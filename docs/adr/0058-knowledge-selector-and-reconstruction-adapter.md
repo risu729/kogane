@@ -278,7 +278,8 @@ across accounts.
   new revision restates it with a time. The 0032 effective time is not shown
   on the listed leg either (not done: it would be a value of no declared
   role).
-- **No route, page or service** calls the query yet; that is the next step.
+- **Route, agent tool and page**: served since the amendment below
+  ("Route and page as implemented (2026-10-09)").
 - **Knowledge.** Only cuts of the current core epoch are answered; commits of
   another epoch read as unlogged. A revision an older build writes later
   without a commit changes the answer at earlier cuts (B2 holds for logged
@@ -369,3 +370,222 @@ Synthetic data only; no production data, D1 or Workers.
 - `mise run //packages/domain:ci`, `//packages/read-model:ci`,
   `//packages/application:ci`, `//packages/parsers:test`, `mise run ci:root`
   and the format, lint and typo checks locally.
+
+## Amendment: Route and page as implemented (2026-10-09)
+
+- Status: proposed (accepted when its pull request merges)
+- Date: 2026-10-09
+- Issue: #550, the route, page and difference-explanation slice
+- Carried by: `packages/application/src/query/reconstructed-state-read.ts`,
+  `services/app/src/reconstructed-state-api.ts`, `services/app/src/agent-service.ts`,
+  `services/app/src/mcp.ts`, `packages/observation-shared/src/reconstructed-state-contract.ts`,
+  `apps/web/src/pages/ReconstructedState.tsx`,
+  [reconstructed state](../reconstructed-state.md#http-agent-tool-and-page),
+  [agent API](../agent-api.md#reconstructed-state)
+
+### Context
+
+The decision above left `queryReconstructedState` without a caller. The owner
+asked for the route, the page and the difference explanation in the UI, and
+for an agent read over the same application layer: what a person can read on
+the page, an agent holding an owner-delegated grant reads through the same
+service, with the same bounds and codes.
+
+### Options considered
+
+1. **The route calls the query and the agent tool calls it again**, each
+   validating its own input. Rejected: two sets of request rules and refusal
+   codes for one read drift apart.
+2. **A shared-query intent (`kogane.financial.query`)**. Rejected: the answer
+   is not a `financial-result-v1` page of rows; it has its own manifest,
+   context id and statuses, and the intent table's filters cannot say a cut.
+3. **One application service both transports call**, as
+   `kogane.purchases.explain` does for the card purchase page. Chosen.
+
+### Decision
+
+- **Service.** `readReconstructedState({ grant, sql, body, now })` checks the
+  grant first (`records.read`, a whole-store perimeter, since the answer reads
+  the account's reported state through every mapped source and its events
+  through every claim holder), then validates the body into the query's input,
+  checks the account against `accounts` by primary key, calls the query, and
+  refuses a pinned `setVersion` the answer no longer has. Every refusal is one
+  closed code with one HTTP status (`RECONSTRUCTED_STATE_REFUSALS`); the
+  agent error carries it as its first ref (`refusal:<code>`) under its
+  `financial-error-v1` category. `reconstructedStateBodyFromQuery` turns the
+  route's query string into the same body.
+- **Request.** One `account` (several, `accounts`, `instrument` or
+  `instruments` are `scope_unsupported`: positions are never folded); `from`
+  before `to`, at most `RECONSTRUCTION_RANGE_MAX_DAYS` (366) days apart, `to`
+  not after today in Tokyo; `basis` absent or `cash`; a cut
+  `{coreEpoch, commitSeq}` with `commitSeq` at least 1 (`validKnowledgeCut`
+  takes a commit reference; the cut before the log is asked as an instant) or
+  `{coreEpoch, instant}` with a UTC instant not after the caller's clock; an
+  optional 64-hex `setVersion`. A rejected value is never echoed in a ref.
+- **Route.** `GET /api/v2/reconstructed-state` (GET and HEAD) under the reader
+  authority the other GET routes have (`readerGrant` of the subject the
+  Access gate proved); no new authentication. It exists, and `/api/meta`
+  advertises `reconstructedStateOnDate`, where `/api/v2/reported-state` does:
+  the two dated reads it compares need the same views. Without CORE 0070 it
+  answers `200` `unavailable` (`economic_guard_missing`), as the query does.
+  Registered in its own module; `worker.ts` gains the registration and the
+  log label.
+- **Agent tool.** `kogane.reconstructed-state.read`
+  (`POST /api/agent/v1/reconstructed-state.read` and MCP `tools/call`),
+  read-only, listed and callable exactly while the route is served, with a
+  closed input schema whose patterns are the service's.
+- **Wire contract.** `validReconstructedState` takes exactly the query's
+  fields, so an adjustment, a total, a net worth or an unknown status, reason,
+  gap, disposition or explanation code is refused rather than displayed. The
+  answer's status must equal `statusOfReasons(reasons)`, with the reasons in
+  the query's order (each once): the group of the first reason by precedence,
+  `incomplete` for any other, `complete` for none. `economic_guard_missing`
+  never sits beside a reconstruction, and an answer without one is exactly
+  the missing guard. A comparing explanation (`reconciled`, either boundary
+  status, `difference_unexplained`) has no reason code, the reported end, a
+  cell with no gaps and a complete partition, and an exact remainder: zero for
+  `reconciled` and `consistent_with_boundary_exclusion`, non-zero for
+  `difference_unexplained`. `not_comparable` and `unavailable` carry a reason
+  from their own list. Its code lists and status groups are restated (the
+  client bundle does not import the query's SQL) and pinned to the query's by
+  a test.
+- **Page.** `残高の再構成` (`/reconstruction`): per currency the start's and
+  end's reported figures as the fold compares them (asset-positive; a
+  liability-positive figure is negated and the provider's figure shown beside
+  it with a sign note), the reconstructed value and `reported − reconstructed` with the fold's explanation status and reason,
+  the applied, pending, same-day and late components and the gaps; the
+  status and reasons; the knowledge used (requested and resolved cut,
+  `known_at`, `final` or `provisional`, set version, identity epoch, log
+  coverage, the selector's diagnostics); the late part; every leg's
+  disposition; refusals with their codes. Every code is shown beside its
+  words. No valuation is shown. `ApiError` now carries a server's closed
+  `error` code when the body has one, so a refusal is shown by its code;
+  messages stay fixed.
+
+### Consequences
+
+- The agent tool list grows by one wherever the reported state is served;
+  the tests that pinned the six tools now pin seven there.
+- `kogane.capabilities` reports `reconstructedStateOnDate` through the same
+  capability object `/api/meta` returns.
+- No migration and no new index: the route adds only the `accounts` primary
+  key lookup to the query's reads.
+
+### Cost
+
+`packages/application/test/reconstructed-state-scale.test.ts` runs the
+service end to end on the statement-scale store of
+`packages/read-model/test/card-usage-scale-fixture.ts` (every CORE migration,
+no table statistics) with settlements on its SMBC account written through
+CORE 0070's triggers, records every statement the service runs, and fails on
+any whole scan that the test owning that statement does not already accept
+(the dated reads' artifact pass and statement ranking, the selector's view
+arms and epoch read, the mapping table by account). Measured on `bun:sqlite`
+locally, medians of three, not asserted; then the same store on workerd
+(below).
+
+| Store                                     | Settlements (revisions) | Commits | Latest cut | Sequence, mid-log | Instant, log start |
+| ----------------------------------------- | ----------------------- | ------- | ---------- | ----------------- | ------------------ |
+| `STATEMENT_CI_SCALE` (CI)                 | 150 (300)               | 373     | 200–356 ms | 146–186 ms        | 189–432 ms         |
+| `STATEMENT_SCALE` (`KOGANE_…_SCALE=full`) | 1,500 (4,500)           | 9,899   | 1,913 ms   | 1,126 ms          | 2,024 ms           |
+
+The full row is one run on a machine shared with other test processes; the
+CI row is the range over three runs (two for the instant, whose first run
+asked an earlier instant). Most of a full answer is work measured before, now
+done in one request: two dated reads (346–398 ms each at this store,
+[reported state](../reported-state.md#cost)), the selector's load and two
+selections (the asked cut and the end capture's cut for the late part) and
+the fold with a baseline (0.92–1.38 s at its budget, ADR 0052).
+
+**On workerd.** `services/app/scripts/reconstructed-state-workerd.ts` (by
+hand, not in CI) builds the same store on `bun:sqlite`, puts it in the SQLite
+file of a local Miniflare D1 under `wrangler dev`, and runs
+`readReconstructedState` on workerd over the D1 binding, as the route does
+after its Access and grant checks. "Wall" is the wall time of one request
+from the harness, the median of three requests after a warm-up. Three further
+requests are instrumented: the Worker records each statement's interval
+(after a zero-delay timer, since workerd's clock only moves on I/O); "D1" is
+their union, the time the Worker waited on D1, and "rest" is the instrumented
+wall time minus it: the Worker's own work (selection, adapter, fold, JSON)
+plus the local transport, an approximate bound on its CPU time (Worker work
+overlapping a concurrent statement counts as D1: the two dated reads and the
+account's sources run under `Promise.all`). D1 + rest is the instrumented
+wall, a median of other requests than the wall column's, so the two can
+differ either way. One answer runs 26 D1 statements at either scale.
+
+| Store, workerd (local D1) | Latest cut: wall; instrumented (D1 + rest) | Sequence, mid-log: wall; instrumented | Instant, log start: wall; instrumented |
+| ------------------------- | ------------------------------------------ | ------------------------------------- | -------------------------------------- |
+| `STATEMENT_CI_SCALE`      | 199 ms; 226 ms (123 + 103)                 | 127 ms; 173 ms (119 + 54)             | 174 ms; 266 ms (162 + 104)             |
+| `STATEMENT_SCALE`         | 1,721 ms; 1,693 ms (1,082 + 611)           | 1,275 ms; 1,530 ms (1,311 + 219)      | 1,729 ms; 1,872 ms (1,219 + 653)       |
+
+One harness run per scale, each figure a median of three requests, on a
+shared machine (the store's answer is `indeterminate` there, as on `bun`).
+Workers do not count time spent waiting on D1 as CPU time.
+`services/app/wrangler*.jsonc` sets no `limits.cpu_ms`, so the plan's
+default applies: on Workers Paid, which the processor's limits are written
+against ([observation lanes](../observation-lanes.md)), 30 s of CPU per HTTP
+request ([Workers limits](https://developers.cloudflare.com/workers/platform/limits/#cpu-time),
+read 2026-10-09; 10 ms on Workers Free). The full-scale "rest", about 0.6 s,
+is about 2% of that default, and even the whole wall time, about 1.7 s, is
+about 6%. Remote D1 (its network round trips and its own query time) is not
+measured; locally the D1 wait is most of the answer.
+
+The route bounds one answer by the range (366 days), the selector's bounds
+(2,000 events, 5,000 revisions; past them `413 result_limit_exceeded`), the
+fold's budgets and the reported state's 5,000 rows per read; nothing is
+paged or cut.
+
+### Limits
+
+- **Open owner items.** The claim-adoption rule (which claims make an event
+  a holder when two writers claim one row) is still the selector's reading of
+  0070, not an owner rule. Provisional cuts are shown and labelled, not
+  hidden or refused; whether the UI should default to the latest sequence
+  rather than offer an instant at or after the log's end is the owner's call.
+  No coverage producer exists, so no real account is `complete`.
+- **Audit slot.** The service receives the principal through the existing
+  `Grant` and the agent error carries the existing `requestId` field (a fixed
+  `reconstructed-state.read`, as `purchases.explain` uses its own); the
+  Worker's per-request id, the channel (ui, mcp, api), a correlation id and
+  an idempotency key have no slot in the read service's input. The shared
+  audit contract for human and agent operations
+  ([ADR 0063](0063-delegated-ai-operation-path.md),
+  [ADR 0064](0064-common-audit-log.md), proposed) owns that slot; this read
+  does not design it. Its agent tool already follows ADR 0063's rule for
+  reads (section 10): it calls the route's own service and is whole-store
+  only.
+- **Grants.** Today's grant scopes list sources and provider accounts
+  (`source_account`), not resolved account ids, so a listed perimeter is
+  refused rather than mapped onto this read; that is today's grant model, to
+  change with the grant contract, not a rule of this read.
+- **Scope.** One account, the cash basis, balances only; instrument
+  quantities stay unfolded (`positions_not_folded`). Today's answers are
+  those listed above (`unavailable` for card accounts, at best `incomplete`
+  for bank accounts).
+- **Time.** `to` and an instant cut are checked against the Worker's clock;
+  the empty log's default cut is that clock, so two such answers differ in
+  their cut and context id.
+
+### Verification
+
+Synthetic data only; no production data, remote D1 or deployed Worker.
+
+- `packages/application/test/reconstructed-state-read.test.ts`: answers for a
+  bank account (reported 10,000 → reconstructed 9,000 beside a reported
+  8,500, difference −500 kept), a card account, a pre-log settlement, an empty
+  log (provisional), a store without 0070; sequence and instant cuts, a
+  pinned set version; every refusal code; the grant refusals before any read;
+  nothing written.
+- `packages/application/test/reconstructed-state-scale.test.ts`: the plan
+  check and the timings above.
+- `services/app/test/reconstructed-state-api.test.ts` on workerd: Access,
+  GET-only, every refusal code with its status, `unavailable` without 0070,
+  `413` past the selector's bound, `404` and an unadvertised capability
+  without the views, nothing written; the agent tool listed, answering what
+  the route answers, refusing with the route's codes, absent with the route.
+- `apps/web/test/reconstructed-state-contract.test.ts` and
+  `apps/web/test/reconstructed-state.browser.test.ts` (production bundle,
+  Chromium): the wire contract, the page's columns and difference, an
+  unexplained difference shown as such, the knowledge panel and pinning,
+  refusals, the missing guard and a card account, provisional cuts, the
+  bound, and a 390 px width.

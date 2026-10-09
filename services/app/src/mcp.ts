@@ -15,6 +15,11 @@
 // URL, a host, a table name, an ordering or SQL text.
 import {
   PURCHASES_EXPLAIN_MAX_OFFSET,
+  RECONSTRUCTED_STATE_ACCOUNT,
+  RECONSTRUCTED_STATE_DATE,
+  RECONSTRUCTED_STATE_EPOCH,
+  RECONSTRUCTED_STATE_INSTANT,
+  RECONSTRUCTED_STATE_SET_VERSION,
   SUPPORTED_QUERY_INTENTS,
 } from "../../../packages/application/src/index";
 import {
@@ -172,6 +177,57 @@ export const PURCHASES_MCP_TOOLS = [
   },
 ] as const;
 
+/**
+ * `kogane.reconstructed-state.read`, published only while this deployment
+ * serves the reconstructed state (`reconstructedStateOnDate`), as its GET
+ * route is. The patterns are the service's own; the range bound, today's
+ * date and the grant are checked by the service, which answers the route's
+ * closed refusal codes (as the first ref, `refusal:<code>`).
+ */
+export const RECONSTRUCTED_STATE_MCP_TOOLS = [
+  {
+    name: "kogane.reconstructed-state.read",
+    title: "Reconstructed balances of one account beside the reported ones",
+    description:
+      "One account's balances reconstructed from adopted events over a range (at most 366 days, not after today in Tokyo, cash basis), beside what its provider reported at both ends, at one cut of the economic commit log (default: the latest commit). Returns the status, closed reason codes, each cell's reported and reconstructed figures and their difference with its explanation, the knowledge used (cut, standing, set version, identity epoch) and the manifest. Read-only: it adopts nothing, and an unexplained difference stays unexplained.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      required: ["account", "from", "to"],
+      properties: {
+        account: { type: "string", pattern: RECONSTRUCTED_STATE_ACCOUNT.source },
+        from: { type: "string", pattern: RECONSTRUCTED_STATE_DATE.source },
+        to: { type: "string", pattern: RECONSTRUCTED_STATE_DATE.source },
+        basis: { type: "string", enum: ["cash"] },
+        cut: {
+          oneOf: [
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["coreEpoch", "commitSeq"],
+              properties: {
+                coreEpoch: { type: "string", pattern: RECONSTRUCTED_STATE_EPOCH.source },
+                commitSeq: { type: "integer", minimum: 1 },
+              },
+            },
+            {
+              type: "object",
+              additionalProperties: false,
+              required: ["coreEpoch", "instant"],
+              properties: {
+                coreEpoch: { type: "string", pattern: RECONSTRUCTED_STATE_EPOCH.source },
+                instant: { type: "string", pattern: RECONSTRUCTED_STATE_INSTANT.source },
+              },
+            },
+          ],
+        },
+        setVersion: { type: "string", pattern: RECONSTRUCTED_STATE_SET_VERSION.source },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
+] as const;
+
 function querySpecSchema(): Record<string, unknown> {
   return {
     type: "object",
@@ -249,8 +305,9 @@ function rpcError(
  * transport answers with 202 and no body.
  *
  * `tools` is what this deployment publishes — the six read/propose tools,
- * plus the purchase explanation while card purchase recognition is served and
- * the operations tools while their flag is on — and `run` is the one
+ * plus the purchase explanation while card purchase recognition is served, the
+ * reconstructed state while it is served, and the operations tools while
+ * their flag is on — and `run` is the one
  * dispatcher for all of them. The adapter never decides which tools exist: a
  * name `run` does not know is `unknown_tool`, not a route of its own. `tools`
  * may be a function, which is then asked only by `tools/list`, so a list that

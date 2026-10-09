@@ -14,7 +14,11 @@ import demo from "./snapshot-worker";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { MCP_TOOLS, PURCHASES_MCP_TOOLS } from "../src/mcp";
-import { AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME } from "../src/agent-service";
+import {
+  AGENT_TOOL_NAMES,
+  PURCHASES_TOOL_NAME,
+  RECONSTRUCTED_STATE_TOOL_NAME,
+} from "../src/agent-service";
 import { principalFor } from "../src/grants";
 import { HttpError } from "../src/http";
 import { parseGrants } from "../../../packages/application/src/index";
@@ -118,9 +122,10 @@ async function call(
   } as Env);
 }
 
-// Every agent path, the purchase explanation's included: whether the
-// deployment serves it is decided only after Access and the grant.
-const AGENT_PATHS = [...AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME].map(
+// Every agent path, the purchase explanation's and the reconstructed state's
+// included: whether the deployment serves them is decided only after Access
+// and the grant.
+const AGENT_PATHS = [...AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME, RECONSTRUCTED_STATE_TOOL_NAME].map(
   (name) => `/api/agent/v1/${name.slice("kogane.".length)}`,
 );
 
@@ -496,6 +501,14 @@ describe("untrusted provider content (AT71)", () => {
         properties: ["identifierId", "offset", "view"],
         annotations: readOnly,
       },
+      // Published because this store has the reported state's views.
+      {
+        name: "kogane.reconstructed-state.read",
+        required: ["account", "from", "to"],
+        closed: false,
+        properties: ["account", "basis", "cut", "from", "setVersion", "to"],
+        annotations: readOnly,
+      },
     ]);
     const query = listed.result.tools[2]!.inputSchema;
     expect(query["properties"].intent.enum).toEqual([
@@ -530,9 +543,10 @@ describe("untrusted provider content (AT71)", () => {
     expect(listed.result.tools.map((tool) => tool.name)).toEqual([
       ...AGENT_TOOL_NAMES,
       PURCHASES_TOOL_NAME,
+      RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
     expect(PURCHASES_MCP_TOOLS.map((tool) => tool.name)).toEqual([PURCHASES_TOOL_NAME]);
-    const purchases = listed.result.tools.at(-1)!;
+    const purchases = listed.result.tools.find((tool) => tool.name === PURCHASES_TOOL_NAME)!;
     expect({
       name: purchases.name,
       required: purchases.inputSchema["required"] ?? [],
@@ -578,10 +592,11 @@ describe("untrusted provider content (AT71)", () => {
     expect((await call(path, { environment: served })).status).toBe(405);
   });
 
-  it("lists exactly the six tools, with the same names the HTTP routes serve", async () => {
+  it("lists the six tools and the reconstructed-state read, with the same names the HTTP routes serve", async () => {
     const listed = (await mcp({ jsonrpc: "2.0", id: 1, method: "tools/list" })) as {
       result: { tools: { name: string }[] };
     };
+    // The six, and the reconstructed state's read while its route is served.
     expect(listed.result.tools.map((tool) => tool.name)).toEqual([
       "kogane.capabilities",
       "kogane.context.open",
@@ -589,6 +604,7 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.explain",
       "kogane.reconcile.propose",
       "kogane.instruments.candidates",
+      "kogane.reconstructed-state.read",
     ]);
     expect(MCP_TOOLS.map((tool) => tool.name)).toEqual([...AGENT_TOOL_NAMES]);
     expect(
