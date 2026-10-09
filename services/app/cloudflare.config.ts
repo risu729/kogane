@@ -42,6 +42,8 @@ export default defineConfig({
       OPERATOR_SUBJECTS: bindings.text('["2c440753-9011-502c-a22d-bb013593c11a"]'),
       AGENT_GRANTS: bindings.text(""),
       AGENT_API_GRANTS: bindings.text(""),
+      // Inert S3 declaration default, matching the canonical/test configuration.
+      MCP_DELEGATIONS: bindings.text(""),
       OPS_API_ENABLED: bindings.text("true"),
       SESSION_REFRESH_POLICY: bindings.text(""),
       RELEASE_SHA: bindings.text(legacyConfig.vars.RELEASE_SHA),

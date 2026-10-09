@@ -21,6 +21,9 @@
     "OPERATOR_SUBJECTS": "[\"2c440753-9011-502c-a22d-bb013593c11a\"]",
     "AGENT_GRANTS": "",
     "AGENT_API_GRANTS": "",
+    // S3 core validates declarations only; no delegated execution is connected.
+    // Empty by default. Filling this requires the owner's concrete approval.
+    "MCP_DELEGATIONS": "",
     "OPS_API_ENABLED": "true",
     "SESSION_REFRESH_POLICY": "",
     // U14 postcheck (plan 11 §6, docs/ci-cd.md). The release stamps the
