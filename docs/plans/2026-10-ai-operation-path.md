@@ -1,0 +1,926 @@
+# Plan: AI as a delegated operation path, with a common audit log
+
+- Status: **proposed**. Nothing in this plan is implemented. The decisions it
+  rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
+  (delegated AI operation path) and
+  [ADR 0064](../adr/0064-common-audit-log.md) (common append-only audit log),
+  both `proposed` until their pull request merges. Each implementation slice
+  (section 8) is its own pull request with its own independent review; merging
+  this plan approves none of them.
+- Written: 2026-10-09, from `origin/main` `c4f611d`, by the AI-operation-path
+  design agent, after the owner changed the product requirements the same day.
+  Open PRs read: #564 (head `3b5c2c3`), #565 (head `9c25877`).
+- Nothing here changes a grant, an Access application, a policy, a secret or a
+  Wrangler configuration. No production data was read.
+
+## 0. Requirement
+
+The owner's words (2026-10-09), and their translation:
+
+| Owner (verbatim)                                                                             | Translation                                                                                                                     |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 「条件を限定してAIが直接反映できるようにする」                                               | Let the AI apply changes directly, under limited conditions.                                                                    |
+| 「基本的に人間ができることはすべてAIができてほしい。AI経由で使うのがメインになる予定なので」 | Basically, I want the AI to be able to do everything a human can, because using the system through the AI will be the main way. |
+| 「これは人間の操作もだけど、監査ログみたいなの記録してこれもAIから読めるようにしてね」       | Record something like an audit log — of human operations too — and make it readable from the AI as well.                        |
+
+The owner's elaboration, as briefed:
+
+- #564 (maintenance-window MCP tools) is no longer "proposal required": design
+  conditional direct application by the AI.
+- MCP is not permanently fixed to read and propose. An authenticated owner can
+  explicitly delegate to the AI, as an operation path, the same permissions the
+  web UI has. The premise that confirm, reject, accept, commit and settings
+  operations are excluded merely because the path is AI is re-examined,
+  operation by operation.
+- This is not full power for an anonymous agent, and not permission to change
+  grants or Access now.
+- Kept: Cloudflare Access authentication (no custom authentication, ever); a
+  verified subject mapped to an explicit role and capability set; default deny;
+  source and account scope; revocation; concrete confirmation for important
+  operations; idempotency; stale checks; rollback. No return of the bare-`sub`
+  fallback or of audience confusion (ADR 0047, #565: a dedicated MCP Access
+  audience and the attenuated `mcp-client:<sub>` principal). Every operation
+  goes through the common application command layer; no command is
+  implemented twice.
+- An audit log common to the human UI and to AI/MCP: append-only records of
+  subject, delegated principal, operation path (`ui` / HTTP agent route / `mcp`
+  / `alarm` / `lane`), operation, target, result, time, correlation id,
+  idempotency key and a safe change diff (closed codes, ids, revision numbers;
+  never provider text or amounts). Refusals and failures are recorded. No
+  credential, token, OTP or raw bank body is ever recorded. The AI reads it over
+  MCP and HTTP according to its permissions.
+- Read, search and detail are available over MCP according to permissions,
+  without leaking an out-of-scope source, count or metadata (#565's P1 finding:
+  a global `LIMIT 501` window before the scope filter let a denied source's
+  activity change an in-scope count).
+- The existing audit, decision and commit logs are inventoried and reused; no
+  duplicate implementation.
+- The new design gets an Opus/Codex fresh review; the initial implementation is
+  not handed to Cursor. #565's P1/P2 fixes stay mandatory and are in progress
+  separately.
+
+## 1. Facts this plan starts from
+
+Code on `origin/main` `c4f611d`, unless a PR is named.
+
+**Who is graded, and by what.**
+
+| Variable / object                                                 | Shape                                                 | Grades                                                                                                                                                                      | Where                                                                                                            |
+| ----------------------------------------------------------------- | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| `OPERATOR_SUBJECTS`                                               | JSON array of Access subjects                         | the human operator: `interpretation.propose` + `interpretation.accept` on the five command routes, the six `/api/ops/v1` routes and the schedule settings routes            | `resolvePrincipal` (`packages/application/src/command/grants.ts`), `principalFor` (`services/app/src/grants.ts`) |
+| `AGENT_GRANTS`                                                    | JSON array of Access subjects                         | change-lifecycle agents: plan and simulate, `403 approval_required` on approve/commit                                                                                       | same resolver                                                                                                    |
+| `AGENT_API_GRANTS`                                                | JSON object, principal → grant                        | what the agent API lets a principal read (`summary.read`, `records.read`, `evidence.read`) and whether it may propose (`interpretation.propose`); the `/mcp` transport gate | `packages/application/src/grants.ts`, `agentGrant` (`services/app/src/agent-api.ts`)                             |
+| `AgentCaller` (#565, ADR 0047)                                    | `{kind: "mcp-client", principal: "mcp-client:<sub>"}` | whoever signed in through the dedicated MCP Access application; its grant is only the `AGENT_API_GRANTS` entry of `mcp-client:<sub>`                                        | `mcpCaller` (`services/app/src/auth.ts` on #565)                                                                 |
+| `schedules.read`, `schedules.maintenance.update` (#564, ADR 0046) | agent-API capabilities with `scopes.scheduleSources`  | the two maintenance MCP tools; an agent revision is adopted when saved, bounded by a 7-day joined deferral and 30 revisions per principal per day                           | `packages/application/src/grants.ts`, `services/app/src/schedule-tools.ts` on #564                               |
+
+All of them deny by default. `AGENT_GRANTS` and `AGENT_API_GRANTS` are empty in
+the committed configuration; `OPERATOR_SUBJECTS` names the human operator
+([current status](../current-status.md#configured-enablement-and-api-access)).
+The change lifecycle's principal kinds are exactly `human` and `agent`
+(`PRINCIPAL_KINDS`, `packages/application/src/command/contract.ts`), and the
+Processor's `principalOf` (`services/processor/src/change-commands.ts`) accepts
+only those two.
+
+**What the operator can do today**, in one list: section 5 maps every one of
+these. The web app (`apps/web/src/pages/`) POSTs only from `Reconciliation`,
+`CardOwnership` and `Purchases` (change-lifecycle `plan`), `Confirm`
+(`simulate`, `approve`, `commit`, `operation`) and `Schedules` (job edit,
+maintenance edit, survey decision, lease release). The operations API's six
+routes have no page ("the web UI has no operations view",
+[ops-api](../ops-api.md#collector-execution-adr-0048)); `identity.assign` and
+`identity.release-override` are plannable over HTTP with no page.
+
+**Cloudflare facts, confirmed read-only by the owner on 2026-10-09.**
+
+- A dedicated Access application on the `/mcp` path with Managed OAuth can
+  connect MCP clients while the existing UI keeps its Gateway gate.
+- An MCP Portal is likely unnecessary.
+- Today there is no Managed OAuth, no MCP audience (`ACCESS_MCP_AUDIENCE` is
+  unset) and the grants are empty.
+- No configuration or permission is added before a concrete approval.
+- The read-only connection test (#565's hand-off step 10) is the first stage,
+  not the final capability limit.
+
+**Numbers.** CORE migrations on main reach 0071. CORE 0067 is #564's; 0072 is
+the financial G3 migration; 0073 and 0074 are UI candidates. This plan's audit
+migration is **"0075 or later (candidate; fixed after root coordination: CORE
+0072 is the financial G3 migration, 0073/0074 are UI candidates, 0067 is #564's;
+re-check latest main and every open PR before the implementation PR)"**.
+ADR numbers: 0057–0059 are reserved by another session, 0060 is the Container
+PR's (#436), and 0061 and 0062 are the financial transfer session's (#550,
+#546); this plan's ADRs are 0063 and 0064.
+
+## 2. Goals and non-goals
+
+Goals:
+
+1. Every operation a person can perform in the web UI or on an operator HTTP
+   route has a named MCP tool, or a written reason why it does not (section 5).
+2. The AI performs an operation only as a **delegated principal**: Access
+   verified it on the MCP application, the owner named it in a delegation entry
+   with a role or capabilities, a scope and an expiry, and the operation's risk
+   class allows delegation.
+3. Each operation runs through the same application service as the UI does;
+   the MCP tool only translates transport.
+4. Every operation, from every path, leaves one append-only audit record
+   (refusals and failures included) that the AI can read within its scope.
+5. No read reveals an out-of-scope source, account, count or digest.
+
+Non-goals (this plan and its first slices):
+
+- No change to any grant, Access application, policy, audience, secret,
+  service token or Wrangler variable value. Adding the empty
+  `MCP_DELEGATIONS` variable is a reviewed configuration change in slice S3;
+  filling it is the owner's concrete approval.
+- No custom authentication, OAuth server, token, session or key handling.
+- No delegation of authority itself: grants, Access, delegations, secrets,
+  deployment, migrations and feature flags (class R4, section 4.5).
+- No external money action (none exists; `CHANGE_KINDS` stays closed).
+- No change to INV07: heuristics, rule proposal passes and AI proposals still
+  only propose.
+- No delegation on the browser-audience HTTP agent route
+  (`/api/agent/v1/*`): it stays read and propose.
+
+## 3. Delegation model
+
+### 3.1 Authentication stays Cloudflare's
+
+Unchanged from ADR 0047 (#565): the MCP endpoint has its own self-hosted
+Access application with Managed OAuth; `/mcp` accepts only an assertion for
+`ACCESS_MCP_AUDIENCE`; every other route accepts only the browser audience and
+refuses one naming the MCP audience; the boundary builds the `AgentCaller`
+`{kind: "mcp-client", principal: "mcp-client:<sub>"}` once and hands that
+object, never the bare subject, to every tool. This plan adds nothing to
+authentication.
+
+### 3.2 The delegated principal
+
+A new deployment variable on `services/app`, **`MCP_DELEGATIONS`** (a JSON
+object; ships `""`, meaning no delegation), is the owner's explicit
+declaration. Synthetic example:
+
+```jsonc
+{
+  "mcp-client:owner-subject-0001": {
+    "delegatedBy": "owner-subject-0001",
+    "role": "maintainer",
+    "capabilities": ["operations.collection.request"],
+    "scopes": { "sources": ["sony-bank"], "accounts": "*", "scheduleSources": ["sony-bank"] },
+    "issuedAt": "2026-10-10T00:00:00Z",
+    "notAfter": "2026-12-31T00:00:00Z",
+    "budget": { "writesPerDay": 30 },
+  },
+}
+```
+
+Validation (`packages/application/src/delegation/parse.ts`), all fail closed;
+one invalid entry makes the whole table `delegation_misconfigured` (503 for
+every delegated operation, as an unreadable grant list does today):
+
+- the key is `mcp-client:` followed by exactly `delegatedBy`, and
+  `delegatedBy` is currently in `OPERATOR_SUBJECTS`: **the owner can delegate
+  only to their own MCP identity**; a bare subject, another person's
+  `mcp-client:` name or a delegator who is not the operator is invalid;
+- `role` is one of the closed roles and `capabilities` (optional additions)
+  are in the closed delegation vocabulary (3.3); an R3 or R4 operation has no
+  name in it;
+- `scopes` are within the same principal's `AGENT_API_GRANTS` entry, axis by
+  axis (a delegation can never see more than its read grant);
+- `issuedAt < notAfter`, and `notAfter - issuedAt` is at most 90 days; before
+  `issuedAt` the entry is inert (`delegation_not_yet_valid`), after `notAfter`
+  it is inert (`delegation_expired`), and in both cases reads continue under
+  `AGENT_API_GRANTS` alone;
+- `budget.writesPerDay` is 1–200, counted over the principal's `applied` and
+  `accepted` audit records of the last 24 hours, before execution;
+- at most 8 entries.
+
+The resolver (`resolveDelegation(env, caller)`) answers a
+`DelegatedPrincipal {kind: "delegated", id: "mcp-client:<sub>", delegator:
+"<sub>", capabilities, scopes, notAfter, delegationRef}` or a refusal.
+`delegationRef` is `dlg_` + the canonical digest (`canonical-json-v1`) of the
+entry, so every audit record names the exact entry that authorized it, and a
+changed entry is visible as a new ref.
+
+**What it composes with, and what it never does:**
+
+| Mechanism              | Relationship                                                                                                                                                                                                                           |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ADR 0047 `AgentCaller` | A delegation resolves **only** from an `AgentCaller` of kind `mcp-client` built by `mcpCaller` from the MCP audience. A browser-audience token, the HTTP agent route and the bare subject never yield one.                             |
+| `principalFor`         | Still refuses any `mcp-client:` string, whatever the lists say (#565). A delegated principal is never graded by it and never reaches `/api/command/v1/*`, `/api/ops/v1/*` or the schedule settings routes; those stay browser-only.    |
+| `OPERATOR_SUBJECTS`    | Read only to check `delegatedBy`. Removing the operator from it invalidates the delegation table.                                                                                                                                      |
+| `AGENT_GRANTS`         | Not consulted. A delegated principal is not a change-lifecycle agent; listing it there changes nothing for delegated operations.                                                                                                       |
+| `AGENT_API_GRANTS`     | Still the `/mcp` transport gate and the read/propose table; its vocabulary still cannot name an acceptance. The delegation's scope must be inside it.                                                                                  |
+| Change lifecycle       | `PRINCIPAL_KINDS` gains `delegated`. The App forwards `x-kogane-actor-kind: delegated`, the principal, the delegated command families and the `delegationRef`; the Processor refuses a family it was not forwarded (defence in depth). |
+
+### 3.3 Capabilities and roles
+
+Read capabilities stay in `AGENT_API_GRANTS` (its vocabulary gains
+`reviews.read` and `audit.read`, beside #564's `schedules.read`); operation
+capabilities exist only in `MCP_DELEGATIONS`:
+
+| Delegated capability              | Allows (section 5 rows)                                                                         | Risk  |
+| --------------------------------- | ----------------------------------------------------------------------------------------------- | ----- |
+| `commands.plan`                   | `command.plan` (R1), `command.simulate` and `command.operation.get` (R0) (W7–W10, W13)          | R0/R1 |
+| `commands.decide.card-settlement` | approve and commit `card-settlement.accept` / `.reject` / `.withdraw` (W11, W12)                | R2    |
+| `commands.decide.relation`        | approve and commit `relation.accept` / `.reject`: pending-to-posted links, ownership (W11, W12) | R2    |
+| `commands.decide.identity`        | approve and commit `identity.assign` / `identity.release-override` (H1)                         | R2    |
+| `schedules.maintenance.update`    | maintenance revisions (W3); moved here from #564's agent-API vocabulary                         | R1/R2 |
+| `schedules.survey.decide`         | accept (R2) or reject (R1) a re-survey proposal (W4, W5)                                        | R1/R2 |
+| `schedules.job.update`            | job time, weekdays, interval, zone, enable/disable (W1, W2)                                     | R2    |
+| `operations.import.request`       | H3                                                                                              | R1    |
+| `operations.replay.request`       | H4                                                                                              | R1    |
+| `operations.projection.request`   | H5                                                                                              | R1    |
+| `operations.collection.request`   | H2 (provider contact)                                                                           | R2    |
+| `operations.session.refresh`      | H6 (provider contact)                                                                           | R2    |
+| `operations.read`                 | H7, the principal's own operations                                                              | R0    |
+
+Roles are closed bundles in code: `maintainer` (`schedules.maintenance.update`,
+`schedules.survey.decide`, `operations.import.request`,
+`operations.replay.request`, `operations.projection.request`,
+`operations.read`), `reviewer` (`commands.plan`,
+`commands.decide.card-settlement`, `commands.decide.relation`) and
+`operator-delegate` (every delegated capability above). The effective set is
+the role's bundle plus the listed additions. There is no capability for R3
+(`schedules.lease.release`) or R4.
+
+### 3.4 Revocation
+
+Each is effective on the next request, and none deletes a record:
+
+1. Remove the entry, or set `MCP_DELEGATIONS` to `""`: delegated tools are
+   unpublished and refused `delegation_not_configured`; reads continue under
+   `AGENT_API_GRANTS`.
+2. `notAfter` passes: `delegation_expired`.
+3. Remove the delegator from `OPERATOR_SUBJECTS`: the table is misconfigured,
+   every delegated operation is `503 delegation_misconfigured`.
+4. Remove the `AGENT_API_GRANTS` entry: `/mcp` answers
+   `403 agent_api_not_configured` before any tool.
+5. Remove the person from the MCP Access application's policy, or unset
+   `ACCESS_MCP_AUDIENCE`: no MCP caller exists (ADR 0047).
+
+What was applied stays applied; it is undone by a reverting operation
+(section 4.4), itself audited.
+
+### 3.5 Stages
+
+1. Read-only connection test (#565 hand-off steps 1–10): `summary.read` on one
+   source. No delegation.
+2. Read expansion (slice S5), one capability per release.
+3. First delegated writes: the owner's concrete approval names the entry; the
+   proposed first one is `maintainer` on one schedule source (R1 maintenance
+   inside the direct envelope).
+4. Further capabilities, one per release, each after the audit of the previous
+   one has been read.
+
+## 4. Per-risk confirmation policy
+
+### 4.1 Risk classes
+
+| Class | Meaning                                                                                                 | Delegated confirmation                                                                                  |
+| ----- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| R0    | Read; nothing changes                                                                                   | none                                                                                                    |
+| R1    | Bounded and reversible by a further operation; changes no adopted financial state; contacts no provider | **direct**: one call, with an idempotency key and, where the target is versioned, the expected revision |
+| R2    | Changes adopted state or a collection schedule, or contacts a provider                                  | **two-step**: prepare returns a confirmation digest; confirm presents it with the identical payload     |
+| R3    | Needs a judgement about runtime state the server cannot verify; a wrong call has no reverting operation | operator in the UI only; not delegable now                                                              |
+| R4    | Authority, secrets, deployment                                                                          | no tool, no route; never delegable                                                                      |
+
+A delegation entry may make a class stricter for itself (never looser); that
+is the only per-entry override, and it is a later addition, not part of S3.
+
+### 4.2 Two-step confirmation
+
+**Change-lifecycle commands (W11, W12, H1).** The lifecycle already is a
+two-step confirmation, and the delegated path uses it unchanged:
+`kogane.command.plan` returns the plan whose id **is** its digest
+(`canonicalDigest({kind, payload, expectedRevisions, baseContextId})`);
+`kogane.command.approve` must present that `planDigest`, re-checks every
+expected revision and marks a moved plan `stale`; `kogane.command.commit` must
+present the `approvalId` and an `operationId`, and the commit batch verifies
+every expected revision inside the receipt reservation
+([change lifecycle](../change-lifecycle.md#expected-revisions)). The approval
+row records `approver_actor = "mcp-client:<sub>"`. Nothing new is stored.
+
+**Settings and operations requests (W1–W4, H2, H6).** Their writers are single
+step. A generic confirmation, `packages/application/src/delegation/confirm.ts`:
+
+1. `step: "prepare"` validates the payload with the route's own schema,
+   resolves the target and its current revision, and answers
+   `{confirmation: {digest, expiresAt}, preview}` where
+
+   ```
+   digest = "cfm_" + canonicalDigest({
+     v: "kogane-confirm-v1", operation, principal, delegationRef,
+     targetRef, expectedRevision, payloadDigest, idempotencyKey, expiresAt })
+   ```
+
+   `expiresAt` is at most 10 minutes ahead. `preview` is the safe diff the
+   confirm would apply (closed field names, revisions, counts; section 6.2).
+   The prepare writes one audit record with `result = "prepared"`, the digest
+   and the expiry. No other row is written.
+
+2. `step: "confirm"` resends the identical payload, the same idempotency key
+   and the digest. The server recomputes the digest, requires an unexpired
+   `prepared` record with that digest for this principal and delegation, runs
+   the writer (whose own version check is the final stale check), and appends
+   the `applied` audit record, which names the prepared record in
+   `confirms_audit_id`, **as the last statement of the writer's own D1
+   batch**. A unique partial index allows one `applied`/`accepted` record per
+   `confirms_audit_id`, so a second confirm — raced or replayed — rolls its
+   whole batch back.
+
+Refusals: `confirmation_required` (R2 called without `step`),
+`confirmation_invalid` (no matching prepare, other principal or delegation,
+payload changed), `confirmation_expired`, `confirmation_used`, and the
+writer's own `revision_conflict` / `stale_context`. A client confirmation
+dialog is not relied on ([agent API](../agent-api.md#why-the-application-service-exists)).
+
+No secret is involved: the digest is not a bearer token; it binds a confirm
+to a prepare the server recorded.
+
+### 4.3 Stale checks and idempotency
+
+- Every versioned write carries the expected revision the caller read
+  (schedule `revision`, maintenance rule `revision`, proposal base revision,
+  plan `expectedRevisions`). The writer's compare-and-set inside its batch is
+  the authority; a pre-read is only for a better error.
+- Every delegated write carries an idempotency key
+  (`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`, the operations API's pattern). Where
+  a writer already has idempotency (operations requests: `op_` id from the key;
+  commands: `operation_receipts` by `operationId`), it is used as it is. Where
+  it has none (schedule and maintenance writes), a unique partial index on the
+  audit table over `(principal, operation, idempotency_key)` for
+  `applied`/`accepted` records gives it: the same key and payload digest
+  answers the stored outcome as `replayed`; a different payload is
+  `idempotency_conflict`.
+
+### 4.4 Rollback
+
+Evidence and decisions are append-only, so a rollback is a new operation that
+restores the previous state, recorded with `reverts_audit_id`:
+
+| Operation                               | Rollback                                                                                  |
+| --------------------------------------- | ----------------------------------------------------------------------------------------- |
+| maintenance revision, survey acceptance | a further maintenance revision restoring the previous pattern/enabled/scope (same writer) |
+| job edit, enable/disable                | a further job revision with the previous values (same writer)                             |
+| `card-settlement.accept`                | `card-settlement.withdraw`                                                                |
+| `relation.accept` (link or ownership)   | `relation.reject` of the accepted relation (its withdrawal)                               |
+| `identity.assign`                       | `identity.release-override`                                                               |
+| import, replay, projection request      | none needed: registration, a planned replay and a rebuild adopt nothing by themselves     |
+| collection, session refresh             | none possible: a provider contact cannot be undone, which is why both are R2              |
+| proposal, plan                          | none needed: inert                                                                        |
+
+### 4.5 Never delegable now
+
+R3, operator in the UI only: **stopped-execution lease release**
+(`POST /api/ops/v1/schedules/leases/:source`). Releasing a lease whose
+execution is still running permits a second provider session; only a person
+who checked the execution can confirm it stopped
+([schedules](../schedules.md)). It gets an audit record on the `ui` path.
+
+R4, no tool and no route on any delegated path: changes to
+`OPERATOR_SUBJECTS`, `AGENT_GRANTS`, `AGENT_API_GRANTS`, `MCP_DELEGATIONS`,
+`ACCESS_AUDIENCE`, `ACCESS_MCP_AUDIENCE`, `HEALTH_PROBE_TOKENS`,
+`DEPLOYMENT_SCHEDULE_TOKENS` or any Access application or policy; issuing a
+secret, service token, collector credential or API key; deploying a Worker;
+applying a migration; changing a feature flag, `OPS_COLLECTOR_DISPATCH_CONNECTIONS`,
+`SESSION_REFRESH_POLICY`, `MAINTENANCE_SURVEY_ENABLED` or the page enablement
+of `config/maintenance-survey.json`; the schedule bootstrap route; the reserved
+`economic-event.resolve-identity` kind; any identity-epoch rewrite.
+
+### 4.6 #564 re-shaped: conditional direct maintenance writes
+
+The maintenance tool keeps #564's one writer (`writeMaintenanceRevision`) and
+its bounds, and changes in four ways:
+
+1. **Who.** The write capability moves from the agent-API vocabulary to
+   `MCP_DELEGATIONS`; `schedules.read` stays a read capability. The writer's
+   actor kinds become `operator` and `delegated` (CORE 0067 is #564's and is
+   still unmerged, so its CHECK is rewritten before merge, not migrated
+   again).
+2. **Why, as a closed code.** #564's free-text `change_reason` (1–500
+   characters) becomes a closed code, following #575's pattern
+   (`ACCEPTED_REASON = "maintenance-survey-proposal-accepted"` and closed reason
+   sets checked by the schema): `MAINTENANCE_CHANGE_REASONS` in
+   `packages/collection/src/schedule-model.ts` — `official-notice-added`,
+   `official-notice-changed`, `official-notice-withdrawn`, `outage-observed`,
+   `owner-instructed`, `correction`, `operator-edit` (the UI path) and the
+   existing `maintenance-survey-proposal-accepted` — enforced by 0067's CHECK.
+   `decision_ref` of a delegated revision is `audit:<audit_id>`.
+3. **Direct inside the envelope, two-step outside it.** Direct (R1) when all
+   hold: the source is in `scopes.scheduleSources`; the rule is the named
+   source's or new; after the revision the source has no joined deferral
+   longer than 7 days that its rules did not already cause (#564's
+   `deferralUnions` measure, unchanged); the principal's 30 revisions per
+   rolling day are not spent; the reason is a closed code; the reference is
+   https on the source's registered host; the expected revision matches. A
+   revision outside the 7-day bound, and only that condition, may be applied
+   as R2 (prepare/confirm). A spent budget, an unregistered host or an
+   out-of-scope source is refused with its code; nothing escalates them.
+4. **Audited.** Each call writes one audit record; an applied revision's
+   record is in the writer's batch.
+
+## 5. UI operation ↔ MCP mapping
+
+Common audit envelope on every row: subject, principal, principal kind,
+`delegationRef`, path, operation, risk class, step, scope, result and closed
+code, correlation id, idempotency key, payload digest, time. The last column
+lists only the row's own target, diff and refs. Tool names keep the `kogane.`
+prefix of the existing tools; the operation name in the audit record is the
+tool name without it.
+
+### 5.1 Writes the web UI performs
+
+| #   | UI action (page → control)                                            | Existing command / API → writer                                                                                | Proposed MCP tool                                       | Capability                                    | Risk                                                          | Confirmation                                              | Audit target · diff · refs                                                                                       |
+| --- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| W1  | 収集スケジュール → schedule card → time/weekdays/interval/zone → 保存 | `POST /api/ops/v1/schedules/:id` → `updateSchedule` (`services/processor/src/schedule-store.ts`)               | `kogane.schedules.job.update`                           | `schedules.job.update`                        | R2                                                            | two-step; expected `revision`                             | `schedule:<id>` · revision from/to, changed field names · `collection_schedule_revisions` `<id>@<rev>`           |
+| W2  | same card → enable/disable → 保存                                     | same route and writer (`enabled`)                                                                              | same tool                                               | `schedules.job.update`                        | R2                                                            | two-step; expected `revision`                             | same, field `enabled`                                                                                            |
+| W3  | 停止時間を追加 / rule 編集 → 保存                                     | `POST /api/ops/v1/schedules/maintenance` → `updateMaintenance` (main); `writeMaintenanceRevision` (#564)       | `kogane.schedules.maintenance.update` (#564, re-shaped) | `schedules.maintenance.update`                | R1 inside the envelope (4.6), R2 outside the 7-day bound only | direct with expected `revision` + key; else two-step      | `maintenance-rule:<id>` · revision from/to, fields, reason code · rule `<id>@<rev>`                              |
+| W4  | 公式サイトの再調査 → 採用                                             | `POST /api/ops/v1/schedules/proposals/:id {"decision":"accept"}` → `decideSurveyProposal` → maintenance writer | `kogane.schedules.survey.decide`                        | `schedules.survey.decide`                     | R2                                                            | two-step; the proposal's base revision                    | `maintenance-survey-proposal:<id>` · decision, rule revision · rule `<id>@<rev>`, `maintenance_survey_decisions` |
+| W5  | 公式サイトの再調査 → 却下                                             | same route `{"decision":"reject"}`                                                                             | same tool                                               | `schedules.survey.decide`                     | R1                                                            | direct + key                                              | `maintenance-survey-proposal:<id>` · decision                                                                    |
+| W6  | 停止した実行を解除                                                    | `POST /api/ops/v1/schedules/leases/:source` → `releaseCollectionLease`                                         | none (R3)                                               | —                                             | R3                                                            | operator in the UI only                                   | `collection-lease:<source>` · `released` (the only durable record of a release; the lease row is mutable)        |
+| W7  | カード決済の照合 → 採用/却下/解除内容を確認                           | `POST /api/command/v1/plan` (`card-settlement.*`) → `createPlan`                                               | `kogane.command.plan`                                   | `commands.plan`                               | R1                                                            | direct (a plan is inert; its id is its digest)            | `plan:<planId>` · kind, target count · `card-settlement:<proposalId>@<rev>`                                      |
+| W8  | 保有者の確認 → 採用/却下内容を確認                                    | same route (`relation.accept` / `.reject`, ownership)                                                          | `kogane.command.plan`                                   | `commands.plan`                               | R1                                                            | direct                                                    | `plan:<planId>` · kind · pinned mapping and ownership revisions                                                  |
+| W9  | カード利用 → 候補 → 判断内容を確認                                    | same route (`relation.accept` / `.reject`, pending-to-posted link)                                             | `kogane.command.plan`                                   | `commands.plan`                               | R1                                                            | direct                                                    | `plan:<planId>` · kind · `card-purchase:<eventId>@<rev>`, `proposal:<id>`                                        |
+| W10 | 確認画面 → 再試算                                                     | `POST /api/command/v1/simulate` → `simulate`                                                                   | `kogane.command.simulate`                               | `commands.plan`                               | R0                                                            | none                                                      | `plan:<planId>` · stale yes/no, re-simulated plan id                                                             |
+| W11 | 確認画面 → 承認                                                       | `POST /api/command/v1/approve` → `approve`                                                                     | `kogane.command.approve`                                | `commands.decide.<family>` of the plan's kind | R2                                                            | the plan digest is the confirmation; revisions re-checked | `plan:<planId>` · approval expiry, uses · `approval:<id>`                                                        |
+| W12 | 確認画面 → 確定                                                       | `POST /api/command/v1/commit` → `commit` (one guarded D1 batch)                                                | `kogane.command.commit`                                 | `commands.decide.<family>`                    | R2                                                            | approval + `operationId`; commit guard                    | `plan:<planId>` · simulation counts · receipt `operationId`, decision revision ids, economic `commit_seq`        |
+| W13 | 確認画面 → 反映状況を再確認                                           | `POST /api/command/v1/operation` → receipt read                                                                | `kogane.command.operation.get`                          | `commands.plan`                               | R0                                                            | none                                                      | `operation:<operationId>` · receipt status                                                                       |
+
+### 5.2 Operator actions with no page (HTTP only today)
+
+| #   | Operator action                                    | Existing command / API → service                                         | Proposed MCP tool                              | Capability                                    | Risk | Confirmation            | Audit target · diff · refs                                        |
+| --- | -------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------- | --------------------------------------------- | ---- | ----------------------- | ----------------------------------------------------------------- |
+| H1  | identity assignment / release of a manual override | command routes, kinds `identity.assign` / `identity.release-override`    | `kogane.command.plan` / `.approve` / `.commit` | `commands.plan`, `commands.decide.identity`   | R2   | as W11/W12              | `plan:<planId>` · mapping revision from/to · decision ids         |
+| H2  | request a collection                               | `POST /api/ops/v1/collections` → `requestCollection`                     | `kogane.ops.collection.request`                | `operations.collection.request`               | R2   | two-step                | `source:<id>` · status · `op_<id>`                                |
+| H3  | re-register a persisted run                        | `POST /api/ops/v1/imports` → `requestImport`                             | `kogane.ops.import.request`                    | `operations.import.request`                   | R1   | direct + key            | `source:<id>` · status · `op_<id>`                                |
+| H4  | replay a parse                                     | `POST /api/ops/v1/replays` → `requestReplay`                             | `kogane.ops.replay.request`                    | `operations.replay.request`                   | R1   | direct + key            | `source:<id>` · status · `op_<id>`, replay plan id                |
+| H5  | rebuild the read model                             | `POST /api/ops/v1/projections` → `requestProjectionRebuild`              | `kogane.ops.projection.request`                | `operations.projection.request`               | R1   | direct + key            | none · status · `op_<id>`                                         |
+| H6  | refresh a session                                  | `POST /api/ops/v1/sessions/{source}/refresh` → `requestSessionRefresh`   | `kogane.ops.session.refresh`                   | `operations.session.refresh`                  | R2   | two-step                | `source:<id>` · status (`waiting_for_human` included) · `op_<id>` |
+| H7  | read an operation                                  | `GET /api/ops/v1/operations/{id}` → `readOperation` (own principal only) | `kogane.ops.operation.get`                     | `operations.read`                             | R0   | none                    | `op_<id>` · status                                                |
+| H8  | propose a relation (agents today)                  | `POST /api/agent/v1/reconcile.propose` → proposal store                  | `kogane.reconcile.propose` (exists)            | `interpretation.propose` (`AGENT_API_GRANTS`) | R1   | direct (inert proposal) | `proposal:<decision id>` · targets count                          |
+
+The six `kogane.ops.*` names are the existing tools of
+[ops-api](../ops-api.md#mcp), which #565 stops publishing on `/mcp`; S6
+publishes them again **only** to a delegated principal holding the capability.
+
+### 5.3 Reads, searches and details
+
+"Whole-store only" means the tool refuses a grant listed on the source or
+account axis with `403 evidence_restricted` before reading anything, as
+`kogane.purchases.explain` does
+([ADR 0013](../adr/0013-agent-card-purchase-read.md)), until a scoped version
+is proven under section 7. Each tool calls the route's own reader function; no
+query is copied. All are R0; MCP and HTTP agent calls write one audit record
+each (`result = "read"`, a row count, no data).
+
+| #   | UI page → API                                                                              | Proposed MCP tool                                                                 | Capability       | Scope mode                                                                                |
+| --- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------- |
+| D1  | 概要 → `/api/overview`, `/api/v2/query?intent=coverage`, `/api/meta`                       | `kogane.financial.query` `coverage` (exists), `kogane.capabilities` (exists)      | `summary.read`   | scoped, after #565's P1 fix (section 7)                                                   |
+| D2  | 取引 → `/api/transactions`, `/api/filter-options`                                          | `kogane.transactions.search` (new)                                                | `records.read`   | whole-store only                                                                          |
+| D3  | 残高 / 残高の推移 → `/api/balances`, `/api/v2/balances/latest`, `/api/v2/balances/history` | `kogane.balances.read` (new); `holdings` intent (exists)                          | `records.read`   | whole-store only; `holdings` is scoped                                                    |
+| D4  | 保有 → `/api/positions`                                                                    | `kogane.positions.read` (new)                                                     | `records.read`   | whole-store only                                                                          |
+| D5  | 指定日の状態 → `/api/v2/reported-state`                                                    | `kogane.reported-state.read` (new)                                                | `records.read`   | whole-store only                                                                          |
+| D6  | 口座・銘柄の整理 → `/api/identity/{accounts,instruments,coverage,connections}`             | `kogane.identity.search` (new)                                                    | `records.read`   | whole-store only                                                                          |
+| D7  | ポイント → `/api/v2/rewards/{holdings,expiry,simulations}`                                 | `kogane.rewards.read` (new)                                                       | `records.read`   | whole-store only                                                                          |
+| D8  | カード決済の照合 → `/api/v2/reconciliation/card-settlements`                               | `kogane.reviews.card-settlements.read` (new)                                      | `reviews.read`   | whole-store only; plan payloads only with `commands.decide.card-settlement`               |
+| D9  | 保有者の確認 → `/api/v2/reconciliation/card-settlements/ownership`                         | `kogane.reviews.card-ownership.read` (new)                                        | `reviews.read`   | whole-store only; plan payloads only with `commands.decide.relation`                      |
+| D10 | カード利用 → `/api/v2/card-purchases`                                                      | `kogane.purchases.explain` (exists)                                               | `records.read`   | whole-store only (exists); `actions`/`relation` kept only with `commands.decide.relation` |
+| D11 | 取得記録 → `/api/artifacts`, `/api/artifacts/:id`                                          | `kogane.artifacts.search`, `kogane.artifacts.get` (new)                           | `records.read`   | whole-store only                                                                          |
+| D12 | 観測の詳細 → `/api/observations/:kind/:id`                                                 | `kogane.observations.get` (new)                                                   | `records.read`   | whole-store only                                                                          |
+| D13 | 原本 → `/api/raw/:sha256`                                                                  | `kogane.evidence.raw.get` (new, last)                                             | `evidence.read`  | whole-store only; `evidence.read` stays a separate owner decision (ADR 0047)              |
+| D14 | 取得履歴 (evidence browser) → `/api/evidence/v1/…`                                         | `kogane.evidence.runs.search` (new)                                               | `records.read`   | the route's single configured source; refused unless that source is granted               |
+| D15 | 収集スケジュール → `GET /api/ops/v1/schedules`                                             | `kogane.schedules.read` (new; extends #564's `kogane.schedules.maintenance.read`) | `schedules.read` | scoped by `scheduleSources` (#564's read view); no lease state, no other principal        |
+| D16 | 確認画面 (plan view)                                                                       | `kogane.command.simulate` (W10)                                                   | `commands.plan`  | the plan's own targets                                                                    |
+| D17 | — → `/api/collection-quality`                                                              | `kogane.collection-quality.read` (new)                                            | `summary.read`   | whole-store only                                                                          |
+| D18 | — → `/api/v2/reports/:id`, `/explanation`                                                  | `kogane.reports.read` (new); `/export` not exposed (`report.export` stays absent) | `records.read`   | whole-store only                                                                          |
+| D19 | — → `/api/v2/activity`, `/api/v2/obligations`                                              | `kogane.events.read` (new)                                                        | `records.read`   | whole-store only                                                                          |
+| D20 | 監査ログ (new page) → `GET /api/v2/audit`; `POST /api/agent/v1/audit.search`               | `kogane.audit.search`, `kogane.audit.get` (new)                                   | `audit.read`     | scoped by source (section 6.7); a listed account axis is refused                          |
+
+Not exposed on any agent path: `GET /api/ops/v1/health` (the release
+postcheck), `POST /api/ops/v1/schedules/bootstrap` (deployment service token),
+`/api/v2/reports/:id/export`.
+
+### 5.4 Count and gaps
+
+41 rows: 13 UI writes (W1–W13), 8 HTTP-only operator actions (H1–H8) and 20
+reads (D1–D20). Operations with **no existing command or service** today:
+
+1. Audit search and detail (D20): no table, service or route (ADR 0064, S1).
+2. A confirmation step for settings and operations writes (W1–W5, H2, H6):
+   their writers are single step (ADR 0063, S3).
+3. A delegated principal kind in the change lifecycle and the Processor
+   (`PRINCIPAL_KINDS` is `human | agent`).
+4. Lease release (W6) records no actor, revision or idempotency key; the audit
+   record will be its only durable trace. It stays R3.
+5. Agent-facing contracts for the review queues (D8, D9): only the purchases
+   page has one (`validAgentCardPurchasePage`).
+6. D2–D7, D11–D14, D17–D19: the routes exist, no MCP tool does, and none is
+   proven computable inside a listed scope.
+7. W1, W2, W4, W5: the writers exist, no agent adapter does.
+8. #564's tool exists only on its branch, with a free-text reason.
+
+## 6. Audit log design
+
+### 6.1 Inventory of what is recorded today
+
+| Log (CORE migration)                                                                    | Records                                                        | Actor fields                                                      | Path fields                                | Append-only?                                | Readable by whom today                                         |
+| --------------------------------------------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------ | ------------------------------------------- | -------------------------------------------------------------- |
+| `decision_operations` (0029)                                                            | one decision operation: action, payload digest, result         | `actor_id`, `actor_verification`                                  | none                                       | yes                                         | no route; backs what the operator pages show                   |
+| `decision_revisions` (0029)                                                             | each judgement: subject, revision, kind, reason, evidence refs | `actor_id`, `method` (`manual`/`rule`/`ai`/…)                     | none (`method` is how, not where)          | yes, except `superseded_by` set once        | operator review pages; agent proposals write it                |
+| `change_plans`, `approvals`, `operation_receipts`, `decision_outbox` (0031, 0038)       | plan, approval, receipt, downstream delivery                   | `created_by`, `approver_actor`, `principal`                       | none                                       | no delete; status columns move forward only | command routes and the confirm page (operator)                 |
+| `economic_commit_log` (0070)                                                            | one economic commit: sequence, members, claims, kind           | `principal`, `operation_id`                                       | none                                       | yes                                         | no route; the knowledge selector reads it                      |
+| `ops_requests`, `ops_request_stages` (0040)                                             | an accepted operations request and its stage progress          | `principal`                                                       | none                                       | no delete; progress forward only            | `GET /api/ops/v1/operations/{id}`, own principal only          |
+| `ops_collector_dispatches` (0068)                                                       | the execution of a collection or refresh request               | none (by `operation_id`)                                          | none                                       | no (`operational-mutable`)                  | through the operation record                                   |
+| `collection_schedule_revisions` (0065)                                                  | each job setting revision                                      | `actor`                                                           | none                                       | yes                                         | no route (written, never read)                                 |
+| `collection_schedules` (0065)                                                           | current job settings                                           | `updated_by`                                                      | none                                       | no (`operational-mutable`)                  | schedules page                                                 |
+| `provider_maintenance_rules` (0065; +0067 on #564)                                      | maintenance rule revisions                                     | `actor` (+ `actor_kind`, `change_reason`, `decision_ref` on #564) | `actor_kind` (operator/agent) on #564 only | yes                                         | schedules page; #564's read tool                               |
+| `maintenance_survey_fetches`, `_proposals`, `_decisions` (0069)                         | page readings, proposals, the operator's decisions             | `maintenance_survey_decisions.actor`                              | none                                       | yes                                         | schedules page, operator only                                  |
+| `collection_schedule_occurrences` (0065)                                                | alarm occurrence receipts: status, run ids, failure code       | none                                                              | implicitly the alarm                       | no (`operational-mutable`)                  | schedules page                                                 |
+| `collection_execution_leases` (0065)                                                    | which lease holds a source now                                 | none                                                              | none                                       | no; a release leaves no trace               | schedules page                                                 |
+| `processor_lane_ticks` (0049)                                                           | one lane tick: outcome, closed error code, counts              | none                                                              | the lane                                   | no update, pruned to the latest day         | Processor `/internal/health`, relayed by the release postcheck |
+| `publication_events` (0026), `release_activation_events` (0028), `report_events` (0034) | parser publication and activation, report lifecycle            | `actor`, `reason`                                                 | none                                       | yes                                         | no agent route                                                 |
+| `account_connection_reviews`, `ingestion_attempts`, `raw_object_verification_events`    | rule-made reviews, ingest attempts, raw object checks          | verifier version, ingest client id                                | ingest client                              | yes                                         | identity and evidence pages, partly                            |
+| Worker request log (`evidence_request` JSON line)                                       | route label, status, request id, error code                    | none                                                              | route label                                | not durable (Workers Logs retention)        | the Cloudflare dashboard                                       |
+
+**Conclusion.** Every log above stays the record of _what_ changed and is
+reused by reference; none is copied. What none of them records, and what the
+common record adds:
+
+1. the **path** (`ui`, `agent-http`, `mcp`, `alarm`, `lane`): no table has one;
+2. the **delegated principal and the delegation in force** (`delegationRef`);
+3. **refusals and failures after authentication**: no table records a refused
+   request; the request log is not durable;
+4. one **correlation id** across the App and the Processor;
+5. one **operation name and risk class** across paths;
+6. a durable trace for operations whose own record is mutable or absent (lease
+   release; schedule settings beyond the revision row);
+7. **AI reads** (tool calls), as counts;
+8. **prepare/confirm linkage** for two-step operations.
+
+What must not be duplicated into it: decision content (subject, kind, reason,
+evidence refs), plan payloads and simulations, operation stage progress, rule
+contents and patterns, economic members and claims, lane tick counts, survey
+page contents. The record holds their ids and revision numbers.
+
+### 6.2 The record
+
+CORE table `audit_records`, migration **0075 or later (candidate; fixed after
+root coordination: CORE 0072 is the financial G3 migration, 0073/0074 are UI
+candidates, 0067 is #564's; re-check latest main and every open PR before the
+implementation PR)**. `STRICT`, classified `core-keep`, listed in
+`REVISION_EXCLUDED_TABLES` (`packages/read-model/src/source-revision.ts`: an
+audit write must not move the CORE source revision, or every MCP read would
+invalidate the read models).
+
+| Column                                      | Type and check                                                                            | Meaning                                                                                           |
+| ------------------------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `audit_id`                                  | TEXT PK, `aud_` + UUID                                                                    | the record                                                                                        |
+| `recorded_at`                               | TEXT, canonical UTC `YYYY-MM-DDTHH:MM:SS.sssZ` (the `economic_commit_log.known_at` CHECK) | time                                                                                              |
+| `path`                                      | `ui` / `agent-http` / `mcp` / `alarm` / `lane`                                            | operation path                                                                                    |
+| `subject`                                   | ACTOR_PATTERN, ≤ 256; NULL exactly when `path` is `alarm` or `lane`                       | the verified Access subject                                                                       |
+| `principal`                                 | ACTOR_PATTERN-like, ≤ 256                                                                 | `<sub>`, `mcp-client:<sub>`, `alarm:<job id>`, `lane:<lane>`                                      |
+| `principal_kind`                            | `operator` / `agent` / `delegated` / `automatic`                                          | how it was graded                                                                                 |
+| `delegation_ref`                            | `dlg_` + 64 hex; NOT NULL exactly when `principal_kind = 'delegated'`                     | the delegation entry in force                                                                     |
+| `operation`                                 | `^[a-z][a-z0-9.-]{0,63}$`; the closed list is `OPERATION_CATALOGUE` in code               | e.g. `schedules.maintenance.update`, `command.commit`                                             |
+| `risk_class`                                | `R0`–`R4`                                                                                 | from the catalogue                                                                                |
+| `step`                                      | `call` / `prepare` / `confirm`                                                            | two-step stage                                                                                    |
+| `scope_namespace`, `scope_source`           | `core-source` / `schedule-source` and `^[a-z0-9-]{1,100}$`; both NULL or both set         | the source the target belongs to, for scoped reads                                                |
+| `target_ref`                                | closed ref pattern, ≤ 300; NULL for a refusal before the target was resolved              | `schedule:<id>`, `maintenance-rule:<id>`, `plan:<64 hex>`, `op_<64 hex>`, …                       |
+| `result`                                    | `applied` / `accepted` / `prepared` / `read` / `replayed` / `refused` / `failed`          | outcome                                                                                           |
+| `result_code`                               | `^[a-z][a-z0-9_]{0,63}$`; NOT NULL for `refused` and `failed`                             | the existing closed code (command, operations, schedule, agent API, delegation)                   |
+| `reason_code`                               | closed per operation family (e.g. `MAINTENANCE_CHANGE_REASONS`), or NULL                  | why, as a code                                                                                    |
+| `correlation_id`                            | UUID                                                                                      | the App's request id, forwarded to the Processor                                                  |
+| `idempotency_key`                           | `^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$` or NULL                                             | the caller's key (`operationId` for a commit)                                                     |
+| `payload_digest`                            | 64 hex or NULL                                                                            | canonical digest of the validated payload, never the payload                                      |
+| `confirmation_digest`, `confirm_expires_at` | `cfm_` + 64 hex, canonical UTC; set exactly on `prepared` records                         | section 4.2                                                                                       |
+| `confirms_audit_id`                         | FK `audit_records`; set exactly when `step = 'confirm'`                                   | the prepare it confirms                                                                           |
+| `reverts_audit_id`                          | FK `audit_records` or NULL                                                                | the operation this one rolls back                                                                 |
+| `refs_json`                                 | JSON array, ≤ 16 strings, each a closed ref pattern                                       | ids in the existing logs: decision revision ids, `commit-seq:<epoch>:<n>`, `<rule>@<rev>`, `op_…` |
+| `diff_json`                                 | JSON object, ≤ 2,048 bytes, one closed schema per `kind`                                  | the safe change diff                                                                              |
+
+`diff_json` kinds (strict Zod schemas in `packages/application/src/audit/diff.ts`):
+`revision` `{from, to, fields[]}` with closed field names; `decision`
+`{decisionRevisions, commitSeq, counts}` with the simulation's counts;
+`request` `{status}`; `read` `{rows, truncated}`; `lane` `{counts,
+commitSeqFrom, commitSeqTo}` with closed count keys; `release` `{released}`;
+`none`.
+
+Triggers, after 0029 and 0070: `audit_records_no_update`,
+`audit_records_no_delete`, `audit_records_no_replace`. Indexes:
+`(principal, recorded_at)`, `(scope_namespace, scope_source, recorded_at)`,
+`(operation, recorded_at)`, `(target_ref)`, `(correlation_id)`; unique partial
+`(confirms_audit_id) WHERE confirms_audit_id IS NOT NULL AND result IN
+('applied','accepted')` and `(principal, operation, idempotency_key) WHERE
+idempotency_key IS NOT NULL AND result IN ('applied','accepted')`.
+
+### 6.3 One chokepoint, writers on every path
+
+`packages/application/src/audit/` builds every record (`auditEnvelope`,
+`auditStatement`, `auditRefusal`); `packages/application/src/operation-path/`
+holds `OPERATION_CATALOGUE` (operation → capability, risk class, handler,
+target and diff builders) and `executeOperation(ctx, operation, input)`, which
+every adapter calls: the UI's operator routes, the HTTP agent routes and the
+MCP dispatcher. `executeOperation` authorizes (grant or delegation,
+capability, scope, class, confirmation), calls the **existing** service or
+writer, and hands it the audit statement to append as the **last statement of
+its own D1 batch**, so an `applied`/`accepted` record exists exactly when the
+effect does. Writers that live in the Processor (commands, schedules) receive
+the envelope over the private `PIPELINE` binding in closed headers
+(`x-kogane-correlation-id`, `x-kogane-audit-path`, `x-kogane-delegation-ref`),
+validated with the same schema, at the trust level the actor headers already
+have; they call the same builder.
+
+| Path         | Writer                                                                             | Records                                                                                                                             |
+| ------------ | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `ui`         | operator routes under the browser audience: command, operations, schedule settings | every POST (W1–W13, H1–H7 sent from a browser session); UI GET page loads are not recorded                                          |
+| `agent-http` | `/api/agent/v1/*` under the browser audience                                       | every tool call, reads included                                                                                                     |
+| `mcp`        | `/mcp` under the MCP audience                                                      | every tool call, reads included, delegated or not                                                                                   |
+| `alarm`      | `ScheduleAlarm` when it claims an occurrence                                       | one record per claimed occurrence (`alarm.occurrence.claim`); its outcome stays in the occurrence row                               |
+| `lane`       | each Processor lane that writes decisions, proposals or settings                   | one record per tick that wrote any, with counts (and the commit-sequence range when it committed economic events); idle ticks: none |
+
+`ui` means "an operator route under the browser Access application": a script
+using the operator's browser session is indistinguishable from a click and is
+recorded as `ui`.
+
+### 6.4 Refusals and failures
+
+After authentication, every refusal is recorded with its closed code:
+authorization (`subject_not_granted`, `approval_required`,
+`agent_api_not_configured`, `delegation_*`, `capability_not_delegated`,
+`unauthorized`, `evidence_restricted`, `source_not_granted`), validation
+(`invalid_request`, `invalid_query`), confirmation, stale and idempotency
+codes, writer codes (`revision_conflict`, `maintenance_deferral_too_long`, …),
+and `failed` with `internal_error` / `commit_failed` when the writer's batch
+failed (then no effect and no `applied` record exist). A refused value is
+never echoed: the record holds the field path in `refs_json`
+(`scope.source`), not the value (G3-08). A request refused before
+authentication (401) has no subject and is not recorded; the Worker request
+log keeps its line. Audit writing never changes the answer: if the refusal
+record cannot be written, the refusal is still returned and the request log
+carries `audit_write_failed`.
+
+### 6.5 Never recorded
+
+Credentials, Access assertions, OAuth tokens, cookies, service-token ids,
+OTPs, passkey or MFA material, session state, raw bank or provider bodies,
+provider text (counterparties, descriptions, page text), amounts, account
+numbers or labels, free-text reasons, request or response bodies, URLs,
+SQL, exception text. Every column is an enum, a bounded pattern, a digest, a
+count or a canonical time; there is no free-text column, and a test asserts
+the schema admits none.
+
+### 6.6 Reading the log
+
+- **Operator:** `GET /api/v2/audit` (reader routes take query strings:
+  `operation`, `path`, `principalKind`, `result`, `from`, `to`, `cursor`) and a
+  `監査ログ` page (slice S8). Whole store.
+- **AI:** `kogane.audit.search` / `kogane.audit.get` on `/mcp` and
+  `POST /api/agent/v1/audit.search` / `audit.get`, graded by `audit.read` in
+  `AGENT_API_GRANTS`:
+  - a record is visible when its `scope_source` is in the grant
+    (`scopes.sources` for `core-source`, `scopes.scheduleSources` for
+    `schedule-source`); a record without a scope is visible only to a `"*"`
+    source grant;
+  - a grant listed on the account axis is refused `evidence_restricted`
+    (`scope:account`) before anything is read, until per-account audit scope
+    is proven;
+  - `subject` is returned only when it equals the caller's own delegator;
+    otherwise it is `subj_` + the first 16 hex of its SHA-256;
+  - the filter is in the SQL `WHERE` before `LIMIT`; pages are 50 records;
+    the cursor binds the grant's perimeter and the filters (a cursor from
+    another perimeter is `stale_context`); no total over the unfiltered table
+    is ever returned.
+
+### 6.7 Retention and classification
+
+`core-keep`, append-only, no pruning: the record is the history of who did
+what, in the same family as the decision log (04 §2 "decisions and
+relations"). Volume is bounded by the operations themselves, the per-principal
+write budget and the MCP call rate; after the first delegated stage the owner
+reads the row count with a read-only aggregate query. Any pruning later needs
+its own ADR, because it would be an exception to an append-only table.
+
+## 7. Out-of-scope leakage rule
+
+Applies to every read tool, every audit read and every count inside a write's
+preview:
+
+1. **Scope before window.** Every count, window, page, `LIMIT`, `max`, digest
+   input and cursor is computed after the scope predicate, inside the SQL
+   `WHERE`; never `LIMIT` first and filter in TypeScript. The known instance is
+   #565's P1: `OVERVIEW_FETCH_RUNS_SQL … LIMIT 501`
+   (`packages/read-model/src/sql.ts`) is filtered by grant afterwards in
+   `packages/application/src/query/execute.ts` (`coverage`), so a denied
+   source's runs can lower an in-scope `collectionRunCount`.
+2. **Per-source aggregation.** A listed grant is read source by source
+   (`grantedSources`), and every figure is a sum of in-scope parts; no global
+   total, gap count or "N more" leaves the perimeter.
+3. **Same answer for absent and denied.** A denied id and a nonexistent id get
+   the same code and the same refs; a refusal never echoes the value.
+4. **Metadata is data.** Context manifests, publication and parser digests,
+   `resultRef`, cursors and error refs are computed inside the scope (#565's
+   `contextInputs`).
+5. **Tests on the whole response.** For each tool: seed a denied source with
+   more rows than any window in the path (at least 600, above `LIMIT 501`),
+   then (a) deep-scan the complete JSON answer, errors included, for the denied
+   source id, its account and source account ids and its row ids; (b) assert
+   that every count, digest, `resultRef` and cursor of the scoped answer is
+   identical before and after adding denied-source activity; (c) assert the
+   refusal for a denied and a nonexistent target is byte-identical.
+6. **Plan checks.** The scoped queries' plans lead with the scope column, shown
+   by `EXPLAIN QUERY PLAN` without table statistics, as AGENTS.md requires of
+   query rewrites.
+
+## 8. Implementation slices, in dependency order
+
+Each slice is one pull request with an independent fresh review (Opus or
+Codex; the initial implementation is not handed to Cursor), and each states in
+its body what the review checked.
+
+Order and what is independent now: **S1 can start now** and needs nothing
+else; **S2 is in progress** separately; S3 needs S1 and S2 merged; S4 and S6
+need S3; S5 needs S2 (and S1 for its read records); S7 and S8 need S1.
+
+**S1 — audit log for the existing paths** (can start now).
+
+- What: `audit_records`, the builder (`packages/application/src/audit/`), the
+  `OPERATION_CATALOGUE` skeleton and `executeOperation` for the existing
+  paths: the command, operations and schedule routes (`ui`); the agent tool
+  dispatcher `callTool`, which both `/api/agent/v1/*` and `/mcp` call
+  (`agent-http`, `mcp`), coordinated with #565 at `agent-api.ts` (whichever
+  merges second rebases); `GET /api/v2/audit` for the operator. No delegation.
+- ADR: 0064. Migration: `audit_records`, 0075 or later (candidate; see
+  section 6.2).
+- Tests: migration guards (no update, delete or replace; CHECKKs refuse free
+  text; both unique partial indexes); ledger regenerated and the table
+  classified `core-keep`; the `lanes.test.ts` migration pin;
+  `REVISION_EXCLUDED_TABLES`; per route, a success record in the same batch as
+  the effect (a failing guard leaves neither), refusal and replay records, no
+  echo of a refused value (G3-08); a deep scan of the stored records after
+  seeding provider text with a token-shaped string and an amount.
+- Review gate: fresh Opus or Codex reviewer; the review checks the batch
+  atomicity on every wired writer and the never-recorded list.
+
+**S2 — #565's P1/P2 fixes, then #565 merges** (in progress).
+
+- What: P1 scopes `OVERVIEW_FETCH_RUNS_SQL`'s window to the grant before its
+  `LIMIT`; P2 as recorded on #565.
+- ADR: 0047 (#565). Migration: none.
+- Tests: #565's matrix 1–9 plus section 7's differential test on `coverage`.
+- Review gate: #565's own independent review.
+
+**S3 — delegation** (after S1 and S2).
+
+- What: `MCP_DELEGATIONS` (added as `""` in a reviewed configuration change),
+  its parser and resolver (`packages/application/src/delegation/`), the roles,
+  `PRINCIPAL_KINDS` gaining `delegated`, the Processor's `principalOf`, the
+  risk classes in `OPERATION_CATALOGUE`, the prepare/confirm module, and
+  `kogane.capabilities` reporting the delegation in force.
+- ADR: 0063. Migration: none (S1's table).
+- Tests: the delegation matrix below, items 1–10 and 12, on a synthetic
+  catalogue operation per risk class.
+- Review gate: fresh Opus or Codex reviewer; the review re-runs #565's matrix
+  1–9 to show the attenuation still holds.
+
+**S4 — #564 re-shaped** (after S3; a rebase can be prepared now).
+
+- What: section 4.6 — the capability moved to the delegation, closed
+  `MAINTENANCE_CHANGE_REASONS`, the direct envelope with its R2 escape, audit.
+- ADR: 0046, amended by 0063. Migration: #564's own CORE 0067, its CHECK
+  rewritten before merge.
+- Tests: #564's suites, plus: free text refused by the CHECK; inside the
+  envelope direct, outside the 7-day bound two-step; a spent budget, an
+  unregistered host and an out-of-scope source never escalate; one audit
+  record per call.
+- Review gate: fresh reviewer; the review checks that the writer is still the
+  only path to a maintenance revision.
+
+**S5 — MCP read, search and detail** (after S2).
+
+- What: D2–D19, each whole-store only first; a scoped version per tool, one
+  per pull request, under section 7.
+- ADR: 0063 (a new ADR only if a scoped version decides more). Migration:
+  none.
+- Tests: per tool, the UI route, the HTTP agent route and MCP deep-equal; a
+  listed grant refused before any read; section 7's tests for each scoped
+  version.
+- Review gate: fresh reviewer; the review runs the leakage tests itself.
+
+**S6 — command, schedule and operations tools** (after S3; W3 after S4).
+
+- What: W1–W5, W7–W13 and H1–H7 through `executeOperation`; the operations
+  tools published on `/mcp` again only to a delegated principal holding the
+  capability.
+- ADR: 0063. Migration: none.
+- Tests: the delegation matrix items 4–12 per tool; the UI and MCP produce one
+  stored effect for one request.
+- Review gate: fresh reviewer; the review checks that no tool carries its own
+  validation or SQL.
+
+**S7 — `alarm` and `lane` writers** (after S1).
+
+- What: one record per claimed occurrence; one per lane tick that wrote
+  decisions, proposals or settings.
+- ADR: 0064. Migration: none.
+- Tests: idle ticks write nothing; counts and closed codes only.
+- Review gate: fresh reviewer.
+
+**S8 — `監査ログ` page and delegation status** (after S1; status after S3).
+
+- What: the audit page, and the delegation in force shown on the schedules and
+  confirm pages.
+- ADR: 0064. Migration: none.
+- Tests: browser tests, desktop and mobile.
+- Review gate: fresh reviewer.
+
+**Delegation test matrix (S3, S6)**, modelled on #565's:
+
+1. An `mcp-client` with no delegation: every delegated tool unpublished and,
+   when called, `delegation_not_configured`; only the refusal record is written.
+2. Invalid entries — bare-subject key, another person's `mcp-client:` name,
+   delegator not an operator, validity longer than 90 days, unknown role or
+   capability, scope outside the `AGENT_API_GRANTS` entry, more than 8 entries
+   — make the table `503 delegation_misconfigured` for every delegated call;
+   an entry before `issuedAt` or after `notAfter` is inert
+   (`delegation_not_yet_valid`, `delegation_expired`) while reads continue.
+3. A browser-audience token, both audiences, the HTTP agent route and the bare
+   subject never resolve a delegation; `principalFor` still refuses
+   `mcp-client:`; a delegated principal is refused on every browser operator
+   route.
+4. Each tool refused without its capability (`capability_not_delegated`),
+   served with it; R3 and R4 have no tool, and the Processor refuses a
+   forwarded family the App did not grant.
+5. Out-of-scope and nonexistent targets get byte-identical refusals with no
+   echo.
+6. R1: stale expected revision writes nothing; same key and payload is
+   `replayed`; same key, other payload is `idempotency_conflict`.
+7. R2: confirm without prepare, with another principal's or delegation's
+   prepare, with a changed payload, after expiry, twice, and two raced confirms
+   — each refused, the effect applied at most once; a target moved between
+   prepare and confirm is refused with the writer's code.
+8. Every call writes exactly one record with closed fields; a writer failure
+   leaves no effect and no `applied` record; deep scan of `audit_records`
+   after seeding provider text containing a token-shaped string and an amount.
+9. Revocation, each of the five ways: the next call is refused; earlier
+   records remain.
+10. INV07: a heuristic or AI proposal is not adopted without a decision; a
+    delegated commit writes `method = 'manual'`, `actor_id = mcp-client:<sub>`
+    and an audit record with `path = 'mcp'`, `principal_kind = 'delegated'`.
+11. HTTP and MCP return the same object; the UI and MCP produce one stored
+    effect for one request.
+12. The undelegated read-only connection (#565 matrix 1–9) is unchanged.
+
+## 9. AGENTS.md amendment
+
+This pull request makes the edit below in [`AGENTS.md`](../../AGENTS.md),
+marked effective when ADRs 0063 and 0064 merge; until slice S3 ships no
+delegation can exist, and the amended text says so.
+
+```diff
+-- Agents never approve or commit a change
+-  ([change lifecycle](docs/change-lifecycle.md#grants),
+-  [agent API](docs/agent-api.md#card-purchase-explanation)).
++- Heuristics, rule proposal passes and AI proposals only propose (INV07
++  above), and an agent without an explicit delegation only reads and
++  proposes: it never approves, commits or changes a setting
++  ([change lifecycle](docs/change-lifecycle.md#grants),
++  [agent API](docs/agent-api.md#card-purchase-explanation)). Only a principal
++  that Cloudflare Access verified on the dedicated MCP application, and that
++  the owner delegated by name, may apply an operation: within its delegated
++  capabilities, scope and expiry, under the operation's confirmation class,
++  through the common command layer, and with an audit record. Grants, Access,
++  delegations, secrets and deployment are never delegated
++  ([ADR 0063](docs/adr/0063-delegated-ai-operation-path.md),
++  [ADR 0064](docs/adr/0064-common-audit-log.md)). Effective when those ADRs
++  merge; until the delegation resolver ships (slice S3 of the
++  [plan](docs/plans/2026-10-ai-operation-path.md)) no delegation exists,
++  so in practice no agent approves, commits or changes a setting.
+```
+
+## 10. Questions for the owner
+
+Only what a design cannot settle:
+
+1. **Financial adoption and provider contact in the first delegated stage.**
+   This design puts card-settlement accept/withdraw, link and ownership
+   decisions, identity assignment, collection requests and session refreshes
+   in R2 (the AI confirms its own prepared plan, bound by digest, revision and
+   key). Is that acceptable for the first stage, or should these be R3
+   (prepared by the AI, confirmed by you in the UI) until you have read the
+   audit of earlier stages?
+2. **Device posture for write delegation.** The MCP Access application
+   cannot carry the browser application's device posture (the clients call
+   from their own clouds; ADR 0047). With writes delegated, the compensating
+   controls are the delegation's expiry (at most 90 days), the Access session
+   and token lifetime you set on the MCP application, two-step confirmation
+   and the audit log. Is that acceptable, and which session length do you want
+   on the MCP application?
+3. **The first delegation entry.** After the read-only connection test, which
+   role, sources and expiry should the first `MCP_DELEGATIONS` entry carry?
+   The proposal is `maintainer` on one schedule source for 30 days.
+
+## 11. What this plan does not do
+
+It writes no code, migration, grant, delegation, Access setting, policy,
+secret or Wrangler value. It does not merge, re-number or edit #564 or #565;
+those PRs carry their own changes, and S2 and S4 say what is asked of them.

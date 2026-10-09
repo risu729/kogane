@@ -23,7 +23,7 @@ for current behavior.
 - [ADR 0010: Bound terminal registration by a per-invocation operation budget](0010-terminal-registration-budget.md)
 - [ADR 0011: Resolve settlement ownership through keyed CTEs, keep the 0044 views as the contract](0011-keyed-ownership-ctes.md)
 - [ADR 0012: Map Mizuho ordinary deposits under identity policy version 2](0012-mizuho-identity-policy-v2.md)
-- [ADR 0013: Give agents card purchases through a separate read-only tool](0013-agent-card-purchase-read.md)
+- [ADR 0013: Give agents card purchases through a separate read-only tool](0013-agent-card-purchase-read.md) — accepted; amended by ADR 0063 (proposed)
 - [ADR 0014: A shared-R2 collector's producer is `collector-<collector id>`](0014-collector-producer-ids.md)
 - [ADR 0015: Source authority v2 names CORE source ids](0015-source-authority-v2.md)
 - [ADR 0016: Key MyJCB pending statements by payment month, current while their position shows them](0016-myjcb-pending-statement-slots.md)
@@ -49,7 +49,7 @@ for current behavior.
 - [ADR 0036: Observe covered D1 costs and failures per Processor lane](0036-lane-cost-observability.md)
 - [ADR 0037: Admit reconciliation pages by evidence and reuse clean purchase retirement checks](0037-reconciliation-purchase-cost.md)
 - [ADR 0038: Isolate complete hosted verification while sharing preparation](0038-shared-verification-preparation.md)
-- [ADR 0039: Alarm scheduling and public maintenance rules](0039-alarm-schedule-management.md)
+- [ADR 0039: Alarm scheduling and public maintenance rules](0039-alarm-schedule-management.md) — amended by ADR 0063 (proposed)
 - [ADR 0040: Deploy compatible Workers through prebuilt cf versions](0040-compatible-cf-version-deployment.md)
 - [ADR 0041: Separate maintained documentation from historical records](0041-documentation-scope.md)
 - [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — proposed; production verification pending
@@ -65,3 +65,5 @@ for current behavior.
 - [ADR 0056: Price and FX selection at an as-of under an explicit, versioned policy](0056-as-of-price-fx-selection.md) — accepted; policy values are open questions
 - [ADR 0058: A knowledge selector reads adopted events at a commit-log cut, and a B adapter feeds the reconstruction fold](0058-knowledge-selector-and-reconstruction-adapter.md) — accepted; no route or page reads it yet
 - [ADR 0059: A C adapter maps selected revisions to lot inputs, and answers unsupported until a securities writer exists](0059-lot-adapter-from-selected-revisions.md) — accepted; no securities writer, no route
+- [ADR 0063: The AI is a delegated operation path: a verified MCP principal the owner names may apply operations within capability, scope, confirmation and audit](0063-delegated-ai-operation-path.md) — proposed; nothing implemented, no delegation exists
+- [ADR 0064: One append-only audit record per operation, for the human UI and the AI alike, referencing the existing logs](0064-common-audit-log.md) — proposed; no table yet, migration number not fixed

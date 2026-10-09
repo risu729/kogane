@@ -32,9 +32,21 @@ before merge. The PR body states what the review checked.
 - Heuristics only propose; nothing changes adopted state until a decision
   accepts it (INV07, [ADR 0001](docs/adr/0001-domain-axes.md);
   [economic events](docs/economic-events.md#what-is-automatic-and-what-is-proposal-only)).
-- Agents never approve or commit a change
+- Heuristics, rule proposal passes and AI proposals only propose (INV07
+  above), and an agent without an explicit delegation only reads and
+  proposes: it never approves, commits or changes a setting
   ([change lifecycle](docs/change-lifecycle.md#grants),
-  [agent API](docs/agent-api.md#card-purchase-explanation)).
+  [agent API](docs/agent-api.md#card-purchase-explanation)). Only a principal
+  that Cloudflare Access verified on the dedicated MCP application, and that
+  the owner delegated by name, may apply an operation: within its delegated
+  capabilities, scope and expiry, under the operation's confirmation class,
+  through the common command layer, and with an audit record. Grants, Access,
+  delegations, secrets and deployment are never delegated
+  ([ADR 0063](docs/adr/0063-delegated-ai-operation-path.md),
+  [ADR 0064](docs/adr/0064-common-audit-log.md)). Effective when those ADRs
+  merge; until the delegation resolver ships (slice S3 of the
+  [plan](docs/plans/2026-10-ai-operation-path.md)) no delegation exists,
+  so in practice no agent approves, commits or changes a setting.
 - Amounts are exact decimals added in `packages/domain` (`sumQuantities` and
   friends refuse mixed units and inexact values, INV03), not summed in SQL
   ([domain contracts](docs/domain-contracts.md)).
