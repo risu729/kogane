@@ -1,7 +1,7 @@
 // @kogane/domain: pure contracts for values, time, metrics, scope, coverage,
 // rewards, context, decisions, results, the transaction-family registry, lots,
-// as-of market-data selection and the economic consumption contract. No I/O,
-// no clock, no runtime dependencies.
+// as-of market-data selection, valuation on a date and the economic
+// consumption contract. No I/O, no clock, no runtime dependencies.
 export * from "./values.ts";
 export * from "./time.ts";
 export * from "./civil-date.ts";
@@ -21,6 +21,7 @@ export * from "./reports.ts";
 export * from "./event-families.ts";
 export * from "./reconstruction.ts";
 export * from "./market-data.ts";
+export * from "./valuation-on-date.ts";
 export * from "./economic-contract.ts";
 export * from "./row-identity.ts";
 export {
