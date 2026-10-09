@@ -156,6 +156,10 @@ describe("reconstructed state HTTP contract", () => {
     ).toBe(false);
     // A status that does not compare names its reason.
     expect(mutate((copy) => (cell(copy)["explanation"]["reasonCode"] = null))).toBe(false);
+    // ... from its own list.
+    expect(
+      mutate((copy) => (cell(copy)["explanation"]["reasonCode"] = "no_reported_container")),
+    ).toBe(false);
     expect(
       mutate((copy) => {
         cell(copy)["explanation"]["status"] = "unavailable";

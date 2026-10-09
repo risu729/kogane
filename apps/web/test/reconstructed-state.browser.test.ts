@@ -31,6 +31,8 @@ if (!runnable && (!existsSync(join(client, "index.html")) || process.env["CI"] =
 
 /** Not a world: the bank answer reshaped to a complete cell with an unexplained difference. */
 const UNEXPLAINED = "acct-unexplained";
+/** Not a world: the bank answer with its start figure reshaped to a liability-positive metric. */
+const LIABILITY = "acct-liability";
 
 describe.if(runnable)("reconstructed state", () => {
   let browser: Browser;
@@ -70,13 +72,25 @@ describe.if(runnable)("reconstructed state", () => {
           if (tooMany) return Response.json({ error: "result_limit_exceeded" }, { status: 413 });
           const params = new URLSearchParams(url.searchParams);
           const unexplained = params.get("account") === UNEXPLAINED;
-          if (unexplained) params.set("account", WORLD_BANK);
+          const liability = params.get("account") === LIABILITY;
+          if (unexplained || liability) params.set("account", WORLD_BANK);
           const outcome = await reconstructedStateOutcome(worlds, params);
           if (!outcome.ok)
             return Response.json(
               { error: outcome.refusal, requestId: "synthetic" },
               { status: RECONSTRUCTED_STATE_REFUSALS[outcome.refusal].status },
             );
+          if (liability) {
+            // As the fold orients a liability-positive figure: negated.
+            const body = structuredClone(outcome.body);
+            const start = body.reconstruction!.cells[0]!.start!;
+            start.signMeaning = "liability-positive";
+            const negated = structuredClone(start.reported);
+            if (negated.value.status === "exact")
+              negated.value.value = { ...negated.value.value, coefficient: "-10000" };
+            start.oriented = negated;
+            return Response.json({ ...body, account: LIABILITY });
+          }
           if (!unexplained) return Response.json(outcome.body);
           const body = structuredClone(outcome.body);
           const cell = body.reconstruction!.cells[0]!;
@@ -220,6 +234,19 @@ describe.if(runnable)("reconstructed state", () => {
     expect(table).toContain("event_time_unknown");
     expect(table).not.toMatch(/(?:^|\s)0 JPY/u);
     expect(table).not.toContain("-0 JPY");
+    await page.close();
+  }, 30_000);
+
+  test("a liability-positive figure is shown as compared, with the provider's figure and a sign note", async () => {
+    const page = await open();
+    await ask(page, LIABILITY);
+    await answered(page);
+    const table = await page.getByRole("region", { name: "残高ごとの比較" }).innerText();
+    expect(table).toContain("-10000 JPY");
+    expect(table).toContain("取得元の表示 10000 JPY");
+    expect(table).toContain("符号を反転");
+    // The asset-positive end figure carries no such note.
+    expect(table.match(/符号を反転/gu)).toHaveLength(1);
     await page.close();
   }, 30_000);
 

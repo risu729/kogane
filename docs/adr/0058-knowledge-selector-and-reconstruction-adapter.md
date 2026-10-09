@@ -435,15 +435,24 @@ service, with the same bounds and codes.
   read-only, listed and callable exactly while the route is served, with a
   closed input schema whose patterns are the service's.
 - **Wire contract.** `validReconstructedState` takes exactly the query's
-  fields: an adjustment, a total, a net worth, an unknown status, reason,
-  gap, disposition or explanation code, a computed answer without reasons or
-  a `complete` one with them, or an answer without a reconstruction that is
-  not the missing guard, is refused rather than displayed. Its code lists are
-  restated (the client bundle does not import the query's SQL) and pinned to
-  the query's by a test.
-- **Page.** `残高の再構成` (`/reconstruction`): per currency the start's
-  reported value, the reconstructed value, the end's reported value and
-  `reported − reconstructed` with the fold's explanation status and reason,
+  fields, so an adjustment, a total, a net worth or an unknown status, reason,
+  gap, disposition or explanation code is refused rather than displayed. The
+  answer's status must equal `statusOfReasons(reasons)`, with the reasons in
+  the query's order (each once): the group of the first reason by precedence,
+  `incomplete` for any other, `complete` for none. `economic_guard_missing`
+  never sits beside a reconstruction, and an answer without one is exactly
+  the missing guard. A comparing explanation (`reconciled`, either boundary
+  status, `difference_unexplained`) has no reason code, the reported end, a
+  cell with no gaps and a complete partition, and an exact remainder: zero for
+  `reconciled` and `consistent_with_boundary_exclusion`, non-zero for
+  `difference_unexplained`. `not_comparable` and `unavailable` carry a reason
+  from their own list. Its code lists and status groups are restated (the
+  client bundle does not import the query's SQL) and pinned to the query's by
+  a test.
+- **Page.** `残高の再構成` (`/reconstruction`): per currency the start's and
+  end's reported figures as the fold compares them (asset-positive; a
+  liability-positive figure is negated and the provider's figure shown beside
+  it with a sign note), the reconstructed value and `reported − reconstructed` with the fold's explanation status and reason,
   the applied, pending, same-day and late components and the gaps; the
   status and reasons; the knowledge used (requested and resolved cut,
   `known_at`, `final` or `provisional`, set version, identity epoch, log
@@ -493,28 +502,33 @@ hand, not in CI) builds the same store on `bun:sqlite`, puts it in the SQLite
 file of a local Miniflare D1 under `wrangler dev`, and runs
 `readReconstructedState` on workerd over the D1 binding, as the route does
 after its Access and grant checks. "Wall" is the wall time of one request
-from the harness, median of three after a warm-up. On three further
-instrumented runs the Worker records each statement's interval (after a
-zero-delay timer, since workerd's clock only moves on I/O); "D1" is their
-union, the time the Worker waited on D1, and "rest" is the instrumented wall
-time minus it: the Worker's own work (selection, adapter, fold, JSON) plus the
-local transport, an upper bound on its CPU time. One answer runs 26 D1
-statements at either scale.
+from the harness, the median of three requests after a warm-up. Three further
+requests are instrumented: the Worker records each statement's interval
+(after a zero-delay timer, since workerd's clock only moves on I/O); "D1" is
+their union, the time the Worker waited on D1, and "rest" is the instrumented
+wall time minus it: the Worker's own work (selection, adapter, fold, JSON)
+plus the local transport, an approximate bound on its CPU time (Worker work
+overlapping a concurrent statement counts as D1: the two dated reads and the
+account's sources run under `Promise.all`). D1 + rest is the instrumented
+wall, a median of other requests than the wall column's, so the two can
+differ either way. One answer runs 26 D1 statements at either scale.
 
-| Store, workerd (local D1) | Latest cut: wall (D1 / rest) | Sequence, mid-log      | Instant, log start     |
-| ------------------------- | ---------------------------- | ---------------------- | ---------------------- |
-| `STATEMENT_CI_SCALE`      | 199 ms (123 / 103)           | 127 ms (119 / 54)      | 174 ms (162 / 104)     |
-| `STATEMENT_SCALE`         | 1,721 ms (1,082 / 611)       | 1,275 ms (1,311 / 219) | 1,729 ms (1,219 / 653) |
+| Store, workerd (local D1) | Latest cut: wall; instrumented (D1 + rest) | Sequence, mid-log: wall; instrumented | Instant, log start: wall; instrumented |
+| ------------------------- | ------------------------------------------ | ------------------------------------- | -------------------------------------- |
+| `STATEMENT_CI_SCALE`      | 199 ms; 226 ms (123 + 103)                 | 127 ms; 173 ms (119 + 54)             | 174 ms; 266 ms (162 + 104)             |
+| `STATEMENT_SCALE`         | 1,721 ms; 1,693 ms (1,082 + 611)           | 1,275 ms; 1,530 ms (1,311 + 219)      | 1,729 ms; 1,872 ms (1,219 + 653)       |
 
-One run each, on a shared machine (the store's answer is `indeterminate`
-there, as on `bun`). Workers do not count time spent waiting on D1 as CPU
-time. `services/app/wrangler*.jsonc` sets no `limits.cpu_ms`, so the plan's
+One harness run per scale, each figure a median of three requests, on a
+shared machine (the store's answer is `indeterminate` there, as on `bun`).
+Workers do not count time spent waiting on D1 as CPU time.
+`services/app/wrangler*.jsonc` sets no `limits.cpu_ms`, so the plan's
 default applies: on Workers Paid, which the processor's limits are written
 against ([observation lanes](../observation-lanes.md)), 30 s of CPU per HTTP
 request ([Workers limits](https://developers.cloudflare.com/workers/platform/limits/#cpu-time),
 read 2026-10-09; 10 ms on Workers Free). The full-scale "rest", about 0.6 s,
-is about 2% of that default. Remote D1 (its network round trips and its own
-query time) is not measured; locally the D1 wait is most of the answer.
+is about 2% of that default, and even the whole wall time, about 1.7 s, is
+about 6%. Remote D1 (its network round trips and its own query time) is not
+measured; locally the D1 wait is most of the answer.
 
 The route bounds one answer by the range (366 days), the selector's bounds
 (2,000 events, 5,000 revisions; past them `413 result_limit_exceeded`), the

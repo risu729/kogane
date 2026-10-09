@@ -155,8 +155,10 @@ Refusals, one closed code each (the same codes the agent tool carries as
 The page `残高の再構成` (`/reconstruction`, shown while the capability is)
 asks for one account (the accounts reported on the end date are offered), a
 range and a cut (latest, a sequence or an instant). Per currency it shows the
-start's reported balance, the reconstructed balance, the end's reported
-balance and the difference `reported − reconstructed` with the fold's
+start's and end's reported figures as the fold compares them (asset-positive;
+a liability-positive figure is negated and the provider's figure shown beside
+it with a sign note), the reconstructed balance and the difference
+`reported − reconstructed` with the fold's
 explanation status and reason, the applied, pending, same-day and
 late-recorded components and the cell's gaps; then the status and every
 reason, the knowledge used (requested and resolved cut, `known_at`,
@@ -304,11 +306,14 @@ Any input order gives the same output and the same id.
   account resolves blocks every requested cell of its unit.
 - Route cost: one answer for an account with 1,500 settlements (4,500
   revisions) on the statement-scale store took about 1.1–2.0 s on
-  `bun:sqlite` and 1.3–1.7 s on workerd over a local D1, of which about 1.1–1.3 s
-  was waiting on D1 and at most 0.2–0.65 s the Worker's own work, against the
-  default 30 s of CPU per request on Workers Paid (no `limits.cpu_ms` is set);
-  26 D1 statements per answer (ADR 0058, amendment of 2026-10-09). Remote D1
-  is not measured.
+  `bun:sqlite` and 1.3–1.7 s on workerd over a local D1 (one harness run, each
+  figure a median of three requests). On instrumented requests about 1.1–1.3 s
+  was waiting on D1 and about 0.2–0.65 s the rest, the Worker's own work and
+  local transport: an approximate bound on its CPU time, since Worker work
+  overlapping a concurrent statement counts as D1. Against the default 30 s
+  of CPU per request on Workers Paid (no `limits.cpu_ms` is set) that rest is
+  about 2%, and the whole wall time about 6%. 26 D1 statements per answer
+  (ADR 0058, amendment of 2026-10-09). Remote D1 is not measured.
 - The page and the route answer one account and a range; an instrument
   quantity is never folded (positions are counted), and no valuation is shown.
 - The input is provisional. Of ADR 0052's held questions, 2 and 8 are

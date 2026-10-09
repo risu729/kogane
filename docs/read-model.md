@@ -422,7 +422,7 @@ history: the seed reads every leg ever written on the account, and
 key (no index orders `known_at`). Measured once on `bun:sqlite`, not
 asserted: 1,500 touched events with 4,500 revisions among 64,500 commits
 loaded in 63–76 ms, and an instant near the log's start resolved in 17–20 ms.
-Not measured on workerd or D1. The route's whole answer, the dated reads and the fold
+The selector's load alone is not measured on workerd or D1. The route's whole answer, the dated reads and the fold
 included, is measured by `packages/application/test/reconstructed-state-scale.test.ts`,
 which also checks the plan of every statement the route runs, and on
 workerd over a local D1 by `services/app/scripts/reconstructed-state-workerd.ts`

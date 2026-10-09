@@ -34,7 +34,7 @@ import {
   UNAVAILABLE_REASONS as FOLD_UNAVAILABLE_REASONS,
 } from "../../domain/src/reconstruction.ts";
 import { validInstantText, validLocalDateText } from "../../domain/src/time.ts";
-import { validQuantity } from "../../domain/src/values.ts";
+import { isZeroDecimal, type Quantity, validQuantity } from "../../domain/src/values.ts";
 
 export const RECONSTRUCTED_STATE_QUERY_SCHEMA = "reconstructed-state-query-v1";
 /** `RECONSTRUCTED_STATE_STATUSES` of the query, in precedence order. */
@@ -287,11 +287,10 @@ const component = (value: unknown, extra: string[] = []): boolean =>
   list(value.refs, text) &&
   extra.every((key) => count(value[key]));
 
-/** An exact quantity, and whether it is zero. */
-function exactValue(value: unknown): "zero" | "non-zero" | null {
-  if (!record(value) || !record(value.value) || value.value.status !== "exact") return null;
-  const decimal = value.value.value;
-  return record(decimal) && decimal.coefficient === "0" ? "zero" : "non-zero";
+/** A quantity `validQuantity` accepted: whether it is an exact zero, an exact non-zero, or not exact. */
+function exactValue(value: Quantity): "zero" | "non-zero" | null {
+  if (value.value.status !== "exact") return null;
+  return isZeroDecimal(value.value.value) ? "zero" : "non-zero";
 }
 
 /**
@@ -333,7 +332,7 @@ function validExplanation(value: unknown, cell: { gaps: unknown; partition: unkn
     case "unavailable":
       return member(FOLD_UNAVAILABLE_REASONS)(value.reasonCode);
     default: {
-      const remainder = exactValue(value.remainder);
+      const remainder = exactValue(value.remainder as Quantity);
       const compared =
         value.reasonCode === null &&
         value.reported !== null &&
