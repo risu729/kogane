@@ -1163,7 +1163,7 @@ function selectBody(input: SelectorInput): AdoptedSelectionBody {
   // pre-log chain of any length ends where a logged correction supersedes its
   // last revision.
   const history = new Map(supersededAt);
-  for (let grown = true; grown; ) {
+  for (let grown = true; grown;) {
     grown = false;
     for (const row of input.revisions) {
       const ref = rowRef(row);
