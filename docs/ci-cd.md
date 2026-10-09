@@ -532,11 +532,19 @@ artifact ID/digest, run/original-attempt, target SHA and trusted workflow SHA.
 
 Rerunning the failed release job reacquires its own `production-deploy` lock,
 refuses any newer release record (including failed/pending releases), and verifies
-artifact metadata and actual downloaded checksums before restoring original
+artifact metadata and incrementally computed whole-ZIP checksums before restoring original
 stamped configs, bundles, cf output and Docker images. It skips only receipt-bound
 Container publication; their full 180-second guards run again against the exact
 original target. Ordinary Workers and idempotent migrations follow the original
 ordered path, and every health/lifecycle/schedule postcheck remains required.
+
+Downloads write unverified bytes only into a unique private quarantine. The helper
+promotes the closed ZIP only after its bound checksum matches, then extracts it.
+ZIP and tar files are removed after successful extraction. The Docker archive
+moves within runner temporary storage instead of being copied again, and is
+removed after the original image ID/input proof. Unexpected failures report closed
+stage codes. Required CI streams more than 2 GiB through this path with peak RSS
+below 256 MiB; it does not substitute for live recovery verification.
 
 No receipt means no safe adoption. Historical runs, publication failure before
 checkpoint binding, ordinary-only rollback runs, expired artifacts, ambiguous
