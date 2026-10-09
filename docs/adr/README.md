@@ -65,4 +65,3 @@ for current behavior.
 - [ADR 0056: Price and FX selection at an as-of under an explicit, versioned policy](0056-as-of-price-fx-selection.md) — accepted; policy values are open questions
 - [ADR 0058: A knowledge selector reads adopted events at a commit-log cut, and a B adapter feeds the reconstruction fold](0058-knowledge-selector-and-reconstruction-adapter.md) — accepted; no route or page reads it yet
 - [ADR 0059: A C adapter maps selected revisions to lot inputs, and answers unsupported until a securities writer exists](0059-lot-adapter-from-selected-revisions.md) — accepted; no securities writer, no route
-- [ADR 0060: Use the direct Container API with existing applications](0060-container-direct-api.md) — proposed; native runtime verification pending
