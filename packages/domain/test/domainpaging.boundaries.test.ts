@@ -149,9 +149,12 @@ describe("keyset cursor field boundaries", () => {
   });
 
   test("a 2048-character wire is the alphabet cap and the next unpadded length is refused", () => {
-    // Field limits cannot fill 2048 characters. 1536 bytes is the largest
-    // multiple of 3 that encodes to 2048 unpadded characters; leading JSON
-    // spaces keep the object valid. One more byte encodes to 2050.
+    // The short ASCII payload's base64url wire is shorter than 2048
+    // characters. Leading JSON spaces are ASCII, so each is one UTF-8 byte
+    // and one UTF-16 code unit, and they lengthen only that wire: 1536 such
+    // bytes encode to the 2048-character cap, and one more byte encodes to
+    // 2050. The decoded object stays the short payload. UTF-16 field limits
+    // are a separate check.
     const json = JSON.stringify(payload);
     const accepted = base64url(`${" ".repeat(1536 - json.length)}${json}`);
     expect(accepted).toHaveLength(2048);
