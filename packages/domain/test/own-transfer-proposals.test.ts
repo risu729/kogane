@@ -80,7 +80,11 @@ function smbc(spec: RowSpec): OwnTransferRowInput {
     postingDate: spec.date === undefined ? "2030-01-10" : spec.date,
   };
 }
-/** An SBI-Shinsei-shaped row: `txnReferenceNo`, and no recorded origin (the parser records none today). */
+/**
+ * An SBI-Shinsei-shaped row of a 0.1.2 run: `txnReferenceNo`, and no recorded
+ * origin (the parser records the origin from release 0.1.3; rows of 0.1.2 runs
+ * stay refused).
+ */
 function shinsei(id: number, amount: string): OwnTransferRowInput {
   return {
     observationId: id,
@@ -337,7 +341,7 @@ describe("pairing", () => {
       policyVersion: EXACT.policyVersion,
       identityEpoch: INITIAL_IDENTITY_EPOCH,
       aliasRuleVersions: ["smbc-meisai-id-v1"],
-      registryVersion: "transaction-family-registry-v2",
+      registryVersion: "transaction-family-registry-v3",
       ownershipVersion: "synthetic-ownership-1",
       arithmeticVersion: "exact-arith-v1",
       contractVersion: "economic-contract-v1",

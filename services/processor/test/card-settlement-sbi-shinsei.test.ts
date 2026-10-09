@@ -21,6 +21,8 @@ import {
   type ChangeKind,
   type Principal,
 } from "../../../packages/application/src/index.ts";
+import { cardSettlementDebitIdentity } from "../../../packages/application/src/operations/card-settlement-target.ts";
+import type { CardSettlementFacts } from "../../../packages/domain/src/card-settlement.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
 
 const FIXTURE = new URL(
@@ -356,7 +358,7 @@ test("re-observing the same txnReferenceNo is one payment, not a second one", as
   );
 }, 60000);
 
-test("ownership is still required; an SBI Shinsei debit's identity is refused, and an accepted SMBC debit reserves the statement", async () => {
+test("ownership is still required; the SBI Shinsei debit's identity is admitted (0.1.3), and an accepted SMBC debit reserves the statement", async () => {
   await ownership(STATEMENT_PARSE, "liable_party");
   await ownership(jpyParse, "beneficial_owner");
   // An SMBC debit of the same bill, as the SMBC parser stores it: its
@@ -407,20 +409,26 @@ test("ownership is still required; an SBI Shinsei debit's identity is refused, a
     ownership_current: 1,
     allocation_available: 1,
   });
-  // ADR 0054: the parser records no origin for txnReferenceNo, so the
-  // human-adopted writer refuses the debit with a closed code, nothing written.
-  const before = await count("SELECT count(*) AS n FROM decision_revisions");
-  await expect(
-    command("card-settlement.accept", {
-      proposalId: sbi[0]!.id,
-      reason: "verified total and SBI Shinsei debit",
-    }),
-  ).rejects.toThrow(
-    '"unsupported_semantics","refs":["card-settlement:' +
-      sbi[0]!.id +
-      '","identity_origin_unrecorded"]',
-  );
-  expect(await count("SELECT count(*) AS n FROM decision_revisions")).toBe(before);
+  // ADR 0054 rule 2: parser 0.1.3 records the origin of txnReferenceNo, so the
+  // human-adopted writer admits the debit under the declared function (a row a
+  // 0.1.2 run stored is refused: card-settlement-sbi-shinsei-origin.test.ts).
+  // It is not accepted here; the next tests reserve it the pre-G1b way.
+  const bankDebit = (JSON.parse(sbi[0]!.facts_json) as CardSettlementFacts).bankDebit;
+  expect(
+    await cardSettlementDebitIdentity(
+      d1CommandStore(db),
+      sbi[0]!.id,
+      JSON.parse(sbi[0]!.facts_json) as CardSettlementFacts,
+    ),
+  ).toEqual({
+    admitted: true,
+    aliasClass: {
+      sourceId: "sbi-shinsei-bank",
+      components: ["SYNTHETIC-TXN-001"],
+      accountId: bankDebit.accountId!,
+      ruleVersion: "sbi-shinsei-txn-reference-no-v1",
+    },
+  });
   const accepted = await command("card-settlement.accept", {
     proposalId: smbc[0]!.id,
     reason: "verified total and SMBC debit",

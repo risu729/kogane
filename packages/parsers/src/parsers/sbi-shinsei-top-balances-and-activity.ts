@@ -12,6 +12,12 @@
 // marker is the whole record of it. A `toDate` without a `fromDate`, rows
 // without a `fromDate`, and a `fromDate` whose `toDate` is absent or null
 // rather than empty stay refused: nobody has observed any of them.
+//
+// From 0.1.3 every activity row records `_kogane.identityOrigin:
+// "provider-id"`, as smbc-direct does: its external id is the provider's
+// `txnReferenceNo` exactly as received, never synthesised (ADR 0018, ADR 0054
+// rule 2). Nothing else changed: the external id, the account, the sign, the
+// accepted shapes and every other field are 0.1.2's.
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
 import { containerClaim } from "./coverage.ts";
 import { decimalToMinorUnits, minorUnitExponent } from "./util.ts";
@@ -37,7 +43,7 @@ const DATASET = "top-accounts-balance-and-activity";
 
 export const sbiShinseiTopBalancesAndActivity: Parser = {
   name: "sbi-shinsei-top-balances-and-activity",
-  version: "0.1.2",
+  version: "0.1.3",
   accepts: (artifact: ArtifactMeta) => acceptsSbiShinseiDataset(artifact, DATASET),
 
   parse(bytes: Uint8Array, artifact: ArtifactMeta): ParseResult {
@@ -288,6 +294,7 @@ export const sbiShinseiTopBalancesAndActivity: Parser = {
           extra: providerExtra(row, context, {
             sourceView: "top_activity",
             amountSignSource: sourceField,
+            identityOrigin: "provider-id",
             rowBalanceDisposition: "preserved_provider_value_semantics_unverified",
             ...windowEnd,
           }),
