@@ -140,6 +140,15 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
+  "experiments/d1-conformance": {
+    source: "docs/plans/2026-10-d1-conformance.md; ADR 0054 remote gate",
+    proposedAction: "isolated-synthetic-preparation",
+    proposedTarget: "experiments/d1-conformance",
+    requiredVerification:
+      "Local binding tests and independent review; root-approved new-resource identity, remote evidence, CPU telemetry and cleanup remain separate gates",
+    executionStatus: "PREPARED_REMOTE_APPROVAL_REQUIRED",
+    planLiveResourceStatus: "NOT_PROVISIONED_BY_THIS_PREPARATION",
+  },
   "experiments/observation-pipeline-local": {
     source: "poc_disposition.csv row poc/observation-pipeline + decision D1",
     proposedAction: "isolated-as-experiment",

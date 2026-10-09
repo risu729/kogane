@@ -4,6 +4,10 @@
     "suite": "bun"
   },
   {
+    "workspace": "experiments/d1-conformance",
+    "suite": "bun"
+  },
+  {
     "workspace": "experiments/mizuho-direct",
     "suite": "bun"
   },
