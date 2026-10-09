@@ -9,6 +9,14 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [cloudflareTest({ wrangler: { configPath: "./wrangler.jsonc" } })],
   test: {
+    coverage: {
+      provider: "istanbul",
+      include: ["src/**/*.{ts,tsx,js,mjs}"],
+      exclude: ["src/**/*.d.ts"],
+      reportsDirectory: "coverage/workerd",
+      reporter: ["text", "lcov", "json-summary", "json"],
+      reportOnFailure: true,
+    },
     include: ["worker-test/**/*.test.ts"],
   },
 });

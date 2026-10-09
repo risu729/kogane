@@ -7,7 +7,7 @@ run = "./node_modules/.bin/tsc --noEmit"
 
 [tasks."test"]
 description = "Run the packages/parsers tests."
-run = "bun test"
+run = "node ../../tasks/_lib/coverage-run.mjs bun test"
 
 [tasks."digests"]
 description = "Print the deployed parser digests."

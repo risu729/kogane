@@ -50,7 +50,21 @@ test("the processor matrix dispatches both distinct native shard tasks", () => {
   expect(processor).toContain(
     "    strategy:\n      fail-fast: false\n      matrix:\n        shard: [1, 2]\n    steps:",
   );
-  expect(processor).not.toMatch(/^\s*(?:include|exclude|if|continue-on-error):/mu);
+  expect(processor.split("    steps:")[0]).not.toMatch(
+    /^\s*(?:include|exclude|if|continue-on-error):/mu,
+  );
+  const postSteps = ["Validate and summarize native coverage", "Upload native coverage"];
+  for (const candidate of workflowSteps(processor)) {
+    if (postSteps.includes(candidate.name)) {
+      expect(candidate.body).toContain("if: ${{ always() }}");
+      expect(candidate.body).not.toMatch(/^\s*continue-on-error:/mu);
+    } else {
+      expect(candidate.body).not.toMatch(/^\s*(?:if|continue-on-error):/mu);
+    }
+  }
+  expect(
+    workflowSteps(processor).filter((candidate) => postSteps.includes(candidate.name)),
+  ).toHaveLength(2);
   const step = workflowSteps(processor).find(
     (candidate) => candidate.name === "Run the complete native processor shard",
   );

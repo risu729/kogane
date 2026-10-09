@@ -13,7 +13,7 @@ run = "./node_modules/.bin/tsc --noEmit"
 [tasks."test"]
 description = "Run the services/collector-sony-bank tests."
 depends = ["//services/collector-sony-bank:types"]
-run = "bun test"
+run = "node ../../tasks/_lib/coverage-run.mjs bun test"
 
 [tasks."dry-run"]
 description = "Validate the services/collector-sony-bank deployment without uploading it."
