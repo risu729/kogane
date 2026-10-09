@@ -1,4 +1,5 @@
 import { SchedulesPage } from "./pages/Schedules";
+import { CollectionQualityPage } from "./pages/CollectionQuality.tsx";
 // Read-only navigation. Connection metadata describes the API, not freshness
 // of financial observations or whether a collector is currently running.
 
@@ -66,6 +67,7 @@ const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeat
   { to: "/identities", label: "口座・銘柄", icon: NAV_ICONS.identities, feature: "identities" },
   { to: "/rewards", label: "ポイント・前払式残高", icon: NAV_ICONS.rewards, feature: "rewards" },
   { to: "/schedules", label: "収集スケジュール", icon: NAV_ICONS.evidence },
+  { to: "/collection-quality", label: "収集品質", icon: NAV_ICONS.evidence },
   { to: "/evidence", label: "取得履歴", icon: NAV_ICONS.evidence, feature: "evidenceHistory" },
 ];
 
@@ -89,6 +91,8 @@ function View({ route }: { route: Route }): ReactNode {
   switch (route.name) {
     case "schedules":
       return <SchedulesPage />;
+    case "collectionQuality":
+      return <CollectionQualityPage />;
     case "overview":
       return <OverviewPage />;
     case "transactions":

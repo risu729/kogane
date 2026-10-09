@@ -80,9 +80,12 @@ export interface ScheduleQualityRow {
   kind: string;
   enabled: number;
   supported: number;
+  next_nominal_at: string | null;
+  next_run_at: string | null;
   occurrence_status: string | null;
   occurrence_failure_code: string | null;
   occurrence_nominal_at: string | null;
+  occurrence_started_at: string | null;
   occurrence_finished_at: string | null;
   /** JSON array of the collector run ids the receipt names; never returned to a client. */
   occurrence_run_ids: string | null;
@@ -95,9 +98,9 @@ export interface ScheduleQualityRow {
  * than counted anywhere, so a job added or removed by a migration or the
  * settings API is what the read shows.
  */
-export const SCHEDULE_QUALITY_SQL = `SELECT s.id, s.source, s.kind, s.enabled, s.supported,
+export const SCHEDULE_QUALITY_SQL = `SELECT s.id, s.source, s.kind, s.enabled, s.supported, s.next_nominal_at, s.next_run_at,
        o.status AS occurrence_status, o.failure_code AS occurrence_failure_code,
-       o.nominal_at AS occurrence_nominal_at, o.finished_at AS occurrence_finished_at,
+       o.nominal_at AS occurrence_nominal_at, o.started_at AS occurrence_started_at, o.finished_at AS occurrence_finished_at,
        o.run_ids_json AS occurrence_run_ids,
        lease.started_at AS lease_started_at
   FROM collection_schedules s
@@ -230,6 +233,10 @@ export interface CellQualityRow {
   /** The newest visible run of the producer that made the newest capture (of its unit, for a unit's cell). */
   latest_producer_run_id: number;
   artifacts: number;
+  observations: number;
+  unresolved_identities: number;
+  identity_missing: number;
+  unit_outcome_unknown: number;
   raw_stored: number;
   not_queued: number;
   not_eligible: number;
@@ -503,6 +510,12 @@ cq_artifacts AS MATERIALIZED (
          SUM(CASE WHEN k.state = 'failed' THEN 1 ELSE 0 END) AS failed,
          SUM(CASE WHEN k.state = 'unpublished' THEN 1 ELSE 0 END) AS unpublished,
          json_group_array(DISTINCT CASE WHEN k.state = 'failed' THEN k.failure_code END) AS failure_codes_json,
+         MAX(CASE WHEN n.fetch_unit_key IS NOT NULL AND coalesce((
+           SELECT report.normalized_outcome FROM fetch_units unit
+           LEFT JOIN fetch_unit_reports report
+             ON report.fetch_unit_id = unit.id AND report.report_kind = 'terminal'
+           WHERE unit.fetch_run_id = n.fetch_run_id AND unit.unit_key = n.fetch_unit_key
+         ), 'unknown') = 'unknown' THEN 1 ELSE 0 END) AS unit_outcome_unknown,
          MAX(CASE WHEN (SELECT unit.unit_status FROM observation_fetch_artifact_units unit
                          WHERE unit.fetch_artifact_id = n.id) = 'failed' THEN 1 ELSE 0 END) AS unit_failed,
          MAX((SELECT unit.unit_failure_code FROM observation_fetch_artifact_units unit
@@ -524,21 +537,70 @@ cq_artifacts AS MATERIALIZED (
    WHERE claim.completeness <> 'complete' OR claim.membership_complete <> 1
       OR claim.failure_cause IS NOT NULL
    GROUP BY ${cellColumns("n")}
-)
+), cq_publication AS (
+  SELECT ${cellColumns("n")},
+         SUM((SELECT COUNT(*) FROM transaction_observations o WHERE o.parse_run_id = pub.parse_run_id)
+           + (SELECT COUNT(*) FROM balance_observations o WHERE o.parse_run_id = pub.parse_run_id)
+           + (SELECT COUNT(*) FROM position_observations o WHERE o.parse_run_id = pub.parse_run_id)
+           + (SELECT COUNT(*) FROM valuation_observations o WHERE o.parse_run_id = pub.parse_run_id)) AS observations,
+         SUM(CASE WHEN NOT EXISTS (
+           SELECT 1 FROM eligible_identity_runs r JOIN identity_run_seals seal ON seal.identity_run_id = r.id
+            WHERE r.parse_run_id = pub.parse_run_id
+         ) THEN 1 ELSE 0 END) AS identity_missing,
+         SUM((SELECT COUNT(*) FROM identity_observations o
+           JOIN eligible_identity_runs r ON r.id = o.identity_run_id
+           JOIN identity_run_seals seal ON seal.identity_run_id = r.id
+           JOIN current_account_mappings mapping ON mapping.source_account_id = o.source_account_id
+           WHERE r.parse_run_id = pub.parse_run_id AND mapping.status = 'unresolved'
+             AND r.policy_version = (SELECT MAX(newest.policy_version) FROM eligible_identity_runs newest
+               JOIN identity_run_seals newest_seal ON newest_seal.identity_run_id = newest.id
+               WHERE newest.parse_run_id = pub.parse_run_id))) AS unresolved_identities
+    FROM cq_newest n
+    JOIN published_parse_runs pub ON pub.fetch_artifact_id = n.id AND pub.parser_name = n.parser_name
+   GROUP BY ${cellColumns("n")}
+), cq_empty_units AS (
+  SELECT u.unit_key, f.id AS fetch_run_id, coalesce(f.completed_at, f.started_at) AS captured_at,
+         CASE WHEN ${successfulFetchRuns.predicate("f")} THEN 1 ELSE 0 END AS succeeded,
+         report.normalized_outcome AS outcome, report.safe_failure_code AS failure_code,
+         ROW_NUMBER() OVER (PARTITION BY u.unit_key
+           ORDER BY coalesce(f.completed_at, f.started_at) DESC, f.id DESC) AS choice
+    FROM cq_latest_units unit_latest
+    CROSS JOIN ${visibleEvidence.fetchRuns} f ON f.id = unit_latest.fetch_run_id
+    CROSS JOIN fetch_units u ON u.fetch_run_id = f.id AND u.unit_key = unit_latest.unit_key
+    LEFT JOIN fetch_unit_reports report ON report.fetch_unit_id = u.id AND report.report_kind = 'terminal'
+   WHERE NOT EXISTS (SELECT 1 FROM ${visibleEvidence.fetchArtifacts} a
+                      WHERE a.fetch_run_id = f.id AND a.fetch_unit_key = u.unit_key)
+), cq_result AS (
 SELECT c.dataset, c.parser_name, c.fetch_unit_key, c.period_kind, c.period, c.period_state,
        c.current_rule, c.newest_run_id, c.newest_captured_at, c.newest_run_succeeded,
        c.latest_producer_run_id, c.artifacts, c.raw_stored, c.not_queued, c.not_eligible,
        c.published, c.pending, c.failed, c.unpublished, c.failure_codes_json,
        c.unit_failed, c.unit_failure_code,
        claims.incomplete_coverage, claims.coverage_causes_json, c.unreported_coverage,
-       cur.fetch_run_id AS current_run_id, cur.captured_at AS current_captured_at
+       cur.fetch_run_id AS current_run_id, cur.captured_at AS current_captured_at,
+       coalesce(publication.observations, 0) AS observations,
+       coalesce(publication.unresolved_identities, 0) AS unresolved_identities,
+       coalesce(publication.identity_missing, 0) AS identity_missing,
+       c.unit_outcome_unknown
   FROM cq_cells c
+  LEFT JOIN cq_publication publication ON ${SAME_CELL("publication", "c")}
   LEFT JOIN cq_claims claims ON ${SAME_CELL("claims", "c")}
   LEFT JOIN cq_current cur ON ${SAME_CELL("cur", "c")}
  WHERE c.parser_name IS NOT NULL
     OR NOT EXISTS (SELECT 1 FROM cq_cells parsed
                     WHERE parsed.parser_name IS NOT NULL AND ${SAME_SLOT("parsed", "c")}
                       AND parsed.newest_captured_at > c.newest_captured_at)
- ORDER BY c.dataset, c.fetch_unit_key, c.period_kind, c.period DESC, c.period_state,
-          c.parser_name, c.current_rule
+ UNION ALL
+ SELECT NULL, NULL, unit_key, 'latest', NULL, NULL, 'published-eligible',
+        fetch_run_id, captured_at, succeeded, fetch_run_id,
+        0, 0, 0, 0, 0, 0, 0, 0, '[]',
+        CASE WHEN outcome IS NOT NULL AND (outcome <> 'success' OR failure_code IS NOT NULL)
+             THEN 1 ELSE 0 END,
+        failure_code, 0, '[]', 0, NULL, NULL, 0, 0, 0,
+        CASE WHEN outcome IS NULL OR outcome = 'unknown' THEN 1 ELSE 0 END
+   FROM cq_empty_units WHERE choice = 1
+)
+SELECT * FROM cq_result
+ ORDER BY dataset, fetch_unit_key, period_kind, period DESC, period_state,
+          parser_name, current_rule
  LIMIT ${PAGE_LIMIT} OFFSET ?2`;

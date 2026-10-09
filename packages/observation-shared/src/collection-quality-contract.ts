@@ -21,7 +21,7 @@ import * as z from "zod/mini";
 import { validInstantText } from "../../domain/src/time.ts";
 
 export const COLLECTION_QUALITY_PATH = "/api/collection-quality";
-export const COLLECTION_QUALITY_API_VERSION = 1;
+export const COLLECTION_QUALITY_API_VERSION = 2;
 /** Cells per page; the read fetches one more to report truncation. */
 export const COLLECTION_QUALITY_PAGE = 500;
 /** More schedules or sources than this in one summary is refused, never cut. */
@@ -120,6 +120,12 @@ export const SOURCE_REASONS = [
 
 /** Why a cell is not shown as current and complete. Each is read from a stored state. */
 export const CELL_REASONS = [
+  "unit_without_artifacts",
+  "unit_outcome_unknown",
+  "identity_unresolved",
+  "identity_not_recorded",
+  "published_without_observations",
+  "retention_not_assessed",
   "run_not_successful",
   "unit_failed",
   "user_action_required",
@@ -191,6 +197,7 @@ const occurrence = z.strictObject({
   status: z.enum(OCCURRENCE_STATUSES),
   failureCode: z.nullable(code),
   nominalAt: instant,
+  startedAt: instant,
   finishedAt: z.nullable(instant),
   terminals: z.array(terminal).check(z.maxLength(100)),
 });
@@ -201,6 +208,14 @@ const schedule = z
     kind: z.enum(SCHEDULE_KINDS),
     enabled: z.boolean(),
     supported: z.boolean(),
+    nextNominalAt: z.nullable(instant),
+    nextRunAt: z.nullable(instant),
+    alarm: z
+      .strictObject({
+        status: z.enum(["observed", "unavailable"]),
+        actualAt: z.nullable(instant),
+      })
+      .check(z.refine((value) => value.status === "observed" || value.actualAt === null)),
     /** A held execution lease: a collection is running or stopped without releasing it. */
     leaseStartedAt: z.nullable(instant),
     /** The newest receipt by nominal time; null when the job never ran. */
@@ -289,7 +304,11 @@ const newest = z
     runSucceeded: z.boolean(),
     unitFailed: z.boolean(),
     unitFailureCode: z.nullable(code),
-    artifacts: id,
+    artifacts: count,
+    /** Stored rows of published parses; zero never asserts provider-history emptiness. */
+    observations: count,
+    /** Current sealed interpretation of the newest capture, without account identifiers. */
+    unresolvedIdentities: count,
     /** Artifacts whose raw object is reachable (`evidenceExists`). */
     rawStored: count,
     parses,
@@ -319,6 +338,17 @@ const cell = z
     reasons: distinct(z.enum(CELL_REASONS)),
   })
   .check(
+    // A declared attempt with no artifacts is never a current empty capture.
+    z.refine(
+      (value) =>
+        value.newest.artifacts > 0 ||
+        (value.parser === null &&
+          value.dataset === null &&
+          value.current === null &&
+          value.newest.observations === 0 &&
+          value.newest.unresolvedIdentities === 0 &&
+          value.reasons.includes("unit_without_artifacts")),
+    ),
     // Every artifact of the capture is counted once, under the cell's own kind.
     z.refine((value) => {
       const n = value.newest.parses;
@@ -354,6 +384,31 @@ const cells = z.strictObject({
 export type CollectionQualityTerminal = z.output<typeof terminal>;
 export type CollectionQualityOccurrence = z.output<typeof occurrence>;
 export type CollectionQualitySchedule = z.output<typeof schedule>;
+const alarms = z.strictObject({
+  alarms: z
+    .array(
+      z.strictObject({
+        id: sourceId,
+        enabled: z.boolean(),
+        nextNominalAt: z.nullable(instant),
+        nextRunAt: z.nullable(instant),
+        alarm: z
+          .strictObject({
+            status: z.enum(["observed", "unavailable"]),
+            actualAt: z.nullable(instant),
+          })
+          .check(z.refine((value) => value.status === "observed" || value.actualAt === null)),
+      }),
+    )
+    .check(
+      z.maxLength(COLLECTION_QUALITY_BOUND),
+      z.refine((values) => new Set(values.map((value) => value.id)).size === values.length),
+    ),
+});
+export type CollectionQualityAlarms = z.output<typeof alarms>;
+export function validCollectionQualityAlarms(value: unknown): value is CollectionQualityAlarms {
+  return alarms.safeParse(value).success;
+}
 export type CollectionQualityFetchRun = NonNullable<z.output<typeof fetchRun>>;
 export type CollectionQualityUnregistered = z.output<typeof unregistered>;
 export type CollectionQualitySource = z.output<typeof source>;

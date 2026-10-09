@@ -1,4 +1,5 @@
 import { SchedulesPage } from "./pages/Schedules";
+import { CollectionQualityPage } from "./pages/CollectionQuality.tsx";
 import { useEffect, useRef, type ReactNode } from "react";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -17,6 +18,7 @@ import { GlobalPassEmptyMonthsNotice } from "./global-pass-empty-months.tsx";
 
 function routeFor(path: string) {
   if (path === "/schedules") return { kind: "schedules" as const, title: "収集スケジュール" };
+  if (path === "/collection-quality") return { kind: "quality" as const, title: "収集品質" };
   const artifact = /^\/runs\/(r_[1-9]\d*)\/artifacts\/(a_[1-9]\d*)$/u.exec(path);
   if (artifact)
     return {
@@ -41,6 +43,7 @@ export function EvidenceContent({
   const route = routeFor(usePath());
   const metadata = useEvidenceMeta();
   if (route.kind === "schedules") return <SchedulesPage />;
+  if (route.kind === "quality") return <CollectionQualityPage />;
   return (
     <>
       {route.kind !== "history" ? (
@@ -118,6 +121,12 @@ export function EvidenceApp({
 
   const navItems: NavItem[] = [
     {
+      to: "/collection-quality",
+      label: "収集品質",
+      icon: NAV_ICONS.evidence,
+      current: route.kind === "quality",
+    },
+    {
       to: "/schedules",
       label: "収集スケジュール",
       icon: NAV_ICONS.evidence,
@@ -163,6 +172,10 @@ export function EvidenceApp({
         onRefresh: () => {
           if (client.isFetching({ queryKey: ["evidence-v1"] }) > 0) return;
           void client.invalidateQueries({ queryKey: ["evidence-v1"], refetchType: "active" });
+          void client.invalidateQueries({
+            queryKey: ["collection-quality"],
+            refetchType: "active",
+          });
         },
       }}
       footer={[

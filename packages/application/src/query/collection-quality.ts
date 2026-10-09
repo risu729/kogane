@@ -165,11 +165,16 @@ function schedule(
 ): CollectionQualitySchedule {
   const collectors = scheduleCollectors(row.source);
   let latest: CollectionQualityOccurrence | null = null;
-  if (row.occurrence_status !== null && row.occurrence_nominal_at !== null) {
+  if (
+    row.occurrence_status !== null &&
+    row.occurrence_nominal_at !== null &&
+    row.occurrence_started_at !== null
+  ) {
     latest = {
       status: row.occurrence_status as OccurrenceStatus,
       failureCode: safeCode(row.occurrence_failure_code),
       nominalAt: row.occurrence_nominal_at,
+      startedAt: row.occurrence_started_at,
       finishedAt: row.occurrence_finished_at,
       terminals: runIds(row).map((runId) => {
         // The run belongs to whichever of the job's collectors recorded it.
@@ -186,6 +191,9 @@ function schedule(
     kind: row.kind as ScheduleKind,
     enabled: row.enabled === 1,
     supported: row.supported === 1,
+    nextNominalAt: row.next_nominal_at,
+    nextRunAt: row.next_run_at,
+    alarm: { status: "unavailable", actualAt: null },
     leaseStartedAt: row.lease_started_at,
     latest,
   };
@@ -317,6 +325,12 @@ export function cell(row: CellQualityRow): CollectionQualityCell {
         : "older-current";
   const named = period(row);
   const reasons = new Set<CellReason>();
+  if (row.artifacts === 0) reasons.add("unit_without_artifacts");
+  if (row.unit_outcome_unknown === 1) reasons.add("unit_outcome_unknown");
+  if ((row.unresolved_identities ?? 0) > 0) reasons.add("identity_unresolved");
+  if (row.published > 0 && (row.identity_missing ?? 0) > 0) reasons.add("identity_not_recorded");
+  if (row.published > 0 && row.observations === 0) reasons.add("published_without_observations");
+  reasons.add("retention_not_assessed");
   if (row.newest_run_succeeded !== 1) reasons.add("run_not_successful");
   if (row.unit_failed === 1) reasons.add("unit_failed");
   if (userActionRequired(unitFailureCode)) reasons.add("user_action_required");
@@ -351,6 +365,8 @@ export function cell(row: CellQualityRow): CollectionQualityCell {
       unitFailed: row.unit_failed === 1,
       unitFailureCode,
       artifacts: row.artifacts,
+      observations: row.observations ?? 0,
+      unresolvedIdentities: row.unresolved_identities ?? 0,
       rawStored: row.raw_stored,
       parses: {
         published: row.published,

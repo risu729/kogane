@@ -21,6 +21,7 @@ import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
 import { auditOverflowStage } from "./audit-overflow.ts";
 import { scheduleRoute } from "./schedule-store";
+import { collectionQualityAlarmRoute } from "./collection-quality-alarms";
 import { maintenanceSurveyLane } from "./maintenance-survey/lane.ts";
 import { maintenanceSurveyEnabled } from "./maintenance-survey/config.ts";
 import { internalHealthRoute } from "./internal-health.ts";
@@ -2070,6 +2071,8 @@ export default {
     // `PIPELINE` service binding after authenticating the caller; a request
     // that did not arrive that way is refused, not answered. Read-only.
     const scheduling = await scheduleRoute(request, env, url);
+    const qualityAlarms = await collectionQualityAlarmRoute(request, env, url);
+    if (qualityAlarms) return qualityAlarms;
     if (scheduling) return scheduling;
     const health = await internalHealthRoute(request, env, path);
     if (health) return health;
