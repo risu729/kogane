@@ -44,6 +44,39 @@ for (const file of [
     }
 }
 
+/**
+ * A release after its cases were frozen, as a closed change of the frozen
+ * output: the comparison below applies it to the frozen observations and then
+ * still compares byte for byte, so anything the release changed beyond it
+ * fails. The frozen files keep the bytes of the earlier release.
+ *
+ * - `sbi-shinsei-top-balances-and-activity` 0.1.3 (ADR 0018, 2026-10-09): its
+ *   cases were frozen under 0.1.2 (`complete-rows` in the historical
+ *   expected.json, `window-end-not-stated` in the observed-shapes file). 0.1.3
+ *   adds `_kogane.identityOrigin: "provider-id"` to every transaction row,
+ *   right after `amountSignSource`, and changes nothing else.
+ */
+const RELEASE_DELTAS: Record<string, (frozen: Observation[]) => Observation[]> = {
+  "sbi-shinsei-top-balances-and-activity": (frozen) =>
+    frozen.map((observation) => {
+      if (observation.kind !== "transaction") return observation;
+      const kogane = observation.extra["_kogane"] as Record<string, unknown>;
+      expect(Object.keys(kogane)).toContain("amountSignSource");
+      expect(Object.keys(kogane)).not.toContain("identityOrigin");
+      const withOrigin = Object.fromEntries(
+        Object.entries(kogane).flatMap(([key, value]) =>
+          key === "amountSignSource"
+            ? [
+                [key, value],
+                ["identityOrigin", "provider-id"],
+              ]
+            : [[key, value]],
+        ),
+      );
+      return { ...observation, extra: { ...observation.extra, _kogane: withOrigin } };
+    }),
+};
+
 interface Expectation {
   completeness: Completeness;
   observed: number;
@@ -186,8 +219,13 @@ for (const { parser, cases } of CONTRACT_PARSERS) {
           return;
         }
         const result = parser.parse(entry.bytes, entry.artifact);
-        // Observations and warning text are exactly what the pre-change parser produced.
-        expect(JSON.stringify(result.observations)).toBe(JSON.stringify(frozen.observations));
+        // Observations and warning text are exactly what the pre-change parser
+        // produced, with only a later release's declared change applied.
+        const delta =
+          RELEASE_DELTAS[parser.name] ?? ((observations: Observation[]) => observations);
+        expect(JSON.stringify(result.observations)).toBe(
+          JSON.stringify(delta(frozen.observations)),
+        );
         expect(result.warnings).toEqual(frozen.warnings);
         // Determinism extends to the new fields.
         expect(parser.parse(entry.bytes, entry.artifact)).toEqual(result);
