@@ -119,9 +119,9 @@ map to one instrument, which only a manual `identity.assign` does today, and
 `rejected` only when the newest `listed_as` relation from one identifier's
 current instrument to the other identifier is rejected. A proposed candidate
 names those two commands (assign the subject identifier to the anchor's
-instrument; reject `listed_as` from the anchor's instrument to the subject) for
-a person to plan with a reason through the [change lifecycle](change-lifecycle.md),
-where agents can plan but never approve or commit. A manually mapped
+instrument; reject `listed_as` from the anchor's instrument to the subject),
+to be planned with a reason through the [change lifecycle](change-lifecycle.md);
+under today's grant lists an agent can plan them and cannot approve or commit. A manually mapped
 identifier, or one sharing its instrument, is always the anchor over one that
 is not; when both identifiers are settled that way the candidate names no
 adopt command and a `hold` code (`subject-decided-elsewhere`,
@@ -130,7 +130,33 @@ rejection, which moves no mapping, so a person can close it as `rejected`. `quer
 lists an identifier's mapping revisions, mapping decisions and `listed_as`
 relations, oldest first; a correction is always a later entry.
 
-Limits today: no HTTP route, page or MCP tool serves these reads. Only SBI
+### Review page, route and agent tool
+
+`reviewInstrumentCandidates` (`packages/application/src/query/instrument-candidates-review.ts`,
+[ADR 0055 amendment 2026-10-09](adr/0055-instrument-candidates.md#amendment-2026-10-09-route-and-page-as-implemented))
+serves one page of that read to whoever its grant allows: `records.read` over
+the whole store. Views `open` (proposed, no hold), `held`, `decided`,
+`separated` and `hints`; 50 items a page; an optional `identifierId`; every
+item with `evidenceRefs` and the identifiers it names; the manifest of the
+policy, bounds and closed codes; the summary counts of the whole read.
+
+- `GET /api/identity/instrument-candidates?view=&offset=&identifierId=`
+  (`services/app/src/instrument-candidates-api.ts`): read-only, behind the
+  Access gate, under the reader grant a signed-in browser has.
+- `kogane.instruments.candidates` ([agent API](agent-api.md#instrument-candidates)):
+  the same answer to an agent under its own grant, read-only.
+- `/identities/instrument-candidates` (`銘柄の同一性の候補`): the page. A
+  proposed candidate's buttons plan its own `identity.assign` or
+  `relation.reject` payload with the reason a person writes, and open the
+  confirmation screen; approval and commit happen there. A held candidate
+  offers keeping apart only.
+
+Each request walks every current identity observation once: about 0.65 s per
+100,000 of them on `bun:sqlite` on the synthetic scaled store, growing
+linearly with history; not measured on D1 (the amendment has the figures).
+A reader pages to offset 950 of a view; `identifierId` narrows a larger one.
+
+Limits today: no route serves `queryInstrumentHistory`. Only SBI
 Securities and SBI VC Trade store security, crypto or product identifiers, so
 cross-broker candidates need a second source whose identity rule records a
 code and country, an ISIN or a RIC. No rule records ISIN, share class or
@@ -138,7 +164,7 @@ product class. Valuation and the report job still key holdings by the
 provider-local `instrument:<source>:<market>:<code>`, so no candidate moves a
 price, quantity or cost. The facts read walks every current identity
 observation once, like the instrument catalogue; its D1 cost is not measured
-and must be measured before a route serves it. An equal country and code is
+(the `bun:sqlite` figures are above). An equal country and code is
 proposed with no period comparison, so a code reassigned after a delisting
 still pairs, and nothing names that as a gap. The status read ignores a
 `listed_as` relation's `valid_from` and `valid_to`, so a rejection limited to

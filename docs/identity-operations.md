@@ -74,12 +74,29 @@ receipt (`revision`, `mappingId`, `decisionRevisionId`); a `409` carries the
 error code in `x-kogane-error` (`revision_conflict`, `idempotency_conflict`,
 `target_missing`, `target_metadata_ambiguous`, `no_active_override`).
 
+### Instrument candidates
+
+`/identities/instrument-candidates` lists which instrument identifiers may
+denote the same instrument ([identity](identity.md#review-page-route-and-agent-tool),
+ADR 0055). A proposed candidate's buttons plan its own command with the
+reason you write: adopting is `identity.assign` of the subject identifier to
+the anchor's instrument, keeping apart is `relation.reject` of `listed_as`
+from the anchor's instrument to the subject. The plan opens on
+`/confirm/:planId`, where it is approved and committed like any other
+correction, recorded in the decision log and refused when stale. A held
+candidate (its subject already decided elsewhere or sharing an instrument)
+offers keeping apart only; moving that subject is a correction of the
+earlier decision, made as above. An agent reads the same list through
+`kogane.instruments.candidates` and plans through the same command API.
+
 ## Verification and rollback
 
 - `/api/identity/coverage` compares all eligible current B observations against
   completed C runs by source; organized is not globally identified.
 - `/api/identity/accounts` and `/api/identity/instruments` read effective mapping
   revisions, expose their evidence links, and paginate at 100 rows.
+- `/api/identity/instrument-candidates` reads the ADR 0055 candidate set and
+  pages it at 50 items per view; it writes nothing.
 - Preserve the original pinned decision IDs to audit what was recorded at the
   time, even after a manual correction.
 - Old B parses/failed acquisitions remain in their own history and never
