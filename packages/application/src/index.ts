@@ -11,6 +11,12 @@
 // Both are allow-lists: `resolvePrincipal` refuses a subject the deployment
 // does not name, and `grantFor` answers `null` for one it has no grant for.
 
+// ── delegation declarations (ADR 0063, S3 core only) ───────────────────
+export { parseDelegations } from "./delegation/parse.ts";
+export { resolveDelegation } from "./delegation/resolve.ts";
+export { delegationCapabilities, delegationExecutionReadiness } from "./delegation/readiness.ts";
+export * from "./delegation/contract.ts";
+
 // ── command services (A09) ───────────────────────────────────────────
 export { APPROVAL_TTL_SECONDS_DEFAULT, approve, type ApproveInput } from "./command/approve.ts";
 export {
