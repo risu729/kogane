@@ -828,3 +828,174 @@ describe("the operator's page", () => {
     expect(tick.join("\n")).not.toContain("TEMP B-TREE");
   });
 });
+
+describe("the operator's page seeks the time index", () => {
+  // The page text as this slice first wrote it: every bound behind `IS NULL
+  // OR`, which the planner can only walk from the newest record. Frozen here
+  // so the range form that replaced it is proven to answer the same rows.
+  const FIRST_PAGE_SQL = `SELECT ${[
+    "audit_id",
+    "recorded_at",
+    "path",
+    "subject",
+    "principal",
+    "principal_kind",
+    "delegation_ref",
+    "operation",
+    "risk_class",
+    "step",
+    "scope_namespace",
+    "scope_source",
+    "target_ref",
+    "result",
+    "result_code",
+    "reason_code",
+    "correlation_id",
+    "idempotency_key",
+    "payload_digest",
+    "confirmation_digest",
+    "confirm_expires_at",
+    "confirms_audit_id",
+    "reverts_audit_id",
+    "refs_json",
+    "diff_json",
+  ].join(",")} FROM audit_records
+  WHERE (?1 IS NULL OR operation=?1) AND (?2 IS NULL OR path=?2)
+    AND (?3 IS NULL OR principal_kind=?3) AND (?4 IS NULL OR result=?4)
+    AND (?5 IS NULL OR recorded_at>=?5) AND (?6 IS NULL OR recorded_at<?6)
+    AND (?7 IS NULL OR recorded_at<?7 OR (recorded_at=?7 AND audit_id<?8))
+  ORDER BY recorded_at DESC, audit_id DESC LIMIT ?9`;
+
+  /** A deterministic pseudo-random sequence, so a failure reproduces. */
+  function random(seed: number): () => number {
+    let state = seed;
+    return () => {
+      state = (state * 1_103_515_245 + 12_345) % 2_147_483_648;
+      return state / 2_147_483_648;
+    };
+  }
+  const pick = <T>(next: () => number, values: readonly T[]): T =>
+    values[Math.floor(next() * values.length)]!;
+
+  test("answers exactly what the first text answered, on a random store with tied instants", async () => {
+    const db = migratedDatabase();
+    const store = sqliteCommandStore(db);
+    const next = random(64);
+    const days = ["2026-10-07", "2026-10-08", "2026-10-09", "2026-10-10"];
+    const writes = [];
+    for (let index = 0; index < 600; index++) {
+      // Few distinct instants, so many records share one and the cursor's
+      // tie on `audit_id` is exercised.
+      const at = `${pick(next, days)}T${pick(next, ["00:00:00.000", "06:30:15.250", "23:59:59.999"])}Z`;
+      const human = next() < 0.5;
+      const result = pick(next, ["read", "refused", "replayed"] as const);
+      writes.push(
+        auditInsertWrite(
+          buildAuditRecord(
+            {
+              ...ACTOR,
+              path: human ? "ui" : pick(next, ["agent-http", "mcp"] as const),
+              principalKind: human ? "human" : "agent",
+            },
+            {
+              operation: pick(next, ["financial.query", "command.plan", "ops.operation.get"]),
+              riskClass: "R0",
+              result,
+              ...(result === "refused" ? { resultCode: "subject_not_granted" } : {}),
+              diff:
+                result === "read" ? { kind: "read", rows: 1, truncated: false } : { kind: "none" },
+            },
+            at,
+          ),
+        ),
+      );
+    }
+    await store.batch(writes);
+    const ids = db.query("SELECT recorded_at,audit_id FROM audit_records").all() as {
+      recorded_at: string;
+      audit_id: string;
+    }[];
+    for (let query = 0; query < 400; query++) {
+      const from = next() < 0.4 ? pick(next, days) : null;
+      const to = next() < 0.4 ? pick(next, days) : null;
+      const cursor = next() < 0.6 ? pick(next, ids) : null;
+      const binds = [
+        next() < 0.3 ? pick(next, ["financial.query", "command.plan"]) : null,
+        next() < 0.3 ? pick(next, ["ui", "mcp"]) : null,
+        next() < 0.3 ? pick(next, ["human", "agent"]) : null,
+        next() < 0.3 ? pick(next, ["read", "refused"]) : null,
+        from === null ? null : `${from}T00:00:00.000Z`,
+        to === null ? null : new Date(Date.parse(`${to}T00:00:00.000Z`) + 86_400_000).toISOString(),
+        cursor?.recorded_at ?? null,
+        cursor?.audit_id ?? null,
+        pick(next, [1, 7, 51, 1000]),
+      ] as never[];
+      expect(db.query(AUDIT_PAGE_SQL).all(...binds)).toEqual(
+        db.query(FIRST_PAGE_SQL).all(...binds),
+      );
+    }
+    // Paged to the end, every filter set reads the same sequence as before.
+    for (const filters of [
+      {},
+      { result: "read" as const },
+      { from: "2026-10-08", to: "2026-10-09" },
+    ]) {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      do {
+        const page = await readAuditPage(store, filters, cursor, 7);
+        if (!page.ok) throw new Error("unreachable");
+        seen.push(...page.records.map((record) => record.auditId));
+        cursor = page.cursor;
+      } while (cursor !== null);
+      const all = (
+        db
+          .query(FIRST_PAGE_SQL)
+          .all(
+            null,
+            null,
+            null,
+            filters.result ?? null,
+            "from" in filters ? `${filters.from}T00:00:00.000Z` : null,
+            "to" in filters ? "2026-10-10T00:00:00.000Z" : null,
+            null,
+            null,
+            10_000,
+          ) as { audit_id: string }[]
+      ).map((row) => row.audit_id);
+      expect(seen).toEqual(all);
+    }
+  });
+
+  test("every bound is one range on the time index, without table statistics", () => {
+    const db = migratedDatabase();
+    expect(
+      db.query("SELECT count(*) AS n FROM sqlite_master WHERE name='sqlite_stat1'").get(),
+    ).toEqual({ n: 0 });
+    for (const operation of [null, "financial.query"])
+      for (const from of [null, "2026-10-01T00:00:00.000Z"])
+        for (const to of [null, "2026-10-02T00:00:00.000Z"])
+          for (const cursor of [null, "2026-10-01T12:00:00.000Z"]) {
+            const plan = (
+              db
+                .query(`EXPLAIN QUERY PLAN ${AUDIT_PAGE_SQL}`)
+                .all(
+                  operation,
+                  null,
+                  null,
+                  null,
+                  from,
+                  to,
+                  cursor,
+                  cursor === null ? null : `aud_${"0".repeat(8)}-0000-4000-8000-000000000000`,
+                  51,
+                ) as { detail: string }[]
+            )
+              .map((row) => row.detail)
+              .join("\n");
+            expect(plan).toContain("SEARCH audit_records USING INDEX audit_records_by_time");
+            expect(plan).not.toContain("SCAN");
+            expect(plan).not.toContain("TEMP B-TREE");
+          }
+  });
+});

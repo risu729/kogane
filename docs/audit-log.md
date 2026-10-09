@@ -142,13 +142,19 @@ route serves it (`audit.read` is a later slice).
 Indexes: by principal, by scope, by operation (each with `recorded_at`), by
 target, by correlation id, by time (`recorded_at`, `audit_id`), and the two
 unique partial indexes (one `applied`/`accepted` record per confirmed prepare
-and per principal, operation and caller key). The page reads the time index
-without a sort; the daily cap counts the principal's own records of the day
-through the principal index; the one-record-per-effect check reads the target
-index; the overflow lane reads only ended days through the counter table's
-key. `packages/application/test/audit.test.ts` asserts these plans without
-table statistics. Each operator write and each agent call adds one row;
-volume is bounded by the operations themselves and by the caps above.
+and per principal, operation and caller key). The page is one range on the
+time index — from its first day to the earlier of its cursor and the end of
+its last day — so a later page or an older day seeks to its place instead of
+walking the index from the newest record, and nothing is sorted; the other
+filters are checked on the rows that range reads. The daily cap counts the
+principal's own records of the day through the principal index; the
+one-record-per-effect check reads the target index; the overflow lane reads
+only ended days through the counter table's key.
+`packages/application/test/audit.test.ts` asserts these plans without table
+statistics, and that the page's range form answers exactly what the page's
+first text (every bound behind `IS NULL OR`) answered. Each operator write and
+each agent call adds one row; volume is bounded by the operations themselves
+and by the caps above.
 
 ## Not recorded, and other limits
 

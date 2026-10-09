@@ -260,12 +260,23 @@ export function auditPageFilters(input: Record<string, string>): AuditPageFilter
  * page; no total is computed. The cursor names the last record shown and
  * binds the filters it was issued under: a cursor presented with other
  * filters is `stale_context`, never a page of a different query.
+ *
+ * The day range and the cursor are one range on `audit_records_by_time`
+ * (`recorded_at` from the first day up to the earlier of the cursor and the
+ * end of the last day), so a later page or an older day seeks to its place in
+ * the index instead of walking it from the newest record. An absent bound is
+ * `''` or `'~'`, which sort before and after every canonical instant. The
+ * exclusive end of the last day and the cursor's tie on `audit_id` are
+ * residual checks (`+recorded_at` keeps them off the index), so the planner
+ * never has two upper bounds to choose between.
  */
 export const AUDIT_PAGE_SQL = `SELECT ${AUDIT_COLUMNS.join(",")} FROM audit_records
   WHERE (?1 IS NULL OR operation=?1) AND (?2 IS NULL OR path=?2)
     AND (?3 IS NULL OR principal_kind=?3) AND (?4 IS NULL OR result=?4)
-    AND (?5 IS NULL OR recorded_at>=?5) AND (?6 IS NULL OR recorded_at<?6)
-    AND (?7 IS NULL OR recorded_at<?7 OR (recorded_at=?7 AND audit_id<?8))
+    AND recorded_at>=coalesce(?5,'')
+    AND recorded_at<=min(coalesce(?6,'~'),coalesce(?7,'~'))
+    AND +recorded_at<coalesce(?6,'~')
+    AND (?7 IS NULL OR +recorded_at<?7 OR audit_id<?8)
   ORDER BY recorded_at DESC, audit_id DESC LIMIT ?9`;
 
 async function filtersDigest(filters: AuditPageFilters): Promise<string> {
