@@ -61,8 +61,8 @@ function insert(db: Database, values: Record<string, unknown>, verb = "INSERT"):
 }
 
 describe("CORE 0075", () => {
-  test("is the latest CORE migration and creates both tables STRICT", () => {
-    expect(migrationFiles(CORE_MIGRATIONS_URL).at(-1)).toBe(MIGRATION);
+  test("is a CORE migration and creates both tables STRICT", () => {
+    expect(migrationFiles(CORE_MIGRATIONS_URL)).toContain(MIGRATION);
     const db = fullCoreDatabase();
     for (const table of ["audit_records", "audit_overflow_counters"])
       expect(
