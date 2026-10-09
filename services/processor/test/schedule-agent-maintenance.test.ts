@@ -653,6 +653,59 @@ test("the daily write budget is per delegated principal and refuses before writi
   expect((await write(rule("sbi-shinsei"))).status).toBe(200);
 });
 
+test("the budget is counted again inside the INSERT: a spent budget that lands after the pre-check writes nothing", async () => {
+  // Thirty delegated revisions of this principal land between the writer's
+  // own count and its batch, as concurrent writers would: the count inside the
+  // INSERT refuses, and nothing of the batch is written.
+  const principal = "mcp-client:raced-budget-synthetic";
+  const reference = () =>
+    db.prepare("SELECT * FROM provider_maintenance_references WHERE source='sbi-shinsei'").first();
+  const before = await reference();
+  const racing = {
+    prepare: (sql: string) => db.prepare(sql),
+    batch: async (statements: D1PreparedStatement[]) => {
+      const at = new Date().toISOString();
+      await db.batch(
+        Array.from({ length: 30 }, (_, i) =>
+          db
+            .prepare(
+              'INSERT INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason) VALUES(?,1,\'sbi-shinsei\',\'UTC\',\'{"kind":"weekly","weekdays":[1],"start":"01:00","end":"02:00"}\',0,?,?,\'collection\',?,?,\'delegated\',\'correction\')',
+            )
+            .bind(`synthetic-raced-budget-${i}`, REFERENCE, at, principal, at),
+        ),
+      );
+      return db.batch(statements);
+    },
+  } as unknown as D1Database;
+  const count = await ruleCount();
+  const result = await writeMaintenanceRevision(
+    { ...processorEnv, DB: racing } as Env,
+    {
+      source: "sbi-shinsei",
+      ruleId: null,
+      expectedRevision: 0,
+      change: {
+        timezone: "Asia/Tokyo",
+        pattern: {
+          kind: "once",
+          from: iso(Date.now() + DAY),
+          to: iso(Date.now() + DAY + 3_600_000),
+        },
+        enabled: true,
+        scope: "collection",
+      },
+      provenance: { referenceUrl: `${REFERENCE}/raced`, verifiedAt: verified() },
+      actor: { kind: "delegated", id: principal },
+      reason: "official-notice-added",
+    },
+    NO_RECORD,
+  );
+  expect(result).toEqual({ ok: false, code: "maintenance_write_budget_exceeded", status: 429 });
+  // Only the thirty racing rows were added; the revision and its provenance were not.
+  expect(await ruleCount()).toBe(count + 30);
+  expect(await reference()).toEqual(before);
+});
+
 test("the budget count reads the rewritten partial index, without table statistics", () => {
   const sqlite = new Database(":memory:");
   const dir = new URL("../../../packages/storage-d1/migrations/core/", import.meta.url);
