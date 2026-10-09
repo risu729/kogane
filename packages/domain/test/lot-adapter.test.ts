@@ -463,6 +463,16 @@ describe("B10: a sale after a withdrawal is never filled with a short", () => {
       allocatedCost: null,
     });
     expect(after.status).toBe("indeterminate");
+    // A withdrawal the log does not place is held for that reason alone.
+    const unlogged = await run([
+      { eventId: "acq", revision: 2, state: "unknown", seq: null, legs: [], claims: [], times: [] },
+      sell("dis", "2030-01-08", "4", "480", { seq: 2 }),
+    ]);
+    expect(entryOf(unlogged, "acq", 2)).toMatchObject({
+      outcome: "held",
+      codes: ["knowledge_unlogged"],
+    });
+    expect(unlogged.status).toBe("indeterminate");
   });
 });
 

@@ -84,7 +84,8 @@ kind; every other revision is counted (`otherRevisions`) and not read.
   conversion moves no security quantity and is not read. A `trade` maps only
   in a state of `LOT_TRADE_STATES` (`executed`, `settled`; reserved names, no
   state family exists); in state `unknown` with no legs and no claims it is a
-  withdrawal (`no_movement`); any other state is `writer_unsupported`.
+  withdrawal (`no_movement`, or held for a selector disposition alone); any
+  other state is `writer_unsupported`.
 - **The security side.** Exactly one movement leg (a `movement` effect row, or
   a legacy increase or decrease) in an instrument unit; increase is an
   acquisition, decrease a disposal. A second movement or any non-movement leg

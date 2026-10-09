@@ -525,13 +525,9 @@ function mapRevision(revision: SelectedAdoptedRevision, context: Context): Mappe
     codes.add("writer_unsupported");
     return { entry: entry("held"), input: null };
   }
-  if (
-    revision.state === "unknown" &&
-    revision.legs.length === 0 &&
-    revision.claims.length === 0 &&
-    codes.size === 0
-  )
-    return { entry: entry("no_movement"), input: null };
+  if (revision.state === "unknown" && revision.legs.length === 0 && revision.claims.length === 0)
+    // A withdrawal moves nothing; a disposition on it still holds what it touches.
+    return { entry: entry(codes.size === 0 ? "no_movement" : "held"), input: null };
   if (!(LOT_TRADE_STATES as readonly string[]).includes(revision.state))
     codes.add("writer_unsupported");
   // A movement of a security quantity is held by a claim in its book.
