@@ -619,10 +619,10 @@ describe("plans on the complete CORE schema without statistics", () => {
     ["commit", COMMIT_AT_SQL, [EPOCH, 1]],
     ["seed", SEED_EVENTS_SQL, [JSON.stringify([BANK, `account:${BANK}`]), 10]],
     ["revisions", REVISIONS_SQL, [ids, 10]],
-    ["pointed", POINTED_BY_SQL, [JSON.stringify(["ev-1@1"])]],
+    ["pointed", POINTED_BY_SQL, [JSON.stringify(["ev-1@1"]), 10]],
     ["claims", CLAIMS_SQL, [ids, 10]],
-    ["key holders", KEY_HOLDERS_SQL, [JSON.stringify([["cash-movement", "[]"]])]],
-    ["alias holders", ALIAS_HOLDERS_SQL, [JSON.stringify([["cash-movement", "[]"]])]],
+    ["key holders", KEY_HOLDERS_SQL, [JSON.stringify([["cash-movement", "[]"]]), 10]],
+    ["alias holders", ALIAS_HOLDERS_SQL, [JSON.stringify([["cash-movement", "[]"]]), 10]],
     ["legs", LEGS_SQL, [ids, 10]],
     ["times", TIMES_SQL, [ids, 10]],
     ["effects", EFFECTS_SQL, [ids, 10]],
@@ -682,7 +682,7 @@ describe("plans on the complete CORE schema without statistics", () => {
 
   test("the key and alias holder reads use their indexes", () => {
     const db = fullCoreSchema();
-    const keys = explain(db, KEY_HOLDERS_SQL, [JSON.stringify([["cash-movement", "[]"]])]).map(
+    const keys = explain(db, KEY_HOLDERS_SQL, [JSON.stringify([["cash-movement", "[]"]]), 10]).map(
       (step) => step.detail,
     );
     for (const index of [
@@ -691,11 +691,12 @@ describe("plans on the complete CORE schema without statistics", () => {
       "card_settlement_candidates_bank",
     ])
       expect(keys.some((detail) => detail.includes(index))).toBe(true);
-    const alias = explain(db, ALIAS_HOLDERS_SQL, [JSON.stringify([["cash-movement", "[]"]])]).map(
-      (step) => step.detail,
-    );
+    const alias = explain(db, ALIAS_HOLDERS_SQL, [
+      JSON.stringify([["cash-movement", "[]"]]),
+      10,
+    ]).map((step) => step.detail);
     expect(alias.some((detail) => detail.includes("economic_claims_alias"))).toBe(true);
-    const pointed = explain(db, POINTED_BY_SQL, [JSON.stringify(["ev@1"])]).map(
+    const pointed = explain(db, POINTED_BY_SQL, [JSON.stringify(["ev@1"]), 10]).map(
       (step) => step.detail,
     );
     expect(

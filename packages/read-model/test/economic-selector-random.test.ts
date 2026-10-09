@@ -14,10 +14,13 @@
 //   1. the SQL half's loaded rows equal the oracle's own closure of the model
 //      (seed by both subject forms, supersession both ways, key and alias
 //      holders), row for row;
-//   2. at every cut, and at instants between and equal to commits, the
-//      selection equals the oracle's replay: commits applied in sequence,
-//      members becoming live and their `supersedes` dying, unlogged revisions
-//      unknown unless a visible commit superseded them;
+//   2. at every sequence cut, at an instant before the first commit, and at
+//      instants strictly between two commits' known_at (and after the last),
+//      the selection equals the oracle's replay: commits applied in sequence,
+//      members becoming live and their `supersedes` dying, a revision known at
+//      the cut whose pointer chain reaches a superseded one replaced, other
+//      unlogged revisions unknown; each commit's own known_at resolves to the
+//      last commit sharing it;
 //   3. W11 (ADR 0054): at the last commit, an active revision is the stored
 //      live one and its claims are its event's rows of live_consumption_claims.
 // Every id and amount is invented.
@@ -500,6 +503,7 @@ function shuffle<T>(list: readonly T[], next: () => number): T[] {
 describe("the knowledge selector against a replay oracle on random stores", () => {
   const drawn = {
     prelogChains: 0,
+    betweenInstants: 0,
     unlogged: 0,
     conflicts: 0,
     merges: 0,
@@ -628,6 +632,23 @@ describe("the knowledge selector against a replay oracle on random stores", () =
           )!,
         );
       }
+      // Instants strictly between two commits' known_at (and after the last):
+      // the selection equals the replay at the sequence the instant resolves to.
+      const log = model.commits.map((c) => ({ commitSeq: c.seq, knownAt: c.knownAt }));
+      const between = model.commits.map((commit, index) => {
+        const after = model.commits[index + 1]?.knownAt ?? "2026-12-31T00:00:00.000Z";
+        const mid = Math.floor((Date.parse(commit.knownAt) + Date.parse(after)) / 2);
+        return new Date(mid).toISOString();
+      });
+      for (const instant of between) {
+        if (model.commits.some((commit) => commit.knownAt === instant)) continue;
+        const resolved = await resolveSelectorCut(sql, meta, { coreEpoch: EPOCH, instant });
+        expect(resolved.cut.commitSeq).toBe(resolveInstantCut(log, instant)!);
+        const result = await selectAdopted(selectorInput(meta, resolved, SCOPE, rows));
+        if (!result.ok) throw new Error(result.error.code);
+        expect(observed(result.selection)).toEqual(replay(model, events, resolved.cut.commitSeq));
+        drawn.betweenInstants += 1;
+      }
     });
 
   test("the seeds draw every case", () => {
@@ -640,5 +661,6 @@ describe("the knowledge selector against a replay oracle on random stores", () =
     expect(drawn.inScopeCuts).toBeGreaterThan(0);
     expect(drawn.currentState).toBeGreaterThan(0);
     expect(drawn.prelogChains).toBeGreaterThan(0);
+    expect(drawn.betweenInstants).toBeGreaterThan(0);
   });
 });

@@ -96,9 +96,9 @@ export const SEED_EVENTS_SQL = `SELECT DISTINCT l.event_id FROM json_each(?1) s
 export const REVISIONS_SQL = `SELECT r.event_id,r.revision,r.kind,r.state,r.unknown_reason,r.created_at,r.superseded_by
  FROM json_each(?1) e CROSS JOIN economic_event_revisions r ON r.event_id=e.value LIMIT ?2`;
 
-/** ?1 JSON array of `eventId@revision`: the events whose revisions point at them. */
+/** ?1 JSON array of `eventId@revision`: the events whose revisions point at them; ?2 row limit. */
 export const POINTED_BY_SQL = `SELECT DISTINCT r.event_id FROM json_each(?1) p
- CROSS JOIN economic_event_revisions r ON r.superseded_by=p.value`;
+ CROSS JOIN economic_event_revisions r ON r.superseded_by=p.value LIMIT ?2`;
 
 /** ?1 JSON array of event ids, ?2 row limit: every claim of every revision, through the 0070 view. */
 export const CLAIMS_SQL = `SELECT event_id,revision,book,consumption_key,alias_class FROM economic_revision_claims
@@ -108,7 +108,7 @@ export const CLAIMS_SQL = `SELECT event_id,revision,book,consumption_key,alias_c
  * ?1 JSON array of `[book, key text]`: every event holding one of those keys
  * in any revision, from each holder source by its key index (SQLite does not
  * push a join term into the UNION view, so the view's three sources are
- * spelled out as the 0070 triggers spell them).
+ * spelled out as the 0070 triggers spell them). ?2 row limit.
  */
 export const KEY_HOLDERS_SQL = `WITH wanted AS MATERIALIZED (
  SELECT DISTINCT json_extract(value,'$[0]') AS book,json_extract(value,'$[1]') AS consumption_key FROM json_each(?1)
@@ -120,12 +120,13 @@ SELECT k.event_id FROM wanted w CROSS JOIN card_purchase_recognition_keys k ON k
 UNION
 SELECT d.event_id FROM wanted w CROSS JOIN card_settlement_candidates c ON c.bank_key=w.consumption_key
  CROSS JOIN card_settlement_decisions d ON d.proposal_id=c.id
- WHERE w.book='cash-movement' AND d.status='accepted' AND d.event_id IS NOT NULL`;
+ WHERE w.book='cash-movement' AND d.status='accepted' AND d.event_id IS NOT NULL
+LIMIT ?2`;
 
-/** ?1 JSON array of `[book, alias class text]`. Legacy holders carry no alias class. */
+/** ?1 JSON array of `[book, alias class text]`, ?2 row limit. Legacy holders carry no alias class. */
 export const ALIAS_HOLDERS_SQL = `SELECT DISTINCT x.event_id FROM json_each(?1) wanted_alias
  CROSS JOIN economic_claims x ON x.book=json_extract(wanted_alias.value,'$[0]')
- AND x.alias_class=json_extract(wanted_alias.value,'$[1]')`;
+ AND x.alias_class=json_extract(wanted_alias.value,'$[1]') LIMIT ?2`;
 
 /** ?1 JSON array of event ids, ?2 row limit. */
 export const LEGS_SQL = `SELECT l.event_id,l.revision,l.leg_index,l.subject_ref,l.unit_ref,l.value_status,l.coefficient,l.scale,
@@ -175,7 +176,7 @@ export const PINS_SQL = `SELECT p.value AS subject,
  END AS current_revision
  FROM json_each(?1) p`;
 
-export const ECONOMIC_SELECTOR_ERRORS = [
+const ECONOMIC_SELECTOR_ERRORS = [
   "selector_bound_exceeded",
   "cut_after_log_end",
   "cut_epoch_not_current",
@@ -367,7 +368,13 @@ export async function loadSelectorRows(
     }
     const refs = revisionRows.map((row) => `${row.event_id}@${row.revision}`);
     if (refs.length > 0)
-      for (const row of await sql.all<{ event_id: string }>(POINTED_BY_SQL, [JSON.stringify(refs)]))
+      for (const row of bounded(
+        await sql.all<{ event_id: string }>(POINTED_BY_SQL, [
+          JSON.stringify(refs),
+          limit("events"),
+        ]),
+        "events",
+      ))
         add(row.event_id);
     const claimRows = bounded(
       await sql.all<{
@@ -404,14 +411,22 @@ export async function loadSelectorRows(
       }
     }
     if (keys.length > 0)
-      for (const row of await sql.all<{ event_id: string }>(KEY_HOLDERS_SQL, [
-        JSON.stringify(keys),
-      ]))
+      for (const row of bounded(
+        await sql.all<{ event_id: string }>(KEY_HOLDERS_SQL, [
+          JSON.stringify(keys),
+          limit("events"),
+        ]),
+        "events",
+      ))
         add(row.event_id);
     if (aliases.length > 0)
-      for (const row of await sql.all<{ event_id: string }>(ALIAS_HOLDERS_SQL, [
-        JSON.stringify(aliases),
-      ]))
+      for (const row of bounded(
+        await sql.all<{ event_id: string }>(ALIAS_HOLDERS_SQL, [
+          JSON.stringify(aliases),
+          limit("events"),
+        ]),
+        "events",
+      ))
         add(row.event_id);
     for (const eventId of next) events.add(eventId);
     if (events.size > SELECTOR_BOUNDS.events)
