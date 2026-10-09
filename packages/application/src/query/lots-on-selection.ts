@@ -1,11 +1,13 @@
 // Lots of one holder and instrument scope at one knowledge cut (ADR 0059).
 // Read-only and computed per request; nothing is stored, adopted or written.
 //
-//   knowledge   the knowledge selector (ADR 0058) for the account and the
-//               instrument identifiers at the asked cut (default: the latest
+//   identity    the current mapping of each asked instrument identifier
+//               (`instrument_mappings` by its key, with its instrument), then
+//               every identifier currently mapped to those instruments, so a
+//               book is never computed from part of its instrument's history;
+//   knowledge   the knowledge selector (ADR 0058) for the account and all
+//               those identifiers at the asked cut (default: the latest
 //               commit of the current core epoch);
-//   identity    the current mapping of each instrument identifier
-//               (`instrument_mappings` by its key, with its instrument);
 //   lots        the C adapter and `computeLots` under the caller's explicit
 //               policy, with the outer manifest (`lotsOnSelection`).
 //
@@ -48,6 +50,13 @@ import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 export const LOTS_ON_SELECTION_QUERY_SCHEMA = "lots-on-selection-query-v1";
 /** The most instrument identifiers one query asks about. */
 export const LOTS_QUERY_MAX_INSTRUMENTS = 16;
+/**
+ * The most identifiers one query reads for its instruments (the asked ones and
+ * every other identifier currently mapped to the same instruments); the
+ * selector's instrument scope holds no more. Past it the query is refused
+ * (`instrument_identifier_bound_exceeded`), never cut.
+ */
+export const LOTS_QUERY_MAX_IDENTIFIERS = 64;
 
 /**
  * ?1 JSON array of instrument identifier ids: the current mapping of each
@@ -60,6 +69,26 @@ export const LOT_INSTRUMENT_MAPPINGS_SQL = `SELECT w.value AS identifier_id,m.re
   AND m.revision=(SELECT max(n.revision) FROM instrument_mappings n WHERE n.identifier_id=w.value)
  CROSS JOIN instruments i ON i.id=m.instrument_id
  ORDER BY w.value`;
+
+/**
+ * ?1 JSON array of instrument ids: every identifier whose current mapping (its
+ * highest revision) names one of them, so a book is computed from the whole
+ * identifier set of its instrument, not from the identifiers a caller named.
+ * No index orders `instrument_mappings` by instrument (CORE 0018 keys it by
+ * identifier and revision, and an index would be a migration), so this reads
+ * the mapping table once, as `ACCOUNT_SOURCES_SQL` reads the account
+ * mappings; each row's currency is checked by the `(identifier_id, revision)`
+ * key. The table holds one row per identifier revision, curated by identity
+ * runs and decisions, not one per observation. One row past the bound is read
+ * so that a larger set is refused.
+ */
+export const LOT_INSTRUMENT_IDENTIFIERS_SQL = `SELECT m.identifier_id,m.instrument_id FROM instrument_mappings m
+ WHERE m.instrument_id IN (SELECT value FROM json_each(?1))
+  AND m.revision=(SELECT max(n.revision) FROM instrument_mappings n WHERE n.identifier_id=m.identifier_id)
+ ORDER BY m.identifier_id LIMIT ${LOTS_QUERY_MAX_IDENTIFIERS + 1}`;
+
+/** Closed codes of `LotsOnSelectionRefusedError` raised by the query itself. */
+export const LOTS_ON_SELECTION_REFUSALS = ["instrument_identifier_bound_exceeded"] as const;
 
 export const LOTS_ON_SELECTION_INPUT_ERRORS = ["invalid_query", "cut_in_future"] as const;
 export type LotsOnSelectionInputErrorCode = (typeof LOTS_ON_SELECTION_INPUT_ERRORS)[number];
@@ -109,8 +138,14 @@ export type LotsOnSelectionQueryReason = "economic_guard_missing" | LotsOnSelect
 export interface LotsOnSelectionQueryManifest {
   schemaVersion: typeof LOTS_ON_SELECTION_QUERY_SCHEMA;
   account: string;
-  /** The asked instrument identifiers, sorted; the mappings read are in `lots.instruments`. */
+  /** The asked instrument identifiers, sorted. */
   instruments: string[];
+  /**
+   * The selector's instrument scope: the asked identifiers and every other
+   * identifier currently mapped to their instruments, sorted; the mappings
+   * read are in `lots.instruments`.
+   */
+  scopeIdentifiers: string[];
   lots: LotsOnSelectionManifest;
 }
 
@@ -192,18 +227,21 @@ function checkInput(input: LotsOnSelectionInput): void {
 async function readMappings(
   sql: SqlExecutor,
   identifiers: readonly string[],
-): Promise<LotInstrumentMapping[]> {
+): Promise<{ mappings: LotInstrumentMapping[]; instrumentIds: string[] }> {
   const rows = await sql.all<MappingRow>(LOT_INSTRUMENT_MAPPINGS_SQL, [
     JSON.stringify([...identifiers].sort()),
   ]);
   const statuses: readonly string[] = ["identified", "provider-local", "aggregate", "unresolved"];
-  return rows.map((row) => ({
-    unitRef: row.identifier_id,
-    mappingRevision: row.revision,
-    instrumentRef: `instrument:${row.instrument_id}`,
-    status: (statuses.includes(row.status) ? row.status : "unresolved") as LotInstrumentStatus,
-    instrumentClass: row.kind === "crypto" ? ("crypto-asset" as const) : null,
-  }));
+  return {
+    mappings: rows.map((row) => ({
+      unitRef: row.identifier_id,
+      mappingRevision: row.revision,
+      instrumentRef: `instrument:${row.instrument_id}`,
+      status: (statuses.includes(row.status) ? row.status : "unresolved") as LotInstrumentStatus,
+      instrumentClass: row.kind === "crypto" ? ("crypto-asset" as const) : null,
+    })),
+    instrumentIds: [...new Set(rows.map((row) => row.instrument_id))].sort(),
+  };
 }
 
 /**
@@ -244,9 +282,28 @@ export async function queryLotsOnSelection(
       ? { coreEpoch: meta.currentCoreEpoch, instant: new Date(Date.parse(input.now)).toISOString() }
       : { coreEpoch: meta.currentCoreEpoch, commitSeq: meta.log.lastSeq });
   const cut = await resolveSelectorCut(sql, meta, requested);
+  // A book is the instrument's: read every identifier currently mapped to the
+  // instruments the asked identifiers name, and select all of them.
+  const { instrumentIds } = await readMappings(sql, instruments);
+  const siblings =
+    instrumentIds.length === 0
+      ? []
+      : await sql.all<{ identifier_id: string }>(LOT_INSTRUMENT_IDENTIFIERS_SQL, [
+          JSON.stringify(instrumentIds),
+        ]);
+  const scopeIdentifiers = [
+    ...new Set([...instruments, ...siblings.map((row) => row.identifier_id)]),
+  ].sort();
+  if (
+    siblings.length > LOTS_QUERY_MAX_IDENTIFIERS ||
+    scopeIdentifiers.length > LOTS_QUERY_MAX_IDENTIFIERS
+  )
+    throw new LotsOnSelectionRefusedError("instrument_identifier_bound_exceeded", [
+      `identifiers:>${LOTS_QUERY_MAX_IDENTIFIERS}`,
+    ]);
   const scope: SelectionScope = {
     accounts: [input.account],
-    instruments,
+    instruments: scopeIdentifiers,
     kinds: null,
     legEffects: null,
     basis: null,
@@ -256,7 +313,7 @@ export async function queryLotsOnSelection(
   const selected = await selectAdopted(selectorInput(meta, cut, scope, rows));
   if (!selected.ok) throw new LotsOnSelectionRefusedError(selected.error.code, selected.error.refs);
   const selection = selected.selection;
-  const mappings = await readMappings(sql, instruments);
+  const { mappings } = await readMappings(sql, scopeIdentifiers);
   const answered = await lotsOnSelection(selection, {
     holders: [{ accountId: input.account, wrapperKey: input.wrapperKey }],
     instruments: mappings,
@@ -269,6 +326,7 @@ export async function queryLotsOnSelection(
     schemaVersion: LOTS_ON_SELECTION_QUERY_SCHEMA,
     account: input.account,
     instruments,
+    scopeIdentifiers,
     lots: result.manifest,
   };
   return {

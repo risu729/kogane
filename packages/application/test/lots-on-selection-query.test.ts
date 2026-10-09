@@ -19,7 +19,10 @@ import {
 } from "../../read-model/test/economic-history-fixture.ts";
 import { EconomicSelectorError } from "../../read-model/src/economic-selector.ts";
 import {
+  LOT_INSTRUMENT_IDENTIFIERS_SQL,
   LOT_INSTRUMENT_MAPPINGS_SQL,
+  LOTS_QUERY_MAX_IDENTIFIERS,
+  LotsOnSelectionRefusedError,
   LotsOnSelectionInputError,
   queryLotsOnSelection,
   type LotsOnSelectionInput,
@@ -81,7 +84,7 @@ const input = (fields: Partial<LotsOnSelectionInput> = {}): LotsOnSelectionInput
 });
 
 /** A logged event moving share units on the securities account; no writer claims a security quantity. */
-function moveShares(h: EconomicHistory, eventId: string, knownAt: string) {
+function moveShares(h: EconomicHistory, eventId: string, knownAt: string, unit = SHARE) {
   h.adopt({
     eventId,
     revision: 1,
@@ -90,7 +93,7 @@ function moveShares(h: EconomicHistory, eventId: string, knownAt: string) {
     legs: [
       {
         subject: `account:${SEC}`,
-        unit: SHARE,
+        unit,
         amount: "10",
         role: "increase",
         basis: "trade-date",
@@ -105,7 +108,7 @@ function moveShares(h: EconomicHistory, eventId: string, knownAt: string) {
       },
     ],
     times: [["trade", day("2026-03-02")]],
-    pins: { [`instrument_mapping:${SHARE}`]: 1 },
+    pins: { [`instrument_mapping:${unit}`]: 1 },
     knownAt,
   });
 }
@@ -341,5 +344,100 @@ describe("the mapping read", () => {
     expect(
       steps.some((step) => /^SEARCH i USING INDEX sqlite_autoindex_instruments/u.test(step.detail)),
     ).toBe(true);
+  });
+
+  test("reads the mapping table once for an instrument's identifiers; currency by the unique key", () => {
+    const db = fullCoreSchema();
+    const steps = explain(db, LOT_INSTRUMENT_IDENTIFIERS_SQL, [JSON.stringify(["inst-share"])]);
+    const scans = steps
+      .filter((step) => step.detail.startsWith("SCAN ") && !step.detail.includes("VIRTUAL TABLE"))
+      .map((step) => step.detail);
+    // No index orders instrument_mappings by instrument: one pass over it, nothing else whole.
+    expect(scans).toHaveLength(1);
+    expect(scans[0]).toMatch(/^SCAN m( USING (COVERING )?INDEX \w+)?$/u);
+    expect(steps.some((step) => /^SEARCH n USING (COVERING )?INDEX/u.test(step.detail))).toBe(true);
+  });
+});
+
+describe("a book is the instrument's, whatever identifiers are asked", () => {
+  /** A second identifier of the share, and one that maps to it no longer. */
+  function twins(h: EconomicHistory) {
+    h.db.run(
+      "INSERT INTO instrument_identifiers VALUES('ii-share-2','synthetic','test','S2','{}')",
+    );
+    h.db.run(
+      "INSERT INTO instrument_mappings VALUES('im-share-2','ii-share-2',1,'inst-share','manual','synthetic',1,'2026-01-01','Synthetic','identified')",
+    );
+    h.db.run(
+      "INSERT INTO instrument_identifiers VALUES('ii-share-old','synthetic','test','S0','{}')",
+    );
+    h.db.run(
+      "INSERT INTO instrument_mappings VALUES('im-share-old-1','ii-share-old',1,'inst-share','manual','synthetic',1,'2026-01-01','Synthetic','identified')",
+    );
+    h.db.run(
+      "INSERT INTO instrument_mappings VALUES('im-share-old-2','ii-share-old',2,'inst-coin','manual','synthetic',1,'2026-01-02','Synthetic','identified')",
+    );
+  }
+
+  test("asking for one identifier selects every identifier currently mapped to its instrument", async () => {
+    const h = world();
+    twins(h);
+    moveShares(h, "ev-1", "2026-04-01T00:00:00.000Z");
+    moveShares(h, "ev-2", "2026-04-02T00:00:00.000Z", "ii-share-2");
+    const result = await queryLotsOnSelection(storeExecutor(h.db), input({ instruments: [SHARE] }));
+    expect(result.manifest!.instruments).toEqual([SHARE]);
+    expect(result.manifest!.scopeIdentifiers).toEqual(["ii-share", "ii-share-2"]);
+    expect(result.manifest!.lots.instruments.map((mapping) => mapping.unitRef)).toEqual([
+      "ii-share",
+      "ii-share-2",
+    ]);
+    expect(result.knowledge!.revisions).toBe(2);
+    expect(result.adaptation!.entries.map((entry) => [entry.ref, entry.books])).toEqual([
+      [
+        "event:ev-1@1",
+        [
+          {
+            holderRef: `account:${SEC}`,
+            instrumentRef: "instrument:inst-share",
+            wrapperKey: "wrapper:test:general",
+          },
+        ],
+      ],
+      [
+        "event:ev-2@1",
+        [
+          {
+            holderRef: `account:${SEC}`,
+            instrumentRef: "instrument:inst-share",
+            wrapperKey: "wrapper:test:general",
+          },
+        ],
+      ],
+    ]);
+    expect(result.adaptation!.books).toHaveLength(1);
+    // Asking for the other identifier gives the same book and the same scope.
+    const other = await queryLotsOnSelection(
+      storeExecutor(h.db),
+      input({ instruments: ["ii-share-2"] }),
+    );
+    expect(other.manifest!.scopeIdentifiers).toEqual(result.manifest!.scopeIdentifiers);
+    expect(other.adaptation).toEqual(result.adaptation);
+  });
+
+  test("more identifiers than the bound is refused, never cut", async () => {
+    const h = world();
+    for (let index = 0; index < LOTS_QUERY_MAX_IDENTIFIERS; index += 1) {
+      const id = `ii-share-x${index}`;
+      h.db.run("INSERT INTO instrument_identifiers VALUES(?,'synthetic','test',?,'{}')", [id, id]);
+      h.db.run(
+        "INSERT INTO instrument_mappings VALUES(?,?,1,'inst-share','manual','synthetic',1,'2026-01-01','Synthetic','identified')",
+        [`im-${id}`, id],
+      );
+    }
+    const refused = queryLotsOnSelection(storeExecutor(h.db), input({ instruments: [SHARE] }));
+    await expect(refused).rejects.toBeInstanceOf(LotsOnSelectionRefusedError);
+    await expect(
+      queryLotsOnSelection(storeExecutor(h.db), input({ instruments: [SHARE] })),
+    ).rejects.toThrow("instrument_identifier_bound_exceeded");
   });
 });
