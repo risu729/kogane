@@ -65,5 +65,6 @@ for current behavior.
 - [ADR 0056: Price and FX selection at an as-of under an explicit, versioned policy](0056-as-of-price-fx-selection.md) — accepted; policy values are open questions
 - [ADR 0058: A knowledge selector reads adopted events at a commit-log cut, and a B adapter feeds the reconstruction fold](0058-knowledge-selector-and-reconstruction-adapter.md) — accepted; no route or page reads it yet
 - [ADR 0059: A C adapter maps selected revisions to lot inputs, and answers unsupported until a securities writer exists](0059-lot-adapter-from-selected-revisions.md) — accepted; no securities writer, no route
+- [ADR 0060: Resume verification of an exact published Container](0060-container-publication-checkpoint.md) — accepted (merged in #602)
 - [ADR 0063: The AI is a delegated operation path: a verified MCP principal the owner names may apply operations within capability, scope, confirmation and audit](0063-delegated-ai-operation-path.md) — proposed; nothing implemented, no delegation exists
 - [ADR 0064: One append-only audit record per operation, for the human UI and the AI alike, referencing the existing logs](0064-common-audit-log.md) — proposed; no table yet, migration number not fixed
