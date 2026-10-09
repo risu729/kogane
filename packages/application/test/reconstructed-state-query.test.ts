@@ -272,6 +272,9 @@ describe("refusals", () => {
     expect(
       await refused({ cut: { coreEpoch: "core-epoch-1", instant: "2026-05-01T00:00:00.000Z" } }),
     ).toBe("cut_in_future");
+    expect(await refused({ cut: { coreEpoch: "core-epoch-1", instant: "2026-04-01" } })).toBe(
+      "invalid_query",
+    );
   });
 
   test("a cut past the log or of another epoch is refused by the selector", async () => {

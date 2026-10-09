@@ -227,7 +227,8 @@ function checkInput(input: ReconstructedStateInput): void {
     to === null ||
     input.from >= input.to ||
     today === null ||
-    !(input.cut === null || validKnowledgeCut(input.cut))
+    !(input.cut === null || validKnowledgeCut(input.cut)) ||
+    (input.cut !== null && "instant" in input.cut && !validInstantText(input.cut.instant))
   )
     throw new ReconstructedStateInputError("invalid_query");
   if (daysFromCivil(to) - daysFromCivil(from) > RECONSTRUCTION_RANGE_MAX_DAYS)
@@ -237,7 +238,7 @@ function checkInput(input: ReconstructedStateInput): void {
   if (
     input.cut !== null &&
     "instant" in input.cut &&
-    (!validInstantText(input.cut.instant) || Date.parse(input.cut.instant) > Date.parse(input.now))
+    Date.parse(input.cut.instant) > Date.parse(input.now)
   )
     throw new ReconstructedStateInputError("cut_in_future");
 }
