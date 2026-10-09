@@ -94,13 +94,16 @@ shapes ([ci](docs/ci.md); examples in
 [plans](docs/plans/), [observations](docs/observations.md),
 [economic events](docs/economic-events.md).
 
-## Cursor Cloud specific instructions
+## Cloud agent setup and preview
 
-Login shells have the pinned mise tools on `PATH` (`mise`, `bun`, `node`,
-`hk`, and the other CLIs in the root `mise.toml`). Dependency install is
-`mise trust -a -y`, `mise install`, then `mise run install`. Playwright
-Chromium is already in the user cache. `//apps/web:browser` downloads a
-browser only when `CI=true` and `CHROMIUM_PATH` is unset.
+Use the repository's pinned mise tools, not system copies of Bun or Node.
+From the repository root, run `mise trust`, `mise install`, then
+`mise run install` ([CI setup](docs/ci.md#local-commands)). Use
+`mise exec -- <command>` when the shell has not activated mise.
+For browser tests, verify that Playwright's Chromium is cached or set
+`CHROMIUM_PATH` to an installed executable; do not assume a fresh agent has
+a browser. `//apps/web:browser` installs Chromium only when `CI=true` and
+`CHROMIUM_PATH` is unset.
 
 The local UI check is the synthetic preview:
 
@@ -108,12 +111,16 @@ The local UI check is the synthetic preview:
 mise run //experiments/observation-pipeline-local:preview
 ```
 
-It listens on `127.0.0.1:8787`. `/api/meta` reports `classification:
-synthetic`, and the client shows 表示対象の記録がありません on the financial
-routes. That empty state is the current client. The API still serves the
-ingested fixtures. 収集スケジュール stays available on `/schedules`.
+It listens on `127.0.0.1:8787`, uses a new temporary store containing only
+committed synthetic fixtures, and never opens the regular `state/` store
+([safe preview](docs/frontend.md#safe-preview)). `/api/meta` reports
+`source.classification: synthetic`. The client shows
+表示対象の記録がありません on financial routes even though the API serves
+the fixtures. The `/schedules` page still renders, but the local preview
+does not provide its operations API; it is not a working schedule editor.
 
 Container image identity checks (`cf-container-release.mjs validate` and the
-container collectors' `cf-build` tasks) require a Docker daemon. This
-environment leaves those checks to hosted CI
+container collectors' `cf-build` tasks) require a Docker daemon. When the
+agent environment has no daemon, report those checks as unverified locally
+and require the exact PR head's hosted CI results before merge
 ([ADR 0043](docs/adr/0043-cf-container-deployment.md)).
