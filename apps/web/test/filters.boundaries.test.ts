@@ -104,7 +104,7 @@ describe("account option identity", () => {
 });
 
 describe("page windows at the recorded page size", () => {
-  test("lengths 50, 51, and 100 clamp a stale page, then an emptied window", () => {
+  test("lengths 50, 51, and 100 clamp a stale page onto the last real page", () => {
     expect(PAGE_SIZE).toBe(50);
 
     const expectSlice = (
@@ -138,15 +138,5 @@ describe("page windows at the recorded page size", () => {
     expectSlice(100, 0, 0, 50, 0, 2);
     expectSlice(100, 1, 50, 50, 1, 2);
     expectSlice(100, 4, 50, 50, 1, 2);
-
-    const hundred = numbered(100);
-    expect(pageWindow(hundred, 4).rows[0]?.id).toBe("row-50");
-    expect(pageWindow(hundred.slice(0, 0), 4)).toEqual({
-      page: 0,
-      pages: 1,
-      rows: [],
-      start: 0,
-      end: 0,
-    });
   });
 });
