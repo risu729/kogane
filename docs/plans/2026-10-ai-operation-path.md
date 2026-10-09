@@ -469,7 +469,8 @@ its bounds, and changes in four ways:
    `official-notice-changed`, `official-notice-withdrawn`, `outage-observed`,
    `owner-instructed`, `correction`, `operator-edit` (the UI path) and the
    existing `maintenance-survey-proposal-accepted` — enforced by 0067's CHECK.
-   `decision_ref` of a delegated revision is `audit:<audit_id>`.
+   `decision_ref` of a delegated revision names its audit record; S4 settled
+   the shape as `delegated-audit:<audit_id>` (the S4 status in section 8).
 3. **Direct inside the envelope; beyond it, the operator for now.** Direct
    (R1) when all hold: the source is in `scopes.scheduleSources`; the rule is
    the named source's or new; after the revision the source has no joined
