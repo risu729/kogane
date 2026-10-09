@@ -14,6 +14,7 @@ import { validInstrumentCandidateReview } from "../../../packages/observation-sh
 import { identifyParse } from "../../processor/src/identity-store";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
+import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
 const PATH = "/api/identity/instrument-candidates";
 const AGENT_PATH = "/api/agent/v1/instruments.candidates";
@@ -22,6 +23,8 @@ const FULL_GRANT = {
   capabilities: ["summary.read", "records.read"],
   budget: { maxRows: 500, maxProposalTargets: 5, maxExplainDepth: 3 },
 };
+/** The MCP Access application's audience (ADR 0047); `/mcp` accepts nothing else. */
+const MCP_AUDIENCE = "fixture-mcp-audience";
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;
 let jwks: { keys: unknown[] };
@@ -107,23 +110,35 @@ async function call(path: string, options: CallOptions = {}) {
       : await new SignJWT({ type: "app" })
           .setProtectedHeader({ alg: "RS256", kid: "fixture" })
           .setIssuer(issuer)
-          .setAudience("fixture-audience")
+          .setAudience(path === "/mcp" ? MCP_AUDIENCE : "fixture-audience")
           .setSubject(subject)
           .setIssuedAt()
           .setExpirationTime("5m")
           .sign(keys.privateKey);
   const init: RequestInit = {
     method: options.method ?? (options.body === undefined ? "GET" : "POST"),
-    headers: token ? { "cf-access-jwt-assertion": token } : {},
+    headers: {
+      ...(token ? { "cf-access-jwt-assertion": token } : {}),
+      // What an MCP client sends on every POST (Streamable HTTP).
+      ...(path === "/mcp" ? MCP_CLIENT_HEADERS : {}),
+    },
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
   return worker.fetch(new Request(`https://fixture.test${path}`, init), {
     ...env,
     ACCESS_ISSUER: issuer,
     ACCESS_AUDIENCE: "fixture-audience",
+    ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
     OPERATOR_SUBJECTS: '["synthetic-operator"]',
     AGENT_GRANTS: '["synthetic-agent"]',
-    AGENT_API_GRANTS: JSON.stringify(options.grants ?? { "synthetic-agent": FULL_GRANT }),
+    // Through `/mcp` the same subject is the agent-only `mcp-client:<sub>`
+    // (ADR 0047), so it has a grant under that name too.
+    AGENT_API_GRANTS: JSON.stringify(
+      options.grants ?? {
+        "synthetic-agent": FULL_GRANT,
+        "mcp-client:synthetic-agent": FULL_GRANT,
+      },
+    ),
   } as Env);
 }
 
@@ -285,6 +300,57 @@ describe("kogane.instruments.candidates", () => {
     });
     expect(unknownKey.status).toBe(400);
     expect(await unknownKey.json()).toMatchObject({ code: "unsupported_semantics" });
+    expect(await tables()).toEqual(before);
+  });
+
+  it("is graded over /mcp by the agent-only mcp-client entry, never the bare subject's (ADR 0047)", async () => {
+    const before = await tables();
+    const candidates = (grants: Record<string, unknown>) =>
+      mcp(
+        {
+          method: "tools/call",
+          params: { name: "kogane.instruments.candidates", arguments: {} },
+        },
+        { grants },
+      );
+    // The tool list is per deployment: listed under a summary-only grant too,
+    // and refused when called, with the closed reason.
+    const summaryOnly = {
+      "mcp-client:synthetic-agent": { ...FULL_GRANT, capabilities: ["summary.read"] },
+    };
+    const listed = await mcp({ method: "tools/list" }, { grants: summaryOnly });
+    expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).toContain(
+      "kogane.instruments.candidates",
+    );
+    const summary = await candidates(summaryOnly);
+    expect(summary["result"].isError).toBe(true);
+    expect(summary["result"].structuredContent).toMatchObject({
+      code: "unauthorized",
+      refs: ["capability:records.read"],
+    });
+    const narrowed = await candidates({
+      "mcp-client:synthetic-agent": {
+        ...FULL_GRANT,
+        scopes: { sources: ["sbi-securities"], accounts: "*" },
+      },
+    });
+    expect(narrowed["result"].structuredContent).toMatchObject({
+      code: "evidence_restricted",
+      refs: ["scope:source"],
+    });
+    // A whole-store grant under the bare subject does not reach an MCP client.
+    const response = await call("/mcp", {
+      subject: "synthetic-agent",
+      grants: { "synthetic-agent": FULL_GRANT },
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "kogane.instruments.candidates", arguments: {} },
+      },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
     expect(await tables()).toEqual(before);
   });
 });

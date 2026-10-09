@@ -692,6 +692,7 @@ describe("a token minted for MCP reaches no other route, and /mcp takes no other
       ["GET", "/api/overview", undefined],
       ["GET", "/api/meta", undefined],
       ["GET", "/api/identity/accounts?offset=0", undefined],
+      ["GET", "/api/identity/instrument-candidates", undefined],
       ["GET", "/api/v2/query?intent=coverage", undefined],
       ["GET", `/api/evidence/v1/runs/r_1/artifacts/a_${String(artifactId)}/raw`, undefined],
       ["POST", "/api/agent/v1/capabilities", {}],
@@ -1202,6 +1203,8 @@ describe("scope covers every byte of every answer (matrix 5, 6)", () => {
       ["kogane.explain", { ref: inScopeRef }],
       ["kogane.explain", { ref: "observation:transaction:999999" }],
       ["kogane.purchases.explain", {}],
+      ["kogane.instruments.candidates", {}],
+      ["kogane.instruments.candidates", { view: "separated" }],
     ];
     for (const [name, args] of calls) {
       const outcome = await callTool(name, args, { environment });
