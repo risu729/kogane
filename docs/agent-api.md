@@ -7,8 +7,8 @@ the MCP adapter and the Overview page are adapters over it.
 
 This implements A08 and review findings AR13, AR14 and D14 (agent side).
 It is the MVP gate of `architecture-addendum/10_agent_api_and_permissions.md`
-§10: summary, query, explain and propose — plus, under their own capabilities,
-reading and revising public maintenance windows
+§10: summary, query, explain and propose — plus, under its own capability,
+reading public maintenance windows
 ([ADR 0046](adr/0046-agent-maintenance-windows.md), [below](#maintenance-windows))
 — and nothing else. There is no acceptance, no simulation, no commit, no
 calculation job, no collection request, no export, and no external money action
@@ -29,8 +29,9 @@ transport gate. How a real MCP client connects — Cloudflare Access Managed
 OAuth on a dedicated MCP application, bound to an agent-only principal — and
 the owner's steps to get there are in
 [Connecting an MCP client](#connecting-an-mcp-client); none of them has been
-taken. Maintenance windows have two MCP tools under their own
-capabilities ([below](#maintenance-windows)); job settings and lease release
+taken. Maintenance windows can be read under their own capability; revising
+one is an operation the owner may delegate (ADR 0063), which no delegation can
+execute yet ([below](#maintenance-windows)). Job settings and lease release
 stay operator-only ([schedules](schedules.md#settings-api)).
 
 ## Why the application service exists
@@ -61,14 +62,13 @@ here parses the token a second time and nothing reads an actor from a request
 body or header, which is the same rule the change lifecycle follows. A valid
 token with no grant is still refused.
 
-| Capability                     | Allows                                                                                                                            | Notes                                                   |
-| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `summary.read`                 | `coverage`, `holdings`, and the shell of `explain`                                                                                | The first capability an agent should get                |
-| `records.read`                 | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
-| `evidence.read`                | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                       | A separate grant; raw bytes are still a different route |
-| `interpretation.propose`       | `reconcile.propose`                                                                                                               | Proposals only; never adoption                          |
-| `schedules.read`               | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                         | Not a financial read; implied by no other capability    |
-| `schedules.maintenance.update` | `schedules.maintenance.update` for `scopes.scheduleSources`                                                                       | One maintenance revision; never a job edit or lease     |
+| Capability               | Allows                                                                                                                            | Notes                                                   |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                | The first capability an agent should get                |
+| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                       | A separate grant; raw bytes are still a different route |
+| `interpretation.propose` | `reconcile.propose`                                                                                                               | Proposals only; never adoption                          |
+| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                         | Not a financial read; implied by no other capability    |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
 exist in this vocabulary: `interpretation.accept`, `calculation.run`,
@@ -178,18 +178,18 @@ Six tools, plus a seventh while the deployment serves card purchase
 recognition and an eighth while it serves the reconstructed state, one
 implementation each (`src/agent-service.ts`), reachable two ways.
 
-| Tool                                  | HTTP                                          | MCP `tools/call`                      | Requires                                                                                                                      |
-| ------------------------------------- | --------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `kogane.capabilities`                 | `POST /api/agent/v1/capabilities`             | `kogane.capabilities`                 | any grant                                                                                                                     |
-| `kogane.context.open`                 | `POST /api/agent/v1/context.open`             | `kogane.context.open`                 | any grant                                                                                                                     |
-| `kogane.financial.query`              | `POST /api/agent/v1/financial.query`          | `kogane.financial.query`              | per intent (table below)                                                                                                      |
-| `kogane.explain`                      | `POST /api/agent/v1/explain`                  | `kogane.explain`                      | `summary.read`                                                                                                                |
-| `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`        | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                      |
-| `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`   | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                |
-| `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`        | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation)) |
-| `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read` | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))      |
-| `kogane.schedules.maintenance.read`   | none (MCP only)                               | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                             |
-| `kogane.schedules.maintenance.update` | none (MCP only)                               | `kogane.schedules.maintenance.update` | `schedules.maintenance.update`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                               |
+| Tool                                  | HTTP                                            | MCP `tools/call`                      | Requires                                                                                                                                                       |
+| ------------------------------------- | ----------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.capabilities`                 | `POST /api/agent/v1/capabilities`               | `kogane.capabilities`                 | any grant                                                                                                                                                      |
+| `kogane.context.open`                 | `POST /api/agent/v1/context.open`               | `kogane.context.open`                 | any grant                                                                                                                                                      |
+| `kogane.financial.query`              | `POST /api/agent/v1/financial.query`            | `kogane.financial.query`              | per intent (table below)                                                                                                                                       |
+| `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                                                 |
+| `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                                       |
+| `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                 |
+| `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                                  |
+| `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                                       |
+| `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                              |
+| `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | a delegation (`MCP_DELEGATIONS`) holding `schedules.maintenance.update`; no delegation executes yet, so it is listed to nobody ([below](#maintenance-windows)) |
 
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
@@ -474,27 +474,72 @@ side, 1,000 coverage rows) and the reported state's 5,000 rows a read.
 
 ### Maintenance windows
 
-[ADR 0046](adr/0046-agent-maintenance-windows.md). With `SCHEDULES_ENABLED`
-on, each of the two maintenance tools is appended to `tools/list` for a grant
-holding its capability, after every other tool; otherwise its name is
-`unknown_tool`. A grant names the sources it reaches in a separate
+[ADR 0046](adr/0046-agent-maintenance-windows.md), as amended by
+[ADR 0063](adr/0063-delegated-ai-operation-path.md) (item 8) in slice S4 of
+the [AI operation path plan](plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
+Both tools exist while `SCHEDULES_ENABLED` is on; otherwise their names are
+`unknown_tool`. Each call is recorded once through the common chokepoint
+([audit log](audit-log.md)).
+
+**Reading** (`kogane.schedules.maintenance.read`, operation
+`schedules.maintenance.read`, R0). Graded by this API's grant:
+`schedules.read`, with the sources it reaches in a separate
 `scopes.scheduleSources` (source ids of `config/alarm-jobs.json`; absent means
 none), so financial scope and maintenance scope never stand in for each other:
 
 ```jsonc
 {
-  "maintenance-client": {
+  "mcp-client:owner-subject-0001": {
     "scopes": { "sources": [], "accounts": [], "scheduleSources": ["sony-bank"] },
-    "capabilities": ["schedules.read", "schedules.maintenance.update"],
+    "capabilities": ["schedules.read"],
     "budget": { "maxRows": 1, "maxProposalTargets": 1, "maxExplainDepth": 1 },
   },
 }
 ```
 
-The tools relay to the Processor's settings service as the verified principal;
-what they validate, refuse and read back is in
+It is listed on `/mcp` to a grant holding `schedules.read`, after the other
+tools, and served on `POST /api/agent/v1/schedules.maintenance.read` as well:
+one function answers both, so the two return the same object, each recorded as
+a `read` on its own path. Without the capability it is `403 unauthorized`; a
+source outside `scheduleSources`, existing or not, is
+`403 source_not_granted`. What it reads back is in
 [schedules](schedules.md#agent-maintenance-tools). `kogane.capabilities`
-reports `scopes.scheduleSources` and `writes.maintenanceRules`.
+reports `scopes.scheduleSources`.
+
+**Revising** (`kogane.schedules.maintenance.update`, operation
+`schedules.maintenance.update`). Not an agent-API capability: a grant table
+naming `schedules.maintenance.update` is refused whole, so `/mcp` answers
+`403 agent_api_not_configured`. It is an operation the owner may delegate to
+their own MCP identity in `MCP_DELEGATIONS` (ADR 0063; the `maintainer` role
+holds it), with the source in the delegation's `scopes.scheduleSources`, which
+must lie inside the read grant's. It has no `/api/agent/v1` route: a browser
+session yields no delegation. On `/mcp` it is listed to nobody, and every call
+is refused, in this order, with nothing relayed to the Processor and nothing
+written but the refusal record:
+
+1. the caller's delegation, as #628's resolver answers it:
+   `403 delegation_not_configured`, `503 delegation_misconfigured`,
+   `403 delegation_not_yet_valid` or `403 delegation_expired`;
+2. the delegated capability: `403 delegation_capability_denied`;
+3. the arguments, a closed schema whose `reason` is one of
+   `official-notice-added`, `official-notice-changed`,
+   `official-notice-withdrawn`, `outage-observed`, `owner-instructed`,
+   `correction` (never free text): `400 invalid_request`;
+4. the delegation's schedule scope, existing source or not:
+   `403 source_not_granted`;
+5. whether delegated execution is connected:
+   `403 delegation_execution_unavailable`, always today.
+   `delegationExecutionReadiness` answers `available: false` for every
+   capability until slice S3 connects the delegated audit record, the
+   operation path and the Processor's delegation guards.
+
+When S3 connects it, the call reaches the Processor's single writer, which
+holds the direct envelope: R1 within the seven-day joined-deferral bound and
+30 revisions per principal per rolling day; beyond the bound it refuses
+(`maintenance_deferral_too_long`, R3 until the owner answers the plan's
+question 1), and the operator makes such a revision in the UI
+([schedules](schedules.md#agent-maintenance-tools)). No prepare/confirm step
+exists (S3), so no revision of a class that needs one can be offered.
 
 ## Contexts, cursors and hand-off
 

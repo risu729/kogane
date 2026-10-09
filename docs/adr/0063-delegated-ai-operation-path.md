@@ -1,8 +1,10 @@
 # ADR 0063: The AI is a delegated operation path: a verified MCP principal the owner names may apply operations within capability, scope, confirmation and audit
 
-- Status: proposed (accepted when its pull request merges). Nothing it decides
-  is implemented; the slices are in the
-  [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
+- Status: proposed (accepted when its pull request merges). No delegated
+  operation executes: of the slices in the
+  [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order),
+  the inert declaration core of S3 (#628) and the maintenance re-shape of S4
+  (#564, whose tool refuses every call until S3 connects execution) exist.
 - Date: 2026-10-09
 - Amends: [ADR 0013](0013-agent-card-purchase-read.md) (the read-only
   premise), [ADR 0039](0039-alarm-schedule-management.md) ("agents and service
@@ -225,7 +227,8 @@ Provider contact cannot be rolled back, which is why it is R2.
 write capability moves to `MCP_DELEGATIONS`; the actor kinds become `operator`
 and `delegated`; the free-text reason becomes a closed code
 (`MAINTENANCE_CHANGE_REASONS`, enforced by #564's own unmerged CORE 0067
-CHECK, following #575's closed-reason pattern); a revision is R1 inside the
+CHECK — renumbered CORE 0076 when S4 re-shaped #564 — following #575's
+closed-reason pattern); a revision is R1 inside the
 direct envelope (granted source, rule of that source or new, no new joined
 deferral over 7 days, budget unspent, closed reason, registered https host,
 expected revision). Beyond the 7-day bound the target is R2 up to a hard
@@ -322,7 +325,8 @@ an audit record; R4 is never delegated. A delegated decision is recorded with
   `MCP_DELEGATIONS` entry, session length, authentication or production
   change.
 - The ADRs of #564 and #565 are amended by reference here; those PRs should
-  add a line pointing to this ADR when they next change.
+  add a line pointing to this ADR when they next change. ADR 0046 (#564) does,
+  in its amendment of 2026-10-09 (slice S4).
 - Stopped-execution lease release stays the operator's until the server can
   verify that an execution stopped.
 
@@ -338,6 +342,15 @@ tracks mandatory integration after S1 (#619) merges and reconciliation with
 #564. The declaration-core synthetic tests cover malformed/empty settings,
 identity boundaries, role/scope/time bounds, revocation, canonical references,
 closed unavailable reasons, no configuration leakage, and unchanged read/UI paths.
+
+Slice S4 (#564; [ADR 0046's amendment](0046-agent-maintenance-windows.md#amendment-a-delegated-operation-not-an-agent-grant-2026-10-09))
+puts item 8 behind these gates without executing anything: the maintenance
+revision tool resolves the MCP caller's delegation with the declaration
+core, checks the capability, its closed arguments and the delegation's
+schedule scope, and is then refused by `delegationExecutionReadiness`, which
+answers `available: false`; nothing is relayed and every call is one recorded
+refusal. Its writer, CORE 0076 and closed reasons are in place for S3 to
+connect.
 
 This ADR is a design record; its pull request changes documentation only.
 The slices are verified by the tests the plan lists (section 8, the delegation

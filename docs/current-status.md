@@ -23,7 +23,7 @@ are separate claims. Historical acceptance records are linked from the
 | Rewards              | Bucket/quantity display; displayed and computed expiry apart with basis or closed reason; claim/read projections; pure simulation components                                                                                                                           | Useful forecasts need actual activity, verified rules, membership and applicable offers; no external exchange is performed                                                                       |
 | Valuation/reports    | Provider price claims, pure valuation components, fixed report artifacts and as-of price/FX selection under an explicit policy                                                                                                                                         | No adopted selection policy, no general external price/FX acquisition or complete portfolio valuation product                                                                                    |
 | Cost basis/P&L/tax   | Typed input/policy gates, decomposition components and a pure lot engine over provisional inputs                                                                                                                                                                       | `costBasis()` always returns `needs-policy`; the lot adapter answers `unsupported` (no securities writer); transfers, persistence, P&L and tax are absent                                        |
-| AI/MCP               | Shared query/explanation/proposal service, `/mcp` transport and maintenance-window tools exist                                                                                                                                                                         | Agent grants are empty; maintenance tools are unverified in production; client access is not established by having an adapter                                                                    |
+| AI/MCP               | Shared query/explanation/proposal service, `/mcp` transport, a maintenance-window read on both agent paths, and the common audit log                                                                                                                                   | Agent grants and `MCP_DELEGATIONS` are empty, and no delegated operation executes (the maintenance revision tool refuses every call); client access is not established by having an adapter      |
 
 ## Source and execution blockers
 
@@ -94,8 +94,8 @@ are separate claims. Historical acceptance records are linked from the
 The committed [App config](../services/app/wrangler.jsonc) and
 [Processor config](../services/processor/wrangler.jsonc) enable their existing
 boolean feature flags, including scheduling, operations, purchase recognition,
-rewards, reports and READ projections. CORE migrations reach 0071; READ
-reaches 0003. The Processor's
+rewards, reports and READ projections. CORE migrations reach 0076 (no
+file uses 0067, 0073 or 0074); READ reaches 0003. The Processor's
 `OPS_COLLECTOR_DISPATCH_CONNECTIONS` is empty, so the operation dispatch lane
 calls no collector. These are repository facts, not live database/deployment readback.
 
@@ -111,10 +111,12 @@ client has connected ([ADR 0047](adr/0047-mcp-client-connection.md),
 Schedule and maintenance edits use the operator-only
 [HTTP settings API](schedules.md#settings-api), with version checks, verified
 Access identity, same-origin JSON and the settings header. This API exists for
-the management screen. Maintenance windows alone can also be changed by an
-agent holding `schedules.maintenance.update` through the
-[maintenance MCP tools](schedules.md#agent-maintenance-tools); no grant names
-such an agent yet.
+the management screen. An agent holding `schedules.read` can read maintenance
+windows through the [maintenance tools](schedules.md#agent-maintenance-tools);
+revising one through MCP is an operation the owner may delegate
+([ADR 0063](adr/0063-delegated-ai-operation-path.md)), which no delegation can
+execute until slice S3 connects delegated execution, so every such call is
+refused. No grant or delegation names a maintenance principal.
 
 ## Next work
 
@@ -122,8 +124,11 @@ The next product milestone is card usage → statement → bank debit with an
 explainable trail and no double expense. Finish representative coverage and
 identity gaps, then extend dated holdings/liabilities, valuation, lots/P&L and
 tax. Rewards can progress in parallel. See the [roadmap](roadmap.md) for delivery
-order and acceptance criteria. Production use of the maintenance MCP tools is a
-separate unfinished capability. The official-site maintenance re-survey is
+order and acceptance criteria. Delegated maintenance revisions wait for slice
+S3 (delegated execution and its audit record) and the owner's first delegation
+entry; deferrals beyond seven days wait for the owner's answer to the
+[plan's](plans/2026-10-ai-operation-path.md#10-questions-for-the-owner)
+question 1. The official-site maintenance re-survey is
 implemented as a proposal-only Processor lane
 ([ADR 0050](adr/0050-maintenance-survey-proposals.md),
 [schedules](schedules.md#official-site-re-survey)), but no page is allowed

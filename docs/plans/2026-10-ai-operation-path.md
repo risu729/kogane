@@ -2,7 +2,9 @@
 
 - Status: **proposed**. Slice S1 (section 8) is implemented
   ([audit log](../audit-log.md)); of S3 only the inert declaration core
-  (#628) is, and no delegated operation executes; no other slice is. The decisions it
+  (#628) is, and no delegated operation executes; S4 is on #564 up to the
+  delegation gate (its tool refuses every call until S3 connects execution);
+  no other slice is. The decisions it
   rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and
   [ADR 0064](../adr/0064-common-audit-log.md) (common append-only audit log),
@@ -455,7 +457,7 @@ its bounds, and changes in four ways:
    `MCP_DELEGATIONS`; `schedules.read` stays a read capability. The writer's
    actor kinds become `operator` and `delegated` (CORE 0067 is #564's and is
    still unmerged, so its CHECK is rewritten before merge, not migrated
-   again). The same rewrite changes 0067's partial index
+   again; S4 renumbers it CORE 0076). The same rewrite changes 0067's partial index
    `maintenance_agent_writes` from `WHERE actor_kind='agent'` to
    `WHERE actor_kind='delegated'`, so the daily budget check inside the
    `INSERT` keeps an index to read.
@@ -1020,6 +1022,21 @@ contradicts it, so #564 lands as this slice, not before it.
   audit record per call.
 - Review gate: fresh reviewer; the review checks that the writer is still the
   only path to a maintenance revision.
+- Status (2026-10-09): implemented on #564 ahead of S3's execution
+  integration, up to the delegation gate
+  ([ADR 0046's amendment](../adr/0046-agent-maintenance-windows.md#amendment-a-delegated-operation-not-an-agent-grant-2026-10-09)).
+  The migration is CORE 0076 (main reached 0075, #632 holds 0073, 0074 is
+  reserved). The write capability is in `MCP_DELEGATIONS` only; the update
+  tool resolves the delegation with #628's core, checks capability, closed
+  arguments and scope, and is refused by `delegationExecutionReadiness`
+  (`available: false`), so it relays nothing and is published to nobody; the
+  read is served on both agent paths with one function. The writer takes
+  `append` and the operator's edit records `operator-edit`. Left to S3: the
+  delegated audit record (`principal_kind` `delegated`, `delegation_ref`),
+  Processor family/ref forwarding, `budget.writesPerDay`, the delegated
+  revision's `decision_ref`, prepare/confirm and therefore the R2 path; the
+  missing-capability code is #628's `delegation_capability_denied` (section
+  8's matrix item 4 calls it `capability_not_delegated`).
 
 **S5 — MCP read, search and detail** (after S2).
 

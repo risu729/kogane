@@ -2,7 +2,7 @@
 
 Open `/schedules` from **取得履歴** or **収集スケジュール**. Only the configured
 Access operator can open this page; maintenance windows alone can also be read
-and revised by a granted agent ([below](#agent-maintenance-tools)). The page
+by a granted agent ([below](#agent-maintenance-tools)). The page
 shows the original next occurrence, maintenance-adjusted due time, actual alarm
 reservation and the latest scheduling receipt separately. All displayed timestamps use Japan time;
 daily configuration defaults to Japan time and can use Sydney or UTC explicitly.
@@ -150,52 +150,80 @@ same-origin JSON, `x-kogane-settings: 1` and strict payload validation
 tools. The separately allowlisted, bodyless deployment `/bootstrap` route
 only reconciles reservations after release identity checks.
 
-Maintenance changes can be made from the management screen using this HTTP API,
-and by an agent through the two MCP tools below. Automatic online research
-exists only as the proposal-only re-survey above, which fetches nothing until
-pages are confirmed. See [agent access](agent-api.md) and
-[current status](current-status.md).
+Maintenance changes are made from the management screen using this HTTP API.
+An agent can read maintenance windows through the tool below; revising one
+through MCP is an operation the owner may delegate, which no delegation can
+execute yet. Automatic online research exists only as the proposal-only
+re-survey above, which fetches nothing until pages are confirmed. See
+[agent access](agent-api.md) and [current status](current-status.md).
 
 ## Agent maintenance tools
 
-[ADR 0046](adr/0046-agent-maintenance-windows.md). An agent-API grant with
-`schedules.read` and `schedules.maintenance.update`, scoped by
-`scopes.scheduleSources`, reaches two MCP tools and nothing else here: job
-times, enable/disable, lease release and bootstrap stay operator or deployment
-only, and the routes above still refuse every agent.
+[ADR 0046](adr/0046-agent-maintenance-windows.md), as amended by
+[ADR 0063](adr/0063-delegated-ai-operation-path.md) item 8 (slice S4 of the
+[AI operation path plan](plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)).
+Job times, enable/disable, lease release and bootstrap stay operator or
+deployment only, and the routes above refuse every agent and every MCP-audience
+caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows).
 
-- `kogane.schedules.maintenance.read` returns, for the granted sources (or the
-  one named), the registered reference, each schedule's original next
-  occurrence, saved maintenance-adjusted due time, actual alarm,
-  `armed`/`pending`/`disabled` state and latest receipt outcome, and each rule
-  with up to 20 revisions (actor kind, reason, whether the caller wrote it).
-  It returns no run or evidence ids, no lease and no principal's identity, and
-  nothing about another source.
-- `kogane.schedules.maintenance.update` appends one revision: omit `ruleId` with
+- `kogane.schedules.maintenance.read` (`schedules.read`, scoped by
+  `scopes.scheduleSources`; on `/mcp` and `POST /api/agent/v1/schedules.maintenance.read`,
+  which answer the same object) returns, for the granted sources (or the one
+  named), the registered reference, each schedule's original next occurrence,
+  saved maintenance-adjusted due time, actual alarm, `armed`/`pending`/`disabled`
+  state and latest receipt outcome, each rule with up to 20 revisions (actor
+  kind, closed reason, whether the reader wrote it as a delegated principal),
+  and the writer's limits on delegated revisions with how many the reader wrote
+  today. It returns no run or evidence ids, no lease and no principal's
+  identity, and nothing about another source. The Processor serves it on
+  `/internal/schedules/agent/read`, which refuses a request that also carries
+  the operator header or a delegation reference; no write is reachable under
+  `/internal/schedules/agent/`.
+- `kogane.schedules.maintenance.update` is a delegated operation: no agent-API
+  grant can name it, it is published to nobody, and every call on `/mcp` is
+  refused before anything reaches the Processor — at the latest with
+  `delegation_execution_unavailable`, because no delegation executes until
+  slice S3 connects it. Its arguments are one revision: omit `ruleId` with
   `revision: 0` to create a rule under an id the server chooses, or name a rule
-  of that source with its current revision. It needs a one-line `reason`, an
-  https `referenceUrl` on the source's registered maintenance host (stored,
-  never fetched) and `verifiedAt`. It answers the saved revision, whether the
-  reservations were reconciled, and the source's view after the save.
+  of that source with its current revision; a closed `reason`; an https
+  `referenceUrl` on the source's registered maintenance host (stored, never
+  fetched) and `verifiedAt`.
 
-Both go through the Processor's single writer, `writeMaintenanceRevision`
-(`services/processor/src/schedule-store.ts`), which the operator route and an
-accepted re-survey proposal also use. It answers a closed code:
-`invalid_request`, `invalid_reference`, `reason_required`,
-`maintenance_rule_not_found` (another source's rule answers like a missing
-one), `revision_conflict`, `maintenance_deferral_too_long` (after an agent
-revision, every joined deferral of the source longer than seven
-days must lie within one its rules already caused; a running one counts its
-part before the revision, up to seven days back) or
-`maintenance_write_budget_exceeded` (30 agent revisions per principal per
-rolling day). CORE 0067 records each revision's actor kind, reason and optional
-decision reference; older revisions show them as unknown.
-A source with no registered reference (PRESTIA bank) takes no rule. A
-collection deferred by any window still runs once after it and resumes its
-nominal schedule. An agent revision is in effect once saved; no one accepts it
-first (ADR 0046). The `/schedules` page shows each rule's current revision but
-not who wrote it or why: the actor kind and reason are on the read tool and in
-the table.
+**The writer.** Every maintenance revision goes through the Processor's single
+writer, `writeMaintenanceRevision(env, write, append)`
+(`services/processor/src/schedule-store.ts`): the operator's edit, an accepted
+re-survey proposal and, once S3 connects it, a delegated principal. It sends
+the revision, its provenance update and what its caller appends — the audit
+record ([audit log](audit-log.md)), an acceptance row — as one batch, so they
+exist together or not at all. Its actors are the operator and a delegated
+principal (`mcp-client:<sub>`); there is no other kind. Its reason is a closed
+code (`MAINTENANCE_CHANGE_REASONS` in `packages/collection/src/schedule-model.ts`):
+the operator's edit records `operator-edit`, an accepted proposal
+`maintenance-survey-proposal-accepted` with the proposal as its decision
+reference, and a delegated principal chooses `official-notice-added`,
+`official-notice-changed`, `official-notice-withdrawn`, `outage-observed`,
+`owner-instructed` or `correction`. It answers a closed code:
+`invalid_request`, `invalid_reference`, `invalid_reason`,
+`maintenance_rule_not_found` (a delegated principal naming another source's
+rule is answered like a missing one), `revision_conflict`,
+`maintenance_deferral_too_long` or `maintenance_write_budget_exceeded`. For a
+delegated principal only, it also requires the rule to be the named source's
+or new, refuses a revision after which the source has a joined deferral
+longer than seven days that its rules did not already cause (every such union
+must lie within one the source already had; a running one counts its part
+before the revision, up to seven days back), and caps each principal at 30
+revisions per rolling day, counted through the partial index
+`maintenance_agent_writes` inside the INSERT. CORE 0076 records each revision's
+actor kind, closed reason and decision reference, and its CHECK refuses free
+text, a missing reason, a bare agent kind and `operator-edit` from anyone but
+the operator; revisions written before it show them as unknown. A source with
+no registered reference (PRESTIA bank) takes no rule. A collection deferred by
+any window still runs once after it and resumes its nominal schedule. The
+`/schedules` page shows each rule's current revision but not who wrote it or
+why: the actor kind and reason are on the read tool and in the table.
 
-Not verified in production: no grant names a maintenance principal, CORE 0067
-is not applied, and no Claude or Codex client has called these tools.
+Beyond the seven-day bound a delegated revision is class R3 until the owner
+answers the plan's question 1, and stays the operator's in the UI; its target
+class is R2 (prepare/confirm) up to a 31-day ceiling, which does not exist
+yet. Not verified in production: no grant or delegation names a maintenance
+principal, CORE 0076 is not applied, and no MCP client has called these tools.

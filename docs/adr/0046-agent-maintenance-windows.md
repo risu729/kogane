@@ -2,6 +2,12 @@
 
 Status: proposed until this PR merges; accepted upon merge
 Date: 2026-10-08
+Amended by: [ADR 0063](0063-delegated-ai-operation-path.md) item 8, as
+[the amendment below](#amendment-a-delegated-operation-not-an-agent-grant-2026-10-09)
+records (slice S4 of the
+[AI operation path plan](../plans/2026-10-ai-operation-path.md)). The
+Decision that follows is this ADR's first form; where the amendment differs,
+the amendment is what the code does.
 
 ## Context
 
@@ -25,11 +31,15 @@ sources and accounts.
 1. **Admit agents to the operator routes.** Rejected: those routes also edit
    jobs and release leases, and their same-origin/header checks are browser
    protections, not a permission model for a remote client.
-2. **Maintenance changes as proposals the operator accepts.** The safest flow,
-   but no maintenance proposal/acceptance path exists, and #560's completion
-   condition is that the client itself saves and reads back the window. The
-   re-survey line (#561) can add such a flow on top of the same writer
-   (`decisionRef` below).
+2. **Maintenance changes as proposals the operator accepts.** The safest flow.
+   A proposal/acceptance path now exists for the Processor's own re-survey
+   readings ([ADR 0050](0050-maintenance-survey-proposals.md), #561), through
+   the same writer (`decisionRef` below), but #560's completion condition is
+   that the client itself saves and reads back the window, which a proposal
+   the operator later accepts does not meet; and the owner's direction of
+   2026-10-09 (ADR 0063) is conditional direct application by a delegated
+   principal, not proposal-only. Rejected for the client's own changes; the
+   survey keeps its proposals.
 3. **Reuse `scopes.sources`.** Rejected: it couples financial read scope with a
    settings write scope, and schedule source ids are a different namespace
    (`config/alarm-jobs.json`).
@@ -189,3 +199,121 @@ for malformed arguments, none of which relays or writes anything, a saved
 revision with the verified principal and its readback, and the operator routes
 still refusing agents and serving the operator. No production client, grant
 or deployment was exercised.
+
+## Amendment: a delegated operation, not an agent grant (2026-10-09)
+
+Status: proposed until this PR merges; accepted upon merge.
+
+The owner's direction of 2026-10-09 — conditional direct application by the
+AI, and not anonymous-agent power
+([ADR 0063](0063-delegated-ai-operation-path.md),
+[plan](../plans/2026-10-ai-operation-path.md) sections 3, 4.6 and slice S4)
+— re-shapes this decision before it merges. What the code does now:
+
+- **Who may write.** `schedules.maintenance.update` is no longer an
+  agent-API capability: `AGENT_CAPABILITIES` keeps `schedules.read` only, and
+  a grant table naming the write is refused whole (`/mcp` answers
+  `403 agent_api_not_configured`). The write is an operation the owner may
+  delegate to their own MCP identity in `MCP_DELEGATIONS` (the `maintainer`
+  role holds it), scoped by the delegation's `scheduleSources` inside the read
+  grant's. The tool resolves the caller's delegation with #628's resolver,
+  checks the capability, its closed argument schema and the delegation's
+  scope, and then asks `delegationExecutionReadiness`, which answers
+  `available: false` for every capability until slice S3 connects delegated
+  execution (its audit record, the operation path and the Processor's
+  delegation guards). So the tool is published to nobody, every call is
+  refused with a closed code (`delegation_not_configured`,
+  `delegation_misconfigured`, `delegation_not_yet_valid`,
+  `delegation_expired`, `delegation_capability_denied`, `invalid_request`,
+  `source_not_granted`, and last `delegation_execution_unavailable`), and no
+  code relays a delegated write. The refusal code for a missing capability is
+  #628's `delegation_capability_denied`, which the plan calls
+  `capability_not_delegated`. It has no `/api/agent/v1` route: a browser
+  session yields no delegation.
+- **No bare agent.** The Processor's `/internal/schedules/agent/maintenance`
+  route is removed; `/internal/schedules/agent/read` stays read-only and
+  refuses a request carrying the operator header or a delegation reference.
+  The writer's actor kinds are `operator` and `delegated` (an `mcp-client:`
+  name only); there is no `agent` kind in the code or the table.
+- **Closed reasons.** The free-text reason becomes a closed code,
+  `MAINTENANCE_CHANGE_REASONS` (`packages/collection/src/schedule-model.ts`):
+  a delegated principal chooses `official-notice-added`,
+  `official-notice-changed`, `official-notice-withdrawn`, `outage-observed`,
+  `owner-instructed` or `correction`; the operator's edit records
+  `operator-edit`; an accepted survey proposal records
+  `maintenance-survey-proposal-accepted` with its proposal as the decision
+  reference (the only decision reference the writer accepts). The writer
+  answers `invalid_reason` for anything else, in place of `reason_required`.
+- **One writer, one batch, one record.** `writeMaintenanceRevision(env,
+write, append)` stays the only code that writes a maintenance revision; it
+  takes ADR 0050's `append` argument and sends the revision, its guarded
+  provenance update and what the caller appends (the audit record of ADR
+  0064, a survey acceptance row) as one D1 batch. The operator route and the
+  survey route call it; the operator's record carries `reason_code`
+  `operator-edit`. Both the read and the revision are catalogued operations
+  (`OPERATION_CATALOGUE`): `schedules.maintenance.read` (R0, `agent-http` and
+  `mcp`) and `schedules.maintenance.update` (`ui` and `mcp`; R1, and R3
+  beyond the seven-day bound), and every call of either is recorded once
+  through `executeOperation`.
+- **Risk class and bounds.** A delegated revision is R1 inside the direct
+  envelope: a source in the delegation's scope, a rule of that source or a
+  new one, no joined deferral over seven days that its rules did not already
+  cause, 30 revisions per principal per rolling day, a closed reason, a
+  registered https reference host and the expected revision. Beyond the
+  seven-day bound the writer refuses it (`maintenance_deferral_too_long`):
+  it is R3 until the owner answers the plan's question 1, and the operator
+  makes it in the UI. Its target class, R2 (prepare/confirm) up to a 31-day
+  ceiling, is not built: no prepare/confirm step exists (slice S3), and a
+  deferral longer than 31 days stays the operator's in every case.
+- **Migration.** CORE 0067 never merged; it is renumbered CORE 0076 (the
+  next free number after main's 0075; open #632 holds 0073, and 0074 is
+  reserved) and rewritten: `actor_kind IN ('operator','delegated')`; a
+  closed `change_reason` CHECK, required with every actor kind and
+  `operator-edit` only for the operator; the partial index
+  `maintenance_agent_writes` on `actor_kind='delegated'`, which the budget
+  count reads inside the INSERT.
+- **Reads.** The read tool is also served on
+  `POST /api/agent/v1/schedules.maintenance.read`; one function answers both
+  paths, so HTTP and MCP return the same object. Its `byCaller` marks the
+  reader's own delegated revisions. `kogane.capabilities` no longer reports
+  `writes.maintenanceRules`.
+
+What this replaces above: the Vocabulary and Tools paragraphs' update
+capability and its agent-API grant; the "Agent-only limits" (they hold for a
+delegated principal, with a closed reason); "Adopted when saved, not
+proposed" holds inside the direct envelope under a delegation, and its
+statement that this path "is not an exception to the agent invariants" is
+replaced by ADR 0063 item 12; Provenance's CORE 0067, its `agent` kind and
+free-text reason; the Revocation paragraph (a delegated write is revoked by
+the ways ADR 0063 item 11 lists); and the Consequences' agent grant and
+`writes.maintenanceRules`. ADR 0039's amendment already states that settings
+are edited by the operator, or by the owner's own MCP principal holding the
+setting's capability once delegation exists.
+
+Not done here, and why: delegated execution, the delegated audit record
+(`principal_kind` `delegated` with a `delegation_ref`), the delegation's
+`budget.writesPerDay` count and a delegated revision's `decision_ref`
+(`audit:<audit_id>`) are slice S3's; prepare/confirm and the R2 path up to 31
+days wait for S3 and the owner's answer to question 1. Until then no
+delegated revision can be written outside a test.
+
+Verification: synthetic only.
+`services/processor/test/schedule-agent-maintenance.test.ts` exercises the
+writer for a delegated principal directly (no route reaches it): revisions
+with actor kind and closed reason, the readback of next run and armed
+reservation, a three-day window followed by exactly one collection under
+native alarms, the seven-day bound at its boundary (exactly seven days
+accepted, one millisecond more refused), the existing deferral cases, the
+budget and its query plan on the partial index without table statistics,
+closed reasons and actor shapes, the CHECK and its list against the code, the
+read route's refusals, and the batch both ways (an appended record that fails
+leaves no revision; a revision that loses its version check inside the batch
+leaves no record). `services/app/test/schedule-tools.test.ts`, through the
+real App Worker and the Processor's route: HTTP and MCP reads answering the
+same object, each recorded once; the update tool published to nobody and
+refused under no, an invalid, an early, a late, a capability-less and a valid
+delegation, in and out of scope, with nothing relayed, no revision, no
+reference change and one record each; an agent grant naming the write refused
+whole; the operator's edit recorded with its reason; and a deep scan of the
+records and revisions for a token-shaped value and an amount. Not verified:
+anything in production; no delegation, grant or Access setting exists.
