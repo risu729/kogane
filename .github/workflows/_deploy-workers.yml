@@ -539,6 +539,13 @@ jobs:
       # ADR 0039: the named RPC entrypoints must exist before the Processor
       # binds them. The acquisition/terminal protocol is unchanged. Uploads
       # execute no collection; future alarms are activated after all postchecks.
+      - name: Verify the original GlobalPass baseline immediately before publication
+        id: verify-publication-baseline-globalpass-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node "${RELEASE_RESUME}" verify-publication-baseline globalpass-worker
       - name: Deploy the GlobalPass collector
         id: deploy-globalpass-worker
         if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker') && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'globalpass-worker')
@@ -682,6 +689,13 @@ jobs:
           deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Verify the original SBI Shinsei baseline immediately before publication
+        id: verify-publication-baseline-sbi-shinsei-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node "${RELEASE_RESUME}" verify-publication-baseline sbi-shinsei-worker
       - name: Deploy the SBI Shinsei collector
         id: deploy-sbi-shinsei-worker
         if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker') && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'sbi-shinsei-worker')
@@ -825,6 +839,13 @@ jobs:
           deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Verify the original St.George baseline immediately before publication
+        id: verify-publication-baseline-st-george-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node "${RELEASE_RESUME}" verify-publication-baseline st-george-worker
       - name: Deploy the St.George collector
         id: deploy-st-george-worker
         if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker') && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'st-george-worker')

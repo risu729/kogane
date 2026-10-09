@@ -177,3 +177,38 @@ resource-heavy repository checks; existing test deadlines are unchanged. Small
 synthetic tests cover quarantine lifecycle, interruption, tamper, exclusive
 promotion, staging reuse, oversized chunks, native/legacy restoration and the
 unchanged image proof. This does not establish live recovery success.
+
+## Proposed amendment: bounded publication target readback (2026-10-09)
+
+A single read of application allocations currently conflates no new version with
+multiple new versions. Allocation visibility can lag successful publication;
+the failed capture logs do not record the candidate count, so they cannot prove
+which condition occurred. A saved desired-version snapshot alone also does not
+prove the original application had completed its rollout.
+
+Require a stable original baseline for every selected Container before any
+legacy image push or migrations: exact desired version/image at 100%, all other
+versions at 0%, and no active rollout. Before each unpublished Container Action,
+recheck the original Worker UUID, application version/image, namespaces and
+resource policy plus full stability. Do not refresh the stored baseline. Restore
+preflight applies the same stability rule to still-unpublished targets before
+resumed migrations; receipt-bound targets may remain pending for their existing
+full verification guard.
+
+Capture uses one absolute 30-second budget covering allocation reads, registry
+proof and a final readback before writing the receipt. Only zero candidates may
+retry; multiple candidates, malformed responses, read failures and identity
+drift fail immediately. Every request uses the remaining budget, and late
+responses cannot bind a target. Existing registry callers retain their previous
+request limits. The native Action UUID stays exact throughout; legacy mode
+freezes its first changed UUID and rejects any later change. Candidate selection
+still requires exactly one new version and the original immutable image-config
+proof, never a latest or baseline-plus-one guess. Recheck the same candidate
+version/image, Worker UUID, namespace and application identity after registry
+verification. No receipt is written if that proof has changed or expired.
+
+The separate mandatory 180-second rollout guard, serial downstream gates,
+immutable artifact trust, supersession refusal and no historical receipt adoption
+remain unchanged. Synthetic clock and real Node CLI tests cover delayed visibility,
+expiry and late responses, ambiguous versions, identity/image drift, legacy UUID
+replacement and unstable original baselines. Live recovery remains unverified.
