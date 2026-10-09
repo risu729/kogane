@@ -6,10 +6,7 @@
   "workers_dev": false,
   "preview_urls": false,
   "vars": {
-    "BALANCE_PROJECTION_ENABLED": "0",
-    "REWARDS_V2_ENABLED": "false",
     "EVIDENCE_SOURCE_ID": "sony-bank",
-    "EVENTS_V2_ENABLED": "0",
     "ACCESS_ISSUER": "https://evidence-test.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "synthetic-test-audience",
     "COMMANDS_ENABLED": "",
@@ -18,6 +15,7 @@
     "OPERATOR_SUBJECTS": "",
     "AGENT_GRANTS": "",
     "AGENT_API_GRANTS": "",
+    "MCP_DELEGATIONS": "",
     "OPS_API_ENABLED": "",
     "SESSION_REFRESH_POLICY": "",
     // Declared so the suite has the same shape as production; the health test

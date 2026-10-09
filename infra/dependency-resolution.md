@@ -225,6 +225,7 @@ Lockfile: `bun.lock`.
 | --- | --- | --- | --- |
 | `@types/bun` | devDependencies | `1.4.2` | 1.4.2 |
 | `typescript` | devDependencies | `7.0.2` | 7.0.2 |
+| `zod` | dependencies | `4.6.5` | 4.6.5 |
 
 ### `packages/collection` — `@kogane/collection`
 
@@ -652,7 +653,7 @@ a changed digest has to be explained dependency by dependency.
 | `experiments/observation-pipeline-local` | bun.lock | 28 | `d398cfdf902336405d1a09181aff12dfdc144b5f2c0cc57a46a68be78ac7009d` |
 | `experiments/st-george-automation` | bun.lock | 27 | `d3880cd18c9fb9f8cbaa4595bc3a8ffd002141fadbddf4a00ae650e200869f62` |
 | `experiments/tamia-tcp-bridge` | bun.lock | 114 | `679d0a688228e5ea2e05684b3e39fa51a52515f17f8ff206a4b2bd982f3cfd31` |
-| `packages/application` | bun.lock | 25 | `d45c1ad6a273efeacff18bfdcbb5f9478ec2297cf1bec55eed01dfed21a21220` |
+| `packages/application` | bun.lock | 26 | `642c5ef675560e7a68b5526c350319cfcf015891311d5a9ceed443e4c5223d01` |
 | `packages/collection` | bun.lock | 226 | `52adcbe3539ea129eb6fd22707914a4c992d05451e83ad301f1c2036ea43f3f1` |
 | `packages/collector-diagnostics` | bun.lock | 25 | `d45c1ad6a273efeacff18bfdcbb5f9478ec2297cf1bec55eed01dfed21a21220` |
 | `packages/domain` | bun.lock | 25 | `d45c1ad6a273efeacff18bfdcbb5f9478ec2297cf1bec55eed01dfed21a21220` |

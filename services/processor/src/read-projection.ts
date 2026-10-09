@@ -74,7 +74,7 @@ const WRITER_LEASE_MS = 60_000;
 /**
  * The READ binding, when the deployment has one. A configuration that turned
  * the flag on without binding a database is a configuration error, and the job
- * says so instead of writing the CORE tables under a flag that claims READ.
+ * returns `read_binding_missing` instead of writing anywhere else.
  */
 export function readDatabase(env: Env): D1Like | null {
   const bound = (env as unknown as { READ?: D1Like }).READ;

@@ -516,7 +516,13 @@ observation_sweep → collection_scan → identity_sweep → balance_projection
   → purchase_recognition
   → reward_claims_sweep → reward_read_projection → price_promotion
   → report_job → maintenance_survey → operation_dispatch → decision_outbox
+  → audit_overflow
 ```
+
+`audit_overflow` has no flag. It turns each `audit_overflow_counters` row of a
+UTC day that has ended into one `overflow` audit record and deletes the row in
+the same batch ([audit log](audit-log.md#daily-caps)); with no ended day it
+writes nothing.
 
 `maintenance_survey` runs only while `MAINTENANCE_SURVEY_ENABLED` is `"1"` or
 `"true"` (not declared in `wrangler.jsonc`, so off). It re-reads the official
@@ -579,8 +585,9 @@ it to the next ticks; the repair budget sets how fast a parser version bump drai
 
 `collection_scan` sits after the parse sweep and before identity so a run
 found this tick can reach identity and parsing on the same tick.
-`operation_dispatch` sits before `decision_outbox`, which stays last, after
-the projections a decision may have invalidated. Each lane is isolated: a
+`operation_dispatch` sits before `decision_outbox`, which stays after every
+lane that changes what a projection reads; only `audit_overflow`, which touches
+the audit tables alone, runs after it. Each lane is isolated: a
 failure is logged as its own event and stops nothing else. Both new lanes are
 always wired, like `balance_projection`: while their flags are off each logs
 one line per tick — `{"event":"collection_scan","enabled":false,"status":"skipped",…}`,
@@ -621,6 +628,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `maintenance_survey`       | `targets`, `due`, `extracted`, `failed`, `windows`, `unchanged`, `proposed`, `reviewPending`, `known`, `failures` (closed failure codes, ADR 0050)                                                                                  |
 | `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                                                            |
 | `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
+| `audit_overflow`           | `counters`, `written`                                                                                                                                                                                                               |
 
 Not recorded, because they already keep their own record: `observation_sweep`
 (`observation_lane_state`), `collection_scan` (`collection_scan_state`),

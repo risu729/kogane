@@ -135,10 +135,39 @@ describe("card settlement plan pins server facts", () => {
     });
   });
 
+  test("an SBI Shinsei debit stored by parser 0.1.3 is admitted; the same row stored by 0.1.2 is not", async () => {
+    const shinsei = (kogane: Record<string, unknown>) => ({
+      source_id: "sbi-shinsei-bank",
+      parser_name: "sbi-shinsei-top-balances-and-activity",
+      source_account: "sbi-shinsei:synthetic",
+      external_id: "synthetic-ref",
+      extra_json: JSON.stringify({
+        txnReferenceNo: "synthetic-ref",
+        _kogane: { amountSignSource: "debit", ...kogane },
+      }),
+    });
+    // 0.1.3 records the origin: rule 2 no longer refuses, the plan is made
+    // (a plan only; approval and commit stay a human's, ADR 0054).
+    const admitted = await resolveAndSimulate(
+      store(row, shinsei({ identityOrigin: "provider-id" })),
+      "card-settlement.accept",
+      payload,
+    );
+    expect(admitted.ok).toBe(true);
+    // 0.1.2 recorded none.
+    expect(
+      await resolveAndSimulate(store(row, shinsei({})), "card-settlement.accept", payload),
+    ).toEqual({
+      ok: false,
+      error: "unsupported_semantics",
+      refs: ["card-settlement:candidate", "identity_origin_unrecorded"],
+    });
+  });
+
   test("the debit's identity must be admitted: a closed refusal, nothing adopted (ADR 0054)", async () => {
     const refused = async (bank: unknown) =>
       resolveAndSimulate(store(row, bank), "card-settlement.accept", payload);
-    // No recorded origin (SBI Shinsei's parser records none).
+    // No recorded origin (an SBI Shinsei row a 0.1.2 run stored; 0.1.3 records it).
     expect(
       await refused({
         source_id: "sbi-shinsei-bank",

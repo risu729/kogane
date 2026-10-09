@@ -323,7 +323,7 @@ describe("the cells of a source", () => {
         entry.current?.capturedAt ?? null,
       ]),
     ).toEqual([
-      ["2099-01", "current", [], "2099-02-02T00:00:00.000Z"],
+      ["2099-01", "current", ["coverage_not_recorded"], "2099-02-02T00:00:00.000Z"],
       [
         "2098-12",
         "older-current",
@@ -413,6 +413,7 @@ function row(overrides: Partial<CellQualityRow> = {}): CellQualityRow {
     unit_failure_code: null,
     incomplete_coverage: null,
     coverage_causes_json: null,
+    unreported_coverage: 0,
     current_run_id: 7,
     current_captured_at: "2099-01-01T00:00:00.000Z",
     ...overrides,
@@ -467,7 +468,7 @@ describe("one reason per stored state", () => {
       },
       ["no_current_capture", "period_unplaced"],
     ],
-    [{ parser_name: "smbc-direct-transactions" }, ["query_rule_not_composed"]],
+    [{ unreported_coverage: 1 }, ["coverage_not_recorded"]],
     [{ latest_producer_run_id: 9 }, ["not_in_latest_run"]],
     [
       {

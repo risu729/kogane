@@ -173,7 +173,7 @@ jobs:
         # its mise configuration and the scripts below are reviewed code.
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: 2026.10.5
+          version: 2026.10.6
           # No tool cache anywhere in this job: its cache scope is shared with
           # pull request CI, which runs pull request code, so a restored archive
           # is not a trusted source of the interpreter that decides whether this
@@ -243,7 +243,7 @@ jobs:
         if: steps.decide.outputs.proceed == 'true'
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: 2026.10.5
+          version: 2026.10.6
           cache: false
       - name: Install the locked dependencies
         if: steps.decide.outputs.proceed == 'true'
@@ -539,6 +539,13 @@ jobs:
       # ADR 0039: the named RPC entrypoints must exist before the Processor
       # binds them. The acquisition/terminal protocol is unchanged. Uploads
       # execute no collection; future alarms are activated after all postchecks.
+      - name: Verify the original GlobalPass baseline immediately before publication
+        id: verify-publication-baseline-globalpass-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node "${RELEASE_RESUME}" verify-publication-baseline globalpass-worker
       - name: Deploy the GlobalPass collector
         id: deploy-globalpass-worker
         if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker') && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'globalpass-worker')
@@ -589,6 +596,8 @@ jobs:
         run: node "${RELEASE_RESUME}" checkpoint
       - name: Verify the GlobalPass Container application and image
         id: verify-container-globalpass-worker
+        # The helper enforces one 600-second total postcheck budget.
+        timeout-minutes: 11
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker')
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -682,6 +691,13 @@ jobs:
           deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Verify the original SBI Shinsei baseline immediately before publication
+        id: verify-publication-baseline-sbi-shinsei-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node "${RELEASE_RESUME}" verify-publication-baseline sbi-shinsei-worker
       - name: Deploy the SBI Shinsei collector
         id: deploy-sbi-shinsei-worker
         if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker') && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'sbi-shinsei-worker')
@@ -732,6 +748,8 @@ jobs:
         run: node "${RELEASE_RESUME}" checkpoint
       - name: Verify the SBI Shinsei Container application and image
         id: verify-container-sbi-shinsei-worker
+        # The helper enforces one 600-second total postcheck budget.
+        timeout-minutes: 11
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker')
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -825,6 +843,13 @@ jobs:
           deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Verify the original St.George baseline immediately before publication
+        id: verify-publication-baseline-st-george-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node "${RELEASE_RESUME}" verify-publication-baseline st-george-worker
       - name: Deploy the St.George collector
         id: deploy-st-george-worker
         if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker') && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'st-george-worker')
@@ -875,6 +900,8 @@ jobs:
         run: node "${RELEASE_RESUME}" checkpoint
       - name: Verify the St.George Container application and image
         id: verify-container-st-george-worker
+        # The helper enforces one 600-second total postcheck budget.
+        timeout-minutes: 11
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker')
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}

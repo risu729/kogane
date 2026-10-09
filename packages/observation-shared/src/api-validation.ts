@@ -1,3 +1,7 @@
+import {
+  INSTRUMENT_HISTORY_PATH,
+  validInstrumentHistoryRead,
+} from "./instrument-history-contract.ts";
 import { validQuantity } from "../../domain/src/values.ts";
 import { validTemporalValue, validInstantText, validLocalDateText } from "../../domain/src/time.ts";
 import type {
@@ -762,6 +766,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path.startsWith("/api/collection-quality"))
     return validCollectionQualityResponse(path, value);
   if (path === INSTRUMENT_CANDIDATES_PATH) return validInstrumentCandidateReview(value);
+  if (path === INSTRUMENT_HISTORY_PATH) return validInstrumentHistoryRead(value);
   if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);
   if (path === "/api/v2/query") return validSharedQueryResponse(value);
   if (path === "/api/filter-options") {

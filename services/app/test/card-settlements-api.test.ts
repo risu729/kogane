@@ -75,9 +75,31 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.restoreAllMocks());
+/** The store with the settlement views not yet applied. */
+function withoutSettlementViews(db: D1Database): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) =>
+          target.prepare(
+            sql.includes("sqlite_master") && sql.includes("card_settlement_reviews")
+              ? "SELECT 0 AS present"
+              : sql,
+          );
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 async function call(
   path = PATH,
-  options: { subject?: string | null; method?: string; enabled?: boolean } = {},
+  options: {
+    subject?: string | null;
+    method?: string;
+    enabled?: boolean;
+    schema?: boolean;
+  } = {},
 ) {
   const subject = options.subject === undefined ? "synthetic-operator" : options.subject;
   const token =
@@ -100,6 +122,7 @@ async function call(
     }),
     {
       ...env,
+      DB: options.schema === false ? withoutSettlementViews(env.DB) : env.DB,
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: "fixture-audience",
       EVENTS_V2_ENABLED: options.enabled === false ? "0" : "true",
@@ -137,8 +160,9 @@ describe("card settlement review boundary", () => {
     ] as const)
       expect((await call(PATH, { subject })).status).toBe(status);
   });
-  it("honors disabled capability and remains read-only", async () => {
-    expect((await call(PATH, { enabled: false })).status).toBe(404);
+  it("stays readable when the retired flag is off, hides a missing view, and remains read-only", async () => {
+    expect((await call(PATH, { enabled: false })).status).toBe(200);
+    expect((await call(PATH, { schema: false, enabled: true })).status).toBe(404);
     expect((await call(PATH, { method: "POST" })).status).toBe(405);
   });
   it("validates exact-id and offset requests without allowing mixed or repeated filters", async () => {
@@ -186,7 +210,8 @@ describe("card settlement review boundary", () => {
       ["synthetic-agent", 403],
     ] as const)
       expect((await call(path, { subject })).status).toBe(status);
-    expect((await call(path, { enabled: false })).status).toBe(404);
+    expect((await call(path, { enabled: false })).status).toBe(200);
+    expect((await call(path, { schema: false, enabled: true })).status).toBe(404);
     expect((await call(path, { method: "POST" })).status).toBe(405);
     expect((await call(PATH + "/ownership")).status).toBe(400);
     expect((await call(path + "&offset=0")).status).toBe(400);

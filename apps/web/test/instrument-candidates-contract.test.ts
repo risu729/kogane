@@ -69,6 +69,11 @@ describe("the instrument candidate review contract", () => {
     tooMany.items = Array.from({ length: 51 }, () => tooMany.items[0]);
     const otherCommand = copy("open");
     otherCommand.items[0].commands.adopt.kind = "identity.release-override";
+    const missingProvenance = copy("open");
+    delete missingProvenance.items[0].commands.adopt.payload.candidate;
+    const otherCandidate = copy("open");
+    otherCandidate.items[0].commands.adopt.payload.candidate.candidateId =
+      "instrument-candidate:other|pair";
     // A held candidate that names an adoption anyway.
     const heldWithAdopt = copy("held");
     heldWithAdopt.items[0].commands.adopt = copy("open").items[0].commands.adopt;
@@ -82,6 +87,8 @@ describe("the instrument candidate review contract", () => {
       unknownConflict,
       tooMany,
       otherCommand,
+      missingProvenance,
+      otherCandidate,
       heldWithAdopt,
       unknownState,
       { ...copy("open"), decisions: "operator-only" },

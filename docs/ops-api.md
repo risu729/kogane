@@ -1,8 +1,10 @@
 # Operations API
 
 The committed App configuration enables `OPS_API_ENABLED` and names a human
-operator; agent grants remain empty. MCP additionally requires the agent-API
-transport grant, so an operations flag alone does not enable a client. These
+operator; agent grants remain empty. The operations are not served over MCP:
+`/mcp` accepts only agent-only MCP clients
+([ADR 0047](adr/0047-mcp-client-connection.md)), and an agent cannot request
+an operation. These
 six operation-request kinds are distinct from the newer operator-only
 [schedule settings API](schedules.md#settings-api). A collection or unattended
 session-refresh request reaches a collector only through the named collector RPC
@@ -14,8 +16,9 @@ the alarm uses, and only for a connection the Processor's
 The six things an operator asks this system to _do_ — collect a source,
 re-register a persisted run, replay a parse, rebuild the read model, refresh a
 session, and read what happened — as one authenticated API under
-`/api/ops/v1`, served by the same Worker that serves the reads, and reachable
-through MCP under the same names.
+`/api/ops/v1`, served by the same Worker that serves the reads. Their MCP tool
+definitions still exist but are not published to, and refuse, every `/mcp`
+caller ([MCP](#mcp)).
 
 This implements unified plan 02 §4-5 and the U06 backlog row. Everything here
 is **off by default**: with `OPS_API_ENABLED` unset these paths answer exactly
@@ -38,9 +41,9 @@ identity, one record and one vocabulary, so that:
   lost notification loses a dispatch, never the request (02 §5);
 - re-sending the same request is the same operation rather than a second bank
   session (G3-06, G3-14);
-- a person looking at a screen, an operator with `curl` and a model with an
-  MCP client all reach the same application service and get the same record
-  (G3-05).
+- a person looking at a screen and an operator with `curl` reach the same
+  application service and get the same record (G3-05); a model with an MCP
+  client cannot request an operation at all (ADR 0047).
 
 The one thing the API deliberately cannot be is a generic proxy: there is no
 route that takes SQL, a table name, a bucket key, a URL, a database id or a
@@ -85,7 +88,7 @@ a postcheck that only works once an unrelated flag is on is not a postcheck
 | `releaseSha`   | the commit the deploy stamped into `RELEASE_SHA`, or `""` outside a release                                                                                                                    |
 | `worker`       | `kogane-evidence-browser`                                                                                                                                                                      |
 | `core`         | `SELECT 1` against CORE, plus the applied migration file names in order                                                                                                                        |
-| `read`         | the same for READ, with `required` — true only while a READ flag is on                                                                                                                         |
+| `read`         | the same for READ, with `required: true`. This deployment always requires READ. The retired `READ_PROJECTION_ENABLED` name is not read. A binding that does not answer is `degraded`           |
 | `data`         | one R2 `head` of the fixed key `health/release-marker`; `markerPresent` is reported, never required                                                                                            |
 | `capabilities` | this deployment's capability snapshot, the same object `/api/meta` serves                                                                                                                      |
 | `grants`       | `{ "usable": true }`, or `{ "usable": false, "problem": "<code>" }` when `OPERATOR_SUBJECTS`/`AGENT_GRANTS` cannot be read or overlap — a code, never a subject; `usable: false` is `degraded` |
@@ -239,11 +242,9 @@ already does:
    `subject_not_granted` until a deployment names its operator. That is
    intended.**
 
-   Both transports go through the same resolver, so a misconfigured deployment
-   cannot serve one and refuse the other. While the lists are unreadable the
-   six MCP tools are not published either (a deployment that grades nobody can
-   authorize none of them) and remain callable only to answer
-   `grants_misconfigured`.
+   The routes are the only transport that reaches this resolver: `/mcp`
+   refuses an operations tool from its caller object before any grading
+   ([MCP](#mcp)).
 
 Reads are scoped to the principal that accepted the operation. An operation
 belonging to someone else answers `404 receipt_not_found`, exactly like one
@@ -278,8 +279,8 @@ misconfiguration is logged once as
 
 ## MCP
 
-The same six operations are MCP tools on the existing `POST /mcp` endpoint,
-published **only while the flag is on and the grant lists are readable**:
+The six operations have MCP tool definitions (`src/ops-tools.ts`), each
+generated from the Zod schema its route validates with:
 
 | Tool                            | Route                                        |
 | ------------------------------- | -------------------------------------------- |
@@ -290,20 +291,23 @@ published **only while the flag is on and the grant lists are readable**:
 | `kogane.ops.session.refresh`    | `POST /api/ops/v1/sessions/{source}/refresh` |
 | `kogane.ops.operation.get`      | `GET /api/ops/v1/operations/{id}`            |
 
-Each tool's published JSON Schema is generated from the same Zod schema its
-route validates with, so the wire contract and the advertised contract cannot
-drift. Reaching `/mcp` still needs an `AGENT_API_GRANTS` grant (that is the MCP
-endpoint's own gate) _and_ the operator capability above, so a read-only agent
-principal sees the tools refuse exactly as the routes do.
+**No `/mcp` caller can use them.** Since
+[ADR 0047](adr/0047-mcp-client-connection.md), `/mcp` accepts only an identity
+that came through the MCP Access application, and that identity is the
+agent-only caller `mcp-client:<sub>` — the operator's own identity included.
+The tools are not published to it, and `callOpsTool` refuses a call from the
+caller object with `403 actor_not_supported` before `opsContext` or the
+resolver runs, writing nothing. An operation is requested over the routes
+above, with the browser application's identity, where the operator is graded
+as before.
 
-`kogane.ops.operation.get` calls the same service as the read route, so on
-this code it returns the same record, `execution` block included. No MCP tool,
+`kogane.ops.operation.get` is defined over the same service as the read
+route, but no `/mcp` caller reaches it, so the HTTP read route is the only
+surface for following an operation, `execution` block included. No MCP tool,
 schema or grant was added for collector execution, and no MCP client has
-connected. The HTTP read route is the surface for following an operation. MCP
-client access is the work of #559/#565, whose design stops publishing the
-operations tools on `/mcp`; tracking an operation over MCP would be a separate
-follow-up: a read tool graded by an agent capability under the `/mcp` tool
-contract of [agent API](agent-api.md), never by the operator role.
+connected. Tracking an operation over MCP would be a separate follow-up: a
+read tool graded by an agent capability under the `/mcp` tool contract of
+[agent API](agent-api.md), never by the operator role.
 
 ## Session refresh and human-required states
 
@@ -420,6 +424,13 @@ per Processor invocation, inside the tick; the web UI has no operations view.
 
 ## Storage
 
+Every request to the six routes, and every operations MCP tool call, is
+recorded in the common audit log ([audit log](audit-log.md), ADR 0064): an
+accepted request's `accepted` record is the last statement of the acceptance
+batch (so a request exists exactly when its record does), and a re-send, a read
+or a refusal is recorded once after the answer. A validation refusal records
+the field paths, never the refused value.
+
 Migration `0040_operations_api.sql` (CORE), additive:
 
 - `ops_requests` — one accepted request. What was accepted (id, kind,
@@ -506,7 +517,7 @@ The collector execution services are in
 
 Synthetic data only.
 
-- `services/app/test/ops-api.test.ts` (30 checks over the real
+- `services/app/test/ops-api.test.ts` (28 checks over the real
   Worker, the real migrations and the real store): flag-off behaviour, the
   closed route and verb set with the flag on, `/api/meta` discovery, one
   record per request, re-send, idempotency conflict, per-principal scoping,
@@ -514,9 +525,11 @@ Synthetic data only.
   impossible dates (G3-13), error bodies that carry no rejected value — not
   the unknown source or release either (G3-08), the four other routes, the
   replay plan written into the 0035 tables exactly once, `waiting_for_human`
-  (G3-11), stage progress and completion, the MCP tool list pinned on both
-  flag states, HTTP/MCP parity down to the stored row (G3-05), and the
-  read route's `execution` block for an accepted and for a collected request.
+  (G3-11), stage progress and completion, the read route's `execution` block
+  for an accepted and for a collected request, and that `/mcp` publishes none
+  of the operations and refuses each of them without writing a row, even to
+  the operator's own MCP client, while HTTP still serves the operator (G3-05,
+  ADR 0047).
 - `packages/application/test/operations.test.ts` (10 checks; the SQL half
   runs against the real migrations in `bun:sqlite`): request identity,
   principal binding, the stage table per kind, the session policy's safe
@@ -553,15 +566,15 @@ enabled in the committed configuration. No MCP client has connected.
 
 Acceptance ids and the test that carries each:
 
-| Id    | Asked                                             | Test                                                                                                                        |
-| ----- | ------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| G3-01 | absence is reported as absence, not empty success | `ops-api.test.ts` "stores one record … pending, not as success (G3-01)"                                                     |
-| G3-05 | the same request over UI/HTTP and MCP is the same | `ops-api.test.ts` "HTTP and MCP are one API (G3-05)"                                                                        |
-| G3-06 | a re-sent operation returns the existing record   | `ops-api.test.ts` "collection requests are accepted, not executed (G3-06, G3-14)"; `operations.test.ts` raced re-send tests |
-| G3-08 | a secret in the input leaves only a safe code     | `ops-api.test.ts` "the schema is the boundary (G3-08, G3-13)"                                                               |
-| G3-11 | human-required state, no login retry              | `ops-api.test.ts` "waiting_for_human … (G3-11)"; `operations.test.ts` "a session refresh needs a person … (G3-11)"          |
-| G3-13 | SQL / bucket key / URL is not executed            | `ops-api.test.ts` "refuses arbitrary SQL, storage keys and external URLs by shape"                                          |
-| G3-14 | a duplicated acceptance maps to one run           | `operations.test.ts` "a second dispatch of one operation finds the first executor's run … (G3-14)"                          |
+| Id    | Asked                                                         | Test                                                                                                                        |
+| ----- | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| G3-01 | absence is reported as absence, not empty success             | `ops-api.test.ts` "stores one record … pending, not as success (G3-01)"                                                     |
+| G3-05 | the same request over UI/HTTP is the same; MCP cannot make it | `ops-api.test.ts` "operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)"                                          |
+| G3-06 | a re-sent operation returns the existing record               | `ops-api.test.ts` "collection requests are accepted, not executed (G3-06, G3-14)"; `operations.test.ts` raced re-send tests |
+| G3-08 | a secret in the input leaves only a safe code                 | `ops-api.test.ts` "the schema is the boundary (G3-08, G3-13)"                                                               |
+| G3-11 | human-required state, no login retry                          | `ops-api.test.ts` "waiting_for_human … (G3-11)"; `operations.test.ts` "a session refresh needs a person … (G3-11)"          |
+| G3-13 | SQL / bucket key / URL is not executed                        | `ops-api.test.ts` "refuses arbitrary SQL, storage keys and external URLs by shape"                                          |
+| G3-14 | a duplicated acceptance maps to one run                       | `operations.test.ts` "a second dispatch of one operation finds the first executor's run … (G3-14)"                          |
 
 ## Flags, deploy order and rollback
 
@@ -569,7 +582,7 @@ Flag defaults when absent (not the current committed settings):
 
 | Variable                             | Worker    | Default | Effect                                                                                    |
 | ------------------------------------ | --------- | ------- | ----------------------------------------------------------------------------------------- |
-| `OPS_API_ENABLED`                    | app       | `""`    | `"true"` serves the six routes and publishes the six tools                                |
+| `OPS_API_ENABLED`                    | app       | `""`    | `"true"` serves the six routes; their tools are published to no `/mcp` caller (ADR 0047)  |
 | `SESSION_REFRESH_POLICY`             | app       | `""`    | Sources a collector may refresh unattended; absent = a person                             |
 | `OPS_DISPATCH_ENABLED`               | processor | `""`    | `"1"`/`"true"` runs the `operation_dispatch` lane                                         |
 | `OPS_COLLECTOR_DISPATCH_CONNECTIONS` | processor | `""`    | JSON array of connection ids whose collector the lane may call; empty or malformed = none |

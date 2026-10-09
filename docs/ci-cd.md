@@ -530,13 +530,30 @@ namespace identity in an immutable receipt. Its original deployment audit
 binds the receipt artifact ID/digest; the original payload binds prepared
 artifact ID/digest, run/original-attempt, target SHA and trusted workflow SHA.
 
+Original Container baselines must be fully stable before preparation can push
+legacy images or proceed to migrations. Each unpublished target is checked again
+against that same baseline immediately before its Action; unbound targets are
+also checked during restore before resumed migrations. Capture retries only an
+absent new allocation version within one absolute 30-second budget, including
+registry proof and final readback. Multiple candidates, malformed/read failures
+and identity changes are refused immediately. The native returned UUID, or the
+frozen first changed legacy UUID, stays exact. The final readback must retain the
+same candidate before any receipt is written.
+
 Rerunning the failed release job reacquires its own `production-deploy` lock,
 refuses any newer release record (including failed/pending releases), and verifies
 artifact metadata and incrementally computed whole-ZIP checksums before restoring original
 stamped configs, bundles, cf output and Docker images. It skips only receipt-bound
-Container publication; their full 180-second guards run again against the exact
-original target. Ordinary Workers and idempotent migrations follow the original
-ordered path, and every health/lifecycle/schedule postcheck remains required.
+Container publication; their complete 600-second postchecks run again against
+the exact original target. One absolute deadline begins at postcheck entry and covers every
+allocation/identity read, registry credentials and manifest proof, and the final
+complete live readback. Late results cannot pass. A final pending state may poll
+again only within that same budget; identity drift fails immediately. Each
+postcheck step has an 11-minute fail-safe timeout and the release job retains its
+60-minute cap. Three full postcheck budgets consume at most 30 minutes; the
+separate 30-second capture budgets and all other release work must fit in the
+remaining time. No prewaiting, deadline resets or automatic reruns are added.
+Ordinary Workers and idempotent migrations follow the original ordered path, and every health/lifecycle/schedule postcheck remains required.
 
 Downloads write unverified bytes only into a unique private quarantine. The helper
 promotes the closed ZIP only after its bound checksum matches, then extracts it.

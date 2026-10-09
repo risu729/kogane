@@ -14,8 +14,8 @@ run = "./node_modules/.bin/tsc --noEmit"
 description = "Run the services/collector-sbi-vc-trade tests."
 depends = ["//services/collector-sbi-vc-trade:types"]
 run = [
-	"bun test ./test/*.test.ts",
-	"./node_modules/.bin/vitest run",
+	"node ../../tasks/_lib/coverage-run.mjs bun test ./test/*.test.ts",
+	"node ../../tasks/_lib/coverage-run.mjs vitest run",
 ]
 
 [tasks."dry-run"]

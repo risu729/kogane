@@ -16,7 +16,7 @@ depends = ["//experiments/st-george-automation:browser"]
 # navigation; under the fully parallel CI graph that can exceed bun's 5 s
 # default per-test timeout, so they get the same 60 s the other browser tests
 # in this repository use.
-run = "bun test --timeout 60000"
+run = "node ../../tasks/_lib/coverage-run.mjs bun test --timeout 60000"
 
 [tasks."probe"]
 description = "Try the public St.George login page in a fresh normal browser."

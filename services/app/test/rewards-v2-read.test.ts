@@ -46,18 +46,19 @@ async function token() {
     .sign(keys.privateKey);
 }
 
-/** `read` switches the store the reward routes read; never authentication. */
-async function call(path: string, options: { read?: boolean } = {}) {
+/** `read: false` drops the READ binding. `retired` is the old App env name. */
+async function call(path: string, options: { read?: boolean; retired?: string } = {}) {
+  const { READ: _read, ...withoutRead } = env;
   return worker.fetch(
     new Request(`https://fixture.test${path}`, {
       headers: { "cf-access-jwt-assertion": await token() },
     }),
     {
-      ...env,
+      ...(options.read === false ? withoutRead : env),
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: "fixture-audience",
-      REWARDS_V2_ENABLED: "true",
-      REWARD_READ_PROJECTION_ENABLED: options.read === false ? "false" : "true",
+      REWARDS_V2_ENABLED: options.retired ?? "false",
+      REWARD_READ_PROJECTION_ENABLED: "false",
     } as Env,
   );
 }
@@ -189,11 +190,18 @@ describe("the reward routes over the READ database", () => {
     );
     const expiry = await call("/api/v2/rewards/expiry");
     expect(expiry.status).toBe(503);
+    for (const retired of ["false", "0", "true"]) {
+      const again = await call("/api/v2/rewards/expiry", { retired });
+      expect(again.status).toBe(503);
+      expect(await again.json()).toMatchObject({ error: "reward_read_model_unavailable" });
+    }
   });
 
-  it("the retired reader flag cannot fall back to CORE before READ is built", async () => {
-    for (const path of ["/api/v2/rewards/expiry", "/api/v2/rewards/simulations"])
-      expect((await call(path, { read: false })).status).toBe(503);
+  it("the retired reader flag cannot fall back to CORE", async () => {
+    for (const path of ["/api/v2/rewards/expiry", "/api/v2/rewards/simulations"]) {
+      expect((await call(path, { retired: "true" })).status).toBe(503);
+      expect((await call(path, { read: false, retired: "true" })).status).toBe(503);
+    }
   });
 
   it("G2-19: a published snapshot answers with the instant it was evaluated at", async () => {

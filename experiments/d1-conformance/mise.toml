@@ -1,0 +1,24 @@
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks.corpus]
+description = "Generate the synthetic D1 conformance corpus from locked CORE migrations and existing builders."
+run = "bun scripts/corpus.ts"
+
+[tasks.types]
+description = "Generate the isolated conformance Worker binding types."
+run = "./node_modules/.bin/wrangler types --strict-vars false"
+
+[tasks.typecheck]
+depends = ["//experiments/d1-conformance:corpus", "//experiments/d1-conformance:types"]
+run = "./node_modules/.bin/tsc --noEmit"
+
+[tasks.test]
+depends = ["//experiments/d1-conformance:corpus", "//experiments/d1-conformance:types"]
+run = "node ../../tasks/_lib/coverage-run.mjs bun test"
+
+[tasks.dry-run]
+depends = ["//experiments/d1-conformance:corpus", "//experiments/d1-conformance:types"]
+run = "./node_modules/.bin/wrangler deploy --dry-run"
+
+[tasks.ci]
+depends = ["//experiments/d1-conformance:typecheck", "//experiments/d1-conformance:test"]

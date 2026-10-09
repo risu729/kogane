@@ -1,3 +1,4 @@
+import { InstrumentHistory } from "./InstrumentHistory.tsx";
 // How the instrument candidate review names its closed codes (ADR 0055).
 // Every code the server sends is one of the manifest's; an unknown one is
 // shown as itself (`displayLabel`), never dropped. A gap is shown as what is
@@ -148,6 +149,9 @@ export function IdentifierSide({
       <KvRow label="状態">{displayLabel(IDENTIFIER_STATE_LABELS, identifier.state)}</KvRow>
       <KvRow label="参照ID">
         <code className="wrap-any">{identifier.identifierId}</code>
+      </KvRow>
+      <KvRow label="訂正履歴">
+        <InstrumentHistory identifierId={identifier.identifierId} />
       </KvRow>
     </Kv>
   );

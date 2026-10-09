@@ -14,6 +14,7 @@ import { validInstrumentCandidateReview } from "../../../packages/observation-sh
 import { identifyParse } from "../../processor/src/identity-store";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
+import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
 const PATH = "/api/identity/instrument-candidates";
 const AGENT_PATH = "/api/agent/v1/instruments.candidates";
@@ -22,6 +23,8 @@ const FULL_GRANT = {
   capabilities: ["summary.read", "records.read"],
   budget: { maxRows: 500, maxProposalTargets: 5, maxExplainDepth: 3 },
 };
+/** The MCP Access application's audience (ADR 0047); `/mcp` accepts nothing else. */
+const MCP_AUDIENCE = "fixture-mcp-audience";
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;
 let jwks: { keys: unknown[] };
@@ -107,23 +110,35 @@ async function call(path: string, options: CallOptions = {}) {
       : await new SignJWT({ type: "app" })
           .setProtectedHeader({ alg: "RS256", kid: "fixture" })
           .setIssuer(issuer)
-          .setAudience("fixture-audience")
+          .setAudience(path === "/mcp" ? MCP_AUDIENCE : "fixture-audience")
           .setSubject(subject)
           .setIssuedAt()
           .setExpirationTime("5m")
           .sign(keys.privateKey);
   const init: RequestInit = {
     method: options.method ?? (options.body === undefined ? "GET" : "POST"),
-    headers: token ? { "cf-access-jwt-assertion": token } : {},
+    headers: {
+      ...(token ? { "cf-access-jwt-assertion": token } : {}),
+      // What an MCP client sends on every POST (Streamable HTTP).
+      ...(path === "/mcp" ? MCP_CLIENT_HEADERS : {}),
+    },
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
   return worker.fetch(new Request(`https://fixture.test${path}`, init), {
     ...env,
     ACCESS_ISSUER: issuer,
     ACCESS_AUDIENCE: "fixture-audience",
+    ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
     OPERATOR_SUBJECTS: '["synthetic-operator"]',
     AGENT_GRANTS: '["synthetic-agent"]',
-    AGENT_API_GRANTS: JSON.stringify(options.grants ?? { "synthetic-agent": FULL_GRANT }),
+    // Through `/mcp` the same subject is the agent-only `mcp-client:<sub>`
+    // (ADR 0047), so it has a grant under that name too.
+    AGENT_API_GRANTS: JSON.stringify(
+      options.grants ?? {
+        "synthetic-agent": FULL_GRANT,
+        "mcp-client:synthetic-agent": FULL_GRANT,
+      },
+    ),
   } as Env);
 }
 
@@ -136,13 +151,19 @@ async function mcp(message: Record<string, unknown>, options: CallOptions = {}) 
   return (await response.json()) as Record<string, any>;
 }
 
-/** Every table's row count, so "writes nothing" is checkable. */
+/**
+ * Every table's row count, so "writes nothing" is checkable — but for the
+ * audit tables: an agent call's own audit record (ADR 0064) is the one write
+ * it makes, and `test/audit.test.ts` covers it.
+ */
 async function tables() {
   const names = await env.DB.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name",
   ).all<{ name: string }>();
   const counts: Record<string, number> = {};
-  for (const { name } of names.results)
+  for (const { name } of names.results.filter(
+    ({ name }) => name !== "audit_records" && name !== "audit_overflow_counters",
+  ))
     counts[name] = (await env.DB.prepare(`SELECT count(*) AS n FROM "${name}"`).first<number>(
       "n",
     ))!;
@@ -286,5 +307,101 @@ describe("kogane.instruments.candidates", () => {
     expect(unknownKey.status).toBe(400);
     expect(await unknownKey.json()).toMatchObject({ code: "unsupported_semantics" });
     expect(await tables()).toEqual(before);
+  });
+
+  it("is graded over /mcp by the agent-only mcp-client entry, never the bare subject's (ADR 0047)", async () => {
+    const before = await tables();
+    const candidates = (grants: Record<string, unknown>) =>
+      mcp(
+        {
+          method: "tools/call",
+          params: { name: "kogane.instruments.candidates", arguments: {} },
+        },
+        { grants },
+      );
+    // The tool list is per deployment: listed under a summary-only grant too,
+    // and refused when called, with the closed reason.
+    const summaryOnly = {
+      "mcp-client:synthetic-agent": { ...FULL_GRANT, capabilities: ["summary.read"] },
+    };
+    const listed = await mcp({ method: "tools/list" }, { grants: summaryOnly });
+    expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).toContain(
+      "kogane.instruments.candidates",
+    );
+    const summary = await candidates(summaryOnly);
+    expect(summary["result"].isError).toBe(true);
+    expect(summary["result"].structuredContent).toMatchObject({
+      code: "unauthorized",
+      refs: ["capability:records.read"],
+    });
+    const narrowed = await candidates({
+      "mcp-client:synthetic-agent": {
+        ...FULL_GRANT,
+        scopes: { sources: ["sbi-securities"], accounts: "*" },
+      },
+    });
+    expect(narrowed["result"].structuredContent).toMatchObject({
+      code: "evidence_restricted",
+      refs: ["scope:source"],
+    });
+    // A whole-store grant under the bare subject does not reach an MCP client.
+    const response = await call("/mcp", {
+      subject: "synthetic-agent",
+      grants: { "synthetic-agent": FULL_GRANT },
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "kogane.instruments.candidates", arguments: {} },
+      },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
+    expect(await tables()).toEqual(before);
+  });
+
+  it("records each served call as one read of the page's candidates, and a refusal under its tool (ADR 0064)", async () => {
+    const last = (await env.DB.prepare(
+      "SELECT coalesce(max(rowid),0) AS n FROM audit_records",
+    ).first<number>("n"))!;
+    const records = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT path,principal,subject,principal_kind,risk_class,result,result_code,diff_json FROM audit_records WHERE operation='instruments.candidates' AND rowid>? ORDER BY rowid",
+        )
+          .bind(last)
+          .all()
+      ).results;
+    const page = (await (await call(PATH)).json()) as { items: unknown[]; total: number };
+    expect((await call(AGENT_PATH, { subject: "synthetic-agent", body: {} })).status).toBe(200);
+    await mcp({
+      method: "tools/call",
+      params: { name: "kogane.instruments.candidates", arguments: {} },
+    });
+    const refused = await call(AGENT_PATH, { subject: "synthetic-agent", body: { source: "x" } });
+    expect(refused.status).toBe(400);
+    const read = {
+      principal_kind: "agent",
+      risk_class: "R0",
+      result: "read",
+      result_code: null,
+      diff_json: JSON.stringify({
+        kind: "read",
+        rows: page.items.length,
+        truncated: page.total > page.items.length,
+      }),
+    };
+    // The browser route is not an agent call and records nothing.
+    expect(await records()).toEqual([
+      { path: "agent-http", principal: "synthetic-agent", subject: "synthetic-agent", ...read },
+      { path: "mcp", principal: "mcp-client:synthetic-agent", subject: "synthetic-agent", ...read },
+      expect.objectContaining({
+        path: "agent-http",
+        principal: "synthetic-agent",
+        risk_class: "R0",
+        result: "refused",
+        result_code: "unsupported_semantics",
+      }),
+    ]);
   });
 });

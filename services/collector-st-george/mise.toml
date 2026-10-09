@@ -12,7 +12,7 @@ run = "./node_modules/.bin/tsc --noEmit"
 [tasks.test]
 description = "Verify St.George collection and persistence using synthetic data."
 depends = ["//services/collector-st-george:types"]
-run = ["bun test ./test/*.test.ts", "./node_modules/.bin/vitest run"]
+run = ["node ../../tasks/_lib/coverage-run.mjs bun test ./test/*.test.ts", "node ../../tasks/_lib/coverage-run.mjs vitest run"]
 
 [tasks.container]
 depends = ["//apps/web:browser"]

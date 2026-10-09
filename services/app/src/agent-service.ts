@@ -23,6 +23,7 @@ import {
   explainCardPurchases,
   financialError,
   type Grant,
+  grantAllowsSource,
   openContext,
   parseExplainRequest,
   parseProposalRequest,
@@ -43,11 +44,14 @@ import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import {
   interpretationContext,
   LATEST_IDENTITY_RELEASE,
+  PAGE_LIMIT,
+  visibleEvidence,
 } from "../../../packages/read-model/src/index";
-import { balanceProjectionReader, projectionFlagOn } from "./balances-v2";
+import { balanceProjectionReader, balanceReadConfigured } from "./balances-v2";
 import { centralStoreCapabilities } from "./capabilities";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
 import { proposalStore } from "./proposals";
+import type { OperationCall } from "../../../packages/application/src/audit/call.ts";
 
 /** The tools every configured deployment serves. */
 export const AGENT_TOOL_NAMES = [
@@ -98,6 +102,8 @@ interface ToolContext {
   env: Env;
   grant: Grant;
   now: string;
+  /** The tool call's audit record (ADR 0064); a proposal's joins its batch. */
+  audit?: OperationCall;
 }
 
 function failure(
@@ -109,14 +115,27 @@ function failure(
 }
 
 /**
- * Everything the context pins, read from the shared read model once per call.
- * `publicationHighWater` is the highest visible parse run: what "current"
- * means for this answer. `parserBuildDigest` covers the visible parse-run
- * window the overview reports, which is bounded by the read model's page
- * limit; it identifies the builds behind the rows this answer can contain.
+ * Everything the context pins, read from the shared read model once per call,
+ * **inside the grant's source scope** (SC18). `visibleSources` is the granted
+ * sources the store holds; `publicationHighWater` is the highest visible
+ * parse run of those sources — what "current" means for this answer; and
+ * `parserBuildDigest` covers the builds of the newest visible parse runs of
+ * those sources, bounded by the read model's page limit. For a grant over
+ * every source (`"*"`, which is also the browser reader's) the window is the
+ * overview's own; for a listed grant it is read for the listed sources only,
+ * so a source outside the grant can neither be named in a context nor move
+ * its publication or parser digests.
  */
 async function contextInputs(context: ToolContext, overview: Overview): Promise<ContextInputs> {
-  const parseRuns = overview.parseRuns;
+  const grant = context.grant;
+  const visibleSources = overview.sources
+    .map((source) => source.id)
+    .filter((id) => grantAllowsSource(grant, id))
+    .sort();
+  const parseRuns =
+    grant.scopes.sources === "*"
+      ? overview.parseRuns
+      : await scopedParseRuns(context.db, visibleSources);
   const builds = [
     ...new Set(parseRuns.map((run) => `${run.parser_name}@${run.parser_version}`)),
   ].sort();
@@ -124,9 +143,33 @@ async function contextInputs(context: ToolContext, overview: Overview): Promise<
     now: context.now,
     publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}`,
     parserBuildDigest: await canonicalDigest(builds),
-    visibleSources: overview.sources.map((source) => source.id).sort(),
+    visibleSources,
     interpretation: interpretationContext("latest", LATEST_IDENTITY_RELEASE),
   };
+}
+
+/**
+ * The newest visible parse runs of the given sources, newest first: the
+ * overview's parse-run window (`visibleEvidence.parseRuns`, the read model's
+ * page limit), restricted to those sources before it is bounded.
+ */
+async function scopedParseRuns(
+  db: D1Database,
+  sources: readonly string[],
+): Promise<Pick<Overview["parseRuns"][number], "id" | "parser_name" | "parser_version">[]> {
+  if (sources.length === 0) return [];
+  const placeholders = sources.map(() => "?").join(",");
+  const result = await db
+    .prepare(
+      `SELECT p.id, p.parser_name, p.parser_version
+         FROM ${visibleEvidence.parseRuns} p
+         JOIN observation_fetch_artifacts a ON a.id = p.fetch_artifact_id
+        WHERE a.source_id IN (${placeholders})
+        ORDER BY p.id DESC LIMIT ${String(PAGE_LIMIT)}`,
+    )
+    .bind(...sources)
+    .all<{ id: number; parser_name: string; parser_version: string }>();
+  return result.results;
 }
 
 /** `resultRef`: the hand-off id for one answer. Equal inputs give an equal ref. */
@@ -204,7 +247,7 @@ export async function callTool(
       const outcome = await proposeReconciliation({
         grant: context.grant,
         opened,
-        store: proposalStore(context.db),
+        store: proposalStore(context.db, context.audit),
         request: parsed.value,
         now: context.now,
       });
@@ -275,10 +318,12 @@ export async function queryResponse(
     opened,
     request,
     reader: context.reader,
-    // `holdings` reads the adopted balance projection and nothing else; it
-    // answers `unavailable` while the reader flag is off or no snapshot is
-    // sealed, rather than summing the observation rows behind it.
-    projection: projectionFlagOn(context.env) ? balanceProjectionReader(context.env) : undefined,
+    // `holdings` reads the adopted balance projection when READ is bound, and
+    // answers `unavailable` when no snapshot is sealed, rather than summing
+    // the observation rows behind it.
+    projection: balanceReadConfigured(context.env)
+      ? balanceProjectionReader(context.env)
+      : undefined,
     overview,
   });
   if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };

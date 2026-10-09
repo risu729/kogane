@@ -36,8 +36,9 @@ production gate". What the code holds before this ADR:
   approve and commit, and the processor's writer slot answers null.
 - Human-adopted identity is `humanAdoptedRowIdentity` (`row-identity.ts`): an
   SMBC row whose parser records `_kogane.identityOrigin: provider-id` is
-  admitted with its alias class; an SBI Shinsei row is refused
-  `identity_origin_unrecorded` (rule 2), because its parser records no origin.
+  admitted with its alias class; an SBI Shinsei row of a 0.1.2 run is refused
+  `identity_origin_unrecorded` (rule 2): the parser records the origin from
+  release 0.1.3; rows of 0.1.2 runs stay refused.
 - The domain already has a stage C matcher (`stageCProposals`,
   `reconcile.ts`): equal opposite amounts on nearby days across two sources,
   under a built-in `DEFAULT_MATCH_OPTIONS` window, with no identity admission,
@@ -303,10 +304,11 @@ Rollback). 0072 stays; an older build never reads or writes its tables.
   rows without a recorded origin are refused here (`identity_origin_unrecorded`).
   The owner reports (2026-10-09), from read-only production aggregates, that
   the parser uses `txnReferenceNo` as it is and that it was stable across
-  re-observations in the captured range, and that a parser release recording
-  `identityOrigin: provider-id` is being prepared on a separate branch. A parser
-  release that records the origin admits the rows; this ADR does not assume it
-  is deployed.
+  re-observations in the captured range. Parser release 0.1.3 records
+  `identityOrigin: provider-id`
+  ([ADR 0018 note](0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin));
+  it admits the rows 0.1.3 runs store, rows of 0.1.2 runs stay refused, and
+  this ADR does not depend on it.
 - **The `economic-event.resolve-identity` exemption** stays closed (ADR 0054,
   G2 amendment): owner question, unchanged.
 - **Enabling the planners and a writer in production**: after ADR 0054's

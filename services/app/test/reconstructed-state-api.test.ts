@@ -15,6 +15,7 @@ import { RECONSTRUCTED_STATE_TOOL_NAME } from "../src/agent-service";
 import { RECONSTRUCTED_STATE_MCP_TOOLS } from "../src/mcp";
 import { reconstructedStateAvailable } from "../src/reconstructed-state-api";
 import worker from "../src/worker";
+import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
 const PATH = "/api/v2/reconstructed-state";
 const ACCOUNT = "acct-reconstructed-synthetic";
@@ -25,6 +26,8 @@ const FULL_GRANT = {
   capabilities: ["summary.read", "records.read"],
   budget: { maxRows: 500, maxProposalTargets: 5, maxExplainDepth: 3 },
 };
+/** The MCP Access application's audience (ADR 0047); `/mcp` accepts nothing else. */
+const MCP_AUDIENCE = "fixture-mcp-audience";
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;
 let jwks: { keys: unknown[] };
@@ -99,14 +102,18 @@ async function call(
       : await new SignJWT({ type: "app" })
           .setProtectedHeader({ alg: "RS256", kid: "fixture" })
           .setIssuer(issuer)
-          .setAudience("fixture-audience")
+          .setAudience(path === "/mcp" ? MCP_AUDIENCE : "fixture-audience")
           .setSubject(subject)
           .setIssuedAt()
           .setExpirationTime("5m")
           .sign(keys.privateKey);
   const init: RequestInit = {
     method: options.method ?? (options.body === undefined ? "GET" : "POST"),
-    headers: token ? { "cf-access-jwt-assertion": token } : {},
+    headers: {
+      ...(token ? { "cf-access-jwt-assertion": token } : {}),
+      // What an MCP client sends on every POST (Streamable HTTP).
+      ...(path === "/mcp" ? MCP_CLIENT_HEADERS : {}),
+    },
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
   return worker.fetch(new Request(`https://fixture.test${path}`, init), {
@@ -114,6 +121,7 @@ async function call(
     DB: options.rewrite ? rewritten(env.DB, options.rewrite) : env.DB,
     ACCESS_ISSUER: issuer,
     ACCESS_AUDIENCE: "fixture-audience",
+    ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
     OPERATOR_SUBJECTS: '["synthetic-operator"]',
     ...options.environment,
   } as Env);
@@ -239,7 +247,14 @@ describe("reconstructed state over HTTP", () => {
 });
 
 describe("the agent tool", () => {
-  const granted = { AGENT_API_GRANTS: JSON.stringify({ "agent-principal": FULL_GRANT }) };
+  // Through `/mcp` the same subject is the agent-only `mcp-client:<sub>`
+  // (ADR 0047), so it has a grant under that name too.
+  const granted = {
+    AGENT_API_GRANTS: JSON.stringify({
+      "agent-principal": FULL_GRANT,
+      "mcp-client:agent-principal": FULL_GRANT,
+    }),
+  };
   const body = { account: ACCOUNT, from: "2026-03-01", to: "2026-03-31" };
 
   it("is listed while the route is served and answers what the route answers", async () => {
@@ -355,5 +370,54 @@ describe("the agent tool", () => {
     ).toBe(404);
     expect((await call(TOOL_PATH, { subject: "agent-principal", body })).status).toBe(403);
     expect((await call(TOOL_PATH, { body, subject: null, environment: granted })).status).toBe(401);
+  });
+
+  it("records each served call as a read of one reconstruction, and nothing where the tool is absent (ADR 0064)", async () => {
+    const last = (await env.DB.prepare(
+      "SELECT coalesce(max(rowid),0) AS n FROM audit_records",
+    ).first<number>("n"))!;
+    const records = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT path,principal,subject,principal_kind,operation,risk_class,result,diff_json FROM audit_records WHERE rowid>? ORDER BY rowid",
+        )
+          .bind(last)
+          .all()
+      ).results;
+    const toolCall = {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: RECONSTRUCTED_STATE_TOOL_NAME, arguments: body },
+    };
+    // Absent: the HTTP 404 and MCP's `unknown_tool` name no served tool.
+    await call("/mcp", {
+      subject: "agent-principal",
+      body: toolCall,
+      environment: granted,
+      rewrite: withoutViews,
+    });
+    await call(TOOL_PATH, {
+      subject: "agent-principal",
+      body,
+      environment: granted,
+      rewrite: withoutViews,
+    });
+    expect(await records()).toEqual([]);
+    expect(
+      (await call(TOOL_PATH, { subject: "agent-principal", body, environment: granted })).status,
+    ).toBe(200);
+    await call("/mcp", { subject: "agent-principal", body: toolCall, environment: granted });
+    const read = {
+      principal_kind: "agent",
+      operation: "reconstructed-state.read",
+      risk_class: "R0",
+      result: "read",
+      diff_json: '{"kind":"read","rows":1,"truncated":false}',
+    };
+    expect(await records()).toEqual([
+      { path: "agent-http", principal: "agent-principal", subject: "agent-principal", ...read },
+      { path: "mcp", principal: "mcp-client:agent-principal", subject: "agent-principal", ...read },
+    ]);
   });
 });

@@ -16,7 +16,7 @@ run = [
 [tasks."test"]
 description = "Run the services/collector-myjcb tests."
 depends = ["//services/collector-myjcb:types"]
-run = "bun test"
+run = "node ../../tasks/_lib/coverage-run.mjs bun test"
 
 [tasks."dry-run"]
 description = "Validate the services/collector-myjcb deployment without uploading it."

@@ -1,11 +1,10 @@
 // Shared DATA-bucket persistence for the V Point Pay app collector (unified
 // plan U09, chapter 03, decisions D7/D12).
 //
-// With `COLLECTION_TARGET=shared` the Durable Object writes the run through
-// `packages/collection` — every artifact content-addressed under `objects/`,
-// the `terminal-v1` manifest last — instead of writing artifacts and a
-// collector manifest into the per-source bucket. The bytes are identical: the
-// same decoded API response text the legacy path stores.
+// The Durable Object writes the run through `packages/collection` — every
+// artifact content-addressed under `objects/`, the `terminal-v1` manifest
+// last. It does not read `COLLECTION_TARGET`. The bytes match the decoded API
+// text the retired per-source path stored.
 //
 // The app collector is stopped (`/trigger`, `/probe` and `/reset-credentials`
 // answer 410 and there is no cron), so this is the target a future re-enable

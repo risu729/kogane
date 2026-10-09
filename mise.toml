@@ -3,7 +3,7 @@
 # mise 2026.9.3 is the first release whose `deps` providers this repository
 # relies on (`mise deps --explain bun`, `mise deps --force`); the CI workflow
 # pins the same version.
-min_version = "2026.10.5"
+min_version = "2026.10.6"
 monorepo_root = true
 
 [monorepo]
@@ -85,7 +85,7 @@ run = "bun tasks/_lib/check-manifests.ts"
 description = "Run the repository-wide guards that belong to no single workspace."
 # Directories, not a list of files: a new guard next to the one it protects
 # joins CI by existing, exactly like a new workspace does.
-run = "bun test tasks/_lib scripts tests packages/collector-diagnostics/test/diagnostics.test.ts"
+run = "node tasks/_lib/coverage-run.mjs bun test tasks/_lib scripts tests packages/collector-diagnostics/test/diagnostics.test.ts"
 
 [tasks."root:depcruise"]
 description = "Check the resolved import graph against the boundary rules."
@@ -185,3 +185,13 @@ depends = ["check"]
 [tasks."automation:alarm-bootstrap"]
 description = "Reconcile and verify future production schedule alarms."
 run = "node tasks/_lib/ci/alarm-bootstrap.mjs"
+
+[tasks."coverage:summary"]
+description = "Validate native coverage artifacts and summarize their separate runtime scopes."
+run = "node tasks/_lib/coverage-summary.mjs"
+
+[tasks."coverage:processor-baseline"]
+description = "Collect the full serial processor baseline, without merging native shards."
+dir = "services/processor"
+depends = ["//services/processor:types"]
+run = "node ../../tasks/_lib/coverage-run.mjs --baseline bun test"

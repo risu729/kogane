@@ -61,13 +61,17 @@ test("hosted partitions cover exactly the executable leaves of local full verifi
   for (const index of [1, 2]) {
     const name = `//services/processor:test-shard-${index}`;
     const task = byName.get(name);
-    expect(task?.run).toEqual([`bun test --shard=${index}/2`]);
+    expect(task?.run).toEqual([
+      `node ../../tasks/_lib/coverage-run.mjs bun test --shard=${index}/2`,
+    ]);
     expect(task?.dir).toBe(`${REPO_ROOT}/services/processor`);
     for (const leaf of leaves(name))
       combined.add(leaf === name ? "//services/processor:test" : leaf);
   }
   expect([...combined].sort()).toEqual(full);
-  expect(byName.get("//services/processor:test")?.run).toEqual(["bun test"]);
+  expect(byName.get("//services/processor:test")?.run).toEqual([
+    "node ../../tasks/_lib/coverage-run.mjs bun test",
+  ]);
 
   const plan = native(["mise", "run", "--dry-run", "--jobs", "1", "ci:remainder"]);
   const commands = plan.split("\n").filter((line) => line.includes("] $ "));

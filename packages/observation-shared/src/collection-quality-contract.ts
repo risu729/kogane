@@ -45,6 +45,10 @@ export const REGISTRATION_STATES = ["registered", "pending", "blocked", "unrecor
 
 /**
  * Which existing rule decides that a cell's capture is current:
+ * SMBC request keys, MoneyForward account-months, V Point complete runs and
+ * MyJCB connections compose Transactions/Balances' unchanged selections.
+ * Capture membership is not a guarantee of full provider-history coverage;
+ * missing published-parse claims are `coverage_not_recorded`.
  * `container-snapshot` the dataset snapshot policies (`completeSnapshotCandidates`),
  * `global-pass-month`, `vpass-card-month` and `myjcb-statement-slot` the
  * per-source snapshot CTEs of `packages/read-model/src/sql.ts`, and
@@ -56,11 +60,19 @@ export const CURRENT_RULES = [
   "global-pass-month",
   "vpass-card-month",
   "myjcb-statement-slot",
+  "smbc-request-key",
+  "moneyforward-account-month",
+  "v-point-complete-run",
+  "myjcb-connection",
   "published-eligible",
 ] as const;
 
 /**
  * How a cell's period is named: `latest` (one period, the newest capture),
+ * `request-key` (SMBC's complete artifact key, an opaque request partition,
+ * not a parsed date range), `account-month` (MoneyForward's existing key
+ * substring), `connection` (MyJCB's existing key prefix, an opaque connection,
+ * not a payment month),
  * `activity-month` (GLOBAL PASS `YYYY-MM`), `statement-month` (Vpass
  * `YYYYMM`), `statement-slot` (MyJCB payment month `YYYY-MM` with its
  * statement state, as `myjcbStatementSlot` reads it: a relative label no rule
@@ -73,6 +85,9 @@ export const PERIOD_KINDS = [
   "activity-month",
   "statement-month",
   "statement-slot",
+  "request-key",
+  "account-month",
+  "connection",
 ] as const;
 
 /** `current`: the newest capture is current; `older-current`: an older one is; `no-current`: none is. */
@@ -116,6 +131,7 @@ export const CELL_REASONS = [
   "parser_rejected",
   "parse_unpublished",
   "coverage_incomplete",
+  "coverage_not_recorded",
   "newer_capture_not_current",
   "no_current_capture",
   "period_unplaced",
