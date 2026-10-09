@@ -329,8 +329,9 @@ everything a person can do through the UI, an AI holding explicit
 owner-delegated grants should be able to do through the same application
 layer, so the route and page add no new human-only constraint and keep the
 existing grant checks exactly as they are; the agent read is the main path;
-a shared audit log for human and AI operations is designed elsewhere (ADR
-0063/0064 are reserved for it).
+the delegated AI operation path and the shared audit log for human and AI
+operations are designed in [ADR 0063](0063-delegated-ai-operation-path.md)
+and [ADR 0064](0064-common-audit-log.md), not here.
 
 ### Options considered
 
@@ -545,8 +546,17 @@ history beyond 730 days.
   approval id and the commit's `operationId` (the commit's idempotency key).
   None carries a channel (ui, mcp, api) or a correlation id, a read has no
   per-request id (its errors carry the constant `instruments.candidates`),
-  and a plan request has no idempotency key of its own. Recorded for the
-  audit contract of ADR 0063/0064; this slice designs none.
+  and a plan request has no idempotency key of its own. ADR 0064 supplies
+  them (`path`, `correlation_id`, `idempotency_key` on an `audit_records`
+  row, written through ADR 0063's `executeOperation`); this slice implements
+  neither. Against those ADRs: the read tool already follows ADR 0063 §10 (it
+  calls the route's own service and refuses a listed source or account grant
+  before any read), and it writes no ADR 0064 `read` record, which every
+  agent and MCP tool call will need once `audit_records` and
+  `executeOperation` exist. Its `commands` reach every `records.read`
+  caller; ADR 0063 §10 strips decision payloads only from ADR 0013's card
+  purchase candidates, and an agent's plan of them is still graded by the
+  change lifecycle.
 - **A server-side anchor pin** for adoption plans (Decision 7): a payload
   field naming the anchor, or a planner that pins the target instrument's
   identifiers. Either changes `identity.assign` for every caller.
