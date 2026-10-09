@@ -45,7 +45,6 @@ export const RECONSTRUCTED_STATE_WIRE_STATUSES = [
   "incomplete",
   "complete",
 ] as const;
-export type ReconstructedStateWireStatus = (typeof RECONSTRUCTED_STATE_WIRE_STATUSES)[number];
 /** `RECONSTRUCTED_STATE_REASONS` of the query, in its order. */
 export const RECONSTRUCTED_STATE_WIRE_REASONS = [
   "economic_guard_missing",
@@ -79,7 +78,6 @@ export const RECONSTRUCTED_STATE_WIRE_REASONS = [
   "nothing_to_reconstruct",
   "positions_not_folded",
 ] as const;
-export type ReconstructedStateWireReason = (typeof RECONSTRUCTED_STATE_WIRE_REASONS)[number];
 /** `LATE_UNAVAILABLE_REASONS` of the query. */
 export const RECONSTRUCTED_STATE_LATE_UNAVAILABLE = [
   "no_end_capture",

@@ -2,13 +2,9 @@ import { useQuery } from "@tanstack/react-query";
 import { getJson, useFeatures } from "./api.ts";
 import type { ReconstructedStateResult } from "../../../packages/application/src/query/reconstructed-state.ts";
 
-export type {
-  ReconstructedStateManifest,
-  ReconstructedStateResult,
-} from "../../../packages/application/src/query/reconstructed-state.ts";
+export type { ReconstructedStateResult } from "../../../packages/application/src/query/reconstructed-state.ts";
 export type {
   ReconstructedCell,
-  ReconstructionExplanation,
   ReconstructionStart,
   LegDispositionRecord,
 } from "../../../packages/domain/src/reconstruction.ts";

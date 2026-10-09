@@ -52,11 +52,7 @@ export const RECONSTRUCTED_STATE_KEYS = [
   "setVersion",
 ] as const;
 /** Scope keys the query does not answer: refused by name, never ignored. */
-export const RECONSTRUCTED_STATE_UNSUPPORTED_SCOPES = [
-  "accounts",
-  "instrument",
-  "instruments",
-] as const;
+const RECONSTRUCTED_STATE_UNSUPPORTED_SCOPES = ["accounts", "instrument", "instruments"] as const;
 /** The forms the HTTP route and the tool schema publish. */
 export const RECONSTRUCTED_STATE_ACCOUNT = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,127}$/u;
 export const RECONSTRUCTED_STATE_DATE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u;
@@ -65,7 +61,7 @@ export const RECONSTRUCTED_STATE_INSTANT =
   /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z$/u;
 export const RECONSTRUCTED_STATE_SET_VERSION = /^[0-9a-f]{64}$/u;
 /** The largest commit sequence a request may name (a safe integer). */
-export const RECONSTRUCTED_STATE_MAX_SEQ = Number.MAX_SAFE_INTEGER;
+const RECONSTRUCTED_STATE_MAX_SEQ = Number.MAX_SAFE_INTEGER;
 
 /**
  * Every refusal, its HTTP status and the agent API's error category. The code
@@ -285,7 +281,7 @@ export function reconstructedStateBodyFromQuery(
 }
 
 /** Whether a resolved account id names an `accounts` row (by primary key). */
-export const RECONSTRUCTED_STATE_ACCOUNT_SQL = "SELECT 1 AS present FROM accounts WHERE id=?1";
+const RECONSTRUCTED_STATE_ACCOUNT_SQL = "SELECT 1 AS present FROM accounts WHERE id=?1";
 
 /** The refusal codes the query's own errors become. */
 function refusalOf(error: unknown): { refusal: ReconstructedStateRefusal; refs: string[] } | null {
