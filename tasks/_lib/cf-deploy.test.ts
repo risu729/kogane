@@ -5,6 +5,7 @@ import { readDeployOrder, workflowSteps } from "./deploy-order.ts";
 import { REPO_ROOT } from "./repo-root.ts";
 import { releaseProgress } from "./ci/release-ledger.mjs";
 import { containerProgress } from "./ci/cf-container-release.mjs";
+import { grantAllows, parseGrants } from "../../packages/application/src/grants.ts";
 
 const order = readDeployOrder();
 const allTargets = order.workers.filter((worker) => worker.deployBackend === "cf");
@@ -90,6 +91,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
               "vpc_networks",
               "limits",
               "queues",
+              "routes",
             ].includes(key),
         ),
       ).toEqual([]);
@@ -114,6 +116,11 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(worker.compatibilityFlags).toEqual(old.compatibility_flags);
       expect(worker.workersDev).toBe(old.workers_dev);
       expect(worker.previewUrls).toBe(false);
+      expect(worker.domains ?? []).toEqual(
+        (old.routes ?? [])
+          .filter((route: any) => route.custom_domain)
+          .map((route: any) => route.pattern),
+      );
       expect(worker.observability).toEqual(camel(old.observability));
       for (const [key, value] of Object.entries(old.vars ?? {}))
         expect(worker.env[key]).toEqual({ type: "text", value });
@@ -199,6 +206,25 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(steps.indexOf(cf!)).toBe(steps.indexOf(legacy!) + 1);
     });
   }
+  test("the configured MCP reader grants only the dedicated identity bounded structured reads", () => {
+    const old = parseJsonc(readFileSync(`${REPO_ROOT}/services/app/wrangler.jsonc`, "utf8"));
+    const grants = parseGrants(old.vars.AGENT_API_GRANTS);
+    const owner = JSON.parse(old.vars.OPERATOR_SUBJECTS)[0];
+    expect(grants.size).toBe(1);
+    expect(grants.has(owner)).toBe(false);
+    expect(grants.has("mcp-client:ungranted-synthetic-subject")).toBe(false);
+    const grant = grants.get(`mcp-client:${owner}`)!;
+    expect(grant).toBeDefined();
+    expect(grant.scopes).toEqual({ sources: "*", accounts: "*" });
+    expect(grantAllows(grant, "summary.read")).toBe(true);
+    expect(grantAllows(grant, "records.read")).toBe(true);
+    expect(grantAllows(grant, "evidence.read")).toBe(false);
+    expect(grantAllows(grant, "interpretation.propose")).toBe(false);
+    expect(grant.budget.maxRows).toBe(100);
+    expect(old.vars.ACCESS_MCP_AUDIENCE).not.toBe(old.vars.ACCESS_AUDIENCE);
+    expect(old.vars.AGENT_GRANTS).toBe("");
+    expect(old.vars.MCP_DELEGATIONS).toBe("");
+  });
   test("legacy lifecycle stays canonical and is checked around publication", () => {
     const history: Record<string, unknown[]> = {
       "sbi-vc-trade-worker": [{ tag: "v1", new_sqlite_classes: ["SbiVcSessionState"] }],

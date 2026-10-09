@@ -499,6 +499,28 @@ function strings(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
 }
 
+/** Only exact custom-domain declarations are extracted; other route shapes remain unextracted. */
+export function customDomainPatterns(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const patterns: string[] = [];
+  for (const item of value) {
+    const route = object(item);
+    const pattern = route["pattern"];
+    if (
+      Object.keys(route).sort().join(",") !== "custom_domain,pattern" ||
+      route["custom_domain"] !== true ||
+      typeof pattern !== "string" ||
+      pattern.length > 253 ||
+      !pattern.includes(".") ||
+      !pattern.split(".").every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(label)) ||
+      patterns.includes(pattern)
+    )
+      return null;
+    patterns.push(pattern);
+  }
+  return patterns;
+}
+
 export interface WorkerResources {
   config: string;
   name: string;
@@ -507,6 +529,8 @@ export interface WorkerResources {
   role: "deployed" | "local-audit" | "test-only" | "binding-only" | "not-deployed";
   liveWorker: boolean;
   crons: string[];
+  /** Declared custom domains, not proof of a live attachment or DNS. */
+  customDomains?: string[];
   emailHandler: boolean;
   d1: {
     binding: string;
@@ -576,6 +600,7 @@ function readWorker(root: string, configPath: string): WorkerResources {
   }
   const emailHandler = /\basync email\s*\(/u.test(handlerText);
   const queues = object(config["queues"]);
+  const customDomains = customDomainPatterns(config["routes"]);
   return {
     config: configPath,
     name,
@@ -684,12 +709,18 @@ function readWorker(root: string, configPath: string): WorkerResources {
               : { binding: text(object(config["assets"])["binding"]) as string }),
           },
         }),
+    ...(customDomains === null ? {} : { customDomains }),
     varNames: names(config["vars"]),
     requiredSecretNames: strings(object(config["secrets"])["required"]).toSorted((a, b) =>
       a.localeCompare(b),
     ),
     unextractedKeys: Object.keys(config)
-      .filter((key) => !COSMETIC_KEYS.has(key) && !EXTRACTED_KEYS.has(key))
+      .filter(
+        (key) =>
+          !COSMETIC_KEYS.has(key) &&
+          !EXTRACTED_KEYS.has(key) &&
+          !(key === "routes" && customDomains !== null),
+      )
       .sort(),
   };
 }
@@ -1072,6 +1103,10 @@ export function renderResourceMarkdown(ledger: ResourceLedger): string {
         `- Service bindings: ${list(worker.serviceBindings.map((entry) => `${entry.binding} → ${entry.service}`))}`,
       );
       lines.push(`- Crons: ${list(worker.crons.map((cron) => `\`${cron}\``))}`);
+      if (worker.customDomains !== undefined)
+        lines.push(
+          `- Declared custom domains (attachment not verified): ${list(worker.customDomains)}`,
+        );
       lines.push(
         `- Assets: ${worker.assets === undefined ? "—" : `\`${worker.assets.directory}\` → ${cell(worker.assets.binding)}`}`,
       );
@@ -1171,6 +1206,9 @@ export function resourceIdentityLines(ledger: ResourceLedger, root = REPO_ROOT):
         )}`,
         `services=${list(worker.serviceBindings.map((item) => `${item.binding}>${item.service}`))}`,
         `assets=${worker.assets === undefined ? "-" : `${worker.assets.directory}>${worker.assets.binding ?? "-"}`}`,
+        ...(worker.customDomains === undefined
+          ? []
+          : [`custom-domains=${list(worker.customDomains)}`]),
         `vars=${list(worker.varNames)}`,
         `secrets=${list(worker.requiredSecretNames)}`,
         `sha256=${digest}`,

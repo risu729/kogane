@@ -563,9 +563,13 @@
             "directory": "../../apps/web/dist-production",
             "binding": "ASSETS"
           },
+          "customDomains": [
+            "kogane-mcp.takuk.me"
+          ],
           "varNames": [
             "ACCESS_AUDIENCE",
             "ACCESS_ISSUER",
+            "ACCESS_MCP_AUDIENCE",
             "AGENT_API_GRANTS",
             "AGENT_GRANTS",
             "COMMANDS_ENABLED",
