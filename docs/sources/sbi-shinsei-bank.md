@@ -1167,6 +1167,8 @@ different provider fields in different captures. Nothing shows the provider
 never reuses a reference later; a reused reference would collide with the
 earlier one's holder rather than count twice (ADR 0018 note).
 
-**Not deployed.** Nothing in production changes until 0.1.3 is deployed;
-deploying it re-parses the stored captures through the repair lane, as it did
-for 0.1.2 above. Production was not read for this release.
+**Deploying is the re-parse.** The release is deployed by the CD release of
+the commit that merges it (`deploy.yml` releases every green CI run on main);
+the repair lane then re-parses the stored captures, as it did for 0.1.2
+above, and rows of 0.1.2 runs stay refused until it has. Production was not
+read for this release.

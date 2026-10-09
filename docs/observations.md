@@ -34,13 +34,15 @@ parser, and ADR 0054's rule 2 then admits a row a 0.1.3 run stored under the
 already-declared function `sbi-shinsei-txn-reference-no-v1`; a row a 0.1.2 run
 stored records none and stays refused (`identity_origin_unrecorded`).
 
-**Not deployed.** Nothing in production changes until it is. Deploying is the
-re-parse: the repair lane's cyclic scan then creates a 0.1.3 job for every
+**Deploying is the re-parse.** The release is deployed by the CD release of
+the commit that merges it (`deploy.yml` releases every green CI run on main),
+so the owner's merge is the deploy decision. Rows of 0.1.2 runs stay refused
+until the repair lane has re-parsed them under 0.1.3: the repair lane's cyclic scan then creates a 0.1.3 job for every
 stored activity capture, as for 0.1.2 [below](#sbi-shinsei-stored-capture-shapes-activity-parser-012-board-parser-101);
 each `ok` 0.1.3 run is published in place of the 0.1.2 run, which is marked
 superseded while its rows stay stored. No migration: the dataset's snapshot
 policy row pins no parser version, and every reader pins this parser by name.
-What that would change for card settlement review (new candidates citing the
+What that changes for card settlement review (new candidates citing the
 0.1.3 rows under the same `bank_key`, pre-G1b acceptances still reserving
 them, no adoption by itself, and how a reused reference collides) is in the
 ADR note. Limits: the owner's read-only confirmation covers the captured range

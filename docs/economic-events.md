@@ -98,7 +98,10 @@ family maps onto the display kinds `classifyActivity` knows.
 
 In the table, "Writer" is the family-level status (`FAMILY_SUPPORT`); "(writer)"
 marks the parsers whose rows a writer reads. For a supported family the reasons
-column lists why the sources its writer does not read have no event.
+column lists why the sources its writer does not read have no event. SBI
+Shinsei's writer admits a row only when that row records its origin (parser
+0.1.3); rows stored by 0.1.2 runs are refused per row
+(`identity_origin_unrecorded`).
 
 | Family                       | Writer      | Parsers whose rows belong to it                                                                                                                                                                                  | Why no event is written (`familyUnsupportedReasons`)                                                                                                                               |
 | ---------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -324,9 +327,8 @@ The admission reads the origin off each stored row. SBI Shinsei's parser
 records it from release 0.1.3 (2026-10-09,
 [ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin));
 a row a 0.1.2 run stored records none and is refused
-(`identity_origin_unrecorded`). 0.1.3 is not deployed: until it is, and the
-stored captures are re-parsed under it, every stored SBI Shinsei debit is
-still refused.
+(`identity_origin_unrecorded`) until the repair lane has re-parsed its capture
+under 0.1.3.
 
 | Object                          | Role                                                                                                                                                                                                                                                                                |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -660,7 +662,7 @@ fixtures):
 
 | Source                                                                                                                                                                                                                                       | What it exposes                                                                                                                                                     | Effect                                                                                                                                                                                                                                                                                                                       |
 | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| SMBC Direct (`id`); SBI Shinsei (`txnReferenceNo`) from parser 0.1.3                                                                                                                                                                         | A provider row id, recorded as `_kogane.identityOrigin: "provider-id"`                                                                                              | Identifies one row (stage A; SBI Shinsei is in no reconciliation slice). Does not link pending to posted. SBI Shinsei 0.1.3 is not deployed, and rows a 0.1.2 run stored record no origin (next row).                                                                                                                        |
+| SMBC Direct (`id`); SBI Shinsei (`txnReferenceNo`) from parser 0.1.3                                                                                                                                                                         | A provider row id, recorded as `_kogane.identityOrigin: "provider-id"`                                                                                              | Identifies one row (stage A; SBI Shinsei is in no reconciliation slice). Does not link pending to posted. Rows a 0.1.2 run stored record no origin (next row) and stay refused until the repair lane has re-parsed them under 0.1.3.                                                                                         |
 | SBI Shinsei (`txnReferenceNo`) as parser 0.1.2 stored it, SBI Securities yen detail history (the provider `did`), SBI VC Trade cash flows (`cashflowID`) and executions (`CExecutionId` + `CExecutionIdSubNo`), PayPay (`transactionNumber`) | A provider row id; the parser records no `_kogane.identityOrigin`                                                                                                   | Stage A reads the origin as unknown and pairs nothing. Does not link pending to posted.                                                                                                                                                                                                                                      |
 | V Point Pay                                                                                                                                                                                                                                  | The SHA-256 of the stored notification message, recorded as `_kogane.identityOrigin: "normalized-event-id"`                                                         | One notification, not an id the provider issued; stage A currently reads that text as provider-issued, a limit until a parser release records its origin (no effect today: V Point Pay is in no reconciliation slice). No pending/posted link. A human-adopted writer refuses it (`identity_digest_not_provider`, ADR 0054). |
 | MyJCB                                                                                                                                                                                                                                        | A third-party column survey mentions an approval number on the debit sections                                                                                       | Not read by the deployed ledger parser.                                                                                                                                                                                                                                                                                      |
@@ -1584,8 +1586,8 @@ Since G1b an acceptance and a withdrawal are writers of the
 acceptance claims its bank debit in book `cash-movement` under the debit's
 alias class, after admitting the debit's identity (SMBC debits are admitted;
 an SBI Shinsei debit is admitted when a 0.1.3 run stored it and refused with
-`identity_origin_unrecorded` when a 0.1.2 run did, which is every stored one
-until 0.1.3 is deployed), and is
+`identity_origin_unrecorded` when a 0.1.2 run did, until the repair lane has
+re-parsed it under 0.1.3), and is
 refused while another writer holds the debit's key or alias class
 (`claim_available`); a withdrawal releases the claim. The event revision cites
 its statement and bank rows as `SourceFactRef` objects.

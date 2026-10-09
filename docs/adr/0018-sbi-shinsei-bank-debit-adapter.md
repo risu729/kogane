@@ -144,8 +144,10 @@ and the provider's civil date.
 - Carried by: `packages/parsers/src/parsers/sbi-shinsei-top-balances-and-activity.ts`
   (0.1.3), `packages/domain/src/event-families.ts`
   (`transaction-family-registry-v3`)
-- Deployed: **not yet.** Nothing in production changes until 0.1.3 is
-  deployed and the stored activity captures are re-parsed under it.
+- Deployed: by the CD release of the commit that merges this PR (`deploy.yml`
+  releases every green CI run on main); the owner's merge is the deploy
+  decision, and with it the repair-lane re-parse. Rows of 0.1.2 runs stay
+  refused until the repair lane has re-parsed their captures under 0.1.3.
 
 ### Context
 
@@ -203,7 +205,7 @@ stays "unique within one account", unverified beyond what was captured (ADR
   `sql.ts`, `snapshot-query.ts` and the observation-shared semantics pin it by
   name, so 0.1.2 and 0.1.3 observations are read alike.
 
-### What deploying it would do
+### What deploying it does
 
 Production was not read for this change; the following is what the code and
 the synthetic tests show.
@@ -212,20 +214,28 @@ the synthetic tests show.
   creates a 0.1.3 job for every stored activity capture without an operator
   step ([observations](../observations.md#sbi-shinsei-activity-rows-record-the-provider-id-origin-activity-parser-013)).
   The lanes take the parsers from the deployed registry; a release pointer
-  naming a version the build does not carry falls back to it (`laneParsers`),
-  and whether production holds such a pointer for this dataset was not
-  checked. So the owner's decision to deploy is also the decision to
+  naming 0.1.2 falls back to 0.1.3 (`laneParsers`, which skips a pointer
+  naming a version the build does not carry), so the outcome does not depend
+  on it. So the owner's merge, which deploys, is also the decision to
   re-parse.
-- **Append-only.** Each job registers release 0.1.3 in `parser_releases`
+- **Gradual.** The repair scan reads 100 artifacts per sweep
+  (`REPAIR_SCAN_PAGE`) in artifact-id order and runs jobs at the lane's
+  budget; new captures are parsed under 0.1.3 at once by the incremental
+  lane. Until a reference's newest capture has been re-parsed or re-captured,
+  its adapter row stays a 0.1.2 row, and its debit stays refused.
+- **Append-only evidence (the only update is the existing supersession
+  marker).** Each job registers release 0.1.3 in `parser_releases`
   beside 0.1.2's row, and writes a new `parse_runs` row with new
   `transaction_observations`, `balance_observations` and
   `valuation_observations` rows (their `observation_decimal_values` by
   trigger) and its `parse_coverage_claims` row; the identity sweep then
   identifies the new run like any other. The publication pointer
   `published_parse_runs` moves to the 0.1.3 run through an appended
-  `publication_events` row; the 0.1.2 run is marked superseded
-  (`superseded_by_parse_run_id`) and its observation rows stay stored,
-  unchanged.
+  `publication_events` row; the 0.1.2 run is marked superseded (the
+  publish batch updates `parse_runs.superseded_by_parse_run_id`, as for every
+  release) and its observation rows stay stored, unchanged. Each capture's
+  balances and valuations are republished under new observation ids with
+  identical values.
 - **Which rows become admissible.** Only rows a 0.1.3 run stored: every SBI
   Shinsei activity transaction row of those runs records the origin, and of
   them the debit adapter still admits only the provider's own non-zero JPY
@@ -234,7 +244,9 @@ the synthetic tests show.
 - **Card settlement readiness.** `card_bank_debit_facts` keeps the newest
   capture of each reference, newest row first, so the 0.1.3 row of a reference
   replaces its 0.1.2 row as the adapter row. Candidates already proposed cite
-  0.1.2 rows: their `bank_current` becomes 0 and they stay stored. The sweep
+  0.1.2 rows: their `bank_current` becomes 0 and they stay stored, so every
+  existing proposed SBI Shinsei candidate stays in the review list with the
+  blocker `bank_debit_changed` beside its 0.1.3 twin. The sweep
   (its cursor wraps) proposes new candidates citing the 0.1.3 rows under the
   same `bank_key` (the 5-tuple has no parse run) and the same alias class. On
   the new candidates `bank_current` is 1 and the other flags read the holders
@@ -281,8 +293,8 @@ the synthetic tests show.
   function is unchanged.
 - `packages/parsers/test/coverage-contract.test.ts`: the frozen files keep
   their bytes; the declared 0.1.3 delta is applied before the byte
-  comparison. `parser-digests.test.ts`: only this parser's digest and version
-  changed. `event-families.test.ts` (parsers and domain): the registry v3
+  comparison. `git diff` of `digests.ts`: one source digest and one release
+  changed; `parser-digests.test.ts` passes. `event-families.test.ts` (parsers and domain): the registry v3
   entry matches the fixture rows; the economic-events family table follows it.
 - `packages/application/test/card-settlement-plan.test.ts`: a 0.1.3-shaped
   SBI Shinsei bank row is planned; the 0.1.2-shaped one is refused.
