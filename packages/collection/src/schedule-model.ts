@@ -27,7 +27,7 @@ export interface MaintenanceRule {
 }
 /**
  * Why a maintenance revision was written, as a closed code (ADR 0046 as
- * amended by ADR 0063, item 8). CORE 0076's CHECK on
+ * amended by ADR 0063, item 8). CORE 0078's CHECK on
  * `provider_maintenance_rules.change_reason` holds the same list; a revision
  * never carries free text. `operator-edit` is the operator page's own edit;
  * `maintenance-survey-proposal-accepted` is an accepted re-survey proposal

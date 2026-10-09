@@ -31,7 +31,7 @@ import type { SqlWrite } from "../../../../packages/storage-d1/src/core/operatio
  * the narrowest form of `MaintenanceWrite` (#560, ADR 0046): an operator, a
  * named rule (new rules get an id derived from the proposal), the proposal's
  * page and fetch time as provenance, the proposal as the decision reference
- * and the closed acceptance reason, which CORE 0076 stores. The proposal
+ * and the closed acceptance reason, which CORE 0078 stores. The proposal
  * route passes `writeMaintenanceRevision(env, MaintenanceWrite, append)`
  * itself: it accepts this write as it is, and answers a
  * `MaintenanceWriteResult`, which `RevisionResult` covers.

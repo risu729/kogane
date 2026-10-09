@@ -221,7 +221,7 @@ must lie within one the source already had; a running one counts its part
 before the revision, up to the bound back), and caps each principal at 30
 revisions per rolling day, counted before writing and again through the
 partial index `maintenance_agent_writes` inside the INSERT. The bound is seven
-days; only the trusted option below raises it to 31. CORE 0076 records each
+days; only the trusted option below raises it to 31. CORE 0078 records each
 revision's actor kind, closed reason and decision reference, and its CHECK
 refuses free text, a missing reason, a bare agent kind and `operator-edit`
 from anyone but the operator; revisions written before it show them as
@@ -283,5 +283,5 @@ answers the plan's question 1, and stays the operator's in the UI; its target
 class is R2 (prepare/confirm) up to the 31-day ceiling, for which the writer's
 prepare and option above exist and the confirm does not. Not verified in
 production: no grant or delegation holds a schedule capability (the committed
-MCP reader's grant names none), CORE 0076 is not applied, and no MCP client has
+MCP reader's grant names none), CORE 0078 is not applied, and no MCP client has
 called these tools.

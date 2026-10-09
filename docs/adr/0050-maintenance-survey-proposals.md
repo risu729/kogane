@@ -276,7 +276,7 @@ describe the time before #560 merged; with it they no longer hold:
   gone. The writer sends what `append` returns (the acceptance row and its
   audit record) in the revision's own batch, as the amendment above requires,
   so the revision, the decision and the record are still one write.
-- CORE 0076 (which #560 carried as 0067 before it merged) stores the accepted
+- CORE 0078 (which #560 carried as 0067, then 0076, before it merged) stores the accepted
   revision's actor kind (`operator`), its closed reason
   (`maintenance-survey-proposal-accepted`, one of `MAINTENANCE_CHANGE_REASONS`)
   and the proposal as its decision reference

@@ -39,7 +39,7 @@ What is recorded today (the plan's section 6.1 has the full table):
   mutable execution state.
 - **Settings** — `collection_schedule_revisions` (0065; written, never read),
   `provider_maintenance_rules` (0065; `actor_kind`, `change_reason`,
-  `decision_ref` on #564's 0067, renumbered 0076 in slice S4),
+  `decision_ref` on #564's 0067, renumbered 0078 in slice S4),
   `maintenance_survey_decisions` (0069) — carry
   an actor. `collection_schedules`, `collection_schedule_occurrences` and
   `collection_execution_leases` are mutable; releasing a lease leaves no trace

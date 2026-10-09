@@ -991,7 +991,7 @@ test("the agent path only reads: no write route, no operator or delegation heade
   expect(await ruleCount()).toBe(count);
 });
 
-describe("the store's own guards (CORE 0076)", () => {
+describe("the store's own guards (CORE 0078)", () => {
   const insert = (actorKind: string | null, reason: string | null) =>
     db
       .prepare(
@@ -1029,7 +1029,7 @@ describe("the store's own guards (CORE 0076)", () => {
   test("the CHECK's list is MAINTENANCE_CHANGE_REASONS, code for code", () => {
     const sql = readFileSync(
       new URL(
-        "../../../packages/storage-d1/migrations/core/0076_maintenance_change_provenance.sql",
+        "../../../packages/storage-d1/migrations/core/0078_maintenance_change_provenance.sql",
         import.meta.url,
       ),
       "utf8",

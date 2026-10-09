@@ -418,7 +418,7 @@ const DELEGATED_AUDIT_REF =
 const CREATED_ID_SUFFIX = "-000000000000";
 /**
  * The delegated revisions of one principal since an instant. It reads the
- * partial index `maintenance_agent_writes` (CORE 0076); the writer runs it
+ * partial index `maintenance_agent_writes` (CORE 0078); the writer runs it
  * before writing and again inside its INSERT, so two concurrent writes cannot
  * both pass a spent budget.
  */
@@ -1134,9 +1134,9 @@ function revisionView(row: RevisionRow, agent: string) {
     referenceUrl: row.reference_url,
     verifiedAt: row.verified_at,
     createdAt: row.created_at,
-    /** `null` for revisions written before CORE 0076 recorded it. */
+    /** `null` for revisions written before CORE 0078 recorded it. */
     actorKind: row.actor_kind,
-    /** A closed code (`MAINTENANCE_CHANGE_REASONS`), or `null` before CORE 0076. */
+    /** A closed code (`MAINTENANCE_CHANGE_REASONS`), or `null` before CORE 0078. */
     changeReason: row.change_reason,
     /** Whether the reading principal wrote it as a delegated principal. */
     byCaller: row.actor_kind === "delegated" && row.actor === agent,

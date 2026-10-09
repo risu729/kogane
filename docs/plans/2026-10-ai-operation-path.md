@@ -457,7 +457,7 @@ its bounds, and changes in four ways:
    `MCP_DELEGATIONS`; `schedules.read` stays a read capability. The writer's
    actor kinds become `operator` and `delegated` (CORE 0067 is #564's and is
    still unmerged, so its CHECK is rewritten before merge, not migrated
-   again; S4 renumbers it CORE 0076). The same rewrite changes 0067's partial index
+   again; S4 renumbers it CORE 0078). The same rewrite changes 0067's partial index
    `maintenance_agent_writes` from `WHERE actor_kind='agent'` to
    `WHERE actor_kind='delegated'`, so the daily budget check inside the
    `INSERT` keeps an index to read.
@@ -764,7 +764,7 @@ reconciliation after a settings write stays outside the batch, as today.
 
 After authentication, every refusal is recorded with its closed code:
 authorization (`subject_not_granted`, `approval_required`,
-`agent_api_not_configured`, `delegation_*`, `capability_not_delegated`,
+`agent_api_not_configured`, `delegation_*` (`delegation_capability_denied` included),
 `unauthorized`, `evidence_restricted`, `source_not_granted`), validation
 (`invalid_request`, `invalid_query`), confirmation, stale and idempotency
 codes, writer codes (`revision_conflict`, `maintenance_deferral_too_long`, …),
@@ -1026,8 +1026,8 @@ contradicts it, so #564 lands as this slice, not before it.
 - Status (2026-10-09): implemented on #564 ahead of S3's execution
   integration, up to the delegation gate
   ([ADR 0046's amendment](../adr/0046-agent-maintenance-windows.md#amendment-a-delegated-operation-not-an-agent-grant-2026-10-09)).
-  The migration is CORE 0076 (taken after main's 0075; #632 then took
-  0077, and no file uses 0073 or 0074). The write capability is in `MCP_DELEGATIONS` only; the update
+  The migration is CORE 0078, the next free number above main's 0077 (first
+  0067, then 0076 until #632 merged as 0077; no file uses 0073, 0074 or 0076). The write capability is in `MCP_DELEGATIONS` only; the update
   tool resolves the delegation with #628's core, checks capability, closed
   arguments and scope, and is refused by `delegationExecutionReadiness`
   (`available: false`), so it relays nothing and is published to nobody; the
@@ -1043,9 +1043,9 @@ contradicts it, so #564 lands as this slice, not before it.
   Left to S3: the delegated audit record (`principal_kind` `delegated`,
   `delegation_ref`) and the reservation of its id, Processor family/ref
   forwarding, `budget.writesPerDay` at the App chokepoint, and the confirm
-  that may pass `"confirmed-31d"`, and therefore the R2 path; the
-  missing-capability code is #628's `delegation_capability_denied` (section
-  8's matrix item 4 calls it `capability_not_delegated`).
+  that may pass `"confirmed-31d"`, and therefore the R2 path. The
+  missing-capability code is #628's `delegation_capability_denied`, which
+  section 8's matrix item 4 and section 6.4 now name.
 
 **S5 — MCP read, search and detail** (after S2).
 
@@ -1106,7 +1106,7 @@ contradicts it, so #564 lands as this slice, not before it.
    subject never resolve a delegation; `principalFor` still refuses
    `mcp-client:`; a delegated principal is refused on every browser operator
    route.
-4. Each tool refused without its capability (`capability_not_delegated`),
+4. Each tool refused without its capability (`delegation_capability_denied`),
    served with it; R3 and R4 have no tool, and the Processor refuses a
    forwarded family the App did not grant.
 5. Out-of-scope and nonexistent targets get byte-identical refusals with no

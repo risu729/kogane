@@ -241,7 +241,7 @@ test("an accepted window defers the next run through the alarm code, which then 
   });
   // The writer's revision: the page and fetch time as provenance, the operator
   // as actor, its closed reason and the proposal as its decision reference
-  // (CORE 0076).
+  // (CORE 0078).
   expect(
     await env.DB.prepare(
       "SELECT revision,source,pattern_json,enabled,reference_url,verified_at,scope,actor,actor_kind,change_reason,decision_ref FROM provider_maintenance_rules WHERE id=?",

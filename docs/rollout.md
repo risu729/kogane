@@ -213,6 +213,18 @@ Removing ScheduleAlarm requires a separate retirement migration; do not use
 historical component rollback recipes to restore old Cron triggers.
 Repair READ using [the rebuild runbook](read-rebuild-runbook.md).
 
+**A migration numbered below an applied one.** A release applies every CORE
+migration it knows that the database lacks (`wrangler d1 migrations apply`),
+whatever its number, so such a migration still applies forward. But a
+release's record keeps its sorted CORE migration list, and a rollback is
+refused when the target's list is not a prefix of the deployed one
+(`isMigrationPrefix` in `tasks/_lib/ci/release-manifest.mjs`, the "Refuse an
+incompatible rollback" step of `_deploy-workers.yml`). A migration that lands
+below an already-applied one therefore puts every commit between the
+higher-numbered release and its own out of rollback's reach. For that reason
+#564's migration took 0078, above main's 0077, and not 0076. 0073 and 0074,
+held for UI work, will carry the same limit when they land.
+
 ## 6. One-time GitHub and Cloudflare settings
 
 These settings are maintained in the repository owner's GitHub and Cloudflare accounts.

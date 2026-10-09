@@ -227,8 +227,8 @@ AI, and not anonymous-agent power
   `delegation_expired`, `delegation_capability_denied`, `invalid_request`,
   `source_not_granted`, and last `delegation_execution_unavailable`), and no
   code relays a delegated write. The refusal code for a missing capability is
-  #628's `delegation_capability_denied`, which the plan calls
-  `capability_not_delegated`. It has no `/api/agent/v1` route: a browser
+  #628's `delegation_capability_denied`, which the plan's matrix item 4 now
+  names as well. It has no `/api/agent/v1` route: a browser
   session yields no delegation.
 - **No bare agent.** The Processor's `/internal/schedules/agent/maintenance`
   route is removed; `/internal/schedules/agent/read` stays read-only and
@@ -266,9 +266,12 @@ write, append)` stays the only code that writes a maintenance revision; it
   ceiling, is not usable: the writer's prepare and its trusted 31-day option
   exist (the contract below), but no confirm step does (slice S3), and a
   deferral longer than 31 days stays the operator's in every case.
-- **Migration.** CORE 0067 never merged; it is renumbered CORE 0076 (the
-  number this pull request took after main's 0075; #632 then took 0077, and
-  no file uses 0073 or 0074) and rewritten: `actor_kind IN ('operator','delegated')`; a
+- **Migration.** CORE 0067 never merged; it is renumbered CORE 0078, the
+  next free number above main's 0077 (it was 0076 until #632 merged as 0077;
+  numbered below an applied migration, it would have made the release
+  workflow refuse a rollback to the commits between, see
+  [rollout](../rollout.md#5-incident-controls-and-rollback); no file uses 0073,
+  0074 or 0076) and rewritten: `actor_kind IN ('operator','delegated')`; a
   closed `change_reason` CHECK, required with every actor kind and
   `operator-edit` only for the operator; the partial index
   `maintenance_agent_writes` on `actor_kind='delegated'`, which the budget

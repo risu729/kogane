@@ -227,7 +227,7 @@ Provider contact cannot be rolled back, which is why it is R2.
 write capability moves to `MCP_DELEGATIONS`; the actor kinds become `operator`
 and `delegated`; the free-text reason becomes a closed code
 (`MAINTENANCE_CHANGE_REASONS`, enforced by #564's own unmerged CORE 0067
-CHECK — renumbered CORE 0076 when S4 re-shaped #564 — following #575's
+CHECK — renumbered CORE 0078 when S4 re-shaped #564 — following #575's
 closed-reason pattern); a revision is R1 inside the
 direct envelope (granted source, rule of that source or new, no new joined
 deferral over 7 days, budget unspent, closed reason, registered https host,
@@ -349,7 +349,7 @@ revision tool resolves the MCP caller's delegation with the declaration
 core, checks the capability, its closed arguments and the delegation's
 schedule scope, and is then refused by `delegationExecutionReadiness`, which
 answers `available: false`; nothing is relayed and every call is one recorded
-refusal. Its writer, CORE 0076 and closed reasons are in place for S3 to
+refusal. Its writer, CORE 0078 and closed reasons are in place for S3 to
 connect.
 
 This ADR is a design record; its pull request changes documentation only.
