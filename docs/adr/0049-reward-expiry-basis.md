@@ -267,3 +267,109 @@ this decision, not a defect: the inputs that would allow one are not confirmed.
   malformed basis is shown as "not recorded".
 - `packages/storage-d1` and `scripts/core-schema-ledger.test.ts`: the READ
   migration list and the regenerated `infra/schema/read-ledger.*`.
+
+## Amendment: current V Point snapshot and unclassified buckets
+
+- Status: proposed; accepted upon merge of #632
+- Date: 2026-10-09
+- Issue: #554; current capture selection consumes #542's shared contract
+
+### Context and options
+
+The old promotion inferred `time-limited` from an expiry display and `regular`
+from its absence. The official My Page FAQ also displays a regular-point
+expiry, so this inference cannot classify a source bucket. The numeric type is
+unconfirmed for this promotion. The old reader separately ranked every array
+slot across all published claims: a new array with one slot could retain two
+slots from an older capture. An array position is not a durable lot identity.
+
+Dropping unknown buckets would lose a displayed expiry and amount. Calling
+them regular, time-limited or qualification would invent a meaning. Editing
+the old migration or claims would destroy their recorded interpretation.
+Serving old snapshots through a compatibility union would retain that wrong
+classification. We instead add one closed kind and replace the current claim
+and estimate stores additively. There is one current API and promotion path.
+
+### Decision
+
+1. `unclassified` means the bucket kind is not confirmed. It retains quantity,
+   restriction refs, displayed expiry, observation time and source-fact refs.
+   It remains in holdings and expiry rows. The consumable summary is `missing`
+   with `bucket_kind_unclassified` when such a bucket might change the total;
+   its exact original quantity stays in the per-kind summary. Conversion
+   excludes it, and expiry computation refuses it with that same closed code,
+   even if a synthetic rule attempts to cover the kind. Displayed expiry is
+   still an observation and never becomes a computed expiry.
+2. CORE `0077_reward_bucket_claims_v2.sql` adds `reward_bucket_claims_v2` with
+   the expanded kind CHECK, append-only and published-parse guards, the same
+   source-fact references and revision triggers. `reward-promotion-v2` writes
+   there. V Point common buckets are unclassified regardless of the expiry
+   field; structural store restrictions and qualification measures keep their
+   supported meanings. The original balance row preserves the numeric enum,
+   raw locator and provider fields. Old v1 claims remain historical and are
+   neither copied as confirmed v2 claims nor rewritten.
+3. V Point current claims are confined, before slot ranking, to
+   `ELIGIBLE_VPOINT_RUNS` / `VPOINT_MEMBER` in `current-captures.ts`. This is the
+   existing Transactions/Balances published-capture contract extracted by
+   #542, not a second selection implementation. A pending, failed or
+   unpublished page retains the previous eligible capture. An eligible new
+   capture removes slots absent from its array, including an empty array.
+   Reordering does not resolve lot identities. The shared predicate proves its
+   shipped capture eligibility only, not lifetime activity coverage, enum
+   semantics, or new guarantees about malformed parser/artifact associations.
+4. READ `0004_reward_unclassified_buckets.sql` adds
+   `reward_expiry_estimates_v2`. Its kind CHECK admits unclassified; fixed-input,
+   chunk-conflict, rule-ref and sealed-row guards remain. Old estimate rows and
+   snapshots are preserved. New readers/writers use the new table. The App
+   refuses a snapshot or cursor from the old promotion/projection release
+   instead of reporting an empty successful page or old kinds as current.
+5. `reward-projection-input-v2`, `reward-projection-v3`, `reward-model-v2` and
+   `reward-expiry-v2` make the changed interpretation a new input/build identity.
+   The existing input content fixes the v2 claim rows, their source refs,
+   quantities/displays, promotion release, rules and evaluation calendar. Their
+   digest and input-ref digest change with their content. An incompatible
+   unfinished build is retired, then a later tick captures afresh; a current
+   compatible build still resumes from its original input. A bounded promotion
+   backlog yields `pending / reward_promotion_incomplete`, so it is never sealed
+   as an empty or partial current holding.
+
+### Deployment and limits
+
+Normal migrations precede the new code. With the existing promotion and READ
+flags enabled, bounded sweeps re-promote already-published observations into
+v2, then rebuild READ. No provider login or raw download is required for this
+repair. Until a current compatible snapshot is published the expiry route is
+unavailable. Historical v1 source claims and sealed READ rows are retained;
+no domain financial adoption, audit/command/MCP/auth change is part of this PR.
+
+This amendment does not complete #554. Activity history remains the recorded
+unclassified/unknown window, and the old open-ended rule seed is untouched.
+No real holding receives a computed date. The public UI evidence recorded in
+`docs/sources/v-point.md` establishes several display labels, but does not
+establish `point_type=0` as regular, the Article 3 date field, cancellation
+relations or historical terms transitions. Those gaps are not filled from a
+sign, display text or the latest transaction.
+
+The next actual-activity input must fix, per holding and same capture, enum
+classification release and evidence, page/filter/sort/window completeness,
+posted/used dates, terms effective period and transition confirmation. Its
+unknown result must be explicit: an unknown enum must not silently become an
+excluded activity, an unconfirmed posted basis must not borrow `asOf`, and an
+unconfirmed terms transition must not retroactively use today's policy. This
+broader adapter is deferred until those meanings are confirmed; this PR does
+not add an empty wrapper and claim it completes the issue.
+
+### Verification
+
+The SQL change deliberately differs from the frozen shipped query on shrinking
+and empty captures; it is a semantic correction, not an equal-output cost
+rewrite. A same-snapshot fixture preserves the shipped selection. Synthetic
+array reordering, shrinking, zero-row history, missing publication, failed
+fetches, tied capture times, replacement/rollback and seeded random snapshot
+sets follow the new set oracle. Tests apply the full schema with foreign keys
+and without ANALYZE. Plan checks cover keyed claim-to-parse lookups; the reused
+capture CTE retains its existing scans, automatic indexes and temporary sorts.
+Domain/API/web tests keep dated and undated unknown buckets, quantities and
+source refs, refuse computed/converted quantities, and render 種類未確認.
+Migration/promotion tests preserve v1 rows, re-promote with the new release,
+enforce append-only/current-publication guards and bump the source revision.

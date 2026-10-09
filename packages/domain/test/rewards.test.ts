@@ -1005,3 +1005,46 @@ describe("SC14 / AT49-AT54 — conversion simulation and bounded search", () => 
     ]);
   });
 });
+
+test("unclassified quantities retain exact per-kind evidence but never prove a consumable total", () => {
+  const unknown = bucket("bucket:unclassified", "unclassified", "points:a", "123.45");
+  const regular = bucket("bucket:regular", "regular", "points:a", "2500");
+  const summary = summarizeHolding(holding("points:a", [regular, unknown]));
+  expect(validRewardBucket(unknown)).toBe(true);
+  expect(summary.consumable.value).toEqual({
+    status: "missing",
+    reasonCode: "bucket_kind_unclassified",
+  });
+  expect(summary.byKind.find((group) => group.kind === "unclassified")).toEqual({
+    kind: "unclassified",
+    quantity: unknown.quantity,
+    bucketRefs: [unknown.bucketRef],
+  });
+  expect(summary.excluded).toContainEqual({
+    bucketRef: unknown.bucketRef,
+    kind: "unclassified",
+    reasonCode: "bucket_kind_unclassified",
+  });
+  expect(summary.qualificationMeasures).toEqual([]);
+  expect(unknown.quantity).toEqual(q("points:a", "123.45"));
+  expect(unknown.sourceFactRefs).toEqual(["fact:bucket:unclassified"]);
+  expect(simulateConversion(offer(), summary.consumable).feasible).toBe(false);
+});
+
+test("an offer cannot convert an unclassified bucket even when its kind is named by the offer", () => {
+  const unknown = bucket("bucket:unclassified", "unclassified", "points:a", "2500");
+  const conversion = offer({ eligibleBucketKinds: ["regular", "unclassified"] });
+  const eligibility = availableForOffer([unknown], conversion);
+  expect(eligibility.state).toBe("not-eligible");
+  expect(eligibility.eligibleBucketRefs).toEqual([]);
+  expect(eligibility.excluded).toEqual([
+    { bucketRef: unknown.bucketRef, reasonCode: "bucket_kind_unclassified" },
+  ]);
+  expect(simulateConversion(conversion, eligibility.eligible).feasible).toBe(false);
+  const mixed = availableForOffer(
+    [unknown, bucket("bucket:regular", "regular", "points:a", "2500")],
+    conversion,
+  );
+  expect(mixed.eligible).toEqual(q("points:a", "2500"));
+  expect(mixed.eligibleBucketRefs).toEqual(["bucket:regular"]);
+});

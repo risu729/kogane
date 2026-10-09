@@ -13,11 +13,12 @@
 //   * The job is idempotent: `claim_digest` is a digest of the source fact
 //     reference and the promotion release, and the insert ignores a conflict.
 //     Re-running it, or running it while another sweep runs, adds nothing new.
+import type { D1Like as RewardReadD1 } from "../../../packages/storage-d1/src/d1.ts";
 import type { BucketKind } from "../../../packages/domain/src/rewards.ts";
 import { validTemporalValue, type TemporalValue } from "../../../packages/domain/src/time.ts";
 
 /** Bump to re-promote every published row under new mapping rules. */
-export const REWARD_PROMOTION_RELEASE = "reward-promotion-v1";
+export const REWARD_PROMOTION_RELEASE = "reward-promotion-v2";
 /** Eligible, unpromoted rows examined per sweep. */
 export const REWARD_PROMOTION_BATCH = 500;
 
@@ -42,7 +43,7 @@ interface PromotionRule {
    */
   holdingRef: string;
   unitRef: string;
-  bucketKind: BucketKind | "expiry-dependent";
+  bucketKind: BucketKind;
   restrictionRefs: string[];
 }
 
@@ -67,12 +68,13 @@ export const PROMOTION_RULES: readonly PromotionRule[] = [
     sourceId: "v-point",
     parserName: "v-point-balance-info",
     metric: "available_point_bucket",
-    // A bucket the provider dated is time-limited; one it did not is regular.
-    // The provider's own `point_type` enum stays unmapped (docs/sources/v-point.md §4.1).
+    // Expiry dates do not establish bucket semantics. The provider enum stays
+    // unmapped; classification evidence remains in the original balance row
+    // referenced by source_fact_id (including its raw locator and extra_json).
     programId: "program:v-point",
     holdingRef: "program:v-point:member",
     unitRef: "points:v-point",
-    bucketKind: "expiry-dependent",
+    bucketKind: "unclassified",
     restrictionRefs: [],
   },
   {
@@ -164,16 +166,16 @@ const CANDIDATE_SQL = `SELECT b.id,b.parse_run_id,a.source_id,p.parser_name,b.so
    ON d.kind='balance' AND d.observation_id=b.id AND d.policy_version='decimal-v1'
  WHERE f.status='success' AND f.failure_count=0 AND (${candidateScope})
  AND NOT EXISTS (
-   SELECT 1 FROM reward_bucket_claims claimed
+   SELECT 1 FROM reward_bucket_claims_v2 claimed
    WHERE claimed.source_fact_kind='balance' AND claimed.source_fact_id=b.id
      AND claimed.promotion_release=?1
  )
  ORDER BY b.id LIMIT ?2`;
 
-const CURSOR_SQL = `SELECT COALESCE(MAX(source_fact_id),0) AS cursor FROM reward_bucket_claims
+const CURSOR_SQL = `SELECT COALESCE(MAX(source_fact_id),0) AS cursor FROM reward_bucket_claims_v2
  WHERE source_fact_kind='balance' AND promotion_release=?1`;
 
-const INSERT_SQL = `INSERT OR IGNORE INTO reward_bucket_claims
+const INSERT_SQL = `INSERT OR IGNORE INTO reward_bucket_claims_v2
  (claim_digest,parse_run_id,source_fact_kind,source_fact_id,program_id,holding_ref,bucket_ref,
   bucket_kind,restriction_refs_json,unit_ref,quantity_coefficient,quantity_scale,quantity_status,
   observed_expiry_json,observed_at,promotion_release,recorded_at)
@@ -239,6 +241,18 @@ async function digest(input: string): Promise<string> {
   ).join("");
 }
 
+/** A bounded promotion must finish before a new READ input is sealed.
+ * Reuse the promoter's own eligibility/anti-join; a claim id high-water is
+ * not a proof that a current source set has been promoted (late publication).
+ */
+export async function rewardPromotionPending(db: Pick<RewardReadD1, "prepare">): Promise<boolean> {
+  const row = await db
+    .prepare(CANDIDATE_SQL)
+    .bind(REWARD_PROMOTION_RELEASE, 1, ...candidateBindings)
+    .first<{ id: number }>();
+  return row !== null;
+}
+
 export interface RewardPromotionResult {
   enabled: true;
   scanned: number;
@@ -289,12 +303,7 @@ export async function promoteRewardClaims(
       rule.sourceId === "v-point"
         ? observedExpiry(koganeField(row.extra_json, "expiration"), "Asia/Tokyo")
         : null;
-    const bucketKind: BucketKind =
-      rule.bucketKind === "expiry-dependent"
-        ? expiry === null
-          ? "regular"
-          : "time-limited"
-        : rule.bucketKind;
+    const bucketKind: BucketKind = rule.bucketKind;
     const status = row.decimal_status ?? "unparsed";
     const claimDigest = await digest(
       `balance:${row.id}:${rule.programId}:${row.source_account}:${release}`,

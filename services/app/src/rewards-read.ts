@@ -41,6 +41,8 @@ import {
   type RewardExpiryBasis,
 } from "../../../packages/observation-shared/src/reward-contract.ts";
 import { HttpError, json } from "./http";
+import { REWARD_PROJECTION_RELEASE } from "../../../packages/read-model/src/reward-projection";
+import { REWARD_READ_RELEASE } from "../../../packages/read-model/src/rewards";
 
 /** Rows per page; the same shape of limit the v2 balance routes accept. */
 export const REWARD_READ_PAGE_LIMITS = [25, 50, 100, 200] as const;
@@ -88,6 +90,13 @@ async function snapshotRefusal(
   read: D1Like,
   snapshot: RewardSnapshotRow,
 ): Promise<string | null> {
+  // The old snapshot classified common V Point by expiry display. It is
+  // retained as history, never served as the current corrected contract.
+  if (
+    snapshot.policy_release !== REWARD_PROJECTION_RELEASE ||
+    snapshot.claims_release !== REWARD_READ_RELEASE
+  )
+    return "reward_read_model_context_changed";
   const revision = await createCoreProjectionSource(d1Executor(env.DB)).coreRevision();
   const pointer = await rewardPointer(read);
   const vouched =
@@ -145,7 +154,13 @@ async function continuation(
     snapshotReadable: named !== null,
   });
   if (rejection === "cursor_mismatch") throw new HttpError(400, "cursor_mismatch");
-  if (rejection !== null || named === null) throw new HttpError(410, "context_expired");
+  if (
+    rejection !== null ||
+    named === null ||
+    named.policy_release !== REWARD_PROJECTION_RELEASE ||
+    named.claims_release !== REWARD_READ_RELEASE
+  )
+    throw new HttpError(410, "context_expired");
   return { snapshot: named, afterRowSeq: cursor.position };
 }
 

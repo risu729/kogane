@@ -126,6 +126,7 @@ const READ_TABLES = [
   "reward_build_checkpoints",
   "reward_conversion_simulations",
   "reward_expiry_estimates",
+  "reward_expiry_estimates_v2",
   "reward_snapshot_input_refs",
   "reward_snapshot_pointer",
   "reward_expiry_snapshots",

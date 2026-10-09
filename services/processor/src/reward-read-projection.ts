@@ -1,3 +1,4 @@
+import { rewardPromotionPending } from "./reward-claims-job";
 // The reward second stage: expiry estimates and replayed simulations built
 // into the READ database from a fixed evaluation input (unified plan 04 §2,
 // 05 §3–§6; U16), behind `REWARD_READ_PROJECTION_ENABLED`.
@@ -128,7 +129,7 @@ export function evaluationInstant(now: string): string {
 const PROMOTION_RELEASE = REWARD_PROJECTION_PROMOTION_RELEASE;
 
 const CLAIMS_HIGH_WATER_SQL = `SELECT coalesce(max(id),0) AS high_water
-  FROM reward_bucket_claims WHERE promotion_release=?1`;
+  FROM reward_bucket_claims_v2 WHERE promotion_release=?1`;
 
 /**
  * The target flag. Off by default: with it off the lane does not run and
@@ -227,6 +228,8 @@ export async function captureRewardInput(
   const sql = d1Executor(db);
   for (let attempt = 1; attempt <= CAPTURE_ATTEMPTS; attempt += 1) {
     const before = await currentCoreRevision(db);
+    if (await rewardPromotionPending(db))
+      return { ok: false, status: "pending", code: "reward_promotion_incomplete" };
     const evaluatedAt = evaluationInstant(clock());
     const rules = await sql.all<ExpiryRuleSqlRow>(EXPIRY_RULES_SQL, [null]);
     if (rules.length > RULE_BOUND)
@@ -526,6 +529,17 @@ async function resumeBuild(
 ): Promise<RewardBuild | RewardReadProjectionResult | null> {
   const unfinished = await oldestBuildingRewardSnapshot(read);
   if (!unfinished) return null;
+  if (
+    unfinished.contract_version !== REWARD_PROJECTION_CONTRACT_VERSION ||
+    unfinished.claims_release !== PROMOTION_RELEASE ||
+    unfinished.policy_release !== REWARD_PROJECTION_RELEASE ||
+    unfinished.build_digest !== (await rewardProjectionBuildDigest())
+  ) {
+    // Never replay old expiry-based classifications through a new writer.
+    // Retire the operational build; its old claims and sealed rows remain.
+    await abandonRewardSnapshot(read, unfinished.snapshot_id);
+    return halted("retryable", "reward_build_release_changed", unfinished.snapshot_id);
+  }
   const record = await readInputRecord(db, unfinished.input_digest);
   if (!record) {
     // Its input is not on record: it can only be rebuilt from a fresh capture,
