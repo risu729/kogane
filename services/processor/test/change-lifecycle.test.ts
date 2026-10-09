@@ -50,6 +50,7 @@ import {
   splitSql,
   startPipeline,
 } from "./harness.ts";
+import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { envelopeHeaders, testCall } from "./audit-envelope.ts";
 
 let mf: Miniflare;
@@ -1415,3 +1416,107 @@ test("an audit record that cannot be written rolls back the plan, approval or co
   expect(audit.recorded).toBe(true);
   expect(await auditRows("idempotency_key='op-audit-refused'")).toHaveLength(1);
 }, 60_000);
+
+test("delegated private binding admits a bounded plan but no financial adoption or forged family", async () => {
+  const mapping = await seedParse(249, "smbc-bank:delegated");
+  const targetId = await target("target-delegated");
+  const body = {
+    kind: "identity.assign",
+    payload: {
+      subject: "account",
+      referenceId: mapping.ref,
+      targetId,
+      reason: "synthetic delegated plan",
+    },
+    idempotencyKey: "delegated-plan-1",
+  };
+  const owner = "delegated-owner-synthetic";
+  const principal = `mcp-client:${owner}`;
+  const authority = {
+    delegationRef: `dlg_${"d".repeat(64)}`,
+    writesPerDay: 1,
+    notAfter: new Date(Date.now() + 600_000).toISOString(),
+    commandFamilies: ["plan"],
+    idempotencyKey: body.idempotencyKey,
+    payloadDigest: await canonicalDigest({
+      v: "kogane-delegated-payload-v1",
+      operation: "command.plan",
+      payload: body,
+    }),
+  };
+  const headers = {
+    "content-type": "application/json",
+    "x-kogane-verified-actor": principal,
+    "x-kogane-actor-kind": "delegated",
+    "x-kogane-audit-path": "mcp",
+    "x-kogane-correlation-id": crypto.randomUUID(),
+    "x-kogane-delegation-ref": authority.delegationRef,
+    "x-kogane-delegated-execution": JSON.stringify(authority),
+  };
+  const before = await counts();
+  const planned = await mf.dispatchFetch("https://pipeline.internal/command/v1/plan", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  expect(planned.status).toBe(200);
+  expect(planned.headers.get("x-kogane-audit-recorded")).toBe("1");
+  const result = (await planned.json()) as { plan: ChangePlan; created: boolean };
+  expect(result.created).toBe(true);
+  const records = await auditRows("principal=?", principal);
+  expect(records).toHaveLength(1);
+  expect(records[0]).toMatchObject({
+    principal_kind: "delegated",
+    subject: owner,
+    delegation_ref: authority.delegationRef,
+    idempotency_key: body.idempotencyKey,
+    operation: "command.plan",
+    result: "applied",
+  });
+  const approved = await mf.dispatchFetch("https://pipeline.internal/command/v1/approve", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ planId: result.plan.planId, planDigest: result.plan.planId }),
+  });
+  expect(approved.status).toBe(403);
+  expect(await approved.json()).toEqual({ error: "operation_not_delegable" });
+  const denied = await mf.dispatchFetch("https://pipeline.internal/command/v1/plan", {
+    method: "POST",
+    headers: {
+      ...headers,
+      "x-kogane-delegated-execution": JSON.stringify({ ...authority, commandFamilies: [] }),
+    },
+    body: JSON.stringify(body),
+  });
+  expect(denied.status).toBe(403);
+  const forged = await mf.dispatchFetch("https://pipeline.internal/command/v1/plan", {
+    method: "POST",
+    headers: { ...headers, "x-kogane-actor-kind": "human" },
+    body: JSON.stringify(body),
+  });
+  expect(forged.status).toBe(400);
+  const changed = {
+    ...body,
+    idempotencyKey: "delegated-plan-2",
+    payload: { ...body.payload, reason: "another synthetic plan" },
+  };
+  const changedAuth = {
+    ...authority,
+    idempotencyKey: changed.idempotencyKey,
+    payloadDigest: await canonicalDigest({
+      v: "kogane-delegated-payload-v1",
+      operation: "command.plan",
+      payload: changed,
+    }),
+  };
+  const spent = await mf.dispatchFetch("https://pipeline.internal/command/v1/plan", {
+    method: "POST",
+    headers: { ...headers, "x-kogane-delegated-execution": JSON.stringify(changedAuth) },
+    body: JSON.stringify(changed),
+  });
+  expect(spent.status).toBe(429);
+  expect(await spent.json()).toEqual({ error: "delegation_budget_exceeded" });
+  expect(await auditRows("principal=?", principal)).toHaveLength(1);
+  const after = await counts();
+  expect(after).toEqual({ ...before, plans: before.plans + 1 });
+});

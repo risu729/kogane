@@ -38,6 +38,7 @@ describe("grants are deny-by-default", () => {
     expect([...AGENT_CAPABILITIES]).toEqual([
       "summary.read",
       "records.read",
+      "audit.read",
       "evidence.read",
       "interpretation.propose",
     ]);

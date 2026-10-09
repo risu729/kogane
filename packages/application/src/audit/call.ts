@@ -6,6 +6,12 @@
 // its effect statement (`effect`), appends it as the last statement of its own
 // batch and reports what that statement changed (`settle`); whether the call
 // is then recorded is the call's answer, not the writer's.
+import {
+  guardDelegatedEffect,
+  validDelegatedExecution,
+  type DelegatedExecution,
+} from "../delegation/execution.ts";
+import type { DelegatedPrincipal } from "../delegation/contract.ts";
 import type { SqlWrite } from "../../../storage-d1/src/core/operations.ts";
 import {
   type AuditActor,
@@ -29,8 +35,9 @@ import { catalogueEntry, type OperationName } from "../operation-path/catalogue.
 export const AUDIT_HEADERS = {
   correlationId: "x-kogane-correlation-id",
   path: "x-kogane-audit-path",
-  /** ADR 0063's delegation reference. No delegation exists yet, so its presence is refused. */
+  /** ADR 0063's reference, admitted only with the closed private execution envelope. */
   delegationRef: "x-kogane-delegation-ref",
+  delegatedExecution: "x-kogane-delegated-execution",
 } as const;
 /** Set by the Processor on its answer when its batch wrote the effect record. */
 export const AUDIT_RECORDED_HEADER = "x-kogane-audit-recorded";
@@ -46,6 +53,8 @@ export class OperationCall {
   #risk: RiskClass;
   #pending: { auditId: string } | null = null;
   #recorded: string | null = null;
+  #execution: DelegatedExecution | null = null;
+  #step: "call" | "prepare" | "confirm" = "call";
 
   constructor(
     readonly operation: OperationName,
@@ -58,6 +67,38 @@ export class OperationCall {
 
   get actor(): Readonly<AuditActor> {
     return this.#actor;
+  }
+  get delegatedExecution(): Readonly<DelegatedExecution> | null {
+    return this.#execution;
+  }
+  get step() {
+    return this.#step;
+  }
+  setStep(step: "call" | "prepare" | "confirm"): void {
+    this.#step = step;
+  }
+  markRecorded(auditId: string): void {
+    this.#recorded = auditId;
+  }
+  delegate(
+    principal: Pick<DelegatedPrincipal, "id" | "delegator" | "delegationRef">,
+    execution: DelegatedExecution,
+  ): void {
+    if (
+      this.#actor.path !== "mcp" ||
+      this.#actor.principal !== principal.id ||
+      this.#actor.subject !== principal.delegator ||
+      principal.id !== `mcp-client:${principal.delegator}` ||
+      !validDelegatedExecution(execution) ||
+      execution.delegationRef !== principal.delegationRef
+    )
+      throw new Error("invalid delegated call");
+    this.#actor = {
+      ...this.#actor,
+      principalKind: "delegated",
+      delegationRef: principal.delegationRef,
+    };
+    this.#execution = { ...execution, commandFamilies: [...execution.commandFamilies] };
   }
   get riskClass(): RiskClass {
     return this.#risk;
@@ -76,6 +117,8 @@ export class OperationCall {
    * what a refusal before grading (an ungranted subject) is recorded as.
    */
   grade(principal: string, kind: SubjectPrincipalKind): void {
+    if (kind === "delegated" || this.#execution !== null)
+      throw new Error("delegation must be resolved");
     this.#actor = { ...this.#actor, principal, principalKind: kind };
   }
 
@@ -96,12 +139,26 @@ export class OperationCall {
     const auditId = newAuditId();
     const row = buildAuditRecord(
       this.#actor,
-      { operation: this.operation, riskClass: this.#risk, result, ...facts },
+      {
+        operation: this.operation,
+        riskClass: this.#risk,
+        result,
+        ...facts,
+        ...(this.#execution
+          ? {
+              step: this.#step,
+              idempotencyKey: this.#execution.idempotencyKey,
+              payloadDigest: this.#execution.payloadDigest,
+              confirmsAuditId: this.#execution.confirmsAuditId,
+            }
+          : {}),
+      },
       auditInstant(this.clock()),
       auditId,
     );
     this.#pending = { auditId };
-    return auditEffectWrite(row, guard, once);
+    const write = auditEffectWrite(row, guard, once);
+    return this.#execution ? guardDelegatedEffect(write, row, this.#execution) : write;
   }
 
   /** The writer reports the changes of the effect statement after its batch. */
@@ -116,6 +173,12 @@ export class OperationCall {
     return {
       [AUDIT_HEADERS.correlationId]: this.#actor.correlationId,
       [AUDIT_HEADERS.path]: this.#actor.path,
+      ...(this.#execution
+        ? {
+            [AUDIT_HEADERS.delegationRef]: this.#execution.delegationRef,
+            [AUDIT_HEADERS.delegatedExecution]: JSON.stringify(this.#execution),
+          }
+        : {}),
     };
   }
 }
@@ -124,21 +187,39 @@ export class OperationCall {
 export interface AuditEnvelope {
   path: SubjectPath;
   correlationId: string;
+  delegatedExecution?: DelegatedExecution;
 }
 
 /**
  * Reads the envelope headers, validated by the same patterns the builder
- * uses. Missing or malformed headers, and any delegation reference (no
- * delegation exists yet), answer null: the route refuses the request as it
+ * uses. Missing or malformed headers, or an incomplete delegation envelope,
+ * answer null: the route refuses the request as it
  * refuses a missing actor header.
  */
 export function parseAuditEnvelope(headers: Headers): AuditEnvelope | null {
   const path = headers.get(AUDIT_HEADERS.path);
   const correlationId = headers.get(AUDIT_HEADERS.correlationId);
-  if (headers.has(AUDIT_HEADERS.delegationRef)) return null;
+  const delegationRef = headers.get(AUDIT_HEADERS.delegationRef);
+  const serialized = headers.get(AUDIT_HEADERS.delegatedExecution);
+  let delegatedExecution: DelegatedExecution | undefined;
+  if (delegationRef !== null || serialized !== null) {
+    if (path !== "mcp" || delegationRef === null || serialized === null || serialized.length > 2048)
+      return null;
+    try {
+      const parsed: unknown = JSON.parse(serialized);
+      if (!validDelegatedExecution(parsed) || parsed.delegationRef !== delegationRef) return null;
+      delegatedExecution = parsed;
+    } catch {
+      return null;
+    }
+  }
   if (path === null || !(SUBJECT_PATHS as readonly string[]).includes(path)) return null;
   if (correlationId === null || !AUDIT_CORRELATION_ID.test(correlationId)) return null;
-  return { path: path as SubjectPath, correlationId };
+  return {
+    path: path as SubjectPath,
+    correlationId,
+    ...(delegatedExecution ? { delegatedExecution } : {}),
+  };
 }
 
 /** `mcp-client:<sub>` stands for `<sub>` (ADR 0047); every other principal is its own subject. */
@@ -154,15 +235,27 @@ export function processorCall(
   kind: SubjectPrincipalKind,
   clock?: () => Date,
 ): OperationCall {
-  return new OperationCall(
+  const call = new OperationCall(
     operation,
     {
       path: envelope.path,
       subject: subjectOfPrincipal(principal),
       principal,
-      principalKind: kind,
+      principalKind: kind === "delegated" ? "agent" : kind,
       correlationId: envelope.correlationId,
     },
     clock,
   );
+  if (kind === "delegated") {
+    if (!envelope.delegatedExecution) throw new Error("delegation envelope required");
+    call.delegate(
+      {
+        id: principal,
+        delegator: subjectOfPrincipal(principal),
+        delegationRef: envelope.delegatedExecution.delegationRef,
+      },
+      envelope.delegatedExecution,
+    );
+  } else if (envelope.delegatedExecution) throw new Error("unexpected delegation envelope");
+  return call;
 }

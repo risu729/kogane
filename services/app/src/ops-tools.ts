@@ -11,7 +11,19 @@
 // wire contract cannot leave the published schema behind. They are closed
 // objects of bounded identifier patterns: no URL, no host, no bucket key, no
 // table name, no ordering, no SQL (G3-13).
-import type { OperationCall } from "../../../packages/application/src/index";
+import {
+  type OperationCall,
+  type DelegatedPrincipal,
+  type DelegationCapability,
+  type DelegationResolution,
+  d1CommandStore,
+  bindDelegatedWrite,
+  delegatedCan,
+  DelegatedOperationError,
+  delegatedBatchFailure,
+  executionFor,
+  sessionRefreshPolicy,
+} from "../../../packages/application/src/index";
 
 import { z } from "zod";
 import type { ToolResult } from "./agent-service";
@@ -27,6 +39,7 @@ import {
   projectionSchema,
   replaySchema,
   sessionRefreshSchema,
+  type OpsContext,
 } from "./ops-api";
 
 export const OPS_TOOL_NAMES = [
@@ -132,7 +145,8 @@ export async function callOpsTool(
 ): Promise<ToolResult> {
   // An MCP client is agent-only (ADR 0047): it is refused here, from the
   // caller object, before any grader could look at a subject.
-  if (caller.kind === "mcp-client") return { status: 403, body: { error: "actor_not_supported" } };
+  if (caller.kind === "mcp-client")
+    return { status: 403, body: { error: "delegation_not_configured" } };
   try {
     const context = opsContext(env, caller.principal, audit);
     const argument: unknown = body ?? {};
@@ -165,5 +179,154 @@ export async function callOpsTool(
         ...(error.refs.length > 0 ? { refs: error.refs } : {}),
       },
     };
+  }
+}
+
+export const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
+  "kogane.ops.collection.request": "operations.collection.request",
+  "kogane.ops.import.request": "operations.import.request",
+  "kogane.ops.replay.request": "operations.replay.request",
+  "kogane.ops.projection.request": "operations.projection.request",
+  "kogane.ops.session.refresh": "operations.session.refresh",
+  "kogane.ops.operation.get": "operations.read",
+};
+export const EXECUTABLE_OPS_CAPABILITIES = [
+  "operations.import.request",
+  "operations.replay.request",
+  "operations.projection.request",
+  "operations.read",
+] as const satisfies readonly DelegationCapability[];
+
+export function delegatedOpsTools(resolution: DelegationResolution) {
+  return resolution.ok
+    ? OPS_MCP_TOOLS.filter(
+        (tool) =>
+          resolution.principal.capabilities.includes(DELEGATED_OPS_CAPABILITIES[tool.name]) &&
+          (EXECUTABLE_OPS_CAPABILITIES as readonly string[]).includes(
+            DELEGATED_OPS_CAPABILITIES[tool.name],
+          ),
+      )
+    : [];
+}
+
+function delegatedContext(
+  env: Env,
+  principal: DelegatedPrincipal,
+  audit: OperationCall,
+): OpsContext {
+  return {
+    store: d1CommandStore(env.DB),
+    principal: {
+      id: principal.id,
+      kind: "delegated",
+      verification: "server",
+      capabilities: ["interpretation.accept"],
+    },
+    audit,
+    now: new Date().toISOString().replace(/\.\d{3}Z$/u, "Z"),
+    nowMs: Date.now(),
+    policy: sessionRefreshPolicy(env.SESSION_REFRESH_POLICY),
+  };
+}
+function sourceAllowed(principal: DelegatedPrincipal, source: string): boolean {
+  return principal.scopes.sources === "*" || principal.scopes.sources.includes(source);
+}
+
+/** Transport only: shared schemas, registry checks, requests and receipts remain the existing services'. */
+export async function callDelegatedOpsTool(
+  name: OpsToolName,
+  body: unknown,
+  env: Env,
+  resolution: DelegationResolution,
+  audit: OperationCall,
+): Promise<ToolResult> {
+  if (!resolution.ok)
+    return {
+      status: resolution.code === "delegation_misconfigured" ? 503 : 403,
+      body: { error: resolution.code },
+    };
+  const principal = resolution.principal;
+  const context = delegatedContext(env, principal, audit);
+  try {
+    audit.delegate(principal, executionFor(principal));
+    delegatedCan(principal, DELEGATED_OPS_CAPABILITIES[name]);
+    if (
+      !(EXECUTABLE_OPS_CAPABILITIES as readonly string[]).includes(DELEGATED_OPS_CAPABILITIES[name])
+    )
+      throw new DelegatedOperationError("operation_not_delegable");
+    if (name === "kogane.ops.operation.get") {
+      const input = parseRequest(operationIdSchema, body ?? {});
+      // Resolve the caller's own row before reading progress; denied and absent are identical.
+      const row = await context.store.first<{ source_id: string | null }>(
+        "SELECT source_id FROM ops_requests WHERE operation_id=? AND principal=?",
+        [input.operationId, principal.id],
+      );
+      if (
+        !row ||
+        (row.source_id === null
+          ? principal.scopes.sources !== "*" || principal.scopes.accounts !== "*"
+          : !sourceAllowed(principal, row.source_id))
+      )
+        throw new HttpError(400, "target_missing");
+      return await opsServices.operation(context, input.operationId);
+    }
+    if (name === "kogane.ops.import.request") {
+      const input = parseRequest(importSchema, body ?? {});
+      if (!sourceAllowed(principal, input.source))
+        throw new HttpError(400, "target_missing", ["source"]);
+      await bindDelegatedWrite(context.store, audit, principal, {
+        capability: "operations.import.request",
+        idempotencyKey: input.idempotencyKey,
+        payload: input,
+      });
+      return await opsServices.import(context, input);
+    }
+    if (name === "kogane.ops.replay.request") {
+      const input = parseRequest(replaySchema, body ?? {});
+      if (!sourceAllowed(principal, input.scope.source))
+        throw new HttpError(400, "target_missing", ["scope.source"]);
+      await bindDelegatedWrite(context.store, audit, principal, {
+        capability: "operations.replay.request",
+        idempotencyKey: input.idempotencyKey,
+        payload: input,
+      });
+      return await opsServices.replay(context, input);
+    }
+    const input = parseRequest(projectionSchema, body ?? {});
+    if (principal.scopes.sources !== "*" || principal.scopes.accounts !== "*")
+      throw new HttpError(400, "target_missing");
+    await bindDelegatedWrite(context.store, audit, principal, {
+      capability: "operations.projection.request",
+      idempotencyKey: input.idempotencyKey,
+      payload: input,
+    });
+    return await opsServices.projection(context, input);
+  } catch (error) {
+    const guard =
+      error instanceof DelegatedOperationError || error instanceof HttpError
+        ? null
+        : await delegatedBatchFailure(context.store, audit);
+    const failure = guard ?? error;
+    if (failure instanceof DelegatedOperationError)
+      return {
+        status:
+          failure.code === "delegation_budget_exceeded"
+            ? 429
+            : [
+                  "idempotency_conflict",
+                  "confirmation_used",
+                  "confirmation_expired",
+                  "revision_conflict",
+                ].includes(failure.code)
+              ? 409
+              : 403,
+        body: { error: failure.code },
+      };
+    if (failure instanceof HttpError)
+      return {
+        status: failure.status,
+        body: { error: failure.code, ...(failure.refs.length ? { refs: failure.refs } : {}) },
+      };
+    throw failure;
   }
 }

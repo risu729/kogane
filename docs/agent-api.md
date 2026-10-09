@@ -970,3 +970,37 @@ Rollback: set `AGENT_API_GRANTS` to `""` (immediate, no redeploy of code needed 
 it is a secret), or deploy a compatible build under the current rollback floor. Proposals already
 written stay as `proposed` rows; they are inert, and removing the capability
 does not need to remove them.
+
+## Delegated execution integration and shared history reads (S3, 2026-10-10)
+
+The deployment configuration remains empty: this code change creates no grant,
+MCP delegation or authentication resource. An explicitly configured owner MCP
+delegation can use only the adapters reported ready by `kogane.capabilities`.
+Installed operations are persisted-run import, parser replay, whole-store
+projection, own-operation status, and inert command planning/simulation.
+They reuse the operator's existing application services and Processor planner.
+They cannot approve or commit a financial decision, contact a provider, release
+a collection lease, or change authority. The operation's delegated effect and
+its audit record share a batch with a strict rolling-day budget; a retry under
+the same key does not spend a second write.
+
+`POST /api/agent/v1/instruments.history` and
+`kogane.instruments.history` use the same reader as
+`GET /api/identity/instrument-history?identifierId=...`: `records.read`,
+whole source/account scope, and the grant's row budget. They return the same
+history contract and do not write a mapping or decision.
+
+`POST /api/agent/v1/audit.search` / `audit.get` and the corresponding
+`kogane.audit.search` / `kogane.audit.get` require `audit.read`.
+Search accepts the common closed filters plus an opaque cursor; detail accepts
+an `auditId`. Source scope is applied in SQL before the page window, account
+scope must be whole-store, and other subjects are pseudonymized. Schedule
+sources use their own `scheduleSources` axis; null-source records need both
+source axes whole-store. An absent detail and an out-of-scope detail are
+indistinguishable.
+
+Synthetic tests verify these paths and their authority boundaries. Real
+client authentication, delegation activation, and production operation remain
+unverified. A preparation helper alone is not a completed settings adapter;
+the remaining #564 writer integration and other schedule operations stay
+unavailable until implemented and independently reviewed.

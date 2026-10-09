@@ -1,7 +1,9 @@
 # ADR 0063: The AI is a delegated operation path: a verified MCP principal the owner names may apply operations within capability, scope, confirmation and audit
 
-- Status: proposed (accepted when its pull request merges). Nothing it decides
-  is implemented; the slices are in the
+- Status: proposed (accepted when its pull request merges). Common auditing and
+  delegation declarations are implemented on main; this S3 execution slice adds
+  delegated R1 operations and shared read adapters. Remaining R2/settings adapters
+  are not implemented in this slice. The slices are in the
   [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
 - Date: 2026-10-09
 - Amends: [ADR 0013](0013-agent-card-purchase-read.md) (the read-only
@@ -303,8 +305,9 @@ an audit record; R4 is never delegated. A delegated decision is recorded with
 - Delegated command reasons remain the free text the command payload already
   requires (`decision_revisions.reason`, as for the operator); the audit record
   never copies them.
-- Two concurrent writes can exceed `budget.writesPerDay` by the number in
-  flight: the count is read before execution.
+- The S3 execution amendment below replaces the proposed pre-count: a delegated
+  effect and its budget check are in the same database batch, so concurrent
+  effects cannot exceed `budget.writesPerDay`.
 - **Trade-off of `method = 'manual'`.** No migration is needed, and delegated
   identity assignments keep the protection `active_manual_overrides` gives
   manual ones. The price: `method` alone no longer separates the owner's own
@@ -344,3 +347,55 @@ The slices are verified by the tests the plan lists (section 8, the delegation
 matrix of thirteen items), on synthetic data, with an independent review per
 slice. Not verified: anything in production; no delegation, grant or Access
 setting exists.
+
+## S3 execution amendment — 2026-10-10 (proposed)
+
+This amendment replaces the pre-execution count's concurrent overshoot with a
+strict rolling-day limit. Only `principal_kind = delegated` records with
+`result IN (applied, accepted)` consume the budget, across delegation revisions
+for the same MCP principal. Existing read/proposal records do not. The last
+audit statement in the effect's existing D1 batch tests the database clock,
+delegation expiry and budget. A failed guard violates the audit-id CHECK and
+rolls back the whole batch, including the native operation. Filtering out only
+the audit row would be unsafe and is not used. Same-key retries reuse the
+native receipt, do not reapply the effect, and do not consume another write.
+Unknown failures remain failures; closed failure codes are derived by reading
+authority facts, never from exception text.
+
+The common call now accepts a delegated principal only on `mcp`, with its
+canonical reference, and carries a closed execution envelope over the private
+App/Processor binding. The Processor validates kind, subject prefix, envelope,
+expiry, payload digest and command family before dispatching the existing
+planner. Financial approvals/commits and provider-contact requests remain
+unavailable in this core slice: their adapters still require implementation.
+The owner approved first-stage R2 on 2026-10-10. This code slice creates or
+activates no credential, delegation or authentication resource; real-client
+setup is a separately authorized workflow.
+
+The R2 helper records a bounded preparation, binds operation, principal,
+delegation revision, target, expected revision, payload, key and expiry, and
+requires the confirmed effect's audit record to cite it. The existing unique
+confirmation index supplies single use in the effect batch. A schedule writer
+must still enforce its native expected revision in that same batch. A tested
+helper is not an exposed settings operation: the maintenance writer integration
+and other schedule adapters remain separate work, and the greater-than-seven-day
+maintenance path remains unavailable pending writer integration and review.
+
+Only installed adapters are advertised: persisted-run import, replay,
+whole-store projection, own operation reads and inert command planning.
+`MCP_DELEGATIONS` remains empty in every checked-in configuration.
+
+History reads reuse #629's `readInstrumentHistoryForGrant` across owner HTTP,
+agent HTTP and MCP. Audit search/detail reuse the common reader with permission
+predicates before pagination: financial-source and schedule-source scopes are
+separate, an account-listed grant is refused, and a null-source record requires
+both source axes to be whole-store. Other subjects are pseudonymized. Cursors
+bind the perimeter. A per-principal overflow aggregate is recorded as `agent`,
+not `delegated`: it spans delegation revisions and asserts no execution grant.
+
+Verification: synthetic full-schema SQLite tests exercise budget races, failed
+batch rollback, exact retry versus payload conflict, expiry at the database
+boundary, altered preparations and single-use confirmations. Real Worker
+transport tests cover import/replay, revocation, receipt scope, HTTP/MCP history
+and audit parity, and unchanged browser audience separation. This does not
+prove a real MCP client's authentication, a production grant, or deployment.

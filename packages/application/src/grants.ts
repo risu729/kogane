@@ -18,6 +18,8 @@ export const AGENT_CAPABILITIES = [
   "summary.read",
   /** Structured records inside the granted scope. */
   "records.read",
+  /** Scoped common operation history. */
+  "audit.read",
   /** Bounded expansion to raw locators; never granted by records.read. */
   "evidence.read",
   /** Immutable relation proposals; never adoption. */
@@ -44,7 +46,7 @@ export interface GrantBudget {
 export interface Grant {
   /** Server-verified principal (Access JWT subject or service-token id). */
   principal: string;
-  scopes: { sources: ScopeSet; accounts: ScopeSet };
+  scopes: { sources: ScopeSet; accounts: ScopeSet; scheduleSources?: ScopeSet };
   capabilities: readonly AgentCapability[];
   budget: GrantBudget;
 }
@@ -119,7 +121,11 @@ export function validGrant(value: unknown): value is Grant {
     !hasExactKeys(value, ["principal", "scopes", "capabilities", "budget"]) ||
     !isText(value.principal, 256) ||
     !isRecord(value.scopes) ||
-    !hasExactKeys(value.scopes, ["sources", "accounts"]) ||
+    !(
+      hasExactKeys(value.scopes, ["sources", "accounts"]) ||
+      hasExactKeys(value.scopes, ["sources", "accounts", "scheduleSources"])
+    ) ||
+    (value.scopes.scheduleSources !== undefined && !validScopeSet(value.scopes.scheduleSources)) ||
     !validScopeSet(value.scopes.sources) ||
     !validScopeSet(value.scopes.accounts) ||
     !Array.isArray(value.capabilities) ||

@@ -4,6 +4,7 @@ import {
   parseGrants,
   resolveDelegation,
   delegationCapabilities,
+  type DelegationCapability,
 } from "../../../packages/application/src/index";
 import type { AgentCaller } from "./auth";
 
@@ -12,10 +13,20 @@ export interface DelegationVars {
   OPERATOR_SUBJECTS?: string;
   AGENT_API_GRANTS?: string;
 }
+export async function resolveMcpDelegation(env: DelegationVars, caller: AgentCaller, now: string) {
+  return resolveDelegation({
+    configured: env.MCP_DELEGATIONS,
+    operatorSubjects: env.OPERATOR_SUBJECTS,
+    readGrants: parseGrants(env.AGENT_API_GRANTS),
+    caller,
+    now,
+  });
+}
 export async function mcpDelegationCapabilities(
   env: DelegationVars,
   caller: AgentCaller,
   now: string,
+  installed: readonly DelegationCapability[] = [],
 ) {
   return delegationCapabilities(
     await resolveDelegation({
@@ -25,5 +36,6 @@ export async function mcpDelegationCapabilities(
       caller,
       now,
     }),
+    installed,
   );
 }

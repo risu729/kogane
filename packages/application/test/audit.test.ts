@@ -144,10 +144,10 @@ describe("the record builder", () => {
     }
   });
 
-  test("no delegation, prepare or confirm exists in this slice", () => {
+  test("incomplete delegation and mismatched confirmation records are refused", () => {
     expect(() =>
       buildAuditRecord({ ...ACTOR, principalKind: "delegated" as never }, read(), AT),
-    ).toThrow("audit_record_invalid:principal_kind");
+    ).toThrow("audit_record_invalid:delegation_ref");
     expect(() => buildAuditRecord(ACTOR, { ...read(), step: "prepare" }, AT)).toThrow(
       "audit_record_invalid:step",
     );
@@ -198,7 +198,7 @@ describe("the record builder", () => {
     expect(toolOperation("kogane.ops.collection.request", "agent-http")).toBeNull();
     expect(toolOperation("kogane.mcp.request", "mcp")).toBeNull();
     expect(toolOperation("kogane.audit.overflow", "mcp")).toBeNull();
-    expect(toolOperation("kogane.audit.search", "mcp")).toBeNull();
+    expect(toolOperation("kogane.audit.search", "mcp")).toBe("audit.search");
     expect(toolOperation("financial.query", "mcp")).toBeNull();
   });
 });

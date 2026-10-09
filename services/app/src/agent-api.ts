@@ -59,9 +59,26 @@ import {
 } from "./mcp";
 import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { opsApiEnabled } from "./ops-api";
-import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
+import {
+  callOpsTool,
+  callDelegatedOpsTool,
+  delegatedOpsTools,
+  EXECUTABLE_OPS_CAPABILITIES,
+  isOpsToolName,
+  OPS_MCP_TOOLS,
+} from "./ops-tools";
 import { HttpError, json } from "./http";
-import { mcpDelegationCapabilities } from "./delegation";
+import { mcpDelegationCapabilities, resolveMcpDelegation } from "./delegation";
+
+import { commandsEnabled } from "./command-api";
+import {
+  callDelegatedCommandTool,
+  delegatedCommandTools,
+  EXECUTABLE_COMMAND_CAPABILITIES,
+  isDelegatedCommandTool,
+} from "./delegated-command-tools";
+
+import { readMcpTools } from "./read-tools";
 
 const AGENT_PREFIX = "/api/agent/v1/";
 export const MCP_PATH = "/mcp";
@@ -194,6 +211,8 @@ export async function agentApi(
     // so a client that asks anyway is told `grants_misconfigured` rather than
     // "no such tool".
     const listOps = ops && caller.kind !== "mcp-client" && grantsUsable(env);
+    let delegated: ReturnType<typeof resolveMcpDelegation> | undefined;
+    const delegation = () => (delegated ??= resolveMcpDelegation(env, caller, delegationNow));
     // The purchase explanation exists exactly while the operator route does
     // (`cardPurchaseRecognition`): otherwise it is neither listed nor callable.
     // That needs the store's schema, so it is asked once, and only by a message
@@ -219,25 +238,41 @@ export async function agentApi(
               ...result,
               body: {
                 ...(result.body as Record<string, unknown>),
-                delegation: await mcpDelegationCapabilities(env, caller, delegationNow),
+                delegation: await mcpDelegationCapabilities(env, caller, delegationNow, [
+                  ...(ops ? EXECUTABLE_OPS_CAPABILITIES : []),
+                  ...(commandsEnabled(env) && env.PIPELINE ? EXECUTABLE_COMMAND_CAPABILITIES : []),
+                ]),
               },
             };
+          });
+        if (isDelegatedCommandTool(name) && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async (audit) => {
+            if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
+            return callDelegatedCommandTool(name, body, env, await delegation(), audit);
           });
         if (isAgentToolName(name))
           return toolCall(request, env, caller, name, (audit) =>
             callTool(name, body, { ...context, audit }),
           );
         if (ops && isOpsToolName(name))
-          return toolCall(request, env, caller, name, (audit) =>
-            callOpsTool(name, body, env, caller, audit),
-          );
+          return toolCall(request, env, caller, name, async (audit) => {
+            if (caller.kind !== "mcp-client") return callOpsTool(name, body, env, caller, audit);
+            if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
+            return callDelegatedOpsTool(name, body, env, await delegation(), audit);
+          });
         return null;
       },
       async () => [
         ...MCP_TOOLS,
+        ...readMcpTools(grant),
+        ...(caller.kind === "mcp-client" ? delegatedCommandTools(env, await delegation()) : []),
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),
         ...((await reconstructed()) ? RECONSTRUCTED_STATE_MCP_TOOLS : []),
-        ...(listOps ? OPS_MCP_TOOLS : []),
+        ...(caller.kind === "mcp-client" && ops
+          ? delegatedOpsTools(await delegation())
+          : listOps
+            ? OPS_MCP_TOOLS
+            : []),
       ],
     );
     return message;

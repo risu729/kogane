@@ -6,32 +6,31 @@ What the code records today about who did what, through which path
 The log covers the operations that exist today on three paths — the
 operator's routes (`ui`), the agent HTTP routes (`agent-http`) and MCP tool
 calls (`mcp`). It does not record the Processor's own `alarm` and `lane` work
-yet (plan S7); no call runs as a delegated principal and nothing prepares or
-confirms (ADR 0063, plan S3: the merged declaration core only parses
-`MCP_DELEGATIONS` and reports an inert status in an MCP client's
-`kogane.capabilities`, which is recorded as that tool's read); and agents
-cannot read it (plan S5/S8). The limits are listed at the
-end.
+yet (plan S7). S3 execution integration adds delegated calls for installed
+adapters and common preparation/confirmation primitives; actual schedule
+adapters remain incomplete. The checked-in delegation configuration is still
+empty. Agent HTTP and MCP can read scoped records under `audit.read`.
+The limits are listed at the end.
 
 ## The record
 
 CORE `audit_records` (migration 0075), one row per operation call:
 
-| Column                                                                               | Holds                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `audit_id`, `recorded_at`                                                            | `aud_` + UUID; canonical UTC milliseconds                                                                                                                                                                                                    |
-| `path`                                                                               | `ui`, `agent-http`, `mcp` (the table also admits `alarm` and `lane`, which nothing writes yet)                                                                                                                                               |
-| `subject`, `principal`, `principal_kind`                                             | the verified Access subject; what it was graded as; `human` (the operator) or `agent` (the table also admits `delegated` and `automatic`)                                                                                                    |
-| `delegation_ref`                                                                     | always NULL today                                                                                                                                                                                                                            |
-| `operation`, `risk_class`, `step`                                                    | a name from `OPERATION_CATALOGUE` (`packages/application/src/operation-path/catalogue.ts`), its ADR 0063 risk class, and `call`                                                                                                              |
-| `scope_namespace`, `scope_source`                                                    | the one server-resolved source the target belongs to, or both NULL                                                                                                                                                                           |
-| `target_ref`                                                                         | the target, as an id the existing logs hold (`plan:<id>`, `op_<id>`, `schedule:<id>`, …); NULL on a refusal                                                                                                                                  |
-| `result`, `result_code`, `reason_code`                                               | `applied` / `accepted` / `read` / `replayed` / `refused` / `failed` / `overflow`; the closed code of a refusal or failure; a closed reason                                                                                                   |
-| `correlation_id`                                                                     | the App's request id (`x-request-id` of the answer), forwarded to the Processor                                                                                                                                                              |
-| `idempotency_key`, `payload_digest`                                                  | the caller's key (a commit's `operationId`, an operations request's key); the digest of the validated payload, never the payload                                                                                                             |
-| `confirmation_digest`, `confirm_expires_at`, `confirms_audit_id`, `reverts_audit_id` | always NULL today (two-step confirmation and reverting operations are ADR 0063's later slices); the table requires `confirms_audit_id` only on an applied or accepted confirm, so a refused confirm with no matching prepare can be recorded |
-| `refs_json`                                                                          | at most 16 references into the existing logs (`approval:<id>`, `operation:<id>`, `decision:<id>`, `schedule:<id>@<rev>`, `field:<path>`)                                                                                                     |
-| `diff_json`                                                                          | one closed shape per kind: `revision` (from, to, changed field names), `decision` (counts), `request` (status), `read` (row count), `release`, `overflow`, `none`                                                                            |
+| Column                                                                               | Holds                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audit_id`, `recorded_at`                                                            | `aud_` + UUID; canonical UTC milliseconds                                                                                                                                                                                                               |
+| `path`                                                                               | `ui`, `agent-http`, `mcp` (the table also admits `alarm` and `lane`, which nothing writes yet)                                                                                                                                                          |
+| `subject`, `principal`, `principal_kind`                                             | the verified Access subject; what it was graded as; `human` (the operator), `agent`, or `delegated` (the table also admits `automatic`)                                                                                                                 |
+| `delegation_ref`                                                                     | the canonical `dlg_` reference for delegated calls, NULL otherwise                                                                                                                                                                                      |
+| `operation`, `risk_class`, `step`                                                    | a name from `OPERATION_CATALOGUE` (`packages/application/src/operation-path/catalogue.ts`), its ADR 0063 risk class, and `call`, `prepare` or `confirm`                                                                                                 |
+| `scope_namespace`, `scope_source`                                                    | the one server-resolved source the target belongs to, or both NULL                                                                                                                                                                                      |
+| `target_ref`                                                                         | the target, as an id the existing logs hold (`plan:<id>`, `op_<id>`, `schedule:<id>`, …); NULL on a refusal                                                                                                                                             |
+| `result`, `result_code`, `reason_code`                                               | `applied` / `accepted` / `prepared` / `read` / `replayed` / `refused` / `failed` / `overflow`; the closed code of a refusal or failure; a closed reason                                                                                                 |
+| `correlation_id`                                                                     | the App's request id (`x-request-id` of the answer), forwarded to the Processor                                                                                                                                                                         |
+| `idempotency_key`, `payload_digest`                                                  | the caller's key (a commit's `operationId`, an operations request's key); the digest of the validated payload, never the payload                                                                                                                        |
+| `confirmation_digest`, `confirm_expires_at`, `confirms_audit_id`, `reverts_audit_id` | preparation digest/expiry and confirmed-preparation link for two-step helpers; revert links remain unused; the table requires `confirms_audit_id` only on an applied or accepted confirm, so a refused confirm with no matching prepare can be recorded |
+| `refs_json`                                                                          | at most 16 references into the existing logs (`approval:<id>`, `operation:<id>`, `decision:<id>`, `schedule:<id>@<rev>`, `field:<path>`)                                                                                                                |
+| `diff_json`                                                                          | one closed shape per kind: `revision` (from, to, changed field names), `decision` (counts), `request` (status), `read` (row count), `release`, `overflow`, `none`                                                                                       |
 
 The table is append-only (no update, delete or replace), `STRICT`,
 `core-keep`, never pruned, and listed in `REVISION_EXCLUDED_TABLES`, so an
@@ -150,8 +149,12 @@ Query parameters, each at most once: `operation`, `path`, `principalKind`,
 `400 invalid_query`. The filters are in the SQL `WHERE` before the `LIMIT`, no
 total is computed, and the cursor binds the filters it was issued under (a
 cursor presented with other filters is `409 stale_context`). Reading the log is
-a page load and is not recorded. No page shows it yet (plan S8), and no agent
-route serves it (`audit.read` is a later slice).
+a page load and is not recorded. No page shows it yet (plan S8). Agent routes `POST /api/agent/v1/audit.search` and `/audit.get`, also served as
+`kogane.audit.search` and `kogane.audit.get`, require `audit.read` and whole
+account scope. Their source predicates precede the page window and cursor,
+with financial and schedule source scopes separate. Null-source records
+require whole scope on both axes. Other subjects are pseudonymized; details
+outside scope and absent details return the same refusal.
 
 ## Cost
 

@@ -404,3 +404,18 @@ export {
   type ExecuteContext,
   executeOperation,
 } from "./operation-path/execute.ts";
+
+export {
+  type DelegatedExecution,
+  DelegatedOperationError,
+  type DelegatedErrorCode,
+  validDelegatedExecution,
+  executionFor,
+  delegatedCan,
+  delegatedReplay,
+  bindDelegatedWrite,
+  type ConfirmationInput,
+  prepareDelegatedOperation,
+  confirmDelegatedOperation,
+  delegatedBatchFailure,
+} from "./delegation/execution.ts";

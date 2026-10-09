@@ -34,12 +34,15 @@ import {
   type OperationName,
   parseAuditEnvelope,
   processorCall,
+  delegatedBatchFailure,
 } from "../../../packages/application/src/index.ts";
 import { IDENTITY_POLICY_VERSION } from "./identity-store.ts";
 import { identitySubjectRef } from "../../../packages/application/src/operations/sql.ts";
 import { prepareIdentityCommand } from "./identity-commands.ts";
 
 import { cardSettlementMutation } from "./card-settlement-commands.ts";
+
+import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 
 const BODY_LIMIT = 16 * 1024;
 const ACTOR = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u;
@@ -167,10 +170,27 @@ async function body(request: Request): Promise<CommandBody | null> {
  * those headers at the same level as `/sweep` and `/identity-revise`, and
  * still refuses an agent's approval itself rather than assuming the caller did.
  */
-function principalOf(request: Request): Principal | null {
+function principalOf(request: Request, envelope: AuditEnvelope): Principal | null {
   const id = request.headers.get("x-kogane-verified-actor");
   const kind = request.headers.get("x-kogane-actor-kind");
-  if (id === null || !ACTOR.test(id)) return null;
+  if (id === null) return null;
+  if (kind === "delegated") {
+    const auth = envelope.delegatedExecution;
+    if (
+      envelope.path !== "mcp" ||
+      !auth ||
+      !id.startsWith("mcp-client:") ||
+      !ACTOR.test(id.slice(11))
+    )
+      return null;
+    return {
+      id,
+      kind,
+      verification: "server",
+      capabilities: auth.commandFamilies.includes("plan") ? ["interpretation.propose"] : [],
+    };
+  }
+  if (!ACTOR.test(id) || envelope.delegatedExecution || id.startsWith("mcp-client:")) return null;
   if (kind !== "human" && kind !== "agent") return null;
   return {
     id,
@@ -218,15 +238,44 @@ export async function changeCommandRoute(
   const match = COMMAND_PATH.exec(path);
   if (!match) return undefined;
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
-  const principal = principalOf(request);
-  if (!principal) return fail("invalid_command");
+
   // The audit envelope (ADR 0064) is required like the actor headers: the
   // App forwards it on every command, and a request without it is refused
   // exactly as one without a verified actor is.
   const envelope = parseAuditEnvelope(request.headers);
   if (!envelope) return fail("invalid_command");
+  const principal = principalOf(request, envelope);
+  if (!principal) return fail("invalid_command");
   const input = await body(request);
   if (!input) return fail("invalid_command");
+  if (principal.kind === "delegated") {
+    const auth = envelope.delegatedExecution!;
+    if (auth.notAfter <= new Date().toISOString())
+      return Response.json({ error: "delegation_expired" }, { status: 403 });
+    // This core slice does not yet install the R2 financial adapters.
+    if (match[1] === "approve" || match[1] === "commit")
+      return Response.json({ error: "operation_not_delegable" }, { status: 403 });
+    if (!auth.commandFamilies.includes("plan"))
+      return Response.json({ error: "capability_not_delegated" }, { status: 403 });
+    if (match[1] === "plan") {
+      if (
+        typeof input.kind !== "string" ||
+        !["identity", "relation", "card-settlement"].includes(input.kind.split(".")[0]!)
+      )
+        return fail("unsupported_semantics");
+      if (
+        auth.idempotencyKey !== input.idempotencyKey ||
+        !auth.payloadDigest ||
+        auth.payloadDigest !==
+          (await canonicalDigest({
+            v: "kogane-delegated-payload-v1",
+            operation: "command.plan",
+            payload: input,
+          }))
+      )
+        return Response.json({ error: "idempotency_conflict" }, { status: 409 });
+    } else if (auth.idempotencyKey || auth.confirmsAuditId) return fail("invalid_command");
+  }
   const store = d1CommandStore(env.DB);
   const now = new Date().toISOString();
   switch (match[1]) {
@@ -234,23 +283,34 @@ export async function changeCommandRoute(
       if (!isChangeKind(input.kind)) return fail("unsupported_semantics");
       const baseContextId = input.baseContextId;
       const audit = writerCall(envelope, "command.plan", principal);
-      const result = await createPlan(
-        input.kind,
-        input.payload,
-        {
-          actor: principal,
-          baseContextId:
-            typeof baseContextId === "string" &&
-            baseContextId.length > 0 &&
-            baseContextId.length <= 256
-              ? baseContextId
-              : "identity-current-v1",
-          now,
-          ttlSeconds: PLAN_TTL_SECONDS_DEFAULT,
-          audit,
-        },
-        store,
-      );
+      let result;
+      try {
+        result = await createPlan(
+          input.kind,
+          input.payload,
+          {
+            actor: principal,
+            baseContextId:
+              typeof baseContextId === "string" &&
+              baseContextId.length > 0 &&
+              baseContextId.length <= 256
+                ? baseContextId
+                : "identity-current-v1",
+            now,
+            ttlSeconds: PLAN_TTL_SECONDS_DEFAULT,
+            audit,
+          },
+          store,
+        );
+      } catch (error) {
+        const guard = await delegatedBatchFailure(store, audit);
+        if (guard)
+          return Response.json(
+            { error: guard.code },
+            { status: guard.code === "delegation_budget_exceeded" ? 429 : 403 },
+          );
+        throw error;
+      }
       return result.ok
         ? answered({ plan: result.plan, created: result.created }, audit)
         : fail(result.error, result.refs);

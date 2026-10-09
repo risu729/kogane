@@ -1,9 +1,10 @@
 # Plan: AI as a delegated operation path, with a common audit log
 
-- Status: **proposed**. Slice S1 (section 8) is implemented
-  ([audit log](../audit-log.md)); of S3 only the inert declaration core
-  (#628) is, and no delegated operation executes; no other slice is. The decisions it
-  rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
+- Status: **in progress**. Slice S1 (section 8) and S3 declaration core (#628)
+  are implemented on main. This S3 execution slice implements delegated R1
+  operations, bounded preparation machinery and shared history/audit reads;
+  actual R2/settings adapters and real-client activation remain separate work.
+  The decisions it rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and
   [ADR 0064](../adr/0064-common-audit-log.md) (common append-only audit log),
   both `proposed` until their pull request merges. Each implementation slice
@@ -223,7 +224,8 @@ every delegated operation, as an unreadable grant list does today):
   it is inert (`delegation_expired`), and in both cases reads continue under
   `AGENT_API_GRANTS` alone;
 - `budget.writesPerDay` is 1–200, counted over the principal's `applied` and
-  `accepted` audit records of the last 24 hours, before execution; a write past
+  `accepted` delegated audit records of the last 24 hours, checked atomically
+  in the effect/audit batch (ADR 0063 S3 execution amendment); a write past
   it is refused `delegation_budget_exceeded` and changes nothing;
 - at most 8 entries.
 
@@ -984,9 +986,9 @@ actually executable delegated operations. Reconcile #564's schedule scope and
 single maintenance writer as S4. Do not copy either unmerged implementation.
 Until this integration is independently reviewed and ships, no delegated
 operation is executable and the S3 matrix remains incomplete.
-The parallel #546 instrument-resolution history service/read route also needs
-a later S3/S6 agent/MCP parity adapter through this common audited path; the
-declaration core does not expose or duplicate that history reader.
+The #629 instrument-resolution history service/read route is merged; execution
+integration reuses its reader for agent HTTP/MCP parity. The declaration core
+itself does not expose or duplicate that history reader.
 
 - What: `MCP_DELEGATIONS` (added as `""` in a reviewed configuration change),
   its parser and resolver (`packages/application/src/delegation/`), the roles,
@@ -998,6 +1000,17 @@ declaration core does not expose or duplicate that history reader.
   catalogue operation per risk class.
 - Review gate: fresh Opus or Codex reviewer; the review re-runs #565's matrix
   1–9 to show the attenuation still holds.
+
+**S3 execution integration (2026-10-10, in progress):** the branch connects
+delegated calls, atomic write-budget/expiry guards, the R2 preparation helper,
+private Processor command envelopes and installed R1 operation adapters.
+History and scoped audit reads share their existing application services.
+The generic R2 helper is not a finished settings tool: #564's sole maintenance
+writer and the other schedule adapters still need integration and independent
+review. The owner approved first-stage R2 on 2026-10-10; financial adoption/provider
+contact still require their adapters. Actual client authentication, grant
+activation and production rollout remain unchanged and unverified.
+No configuration is activated by this work.
 
 **S4 — #564 re-shaped** (after S3; a rebase can be prepared now). Once the
 AGENTS.md rule of section 9 is in force, #564 in its current form — an
