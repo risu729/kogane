@@ -12,6 +12,10 @@
   Open PRs read: #564 (head `3b5c2c3`), #565 (head `9c25877`).
 - Nothing here changes a grant, an Access application, a policy, a secret or a
   Wrangler configuration. No production data was read.
+- Merging this pull request answers none of the owner questions 1–3 (section
+  10), grants nothing and enables nothing: no Access application or policy,
+  grant, `MCP_DELEGATIONS` entry, session length, authentication or
+  production change.
 
 ## 0. Requirement
 
@@ -1119,17 +1123,26 @@ delegation can exist, and the amended text says so.
 
 ## 10. Questions for the owner
 
-Only what a design cannot settle:
+Only what a design cannot settle. Merging this pull request answers none of
+questions 1–3, grants nothing and enables nothing: no Access application or
+policy, grant, `MCP_DELEGATIONS` entry, session length, authentication or
+production change.
 
-1. **Financial adoption and provider contact in the first delegated stage.**
-   This design puts card-settlement accept/withdraw, link and ownership
-   decisions, identity assignment, collection requests and session refreshes
-   in R2 (the AI confirms its own prepared plan, bound by digest, revision and
-   key). Is that acceptable for the first stage, or should these be R3
-   (prepared by the AI, confirmed by you in the UI) until you have read the
-   audit of earlier stages? The same question decides maintenance deferrals
-   beyond the 7-day bound: R3 until you answer, and if you allow them, R2 up
-   to a 31-day joined deferral and never beyond (section 4.6).
+1. **The stage at which the R2 target applies.** Following your direction
+   (「基本的に人間ができることはすべてAIができてほしい、AI経由がメイン」),
+   R2 — the AI confirms its own prepared operation, bound by digest, revision
+   and idempotency key — is the stated target class for financial adoption
+   (card-settlement decisions, link and ownership decisions, identity
+   assignment), provider contact (collection requests, session refreshes) and
+   maintenance deferral beyond the 7-day bound (up to the 31-day
+   joined-deferral ceiling, which stays, and never beyond; section 4.6). That
+   target is not in question. The only judgment left to you is the stage
+   boundary: do these classes become R2 in the first delegated stage, or only
+   after earlier stages' audit records exist and you have read them? Until you
+   answer, the conservative default stays as written: R3 — the tool refuses a
+   deferral beyond 7 days (section 4.6), no delegation entry is proposed with
+   a financial-adoption or provider-contact capability (section 3.5), and you
+   perform these operations in the UI.
 2. **Device posture for write delegation.** The MCP Access application
    cannot carry the browser application's device posture (the clients call
    from their own clouds; ADR 0047). With writes delegated, the compensating

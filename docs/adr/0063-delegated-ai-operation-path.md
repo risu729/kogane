@@ -182,9 +182,14 @@ The assignment of every operation is the plan's mapping (section 5): plans,
 proposals, imports, replays, projection rebuilds, survey rejections and
 maintenance revisions inside the direct envelope are R1; job edits, survey
 acceptances, card-settlement, relation and identity decisions, collection
-requests and session refreshes are R2; stopped-execution lease release, and
-maintenance deferrals beyond the 7-day bound until the owner decides otherwise
-(item 8), are R3; grants, Access, delegations, secrets, service tokens,
+requests and session refreshes are R2, the target class the owner's direction
+sets (「基本的に人間ができることはすべてAIができてほしい、AI経由がメイン」); the
+plan's question 1 asks only at which stage financial adoption, provider
+contact and long deferrals become delegable at R2, and until the owner answers
+they stay R3 (no delegation entry is proposed with those capabilities;
+deferrals as item 8 states). Stopped-execution lease release, and maintenance
+deferrals beyond the 7-day bound until the owner answers that question (item
+8), are R3; grants, Access, delegations, secrets, service tokens,
 deployment, migrations, feature flags, collector dispatch connections, session
 refresh policy, maintenance-survey page enablement, schedule bootstrap,
 `economic-event.resolve-identity` and identity-epoch rewrites are R4.
@@ -217,19 +222,21 @@ relation, `identity.release-override` — recorded with `reverts_audit_id`.
 Provider contact cannot be rolled back, which is why it is R2.
 
 **8. #564 is re-shaped, not replaced.** Its one writer and bounds stay. The
-write capability moves to `MCP_DELEGATIONS`; the actor kinds become
-`operator` and `delegated`; the free-text reason becomes a closed code
+write capability moves to `MCP_DELEGATIONS`; the actor kinds become `operator`
+and `delegated`; the free-text reason becomes a closed code
 (`MAINTENANCE_CHANGE_REASONS`, enforced by #564's own unmerged CORE 0067
 CHECK, following #575's closed-reason pattern); a revision is R1 inside the
 direct envelope (granted source, rule of that source or new, no new joined
 deferral over 7 days, budget unspent, closed reason, registered https host,
-expected revision). Beyond the 7-day bound it is **R3 until the owner answers
-the plan's question 1**: the tool refuses it (`maintenance_deferral_too_long`)
-and the operator makes it in the UI. If the owner then allows it, it becomes
-R2 up to a hard ceiling of a 31-day joined deferral, and a longer one stays
-the operator's in every case. A spent budget, an unregistered host or an
-out-of-scope source never escalates. Rewriting 0067's CHECK also rewrites its
-partial index `maintenance_agent_writes` to `actor_kind='delegated'`.
+expected revision). Beyond the 7-day bound the target is R2 up to a hard
+ceiling of a 31-day joined deferral; the plan's question 1 asks only whether
+that applies from the first delegated stage or after earlier audit records
+exist and have been read. Until the owner answers, it is **R3**: the tool
+refuses it (`maintenance_deferral_too_long`) and the operator makes it in the
+UI. A deferral longer than 31 days stays the operator's in every case. A spent
+budget, an unregistered host or an out-of-scope source never escalates.
+Rewriting 0067's CHECK also rewrites its partial index
+`maintenance_agent_writes` to `actor_kind='delegated'`.
 
 **9. One implementation per command.** `OPERATION_CATALOGUE` and
 `executeOperation` in `packages/application/src/operation-path/` are the only
@@ -310,6 +317,10 @@ an audit record; R4 is never delegated. A delegated decision is recorded with
   `mcp-client:<sub>`; neither the server nor the audit record can tell which
   client acted. This is a limit the owner is asked to accept (plan,
   question 2).
+- Merging this ADR answers none of the plan's owner questions 1–3, grants
+  nothing and enables nothing: no Access application or policy, grant,
+  `MCP_DELEGATIONS` entry, session length, authentication or production
+  change.
 - The ADRs of #564 and #565 are amended by reference here; those PRs should
   add a line pointing to this ADR when they next change.
 - Stopped-execution lease release stays the operator's until the server can
