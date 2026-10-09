@@ -244,7 +244,7 @@ function Components({ cell }: { cell: ReconstructedCell }): ReactNode {
           <SettlementQuantity value={explanation.sameDayBoundary.total} />
         </li>
       )}
-      {explanation.lateRecorded === null ? null : (
+      {explanation.lateRecorded === null || explanation.lateRecorded.refs.length === 0 ? null : (
         <li>
           終了日の取得より後に記録 {explanation.lateRecorded.refs.length} 件{" "}
           <SettlementQuantity value={explanation.lateRecorded.total} />

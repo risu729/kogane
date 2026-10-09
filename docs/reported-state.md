@@ -8,7 +8,7 @@ provider figures, never a total: nothing is added, converted or netted, and a
 container without a capture is named, never shown as zero.
 
 What adopted events imply from a start snapshot, compared with these figures,
-is [reconstructed state](reconstructed-state.md) (an engine and an application query; no route or page yet).
+is [reconstructed state](reconstructed-state.md) (served by `GET /api/v2/reconstructed-state`, an agent read and the `/reconstruction` page).
 
 | Layer        | Where                                                                                                   |
 | ------------ | ------------------------------------------------------------------------------------------------------- |

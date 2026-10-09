@@ -13,6 +13,13 @@
 // quotes. Synthetic values only.
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
+import {
+  ACCOUNT_SOURCES_SQL,
+  CLAIMS_SQL,
+  ECONOMIC_SELECTOR_PRESENT_SQL,
+  KEY_HOLDERS_SQL,
+  SELECTOR_EPOCHS_SQL,
+} from "../../read-model/src/economic-selector.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { explain } from "../../read-model/test/card-usage-plan.ts";
 import { readReconstructedState } from "../src/query/reconstructed-state-read.ts";
@@ -75,41 +82,49 @@ async function timed(run: () => unknown, runs = 3): Promise<number> {
 }
 
 /**
- * The only whole scans any statement of this read may make, each already
- * accepted by the test that owns its statement: the dated reads' bounded
- * CTEs, subqueries, policy rows and `a`, the artifact scan their snapshot CTEs
- * share with every current read (dated-state-scale.test.ts); `b`, the
- * statement ranking's one pass over balance observations, as
- * `card_statement_facts` makes it (ibid.); the selector's schema probe, view
- * arms, newest-first epoch read and materialized key list
+ * The only whole scans each statement of this read may make, by statement and
+ * alias, each already accepted by the test that owns the statement: the dated
+ * container reads' bounded CTEs, subqueries and policy rows and `a`, the
+ * artifact pass their snapshot CTEs share with every current read
+ * (dated-state-scale.test.ts); the statement read's CTEs and `b`, its one pass
+ * over balance observations, as `card_statement_facts` makes it (ibid.); the
+ * selector's schema probe, epoch read, view arms and materialized key list
  * (economic-selector.test.ts); and `m`, the account mapping table, which no
- * index orders by account (ADR 0058). Any other scan fails.
+ * index orders by account (ADR 0058). Any other scan, or one of these aliases
+ * in another statement, fails.
  */
-const ACCEPTED = new Set([
+const DATED_CONTAINERS = new Set([
   "a",
-  "b",
-  "m",
-  "w",
   "l",
-  "s",
   "dp",
   "per",
   "warning",
   "unit_policy",
   "container_policy",
   "dataset_snapshot_policies",
+]);
+const DATED_STATEMENTS = new Set([
+  "b",
+  "s",
   "observed_ids",
   "owned",
   "owned_runs",
   "owned_candidates",
-  "json_each",
-  "CONSTANT",
-  "sqlite_master",
-  "economic_revision_claims",
-  "economic_identity_epochs",
 ]);
-const accepted = (name: string): boolean =>
-  ACCEPTED.has(name) || name.startsWith("dated_") || /^\(subquery-\d+\)$/u.test(name);
+const SELECTOR = new Map<string, Set<string>>([
+  [ECONOMIC_SELECTOR_PRESENT_SQL, new Set(["sqlite_master"])],
+  [SELECTOR_EPOCHS_SQL, new Set(["economic_identity_epochs"])],
+  [CLAIMS_SQL, new Set(["economic_revision_claims"])],
+  [KEY_HOLDERS_SQL, new Set(["w"])],
+  [ACCOUNT_SOURCES_SQL, new Set(["m"])],
+]);
+function accepted(sql: string, name: string): boolean {
+  if (name === "CONSTANT" || name === "json_each") return true;
+  const dated = name.startsWith("dated_") || /^\(subquery-\d+\)$/u.test(name);
+  if (sql.startsWith("WITH dated_snapshot_policies")) return dated || DATED_CONTAINERS.has(name);
+  if (sql.startsWith("WITH dated_statement_ranked")) return dated || DATED_STATEMENTS.has(name);
+  return SELECTOR.get(sql)?.has(name) ?? false;
+}
 
 describe("one read at the route's bounds", () => {
   test(
@@ -130,7 +145,7 @@ describe("one read at the route's bounds", () => {
         for (const step of explain(db, sql, args)) {
           if (!step.detail.startsWith("SCAN ") || step.detail.includes("VIRTUAL TABLE")) continue;
           const name = step.detail.slice(5).split(" ")[0]!;
-          if (!accepted(name)) scanned.push(`${step.detail} :: ${sql.slice(0, 60)}`);
+          if (!accepted(sql, name)) scanned.push(`${step.detail} :: ${sql.slice(0, 60)}`);
         }
       expect(scanned).toEqual([]);
       expect(statements.size).toBeGreaterThan(10);

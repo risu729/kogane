@@ -4,6 +4,7 @@
 // grant, a pinned set version, and that it writes nothing. Every account,
 // amount and date is invented.
 import { describe, expect, test } from "bun:test";
+import { DATED_BALANCES_SQL, DATED_STATE_ROW_BOUND } from "../../read-model/src/dated-state.ts";
 import { storeExecutor } from "../../read-model/test/economic-history-fixture.ts";
 import { ERROR_STATUS } from "../src/errors.ts";
 import {
@@ -12,6 +13,7 @@ import {
   RECONSTRUCTED_STATE_REFUSALS,
   reconstructedStateBodyFromQuery,
   reconstructedStateError,
+  reconstructedStateRefusalOf,
   type ReconstructedStateOutcome,
 } from "../src/query/reconstructed-state-read.ts";
 import {
@@ -250,5 +252,90 @@ describe("refusals", () => {
       expect(error).toMatchObject({ code: category, refs: [`refusal:${code}`, "x"] });
       expect(ERROR_STATUS[category]).toBeGreaterThanOrEqual(400);
     }
+  });
+});
+
+describe("refusals read nothing, bounds are refused, and today is Tokyo's", () => {
+  /** An executor that fails the test on any read. */
+  const unread = {
+    all: async () => {
+      throw new Error("read before a request refusal");
+    },
+    first: async () => {
+      throw new Error("read before a request refusal");
+    },
+  };
+  const base = { account: WORLD_BANK, from: WORLD_FROM, to: WORLD_TO };
+
+  test("every request refusal is decided before the store is read", async () => {
+    const cases: [Record<string, unknown>, string][] = [
+      [{ ...base, from: "2026-02-30" }, "invalid_date"],
+      [{ ...base, from: WORLD_TO, to: WORLD_FROM }, "invalid_range"],
+      [{ ...base, from: "2025-01-01" }, "range_too_long"],
+      [{ ...base, to: "2026-05-01" }, "range_in_future"],
+      [{ ...base, basis: "trade-date" }, "basis_unsupported"],
+      [{ ...base, cut: { coreEpoch: "core-epoch-1", commitSeq: 0 } }, "invalid_cut"],
+      [
+        { ...base, cut: { coreEpoch: "core-epoch-1", instant: "2026-05-01T00:00:00Z" } },
+        "cut_in_future",
+      ],
+      [{ ...base, instrument: "inst-1" }, "scope_unsupported"],
+      [{ ...base, extra: true }, "invalid_query"],
+      [{ ...base, account: " x" }, "invalid_account"],
+      [{ ...base, setVersion: "abc" }, "invalid_query"],
+    ];
+    for (const [body, code] of cases)
+      expect([
+        code,
+        refusal(await readReconstructedState({ grant: WORLD_GRANT, sql: unread, body, now: NOW })),
+      ]).toEqual([code, code]);
+  });
+
+  test("a reported state past its row bound is refused with result_limit_exceeded", async () => {
+    const world = reconstructedStateWorlds().get(WORLD_BANK)!;
+    const sql = storeExecutor(world.db);
+    const overfull = {
+      all: async <T>(text: string, args: readonly unknown[]) =>
+        text === DATED_BALANCES_SQL
+          ? (Array.from({ length: DATED_STATE_ROW_BOUND + 1 }, (_, id) => ({ id })) as T[])
+          : sql.all<T>(text, args),
+      first: sql.first.bind(sql),
+    };
+    expect(
+      await readReconstructedState({ grant: WORLD_GRANT, sql: overfull, body: base, now: NOW }),
+    ).toEqual({ ok: false, refusal: "result_limit_exceeded", refs: ["reportedState"] });
+  });
+
+  test("a selector or fold bound refused inside the query is result_limit_exceeded", () => {
+    for (const code of [
+      "selector_bound_exceeded",
+      "event_budget_exceeded",
+      "reported_budget_exceeded",
+      "coverage_budget_exceeded",
+    ]) {
+      const error = Object.assign(new Error(code), { name: "ReconstructedStateRefusedError" });
+      expect(reconstructedStateRefusalOf(error)).toEqual({
+        refusal: "result_limit_exceeded",
+        refs: [code],
+      });
+    }
+    // Any other refusal of the fold is a programming error, never a 4xx.
+    const other = Object.assign(new Error("invalid_request"), {
+      name: "ReconstructedStateRefusedError",
+    });
+    expect(reconstructedStateRefusalOf(other)).toBeNull();
+  });
+
+  test("today is the caller's date in Asia/Tokyo", async () => {
+    const worlds = reconstructedStateWorlds();
+    const ask = (now: string) =>
+      reconstructedStateOutcome(
+        worlds,
+        new URLSearchParams({ account: WORLD_BANK, from: WORLD_FROM, to: "2026-05-01" }),
+        now,
+      );
+    // 16:00 UTC on 4/30 is 01:00 on 5/1 in Tokyo; 14:59:59 UTC is still 4/30.
+    expect(refusal(await ask("2026-04-30T16:00:00Z"))).toBe("answered");
+    expect(refusal(await ask("2026-04-30T14:59:59Z"))).toBe("range_in_future");
   });
 });

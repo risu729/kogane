@@ -424,8 +424,9 @@ asserted: 1,500 touched events with 4,500 revisions among 64,500 commits
 loaded in 63–76 ms, and an instant near the log's start resolved in 17–20 ms.
 Not measured on workerd or D1. The route's whole answer, the dated reads and the fold
 included, is measured by `packages/application/test/reconstructed-state-scale.test.ts`,
-which also checks the plan of every statement the route runs (ADR 0058,
-amendment of 2026-10-09).
+which also checks the plan of every statement the route runs, and on
+workerd over a local D1 by `services/app/scripts/reconstructed-state-workerd.ts`
+(ADR 0058, amendment of 2026-10-09).
 
 `LOT_INSTRUMENT_IDENTIFIERS_SQL`
 (`packages/application/src/query/lots-on-selection.ts`, ADR 0059) is, like

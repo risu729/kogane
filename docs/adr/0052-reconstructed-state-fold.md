@@ -194,6 +194,9 @@ now)`, a pure diff of two selections of one scope (the baseline is the cut
 - No migration, no read path, no route, no UI: the adapter over the stored
   rows, `GET /api/v2/reconstructed-state` and the panel beside `/state` are
   later PRs. Nothing in production computes a reconstructed state yet.
+  (2026-10-09: the adapter and query landed with ADR 0058, and the route,
+  an agent read and a page of its own, `/reconstruction`, with its amendment
+  of that date.)
 - The subject tolerance (`account:<id>` from card purchases, the bare id from
   card settlements) is an adapter rule, not a decision about the canonical
   form; the fold sees only a resolved `accountId` or null.

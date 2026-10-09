@@ -472,7 +472,8 @@ CORE 0070's triggers, records every statement the service runs, and fails on
 any whole scan that the test owning that statement does not already accept
 (the dated reads' artifact pass and statement ranking, the selector's view
 arms and epoch read, the mapping table by account). Measured on `bun:sqlite`
-locally, medians of three, not asserted:
+locally, medians of three, not asserted; then the same store on workerd
+(below).
 
 | Store                                     | Settlements (revisions) | Commits | Latest cut | Sequence, mid-log | Instant, log start |
 | ----------------------------------------- | ----------------------- | ------- | ---------- | ----------------- | ------------------ |
@@ -481,18 +482,44 @@ locally, medians of three, not asserted:
 
 The full row is one run on a machine shared with other test processes; the
 CI row is the range over three runs (two for the instant, whose first run
-asked an earlier instant). Most of a full answer is work measured
-before, now done in one request: two dated reads (346–398 ms each at this
-store, [reported state](../reported-state.md#cost)), the selector's load and
-two selections (the asked cut and the end capture's cut for the late part)
-and the fold with a baseline (0.92–1.38 s at its budget, ADR 0052). An answer
-of this size is about two seconds of CPU on `bun`; Workers' CPU limit for the
-deployed plan was not checked against it.
+asked an earlier instant). Most of a full answer is work measured before, now
+done in one request: two dated reads (346–398 ms each at this store,
+[reported state](../reported-state.md#cost)), the selector's load and two
+selections (the asked cut and the end capture's cut for the late part) and
+the fold with a baseline (0.92–1.38 s at its budget, ADR 0052).
+
+**On workerd.** `services/app/scripts/reconstructed-state-workerd.ts` (by
+hand, not in CI) builds the same store on `bun:sqlite`, puts it in the SQLite
+file of a local Miniflare D1 under `wrangler dev`, and runs
+`readReconstructedState` on workerd over the D1 binding, as the route does
+after its Access and grant checks. "Wall" is the wall time of one request
+from the harness, median of three after a warm-up. On three further
+instrumented runs the Worker records each statement's interval (after a
+zero-delay timer, since workerd's clock only moves on I/O); "D1" is their
+union, the time the Worker waited on D1, and "rest" is the instrumented wall
+time minus it: the Worker's own work (selection, adapter, fold, JSON) plus the
+local transport, an upper bound on its CPU time. One answer runs 26 D1
+statements at either scale.
+
+| Store, workerd (local D1) | Latest cut: wall (D1 / rest) | Sequence, mid-log      | Instant, log start     |
+| ------------------------- | ---------------------------- | ---------------------- | ---------------------- |
+| `STATEMENT_CI_SCALE`      | 199 ms (123 / 103)           | 127 ms (119 / 54)      | 174 ms (162 / 104)     |
+| `STATEMENT_SCALE`         | 1,721 ms (1,082 / 611)       | 1,275 ms (1,311 / 219) | 1,729 ms (1,219 / 653) |
+
+One run each, on a shared machine (the store's answer is `indeterminate`
+there, as on `bun`). Workers do not count time spent waiting on D1 as CPU
+time. `services/app/wrangler*.jsonc` sets no `limits.cpu_ms`, so the plan's
+default applies: on Workers Paid, which the processor's limits are written
+against ([observation lanes](../observation-lanes.md)), 30 s of CPU per HTTP
+request ([Workers limits](https://developers.cloudflare.com/workers/platform/limits/#cpu-time),
+read 2026-10-09; 10 ms on Workers Free). The full-scale "rest", about 0.6 s,
+is about 2% of that default. Remote D1 (its network round trips and its own
+query time) is not measured; locally the D1 wait is most of the answer.
 
 The route bounds one answer by the range (366 days), the selector's bounds
 (2,000 events, 5,000 revisions; past them `413 result_limit_exceeded`), the
 fold's budgets and the reported state's 5,000 rows per read; nothing is
-paged or cut. Not measured on workerd or D1.
+paged or cut.
 
 ### Limits
 
@@ -523,7 +550,7 @@ paged or cut. Not measured on workerd or D1.
 
 ### Verification
 
-Synthetic data only; no production data, D1 or Workers.
+Synthetic data only; no production data, remote D1 or deployed Worker.
 
 - `packages/application/test/reconstructed-state-read.test.ts`: answers for a
   bank account (reported 10,000 → reconstructed 9,000 beside a reported

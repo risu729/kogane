@@ -283,8 +283,10 @@ export function reconstructedStateBodyFromQuery(
 /** Whether a resolved account id names an `accounts` row (by primary key). */
 const RECONSTRUCTED_STATE_ACCOUNT_SQL = "SELECT 1 AS present FROM accounts WHERE id=?1";
 
-/** The refusal codes the query's own errors become. */
-function refusalOf(error: unknown): { refusal: ReconstructedStateRefusal; refs: string[] } | null {
+/** The refusal codes the query's own errors become; null for an error that is not a refusal. */
+export function reconstructedStateRefusalOf(
+  error: unknown,
+): { refusal: ReconstructedStateRefusal; refs: string[] } | null {
   if (error instanceof ReconstructedStateInputError)
     return {
       refusal: error.code === "invalid_query" ? "invalid_query" : error.code,
@@ -348,7 +350,7 @@ export async function readReconstructedState(input: {
       now,
     });
   } catch (error) {
-    const refused = refusalOf(error);
+    const refused = reconstructedStateRefusalOf(error);
     if (refused === null) throw error;
     return { ok: false, ...refused };
   }

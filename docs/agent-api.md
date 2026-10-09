@@ -411,12 +411,21 @@ capability and perimeter get the same answer.
 Every refusal carries the route's code as its first ref (`refusal:<code>`) and
 the route's HTTP status; the `financial-error-v1` code is its category:
 `invalid_query`, `invalid_account`, `invalid_date`, `invalid_range`,
-`range_in_future`, `invalid_cut`, `cut_in_future`, `cut_after_log_end`
-(`400 invalid_query`); `scope_unsupported`, `basis_unsupported`
-(`400 unsupported_semantics`); `range_too_long` (`400 budget_exceeded`);
-`cut_epoch_not_current`, `set_version_changed` (`409 stale_context`);
-`unknown_account` (`404 evidence_restricted`); `result_limit_exceeded`
+`range_too_long`, `range_in_future`, `invalid_cut`, `cut_in_future`,
+`cut_after_log_end` (`400 invalid_query`); `scope_unsupported`,
+`basis_unsupported` (`400 unsupported_semantics`); `cut_epoch_not_current`,
+`set_version_changed` (`409 stale_context`); `unknown_account`
+(`404 evidence_restricted`, the route's 404 kept); `result_limit_exceeded`
 (`413 budget_exceeded`). It reads and never writes, adopts or approves.
+
+The answer is not paged, so the grant's `budget.maxRows` does not bound it
+(`purchases.explain` pages and enforces it). It is bounded instead by the
+range (366 days) and by the bounds of what it reads, each refused as
+`result_limit_exceeded` rather than cut: the selector's `SELECTOR_BOUNDS`
+(2,000 events, 5,000 revisions, 20,000 legs and claims, 25,000 times, 20,000
+effects, 5,000 commits and subjects, 1,000 pins), the fold's
+`RECONSTRUCTION_BUDGET` (5,000 revisions, 20,000 legs, 5,000 reported rows a
+side, 1,000 coverage rows) and the reported state's 5,000 rows a read.
 
 ## Contexts, cursors and hand-off
 
@@ -541,6 +550,9 @@ Converting them to JSON does not make them instructions.
 | `needs_scope_resolution`  | 422  | Choose a target from the granted candidates                       |
 | `incomplete_evidence`     | 422  | Explain the gap; request the missing scope under a separate grant |
 | `needs_rule_verification` | 422  | Ask for the rule to be verified; an estimate is not a fact        |
+
+`kogane.reconstructed-state.read` keeps its route's status (`unknown_account`
+is 404); the category is advisory.
 
 Authentication failures keep the transport's own closed responses (401 with
 `{error, requestId}`), unchanged from every GET route.
