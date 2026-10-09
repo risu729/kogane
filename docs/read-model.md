@@ -83,6 +83,7 @@ scope (`source`, `account`, `instrument`, `metric`, `from`/`to`, `q`,
 | `getArtifact`           | `observation_fetch_artifacts` + reachable raw object + `observation_fetch_runs`    | recorded: every non-pending parse run of the artifact                         | —                                                                                                                                                                                              | parse runs by id                                    | 5,000 bound per list                |
 | `getObservation`        | the observation table via `visibleEvidence.observations`                           | recorded: failed and superseded results are shown with provenance             | —                                                                                                                                                                                              | —                                                   | —                                   |
 | `getRawDownload`        | `raw_objects` joined to `observation_fetch_artifacts`                              | reachable through a visible artifact                                          | —                                                                                                                                                                                              | lowest artifact id                                  | 1                                   |
+| collection quality      | `src/collection-quality.ts`; see [Collection quality](#collection-quality)         | per cell, by the composed snapshot rules                                      | Cells per (dataset, parser, unit, period) of one source, ranked whole, then paged.                                                                                                             | dataset, unit, period desc, parser                  | 501 cells; 200 jobs and sources     |
 
 ### Limits
 
@@ -315,3 +316,120 @@ exact-arithmetic subtotal over the filter scope. `legacyLatestPage` serves the
 v1 `/api/balances` window from the same rows in the same order, which is what
 the compatibility adapter uses. See
 [Balance read model](balance-read-model.md) for the contract.
+
+## Collection quality
+
+`src/collection-quality.ts` ([ADR 0045](adr/0045-collection-quality-read.md))
+holds the SQL behind `GET /api/collection-quality` and
+`GET /api/collection-quality/<sourceId>`; `packages/application/src/query/collection-quality.ts`
+maps its rows to the contract and the closed reason codes. It is not an
+`ObservationReader` method: like the dated reads it is composed by an
+application query over an executor.
+
+| Text                       | Reads                                                                                                                                                        | Bound                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+| `SCHEDULE_QUALITY_SQL`     | every `collection_schedules` row, its newest receipt by `nominal_at` (the unique index) and its held lease                                                   | 201 rows; more is refused                                |
+| `TERMINAL_QUALITY_SQL`     | the `collection_runs` rows of exactly the (collector, run id) pairs a receipt names, with the newest `registered` stage and the visible fetch run            | the pairs given                                          |
+| `UNREGISTERED_QUALITY_SQL` | never-registered terminals of the given collectors, once per run by its newest row, grouped by code                                                          | every row of those sources, by index; grows with history |
+| `SOURCE_QUALITY_SQL`       | every visible source and its newest visible fetch run, read by id                                                                                            | 201 rows; more is refused                                |
+| `CELL_QUALITY_SQL`         | one source's visible artifacts named by a dataset, a job or a recorded parse; their jobs, parses, publications, claims and unit outcomes; current membership | 501 cells from an offset                                 |
+
+A cell is (dataset, parser, fetch unit, period, MyJCB statement state,
+currentness rule). Its newest capture is its newest fetch run by capture time;
+its current capture is the newest fetch run with a member of the current set,
+decided by `current_global_pass_snapshots`, `current_vpass_snapshots`
+(`VPASS_SNAPSHOT_MEMBER`), `current_myjcb_snapshots` (`MYJCB_LEDGER_MEMBER`),
+or `activeStateProjection` with `completeSnapshotCandidates.currentMember`. The
+CTE texts are composed unchanged; `GLOBAL_PASS_MONTH` and
+`VPASS_STATEMENT_MONTH` are exported from `src/sql.ts` so the cell's period is
+the expression the snapshot partitions on. The parsers whose current set a
+read narrows further (`UNCOMPOSED_QUERY_RULE_PARSERS`) carry
+`query_rule_not_composed`. A capture no job or parse names is its own cell,
+shown only while it is newer than every parsed capture of its slot. The read
+counts no observation, so an empty current capture is `current` like any
+other; the GLOBAL PASS months where such a capture supersedes an older one
+with rows are named by `globalPassEmptyMonths` (the Queries table), not by
+this read. A
+`container-snapshot` cell is current in the sense of the Balances and
+Positions reads: the Transactions read applies no snapshot selection, so the
+transactions a snapshot parser also emits
+(`sbi-shinsei-top-balances-and-activity`) stay listed from a capture this read
+calls not current.
+
+### Cost
+
+D1 has no table statistics. `test/collection-quality.test.ts` checks every plan
+on a complete-CORE store with none: the summary reads are keyed by job, run
+and source. `UNREGISTERED_QUALITY_SQL` reads every `collection_runs` row of
+each visible collector source on each call through `collection_runs_run
+(source)`, so it grows with the terminal history (measured once in review on a
+loaded machine with every row never registered, the worst case: about 20 ms at
+4,000 rows, 200 ms at 16,000; not asserted). The cell read reaches the source's artifacts by
+`idx_fetch_artifacts_source_dataset_time (source_id=?)`, its runs by
+`idx_fetch_runs_source` and their units by `idx_fetch_units_run`, and every
+job, parse, publication, claim and unit report by key; no observation table is
+read. Its only whole-store passes are inside the composed snapshot CTEs, the
+passes the Transactions, Balances and Positions reads already make, and each is
+evaluated once (an `IN` list materialized once, or an automatic index built
+once), never per row. A per-source CTE is reached only from a cell of its
+dataset: measured once on `bun:sqlite`, a Sony Bank page took the same time
+with 0 or 2,000 GLOBAL PASS pages in the store (not asserted). On the test's
+scaled store (90 daily captures of four sources) one source's cells take
+roughly 10 to 50 ms on `bun:sqlite`; not measured on workerd or D1.
+
+## Knowledge selector
+
+`src/economic-selector.ts` ([ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md))
+is the SQL half of the knowledge selector: it loads, for a scope of accounts,
+every event the scope touches and everything that decides its revision in
+force at a cut, and `selectAdopted` (`packages/domain/src/knowledge-selector.ts`)
+resolves and filters. Like the dated reads it is composed by an application
+query over an executor (`queryReconstructedState`), not an `ObservationReader`
+method, and no route calls it yet.
+
+| Text                                                 | Reads                                                                                                                                 |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `SELECTOR_EPOCHS_SQL`, `LOG_EXTENT_SQL`              | the current core epoch, the current identity epoch, the epoch's first and last commit                                                 |
+| `INSTANT_CUT_SQL`, `COMMIT_AT_SQL`                   | the commit an instant resolves to (largest sequence with `known_at` at or before it), the `known_at` of a sequence                    |
+| `SEED_EVENTS_SQL`                                    | events whose legs name an account as `account:<id>` or as the bare id                                                                 |
+| `REVISIONS_SQL`, `POINTED_BY_SQL`                    | every revision of the given events; the events whose revisions point at given revisions                                               |
+| `CLAIMS_SQL`                                         | every claim of the given events through `economic_revision_claims` (legacy purchase keys and accepted settlements included)           |
+| `KEY_HOLDERS_SQL`, `ALIAS_HOLDERS_SQL`               | every event holding a given (book, key) in any of the view's three sources, or a given (book, alias class)                            |
+| `LEGS_SQL`, `TIMES_SQL`, `EFFECTS_SQL`, `SEALS_SQL`  | the children of the given events                                                                                                      |
+| `COMMITS_SQL`, `SUBJECTS_SQL`, `PINS_SQL`            | the commits seals name; the account each leg subject names; the current revision of `account_mapping:` and `instrument_mapping:` pins |
+| `ACCOUNT_SOURCES_SQL`                                | the sources an account's current mappings come from, for the query's reported-container check                                         |
+| `LOT_INSTRUMENT_IDENTIFIERS_SQL` (application, lots) | every identifier any of whose mapping revisions names a given instrument, with whether its current one does (ADR 0059)                |
+
+The closure (supersession both ways, claim holders) repeats until it adds
+nothing; one load answers any cut of the epoch. Every read stops one row past
+its bound (`SELECTOR_BOUNDS`) and the load is refused, never cut.
+
+### Cost
+
+`test/economic-selector.test.ts` checks every statement's plan on the complete
+CORE schema without table statistics: each reads by primary key or by
+`economic_legs_subject`, `economic_event_revisions_superseded_by`,
+`economic_claims_key`, `economic_claims_alias`,
+`card_purchase_recognition_keys_key`, `card_settlement_candidates_bank` and
+`card_settlement_decisions_event`; the view's arms are each searched by event
+id. The whole reads left are the JSON argument, the schema catalogue, the
+identity epochs read newest first (one row) and, in `ACCOUNT_SOURCES_SQL`, the
+operator-curated mapping table (no index by account). Two reads grow with
+history: the seed reads every leg ever written on the account, and
+`INSTANT_CUT_SQL` walks the commits made after the instant along the primary
+key (no index orders `known_at`). Measured once on `bun:sqlite`, not
+asserted: 1,500 touched events with 4,500 revisions among 64,500 commits
+loaded in 63–76 ms, and an instant near the log's start resolved in 17–20 ms.
+Not measured on workerd or D1.
+
+`LOT_INSTRUMENT_IDENTIFIERS_SQL`
+(`packages/application/src/query/lots-on-selection.ts`, ADR 0059) is, like
+`ACCOUNT_SOURCES_SQL`, one pass over a mapping table: no index orders
+`instrument_mappings` by instrument, and adding one would be a migration. Its
+currency check searches the `(identifier_id, revision)` key, and its plan
+without statistics is tested (one scan of the table, nothing else whole).
+Measured by the reviewer on `bun:sqlite`, not D1, not asserted, for the
+statement before it also returned remapped identifiers: about 0.3 ms at 1,000
+mapping rows, 2.3 ms at 10,000 and 11.5 ms at 100,000, linear. The same script
+on the current statement gave 0.2, 2.1–2.2 and 5.5–6.0 ms. D1 reads every
+mapping row on every query.

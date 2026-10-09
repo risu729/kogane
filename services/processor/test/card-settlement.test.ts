@@ -69,6 +69,17 @@ async function preparedCommand(kind: ChangeKind, payload: unknown) {
       now,
     });
 }
+/**
+ * An SMBC debit's `extra` as the SMBC parser stores it: the provider id beside
+ * the external id, and the origin the parser records, which the settlement
+ * writer's identity admission reads (ADR 0054).
+ */
+function smbcExtra(providerId: string): string {
+  return JSON.stringify({
+    id: providerId,
+    _kogane: { direction: "outflow", amountSignSource: "direction", identityOrigin: "provider-id" },
+  });
+}
 async function command(kind: ChangeKind, payload: unknown) {
   return (await preparedCommand(kind, payload))();
 }
@@ -462,10 +473,7 @@ test("one resolved card month cannot be allocated twice after raw ordinal change
     await db
       .prepare(`INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,as_of,raw_locator,extra_json)
       VALUES(803,'smbc-bank:synthetic-ordinal-test',?,'posted',-5000,'-5000',0,'JPY','2026-10-10T00:00:00+09:00','synthetic-ordinal-debit',?)`)
-      .bind(
-        externalId,
-        JSON.stringify({ _kogane: { direction: "outflow", amountSignSource: "direction" } }),
-      )
+      .bind(externalId, smbcExtra(externalId))
       .run();
   }
   for (const [id, source] of [
@@ -609,7 +617,7 @@ test("a newer resolved card ordinal invalidates an earlier approval without cons
   await db
     .prepare(`INSERT INTO transaction_observations(parse_run_id,source_account,external_id,status,amount_minor,amount_text,amount_scale,currency,as_of,raw_locator,extra_json)
     VALUES(903,'smbc-bank:synthetic-freshness','synthetic-freshness-debit','posted',-6000,'-6000',0,'JPY','2026-11-10T00:00:00+09:00','synthetic-freshness',?)`)
-    .bind(JSON.stringify({ _kogane: { direction: "outflow", amountSignSource: "direction" } }))
+    .bind(smbcExtra("synthetic-freshness-debit"))
     .run();
   for (const [id, source] of [
     [901, "vpass"],
@@ -731,7 +739,7 @@ async function ownedPair(base: number, period: string): Promise<string> {
       `smbc-bank:guard-${base}`,
       `synthetic-guard-debit-${base}`,
       `${due}T00:00:00+09:00`,
-      JSON.stringify({ _kogane: { direction: "outflow", amountSignSource: "direction" } }),
+      smbcExtra(`synthetic-guard-debit-${base}`),
     )
     .run();
   for (const [id, source] of [

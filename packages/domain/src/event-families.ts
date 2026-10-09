@@ -13,7 +13,12 @@
 // packages/parsers/test/event-families.test.ts.
 import { hasExactKeys, isOneOf, isRecord, isText } from "./guards.ts";
 
-export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v1";
+/**
+ * v2 (ADR 0054, G1b): the provider identity functions below, and SBI Shinsei
+ * rows no longer have a card settlement writer (their id's origin is not
+ * recorded, so a human-adopted writer refuses them: identity_origin_unrecorded).
+ */
+export const TRANSACTION_FAMILY_REGISTRY_VERSION = "transaction-family-registry-v2";
 
 /**
  * The closed list of economic-event families.
@@ -416,7 +421,10 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
   },
   {
     // `txnReferenceNo`, no origin recorded, no status; debit/credit columns;
-    // `tradeTypeCode` kept unmapped; one native currency per account.
+    // `tradeTypeCode` kept unmapped; one native currency per account. The card
+    // settlement writer is human-adopted and refuses an id whose origin the
+    // parser does not record (ADR 0054 rule 2), although its provider identity
+    // function is declared below: a parser release recording the origin admits it.
     sourceId: "sbi-shinsei-bank",
     parserName: "sbi-shinsei-top-balances-and-activity",
     observationKinds: ["transaction"],
@@ -431,7 +439,7 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
         "counterpart_not_stated",
         "semantics_unobserved",
       ),
-      supported("card-settlement"),
+      unsupported("card-settlement", "identity_origin_unrecorded"),
     ],
   },
   {
@@ -596,6 +604,85 @@ export const TRANSACTION_FAMILY_REGISTRY: readonly TransactionFamilyEntry[] = [
     ],
   },
 ];
+
+/**
+ * A provider identity function (ADR 0054, identity rules 4 and 5): how a
+ * human-adopted writer reads the identity of one provider fact from a row of
+ * one parser, to compute the fact's alias class
+ * `[sourceId, components, resolved account id, ruleVersion]`. The components
+ * are the values of provider fields the parser keeps in the row's `extra`,
+ * never the stored external id text, the producer or the namespace, so the
+ * same fact collected under another producer or namespace, or with its id
+ * rendered differently by another parser release, has the same alias class.
+ *
+ * `sourceAccounts` is the scope the provider's id is declared unique in: the
+ * listed source accounts, or `any` source account of the source (each account
+ * then has its own alias classes through the resolved account id). A row
+ * outside the scope has no declared function (identity_resolver_missing).
+ */
+export interface ProviderIdentityFunction {
+  sourceId: string;
+  parserName: string;
+  sourceAccounts: "any" | readonly string[];
+  /** Top-level keys of the row's `extra` (`transaction_observations.extra_json`). */
+  componentFields: readonly string[];
+  /** Pinned in every alias class it computes; a changed function is a new version. */
+  ruleVersion: string;
+}
+
+/**
+ * The declared provider identity functions. Reviewed entries only; a family
+ * without one is refused to every human-adopted writer
+ * (identity_resolver_missing), and a declared one is still refused while the
+ * parser does not record its rows' identity origin (identity_origin_unrecorded).
+ *
+ * Both are declared unique within one account only: the class carries the
+ * resolved account id, so the same provider id under two accounts is two
+ * classes, and two source accounts resolved to one account share one class
+ * (an alias conflict, never a second holder). Uniqueness across ranges and
+ * accounts is not verified (ADR 0054, Not verified).
+ *
+ * - SMBC (`smbc-direct-transactions`): the row's provider id `id`, which the
+ *   collector reads from the provider's `meisaiId` and the parser records as
+ *   `identityOrigin: provider-id` and as the external id.
+ * - SBI Shinsei (`sbi-shinsei-top-balances-and-activity`): `txnReferenceNo`,
+ *   which the parser requires to be unique within one activity page (ADR
+ *   0018). The parser records no origin, so this function admits nothing
+ *   until a parser release records it.
+ */
+export const PROVIDER_IDENTITY_FUNCTIONS: readonly ProviderIdentityFunction[] = [
+  {
+    sourceId: "smbc-bank",
+    parserName: "smbc-direct-transactions",
+    sourceAccounts: "any",
+    componentFields: ["id"],
+    ruleVersion: "smbc-meisai-id-v1",
+  },
+  {
+    sourceId: "sbi-shinsei-bank",
+    parserName: "sbi-shinsei-top-balances-and-activity",
+    sourceAccounts: "any",
+    componentFields: ["txnReferenceNo"],
+    ruleVersion: "sbi-shinsei-txn-reference-no-v1",
+  },
+];
+
+/** The function declared for one row's parser and source account, or null. */
+export function providerIdentityFunction(
+  sourceId: string,
+  parserName: string,
+  sourceAccount: string,
+  declarations: readonly ProviderIdentityFunction[] = PROVIDER_IDENTITY_FUNCTIONS,
+): ProviderIdentityFunction | null {
+  return (
+    declarations.find(
+      (declared) =>
+        declared.sourceId === sourceId &&
+        declared.parserName === parserName &&
+        (declared.sourceAccounts === "any" || declared.sourceAccounts.includes(sourceAccount)),
+    ) ?? null
+  );
+}
 
 /** The entry for one parser, or null when its rows are not in the registry. */
 export function transactionFamilyEntry(

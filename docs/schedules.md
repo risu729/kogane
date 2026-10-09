@@ -17,8 +17,10 @@ URL on the source's already registered official site, the actual time you checke
 the announcement, and the affected scope. `collection` defers daily collection; `session` also defers session keepalive.
 `feature-only` records provenance but
 does not postpone collection. Sources marked `not-found` have no known window;
-that is not a claim that maintenance never happens. Research is not automatically
-refreshed. The page flags provenance older than thirty days.
+that is not a claim that maintenance never happens. A rule changes only through
+an operator's edit or an operator's acceptance of a re-survey proposal
+([below](#official-site-re-survey)). The page flags provenance older than
+thirty days.
 
 The initial public snapshot is in `config/maintenance-research.json` (2026-10-04).
 It includes Mizuho Saturday night, Sony login/debit windows, the GLOBAL PASS debit
@@ -47,6 +49,18 @@ the release and its state readback finish. The page refreshes after success or
 failure, and keeps the result visible after the released lease disappears. Normal
 executions release their own leases on completion.
 
+An accepted operations-API collection or session refresh runs through the same
+named collector RPC and the same lease
+([ADR 0048](adr/0048-operation-collector-dispatch.md),
+[operations API](ops-api.md#collector-execution-adr-0048)). While a lease is
+held the request waits (`collection_lease_held`) instead of starting. The
+Processor's dispatch only reads the lease and never releases or replaces it;
+the collector acquires and releases it exactly as for an alarm run, and a
+stopped execution's lease is still released only by the operator. A collector that finds its lease held reports `collection_busy` (alarm
+receipts included) rather than `collection_failed`; St George, whose session
+coordinator records a refused lease as a failed run, still reports
+`collection_failed` and then refuses later runs until the operator resumes it.
+
 Deployment applies CORE 0065 and uploads named collector entrypoints before the
 Processor and App. It removes the fourteen configured Cron jobs and reconciles
 future alarms only after healthy release checks. Initial reservations have a
@@ -63,6 +77,52 @@ The trusted workflow refuses pre-alarm release/rollback targets before checkout
 and before any production mutation. Removing the ScheduleAlarm class requires a
 separate retirement migration; it is not an ordinary old-commit rollback.
 
+## Official-site re-survey
+
+[ADR 0050](adr/0050-maintenance-survey-proposals.md). The Processor lane
+`maintenance_survey` re-reads allowlisted official notice pages and turns what
+changed into proposals. It never changes a rule, a schedule or an alarm.
+
+- **What may be read.** `config/maintenance-survey.json` lists one page per
+  source (the registered reference URL), its default scope, time zone,
+  cadence in hours, and the provider's terms and cost of automated reading.
+  A page is fetched only while `fetch` is `enabled`, which requires `terms`
+  and `cost` to be `confirmed`, and only while the Processor's
+  `MAINTENANCE_SURVEY_ENABLED` is `"1"` or `"true"`. Every page ships
+  `disabled`/`unconfirmed` and the variable is not set: today nothing is
+  fetched.
+- **What a reading keeps.** Each attempt is an append-only fetch record:
+  time, HTTP status, media type, size, SHA-256 and a closed outcome; the body
+  is stored once per SHA-256 in the raw-evidence bucket. A redirect, an error
+  status, a non-text or empty page, an undecodable or oversized body, a page
+  with no recognisable window or with more than 40 is a failure with its code,
+  never "no maintenance", and proposes nothing. A failure retries after 1, 2,
+  4 … hours, never later than the cadence.
+- **What is read.** Dated windows (date and time to time, with 翌 or a
+  weekday for the next day) and 毎週X曜日, 毎日 and 毎月第N X曜日(の翌日) followed
+  by a time range. Missing years, weekday or zone mismatches, unmarked
+  next-day ends, exception, change, cancellation or partial-service wording,
+  approximate times (頃, 目途), windows over three days and contradictory
+  times are review reasons.
+- **What is proposed.** A window that equals an enabled rule changes nothing.
+  One that overlaps one rule is a revision of it; one that overlaps none is a
+  new rule; an enabled rule this page backed but no longer states is proposed
+  disabled, for review. The same reading never proposes twice, and a rejected
+  proposal returns only after the rule or the page changes.
+- **Decisions.** The **公式サイトの再調査** section shows each page's freshness
+  (`最新`, `古い情報`, `まだ取得できていません`, or not fetched automatically), last
+  success and failure with its reason, and the undecided proposals with their
+  reasons and source page. Only undecided proposals raise a notice. **採用**
+  writes the proposal through the same version-checked maintenance revision
+  as an edit, with the page and its fetch time as reference and verification
+  time; it is refused if the rule changed after the proposal was read, and
+  that proposal can then only be rejected. **却下** records the judgement and
+  changes nothing.
+
+Not verified: no official page has been fetched; which pages to allow and at
+which cadence are the owner's to confirm, and pages that are PDFs, need a
+login or render with JavaScript cannot be read this way.
+
 ## Settings API
 
 - `GET /api/ops/v1/schedules`: settings, maintenance provenance, reservations
@@ -71,6 +131,8 @@ separate retirement migration; it is not an ordinary old-commit rollback.
 - `POST /api/ops/v1/schedules/maintenance`: versioned maintenance edits.
 - `POST /api/ops/v1/schedules/leases/:sourceId`: release the exact stopped
   execution lease after confirmation, without starting collection.
+- `POST /api/ops/v1/schedules/proposals/:id`: accept or reject one undecided
+  re-survey proposal (`{"decision":"accept"}` or `"reject"`).
 
 These routes require the configured human Access operator. Writes require
 same-origin JSON, `x-kogane-settings: 1` and strict payload validation
@@ -79,6 +141,7 @@ tools. The separately allowlisted, bodyless deployment `/bootstrap` route
 only reconciles reservations after release identity checks.
 
 Maintenance changes can be made from the management screen using this HTTP API.
-An AI/MCP integration, its credentials/permissions and automatic online research
-refresh remain unimplemented. See [agent access](agent-api.md) and
-[current status](current-status.md).
+An AI/MCP integration and its credentials/permissions remain unimplemented.
+Automatic online research exists only as the proposal-only re-survey above,
+which fetches nothing until pages are confirmed. See [agent access](agent-api.md)
+and [current status](current-status.md).

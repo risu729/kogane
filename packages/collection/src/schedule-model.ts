@@ -1,4 +1,5 @@
 // Public scheduling contract. No credentials, bank values or provider response text.
+import type { MaintenanceSurveyView } from "./maintenance-survey-model";
 export type SchedulePattern =
   | { kind: "daily"; time: string; weekdays: number[] }
   | { kind: "interval"; minutes: number };
@@ -60,6 +61,8 @@ export interface ScheduleSnapshot {
   maintenance: MaintenanceRule[];
   occurrences: ScheduleOccurrence[];
   leases: { source: string; leaseRef: string; startedAt: string }[];
+  /** The official-site re-survey (ADR 0050); absent from a Processor that predates it. */
+  survey?: MaintenanceSurveyView;
 }
 export const TIME = /^([01]\d|2[0-3]):[0-5]\d$/u;
 export const ZONES = ["Asia/Tokyo", "UTC", "Australia/Sydney"] as const;
@@ -168,6 +171,20 @@ function at(date: number, time: string, timezone: string): number | null {
     });
   // A missing DST wall time is skipped; the earlier repeated wall time is used once.
   return candidates.length ? Math.min(...candidates) : null;
+}
+/** The local date of an instant in `timezone`, as the UTC midnight of that date. */
+export function localCalendarDate(ms: number, timezone: string): number {
+  return localDate(ms, timezone);
+}
+/**
+ * The instant of wall time `time` (HH:MM) on a local date given as its UTC
+ * midnight, in `timezone`; null for a malformed time or one DST skips. The
+ * maintenance survey places dated windows with it (ADR 0050).
+ */
+export function wallTimeInstant(date: number, time: string, timezone: string): number | null {
+  return TIME.test(time) && (ZONES as readonly string[]).includes(timezone)
+    ? at(date, time, timezone)
+    : null;
 }
 export function nextNominal(pattern: SchedulePattern, timezone: string, after: number): number {
   if (

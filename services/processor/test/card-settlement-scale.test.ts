@@ -148,9 +148,25 @@ function sameReads(
 const guardQuery = (sql: string): string => `SELECT ${sql} AS ok`;
 
 /**
+ * A review's `claim_available` (ADR 0054 G1b), from the keyed readiness CTEs
+ * whose column packages/read-model/test/card-settlement-readiness.test.ts
+ * compares with its definition; 1 for an id no candidate has.
+ */
+function claimAvailable(store: Database, id: string): number {
+  const found = store
+    .query(
+      `WITH chosen AS (SELECT ?1 AS id), ${cardSettlementReadinessCtes()} SELECT claim_available FROM readiness`,
+    )
+    .get(id) as { claim_available: number } | null;
+  return found?.claim_available ?? 1;
+}
+
+/**
  * Both texts of the commit guard for each review in `ids`, at its own revision
  * and the next, under its own status and another, for an acceptance and not;
- * returns the guards that held and failed.
+ * returns the guards that held and failed. Since ADR 0054 G1b the acceptance
+ * guard is the shipped one and `claim_available`; every other guard is the
+ * shipped one.
  */
 function sameGuards(store: Database, ids: readonly string[]): Set<string> {
   const seen = new Set<string>();
@@ -166,10 +182,15 @@ function sameGuards(store: Database, ids: readonly string[]): Set<string> {
           const [found] = rows(store, guardQuery(cardSettlementCommitGuardSql(accept)), args) as {
             ok: number;
           }[];
-          expect(found as unknown).toEqual(
-            rows(store, guardQuery(legacyCardSettlementCommitGuardSql(accept)), args)[0],
-          );
+          const [shipped] = rows(
+            store,
+            guardQuery(legacyCardSettlementCommitGuardSql(accept)),
+            args,
+          ) as { ok: number }[];
+          const claim = accept ? claimAvailable(store, id) : 1;
+          expect(found as unknown).toEqual({ ok: shipped!.ok === 1 && claim === 1 ? 1 : 0 });
           seen.add(`${accept ? "accept" : "other"} guard ${found!.ok}`);
+          if (accept && shipped!.ok === 1 && claim === 0) seen.add("accept guard 0: claim held");
         }
   }
   return seen;
@@ -379,6 +400,7 @@ describe("the settlement sweep's reads on random stores", () => {
     }
     expect([...seen].sort()).toEqual([
       "accept guard 0",
+      "accept guard 0: claim held",
       "accept guard 1",
       "other guard 0",
       "other guard 1",

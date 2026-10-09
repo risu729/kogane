@@ -1,7 +1,10 @@
 // Card purchase revisions as guarded batches (CORE 0047; docs/economic-events.md).
 //
 // Statement order: decision → event revision → leg → supersede pointer(s) →
-// sidecar → keys. Every statement is a *conditional* write, for the reason
+// sidecar → keys → revision seal(s) → commit row (CORE 0070, ADR 0054: the
+// lane is a rule writer of the common consumption guard; its keys are its
+// claims in book `card-usage`, read through `economic_revision_claims`, so no
+// `economic_claims` row repeats them). Every statement is a *conditional* write, for the reason
 // `decision-commit.ts` gives: D1 rolls a batch back on an SQL error, not
 // because a conditional INSERT matched zero rows, so each statement carries
 // its own guard.
@@ -40,13 +43,22 @@
 import {
   CARD_PURCHASE_ACTOR,
   CARD_PURCHASE_POLICY,
+  CARD_PURCHASE_WRITER_RELEASE,
   cardPurchaseDecisionKind,
   cardPurchaseDecisionReason,
   type CardPurchaseDraft,
   type CardPurchaseMergeDraft,
   type CardPurchaseSplitDraft,
 } from "../../../domain/src/card-purchase.ts";
+import {
+  INITIAL_IDENTITY_EPOCH,
+  parseConsumptionKey,
+  type BookClaim,
+  type CommitMember,
+  type RevisionRef,
+} from "../../../domain/src/economic-contract.ts";
 import type { SqlWrite } from "../core/operations.ts";
+import { canonicalKnownAt, decisionEntry, economicFinalizationWrites } from "./economic-commit.ts";
 
 export interface CardPurchaseRecognitionInput {
   draft: CardPurchaseDraft;
@@ -56,7 +68,18 @@ export interface CardPurchaseRecognitionInput {
    */
   expectedRevision: number | null;
   now: string;
+  /**
+   * The identity epoch the seal is made under: the current one, as the caller
+   * read it (`CURRENT_IDENTITY_EPOCH_SQL`). Default: the first epoch. A seal
+   * under an epoch that is no longer current is refused by the commit row
+   * (`identity_epoch_changed`), so a stale value writes nothing.
+   */
+  identityEpoch?: string;
 }
+
+/** The declared identity epoch with the highest ordinal (CORE 0070). */
+export const CURRENT_IDENTITY_EPOCH_SQL =
+  "SELECT identity_epoch FROM economic_identity_epochs ORDER BY ordinal DESC LIMIT 1";
 
 /**
  * Who a merge or split decision is recorded under: the rule (the default: a
@@ -138,7 +161,101 @@ export function cardPurchaseRecognitionWrites(input: CardPurchaseRecognitionInpu
     // The one permitted update (0032): point the old live revision at the new one.
     writes.push(supersedeWrite({ eventId, revision: expectedRevision }, draft));
   writes.push(...sidecarWrites(draft, now));
+  writes.push(
+    ...finalizationWrites({
+      entry: decisionId,
+      kind: `card-purchase.${draft.action}`,
+      members: [
+        {
+          draft,
+          supersedes: expectedRevision === null ? [] : [{ eventId, revision: expectedRevision }],
+        },
+      ],
+      author: RULE,
+      identityEpoch: input.identityEpoch ?? INITIAL_IDENTITY_EPOCH,
+      now,
+    }),
+  );
   return writes;
+}
+
+/**
+ * The seal of every member revision and the commit row, after the keys (CORE
+ * 0070, ADR 0054). The entry is the batch's first decision: "this decision
+ * exists", so a replay writes whatever it has not written yet, and the decision
+ * id names the writer release (`cardPurchaseDecisionId`), so no batch of this
+ * release reuses a pre-guard decision.
+ *
+ * The keys are the claims (book `card-usage`), and nothing is released: a
+ * revision of one event restates its live revision's keys (a revision or a
+ * re-anchoring keeps the row's key, a retirement holds its keys, as 0047
+ * requires), a merge holds both events' keys and a split divides the merged
+ * event's keys between its two members, each checked by statement 1. A draft
+ * that dropped a key would leave it out of `released_json`, which the commit
+ * row refuses (`economic_commit_released_mismatch`): the batch then writes
+ * nothing, never a silent release.
+ *
+ * Identity pins are empty: the lane resolves its card account per row and
+ * revises under retire-before-recognise (ADR 0002), so it pins no identity
+ * revision; the seal pins the identity epoch only.
+ */
+function finalizationWrites(input: {
+  entry: string;
+  kind: string;
+  members: { draft: CardPurchaseDraft; supersedes: RevisionRef[] }[];
+  author: CardPurchaseDecisionAuthor;
+  identityEpoch: string;
+  now: string;
+}): SqlWrite[] {
+  const { author, now } = input;
+  const knownAt = canonicalKnownAt(now);
+  const ref = (draft: CardPurchaseDraft): RevisionRef => ({
+    eventId: draft.revision.eventId,
+    revision: draft.revision.revision,
+  });
+  const claims: BookClaim[] = input.members.flatMap(({ draft }) =>
+    draft.keys.map((key) => {
+      const parsed = parseConsumptionKey(key.key);
+      if (parsed === null) throw new RangeError("a card purchase key is not a consumption key");
+      return { book: "card-usage" as const, key: parsed };
+    }),
+  );
+  const members: CommitMember[] = input.members.map(({ draft, supersedes }) => ({
+    ...ref(draft),
+    supersedes: supersedes.map((prior) => ({ ...prior })),
+  }));
+  const digest = /^dr_cp_([0-9a-f]{64})$/u.exec(input.entry)?.[1];
+  if (digest === undefined) throw new RangeError("card purchase decision id is not a digest");
+  return economicFinalizationWrites({
+    entry: decisionEntry(input.entry),
+    claims: [],
+    times: [],
+    effects: [],
+    seals: input.members.map(({ draft }) => ({
+      ...ref(draft),
+      writerRelease: CARD_PURCHASE_WRITER_RELEASE,
+      legCount: draft.revision.legs.length,
+      claimCount: draft.keys.length,
+      timeCount: 0,
+      effectCount: 0,
+      contentDigest: draft.contentDigest,
+      identityPins: {},
+      identityEpoch: input.identityEpoch,
+      now,
+    })),
+    commit: {
+      decisionRevisionId: input.entry,
+      operationId: author.operationId,
+      principal: author.actorId,
+      // The rule's payload is the draft its decision id digests.
+      payloadDigest: digest,
+      kind: input.kind,
+      members,
+      claims,
+      released: [],
+      now: knownAt,
+    },
+  });
 }
 
 /** A draft's own consistency: the decision it names, no pointer, pinned keys. */
@@ -383,22 +500,26 @@ export interface CardPurchaseMergeInput {
   author?: CardPurchaseDecisionAuthor;
   /** An extra condition on statement 1, e.g. the change lifecycle's receipt reservation. */
   guard?: SqlWrite;
+  /** As `CardPurchaseRecognitionInput.identityEpoch`. */
+  identityEpoch?: string;
 }
 
 /**
  * A pending-to-posted merge in one guarded batch: the survivor's decision
  * (statement 1, carrying the merge guard), its revision n+1 and leg, the
  * survivor's revision n and the posted event's revision m superseded by
- * n+1, then the sidecar and both keys.
+ * n+1, then the sidecar and both keys, the seal and the commit row (one
+ * member, superseding both).
  */
 export function cardPurchaseMergeWrites(input: CardPurchaseMergeInput): SqlWrite[] {
   const { merge, now } = input;
   const guard = cardPurchaseMergeGuard(merge);
+  const author = input.author ?? RULE;
   return [
     decisionWrite(
       merge.draft,
       merge.survivor.revision,
-      input.author ?? RULE,
+      author,
       now,
       input.guard ? all(guard, input.guard) : guard,
     ),
@@ -406,6 +527,14 @@ export function cardPurchaseMergeWrites(input: CardPurchaseMergeInput): SqlWrite
     supersedeWrite(merge.survivor, merge.draft),
     supersedeWrite(merge.absorbed, merge.draft),
     ...sidecarWrites(merge.draft, now),
+    ...finalizationWrites({
+      entry: merge.draft.decisionRevisionId,
+      kind: "card-purchase.merge",
+      members: [{ draft: merge.draft, supersedes: [{ ...merge.survivor }, { ...merge.absorbed }] }],
+      author,
+      identityEpoch: input.identityEpoch ?? INITIAL_IDENTITY_EPOCH,
+      now,
+    }),
   ];
 }
 
@@ -462,13 +591,16 @@ export interface CardPurchaseSplitInput {
   now: string;
   author?: CardPurchaseDecisionAuthor;
   guard?: SqlWrite;
+  /** As `CardPurchaseRecognitionInput.identityEpoch`. */
+  identityEpoch?: string;
 }
 
 /**
  * A withdrawn link split in one guarded batch: the merged event's retirement
  * (statement 1 carries the split guard) superseding its live revision and
  * holding the pending key(s), then the posted event's decision (guarded on
- * the first) and its revision m+1 holding the posted key again.
+ * the first) and its revision m+1 holding the posted key again, then a seal
+ * for each and one commit row listing both members.
  */
 export function cardPurchaseSplitWrites(input: CardPurchaseSplitInput): SqlWrite[] {
   const { split, now } = input;
@@ -492,5 +624,19 @@ export function cardPurchaseSplitWrites(input: CardPurchaseSplitInput): SqlWrite
     }),
     ...revisionWrites(restore, now),
     ...sidecarWrites(restore, now),
+    // The absorbed revision m points at the merged revision, not at m+1:
+    // the restore supersedes nothing, and the merged revision is the
+    // retirement's prior.
+    ...finalizationWrites({
+      entry: split.retire.decisionRevisionId,
+      kind: "card-purchase.split",
+      members: [
+        { draft: split.retire, supersedes: [{ ...split.survivor }] },
+        { draft: restore, supersedes: [] },
+      ],
+      author,
+      identityEpoch: input.identityEpoch ?? INITIAL_IDENTITY_EPOCH,
+      now,
+    }),
   ];
 }

@@ -30,6 +30,7 @@ import {
   type PendingPostedBlocker,
 } from "../../../domain/src/pending-posted-review.ts";
 import {
+  CURRENT_IDENTITY_EPOCH_SQL,
   cardPurchaseMergeGuard,
   cardPurchaseMergeWrites,
   cardPurchaseSplitGuard,
@@ -66,6 +67,11 @@ export interface PendingPostedReview {
   precondition: CommitGuard;
   merge: CardPurchaseMergeDraft | null;
   split: CardPurchaseSplitDraft | null;
+  /**
+   * The identity epoch a merge's or split's seals are made under (CORE 0070):
+   * the current one when the review was read. Null when no event moves.
+   */
+  identityEpoch: string | null;
 }
 
 const BLOCKER_ERRORS: Record<PendingPostedBlocker, CommandErrorCode> = {
@@ -156,6 +162,13 @@ export async function preparePendingPostedReview(
     if (split === null) return commandError("stale_context", [marker]);
   }
 
+  let identityEpoch: string | null = null;
+  if (merge !== null || split !== null) {
+    const epoch = await store.first<{ identity_epoch: string }>(CURRENT_IDENTITY_EPOCH_SQL, []);
+    if (!epoch) return commandError("unsupported_semantics", [marker]);
+    identityEpoch = epoch.identity_epoch;
+  }
+
   // Every side with a live event is pinned, whatever the action: a reviewer
   // decides about the events the screen showed, and the screen finds them
   // through these subjects.
@@ -237,6 +250,7 @@ export async function preparePendingPostedReview(
         : proposalGuard,
       merge,
       split,
+      identityEpoch,
     },
   };
 }
@@ -336,10 +350,13 @@ export async function pendingPostedWrites(input: {
         },
   ];
   const author = { method: "manual" as const, actorId: principal.id, operationId };
+  // Each batch ends its economic statements with its seals and commit row
+  // (CORE 0070); the lifecycle's approval, plan and outbox statements follow.
+  const epoch = review.identityEpoch === null ? {} : { identityEpoch: review.identityEpoch };
   if (review.merge)
-    writes.push(...cardPurchaseMergeWrites({ merge: review.merge, now, author, guard }));
+    writes.push(...cardPurchaseMergeWrites({ merge: review.merge, now, author, guard, ...epoch }));
   if (review.split)
-    writes.push(...cardPurchaseSplitWrites({ split: review.split, now, author, guard }));
+    writes.push(...cardPurchaseSplitWrites({ split: review.split, now, author, guard, ...epoch }));
   const events = review.merge
     ? [at(review.merge.draft.revision.eventId, review.merge.draft.revision.revision)]
     : review.split

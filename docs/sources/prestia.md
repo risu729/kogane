@@ -1173,3 +1173,17 @@ Its output is a closed code per refused page (for example
 options, tables by `th` count, the activity table's rows by cell count and
 how many of the parser's required and the surveyed English and Japanese
 labels it has, the pager), with no text, value or date.
+
+One of the two (artifact 679), replayed by the owner, is `unclassified_table`:
+10 records in the activity table but 9 compact/expanded pairs, in one parent
+`div` outside the activity table, followed in that `div` by a table with two
+headers and one cell
+([observations](../observations.md#global-pass-a-refused-page-has-ten-records-and-nine-detail-pairs-replay-diagnostics-no-parser-release)).
+What that table means and whether it belongs to the tenth record is
+unobserved, and no parser change follows from the counts alone. The replay's
+shape now also prints which record each pair carries, the record without a
+pair, and how the two-header table's headers and cell compare with the
+activity and detail tables, as positions, booleans and pattern classes, and
+compares the page with the newest capture of the same key that has a
+published parse
+([ADR 0026's amendment of 2026-10-08](../adr/0026-collector-unit-coverage.md#amendment-2026-10-08-global-pass-replay-compares-records-with-detail-tables)).

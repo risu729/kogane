@@ -317,10 +317,21 @@ export function expiryRule(row: ExpiryRuleSqlRow): ExpiryRule {
               (BUCKET_KINDS as readonly unknown[]).includes(kind),
             )
           : [],
-        tiers: Array.isArray(record.tiers)
-          ? record.tiers.filter((tier): tier is string => typeof tier === "string")
-          : null,
-        validPeriod: validTemporalValue(record.validPeriod) ? record.validPeriod : null,
+        // Only an explicit null is "every tier" or "open-ended". An unreadable
+        // tier list requires a tier no claim can name, and an unreadable
+        // period covers no day: neither widens the rule (ADR 0049).
+        tiers:
+          record.tiers === null
+            ? null
+            : Array.isArray(record.tiers)
+              ? record.tiers.filter((tier): tier is string => typeof tier === "string")
+              : [],
+        validPeriod:
+          record.validPeriod === null
+            ? null
+            : validTemporalValue(record.validPeriod)
+              ? record.validPeriod
+              : { kind: "unknown", reasonCode: "stored_rule_period_invalid" },
       };
     }
   } catch {
