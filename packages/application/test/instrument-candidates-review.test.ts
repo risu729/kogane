@@ -127,6 +127,12 @@ describe("a page of the candidate read", () => {
       subject: "instrument",
       referenceId: id.broker9001,
       targetId: page.identifiers.find((row) => row.identifierId === id.listing9001)!.instrumentId,
+      candidate: {
+        candidateId: cross.candidateId,
+        anchorIdentifierId: id.listing9001,
+        anchorMappingRevision: 1,
+        subjectMappingRevision: 1,
+      },
     });
     // Every identifier an item names is in the page, and nothing else.
     const named = new Set(

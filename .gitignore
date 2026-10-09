@@ -9,3 +9,8 @@ hk.local.pkl
 mise.local.toml
 mise.local.lock
 **/.cloudflare/
+
+experiments/d1-conformance/src/corpus.generated.ts
+experiments/d1-conformance/worker-configuration.d.ts
+# Native test coverage and invocation metadata (CI artifacts, not source).
+**/coverage/

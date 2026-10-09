@@ -3,6 +3,7 @@
 - Status: accepted (merged 2026-10-08 in #578); the
   [2026-10-09 amendment](#amendment-2026-10-09-route-and-page-as-implemented)
   (route, page, agent read tool and cost) is proposed
+- The [server anchor and history amendment](#amendment-2026-10-09-server-anchor-and-history) below is proposed.
 - Date: 2026-10-08
 - Issue: part of #546
 
@@ -610,3 +611,123 @@ Synthetic data only, no production access:
   re-read and the plan is refused, a held candidate shows its reason and
   only the keep-apart button, decided, separated and hint views, disabled
   actions without `commands`, no horizontal scroll at 390 px).
+
+## Amendment 2026-10-09: server anchor and history
+
+- Status: proposed (until this PR merges)
+- Date: 2026-10-09
+- Issue: part of #546
+
+### Context
+
+The preceding amendment checked an anchor only in the page. An anchor
+mapping could move after that read while the subject stayed unchanged, so
+an API or agent plan could adopt into the anchor's former instrument. The
+existing history query also had no route or page access. This slice uses the
+existing lifecycle and history query; it adds no financial adoption rule.
+
+### Options considered
+
+1. Pin every identifier mapped to the target instrument on every assignment:
+   this would change the scope of direct manual corrections and cannot tie a
+   plan to the particular candidate whose evidence was reviewed.
+2. Add optional anchor fields without distinguishing candidate provenance:
+   omission would let a candidate context claim the old subject-only guard.
+3. A candidate provenance bundle verified against the current open candidate,
+   while explicit direct assignments remain distinguishable. Chosen.
+
+### Decision
+
+Candidate adoption payloads of `identity.assign` carry `candidate` with
+`candidateId`, `anchorIdentifierId`, `anchorMappingRevision` and
+`subjectMappingRevision`. The server verifies that the current resolution
+still offers adoption for that exact candidate, with the same orientation,
+subject, target and revisions. It refuses held, decided, missing or changed
+candidates. The same 500,000 observation bound is checked before this read.
+This applies to the shared `createPlan` service for every caller.
+
+The bundle must match `baseContextId`; an assignment whose context starts
+`instrument-candidate:` must carry it. A direct manual assignment omits it
+and cannot claim candidate provenance. The plan payload and digest retain
+the evidence bundle. The planner checks that the anchor still maps to the
+target, pins both mappings in `expectedRevisions`, and leaves the simulation
+target as the subject actually being changed. Existing simulation, approval
+and commit guards apply to both pins, including the atomic receipt reservation
+before any mutation, outbox write or approval consumption. A same-target
+anchor revision also invalidates the plan. The page verifies both returned
+pins before opening confirmation.
+Stored candidate plans made under the earlier subject-only contract are
+refused with `stale_context` at simulation, approval and commit and must be
+re-planned. Direct manual plans remain valid under their existing contract.
+
+`readInstrumentHistoryForGrant` serves the shipped `queryInstrumentHistory`
+for one identifier. It requires `records.read` and whole-store source/account
+scope before a read, validates the id, and counts every history branch by its
+indexed key before loading entries. More than the grant's `maxRows` is refused
+whole; a concurrent append is checked again against the returned row count.
+The route is `GET /api/identity/instrument-history?identifierId=` behind the
+existing Access gate; HEAD has the existing body suppression. The page loads
+history on request, validates the wire contract, and displays every mapping,
+decision and relation entry in stored order. No SQL history rewrite, schema
+migration or new library is needed.
+
+### Consequences and limits
+
+Candidate adoption now has server anchor protection. Explicit manual
+corrections keep their existing contract without claiming candidate evidence.
+A candidate's entire evidence graph is not pinned: unrelated identifier facts
+or `listed_as` decisions changed after planning are outside the two mapping
+pins. The confirmation screen still renders the assignment generically.
+
+The history adapter for agents/MCP remains pending integration with the shared
+audit service in #619; the grant-graded application service is ready for that
+connection. The route makes no audit implementation of its own. Remote D1 and
+production are unmeasured. No second broker's securities, ISIN/share-class
+observations, or price/quantity/cost connection are introduced. #546 remains
+incomplete.
+
+### Deferred effective-date model
+
+Two separate meanings need a repository decision before implementation:
+recorded-time history (which mapping was known at a cutoff) and effective-time
+mapping (which product a code denoted on a business date). Reading append-only
+revisions by `created_at` would provide only the first and cannot establish
+the second. An additive effective-interval mapping model could preserve old
+decisions and add new revisions, but requires chosen interval boundaries,
+overlap and correction rules, the treatment of undated observations, and
+explicit handling of provider identifier reuse/replacement.
+
+Migrating every current mapping to an unbounded interval would make an
+unobserved historical assertion; backfilling from first/last observation also
+does not prove validity. No such migration is made. A future implementation
+must move this work to an explicit next step, not treat deferral as completion.
+The recommended next design is owner-stated intervals with cited evidence:
+unset intervals are unknown, undated observations remain unresolved, a
+correction appends a version, and conflicting intervals refuse rather than
+choosing a winner. Retained earlier results stay immutable; a new valuation
+pins the interval decision version it uses. This is a proposal for the next
+ADR decision, not behavior this amendment implements.
+
+Choices that can change financial results are the interval boundary convention,
+which dated field determines a trade/position/price's applicability, whether
+non-overlapping intervals can resolve reused provider codes, and whether a
+new calculation restates past holdings or costs. None is assigned a default
+here. The owner must authorize a concrete contract before code/schema changes.
+A future implementation
+must define how historical prices, quantities, costs and retained reports use
+the new intervals and whether correction restates earlier derived results.
+`listed_as.valid_from/valid_to` still have the documented ignored-window
+limitation; choosing the reference date and interaction with superseding
+relations is part of that decision, not inferred here.
+
+### Verification
+
+Synthetic stores only: candidate provenance omission/tampering/context mismatch,
+held candidate refusal, plan payload/digest and both mapping pins; anchor
+changes between reading and planning, between planning and simulation/approval,
+after approval, and after the commit's preparatory reads immediately before
+the batch, with no subject mutation, receipt, outbox or approval consumption.
+The history service matches the shipped query after correction and rejection,
+keeps every revision, checks grant refusals before reads, refuses above budget
+before loading text, and uses indexed count plans without table statistics.
+Worker tests cover Access, method/query validation, HEAD and the wire contract.

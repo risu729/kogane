@@ -33,10 +33,7 @@ export default defineConfig({
     env: {
       SCHEDULES_ENABLED: bindings.text("true"),
       DEPLOYMENT_SCHEDULE_TOKENS: bindings.text('["32f6a8d0612c6a657eb74dc066cefbcf.access"]'),
-      BALANCE_PROJECTION_ENABLED: bindings.text("1"),
-      REWARDS_V2_ENABLED: bindings.text("true"),
       EVIDENCE_SOURCE_ID: bindings.text("sony-bank"),
-      EVENTS_V2_ENABLED: bindings.text("true"),
       ACCESS_ISSUER: bindings.text("https://risu729.cloudflareaccess.com"),
       ACCESS_AUDIENCE: bindings.text(
         "20cc9cb6173e2755bc3ffd5f43a9adf45b0c2ad8451a1b2d330cc2b75f0d85c8",

@@ -2,8 +2,8 @@
 // in the Workers runtime against a real Miniflare R2 `DATA` bucket and the real
 // session Durable Object.
 //
-// `vitest.config.ts` binds COLLECTION_TARGET to "shared" for this suite; the
-// deployed configuration still ships `legacy`.
+// The Worker writes DATA only. It does not read a collection-target var, and
+// the deployed configuration does not declare one.
 import { env, applyD1Migrations, runInDurableObject, type D1Migration } from "cloudflare:test";
 import { beforeEach, describe, expect, it } from "vitest";
 import {

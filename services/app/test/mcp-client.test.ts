@@ -22,7 +22,11 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { AGENT_TOOL_NAMES, RECONSTRUCTED_STATE_TOOL_NAME } from "../src/agent-service";
+import {
+  AGENT_TOOL_NAMES,
+  PURCHASES_TOOL_NAME,
+  RECONSTRUCTED_STATE_TOOL_NAME,
+} from "../src/agent-service";
 import { principalFor } from "../src/grants";
 import { HttpError } from "../src/http";
 import { opsContext } from "../src/ops-api";
@@ -60,12 +64,12 @@ function grants(table: Record<string, unknown>): Record<string, string> {
   return { AGENT_API_GRANTS: JSON.stringify(table) };
 }
 /**
- * What this deployment publishes on `/mcp` to every grant: the agent tools
- * and, because this store has the reported state's views, the reconstructed
- * state's read. The purchase explanation joins them only with the event
- * reader flag on.
+ * What this deployment publishes on `/mcp` to every grant: the agent tools,
+ * the purchase explanation (CORE 0047 is applied here; the retired
+ * `EVENTS_V2_ENABLED` name is not read), and, because this store has the
+ * reported state's views, the reconstructed state's read.
  */
-const PUBLISHED = [...AGENT_TOOL_NAMES, RECONSTRUCTED_STATE_TOOL_NAME];
+const PUBLISHED = [...AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME, RECONSTRUCTED_STATE_TOOL_NAME];
 /** A valid reconstructed-state request for an account the store does not hold. */
 const RECONSTRUCTED = { account: "acct-mcp-synthetic", from: "2026-03-01", to: "2026-03-31" };
 
@@ -492,7 +496,16 @@ describe("a client connects through the MCP application, in either protocol era"
       description: string;
       inputSchema: Record<string, any>;
     }[];
-    expect(tools.length).toBe(PUBLISHED.length + 1);
+    expect(tools.map((tool) => tool.name)).toEqual(PUBLISHED);
+    // The retired name neither adds a tool nor hides the purchase explanation.
+    expect(
+      await listTools({
+        environment: {
+          ...grants({ [AGENT]: grant(["summary.read"]) }),
+          EVENTS_V2_ENABLED: "0",
+        },
+      }),
+    ).toEqual(PUBLISHED);
     for (const tool of tools) {
       expect(tool.name).toMatch(/^[A-Za-z0-9_.-]{1,128}$/u);
       expect(tool.description.length).toBeLessThanOrEqual(2048);
@@ -542,6 +555,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
     for (const [name, args] of [
       [RECONSTRUCTED_STATE_TOOL_NAME, RECONSTRUCTED],
       ["kogane.instruments.candidates", {}],
+      [PURCHASES_TOOL_NAME, {}],
     ] as const) {
       const refused = await callTool(name, args, { environment: HOSTILE });
       expect(refused.isError, name).toBe(true);
@@ -854,7 +868,6 @@ describe("a tool that is not published cannot be called (matrix 8)", () => {
     for (const name of [
       "kogane.change.commit",
       "kogane.change.approve",
-      "kogane.purchases.explain",
       "kogane.ops.collection.request",
       "tools/call",
       "",
@@ -862,6 +875,17 @@ describe("a tool that is not published cannot be called (matrix 8)", () => {
       const response = await rpc("tools/call", { name, arguments: {} }, { environment });
       const message = (await response.json()) as { error?: { code: number; message: string } };
       expect(message.error, name).toMatchObject({ code: -32602 });
+    }
+    // CORE 0047 is applied, so the purchase explanation is published and
+    // callable with the flag unset and with the retired name off.
+    for (const retired of [undefined, "0", "true"]) {
+      const withFlag =
+        retired === undefined ? environment : { ...environment, EVENTS_V2_ENABLED: retired };
+      expect(await listTools({ environment: withFlag }), String(retired)).toContain(
+        PURCHASES_TOOL_NAME,
+      );
+      const explained = await callTool(PURCHASES_TOOL_NAME, {}, { environment: withFlag });
+      expect(explained.isError, String(retired)).toBe(false);
     }
     expect({ relations: await relationCount(), ops: await opsRowCount() }).toEqual(before);
   });

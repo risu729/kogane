@@ -588,6 +588,24 @@ declared origin, would need an owner-approved amendment of rule 2; it is not
 taken.
 The registry lists SBI Shinsei's card-settlement membership as unsupported.
 
+**2026-10-09: a parser release records the origin.** The owner chose the
+parser-release route over a rule exception
+([ADR 0018 note](0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin)).
+`sbi-shinsei-top-balances-and-activity` 0.1.3 records
+`_kogane.identityOrigin: provider-id` on every activity row, with the external
+id and every other field unchanged, and the declared function above admits
+such a row; rule 2 and the function are unchanged. The registry becomes
+`transaction-family-registry-v3`: the entry records its origin under
+`identityOrigin`, and SBI Shinsei's card-settlement membership is `supported`
+again. The admission still reads each stored row, so a row a 0.1.2 run stored
+is refused (`identity_origin_unrecorded`) and stays refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead. The release is deployed by the CD release of the
+commit that merges it (`deploy.yml` releases every green CI run on main), and
+the repair lane then re-parses the stored captures without an operator step:
+the owner's merge is the deploy and re-parse decision. The reference's stability and
+uniqueness stay as listed under Not verified: the owner's read-only
+confirmation covers the captured range only, and nothing shows the provider
+never reuses a reference.
+
 ### Readiness, heads and refusals
 
 - `card_settlement_readiness`'s keyed CTEs gain `claim_available`: no live

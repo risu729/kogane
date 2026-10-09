@@ -20,6 +20,14 @@ export default defineConfig({
     }),
   ],
   test: {
+    coverage: {
+      provider: "istanbul",
+      include: ["src/**/*.{ts,tsx,js,mjs}"],
+      exclude: ["src/**/*.d.ts"],
+      reportsDirectory: "coverage/workerd",
+      reporter: ["text", "lcov", "json-summary", "json"],
+      reportOnFailure: true,
+    },
     include: ["worker-test/**/*.test.ts"],
   },
 });

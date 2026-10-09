@@ -1092,9 +1092,9 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   single-flight `runCollection` returns the in-flight summary (G3-14).
 - Verified with synthetic data only: `test/shared-collection.test.ts` and
   `worker-test/shared-data-bucket.test.ts`, which drives the real Durable
-  Object and a real Miniflare R2 `DATA` bucket. (Its Miniflare config still
-  binds a `COLLECTION_TARGET` value that the Worker no longer reads; the
-  deployed config carries none.)
+  Object and a real Miniflare R2 `DATA` bucket. The Worker does not read a
+  collection-target var, and neither the Miniflare config nor the deployed
+  config declares one.
 
 ### smbc-direct (`kogane-smbc-direct-backfill-poc`)
 

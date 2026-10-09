@@ -1,0 +1,4 @@
+[test]
+# The generated synthetic corpus is runtime input, not tracked source code.
+# Keep its statements in the tests but exclude it from native coverage reports.
+coveragePathIgnorePatterns = ["src/corpus.generated.ts"]

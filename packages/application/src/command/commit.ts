@@ -47,6 +47,7 @@ import { resolveAndSimulate } from "../operations/targets.ts";
 import type { OperationCall } from "../audit/call.ts";
 import { AUDIT_IDEMPOTENCY_KEY } from "../audit/vocabulary.ts";
 import { simulationCounts } from "./plan.ts";
+import { instrumentCandidatePlanIsPinned } from "../operations/instrument-candidate-context.ts";
 import {
   approvalConsumptionWrite,
   outboxWrite,
@@ -160,6 +161,7 @@ export async function commit(
 
   const plan = await loadPlan(store, input.planId);
   if (!plan) return commandError("plan_not_found");
+  if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
   const payloadDigest = await canonicalDigest({
     planId: plan.planId,
     approvalId: typeof input.approvalId === "string" ? input.approvalId : null,

@@ -12,9 +12,10 @@
 //
 // Identity follows ADR 0054's eight fail-closed rules through
 // `humanAdoptedRowIdentity`: a row whose id the parser did not record as
-// provider-issued (an SBI Shinsei row today) is refused with the rule's code,
-// and every admitted row carries the alias class the registry's provider
-// identity function computes. Account ownership is an input (#545): an
+// provider-issued (an SBI Shinsei row of a 0.1.2 run: the parser records the
+// origin from release 0.1.3; rows of 0.1.2 runs stay refused) is refused with
+// the rule's code, and every admitted row carries the alias class the
+// registry's provider identity function computes. Account ownership is an input (#545): an
 // unresolved account is a refusal, never a guess.
 //
 // Amounts are compared with the exact decimal helpers of `values.ts` (INV03);

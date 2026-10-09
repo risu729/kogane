@@ -483,23 +483,29 @@ async function advertised(options: CallOptions = {}): Promise<unknown> {
 }
 
 describe("served only while card purchase recognition is", () => {
-  it("is neither listed nor callable with the reader flag off or CORE 0047 absent", async () => {
-    for (const options of [{ enabled: false }, { schema: false }] as const) {
-      const response = await explain({}, options);
-      expect(response.status).toBe(404);
-      expect(await response.json()).toMatchObject({ error: "not_found" });
-      const listed = await mcp({ method: "tools/list" }, options);
-      expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).not.toContain(
-        "kogane.purchases.explain",
-      );
-      const called = await mcp(
-        { method: "tools/call", params: { name: "kogane.purchases.explain", arguments: {} } },
-        options,
-      );
-      expect(called["error"]).toMatchObject({ code: -32602, message: "unknown_tool" });
-      // The agent is told the same fact the tool list shows.
-      expect(await advertised(options)).toBe(false);
-    }
+  it("stays unlisted when CORE 0047 is absent, and the retired flag does not hide it", async () => {
+    const missing = { schema: false, enabled: true } as const;
+    const response = await explain({}, missing);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: "not_found" });
+    const hidden = await mcp({ method: "tools/list" }, missing);
+    expect(hidden["result"].tools.map((tool: { name: string }) => tool.name)).not.toContain(
+      "kogane.purchases.explain",
+    );
+    const called = await mcp(
+      { method: "tools/call", params: { name: "kogane.purchases.explain", arguments: {} } },
+      missing,
+    );
+    expect(called["error"]).toMatchObject({ code: -32602, message: "unknown_tool" });
+    expect(await advertised(missing)).toBe(false);
+
+    const retired = { enabled: false } as const;
+    expect((await explain({}, retired)).status).not.toBe(404);
+    const shown = await mcp({ method: "tools/list" }, retired);
+    expect(shown["result"].tools.map((tool: { name: string }) => tool.name)).toContain(
+      "kogane.purchases.explain",
+    );
+    expect(await advertised(retired)).toBe(true);
     const listed = await mcp({ method: "tools/list" });
     expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).toContain(
       "kogane.purchases.explain",

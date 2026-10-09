@@ -52,28 +52,25 @@ import {
   VPASS_STATEMENT_MONTH,
   VPASS_STATEMENT_SNAPSHOT_CTES,
 } from "./sql";
+import {
+  ELIGIBLE_VPOINT_RUNS,
+  MONEYFORWARD_MONTH,
+  MONEYFORWARD_SNAPSHOT_CTES,
+  MONEYFORWARD_MEMBER,
+  MYJCB_PAST_MONTHS_CONNECTION,
+  MYJCB_PAST_MONTHS_MEMBER,
+  myjcbPastMonthsSnapshotCtes,
+  SMBC_DIRECT_MEMBER,
+  SMBC_DIRECT_SNAPSHOT_CTES,
+  VPOINT_MEMBER,
+} from "./current-captures";
 
 /** More configured jobs or sources than this in one read is refused, never cut. */
 export const COLLECTION_QUALITY_ROW_BOUND = 200;
 
-/**
- * Parsers whose current set a read narrows further than the rules composed
- * here: the Transactions read keeps only the newest SMBC Direct range per key,
- * the newest MoneyForward month per account and the newest complete V Point
- * run, and the Balances read the newest MyJCB past-months capture per
- * connection. Their cells state `published-eligible` currentness and carry
- * `query_rule_not_composed`; `test/collection-quality.test.ts` pins each name
- * to the read that narrows it, so a rule added there fails until it is named
- * here or composed.
- */
-export const UNCOMPOSED_QUERY_RULE_PARSERS = [
-  "smbc-direct-transactions",
-  "moneyforward-monthly-transactions",
-  "v-point-history-page",
-  "v-point-balance-info",
-  "v-point-smfg-point",
-  "myjcb-credit-past-month-balances",
-] as const;
+// Kept as an explicit future-rule guard: every narrowed parser must be
+// composed or named by the test which inspects the shipped read texts.
+export const UNCOMPOSED_QUERY_RULE_PARSERS: readonly string[] = [];
 
 // ── attempt ───────────────────────────────────────────────────────────────
 
@@ -246,6 +243,7 @@ export interface CellQualityRow {
   unit_failure_code: string | null;
   incomplete_coverage: number | null;
   coverage_causes_json: string | null;
+  unreported_coverage: number;
   current_run_id: number | null;
   current_captured_at: string | null;
 }
@@ -268,6 +266,19 @@ const CURRENT_RULE = (fa: string, parser: string): string => `CASE
            WHEN ${fa}.dataset = 'credit-ledger'
              AND coalesce(${parser}, 'myjcb-credit-ledger') = 'myjcb-credit-ledger'
              THEN 'myjcb-statement-slot'
+           WHEN ${fa}.dataset = 'transactions-normalized'
+             AND coalesce(${parser}, 'smbc-direct-transactions') = 'smbc-direct-transactions'
+             THEN 'smbc-request-key'
+           WHEN ${fa}.dataset = 'monthly-transactions'
+             AND coalesce(${parser}, 'moneyforward-monthly-transactions') = 'moneyforward-monthly-transactions'
+             THEN 'moneyforward-account-month'
+           WHEN ${fa}.dataset = 'credit-past-months'
+             AND coalesce(${parser}, 'myjcb-credit-past-month-balances') = 'myjcb-credit-past-month-balances'
+             THEN 'myjcb-connection'
+           WHEN (${fa}.dataset IN ('balance-info', 'smfg-point') OR ${fa}.dataset LIKE 'history-page-%')
+             AND ${fa}.source_id = 'v-point'
+             AND (${parser} IS NULL OR ${parser} IN ('v-point-balance-info', 'v-point-smfg-point', 'v-point-history-page'))
+             THEN 'v-point-complete-run'
            WHEN EXISTS (SELECT 1 FROM snapshot_policies policy
                          WHERE policy.dataset = ${fa}.dataset
                            AND coalesce(${parser}, policy.parser_name) = policy.parser_name)
@@ -286,12 +297,18 @@ const PERIOD_KIND = (fa: string): string => `CASE ${fa}.dataset
            WHEN 'globalpass-activity' THEN 'activity-month'
            WHEN 'statement-page' THEN 'statement-month'
            WHEN 'credit-ledger' THEN 'statement-slot'
+           WHEN 'transactions-normalized' THEN 'request-key'
+           WHEN 'monthly-transactions' THEN 'account-month'
+           WHEN 'credit-past-months' THEN 'connection'
            ELSE 'latest'
          END`;
 const PERIOD = (fa: string): string => `CASE ${fa}.dataset
            WHEN 'globalpass-activity' THEN ${GLOBAL_PASS_MONTH(fa)}
            WHEN 'statement-page' THEN ${VPASS_STATEMENT_MONTH(fa)}
            WHEN 'credit-ledger' THEN ${myjcbStatementSlot(fa)}
+           WHEN 'transactions-normalized' THEN ${fa}.artifact_key
+           WHEN 'monthly-transactions' THEN ${MONEYFORWARD_MONTH(fa)}
+           WHEN 'credit-past-months' THEN ${MYJCB_PAST_MONTHS_CONNECTION(fa)}
          END`;
 
 const CELL_KEY = [
@@ -331,6 +348,10 @@ export const CELL_QUALITY_SQL = `WITH ${completeSnapshotCandidates.ctes},
 ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES},
 ${VPASS_STATEMENT_SNAPSHOT_CTES},
 ${MYJCB_LEDGER_SNAPSHOT_CTES},
+${SMBC_DIRECT_SNAPSHOT_CTES},
+${MONEYFORWARD_SNAPSHOT_CTES},
+${ELIGIBLE_VPOINT_RUNS},
+${myjcbPastMonthsSnapshotCtes("cq_")},
 cq_artifacts AS MATERIALIZED (
   SELECT fa.id, fa.fetch_run_id, fa.source_id, fa.dataset, fa.artifact_key, fa.fetch_unit_key,
          fa.fetched_at, fa.sha256,
@@ -382,6 +403,22 @@ cq_artifacts AS MATERIALIZED (
        THEN EXISTS (SELECT 1 FROM current_vpass_snapshots snapshot WHERE ${VPASS_SNAPSHOT_MEMBER})
      WHEN 'myjcb-statement-slot'
        THEN ${MYJCB_LEDGER_MEMBER}
+     WHEN 'smbc-request-key' THEN ${SMBC_DIRECT_MEMBER}
+     WHEN 'moneyforward-account-month' THEN ${MONEYFORWARD_MEMBER}
+     WHEN 'myjcb-connection' THEN ${MYJCB_PAST_MONTHS_MEMBER}
+       AND EXISTS (
+         SELECT 1 FROM parse_runs p
+         WHERE p.fetch_artifact_id = fa.id AND p.parser_name = fa.parser_name
+           AND ${completeSnapshotCandidates.currentMember}
+       )
+     WHEN 'v-point-complete-run'
+       THEN EXISTS (
+         SELECT 1 FROM parse_runs p JOIN ${visibleEvidence.fetchRuns} f ON f.id = fa.fetch_run_id
+         WHERE p.fetch_artifact_id = fa.id AND p.parser_name = fa.parser_name
+           AND ${activeStateProjection.predicate} AND ${VPOINT_MEMBER}
+           AND (p.parser_name = 'v-point-history-page'
+             OR ${completeSnapshotCandidates.currentMember})
+       )
      ELSE EXISTS (
        SELECT 1 FROM parse_runs p
          JOIN ${visibleEvidence.fetchRuns} f ON f.id = fa.fetch_run_id
@@ -458,6 +495,10 @@ cq_artifacts AS MATERIALIZED (
          SUM(CASE WHEN n.parser_name IS NULL
                    AND NOT ${unitParseable.policyPredicate("f", "n")} THEN 1 ELSE 0 END) AS not_eligible,
          SUM(CASE WHEN k.state = 'published' THEN 1 ELSE 0 END) AS published,
+         SUM(CASE WHEN k.state = 'published' AND NOT EXISTS (
+           SELECT 1 FROM published_parse_runs pub JOIN parse_coverage_claims claim ON claim.parse_run_id = pub.parse_run_id
+           WHERE pub.fetch_artifact_id = n.id AND pub.parser_name = n.parser_name
+         ) THEN 1 ELSE 0 END) AS unreported_coverage,
          SUM(CASE WHEN k.state = 'pending' THEN 1 ELSE 0 END) AS pending,
          SUM(CASE WHEN k.state = 'failed' THEN 1 ELSE 0 END) AS failed,
          SUM(CASE WHEN k.state = 'unpublished' THEN 1 ELSE 0 END) AS unpublished,
@@ -489,7 +530,7 @@ SELECT c.dataset, c.parser_name, c.fetch_unit_key, c.period_kind, c.period, c.pe
        c.latest_producer_run_id, c.artifacts, c.raw_stored, c.not_queued, c.not_eligible,
        c.published, c.pending, c.failed, c.unpublished, c.failure_codes_json,
        c.unit_failed, c.unit_failure_code,
-       claims.incomplete_coverage, claims.coverage_causes_json,
+       claims.incomplete_coverage, claims.coverage_causes_json, c.unreported_coverage,
        cur.fetch_run_id AS current_run_id, cur.captured_at AS current_captured_at
   FROM cq_cells c
   LEFT JOIN cq_claims claims ON ${SAME_CELL("claims", "c")}

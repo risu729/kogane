@@ -183,3 +183,68 @@ the contract. `services/app/test/collection-quality-api.test.ts` checks
 Access, GET-only, absence without CORE 0065, refusals and that nothing is
 written. Production read-only verification of #542 is a separate, later step
 and is not claimed here.
+
+## Amendment 2026-10-09: compose the remaining shipped capture selections
+
+- Status: proposed (until its PR merges)
+- Issue: part of #542
+
+### Context and options
+
+The first part explicitly withheld six per-query rules. Leaving them withheld
+would keep a published but superseded capture labelled current. Copying the
+rules into quality would drift from Transactions/Balances. Composing their
+unchanged texts is the chosen option. No provider meaning, new acquisition,
+financial adoption, writer, migration, grant or MCP tool is introduced.
+
+### Decision
+
+`packages/read-model/src/current-captures.ts` supplies the existing CTEs to
+`sql.ts` and quality. The complete rendered Transactions and Balances texts
+remain byte-identical to the base; MyJCB past-month CTE names alone gain `cq_`
+in the quality composition to avoid colliding with credit-ledger names.
+
+| Parser                                                               | Existing selection                                                                                                           | Quality rule / partition                                    |
+| -------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `smbc-direct-transactions`                                           | newest eligible published artifact per source and artifact key; capture time then artifact id                                | `smbc-request-key` / `request-key`                          |
+| `moneyforward-monthly-transactions`                                  | newest eligible published artifact per source, v1/v2 account unit and existing key month substring; time then id             | `moneyforward-account-month` / `account-month`              |
+| `v-point-history-page`, `v-point-balance-info`, `v-point-smfg-point` | latest eligible run with all three parsers and every expected balance/history artifact published; completed time then run id | `v-point-complete-run` / existing dataset/unit/latest cells |
+| `myjcb-credit-past-month-balances`                                   | newest eligible published artifact per source and existing connection prefix; time then id                                   | `myjcb-connection` / `connection`                           |
+
+The V Point cell also requires its own published eligible parse: complete run
+membership does not turn a different pending parser into published evidence.
+MyJCB past-month and V Point balance cells additionally compose Balances'
+existing dataset snapshot membership; V Point history follows Transactions
+and is not given an extra balance-only policy.
+The existing final observation deduplication and balance row ranking are not
+capture selection and are not reimplemented in quality.
+
+`request-key` is the full stored artifact key, an opaque request partition,
+not a newly parsed date range. `connection` is the existing artifact-key
+prefix, not a resolved account or a payment month. These may contain
+provider-local identifiers and are returned only through the existing
+authenticated reader route; no MCP tool, grant, recipient or log sink is
+added. MoneyForward uses the shipped substring expression unchanged, not a
+new month inference. The quality contract adds these closed rule/partition
+codes without widening the reader authority. Raw evidence is not rewritten.
+
+A published parse with no coverage claim adds `coverage_not_recorded`.
+Incomplete/unknown stored claims still add `coverage_incomplete` with their
+stored causes. Publication and membership alone never prove full provider
+history, missing pages, retention completeness or resolved account identity.
+`UNCOMPOSED_QUERY_RULE_PARSERS` is empty today but remains pinned against every
+parser-specific guard of the shipped lists, so a new rule must be composed or
+explicitly withheld. No age, stale threshold or retention cap is invented.
+
+### Consequences and verification
+
+Synthetic boundary and randomized stores compare capture membership with the
+shipped selections, covering missing pages, pending/refused/superseded parses,
+account-month and connection separation, equal-time tie-breaking, malformed
+parser association, and missing versus complete/incomplete coverage claims.
+Frozen base rendered-SQL digests protect the unchanged financial list texts.
+The full-CORE scaled fixture adds all four new rule families; query plans are
+checked without statistics, with automatic indexes confined to the composed
+CTEs, and timings printed rather than asserted. Independent review, hosted CI
+and latest-main integration remain merge gates. Production read-only scope
+verification of #542 remains separate and is not claimed by these tests.

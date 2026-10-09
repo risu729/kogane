@@ -195,12 +195,13 @@ collectorの非公開HTML routeとfragment構造は将来変更され得る。va
 
 ## 共通 DATA R2 への切替 (U09)
 
-Collector は `COLLECTION_TARGET` var を持つ。既定の `legacy` は現行どおり
-per-source bucket + importer 経由。`shared` にすると run は `packages/collection`
-経由で共通 bucket `kogane-raw-evidence` に保存され、terminal manifest を最後に
-書く。保存する HTML は現在中央へ送っているものと同じ bytes で、account ごとの
-unit と取得できた月の range を terminal に持つ。artifact と role の対応、deploy 順
-と rollback は `docs/collection.md` の該当節を参照。
+Collector は `COLLECTION_TARGET` を読まない。保存先は共通 bucket
+`kogane-raw-evidence`（binding `DATA`）だけである。切替と importer は
+2026-09-13 に廃止された（`docs/collection.md`）。run は `packages/collection`
+経由で保存され、terminal manifest を最後に書く。保存する HTML は廃止前に
+中央へ送っていたものと同じ bytes で、account ごとの unit と取得できた月の
+range を terminal に持つ。artifact と role の対応は `docs/collection.md`
+の該当節を参照。
 
 account unit の key は、account/service tuple の key なし・domain 分離の SHA-256
 `moneyforward-account-v2-<64 hex>` である（[ADR 0027](../adr/0027-moneyforward-collector-account-identity.md)、

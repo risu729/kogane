@@ -24,9 +24,8 @@
     "REWARD_READ_PROJECTION_ENABLED": "true",
     "REPORTS_ENABLED": "true",
     "BALANCE_PROJECTION_ENABLED": "1",
-    // U11: with this off the balance projection keeps writing the CORE tables
-    // of migration 0030; with it on the same build writes the READ database
-    // below and completes the CORE job only after READ is published.
+    // Anything but "1" skips the balance READ build. Migration 0042 dropped
+    // the CORE projection tables; there is no CORE fallback.
     "RELEASE_CANDIDATES_ENABLED": "true",
     // U08: the queue, R2 notification rule and ingest-client routes are live.
     // The shared layout is consumed before collectors switch their target.

@@ -4,6 +4,7 @@
 // plan of the payload the server named, sent to the change lifecycle; the
 // page never builds one of its own and never approves.
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
@@ -104,6 +105,17 @@ describe.if(runnable)("instrument candidate review", () => {
             ),
           );
         }
+        if (url.pathname === "/api/identity/instrument-history") {
+          read.push(url);
+          const outcome = await readInstrumentHistoryForGrant({
+            grant: GRANT,
+            sql: store.sql,
+            identifierId: url.searchParams.get("identifierId"),
+          });
+          return outcome.ok
+            ? Response.json(outcome.history)
+            : Response.json(outcome.error, { status: 403 });
+        }
         if (url.pathname.startsWith("/api/command/v1/")) {
           const operation = url.pathname.split("/").at(-1)!;
           const body = (await request.json()) as Record<string, any>;
@@ -114,6 +126,11 @@ describe.if(runnable)("instrument candidate review", () => {
           const revisions = subject
             ? { [`instrument_mapping:${subject}`]: stale ? 2 : 1 }
             : ({} as Record<string, number>);
+          const provenance = posted.find((entry) => entry.operation === "plan")?.body["payload"]
+            .candidate;
+          if (provenance)
+            revisions[`instrument_mapping:${provenance.anchorIdentifierId}`] =
+              provenance.anchorMappingRevision;
           const simulation = {
             kind,
             targets: Object.keys(revisions).map((subjectRef) => ({
@@ -254,6 +271,19 @@ describe.if(runnable)("instrument candidate review", () => {
     await tab.close();
   });
 
+  test("history is loaded on request and shows every stored entry without planning", async () => {
+    const tab = await open();
+    expect(read.some((url) => url.pathname === "/api/identity/instrument-history")).toBe(false);
+    await tab.getByRole("button", { name: "訂正履歴を見る", exact: true }).first().click();
+    await tab
+      .getByText("記録順の履歴です。有効期間ごとの対応付けは未対応です。", { exact: true })
+      .waitFor();
+    expect(await tab.getByText("対応付け · 改訂 1", { exact: true }).count()).toBeGreaterThan(0);
+    expect(read.some((url) => url.pathname === "/api/identity/instrument-history")).toBe(true);
+    expect(posted).toEqual([]);
+    await tab.close();
+  });
+
   test("an anchor re-confirmed onto the same instrument still stops the plan", async () => {
     store = await world();
     const tab = await open();
@@ -267,7 +297,7 @@ describe.if(runnable)("instrument candidate review", () => {
       .query("SELECT instrument_id AS id FROM current_instrument_mappings WHERE identifier_id=?")
       .get(id.listing9001) as { id: string };
     // A new mapping revision of the anchor onto the instrument it already maps
-    // to: the candidate, its anchor and its commands stay the same.
+    // to: the pair and its anchor stay the same, but the command's pin changes.
     await decide(
       store,
       OPERATOR,
@@ -283,7 +313,8 @@ describe.if(runnable)("instrument candidate review", () => {
     const after = (await page("open", 0, id.broker9001)).items as ReviewCandidate[];
     const same = after.find((item) => item.candidateId === candidate.candidateId)!;
     expect(same.anchorIdentifierId).toBe(candidate.anchorIdentifierId);
-    expect(same.commands).toEqual(candidate.commands);
+    expect(same.commands!.adopt!.payload.candidate!.anchorMappingRevision).toBe(2);
+    expect(candidate.commands!.adopt!.payload.candidate!.anchorMappingRevision).toBe(1);
     const card = tab.locator(".identity-card").nth(expected.items.indexOf(candidate));
     await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
     await card

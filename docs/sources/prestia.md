@@ -908,24 +908,21 @@ limit, card-control, registration, or settings screen except to leave it.
 
 ## Shared DATA bucket (U09, 2026-09-11)
 
-The GLOBAL PASS collector gained a `COLLECTION_TARGET` var (default `legacy`)
-and a `DATA` binding to the central `kogane-raw-evidence` bucket. In `shared`
-mode the Worker persists the run itself with `packages/collection` — the
-already-sanitized monthly activity pages and the collector manifest, then the
-`terminal-v1` manifest last — and the upload to
-`kogane-collector-r2-importer` is skipped. Legacy mode is unchanged, the daily
-`17 18 * * *` cron is unchanged, and the Container image, relay, browser
+The GLOBAL PASS collector does not read `COLLECTION_TARGET`. Persistence is
+the `DATA` binding to `kogane-raw-evidence` only. The switch and the importer
+were retired on 2026-09-13 (`docs/collection.md`). The Worker persists the run
+itself with `packages/collection` — the already-sanitized monthly activity
+pages and the collector manifest, then the `terminal-v1` manifest last. The
+daily `17 18 * * *` cron is unchanged, and the Container image, relay, browser
 binding and tunnels are untouched: the Worker writes the run, not the
-container. The per-source staging bucket is not written in shared mode: the
-run is stored once, in `DATA` (plan 00).
+container. The run is stored once, in `DATA` (plan 00).
 
 A successful run still declares `coverageStatus: partial`, because the provider
 exposes a rolling window of statement months and the collector stores only
 the first page of a month (below).
 
-Deploy order, rollback and the artifact/role table are in
+Artifact roles and terminal fields are in
 [`docs/collection.md`](../collection.md#prestia-globalpass-kogane-globalpass-collector-poc).
-Merged is not enabled: the var ships as `legacy`.
 
 ## GLOBAL PASS activity pages and refusals (2026-09-27)
 

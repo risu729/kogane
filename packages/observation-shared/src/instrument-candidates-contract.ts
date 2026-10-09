@@ -49,7 +49,14 @@ function validCommands(value: unknown): boolean {
       record(adopt.payload) &&
       adopt.payload.subject === "instrument" &&
       text(adopt.payload.referenceId) &&
-      text(adopt.payload.targetId)
+      text(adopt.payload.targetId) &&
+      record(adopt.payload.candidate) &&
+      text(adopt.payload.candidate.candidateId) &&
+      text(adopt.payload.candidate.anchorIdentifierId) &&
+      count(adopt.payload.candidate.anchorMappingRevision) &&
+      adopt.payload.candidate.anchorMappingRevision > 0 &&
+      count(adopt.payload.candidate.subjectMappingRevision) &&
+      adopt.payload.candidate.subjectMappingRevision > 0
     )
   )
     return false;
@@ -96,6 +103,10 @@ function validItem(view: string, item: unknown): boolean {
     oneOf(CANDIDATE_STATUSES)(status) &&
     (item.hold === null || oneOf(CANDIDATE_HOLDS)(item.hold)) &&
     validCommands(item.commands) &&
+    (item.commands?.adopt == null ||
+      (item.commands.adopt.payload.referenceId === item.subjectIdentifierId &&
+        item.commands.adopt.payload.candidate.candidateId === item.candidateId &&
+        item.commands.adopt.payload.candidate.anchorIdentifierId === item.anchorIdentifierId)) &&
     // Commands exist exactly while a candidate is proposed, and the view matches the status.
     (status === "proposed") === (item.commands !== null) &&
     (view === "decided" ? status !== "proposed" : status === "proposed") &&

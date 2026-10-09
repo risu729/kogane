@@ -178,9 +178,11 @@ synthetic tests cover quarantine lifecycle, interruption, tamper, exclusive
 promotion, staging reuse, oversized chunks, native/legacy restoration and the
 unchanged image proof. This does not establish live recovery success.
 
-## Proposed amendment: bounded publication target readback (2026-10-09)
+## Amendment: bounded publication target readback (2026-10-09)
 
-A single read of application allocations currently conflates no new version with
+- Status: accepted (merged 2026-10-09 in #624)
+
+The earlier single read of application allocations conflated no new version with
 multiple new versions. Allocation visibility can lag successful publication;
 the failed capture logs do not record the candidate count, so they cannot prove
 which condition occurred. A saved desired-version snapshot alone also does not
@@ -211,4 +213,19 @@ The separate mandatory 180-second rollout guard, serial downstream gates,
 immutable artifact trust, supersession refusal and no historical receipt adoption
 remain unchanged. Synthetic clock and real Node CLI tests cover delayed visibility,
 expiry and late responses, ambiguous versions, identity/image drift, legacy UUID
-replacement and unstable original baselines. Live recovery remains unverified.
+replacement and unstable original baselines.
+
+Live recovery was verified by
+[Deploy run 37897282487, attempt 2](https://github.com/risu729/kogane/actions/runs/37897282487/attempts/2)
+on 2026-10-09, for release source
+`b3e03fb69116225e731cef60cc1059db048c4a1d`. The same run restored the
+original prepared release without
+rebuilding; the bound GlobalPass and SBI Shinsei publication steps were skipped,
+and all three mandatory Container guards passed before downstream completion.
+The original DO identity/lifecycle, public health and App/Processor postchecks
+also passed. Deployment 6955120054 recorded success status 19505918237 at
+07:33:06 UTC with 17/17 Workers deployed; the
+[release job](https://github.com/risu729/kogane/actions/runs/37897282487/job/113716322787)
+completed successfully at 07:33:09 UTC. This same-run proof does not establish
+the unobserved candidate count in the earlier failed captures or remove the
+privileged manual mutation timing limitation described above.

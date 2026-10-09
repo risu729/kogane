@@ -1,6 +1,6 @@
 // `/api/v2/activity` and `/api/v2/obligations` (A10). The routes are 404 unless
-// the reader flag is on, they are GET-only behind the existing Access gate, and
-// every figure they return names its basis and its explanation refs.
+// the projection table exists, they are GET-only behind the existing Access
+// gate, and every figure they return names its basis and its explanation refs.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -75,9 +75,26 @@ async function token() {
     .sign(keys.privateKey);
 }
 
+/** The store with migration 0032 not yet applied. */
+function withoutEventsTable(db: D1Database): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) =>
+          target.prepare(
+            sql.includes("sqlite_master") && sql.includes("economic_event_revisions")
+              ? "SELECT 0 AS present"
+              : sql,
+          );
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 async function call(
   path: string,
-  options: { enabled?: boolean; jwt?: string | null; method?: string } = {},
+  options: { retired?: string; schema?: boolean; jwt?: string | null; method?: string } = {},
 ) {
   const jwt = options.jwt === undefined ? await token() : options.jwt;
   return worker.fetch(
@@ -87,27 +104,34 @@ async function call(
     }),
     {
       ...env,
+      DB: options.schema === false ? withoutEventsTable(env.DB) : env.DB,
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: "fixture-audience",
-      EVENTS_V2_ENABLED: options.enabled === false ? "0" : "1",
+      ...(options.retired === undefined ? {} : { EVENTS_V2_ENABLED: options.retired }),
     } as Env,
   );
 }
 
 describe("events v2 capability gate", () => {
-  it("is off by default, and both routes are absent then", async () => {
+  it("stays available when the retired flag is set and the projection exists", async () => {
+    for (const retired of ["0", "false", "1", "true"]) {
+      for (const path of ["/api/v2/activity", "/api/v2/obligations"]) {
+        const response = await call(path, { retired });
+        expect(response.status, `${path} ${retired}`).toBe(200);
+      }
+      const meta = await (await call("/api/meta", { retired })).json();
+      expect(meta).toMatchObject({ capabilities: { eventsV2: true } });
+    }
+  });
+
+  it("is absent when the projection table is missing, even if the retired flag is on", async () => {
     for (const path of ["/api/v2/activity", "/api/v2/obligations"]) {
-      const response = await call(path, { enabled: false });
+      const response = await call(path, { schema: false, retired: "true" });
       expect(response.status).toBe(404);
       expect(await response.json()).toMatchObject({ error: "not_found" });
     }
-    const meta = await (await call("/api/meta", { enabled: false })).json();
+    const meta = await (await call("/api/meta", { schema: false, retired: "true" })).json();
     expect(meta).toMatchObject({ capabilities: { eventsV2: false } });
-  });
-
-  it("reports the capability as true only when the flag is on and the projection exists", async () => {
-    const meta = await (await call("/api/meta")).json();
-    expect(meta).toMatchObject({ capabilities: { eventsV2: true } });
   });
 
   it("stays behind the Access gate and stays GET-only", async () => {

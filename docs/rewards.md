@@ -204,13 +204,13 @@ A10のreconciliation laneと同じ扱いで、`"1"` か `"true"` のときだけ
 
 ## 8. 読み取りAPI
 
-capability `rewardsV2`（既定 off）。`services/app` の `REWARDS_V2_ENABLED` が
-`"1"` か `"true"` のときだけ `/api/meta` が `rewardsV2: true` を広告し、route群が有効になる。
-広告と実際に応答するrouteは `services/app/src/capabilities.ts` の
-`centralStoreCapabilities(env)` が一箇所で決める。同じ関数がA10の `eventsV2`
-（flagに加えて0032の投影が存在するかどうか）も重ね合わせるため、`/api/meta` が
-Workerの拒否するrouteを広告することはない。
-offのとき `/api/v2/rewards/*` は 404 であり、400（未知パラメータ）ではない。
+`/api/v2/rewards/*` は配信される。`/api/meta` の `rewardsV2` は true である。
+`rewardsV2ReadModel` は公開済みで読めるREAD snapshotがあるときだけ `read-d1` で、
+無いときは `none` のまま expiry と simulations は 503 になる。holdings と
+offer simulation は CORE を読む。広告と応答は `services/app/src/capabilities.ts` の
+`centralStoreCapabilities(env)` が一箇所で決める。同じ関数が A10 の `eventsV2` を
+`economic_event_revisions` の有無だけで重ねる。`/api/meta` が Worker の拒否する
+route を広告することはない。未知の reward path は 404 であり、既知 path の未知パラメータは 400 である。
 
 | route                                 | 内容                                                                       |
 | ------------------------------------- | -------------------------------------------------------------------------- |
@@ -234,22 +234,25 @@ publication pointerの巻き戻しはreward側の表示からも同時に消え�
 
 ## 10. デプロイ順とロールバック
 
-The migration/first-activation sequence below is historical. Current releases
-follow [rollout controls](rollout.md#4-deployment-order), and rollback targets
-must satisfy its current schema/resource/alarm floor. An old component-level
-compatibility test does not authorize a pre-alarm production rollback.
+The numbered sequence is the original first activation, not a current control.
+Current releases follow [rollout controls](rollout.md#4-deployment-order), and
+rollback targets must satisfy its current schema/resource/alarm floor. An old
+component-level compatibility test does not authorize a pre-alarm production
+rollback.
 
 1. `0033_reward_buckets.sql` を適用する（追加のみ。既存の表・trigger・indexに触れない）。
-2. `services/processor` をデプロイする。`REWARD_CLAIMS_ENABLED` は `"false"` のまま。
-   問題がなければ `"1"`（または `"true"`）にして昇格を開始する。
-3. `services/app` をデプロイする。`REWARDS_V2_ENABLED` は `"false"` のまま。
-   claimが十分に溜まってから `"1"`（または `"true"`）にする。
-4. UIは同じWorkerのassetsとして配られ、capabilityがoffの間はnavにもrouteにも現れない。
+2. `services/processor` をデプロイする。当時は `REWARD_CLAIMS_ENABLED` を `"false"` のままにし、
+   問題がなければ `"1"`（または `"true"`）にして昇格を開始した。
+3. `services/app` をデプロイする。当時は `REWARDS_V2_ENABLED` を `"false"` のままにし、
+   claimが溜まってから有効にした。その App の切替はもう無い。
+4. UIは同じWorkerのassetsとして配られる。
 
-ロールバック:
+現在のロールバック:
 
-- 表示を止める: `REWARDS_V2_ENABLED="false"`。routeは404へ戻り、`/api/meta` の広告も戻る。
-- 昇格を止める: `REWARD_CLAIMS_ENABLED="false"`。laneごと飛ばされ、ログ行も消える。
+- 報酬routeを隠すAppのflagはない。`/api/v2/rewards/*` は配信され、`/api/meta` の `rewardsV2` は true である。
+- snapshotが無い expiry と simulations は 503 のままである。
+- 昇格を止める: processor の `REWARD_CLAIMS_ENABLED="false"`。laneごと飛ばされ、ログ行も消える。
+- writerを止める: processor の `REWARD_READ_PROJECTION_ENABLED=false`。
 - migrationは戻さない。`reward_bucket_claims` は追記のみで、他の表を参照するだけである。
 - `expiry_estimates` と `conversion_simulations` は再構築可能な投影なので、全削除して差し支えない。
 
@@ -265,8 +268,9 @@ compatibility test does not authorize a pre-alarm production rollback.
 - `services/processor/test/reward-claims.test.ts` — migration 0033 の適用（既存行あり）、
   seedの内容、追記のみの制約、昇格の冪等性、未公開parse runの不可視、読めない期限表記の扱い、
   flag off時にlaneが実行されず何も書かないこと。
-- `services/app/test/rewards-api.test.ts` — capability off時の404、認証、
-  書き込み拒否、保有・期限・simulationの内容、simulationが何も書かないこと。
+- `services/app/test/rewards-api.test.ts` — 退役した App flag が route を 404 にしないこと、
+  認証、書き込み拒否、保有・期限・simulationの内容、snapshotが無い期限は503、
+  simulationが何も書かないこと。
 - `services/app/test/conformance.test.ts` — capabilityとrouteの対応。
 
 確認していないこと: 本番D1・本番Workerでの動作、実際のプログラム規約の現在の内容、
@@ -386,8 +390,8 @@ processorの `REWARD_CLAIMS_ENABLED` と `REWARD_READ_PROJECTION_ENABLED` は本
 公開済みREAD snapshotをAppが読む。App側のREAD切替flagとCORE投影へのfallbackは削除済み。
 
 writerを止める場合はprocessorの `REWARD_READ_PROJECTION_ENABLED=false` を配備する。
-画面を停止する場合はAppの `REWARDS_V2_ENABLED=false` を使う。旧COREへの切り戻しは行わず、
-READの破損は[再構築手順](read-rebuild-runbook.md)で復旧する。
+Appに報酬routeを隠すflagはない。snapshotが無いexpiryとsimulationsは503のままである。
+旧COREへの切り戻しは行わず、READの破損は[再構築手順](read-rebuild-runbook.md)で復旧する。
 COREのclaim・rule・offer、保存済み入力と原本は維持する。
 
 ### 合成データで確認したこと（U16）

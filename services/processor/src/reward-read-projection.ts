@@ -131,9 +131,9 @@ const CLAIMS_HIGH_WATER_SQL = `SELECT coalesce(max(id),0) AS high_water
   FROM reward_bucket_claims WHERE promotion_release=?1`;
 
 /**
- * The target flag. Off by default and off everywhere until a deployment turns
- * it on: with it off the lane does not run at all, nothing is written to READ,
- * and the reward routes keep answering from CORE exactly as before.
+ * The target flag. Off by default: with it off the lane does not run and
+ * nothing is written to READ. The App does not fall back to CORE; expiry and
+ * stored simulations answer 503 until a snapshot is published.
  */
 export function rewardReadProjectionEnabled(value: string | undefined): boolean {
   return value === "1" || value === "true";

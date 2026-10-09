@@ -12,7 +12,7 @@ run = "./node_modules/.bin/tsc --noEmit"
 [tasks.test]
 description = "Test PRESTIA bank collection without contacting the bank."
 depends = ["//services/collector-prestia-bank:types"]
-run = ["bun test ./test", "./node_modules/.bin/vitest run"]
+run = ["node ../../tasks/_lib/coverage-run.mjs bun test ./test", "node ../../tasks/_lib/coverage-run.mjs vitest run"]
 
 [tasks.dry-run]
 description = "Validate PRESTIA bank deployment without uploading it."

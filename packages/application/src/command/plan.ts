@@ -22,6 +22,7 @@ import { expectedRevisionsJson } from "../operations/sql.ts";
 import { resolveAndSimulate } from "../operations/targets.ts";
 import type { OperationCall } from "../audit/call.ts";
 import type { DecisionCount } from "../audit/diff.ts";
+import { verifyInstrumentCandidateContext } from "../operations/instrument-candidate-context.ts";
 
 export interface PlanContext {
   actor: Principal;
@@ -94,6 +95,8 @@ export async function createPlan(
     return commandError("invalid_command");
   const resolution = await resolveAndSimulate(store, kind, payload);
   if (!resolution.ok) return resolution;
+  const candidate = await verifyInstrumentCandidateContext(store, kind, payload, ctx.baseContextId);
+  if (!candidate.ok) return candidate;
   const { targets, expectedRevisions, simulation } = resolution.resolved;
   const planId = await planDigestOf({
     kind,

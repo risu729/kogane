@@ -255,6 +255,18 @@ export const CONFORMANCE_CHECKS: ConformanceCheck[] = [
           assert(bare.status === 404, `${path}: expected 404 without rewardsV2`);
           continue;
         }
+        // Expiry reads the published snapshot. Without one the route stays,
+        // and the answer is unavailable rather than an empty success.
+        if (
+          path.startsWith("/api/v2/rewards/expiry") &&
+          capabilities.rewardsV2ReadModel !== "read-d1"
+        ) {
+          assert(
+            response.status === 503,
+            `${path}: expected 503 without a reward snapshot, got ${response.status}`,
+          );
+          continue;
+        }
         assert(response.status === 200, `${path}: expected 200, got ${response.status}`);
         assert(response.headers.get("cache-control") === "no-store", `${path}: not no-store`);
         await refused(target, `${path.split("?", 1)[0]!}?unexpected=1`, 400);

@@ -331,6 +331,7 @@ export function cell(row: CellQualityRow): CollectionQualityCell {
   }
   if (row.unpublished > 0) reasons.add("parse_unpublished");
   if ((row.incomplete_coverage ?? 0) > 0) reasons.add("coverage_incomplete");
+  if (row.unreported_coverage > 0) reasons.add("coverage_not_recorded");
   if (state === "older-current") reasons.add("newer_capture_not_current");
   if (state === "no-current") reasons.add("no_current_capture");
   if (named.kind !== "latest" && named.value === null) reasons.add("period_unplaced");

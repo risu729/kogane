@@ -179,11 +179,11 @@ object種別とobservation種別のaggregate件数だけを出す。deploy、R2 
 
 ## 追記: 共通DATA R2への切替（U09）
 
-`services/collector-vpoint-pay`にvar `COLLECTION_TARGET`（既定`legacy`）と
-binding `DATA`（`kogane-raw-evidence`）を追加した。`legacy`は現行どおり
-per-source bucketへartifactとmanifestを書く。`shared`ではDurable Objectが
+`services/collector-vpoint-pay`は`COLLECTION_TARGET`を読まない。保存先は
+binding `DATA`（`kogane-raw-evidence`）だけである。Durable Objectが
 `packages/collection`経由で`objects/<2hex>/<sha256>`へ保存し、
-`runs/v-point-pay/<runId>/terminal.json`を最後に書く。artifactは
+`runs/v-point-pay/<runId>/terminal.json`を最後に書く。結果の`target`は
+`"shared"`だけである。artifactは
 `balance.json`・`transactions-yyyyMM.json`（role `collector_derived`）と
 `collection-summary.json`（role `collector_summary`）で、bytesは現行と同一である。
 terminalの`requestedScope`は`inquiry_period`から当月までの`month_range`で、

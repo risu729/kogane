@@ -606,15 +606,13 @@ runがcurrent observation 0になるend-to-end regressionで固定している�
 
 ## Shared DATA bucket (U09, 2026-09-11)
 
-The collector gained a `COLLECTION_TARGET` var (default `legacy`) and a `DATA`
-binding to the central `kogane-raw-evidence` bucket. In `shared` mode the
-session Durable Object persists the run itself with `packages/collection` — the
-sanitized gateway envelopes and the collector manifest, then the `terminal-v1`
-manifest last — and the upload to `kogane-collector-r2-importer` is skipped,
-which also removes the eleven-artifact deferral of the legacy path. Legacy mode
-is unchanged and both crons (`*/15 * * * *` keep-alive, `5 21 * * *`
-collection) are unchanged. The per-source staging bucket is not written in
-shared mode: the run is stored once, in `DATA` (plan 00).
+The collector does not read `COLLECTION_TARGET`. It persists the run only
+through the `DATA` binding to the central `kogane-raw-evidence` bucket. The
+session Durable Object writes the sanitized gateway envelopes and the collector
+manifest with `packages/collection`, then the `terminal-v1` manifest last. The
+upload to `kogane-collector-r2-importer` is not part of this path. Both crons
+(`*/15 * * * *` keep-alive, `5 21 * * *` collection) are unchanged. The run is
+stored once, in `DATA`.
 
 The Durable Object now also keeps a **session generation id** (`sessionRef`),
 minted when a session is seeded and rotated when re-authentication replaces it,
@@ -626,6 +624,5 @@ ever written to `DATA`.
 A collection blocked on re-authentication is recorded as a `failed` run with
 `human_required_reauth` and a `waitingForHuman` signal, never as a retry.
 
-Deploy order, rollback and the artifact/role table are in
+The artifact/role table is in
 [`docs/collection.md`](../collection.md#sbi-vc-trade-kogane-sbi-vc-session-poc).
-Merged is not enabled: the var ships as `legacy`.

@@ -30,6 +30,12 @@ import {
   transactionsSql,
   VPASS_SNAPSHOT_MEMBER,
 } from "../src/sql";
+import {
+  SMBC_DIRECT_MEMBER,
+  MONEYFORWARD_MEMBER,
+  VPOINT_MEMBER,
+  MYJCB_PAST_MONTHS_MEMBER,
+} from "../src/current-captures";
 
 const JOBS = JSON.parse(
   readFileSync(join(import.meta.dir, "../../../config/alarm-jobs.json"), "utf8"),
@@ -332,10 +338,10 @@ describe("collection quality: cells", () => {
     expect(rows[0]).toMatchObject({
       newest_run_id: third.run,
       current_run_id: third.run,
-      current_rule: "published-eligible",
+      current_rule: "moneyforward-account-month",
       latest_producer_run_id: third.run,
     });
-    expect(UNCOMPOSED_QUERY_RULE_PARSERS).toContain("moneyforward-monthly-transactions");
+    expect(UNCOMPOSED_QUERY_RULE_PARSERS).not.toContain("moneyforward-monthly-transactions");
   });
 
   test("Vpass card-months: a refused page keeps the older capture current; a failed unit says so", () => {
@@ -568,6 +574,12 @@ describe("collection quality: the uncomposed per-query rules are the ones the re
       "fa.id IN (SELECT fetch_artifact_id FROM current_global_pass_snapshots)",
     "vpass-statement-page": VPASS_SNAPSHOT_MEMBER,
     "myjcb-credit-ledger": MYJCB_LEDGER_MEMBER,
+    "smbc-direct-transactions": SMBC_DIRECT_MEMBER,
+    "moneyforward-monthly-transactions": MONEYFORWARD_MEMBER,
+    "v-point-history-page": VPOINT_MEMBER,
+    "v-point-balance-info": VPOINT_MEMBER,
+    "v-point-smfg-point": VPOINT_MEMBER,
+    "myjcb-credit-past-month-balances": MYJCB_PAST_MONTHS_MEMBER,
   };
   const reads = [
     transactionsSql({}, 0).sql,
@@ -589,7 +601,7 @@ describe("collection quality: the uncomposed per-query rules are the ones the re
 
   test("the composed rules are the reads' own membership texts; the uncomposed ones appear nowhere here", () => {
     for (const membership of Object.values(COMPOSED)) {
-      expect(reads).toContain(membership);
+      expect(reads).toContain(membership.replaceAll("cq_current_myjcb", "current_myjcb"));
       expect(CELL_QUALITY_SQL).toContain(membership);
     }
     for (const parser of UNCOMPOSED_QUERY_RULE_PARSERS)
@@ -623,6 +635,10 @@ const COMPOSED_SNAPSHOT_STEPS = [
   /^(?:MATERIALIZE|CO-ROUTINE) ranked_myjcb_snapshots$/u,
   /^(?:MATERIALIZE|CO-ROUTINE) ranked_snapshots$/u,
   /^(?:MATERIALIZE|CO-ROUTINE) ranked_artifact_containers$/u,
+  /^(?:MATERIALIZE|CO-ROUTINE) ranked_smbc_direct_snapshots$/u,
+  /^(?:MATERIALIZE|CO-ROUTINE) ranked_moneyforward_snapshots$/u,
+  /^(?:MATERIALIZE|CO-ROUTINE) cq_ranked_myjcb_snapshots$/u,
+  /^(?:MATERIALIZE|CO-ROUTINE) ranked_vpoint_runs$/u,
 ];
 
 /**
@@ -659,6 +675,10 @@ const AUTOMATIC_INDEXES = new Set([
   "ranked_artifact_containers",
   "ranked_myjcb_snapshots",
   "snapshot",
+  "ranked_smbc_direct_snapshots",
+  "ranked_moneyforward_snapshots",
+  "cq_ranked_myjcb_snapshots",
+  "ranked_vpoint_runs",
 ]);
 
 const insideComposed = (steps: readonly PlanStep[], step: PlanStep): boolean =>
@@ -696,6 +716,55 @@ describe("collection quality on the complete CORE schema without statistics", ()
     // every parse published, so each composed rule has work to do.
     for (let day = 0; day < 90; day += 1) {
       const at = new Date(START_MS + day * DAY_MS).toISOString();
+      const smbc = scaled.run({
+        source: "smbc-bank",
+        at,
+        artifacts: [
+          {
+            key: "transactions/20990101-20990131.normalized.json",
+            dataset: "transactions-normalized",
+          },
+        ],
+      });
+      scaled.parse(smbc.artifacts[0]!, "smbc-direct-transactions", { kind: "published" });
+      const mf = scaled.run({
+        source: "moneyforward-me",
+        at,
+        units: { "moneyforward-account-v2-synthetic": { outcome: "success" } },
+        artifacts: [
+          {
+            key: "account-month-2099-01.html",
+            dataset: "monthly-transactions",
+            unit: "moneyforward-account-v2-synthetic",
+          },
+        ],
+      });
+      scaled.parse(mf.artifacts[0]!, "moneyforward-monthly-transactions", { kind: "published" });
+      const past = scaled.run({
+        source: "myjcb",
+        at,
+        units: { "connection-a": { outcome: "success" } },
+        artifacts: [
+          {
+            key: "connection-a/credit-past-months.json",
+            dataset: "credit-past-months",
+            unit: "connection-a",
+          },
+        ],
+      });
+      scaled.parse(past.artifacts[0]!, "myjcb-credit-past-month-balances", { kind: "published" });
+      const point = scaled.run({
+        source: "v-point",
+        at,
+        artifacts: [
+          { key: "balance-info.json", dataset: "balance-info" },
+          { key: "smfg-point.json", dataset: "smfg-point" },
+          { key: "history-page-0001.json", dataset: "history-page-0001" },
+        ],
+      });
+      ["v-point-balance-info", "v-point-smfg-point", "v-point-history-page"].forEach(
+        (parser, index) => scaled.parse(point.artifacts[index]!, parser, { kind: "published" }),
+      );
       const gp = scaled.run({
         source: "global-pass",
         at,
@@ -755,7 +824,16 @@ describe("collection quality on the complete CORE schema without statistics", ()
 
   test("the scaled store reads as the rules say: one current capture per cell, the newest", () => {
     const newest = "2099-03-31T00:00:00.000Z";
-    for (const source of ["global-pass", "vpass", "sony-bank", "st-george"]) {
+    for (const source of [
+      "global-pass",
+      "vpass",
+      "sony-bank",
+      "st-george",
+      "smbc-bank",
+      "moneyforward-me",
+      "myjcb",
+      "v-point",
+    ]) {
       const rows = cells(scaled, source);
       expect(rows.length).toBeGreaterThan(0);
       for (const row of rows) {
@@ -847,7 +925,16 @@ describe("collection quality on the complete CORE schema without statistics", ()
   });
 
   test("timings on the scaled store (printed, not asserted)", () => {
-    for (const source of ["global-pass", "vpass", "sony-bank", "st-george"]) {
+    for (const source of [
+      "global-pass",
+      "vpass",
+      "sony-bank",
+      "st-george",
+      "smbc-bank",
+      "moneyforward-me",
+      "myjcb",
+      "v-point",
+    ]) {
       const started = performance.now();
       cells(scaled, source);
       console.log(

@@ -476,18 +476,16 @@ write/deleteも行っていない。
 
 ## Shared DATA bucket (U09, 2026-09-11)
 
-The backfill collector gained a `COLLECTION_TARGET` var (default `legacy`) and
-a `DATA` binding to the central `kogane-raw-evidence` bucket. In `shared` mode
-the Durable Object finishes a backfill run by re-reading its own staged
-artifacts, verifying each against the manifest, and writing them into `DATA`
-with the `terminal-v1` manifest last — one terminal per backfill run, whether
-it succeeded, ended partial or failed — instead of calling
-`kogane-collector-r2-importer`. Legacy mode is unchanged. There is no cron
-before or after this change: the run is still started by a person behind
-Cloudflare Access with an approved QR challenge. This is the one bounded
-exception to "stored once": because the chunks span alarms, shared mode still
-writes the staging bucket and re-reads it at the end; `docs/collection.md`
-records the bound and the U15 removal path.
+The backfill collector does not read `COLLECTION_TARGET` and does not call the
+importer. The switch and the importer were retired on 2026-09-13
+(`docs/collection.md`). The Durable Object finishes a backfill run by
+re-reading artifacts staged in `DATA`, verifying each against the manifest,
+and writing the `terminal-v1` manifest last — one terminal per backfill run,
+whether it succeeded, ended partial or failed. There is no cron: a person
+starts the run behind Cloudflare Access with an approved QR challenge. This
+is the one bounded exception to "stored once": because the chunks span
+alarms, the finish re-reads the staging prefix inside `DATA`;
+`docs/collection.md` records the bound and the U15 removal path.
 
 The Durable Object now also keeps two session generation ids: `sessionRef`, the
 live generation rotated on every approved sign-in, and `runSessionRef`, the
@@ -501,6 +499,5 @@ reach `success` needs a person to approve a new challenge: its terminal reports
 `waitingForHuman`, a lost session maps to `human_required_approval`, and
 `/api/status` reports the same signal.
 
-Deploy order, rollback, the artifact/role table and the run-size limit are in
+The artifact/role table and the run-size limit are in
 [`docs/collection.md`](../collection.md#smbc-direct-kogane-smbc-direct-backfill-poc).
-Merged is not enabled: the var ships as `legacy`.

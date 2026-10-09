@@ -91,7 +91,7 @@ function identityMutation(db: Database) {
   };
 }
 
-function planners(db: Database): MutationPlanners {
+export function planners(db: Database): MutationPlanners {
   const identity = identityMutation(db);
   return {
     "identity.assign": identity,
@@ -469,7 +469,15 @@ export async function decide(
   const plan = await createPlan(
     kind,
     payload,
-    { actor: principal, baseContextId: "instrument-resolution:test", now: T0, ttlSeconds: 3600 },
+    {
+      actor: principal,
+      baseContextId:
+        kind === "identity.assign" && "candidate" in payload && payload.candidate
+          ? payload.candidate.candidateId
+          : "instrument-resolution:test",
+      now: T0,
+      ttlSeconds: 3600,
+    },
     store,
   );
   if (!plan.ok) return { stage: "plan", result: plan } as const;
