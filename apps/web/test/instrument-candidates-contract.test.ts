@@ -8,6 +8,7 @@ import {
   type InstrumentCandidateReview,
 } from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import {
+  heldWorld,
   world,
   type World,
 } from "../../../packages/application/test/instrument-resolution-world.ts";
@@ -18,22 +19,26 @@ import { matchRoute } from "../src/router.tsx";
 let store: World;
 const pages = new Map<string, InstrumentCandidateReview>();
 
+async function read(of: World, view: (typeof INSTRUMENT_CANDIDATE_VIEWS)[number]) {
+  const outcome = await reviewInstrumentCandidates({
+    grant: {
+      principal: "synthetic-reader",
+      scopes: { sources: "*", accounts: "*" },
+      capabilities: ["records.read"],
+      budget: { maxRows: 1000, maxProposalTargets: 1, maxExplainDepth: 6 },
+    },
+    sql: of.sql,
+    request: { view, offset: 0, identifierId: null },
+  });
+  if (!outcome.ok) throw new Error(outcome.error.code);
+  return outcome.review;
+}
+
 beforeAll(async () => {
   store = await world();
-  for (const view of INSTRUMENT_CANDIDATE_VIEWS) {
-    const outcome = await reviewInstrumentCandidates({
-      grant: {
-        principal: "synthetic-reader",
-        scopes: { sources: "*", accounts: "*" },
-        capabilities: ["records.read"],
-        budget: { maxRows: 1000, maxProposalTargets: 1, maxExplainDepth: 6 },
-      },
-      sql: store.sql,
-      request: { view, offset: 0, identifierId: null },
-    });
-    if (!outcome.ok) throw new Error(outcome.error.code);
-    pages.set(view, outcome.review);
-  }
+  for (const view of INSTRUMENT_CANDIDATE_VIEWS) pages.set(view, await read(store, view));
+  // The world above holds no held candidate; this one does.
+  pages.set("held", await read((await heldWorld()).w, "held"));
 }, 60_000);
 
 const copy = (view: string): any => structuredClone(pages.get(view));
@@ -45,6 +50,7 @@ describe("the instrument candidate review contract", () => {
     expect(pages.get("open")!.items.length).toBeGreaterThan(0);
     expect(pages.get("separated")!.items.length).toBeGreaterThan(0);
     expect(pages.get("hints")!.items.length).toBeGreaterThan(0);
+    expect(pages.get("held")!.items.length).toBeGreaterThan(0);
   });
 
   test("an unknown code, a status in the wrong view or a decided candidate with commands is refused", () => {
@@ -63,6 +69,9 @@ describe("the instrument candidate review contract", () => {
     tooMany.items = Array.from({ length: 51 }, () => tooMany.items[0]);
     const otherCommand = copy("open");
     otherCommand.items[0].commands.adopt.kind = "identity.release-override";
+    // A held candidate that names an adoption anyway.
+    const heldWithAdopt = copy("held");
+    heldWithAdopt.items[0].commands.adopt = copy("open").items[0].commands.adopt;
     const unknownState = copy("open");
     unknownState.identifiers[0].state = "resolved";
     for (const value of [
@@ -73,6 +82,7 @@ describe("the instrument candidate review contract", () => {
       unknownConflict,
       tooMany,
       otherCommand,
+      heldWithAdopt,
       unknownState,
       { ...copy("open"), decisions: "operator-only" },
       null,

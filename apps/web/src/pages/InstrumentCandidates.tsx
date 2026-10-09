@@ -53,16 +53,18 @@ function byId(page: InstrumentCandidateReview): (id: string) => ResolutionIdenti
 
 function DecisionActions({
   candidate,
+  anchor,
   subject,
 }: {
   candidate: ReviewCandidate;
+  anchor: ResolutionIdentifier | undefined;
   subject: ResolutionIdentifier | undefined;
 }): ReactNode {
   const features = useFeatures();
   const [reason, setReason] = useState("");
   const plan = useMutation({
     mutationFn: (decision: CandidateDecision) =>
-      planCandidateDecision(candidate, decision, reason, subject),
+      planCandidateDecision(candidate, decision, reason, { anchor, subject }),
     onSuccess: (value) => navigate(`/confirm/${value.planId}`),
   });
   if (candidate.commands === null) return null;
@@ -84,7 +86,7 @@ function DecisionActions({
         />
       </div>
       <div className="button-row">
-        {candidate.commands.adopt === null ? null : (
+        {candidate.hold !== null || candidate.commands.adopt === null ? null : (
           <button
             className="button"
             type="button"
@@ -146,7 +148,7 @@ function CandidateCard({
         </Notice>
       )}
       {candidate.status === "proposed" ? (
-        <DecisionActions candidate={candidate} subject={subject} />
+        <DecisionActions candidate={candidate} anchor={anchor} subject={subject} />
       ) : (
         <p className="footnote">
           この候補の判断は保存されています。訂正する場合は、口座・銘柄の整理で対応付けを確認してください。

@@ -14,6 +14,7 @@ import {
 } from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import {
   decide,
+  heldWorld,
   ids,
   OPERATOR,
   world,
@@ -38,30 +39,37 @@ describe.if(runnable)("instrument candidate review", () => {
   let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
+  let main: World;
   let store: World;
   let commands = true;
   let stale = false;
   const posted: { operation: string; body: Record<string, any> }[] = [];
   const read: URL[] = [];
 
-  async function page(view: InstrumentCandidateView, offset: number) {
+  async function page(
+    view: InstrumentCandidateView,
+    offset: number,
+    identifierId: string | null = null,
+  ) {
     const outcome = await reviewInstrumentCandidates({
       grant: GRANT,
       sql: store.sql,
-      request: { view, offset, identifierId: null },
+      request: { view, offset, identifierId },
     });
     if (!outcome.ok) throw new Error(outcome.error.code);
     return outcome.review;
   }
 
   beforeEach(() => {
+    store = main;
     commands = true;
     stale = false;
     posted.length = 0;
     read.length = 0;
   });
   beforeAll(async () => {
-    store = await world();
+    main = await world();
+    store = main;
     // One decided pair so the decided view has something to show.
     const id = ids(store);
     const open = await page("open", 0);
@@ -92,6 +100,7 @@ describe.if(runnable)("instrument candidate review", () => {
             await page(
               (url.searchParams.get("view") ?? "open") as InstrumentCandidateView,
               Number(url.searchParams.get("offset") ?? "0"),
+              url.searchParams.get("identifierId"),
             ),
           );
         }
@@ -203,6 +212,72 @@ describe.if(runnable)("instrument candidate review", () => {
       },
     });
     expect(posted.some((entry) => ["approve", "commit"].includes(entry.operation))).toBe(false);
+    await tab.close();
+  });
+
+  test("a candidate that changed after the list was shown is read again and nothing is planned", async () => {
+    store = await world();
+    const tab = await open();
+    const id = ids(store);
+    const expected = await page("open", 0);
+    const candidate = (expected.items as ReviewCandidate[]).find(
+      (item) => item.subjectIdentifierId === id.broker9001,
+    )!;
+    // After the page was shown, a decision made elsewhere moves the anchor
+    // onto another instrument: adopting now would follow an instrument the
+    // anchor has left.
+    const elsewhere = store.db
+      .query("SELECT instrument_id AS id FROM current_instrument_mappings WHERE identifier_id=?")
+      .get(id.tokyo9002) as { id: string };
+    expect(candidate.anchorIdentifierId).toBe(id.listing9001);
+    await decide(
+      store,
+      OPERATOR,
+      "identity.assign",
+      {
+        subject: "instrument",
+        referenceId: id.listing9001,
+        targetId: elsewhere.id,
+        reason: "synthetic: a decision made elsewhere",
+      },
+      "op-elsewhere",
+    );
+    const card = tab.locator(".identity-card").nth(expected.items.indexOf(candidate));
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    await card
+      .getByRole("button", { name: "同じ銘柄として採用する内容を確認", exact: true })
+      .click();
+    await card.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
+    // The candidate was read again before planning, and no plan was created.
+    expect(read.some((url) => url.searchParams.get("identifierId") === id.broker9001)).toBe(true);
+    expect(posted).toEqual([]);
+    await tab.close();
+  });
+
+  test("a held candidate offers keeping apart only and says why", async () => {
+    const held = await heldWorld();
+    store = held.w;
+    const tab = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    await tab.goto(`${origin}/identities/instrument-candidates`);
+    await tab.getByRole("heading", { name: "銘柄の同一性の候補", exact: true }).waitFor();
+    await tab.getByRole("button", { name: "採用を保留", exact: true }).click();
+    const card = tab.locator(".identity-card").first();
+    await card.getByText("すでに手動で別の銘柄に対応付けられています", { exact: false }).waitFor();
+    expect(
+      await card
+        .getByRole("button", { name: "同じ銘柄として採用する内容を確認", exact: true })
+        .count(),
+    ).toBe(0);
+    expect(
+      await card.getByRole("button", { name: "別の銘柄として扱う内容を確認", exact: true }).count(),
+    ).toBe(1);
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic: different products");
+    await card.getByRole("button", { name: "別の銘柄として扱う内容を確認", exact: true }).click();
+    await tab.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
+    expect(posted.find((entry) => entry.operation === "plan")!.body).toMatchObject({
+      kind: "relation.reject",
+      payload: { relationKind: "listed_as", toRef: `identifier:${held.broker}` },
+    });
     await tab.close();
   });
 

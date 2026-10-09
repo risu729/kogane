@@ -99,7 +99,9 @@ function validItem(view: string, item: unknown): boolean {
     // Commands exist exactly while a candidate is proposed, and the view matches the status.
     (status === "proposed") === (item.commands !== null) &&
     (view === "decided" ? status !== "proposed" : status === "proposed") &&
-    (view === "held") === (item.hold !== null)
+    (view === "held") === (item.hold !== null) &&
+    // A held candidate names no adoption: re-mapping a settled subject is a correction.
+    (item.hold === null || item.commands?.adopt === null)
   );
 }
 

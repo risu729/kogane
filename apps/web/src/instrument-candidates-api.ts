@@ -50,20 +50,71 @@ export function isSeparated(item: ReviewItem): item is ReviewSeparated {
 
 export type CandidateDecision = "adopt" | "keepApart";
 
+const STALE = "候補が更新されています。一覧を更新して、内容を確認し直してください。";
+
+/**
+ * The candidate as the server answers it now, read through the subject's own
+ * pairs in the view the candidate is shown in, with its two identifiers; null
+ * when the view no longer holds it.
+ */
+async function currentCandidate(candidate: ReviewCandidate): Promise<{
+  item: ReviewCandidate;
+  identifiers: readonly ResolutionIdentifier[];
+} | null> {
+  const view: InstrumentCandidateView = candidate.hold === null ? "open" : "held";
+  for (let offset: number | null = 0; offset !== null;) {
+    const page: InstrumentCandidateReview = await getJson<InstrumentCandidateReview>(
+      `${INSTRUMENT_CANDIDATES_PATH}?${new URLSearchParams({
+        view,
+        offset: String(offset),
+        identifierId: candidate.subjectIdentifierId,
+      })}`,
+      new AbortController().signal,
+    );
+    const item = page.items.find(
+      (entry): entry is ReviewCandidate =>
+        isCandidate(entry) && entry.candidateId === candidate.candidateId,
+    );
+    if (item) return { item, identifiers: page.identifiers };
+    offset = page.nextOffset;
+  }
+  return null;
+}
+
+const revisionOf = (identifiers: readonly ResolutionIdentifier[], id: string) =>
+  identifiers.find((row) => row.identifierId === id)?.mappingRevision;
+
 /**
  * Plan the command the server named for this candidate, with the reason a
- * person wrote. An adoption whose plan pinned a different mapping revision of
- * the subject than the one on screen is not offered for approval: the list is
- * stale and the candidate needs another look.
+ * person wrote. Before anything is planned the candidate is read again: it
+ * must still be in the same view with the same anchor, subject and commands,
+ * and neither identifier's mapping may have a new revision since the list was
+ * shown, or nothing is planned. After planning, an adoption whose plan pinned
+ * another revision of the subject than the one on screen (a change between
+ * the two requests) is not offered for approval either. The server pins the
+ * subject's mapping revision only; the anchor is checked here.
  */
 export async function planCandidateDecision(
   candidate: ReviewCandidate,
   decision: CandidateDecision,
   reason: string,
-  subject: ResolutionIdentifier | undefined,
+  shown: { anchor: ResolutionIdentifier | undefined; subject: ResolutionIdentifier | undefined },
 ): Promise<ChangePlanView> {
   const command = candidate.commands?.[decision] ?? null;
   if (command === null) throw new Error("この候補では、この判断を計画できません。");
+  const current = await currentCandidate(candidate);
+  if (
+    current === null ||
+    current.item.anchorIdentifierId !== candidate.anchorIdentifierId ||
+    current.item.subjectIdentifierId !== candidate.subjectIdentifierId ||
+    JSON.stringify(current.item.commands) !== JSON.stringify(candidate.commands) ||
+    shown.anchor === undefined ||
+    shown.subject === undefined ||
+    revisionOf(current.identifiers, candidate.anchorIdentifierId) !==
+      shown.anchor.mappingRevision ||
+    revisionOf(current.identifiers, candidate.subjectIdentifierId) !== shown.subject.mappingRevision
+  )
+    throw new Error(STALE);
   const response = await postCommand<{ plan: ChangePlanView }>(
     "plan",
     {
@@ -75,10 +126,9 @@ export async function planCandidateDecision(
   );
   if (
     decision === "adopt" &&
-    subject !== undefined &&
-    response.plan.expectedRevisions[`instrument_mapping:${subject.identifierId}`] !==
-      subject.mappingRevision
+    response.plan.expectedRevisions[`instrument_mapping:${candidate.subjectIdentifierId}`] !==
+      shown.subject.mappingRevision
   )
-    throw new Error("候補が更新されています。一覧を更新して、内容を確認し直してください。");
+    throw new Error(STALE);
   return response.plan;
 }
