@@ -5,6 +5,7 @@ import { executeQuery, type QueryData } from "../src/query/execute.ts";
 import { encodeCursor } from "../src/query/cursor.ts";
 import { parseQueryRequest, querySpecDigest, type QueryRequest } from "../src/query/spec.ts";
 import { CONTEXT_INPUTS, grant, HOSTILE_DESCRIPTION, OVERVIEW, reader } from "./fixture.ts";
+import type { Overview } from "../../../packages/observation-shared/src/api-contract.ts";
 import type { Grant } from "../src/grants.ts";
 import type {
   BalanceProjectionReader,
@@ -176,6 +177,109 @@ describe("coverage inside the granted scope", () => {
     expect(outcome.result.coverage.gaps).toEqual([]);
     const serialized = JSON.stringify(outcome.result);
     for (const hidden of ["fixture-b", "fixture-empty"]) expect(serialized).not.toContain(hidden);
+  });
+});
+
+/**
+ * The overview's run list is the newest 501 runs across every source. This
+ * one is full of `source`'s runs, the shape a busy source outside the scope
+ * gives it; coverage must not count inside it.
+ */
+function windowFullOf(source: string): Overview {
+  return {
+    ...OVERVIEW,
+    fetchRuns: Array.from({ length: 501 }, (_, index) => ({
+      id: 10_000 - index,
+      source_id: source,
+      tool: "fixture",
+      external_run_id: null,
+      status: "success",
+      started_at: "2026-09-08T00:00:00Z",
+      completed_at: "2026-09-08T00:01:00Z",
+    })),
+  };
+}
+
+async function coverageWith(
+  grantValue: Grant,
+  body: QueryRequest,
+  overview: Overview,
+  runTotals: Record<string, number>,
+) {
+  const rows = reader({ runTotals });
+  const opened = await openContext(grantValue, CONTEXT_INPUTS, { query: body });
+  const outcome = await executeQuery({
+    grant: grantValue,
+    opened,
+    request: body,
+    reader: rows,
+    overview,
+  });
+  return { outcome, calls: rows.calls };
+}
+
+describe("coverage run counts are read inside the scope (out-of-scope activity side channel)", () => {
+  test("a denied source's runs never reach or move an in-scope source's coverage answer", async () => {
+    const narrow = grant({ scopes: { sources: ["fixture-a"], accounts: "*" } });
+    const quiet = await coverageWith(narrow, request(), OVERVIEW, {
+      "fixture-a": 1,
+      "fixture-b": 1,
+    });
+    // The denied source then records more runs than the overview's window holds.
+    const busy = await coverageWith(narrow, request(), windowFullOf("fixture-b"), {
+      "fixture-a": 1,
+      "fixture-b": 5_000,
+    });
+    expect(quiet.outcome.ok && busy.outcome.ok).toBe(true);
+    if (!quiet.outcome.ok || !busy.outcome.ok) return;
+    expect(JSON.stringify(busy.outcome.result)).toBe(JSON.stringify(quiet.outcome.result));
+    expect(busy.outcome.result.data).toMatchObject({
+      scopes: [{ sourceRef: "fixture-a", collectionRunCount: 1 }],
+      collectionRunCount: 1,
+    });
+    expect(busy.outcome.result.completeness).toBe("complete");
+    // The count read names only the in-scope source.
+    expect(busy.calls).toEqual(["runCounts:fixture-a"]);
+    expect(JSON.stringify(busy.outcome.result)).not.toContain("fixture-b");
+  });
+
+  test("a source filter narrower than the grant counts only the filtered source", async () => {
+    for (const wide of [
+      grant(),
+      grant({ scopes: { sources: ["fixture-a", "fixture-b"], accounts: "*" } }),
+    ]) {
+      const body = request({ filters: { source: "fixture-a" } });
+      const quiet = await coverageWith(wide, body, OVERVIEW, { "fixture-a": 1, "fixture-b": 1 });
+      const busy = await coverageWith(wide, body, windowFullOf("fixture-b"), {
+        "fixture-a": 1,
+        "fixture-b": 5_000,
+      });
+      expect(quiet.outcome.ok && busy.outcome.ok).toBe(true);
+      if (!quiet.outcome.ok || !busy.outcome.ok) return;
+      expect(JSON.stringify(busy.outcome.result)).toBe(JSON.stringify(quiet.outcome.result));
+      expect(busy.outcome.result.data).toMatchObject({
+        scopes: [{ sourceRef: "fixture-a", collectionRunCount: 1 }],
+        collectionRunCount: 1,
+      });
+      expect(busy.calls).toEqual(["runCounts:fixture-a"]);
+    }
+  });
+
+  test("a count is exact over the source's whole history, not the overview's window", async () => {
+    const { outcome } = await coverageWith(grant(), request(), windowFullOf("fixture-b"), {
+      "fixture-a": 2,
+      "fixture-b": 5_000,
+    });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.result.data).toMatchObject({
+      scopes: [
+        { sourceRef: "fixture-a", collectionRunCount: 2 },
+        { sourceRef: "fixture-b", collectionRunCount: 5_000 },
+        { sourceRef: "fixture-empty", collectionRunCount: 0 },
+      ],
+      collectionRunCount: 5_002,
+    });
   });
 });
 

@@ -1,6 +1,6 @@
 # ADR 0048: Run an accepted collection or session refresh once through the named collector RPC
 
-- Status: proposed (accepted upon merge; production dispatch unverified)
+- Status: accepted (merged 2026-10-08 in #576; production dispatch unverified)
 - Date: 2026-10-08
 - Issue: #544
 

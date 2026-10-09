@@ -11,6 +11,10 @@
     "strict": true,
     "resolveJsonModule": true,
     "noEmit": true,
+    // As in every packages/* workspace: library declarations are not checked
+    // here. The MCP SDK's ship a stdio helper typed on Node's `Buffer`, which a
+    // Worker never imports (ADR 0047).
+    "skipLibCheck": true,
     "types": []
   },
   "include": ["worker-configuration.d.ts", "src/**/*.ts"]

@@ -65,6 +65,22 @@ export const OVERVIEW_SOURCES_SQL = `SELECT s.id, s.provider, s.ingestion,
 export const OVERVIEW_FETCH_RUNS_SQL = `SELECT id, source_id, tool, external_run_id, status, started_at, completed_at
   FROM ${visibleEvidence.fetchRuns} ORDER BY id DESC LIMIT ${PAGE_LIMIT}`;
 
+/**
+ * Visible fetch runs per listed source, counted over each source's whole
+ * history: the `coverage` intent's `collectionRunCount`. `?1` is a JSON array
+ * of source ids, applied before anything is counted, so a run of a source
+ * outside the list is never read and cannot move a listed source's count.
+ * That is the difference from `OVERVIEW_FETCH_RUNS_SQL`, the operator
+ * overview's newest-runs window, which is taken across every source before a
+ * caller could filter it. One row per listed source that has a visible run,
+ * reached through `idx_fetch_runs_source (source_id, id DESC)`.
+ */
+export const SOURCE_FETCH_RUN_COUNTS_SQL = `SELECT f.source_id, COUNT(*) AS run_count
+  FROM ${visibleEvidence.fetchRuns} f
+ WHERE f.source_id IN (SELECT value FROM json_each(?1))
+ GROUP BY f.source_id
+ ORDER BY f.source_id`;
+
 export const OVERVIEW_PARSE_RUNS_SQL = `SELECT id, fetch_artifact_id, parser_name, parser_version, parsed_at, status,
        error, warnings_json, superseded_by_parse_run_id
   FROM ${visibleEvidence.parseRuns} ORDER BY id DESC LIMIT ${PAGE_LIMIT}`;
