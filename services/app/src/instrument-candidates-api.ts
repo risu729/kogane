@@ -28,14 +28,14 @@ import { HttpError, json } from "./http";
  * identity catalogue, which answers 404 for an unknown `/api/identity/` path.
  */
 export async function instrumentCandidatesApi(
-  request: Request,
+  _request: Request,
   env: Env,
   url: URL,
   subject: string,
 ): Promise<Response | null> {
+  // GET/HEAD only: `worker.ts` answers 405 to every other method before any
+  // read route is reached, so this module does not check the method again.
   if (url.pathname !== INSTRUMENT_CANDIDATES_PATH) return null;
-  if (request.method !== "GET" && request.method !== "HEAD")
-    throw new HttpError(405, "method_not_allowed");
   const body: Record<string, unknown> = {};
   for (const [key, value] of url.searchParams) {
     if (
