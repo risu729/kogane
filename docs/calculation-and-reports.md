@@ -419,9 +419,12 @@ caller-supplied wrapper key and the caller's instrument mapping pinned by the
 seal. A book any held revision touches (a selector disposition, a shape it
 cannot place, an unresolved or aggregate instrument, a transfer, a corporate
 action) is not fed. `lotsOnSelection` runs the engine under the caller's
-policy and pins an outer manifest (cut, set version, identity pins, alias
-rules, coverage producer, policy, FX policy, engine manifest digest);
-`queryLotsOnSelection` answers one holder at one cut without a route. Since
+policy and pins an outer manifest (cut and its standing, set version,
+identity pins, alias rules, coverage producer, policy, FX policy, engine
+manifest digest); a provisional cut is never `complete`.
+`queryLotsOnSelection` answers one holder at one cut without a route, over
+every identifier currently mapped to the asked instruments, so a book is its
+instrument's whole history. Since
 CORE 0070 refuses the `security-quantity` book and no securities writer
 exists, every real answer is `unsupported`
 (`security_quantity_writer_missing`), with the manifest produced.

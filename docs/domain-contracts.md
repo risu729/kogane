@@ -486,7 +486,9 @@ admitted by CORE 0071, refused by the change lifecycle until a planner exists
   request's policy and returns a status (`unsupported`, `refused`,
   `indeterminate`, `needs_review`, `limited`, `complete`), every reason
   (`LOTS_ON_SELECTION_REASONS`), the adaptation, the engine's result and the
-  outer manifest with its digest as `contextId`. With no security claim the
+  outer manifest with its digest as `contextId`; the cut's standing is pinned
+  and echoed, and a provisional cut is at most `limited` (`cut_provisional`).
+  With no security claim the
   answer is `unsupported` (`security_quantity_writer_missing`), which is every
   real answer today. No FX rate, snapshot, split or transfer input is
   produced; no gain, no tax.

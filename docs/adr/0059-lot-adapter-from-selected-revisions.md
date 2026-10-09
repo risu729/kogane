@@ -101,10 +101,22 @@ kind; every other revision is counted (`otherRevisions`) and not read.
     consideration is the movement minus the fees (101 out = 100 + 1 fee); for
     a disposal they were deducted from it, so the consideration (gross) is
     the movement plus the fees (100 in = 101 gross − 1 fee). Each fee is
-    handed over once, as a fee, never as a consideration or a second input;
+    handed over once, as a fee, never as a consideration or a second input.
+    A breakdown with another role is `writer_unsupported`; that includes a
+    principal stated as its own breakdown leg (one reading of ADR 0054's
+    "101 out = 100 principal + 1 fee"). The adapter derives the principal as
+    the movement minus its fee breakdowns, and a second, stated principal
+    could disagree with that difference with no rule saying which one wins;
+    a writer that states it needs this ADR amended first;
   - or, without a cash movement, one `correspondence` of the security
     movement in the consideration's direction states the consideration, and
-    `correspondence` legs with the fee role state the fees, as given;
+    `correspondence` legs with the fee role state the fees, as given: the
+    stated consideration is read as the principal, without the fees. Whether
+    a broker's settlement amount includes its fees is one of the owner's open
+    items (below). A writer that stated a fee-inclusive settlement amount
+    here would have its fee counted twice under `capitalize`, and a net
+    amount would understate a disposal's gross; the writer's ADR must state
+    which figure this leg carries;
   - any other cash leg (a second movement, a legacy fee or unresolved leg, a
     breakdown of another role or unit, a direction mismatch, a negative
     result) is `writer_unsupported`;
@@ -124,7 +136,8 @@ kind; every other revision is counted (`otherRevisions`) and not read.
   account the request names no wrapper for, or on no account, is
   `holder_unresolved`. A mapping that is `unresolved` or `aggregate`, states
   no class, or whose revision is not the one the revision's seal pins as
-  `instrument_mapping:<unit>` (or is not pinned) is `instrument_unresolved`;
+  `instrument_mapping:<unit>` (or is not pinned, a revision without a seal
+  included) is `instrument_unresolved`;
   `identified` and `provider-local` place a book. The input's quantity is
   restated in the instrument's unit, so two identifiers of one instrument
   share its book. Two classes for one instrument hold its book
@@ -173,7 +186,13 @@ kind; every other revision is counted (`otherRevisions`) and not read.
 
 `computeLots` runs on the fed inputs under the request's policy, with no
 input at all when nothing is fed, so its gates and manifest are exercised on
-every call. The status says what the answer is before what it computed, every
+every call. `security_quantity_writer_missing` is decided by a count: no
+`security-quantity` claim in the selection. That is today's rule only. The
+securities writer's pull request changes it, because once a writer exists an
+account whose holding of the instrument is empty (no claim in scope) must
+answer as an empty book, not `unsupported`.
+
+The status says what the answer is before what it computed, every
 applicable reason listed (`LOTS_ON_SELECTION_REASONS`, closed, covering the
 adapter's codes, the engine's refusal and reason codes and the selector's
 coverage reasons):
@@ -190,17 +209,23 @@ coverage reasons):
    from the engine;
 4. `needs_review`: a review code, or a choice no disposal took
    (`lot_selection_unused`);
-5. `limited`: a note, a limited disposal or a remaining lot of unknown cost;
+5. `limited`: a note, a limited disposal, a remaining lot of unknown cost, or
+   a provisional cut (`cut_provisional`: the selector's `cutStanding` is
+   `provisional`, an instant at or after the log's last commit, which a commit
+   may still reach). A provisional cut is therefore at most `limited`, never
+   `complete`; the status is not otherwise changed;
 6. else `complete`.
 
 The outer manifest pins (ADR 0054, "Manifest pins"): its schema
 (`lots-on-selection-manifest-v1`), the selector and adapter releases, the
 input contract and engine version, the requested and resolved cut and its
-`known_at`, the set version, the current identity epoch and every pin of the
+`known_at`, the cut's standing (`final` or `provisional`, also echoed in the
+result), the set version, the current identity epoch and every pin of the
 selected seals, the alias rule versions, the coverage producer
 (`coverage-producer-none-v1`), the snapshot contexts (none: no snapshot input
 is produced), the holders and wrapper keys, the instrument mappings read, the
-specific-identification choices, the policy ref, the FX policy ref with its
+specific-identification choices, the policy ref and a copy of the policy (one
+ref with two contents is two contexts), the FX policy ref with its
 rate refs (none), and the `canonicalDigest` of the engine's manifest (null
 when the engine refused). `contextId` is the manifest's digest. Equal
 selections and requests in any order give one manifest (B13); history filled
@@ -212,15 +237,42 @@ later is a new cut, set version and digest, and the earlier cut's stays
 One account (the holder) with its wrapper key, 1–16 instrument identifier ids,
 a cut (default: the latest commit of the current core epoch, or the caller's
 `now` for an empty log), the caller's policy and choices. Without every 0070
-object it answers `unavailable` (`economic_guard_missing`). Otherwise it loads
-the selector rows for the account (ADR 0058), selects with the identifiers as
-the instrument scope, reads each identifier's current mapping and its
-instrument by key (`LOT_INSTRUMENT_MAPPINGS_SQL`: an instrument of kind
-`crypto` is a crypto asset; any other kind states no class), and runs
-`lotsOnSelection`. Its manifest adds the query schema, the account and the
-asked identifiers around the outer manifest. Malformed input is
-`invalid_query`, an instant cut after `now` is `cut_in_future`, and the
-selector's refusals propagate. No route, page or service calls it.
+object it answers `unavailable` (`economic_guard_missing`). Otherwise:
+
+1. It reads each asked identifier's current mapping and its instrument by key
+   (`LOT_INSTRUMENT_MAPPINGS_SQL`: an instrument of kind `crypto` is a crypto
+   asset; any other kind states no class).
+2. It reads every identifier currently mapped to those instruments
+   (`LOT_INSTRUMENT_IDENTIFIERS_SQL`), so a book is computed from its
+   instrument's whole identifier set, never from the part a caller named: a
+   buy under one identifier and a sale under another of the same instrument
+   always meet in one book. No index orders `instrument_mappings` by
+   instrument (CORE 0018 keys it by identifier and revision, and an index
+   would be a migration), so this read passes over the mapping table once,
+   as `ACCOUNT_SOURCES_SQL` passes over the account mappings, and checks each
+   row's currency by the `(identifier_id, revision)` key. The plan is tested
+   without statistics: one scan of the mapping table, nothing else whole.
+   The scope (asked and found) is bounded at 64 identifiers, the selector's
+   instrument bound; past it the query is refused
+   (`instrument_identifier_bound_exceeded`, `LOTS_ON_SELECTION_REFUSALS`),
+   never cut.
+3. It loads the selector rows for the account (ADR 0058), selects with all
+   those identifiers as the instrument scope, and runs `lotsOnSelection` with
+   their mappings.
+
+Its manifest adds the query schema, the account, the asked identifiers and
+the scope's identifiers (`scopeIdentifiers`) around the outer manifest, and
+the result echoes `cutStanding`. Malformed input is `invalid_query`, an
+instant cut after `now` is `cut_in_future`, and the selector's refusals
+propagate. No route, page or service calls it.
+
+**Precondition for the securities writer.** Every security leg's unit is an
+instrument identifier id with a current mapping, and its seal pins
+`instrument_mapping:<id>` at the revision it read. When an identifier is
+remapped to another instrument, the writer re-revises every event that moves
+it under the new mapping (as the card purchase lane re-revises after an
+identity epoch change). Until it does, those events stay under the old pin,
+and the query reads only identifiers mapped now (see Limits).
 
 ## Consequences
 
@@ -230,8 +282,9 @@ selector's refusals propagate. No route, page or service calls it.
   instrument unit without one is held `writer_unsupported`. The mapped path,
   B7–B11 and the C side of B3 run on hand-built selections only.
 - The adapter and the query read; nothing is written, adopted or approved. No
-  migration: the mapping read uses the 0018 key `UNIQUE(identifier_id,
-revision)` and the `instruments` primary key.
+  migration: the mapping reads use the 0018 key `UNIQUE(identifier_id,
+revision)` and the `instruments` primary key, and the identifier read passes
+  over `instrument_mappings` once (its D1 cost is not measured).
 - The manifest holds amounts (the choices' quantities, and through the
   engine's manifest digest the inputs): like the engine's, it is a calculation
   input that a future writer stores only as a report body, never in a log,
@@ -243,6 +296,11 @@ revision)` and the `instruments` primary key.
 
 ### Limits
 
+- **The selector comes first.** Today's selector release reports a
+  `security-quantity` claim as `book_unsupported` and reads a `trade` kind as
+  `unknown`, so the adapter maps nothing real. A selector release must admit
+  the book and the trade kind before a securities writer's revisions can be
+  mapped at all.
 - **No securities writer.** CORE 0070 refuses the `security-quantity` book
   and no event kind for a trade exists; the reserved names `trade`,
   `corporate_action`, `executed` and `settled` are this adapter's
@@ -265,7 +323,12 @@ revision)` and the `instruments` primary key.
   such book is `instrument_unresolved`; only `crypto` instruments state one.
 - **Identity.** A revision whose seal does not pin its instrument mapping is
   `instrument_unresolved`; only the current mapping is read, so a mapping
-  moved since the seal is refused, not read at the pinned revision.
+  moved since the seal is refused, not read at the pinned revision. An
+  identifier mapped to an instrument earlier but not now is not read for that
+  instrument. Its revisions are found only by asking for the identifier
+  itself, where the moved pin holds them `instrument_unresolved`. Until the
+  writer precondition above holds, the instrument's own book can therefore
+  miss them.
 - **Unplaced revisions.** A held revision that no instrument leg places in a
   book (an unmapped unit, an unknown holder) makes the run `needs_review` but
   does not hold the books that are fed.
@@ -286,7 +349,7 @@ revision)` and the `instruments` primary key.
 
 Synthetic data only; no production data, D1 or Workers.
 
-- `packages/domain/test/lot-adapter.test.ts` (35 tests), on hand-built
+- `packages/domain/test/lot-adapter.test.ts` (39 tests), on hand-built
   selections (`packages/domain/test/lot-selection-fixture.ts`, set versions
   from the selector's `adoptedSetVersion`) and on today's selector through
   `selector-fixture.ts`: no security claim is `unsupported` with the manifest
@@ -300,25 +363,38 @@ Synthetic data only; no production data, D1 or Workers.
   both bases, the remaining lot keeps 600 and its acquisition time); B9 (a
   corporate-action revision and a security transfer refused, their books
   held); B10 (a withdrawn acquisition: the sale is `negative_holding`, no
-  allocation); B11 (a choice naming a corrected acquisition's old revision is
+  allocation; an unlogged withdrawal with its predecessor selected as
+  `successor_unlogged`, as the selector does, holds the book); B11 (a choice naming a corrected acquisition's old revision is
   `unknown_lot`; a choice for a disposal no longer in force is unused and the
   disposal `lot_selection_missing`); B12 and B13 (hand-built and through
   today's selector); every adapter code with its shapes; dispositions
   holding only the touched book; the engine's refusals; the manifest pins;
-  invalid requests; the closed reason list covering every code.
-- `packages/application/test/lots-on-selection-query.test.ts` (11 tests) on a
+  invalid requests; the closed reason list covering every code; after
+  review, an active seal-less revision (`instrument_unresolved`), two
+  identifiers of one instrument sharing a book, a provisional cut (`limited`,
+  `cut_provisional`, pinned and echoed), one policy ref with two contents
+  giving two contexts, the unstated fee kept absent with no cash side, and a
+  correspondence and a breakdown naming another leg.
+- `packages/application/test/lots-on-selection-query.test.ts` (14 tests) on a
   CORE store migrated through every migration with an economic history
   written through 0070's triggers: without 0070 `unavailable`; an empty log
   `unsupported` with `log_empty`, the manifest and the mappings read; 0070
   refusing a security-quantity claim with nothing written; an instrument leg
   no writer claims held `writer_unsupported`; a cash event outside the
   instrument scope; B12 (a later commit, the earlier cut's context unchanged);
-  B13; refused queries and cuts; a null policy; the mapping read's plan on the
-  complete CORE schema without table statistics (keyed, no scan).
+  B13; refused queries and cuts; a null policy; asking for one identifier of
+  an instrument selecting its other current identifier (and not one remapped
+  away), with the same answer whichever is asked; the identifier bound
+  refused; both mapping reads' plans on the complete CORE schema without
+  table statistics (the mapping read keyed; the identifier read one pass over
+  the mapping table, its currency check keyed).
 - By hand, not in CI: subtracting instead of adding a disposal's fees,
   falling back to the settlement time, dropping the adapter's own conflict
-  check, feeding books with a held revision, and skipping the pin check each
-  failed tests.
+  check, feeding books with a held revision, skipping the pin check (or only
+  for a seal-less revision), an empty fee list without a cash side, not
+  checking a correspondence's or a breakdown's target leg, dropping
+  `cut_provisional`, dropping the policy copy, and not expanding the
+  identifier scope each failed tests.
 - `mise run //packages/domain:ci`, `//packages/read-model:ci`,
   `//packages/application:ci`, `//packages/parsers:test`, `mise run ci:root`,
   the format, lint and typo checks, and `mise run ledger:schema` (no change).
