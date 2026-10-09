@@ -190,9 +190,11 @@ export const OPERATION_CATALOGUE = {
     capability: "interpretation.propose",
     paths: AGENT,
   },
-  // A refusal on `/mcp` before any tool is named (no grant, a malformed
-  // message): the transport itself, recorded so a refusal after
-  // authentication is never silent.
+  // A refusal on `/mcp` before any tool is named (no grant, a method other
+  // than POST, a query string, a body that is too large or not JSON): the
+  // transport itself, recorded so such a refusal after authentication is
+  // never silent. A JSON body that is not a JSON-RPC request is answered in
+  // the JSON-RPC envelope and, like the protocol's own messages, not recorded.
   "mcp.request": {
     risk: ["R0"],
     effect: null,

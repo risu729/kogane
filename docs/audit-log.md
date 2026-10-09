@@ -166,10 +166,24 @@ and by the caps above.
 - A request refused before authentication (401), the deployment's
   service-token bootstrap (no subject), a path or tool this deployment does
   not serve (`404 not_found`, MCP `unknown_tool`), and the MCP protocol's own
-  messages (`initialize`, `tools/list`, `ping`).
+  messages (`initialize`, `tools/list`, `ping`, notifications) — including a
+  body that is JSON but not a JSON-RPC request (`-32600`) or names an unknown
+  method (`-32601`), which `/mcp` answers in the JSON-RPC envelope. A body that
+  is not JSON at all, or too large, is refused before any message is read and
+  is recorded as `mcp.request`.
 - A subject outside the actor shape (`actor_not_supported`): the record could
   not hold it, so the request log carries `audit_write_failed` instead. The
-  same holds for any record that cannot be written: the answer never changes.
+  same holds for any read, replay, refusal or failure record that cannot be
+  written: the answer never changes. An effect record is different: it is in
+  its writer's batch, so an effect whose record cannot be built or written is
+  not applied either, and the caller gets the writer's failure (the
+  schedules' `503 scheduling_unavailable`, the survey's
+  `503 decision_record_failed`, a command's 5xx, and the proposal tool's
+  existing `409 idempotency_conflict`, which it answers for every failed
+  append). The command, operations and schedule writers act only for a
+  principal whose subject the actor shape admitted (`principalFor`); the
+  proposal tool acts for any subject `AGENT_API_GRANTS` names, so a granted
+  subject outside the actor shape can read but cannot propose.
 - `replayed` and `failed` records are not capped (ADR 0064 caps `prepared`,
   `read` and `refused` only).
 - With one principal on several paths (the owner's subject on `ui` and on the
