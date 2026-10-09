@@ -259,13 +259,22 @@ export function verifyApplicationRollout(snapshot, versions) {
 /** Keep the existing 180-second rollout window; an attempt cap must not shorten it. */
 export async function waitForApplicationRollout(
   readState,
-  { now = Date.now, wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms)) } = {},
+  {
+    now = Date.now,
+    wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms)),
+    publication,
+  } = {},
 ) {
   const deadline = now() + 180000;
   while (now() < deadline) {
     const { snapshot, versions } = await readState(deadline);
     if (now() >= deadline) fail("rollout_pending");
     try {
+      if (
+        publication &&
+        (snapshot.version !== publication.version || snapshot.image !== publication.image)
+      )
+        fail("rollout_pending");
       verifyApplicationRollout(snapshot, versions);
       return snapshot;
     } catch (error) {
@@ -279,6 +288,14 @@ export async function waitForApplicationRollout(
     await wait(Math.min(5000, remaining));
   }
   fail("rollout_pending");
+}
+
+/** Use the authenticated current namespace, while refusing any baseline drift. */
+export async function currentRegistryNamespace(api, expected) {
+  const current = (await api("containers/me")).external_account_id;
+  if (!/^[a-z0-9_-]{1,64}$/u.test(current ?? "")) fail("registry_namespace_invalid");
+  if (current !== expected) fail("registry_namespace_changed");
+  return current;
 }
 
 export function registryImage(target, image, registryNamespace) {
@@ -584,7 +601,10 @@ export async function readApplication(target, api, accountId) {
     `workers/scripts/${target.worker}/versions/${allocation[0].version_id}`,
   );
   const app = await api(`containers/applications/${target.appId}`);
-  return applicationSnapshot(target, app, version.resources?.bindings, accountId);
+  return {
+    ...applicationSnapshot(target, app, version.resources?.bindings, accountId),
+    workerVersion: allocation[0].version_id,
+  };
 }
 
 function quietExec(binary, args, options = {}) {
@@ -812,7 +832,8 @@ async function main() {
       const target = targets.find((entry) => entry.name === image.name);
       if (
         !target ||
-        image.daemonId !== quietExec("docker", ["info", "--format", "{{.ID}}"]).trim() ||
+        (process.env.CONTAINER_RESTORED_DAEMON ?? image.daemonId) !==
+          quietExec("docker", ["info", "--format", "{{.ID}}"]).trim() ||
         image.imageId !== dockerImageId(image.localTag) ||
         image.inputs !== containerInputDigest(root, target)
       )
@@ -832,32 +853,48 @@ async function main() {
     if (!target) fail("target_unknown");
     const image = JSON.parse(readFileSync(path, "utf8")).find((entry) => entry.name === argument);
     const before = JSON.parse(readFileSync(baseline, "utf8"));
+    const receipt = JSON.parse(readFileSync(resolve(temp, "resume-receipt.json"), "utf8"));
+    const bound = receipt.targets.find((entry) => entry.name === argument);
+    if (!bound) fail("publication_receipt_missing");
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
     const api = cloudflareApi({ accountId, token: process.env.CLOUDFLARE_API_TOKEN });
-    const snapshot = await waitForApplicationRollout(async (deadline) => {
-      // All four control-plane reads share the remaining polling window.
-      const rolloutApi = cloudflareApi({
-        accountId,
-        token: process.env.CLOUDFLARE_API_TOKEN,
-        deadline,
-      });
-      const current = await readApplication(target, rolloutApi, accountId);
-      verifyApplicationIdentity(
-        before.snapshots.find((entry) => entry.name === argument),
-        current,
-      );
-      const versions = await rolloutApi(`containers/applications/${target.appId}/versions`);
-      return { snapshot: current, versions };
-    });
+    const snapshot = await waitForApplicationRollout(
+      async (deadline) => {
+        // All four control-plane reads share the remaining polling window.
+        const rolloutApi = cloudflareApi({
+          accountId,
+          token: process.env.CLOUDFLARE_API_TOKEN,
+          deadline,
+        });
+        const current = await readApplication(target, rolloutApi, accountId);
+        verifyApplicationIdentity(
+          before.snapshots.find((entry) => entry.name === argument),
+          current,
+        );
+        const versions = await rolloutApi(`containers/applications/${target.appId}/versions`);
+        if (
+          current.workerVersion !== bound.workerVersion ||
+          current.version > bound.version ||
+          versions.some((entry) => entry.version > bound.version) ||
+          (current.version === bound.version && current.image !== bound.image)
+        )
+          fail("publication_superseded");
+        // Completion is evaluated against the exact intended publication, even
+        // while GET application still describes the previous desired version.
+        return { snapshot: current, versions };
+      },
+      { publication: bound },
+    );
     const credentials = await api("containers/registries/registry.cloudflare.com/credentials", {
       expiration_minutes: 5,
       permissions: ["pull"],
     });
+    const registryNamespace = await currentRegistryNamespace(api, before.registryNamespace);
     await verifyRegistryImage({
       target,
       image: snapshot.image,
       imageId: image.imageId,
-      registryNamespace: before.registryNamespace,
+      registryNamespace,
       ...credentials,
     });
     if (image.legacy && image.registryImage !== snapshot.image) fail("rollback_image_changed");
