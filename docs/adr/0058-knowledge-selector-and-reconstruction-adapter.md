@@ -114,11 +114,14 @@ included.
    (`supersession_pointer_mismatch`), as is the order of the two commits
    (`successor_committed_first`).
    A revision known at the cut (unlogged, or committed by it) whose stored
-   pointer names a revision superseded at the cut, or one already replaced
-   this way, is replaced too, transitively: its pointer was written with its
-   successor, before that successor was superseded. So a pre-log chain of any
-   length (within one event or merged across events) ends where a logged
-   correction supersedes its last revision.
+   pointer names an unlogged revision that is superseded at the cut, or
+   replaced this way, is replaced too, transitively: its pointer was written
+   with its successor, before that successor was superseded. So a pre-log
+   chain of any length (within one event or merged across events) ends where a
+   logged correction supersedes its last revision. A pointer to a logged
+   revision is never followed: 0070 makes that revision's commit declare what
+   it supersedes, so an undeclared one is `supersession_undeclared` (step 3),
+   reported and never turned into history.
 3. Per event, over every loaded revision and before any filter: the in-force
    revisions are those not superseded or replaced at the cut. The event is
    `chain_inconsistent` when the log and the stored rows disagree: a pointer
@@ -312,20 +315,23 @@ across accounts.
 
 Synthetic data only; no production data, D1 or Workers.
 
-- `packages/domain/test/knowledge-selector.test.ts` (24 tests): instant
+- `packages/domain/test/knowledge-selector.test.ts` (27 tests): instant
   resolution with equal instants and flooring; B1 (account correction at every
   later cut); the scope after resolution (a withdrawal without legs); B2 (a
   later commit leaves the earlier cut equal); B13 (reversed rows); the cut
   before the log; unlogged, older-build and other-epoch revisions; a pre-log
   chain of two revisions ended by a logged correction, within one event and
-  merged across events; one set version for one sequence asked by number and
+  merged across events; a committed revision, an older build's unlogged
+  successor and a logged correction; W1 and W2 (undeclared pointers to logged
+  revisions stay `chain_inconsistent`, never history); one set version for one sequence asked by number and
   by instant; `provisional` instants at or after the last `known_at`; two in
   force, an undeclared pointer, a seal count mismatch, a pointer mismatch;
   key and alias conflicts; identity epoch and pins; unsupported shapes; an
   absent value; bounds, unknown keys and orphan rows refused.
-- `packages/domain/test/reconstruction-adapter.test.ts` (17 tests): B3
+- `packages/domain/test/reconstruction-adapter.test.ts` (18 tests): B3
   (101 = 100 + 1, a legacy fee, a settlement's obligation leg, trade and
-  settlement legs, one row two events claim), B4 (boundary day, another role
+  settlement legs, one row two events claim), W2 through the fold (needs review, no exact
+  figure), B4 (boundary day, another role
   only), B5, B6, unlogged revisions, identity and alias flags, unsupported
   writers, the handed-over shape, the late part, B13 on the fold's manifest,
   and the writer releases against the writers' constants.
@@ -341,18 +347,21 @@ Synthetic data only; no production data, D1 or Workers.
 - `packages/read-model/test/economic-selector-random.test.ts` (25 tests: 24
   seeds and a coverage check): on random histories written with the triggers
   dropped, including pre-log chains of two or more revisions that a logged
-  revision ends, the loaded rows equal an independent closure; every sequence
+  revision ends and stored pointers no commit declared, the loaded rows equal an independent closure; every sequence
   cut, an instant before the log and instants strictly between commits equal
-  a replay oracle that walks stored pointer chains forward (revisions and
+  a replay oracle that walks stored pointer chains forward through unlogged
+  revisions only and reports a pointer to a committed revision that did not
+  declare it (revisions and
   statuses, claims, conflicts, identity changes, unlogged entries); each
   commit's own `known_at` resolves to the last commit sharing it; shuffled rows
   keep the set version; and W11: at the last commit an active revision is the
   stored live one and its claims are `live_consumption_claims`. By hand (not
   in CI), each of these mutations failed seeds (failing of 25): commit-log
   supersession ignored (25), the cut shifted by one (25), an unlogged
-  successor ignored (15), predecessors not followed (24), the pre-log chain
-  rule dropped (22), the pointed-by step skipped (11), the purchase-key holder
-  arm on the wrong book (5), `<` for the instant (25).
+  successor ignored (13), predecessors not followed (23), the pre-log chain
+  rule dropped (18), the chain rule widened to logged targets (11), an
+  undeclared pointer not reported (12), the pointed-by step skipped (14), the
+  purchase-key holder arm on the wrong book (3), `<` for the instant (25).
 - `packages/application/test/reconstructed-state-query.test.ts` (13 tests):
   without 0070, an empty log, a logged settlement, a settlement as written
   today, a pre-log settlement, a pre-log chain then a logged correction, a card account, a declared identity epoch, B4,

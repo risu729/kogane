@@ -77,9 +77,10 @@ this; the summary:
   refused past its bounds, every statement by key.
 - **Resolution, before any filter.** A revision is known at the cut when its
   seal's commit is at or before it, and superseded at the cut when such a
-  commit declares it in `supersedes`, or when its stored pointer names a
-  revision so superseded or replaced (a pre-log chain ends at the logged
-  correction of its last revision). An event is `active` (one revision in
+  commit declares it in `supersedes`, or when its stored pointer names an
+  unlogged revision that is so superseded or replaced (a pre-log chain ends at
+  the logged correction of its last revision; a pointer to a logged revision
+  that never declared it is `chain_inconsistent`, never history). An event is `active` (one revision in
   force), `knowledge_unlogged` (an in-force revision without a commit, written
   before the log or by an older build, or pointing at one), or
   `chain_inconsistent`. Only then is the scope applied, through every leg a
