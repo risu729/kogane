@@ -223,12 +223,16 @@ whole history, and their sums. A source without an artifact is the gap
 `no_artifacts_collected`. The run counts are read by one query restricted to
 the in-scope sources before it counts anything
 (`SOURCE_FETCH_RUN_COUNTS_SQL`, through `idx_fetch_runs_source`), so a run of
-a source outside the scope is never read and another source's activity,
-granted or not, never moves an in-scope count, the `contextId` or the
-`resultRef`. The operator overview's fetch-run list (`GET /api/overview`) is a
-different read — the newest 501 visible runs across every source — and
-`coverage` does not count inside it
-([ADR 0047](adr/0047-mcp-client-connection.md)).
+a source outside the scope is never read and never moves an in-scope count.
+Runs do not enter the context either, so a source's runs outside the scope,
+denied or merely filtered out, leave the whole answer unchanged, `contextId`
+and `resultRef` included. A publication is different: the context pins the
+grant's publication high-water, not the filter's, so a granted source outside
+the `source` filter that publishes a parse moves the `contextId` (and so the
+`resultRef`), while a denied source's does not (see Grants). The operator
+overview's fetch-run list (`GET /api/overview`) is a different read — the
+newest 501 visible runs across every source — and `coverage` does not count
+inside it ([ADR 0047](adr/0047-mcp-client-connection.md)).
 `test/coverage-scope.test.ts` pins this on the HTTP agent route and `/mcp`:
 520 runs of a source outside the scope leave the whole answer byte-identical.
 
