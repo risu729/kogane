@@ -34,7 +34,7 @@ describe("collection key boundaries", () => {
     expect(() => terminalKey("ab.cd", "a")).toThrow(new CollectionKeyError("invalid_source"));
   });
 
-  test("control characters and encoded separators are rejected without decoding", () => {
+  test("raw separators and control characters are rejected without decoding", () => {
     expect(() => terminalKey("-a", "a")).toThrow(new CollectionKeyError("invalid_source"));
     expect(parseTerminalKey("runs/-a/a/terminal.json")).toBeNull();
 
