@@ -176,6 +176,13 @@ export interface ApiCapabilities {
    */
   readonly reportedStateOnDate?: boolean;
   /**
+   * `GET /api/v2/reconstructed-state` is served: one account's balances
+   * reconstructed from adopted events over a range, beside the reported state
+   * at both ends, at a cut of the economic commit log. Served exactly where
+   * `reportedStateOnDate` is; without CORE 0070 it answers `unavailable`.
+   */
+  readonly reconstructedStateOnDate?: boolean;
+  /**
    * The authenticated operations API (`/api/ops/v1/*`) is served (02 §4):
    * collection, re-registration, replay, rebuild, session refresh and the
    * progress of one accepted operation. False everywhere the
@@ -211,6 +218,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   cardOwnershipReview: false,
   cardPurchaseRecognition: false,
   reportedStateOnDate: false,
+  reconstructedStateOnDate: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -246,6 +254,7 @@ export const CENTRAL_STORE_CAPABILITIES = {
   cardOwnershipReview: false,
   cardPurchaseRecognition: false,
   reportedStateOnDate: false,
+  reconstructedStateOnDate: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 

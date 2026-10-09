@@ -73,9 +73,11 @@ const production: ConformanceTarget = {
   // Worker serves it (docs/reported-state.md); the shared constant keeps it off.
   // Schema that is present is advertised. Reward routes are served; a missing
   // snapshot keeps `rewardsV2ReadModel` at `none` and expiry at 503.
+  // Reconstructed state is served wherever the reported-state views are.
   expected: {
     ...CENTRAL_STORE_CAPABILITIES,
     reportedStateOnDate: true,
+    reconstructedStateOnDate: true,
     eventsV2: true,
     rewardsV2: true,
     cardPurchaseRecognition: true,
@@ -206,15 +208,18 @@ describe("shared contract pin", () => {
       financialProducts: true,
       evidenceHistory: true,
       sharedQuery: true,
-      // rewardsV2, commands, eventsV2 and opsApi are default off here: each
-      // deployment's own flag decides, and /api/meta reports what the
-      // running Worker actually serves.
+      // These stay false in the shared constant. The Worker sets rewardsV2
+      // true, eventsV2 from economic_event_revisions, and
+      // reconstructedStateOnDate from the reported-state views. commands
+      // follows COMMANDS_ENABLED and opsApi follows OPS_API_ENABLED.
+      // /api/meta reports what the running Worker serves.
       rewardsV2: false,
       commands: false,
       cardSettlementReconciliation: false,
       cardOwnershipReview: false,
       cardPurchaseRecognition: false,
       reportedStateOnDate: false,
+      reconstructedStateOnDate: false,
       eventsV2: false,
       opsApi: false,
     });

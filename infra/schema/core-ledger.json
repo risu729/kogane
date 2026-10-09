@@ -1117,6 +1117,12 @@
         }
       ],
       "sha256": "851d61ac8b44292166e4c586dafe77ca9c31797249c3a1230aafeec6c4ddb03d"
+    },
+    {
+      "file": "0072_own_transfer_proposals.sql",
+      "statementCount": 11,
+      "insertStatements": [],
+      "sha256": "73e7700feb07abd831c3e9ef0f65e34d471e719034629a947e1291f3e3cbfc30"
     }
   ],
   "tables": [
@@ -11772,6 +11778,246 @@
       "sqlSha256": "9e015a3a35d46018"
     },
     {
+      "name": "own_transfer_proposal_retirements",
+      "classification": "core-keep",
+      "planRow": "economic events",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "proposal_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "reason_code",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "retired_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "proposal_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "proposal_id",
+          "references": "own_transfer_proposals(proposal_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "own_transfer_proposal_retirements_no_delete",
+        "own_transfer_proposal_retirements_no_replace",
+        "own_transfer_proposal_retirements_no_update"
+      ],
+      "noUpdateTriggers": [
+        "own_transfer_proposal_retirements_no_update"
+      ],
+      "noDeleteTriggers": [
+        "own_transfer_proposal_retirements_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "d2b557f5f55962c8"
+    },
+    {
+      "name": "own_transfer_proposals",
+      "classification": "core-keep",
+      "planRow": "economic events",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "proposal_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "proposal_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "codes_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "debit_observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "debit_parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "debit_consumption_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "debit_alias_class",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "debit_account_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "credit_observation_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "credit_parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "credit_consumption_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "credit_alias_class",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "credit_account_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "policy_version",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "engine_release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "identity_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "manifest_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "created_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "proposal_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "identity_epoch",
+          "references": "economic_identity_epochs(identity_epoch)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "own_transfer_proposals_credit_alias",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "credit_alias_class"
+          ]
+        },
+        {
+          "name": "own_transfer_proposals_debit_alias",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "debit_alias_class"
+          ]
+        }
+      ],
+      "triggers": [
+        "own_transfer_proposals_guard",
+        "own_transfer_proposals_no_delete",
+        "own_transfer_proposals_no_replace",
+        "own_transfer_proposals_no_update"
+      ],
+      "noUpdateTriggers": [
+        "own_transfer_proposals_no_update"
+      ],
+      "noDeleteTriggers": [
+        "own_transfer_proposals_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "41dd4306b8c488e4"
+    },
+    {
       "name": "parse_coverage_claims",
       "classification": "core-keep",
       "planRow": "parse runs and observations",
@@ -18732,6 +18978,55 @@
       "sqlSha256": "357333b145e6261d"
     },
     {
+      "name": "own_transfer_proposal_retirements_no_delete",
+      "table": "own_transfer_proposal_retirements",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "ad817a3065ee4d93"
+    },
+    {
+      "name": "own_transfer_proposal_retirements_no_replace",
+      "table": "own_transfer_proposal_retirements",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "c8277be83aff4a46"
+    },
+    {
+      "name": "own_transfer_proposal_retirements_no_update",
+      "table": "own_transfer_proposal_retirements",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "037222bd0e8e5098"
+    },
+    {
+      "name": "own_transfer_proposals_guard",
+      "table": "own_transfer_proposals",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "1fa7396f7e78c58a"
+    },
+    {
+      "name": "own_transfer_proposals_no_delete",
+      "table": "own_transfer_proposals",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "3e7789e5ffb7256d"
+    },
+    {
+      "name": "own_transfer_proposals_no_replace",
+      "table": "own_transfer_proposals",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "538f6e69c71ec8f8"
+    },
+    {
+      "name": "own_transfer_proposals_no_update",
+      "table": "own_transfer_proposals",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "00a579885f867579"
+    },
+    {
       "name": "parse_coverage_claims_bump_revision_delete",
       "table": "parse_coverage_claims",
       "timing": "AFTER",
@@ -20253,6 +20548,16 @@
       "sqlSha256": "0d66d1db844a87b1"
     },
     {
+      "name": "own_transfer_proposals_credit_alias",
+      "table": "own_transfer_proposals",
+      "sqlSha256": "3df66ff0bd7b1939"
+    },
+    {
+      "name": "own_transfer_proposals_debit_alias",
+      "table": "own_transfer_proposals",
+      "sqlSha256": "5bffeb2903bd655f"
+    },
+    {
       "name": "parse_coverage_claims_parse_run",
       "table": "parse_coverage_claims",
       "sqlSha256": "29886619ec802af3"
@@ -20414,10 +20719,10 @@
     }
   ],
   "summary": {
-    "tableCount": 134,
+    "tableCount": 136,
     "viewCount": 44,
-    "triggerCount": 500,
-    "explicitIndexCount": 130,
+    "triggerCount": 507,
+    "explicitIndexCount": 132,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -20499,6 +20804,8 @@
         "ops_request_stages",
         "ops_requests",
         "origin_template_policies",
+        "own_transfer_proposal_retirements",
+        "own_transfer_proposals",
         "parse_coverage_claims",
         "parse_input_references",
         "parse_run_candidates",
@@ -20665,6 +20972,6 @@
       "0070_economic_commit_guard.sql",
       "0071_economic_event_command_kinds.sql"
     ],
-    "schemaSha256": "0ad510829d73eac010e8d9bdfeb7fe78e934a6c59c10a7767abb700f1c9448e0"
+    "schemaSha256": "c5fa75fff962ce895d32b305eed5c4e66fa35540459e75e89f74f5a80a58238b"
   }
 }

@@ -1,6 +1,7 @@
 // The tools of the agent API, bound to this Worker's read model: the six
-// that are always served, and `kogane.purchases.explain` while the deployment
-// serves card purchase recognition.
+// that are always served, `kogane.purchases.explain` while the deployment
+// serves card purchase recognition, and `kogane.reconstructed-state.read`
+// while it serves the reconstructed state.
 //
 // There is exactly one implementation of each: the HTTP route, the MCP
 // adapter and the human UI's shared-query route all call `callTool`, so no
@@ -29,6 +30,9 @@ import {
   parseQueryRequest,
   proposeReconciliation,
   type QueryRequest,
+  readReconstructedState,
+  RECONSTRUCTED_STATE_REFUSALS,
+  reconstructedStateError,
 } from "../../../packages/application/src/index";
 import {
   parseInstrumentCandidatesRequest,
@@ -60,13 +64,26 @@ export const AGENT_TOOL_NAMES = [
  * MCP name is `unknown_tool`, as the operator route is absent.
  */
 export const PURCHASES_TOOL_NAME = "kogane.purchases.explain";
-export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number] | typeof PURCHASES_TOOL_NAME;
+/**
+ * Served only while the deployment serves the reconstructed state (the
+ * `reconstructedStateOnDate` capability), like its GET route: otherwise its
+ * path is 404 and its MCP name is `unknown_tool`.
+ */
+export const RECONSTRUCTED_STATE_TOOL_NAME = "kogane.reconstructed-state.read";
+export type AgentToolName =
+  | (typeof AGENT_TOOL_NAMES)[number]
+  | typeof PURCHASES_TOOL_NAME
+  | typeof RECONSTRUCTED_STATE_TOOL_NAME;
 
 /** Largest request body any agent route reads, in bytes. */
 export const MAX_REQUEST_BYTES = 65_536;
 
 export function isAgentToolName(value: string): value is AgentToolName {
-  return value === PURCHASES_TOOL_NAME || (AGENT_TOOL_NAMES as readonly string[]).includes(value);
+  return (
+    value === PURCHASES_TOOL_NAME ||
+    value === RECONSTRUCTED_STATE_TOOL_NAME ||
+    (AGENT_TOOL_NAMES as readonly string[]).includes(value)
+  );
 }
 
 export interface ToolResult {
@@ -223,6 +240,23 @@ export async function callTool(
       });
       if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       return { status: 200, body: outcome.explanation };
+    }
+    case "kogane.reconstructed-state.read": {
+      // The GET route's own service: the request rules, the grant, the bounds
+      // and the refusal codes are decided there, once for both transports.
+      // The refusal keeps the route's status; its code is the first ref.
+      const outcome = await readReconstructedState({
+        grant: context.grant,
+        sql: d1Executor(context.db),
+        body: body ?? {},
+        now: new Date().toISOString(),
+      });
+      if (!outcome.ok)
+        return {
+          status: RECONSTRUCTED_STATE_REFUSALS[outcome.refusal].status,
+          body: reconstructedStateError(outcome.refusal, "reconstructed-state.read", outcome.refs),
+        };
+      return { status: 200, body: outcome.body };
     }
   }
 }

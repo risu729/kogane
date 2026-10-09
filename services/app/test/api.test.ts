@@ -245,9 +245,11 @@ describe("production observation API", () => {
       source: { kind: "central-store", classification: "financial" },
       // Schema-backed reads follow the tables this store has. Reward routes
       // are served; their snapshot-backed read model stays none until published.
+      // Reconstructed state is served wherever the reported-state views are.
       capabilities: {
         ...CENTRAL_STORE_CAPABILITIES,
         reportedStateOnDate: true,
+        reconstructedStateOnDate: true,
         eventsV2: true,
         rewardsV2: true,
         cardPurchaseRecognition: true,

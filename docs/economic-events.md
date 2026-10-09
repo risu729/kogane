@@ -23,16 +23,17 @@ produce the complete economic event or its balance effect.
 
 ## What is automatic and what is proposal-only
 
-| Step                                                      | Who does it                                               |
-| --------------------------------------------------------- | --------------------------------------------------------- |
-| Producing stage A candidates from published observations  | The rule job, whenever `RECONCILIATION_ENABLED` is on     |
-| Accepting a candidate                                     | A decision in the decision log, through a guarded command |
-| Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision       |
-| Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision     |
-| Pairing a recognised pending event with posted events     | The purchase lane's candidate pass: proposals only        |
-| Merging a pending and a posted event into one purchase    | A reviewed `relation.accept` (change lifecycle)           |
-| Merging a pair the provider itself linked                 | The purchase lane, **still** as recorded `rule` decisions |
-| Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)  |
+| Step                                                      | Who does it                                                                               |
+| --------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Producing stage A candidates from published observations  | The rule job, whenever `RECONCILIATION_ENABLED` is on                                     |
+| Accepting a candidate                                     | A decision in the decision log, through a guarded command                                 |
+| Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision                                       |
+| Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision                                     |
+| Pairing a recognised pending event with posted events     | The purchase lane's candidate pass: proposals only                                        |
+| Merging a pending and a posted event into one purchase    | A reviewed `relation.accept` (change lifecycle)                                           |
+| Merging a pair the provider itself linked                 | The purchase lane, **still** as recorded `rule` decisions                                 |
+| Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)                                  |
+| Pairing an own-account debit and credit (own transfer)    | Proposal only ([below](#own-transfer-proposals-migration-0072)); nothing adopts one today |
 
 [Card purchase recognition](#card-purchase-recognition) runs only while
 `PURCHASE_RECOGNITION_ENABLED` is on, and only for single-payment rows with an
@@ -405,6 +406,50 @@ own-transfer-shaped writer, T1 across two producers, W2, W3, W4, W6, W7, W8 and
 W9 with every table compared) and the last test of
 `services/processor/test/card-purchase.test.ts` (the lane's seals under the
 epoch its tick read).
+
+### Own-transfer proposals (migration 0072)
+
+[ADR 0057](adr/0057-own-transfer-proposals.md), stage G3-a of ADR 0054.
+`proposeOwnTransfers` (`packages/domain/src/own-transfer-proposals.ts`) pairs
+a debit and a credit of two of the person's own deposit accounts
+(`bank-movement` rows) into a proposal, under an explicit, versioned policy
+(date window, `same-currency`, and `exact` or a per-currency `fee-within`
+difference). The module has no default policy: without one it refuses
+(`policy_missing`, `policy_unsupported`), and nothing in the repository
+supplies one, so no code path produces a proposal outside tests. Ownership is
+an input; an unresolved account is refused. Rows pass the identity rules of
+ADR 0054 through `humanAdoptedRowIdentity` (an SMBC row with a recorded
+`provider-id` origin is admitted; an SBI Shinsei row is refused
+`identity_origin_unrecorded` until a parser release records its origin), rows
+that may be one fact are `duplicate_unresolved`, and a row a live claim
+already holds is `alias_conflict` or `economic_claim_held`. Cross-currency and
+same-account pairs are refused; a row in more than one candidate makes each of
+them `needs_review`, never chosen. Amounts are compared as exact decimals and
+never stored or logged; a proposal names its rows and pins the policy
+version, engine release and identity epoch, and its run manifest the policy
+digest and the alias rule, registry, ownership, arithmetic and contract
+versions.
+
+| Object                              | Role                                                                                                                                                                                                                                                                      |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `own_transfer_proposals`            | One proposal: `status` (`proposed`, `needs_review`), closed `codes_json`, per side the observation, parse run, 5-tuple key, alias class and account, `policy_version`, `engine_release`, `identity_epoch`, `manifest_json`. Append-only; the current identity epoch only. |
+| `own_transfer_proposal_retirements` | A proposal no longer in force, once: `engine_superseded`, `evidence_changed` or `identity_epoch_changed`. Append-only.                                                                                                                                                    |
+
+No lane writes these tables. The four economic-event planners
+(`packages/application/src/operations/own-transfer-plan.ts`) read them and the
+guard's tables and refuse with closed codes (a proposal not in force, a stale
+identity epoch, an alias conflict or held key, a released key another holder
+keeps, a re-adoption of a withdrawn event, a move that restates other claims),
+but they are not registered in `ECONOMIC_EVENT_PLANNERS` and the writer slot
+answers null: every economic-event command is refused as before, because ADR
+0054's production gate (remote D1 conformance, the unlogged-revision check) is
+not met. Nothing adopts, corrects, withdraws or moves an own transfer today.
+
+Limits: the policy values, families beyond `bank-movement`, the SBI Shinsei
+origin route, enabling the planners and a writer, and cost carried by a
+transfer into lots are owner items (ADR 0057); the planners do not re-read the
+account mapping (only the alias class they recompute) or whether a cited row
+is still published.
 
 ### Where the decisions live
 
