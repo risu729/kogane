@@ -254,6 +254,46 @@ describe.if(runnable)("instrument candidate review", () => {
     await tab.close();
   });
 
+  test("an anchor re-confirmed onto the same instrument still stops the plan", async () => {
+    store = await world();
+    const tab = await open();
+    const id = ids(store);
+    const expected = await page("open", 0);
+    const candidate = (expected.items as ReviewCandidate[]).find(
+      (item) => item.subjectIdentifierId === id.broker9001,
+    )!;
+    expect(candidate.anchorIdentifierId).toBe(id.listing9001);
+    const own = store.db
+      .query("SELECT instrument_id AS id FROM current_instrument_mappings WHERE identifier_id=?")
+      .get(id.listing9001) as { id: string };
+    // A new mapping revision of the anchor onto the instrument it already maps
+    // to: the candidate, its anchor and its commands stay the same.
+    await decide(
+      store,
+      OPERATOR,
+      "identity.assign",
+      {
+        subject: "instrument",
+        referenceId: id.listing9001,
+        targetId: own.id,
+        reason: "synthetic: re-confirmed",
+      },
+      "op-reconfirm",
+    );
+    const after = (await page("open", 0, id.broker9001)).items as ReviewCandidate[];
+    const same = after.find((item) => item.candidateId === candidate.candidateId)!;
+    expect(same.anchorIdentifierId).toBe(candidate.anchorIdentifierId);
+    expect(same.commands).toEqual(candidate.commands);
+    const card = tab.locator(".identity-card").nth(expected.items.indexOf(candidate));
+    await card.getByLabel("判断の理由", { exact: true }).fill("synthetic");
+    await card
+      .getByRole("button", { name: "同じ銘柄として採用する内容を確認", exact: true })
+      .click();
+    await card.getByRole("alert").filter({ hasText: "候補が更新されています" }).waitFor();
+    expect(posted).toEqual([]);
+    await tab.close();
+  });
+
   test("a held candidate offers keeping apart only and says why", async () => {
     const held = await heldWorld();
     store = held.w;

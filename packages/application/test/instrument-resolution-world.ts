@@ -279,6 +279,29 @@ export class World {
     return { run, artifact };
   }
 
+  /**
+   * Identify a capture's published parse again under a later identity policy
+   * version, as a re-identification sweep does: a second sealed identity run
+   * for the same parse, which the current view then reads instead of the first.
+   */
+  async reidentify(capture: Capture, version: number): Promise<void> {
+    const row = this.db
+      .query(
+        "SELECT p.parse_run_id AS id,a.source_id FROM published_parse_runs p JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE p.fetch_artifact_id=?",
+      )
+      .get(capture.artifact) as { id: number; source_id: string };
+    const meta = {
+      id: row.id,
+      artifact_id: capture.artifact,
+      source_id: row.source_id,
+      producer_id: PRODUCER,
+      fetch_run_id: capture.run,
+    };
+    while (await identifyParse(sqliteD1(this.db), meta, resolver, version)) {
+      // Resume the writer's bounded pages until the run is sealed.
+    }
+  }
+
   /** Every row of the tables a read must never write. */
   snapshot(): string {
     return JSON.stringify(

@@ -10,6 +10,7 @@ import {
   IDENTITY_OBSERVATION_COUNT_SQL,
   INSTRUMENT_FACTS_SQL,
 } from "../../read-model/src/instrument-resolution.ts";
+import { IDENTITY_POLICY_VERSION } from "../../storage-d1/src/core/identity-store.ts";
 import { validPayload } from "../src/command/contract.ts";
 import type { Grant } from "../src/grants.ts";
 import {
@@ -421,6 +422,63 @@ describe("the grant decides, before anything is read", () => {
     };
     expect(current.n).toBeGreaterThan(0);
     expect(w.db.query(IDENTITY_OBSERVATION_COUNT_SQL).get()).toEqual({ n: current.n });
+  });
+
+  test("a re-identified parse is counted once, as the current view reads it", async () => {
+    const w = new World();
+    const capture = await w.capture("sbi-securities", [
+      {
+        account: "sbi-securities:domestic",
+        code: "SYN9301",
+        name: "Synthetic Re",
+        market: "TKY",
+        currency: "JPY",
+      },
+      {
+        account: "sbi-securities:domestic",
+        code: "SYN9302",
+        name: "Synthetic Re Two",
+        market: "TKY",
+        currency: "JPY",
+      },
+    ]);
+    await w.reidentify(capture, IDENTITY_POLICY_VERSION + 1);
+    const runs = w.db
+      .query(
+        "SELECT count(*) AS n FROM identity_runs r JOIN identity_run_seals s ON s.identity_run_id=r.id",
+      )
+      .get() as { n: number };
+    expect(runs.n).toBe(2);
+    const current = w.db.query("SELECT count(*) AS n FROM current_identity_observations").get() as {
+      n: number;
+    };
+    expect(current.n).toBe(2);
+    expect(w.db.query(IDENTITY_OBSERVATION_COUNT_SQL).get()).toEqual({ n: current.n });
+  });
+
+  test("the observation bound is 500,000: that many is served, one more refused", async () => {
+    expect(INSTRUMENT_CANDIDATES_MANIFEST.bounds.identityObservations).toBe(500_000);
+    const counted = (n: number): SqlExecutor => ({
+      all: async () => [],
+      first: async <T>() => ({ n }) as T,
+    });
+    expect(
+      await reviewInstrumentCandidates({
+        grant: READER,
+        sql: counted(500_000),
+        request: request(),
+      }),
+    ).toMatchObject({ ok: true });
+    expect(
+      await reviewInstrumentCandidates({
+        grant: READER,
+        sql: counted(500_001),
+        request: request(),
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "budget_exceeded", refs: ["budget:identityObservations=500000"] },
+    });
   });
 
   test("a page past the grant's maxRows is refused", async () => {
