@@ -534,8 +534,12 @@ paged or cut.
   `reconstructed-state.read`, as `purchases.explain` uses its own); the
   Worker's per-request id, the channel (ui, mcp, api), a correlation id and
   an idempotency key have no slot in the read service's input. The shared
-  audit contract for human and agent operations (ADR 0063/0064, reserved)
-  owns that slot; this read does not design it.
+  audit contract for human and agent operations
+  ([ADR 0063](0063-delegated-ai-operation-path.md),
+  [ADR 0064](0064-common-audit-log.md), proposed) owns that slot; this read
+  does not design it. Its agent tool already follows ADR 0063's rule for
+  reads (section 10): it calls the route's own service and is whole-store
+  only.
 - **Grants.** Today's grant scopes list sources and provider accounts
   (`source_account`), not resolved account ids, so a listed perimeter is
   refused rather than mapped onto this read; that is today's grant model, to
