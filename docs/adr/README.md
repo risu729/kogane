@@ -53,4 +53,16 @@ for current behavior.
 - [ADR 0040: Deploy compatible Workers through prebuilt cf versions](0040-compatible-cf-version-deployment.md)
 - [ADR 0041: Separate maintained documentation from historical records](0041-documentation-scope.md)
 - [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — proposed; production verification pending
-- [ADR 0045: Use the direct Container API with existing applications](0045-container-direct-api.md) — proposed; native runtime verification pending
+- [ADR 0045: Collection quality is a per-request read of stored stage states, in closed codes](0045-collection-quality-read.md) — accepted
+- [ADR 0048: Run an accepted collection or session refresh once through the named collector RPC](0048-operation-collector-dispatch.md) — proposed; production dispatch unverified
+- [ADR 0049: Keep the displayed and the computed reward expiry apart, each with its basis](0049-reward-expiry-basis.md) — accepted
+- [ADR 0050: Re-survey official maintenance pages as proposals an operator accepts](0050-maintenance-survey-proposals.md) — accepted; no page enabled until the owner confirms it
+- [ADR 0051: A pure lot engine over a provisional input contract](0051-provisional-lot-engine.md) — accepted; its adapter is ADR 0059 (proposed)
+- [ADR 0052: Reconstructed state is a pure fold over a provisional adopted-event input, compared with reported snapshots](0052-reconstructed-state-fold.md) — accepted; amended by ADR 0058 (proposed)
+- [ADR 0053: A closed transaction-family registry states which families have an event writer and why the others do not](0053-transaction-family-registry.md) — accepted
+- [ADR 0054: One consumption guard for every economic writer: claims, seals and a commit log](0054-economic-consumption-guard.md) — accepted
+- [ADR 0055: Propose cross-identifier instrument candidates from stored identifier facts; adopt only through a person's mapping](0055-instrument-candidates.md) — accepted
+- [ADR 0056: Price and FX selection at an as-of under an explicit, versioned policy](0056-as-of-price-fx-selection.md) — accepted; policy values are open questions
+- [ADR 0058: A knowledge selector reads adopted events at a commit-log cut, and a B adapter feeds the reconstruction fold](0058-knowledge-selector-and-reconstruction-adapter.md) — proposed; no route or page reads it yet
+- [ADR 0059: A C adapter maps selected revisions to lot inputs, and answers unsupported until a securities writer exists](0059-lot-adapter-from-selected-revisions.md) — proposed; no securities writer, no route
+- [ADR 0060: Use the direct Container API with existing applications](0060-container-direct-api.md) — proposed; native runtime verification pending

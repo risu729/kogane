@@ -2165,8 +2165,18 @@ test("pending control-plane rollout sleeps only to the shared deadline and never
   expect(sleeps).toEqual([2000, 500]);
 });
 
-test("captured backpressure failures preserve only the seven owned reasons without provider text", () => {
-  const reasons = ["timing", "process", "stream", "posts", "chunks", "exhausted", "progress"];
+test("captured backpressure failures preserve only owned reasons without provider text", () => {
+  const reasons = [
+    "timing",
+    "process",
+    "stream",
+    "posts",
+    "chunks",
+    "encoding",
+    "exhausted_early",
+    "exhausted_late",
+    "progress",
+  ];
   for (const reason of reasons) {
     const code = `verification_backpressure_${reason}`;
     expect(driverFailure(code)).toBe(code);

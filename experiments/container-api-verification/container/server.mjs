@@ -50,11 +50,13 @@ export function syntheticServer() {
               return;
             }
             backpressureChunks++;
-            controller.enqueue(new Uint8Array(BACKPRESSURE_CHUNK_BYTES));
+            controller.enqueue(crypto.getRandomValues(new Uint8Array(BACKPRESSURE_CHUNK_BYTES)));
           },
           cancel: finish,
         }),
-        { headers: { "content-type": "application/octet-stream" } },
+        {
+          headers: { "content-type": "application/octet-stream", "cache-control": "no-transform" },
+        },
       );
     }
     if (path === "/stream" || path === "/stream-error" || path === "/hold") {

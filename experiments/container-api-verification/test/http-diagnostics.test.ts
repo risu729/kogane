@@ -150,6 +150,24 @@ test("single bounded request keeps manual redirects, 120s deadline and unchanged
     timeout.mockRestore();
   }
 });
+test("only the backpressure GET requests identity encoding at the outer hop", async () => {
+  const seen: [string, RequestInit][] = [];
+  const request = createSyntheticRequest({
+    origin: "https://synthetic.invalid",
+    key: "private-key",
+    fetchImpl: async (url: string, init: RequestInit) => {
+      seen.push([new URL(url).pathname, init]);
+      return new Response(null);
+    },
+  });
+  await request("/backpressure");
+  await request("/stats");
+  expect(seen.map(([path, init]) => [path, init.headers])).toEqual([
+    ["/backpressure", { authorization: "Bearer private-key", "accept-encoding": "identity" }],
+    ["/stats", { authorization: "Bearer private-key" }],
+  ]);
+  expect(seen.every(([, init]) => init.method === "GET" && init.redirect === "manual")).toBe(true);
+});
 test("failed request never reads provider body, retries or forwards exception text", async () => {
   let calls = 0;
   const response = new Response("private-provider-body", { status: 503 });

@@ -113,7 +113,10 @@ export function createSyntheticRequest({ origin, key, fetchImpl = fetch }) {
         method,
         redirect: "manual",
         signal: AbortSignal.timeout(120_000),
-        headers: { authorization: `Bearer ${key}` },
+        headers: {
+          authorization: `Bearer ${key}`,
+          ...(path === "/backpressure" ? { "accept-encoding": "identity" } : {}),
+        },
       });
     } catch {
       throw new Error("verification_transport");

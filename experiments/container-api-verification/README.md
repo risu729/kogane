@@ -103,6 +103,17 @@ The original SDK may still write its own internal runtime error messages;
 observability is disabled and no bank data, bearer key or API token reaches
 that SDK/container request. No global SDK logging override changes the baseline.
 
+The backpressure source emits fresh random 64 KiB chunks and sets
+`Cache-Control: no-transform` to avoid a zero-filled compression confounder.
+The public client requests identity encoding and rejects an explicitly encoded
+response. That request header governs the client-to-Worker hop; the Worker
+still strips headers before DO lookup. A missing encoding header is not proof
+that no internal transformation occurred. These controls change the synthetic
+wire workload, while preserving the 4096-chunk cap, 1-second initial sample,
+35-second plateau interval, and existing lifetime/POST/process assertions.
+Exhaustion diagnostics distinguish the initial sample from the final sample.
+They do not identify which transport layer buffered the bytes.
+
 Idle observations are bounded process-state checks. They do not establish
 billable runtime or DO eviction. Compare independently read aggregate billing
 and lifecycle observations before asserting cost/timing equivalence. Collector

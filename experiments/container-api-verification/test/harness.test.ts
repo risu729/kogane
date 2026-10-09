@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import { gzipSync } from "node:zlib";
 import {
   syntheticServer,
   BACKPRESSURE_CHUNK_BYTES,
@@ -85,6 +86,30 @@ test("synthetic local TCP server only serves fixed counters; no outbound request
   } finally {
     server.stop(true);
   }
+});
+test("backpressure source sends fresh incompressible chunks and forbids transforms", async () => {
+  const serve = syntheticServer();
+  const response = await serve(new Request("http://synthetic/backpressure"));
+  expect(response.headers.get("cache-control")).toBe("no-transform");
+  const reader = response.body!.getReader();
+  try {
+    const chunks: Uint8Array[] = [];
+    for (let i = 0; i < 4; i++) {
+      const part = await reader.read();
+      expect(part.done).toBe(false);
+      expect(part.value!.byteLength).toBe(BACKPRESSURE_CHUNK_BYTES);
+      chunks.push(part.value!);
+    }
+    expect(chunks[0].some((byte) => byte !== 0)).toBe(true);
+    expect(chunks[0]).not.toEqual(chunks[1]);
+    const body = Buffer.concat(chunks);
+    expect(gzipSync(body).byteLength).toBeGreaterThan(body.byteLength * 0.9);
+  } finally {
+    await reader.cancel();
+  }
+  const ordinary = await serve(new Request("http://synthetic/stream"));
+  expect(ordinary.headers.has("cache-control")).toBe(false);
+  await ordinary.body?.cancel();
 });
 test("Worker auth and route guard prevent unauthenticated DO lookup and strip credentials", async () => {
   let lookups = 0;
@@ -382,9 +407,10 @@ test("backpressure diagnostics preserve1s+35s gates and identify each closed pre
     ["too_short", "timing"],
     ["posts", "posts"],
     ["chunks", "chunks"],
-    ["exhausted", "exhausted"],
+    ["exhausted_early", "exhausted_early"],
+    ["exhausted_late", "exhausted_late"],
     ["stopped", "process"],
-    ["exhausted_and_ended", "exhausted"],
+    ["exhausted_and_ended", "exhausted_late"],
     ["multiple_failures", "process"],
   ];
   for (const [scenario, code] of scenarios) {
@@ -395,7 +421,9 @@ test("backpressure diagnostics preserve1s+35s gates and identify each closed pre
       paths: string[] = [];
     const samples = [
       stable,
-      stable,
+      scenario === "exhausted_early"
+        ? { ...stable, backpressureChunks: BACKPRESSURE_MAX_CHUNKS }
+        : stable,
       {
         ...stable,
         ...(scenario === "ended" ? { streams: 0 } : {}),
@@ -405,7 +433,8 @@ test("backpressure diagnostics preserve1s+35s gates and identify each closed pre
         ...(scenario === "moving" ? { backpressureChunks: 33 } : {}),
         ...(scenario === "posts" ? { posts: 3 } : {}),
         ...(scenario === "chunks" ? { backpressureChunks: "32" } : {}),
-        ...(scenario === "exhausted" ||
+        ...(scenario === "exhausted_early" ||
+        scenario === "exhausted_late" ||
         scenario === "exhausted_and_ended" ||
         scenario === "multiple_failures"
           ? { backpressureChunks: BACKPRESSURE_MAX_CHUNKS, streams: 0 }
@@ -445,6 +474,47 @@ test("backpressure diagnostics preserve1s+35s gates and identify each closed pre
     if (scenario === "stopped") expect(paths).toEqual(["/stats", "/stats", "/state"]);
     else if (scenario === "too_short") expect(paths).toEqual(["/stats", "/stats"]);
     else expect(paths).toEqual(["/stats", "/stats", "/state", "/stats"]);
+  }
+});
+test("backpressure accepts absent or identity encoding and cancels every encoded response", async () => {
+  const stable = { processIdentity, posts: 2, streams: 1, backpressureChunks: 32 };
+  for (const encoding of [undefined, "identity", "gzip", "private-encoding"]) {
+    let canceled = false,
+      time = 0,
+      snapshots = 0;
+    const result = verifyBackpressure({
+      request: async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array([1]));
+            },
+            cancel() {
+              canceled = true;
+            },
+          }),
+          { headers: encoding ? { "content-encoding": encoding } : undefined },
+        ),
+      json: async (path: string) => {
+        if (path === "/state") return { running: 1 };
+        snapshots++;
+        return stable;
+      },
+      wait: async (ms: number) => {
+        time += ms;
+      },
+      now: () => time,
+    });
+    if (encoding === undefined || encoding === "identity") {
+      await result;
+      expect(time).toBe(36_000);
+      expect(snapshots).toBe(3);
+    } else {
+      await expect(result).rejects.toThrow("verification_backpressure_encoding");
+      expect(time).toBe(0);
+      expect(snapshots).toBe(1);
+    }
+    expect(canceled).toBe(true);
   }
 });
 test("backpressure reader and malformed snapshots fail closed without erasing primary failure during cancel", async () => {
@@ -757,6 +827,61 @@ test("malformed concurrency state or stats remain classified closed errors", asy
   }
 });
 
+test("Node driver pauses a real TCP consumer for 35s and observes a bounded plateau", async () => {
+  const server = startSyntheticServer({ hostname: "127.0.0.1", port: 0 });
+  const origin = `http://127.0.0.1:${server.port}`;
+  try {
+    const script = `
+      import { verifyBackpressure } from ${JSON.stringify(resolve(import.meta.dir, "../driver.mjs"))};
+      import { createSyntheticRequest } from ${JSON.stringify(resolve(import.meta.dir, "../http-diagnostics.mjs"))};
+      const request = createSyntheticRequest({ origin: ${JSON.stringify(origin)}, key: "local" });
+      const samples = [];
+      const json = async (path) => {
+        if (path === "/state") return { running: 1 };
+        const value = await (await request(path)).json();
+        samples.push(value);
+        return value;
+      };
+      await verifyBackpressure({ request, json });
+      console.log(JSON.stringify({ samples, final: await json("/stats") }));
+    `;
+    const child = Bun.spawn(["node", "--input-type=module", "-e", script], {
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    let childFinished = false;
+    const childExit = child.exited.then((code) => {
+      childFinished = true;
+      return code;
+    });
+    const killChild = () => {
+      if (!childFinished) child.kill("SIGKILL");
+    };
+    const killTimer = setTimeout(killChild, 55_000);
+    try {
+      const [output, errors, exit] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        childExit,
+      ]);
+      expect(errors).toBe("");
+      expect(exit).toBe(0);
+      const result = JSON.parse(output);
+      const [baseline, stalled, after] = result.samples;
+      expect(stalled.backpressureChunks).toBeGreaterThan(0);
+      expect(stalled.backpressureChunks).toBeLessThan(BACKPRESSURE_MAX_CHUNKS);
+      expect(after.backpressureChunks).toBe(stalled.backpressureChunks);
+      expect(after.processIdentity).toBe(baseline.processIdentity);
+      expect(result.final.streams).toBe(0);
+    } finally {
+      clearTimeout(killTimer);
+      killChild();
+      await childExit;
+    }
+  } finally {
+    server.stop(true);
+  }
+}, 65_000);
 test("real TCP synthetic server survives 35s quiet delay and paused backpressure consumer", async () => {
   expect(SYNTHETIC_IDLE_TIMEOUT_SECONDS).toBe(60);
   const server = startSyntheticServer({ hostname: "127.0.0.1", port: 0 });

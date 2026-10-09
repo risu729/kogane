@@ -1,4 +1,4 @@
-# ADR 0045: Use the direct Container API with existing applications
+# ADR 0060: Use the direct Container API with existing applications
 
 - Status: proposed
 - Date: 2026-10-05
@@ -115,10 +115,16 @@ The main-integration head `89d3a3ee614c2ff91e2dee73b2f37d3698ff671e` passed
 That result predates the idle-alarm correction and synthetic harness; it does
 not validate those additions. Local Docker is unavailable. Hosted attempts have deployed the SDK baseline
 and exposed harness defects; none has completed the native or rollback phases.
-The latest completed attempt at commit `c0678833`
-([run 37819824222](https://github.com/risu729/kogane/actions/runs/37819824222))
+The latest completed attempt at commit `7cbff2d2`
+([run 37823165303](https://github.com/risu729/kogane/actions/runs/37823165303))
 passed SDK concurrent startup, a 35-second delayed response and a 40-second
-stream, then failed the paused-consumer backpressure predicate. All four
+stream, then failed `verification_backpressure_exhausted`: the bounded 256 MiB
+source was exhausted while the reader was paused. DO running state and process
+identity checks passed; the actual buffering or encoding cause remains unknown.
+The subsequent test-only hardening emits random chunks, asks the public client
+for identity encoding, sets origin `no-transform`, and rejects declared encoded
+responses. It preserves the cap, sample timing and existing assertions. This
+removes a compression confounder; it is not hosted evidence of a resolved cause. All four
 cleanup checks passed; separate API reads confirmed Worker, application and
 namespace absence. The runner uses canonical OCI manifest HEAD for registry
 ownership and absence, and shares the existing rollout deadline with public

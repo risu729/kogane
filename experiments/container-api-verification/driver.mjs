@@ -177,7 +177,17 @@ export async function verifyBackpressure({ request, json, wait = pause, now = Da
   const baseline = await json("/stats");
   if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(baseline?.processIdentity ?? ""))
     closed("backpressure_process");
-  const reader = (await request("/backpressure")).body?.getReader();
+  const response = await request("/backpressure");
+  const encoding = response.headers.get("content-encoding");
+  if (encoding && encoding.trim().toLowerCase() !== "identity") {
+    try {
+      await response.body?.cancel();
+    } catch {
+      // Preserve the owned encoding failure if the transport also fails to cancel.
+    }
+    closed("backpressure_encoding");
+  }
+  const reader = response.body?.getReader();
   if (!reader) closed("backpressure_chunks");
   let failed = false;
   try {
@@ -213,11 +223,9 @@ export async function verifyBackpressure({ request, json, wait = pause, now = Da
       )
     )
       closed("backpressure_chunks");
-    if (
-      stalled.backpressureChunks >= BACKPRESSURE_MAX_CHUNKS ||
-      after.backpressureChunks >= BACKPRESSURE_MAX_CHUNKS
-    )
-      closed("backpressure_exhausted");
+    if (stalled.backpressureChunks >= BACKPRESSURE_MAX_CHUNKS)
+      closed("backpressure_exhausted_early");
+    if (after.backpressureChunks >= BACKPRESSURE_MAX_CHUNKS) closed("backpressure_exhausted_late");
     if (stalled.streams !== 1 || after.streams !== 1) closed("backpressure_stream");
     if (stalled.posts !== baseline.posts || after.posts !== baseline.posts)
       closed("backpressure_posts");
