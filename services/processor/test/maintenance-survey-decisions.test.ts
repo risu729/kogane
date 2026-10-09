@@ -5,6 +5,7 @@
 // survey. Synthetic pages, synthetic collector stubs, no provider contact.
 import { afterAll, afterEach, beforeAll, expect, spyOn, test } from "bun:test";
 import type { Miniflare } from "miniflare";
+import { loadBundleFixture } from "./bundle-module-fixture.ts";
 import { nextNominal } from "../../../packages/collection/src/schedule-model.ts";
 import { loadSurveyConfig } from "../src/maintenance-survey/config.ts";
 import {
@@ -57,6 +58,7 @@ interface Alarm {
 }
 
 let mf: Miniflare, base: Env, AlarmClass: new (state: State, env: Env) => Alarm;
+let bundleFixture: { dispose(): Promise<void> } | undefined;
 beforeAll(async () => {
   ({ mf, env: base } = await startPipeline());
   // The production alarm, bundled unchanged; only the platform base class is replaced.
@@ -82,13 +84,18 @@ beforeAll(async () => {
     ],
   });
   if (!bundle.success) throw new Error("review_alarm_bundle_failed");
-  const module = (await import(
-    `data:text/javascript;base64,${Buffer.from(await bundle.outputs[0]!.text()).toString("base64")}`
-  )) as { ScheduleAlarm: new (state: State, env: Env) => Alarm };
-  AlarmClass = module.ScheduleAlarm;
+  const loaded = await loadBundleFixture<{ ScheduleAlarm: new (state: State, env: Env) => Alarm }>(
+    await bundle.outputs[0]!.text(),
+  );
+  bundleFixture = loaded;
+  AlarmClass = loaded.module.ScheduleAlarm;
 }, 30000);
 afterAll(async () => {
-  await mf?.dispose();
+  try {
+    await mf?.dispose();
+  } finally {
+    await bundleFixture?.dispose();
+  }
 });
 let clock: ReturnType<typeof spyOn> | undefined;
 afterEach(() => {

@@ -14,8 +14,8 @@ run = "./node_modules/.bin/tsc --noEmit"
 description = "Run the services/collector-sbi-securities tests: the pure suite, then the Miniflare R2 suite."
 depends = ["//services/collector-sbi-securities:types"]
 run = [
-	"bun test ./test/*.test.ts",
-	"./node_modules/.bin/vitest run",
+	"node ../../tasks/_lib/coverage-run.mjs bun test ./test/*.test.ts",
+	"node ../../tasks/_lib/coverage-run.mjs vitest run",
 ]
 
 [tasks."dry-run"]

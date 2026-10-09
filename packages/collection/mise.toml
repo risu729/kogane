@@ -8,8 +8,8 @@ run = "./node_modules/.bin/tsc --noEmit"
 [tasks."test"]
 description = "Run the packages/collection tests: the pure suite, then the Miniflare R2 suite."
 run = [
-	"bun test ./test/*.test.ts",
-	"./node_modules/.bin/vitest run",
+	"node ../../tasks/_lib/coverage-run.mjs bun test ./test/*.test.ts",
+	"node ../../tasks/_lib/coverage-run.mjs vitest run",
 ]
 
 [tasks."ci"]

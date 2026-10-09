@@ -267,3 +267,12 @@ coverage. Record actual elapsed and summed job durations against these baselines
 before claiming the latency goal achieved. Hosted variation remains a confounder.
 CodeQL, signature verification, release gates and merged-result validation remain
 in force.
+
+## Native test coverage
+
+Hosted validation also collects native Bun text/LCOV and the existing Workers
+Vitest/Istanbul reports, without changing the native shard union or CI Check.
+Reports are separate by suite/runtime/shard and actual checkout SHA/attempt;
+failed or missing collections stay failures. No numerical threshold or merged
+repository rate is enforced. See [Test coverage](coverage.md) for scopes,
+limitations, artifacts and the separate full serial Processor baseline.

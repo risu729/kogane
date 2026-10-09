@@ -13,7 +13,7 @@ run = "./node_modules/.bin/tsc --noEmit"
 [tasks."test"]
 description = "Run the services/collector-vpass tests."
 depends = ["//services/collector-vpass:types"]
-run = "bun test"
+run = "node ../../tasks/_lib/coverage-run.mjs bun test"
 
 [tasks."dry-run"]
 description = "Validate the services/collector-vpass deployment without uploading it."
