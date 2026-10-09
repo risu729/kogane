@@ -406,6 +406,12 @@ describe("a decision binds every identifier on the decided instrument", () => {
       subject: "instrument",
       referenceId: venue,
       targetId: listingInstrument,
+      candidate: {
+        candidateId: tie.candidateId,
+        anchorIdentifierId: broker,
+        anchorMappingRevision: 2,
+        subjectMappingRevision: 1,
+      },
     });
     expect(tie.commands!.keepApart.payload).toMatchObject({
       fromRef: `instrument:${listingInstrument}`,

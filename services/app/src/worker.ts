@@ -22,6 +22,7 @@ import { reconstructedStateApi, RECONSTRUCTED_STATE_PATH } from "./reconstructed
 import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
+import { instrumentHistoryApi } from "./instrument-history-api";
 import { reportsApi } from "./reports-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
 import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
@@ -118,6 +119,8 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     instrumentCandidatesApi(request, env, url, subject),
   );
   if (candidatesResponse) return candidatesResponse;
+  const historyResponse = await catalogue(() => instrumentHistoryApi(request, env, url, subject));
+  if (historyResponse) return historyResponse;
   const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
   // Fixed report artifacts (A12). Re-display only; recomputing and sharing a

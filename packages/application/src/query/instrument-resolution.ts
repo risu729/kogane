@@ -140,6 +140,7 @@ function identifierFacts(rows: readonly InstrumentFactsRow[]): {
 function commandsFor(
   candidate: InstrumentCandidate,
   byId: ReadonlyMap<string, InstrumentIdentifierFacts>,
+  revisions: ReadonlyMap<string, number>,
 ): CandidateCommands | null {
   if (candidate.status !== "proposed") return null;
   const anchor = byId.get(candidate.anchorIdentifierId)!;
@@ -156,6 +157,12 @@ function commandsFor(
               subject: "instrument",
               referenceId: subject.identifierId,
               targetId: anchor.instrumentId,
+              candidate: {
+                candidateId: candidate.candidateId,
+                anchorIdentifierId: anchor.identifierId,
+                anchorMappingRevision: revisions.get(anchor.identifierId)!,
+                subjectMappingRevision: revisions.get(subject.identifierId)!,
+              },
             },
           },
     keepApart: {
@@ -224,9 +231,10 @@ export async function queryInstrumentResolution(sql: SqlExecutor): Promise<Instr
       candidateIds: resolution.candidateIds,
     };
   });
+  const revisions = new Map(built.map(({ row }) => [row.identifierId, row.revision]));
   const candidates = result.set.candidates.map((candidate) => ({
     ...candidate,
-    commands: commandsFor(candidate, byId),
+    commands: commandsFor(candidate, byId, revisions),
   }));
   const count = (status: InstrumentCandidate["status"]) =>
     candidates.filter((candidate) => candidate.status === status).length;
