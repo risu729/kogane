@@ -4,7 +4,7 @@
   page, see Consequences)
 - Date: 2026-10-08
 - Issue: #561; builds on [ADR 0039](0039-alarm-schedule-management.md) and
-  consumes the maintenance writer of #560 (ADR 0046, open in PR #564)
+  consumes the maintenance writer of #560 (ADR 0046, PR #564)
 
 ## Context
 
@@ -149,12 +149,15 @@ a proposal read against the older revision then reads as not current.
 
 **The writer.** The decision code depends on the narrowest slice of #560's
 `MaintenanceWrite`/`MaintenanceWriteResult` (`RevisionWrite`,
-`RevisionResult`), which `writeMaintenanceRevision(env, write)` satisfies as
-it is. Until #560 merges, the route passes an adapter over the operator
-route's existing writer (`updateMaintenance`), which makes the same
-version-checked revision; it does not store the decision reference, which
-CORE 0067 of #560 adds. Merging #560 replaces the adapter by
-`writeMaintenanceRevision` in one line.
+`RevisionResult`), and the proposal route passes
+`writeMaintenanceRevision(env, write)` itself, which takes that write as it
+is. The accepted revision is the same version-checked operator revision an
+edit makes, and CORE 0067's provenance columns store its actor kind
+(`operator`), its reason (`maintenance-survey-proposal-accepted`) and the
+proposal as its decision reference (`maintenance-survey:proposal:<id>`).
+Until #560 merged, the route passed an adapter over the operator route's
+`updateMaintenance`, which stored no decision reference; merging #560
+replaced it.
 
 **Read side.** `GET /api/ops/v1/schedules` gains `survey`: whether the lane
 runs; per page its freshness (`disabled`, `never`, `fresh`, or `stale` when
@@ -185,14 +188,14 @@ codes are checked closed sets in the schema itself.
 - `absent` and `changed` are guesses about which rule a window revises. They
   are proposals for that reason, and an operator who disagrees rejects them
   and edits the rule by hand.
-- Before #560 merges, an accepted revision does not carry its decision
-  reference; the acceptance row links proposal and revision instead. The
-  writer call and the acceptance row are not one transaction: if the row
-  cannot be written after the writer saved, the revision stands, the API
-  answers `decision_record_failed`, and the proposal reads as not current (a
-  `new` one too: its rule `<source>-survey-<id>` then exists). Accepting it
-  again is the writer's `revision_conflict`, so the revision is never written
-  twice; the proposal can still be rejected.
+- An accepted revision carries the proposal as its decision reference
+  (CORE 0067's `decision_ref`), and the acceptance row links proposal and
+  revision as well. The writer call and the acceptance row are not one
+  transaction: if the row cannot be written after the writer saved, the
+  revision stands, the API answers `decision_record_failed`, and the proposal
+  reads as not current (a `new` one too: its rule `<source>-survey-<id>` then
+  exists). Accepting it again is the writer's `revision_conflict`, so the
+  revision is never written twice; the proposal can still be rejected.
 - Page bodies of public notices are kept in the raw-evidence bucket under
   their own prefix, outside the collection catalogue, without retention
   pruning. Each distinct body is stored once.
@@ -218,7 +221,8 @@ nothing new, empty and windowless pages as failures, an injected page whose
 text reaches no row, log or tick record, a body cut off after its headers
 recorded as `timeout` and backed off, and the flag-off tick.
 `maintenance-survey-decisions.test.ts` accepts a proposal through the
-operator route and the adapter, then shows with the production
+operator route and `writeMaintenanceRevision`, checks the revision's actor
+kind, reason and decision reference, then shows with the production
 `ScheduleAlarm` that the due time moves to the window's end while the nominal
 occurrence stays, and that the alarm runs it once after the window; it also
 covers rejection, a moved rule (`revision_conflict`), operator-only access,

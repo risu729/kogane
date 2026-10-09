@@ -116,9 +116,9 @@ changed into proposals. It never changes a rule, a schedule or an alarm.
   reasons and source page. Only undecided proposals raise a notice. **採用**
   writes the proposal through the same version-checked maintenance revision
   as an edit, with the page and its fetch time as reference and verification
-  time; it is refused if the rule changed after the proposal was read, and
-  that proposal can then only be rejected. **却下** records the judgement and
-  changes nothing.
+  time and the proposal as its decision reference; it is refused if the rule
+  changed after the proposal was read, and that proposal can then only be
+  rejected. **却下** records the judgement and changes nothing.
 
 Not verified: no official page has been fetched; which pages to allow and at
 which cadence are the owner's to confirm, and pages that are PDFs, need a
@@ -170,11 +170,12 @@ only, and the routes above still refuse every agent.
   reservations were reconciled, and the source's view after the save.
 
 Both go through the Processor's single writer, `writeMaintenanceRevision`
-(`services/processor/src/schedule-store.ts`), which the operator route also
-uses. It answers a closed code: `invalid_request`, `invalid_reference`,
-`reason_required`, `maintenance_rule_not_found` (another source's rule answers
-like a missing one), `revision_conflict`, `maintenance_deferral_too_long`
-(after an agent revision, every joined deferral of the source longer than seven
+(`services/processor/src/schedule-store.ts`), which the operator route and an
+accepted re-survey proposal also use. It answers a closed code:
+`invalid_request`, `invalid_reference`, `reason_required`,
+`maintenance_rule_not_found` (another source's rule answers like a missing
+one), `revision_conflict`, `maintenance_deferral_too_long` (after an agent
+revision, every joined deferral of the source longer than seven
 days must lie within one its rules already caused; a running one counts its
 part before the revision, up to seven days back) or
 `maintenance_write_budget_exceeded` (30 agent revisions per principal per

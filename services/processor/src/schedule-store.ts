@@ -16,12 +16,7 @@ import {
   type ScheduleOccurrence,
   type ScheduleSnapshot,
 } from "../../../packages/collection/src/schedule-model";
-import {
-  decideSurveyProposal,
-  maintenanceSurveyView,
-  type RevisionResult,
-  type RevisionWrite,
-} from "./maintenance-survey/decisions.ts";
+import { decideSurveyProposal, maintenanceSurveyView } from "./maintenance-survey/decisions.ts";
 export { jobs };
 export interface ScheduleRow {
   id: string;
@@ -1043,7 +1038,7 @@ export async function scheduleRoute(
         Number(proposalMatch[1]),
         value,
         actor,
-        surveyRevisionWriter,
+        writeMaintenanceRevision,
       );
     const match = /^\/([a-z0-9-]{1,100})$/u.exec(path);
     if (match) return Response.json(await updateSchedule(env, match[1]!, value, actor));
@@ -1053,41 +1048,5 @@ export async function scheduleRoute(
       { error: error instanceof ScheduleError ? error.code : "scheduling_unavailable" },
       { status: error instanceof ScheduleError ? error.status : 503 },
     );
-  }
-}
-/**
- * The writer an accepted maintenance-survey proposal goes through (ADR 0050):
- * the operator route's own version-checked revision, so a proposal is adopted
- * exactly as an operator's edit is. #560's `writeMaintenanceRevision` takes
- * this write as it is; when it merges it replaces this adapter, and the
- * revision then also carries the proposal as its decision reference.
- */
-async function surveyRevisionWriter(env: Env, write: RevisionWrite): Promise<RevisionResult> {
-  try {
-    const saved = await updateMaintenance(
-      env,
-      {
-        id: write.ruleId,
-        revision: write.expectedRevision,
-        source: write.source,
-        timezone: write.change.timezone,
-        pattern: write.change.pattern,
-        enabled: write.change.enabled,
-        scope: write.change.scope,
-        referenceUrl: write.provenance.referenceUrl,
-        verifiedAt: write.provenance.verifiedAt,
-      },
-      write.actor.id,
-    );
-    return {
-      ok: true,
-      ruleId: write.ruleId,
-      revision: saved.revision,
-      reconciled: saved.reservation === "armed",
-    };
-  } catch (error) {
-    if (error instanceof ScheduleError)
-      return { ok: false, code: error.code, status: error.status };
-    throw error;
   }
 }

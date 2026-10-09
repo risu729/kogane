@@ -28,9 +28,10 @@ import {
  * the narrowest form of `MaintenanceWrite` (#560, ADR 0046): an operator, a
  * named rule (new rules get an id derived from the proposal), the proposal's
  * page and fetch time as provenance, and the proposal as the decision
- * reference. `writeMaintenanceRevision(env, MaintenanceWrite)` accepts it as
- * it is, and answers a `MaintenanceWriteResult`, which `RevisionResult`
- * covers.
+ * reference, which CORE 0067 stores. The proposal route passes
+ * `writeMaintenanceRevision(env, MaintenanceWrite)` itself: it accepts this
+ * write as it is, and answers a `MaintenanceWriteResult`, which
+ * `RevisionResult` covers.
  */
 export interface RevisionWrite {
   source: string;

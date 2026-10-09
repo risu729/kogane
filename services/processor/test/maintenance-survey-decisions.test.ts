@@ -230,10 +230,11 @@ test("an accepted window defers the next run through the alarm code, which then 
     revision: 1,
     reservation: "armed",
   });
-  // The writer's revision: the page and fetch time as provenance, the operator as actor.
+  // The writer's revision: the page and fetch time as provenance, the operator
+  // as actor, and the proposal as its decision reference (CORE 0067).
   expect(
     await env.DB.prepare(
-      "SELECT revision,source,pattern_json,enabled,reference_url,verified_at,scope,actor FROM provider_maintenance_rules WHERE id=?",
+      "SELECT revision,source,pattern_json,enabled,reference_url,verified_at,scope,actor,actor_kind,change_reason,decision_ref FROM provider_maintenance_rules WHERE id=?",
     )
       .bind(ruleId)
       .first<Record<string, unknown>>(),
@@ -250,6 +251,9 @@ test("an accepted window defers the next run through the alarm code, which then 
     verified_at: new Date(now).toISOString(),
     scope: "collection",
     actor: OPERATOR,
+    actor_kind: "operator",
+    change_reason: ACCEPTED_REASON,
+    decision_ref: proposalRef(proposal.id),
   });
   expect(
     await env.DB.prepare(
