@@ -290,8 +290,8 @@ function openFinalizedPages(count: number) {
   );
 }
 
-function topRequests(count: number) {
-  return Array.from({ length: count }, (_, index) => [
+function topRequests(count: number): [string, Record<string, unknown>][] {
+  return Array.from({ length: count }, (_, index): [string, Record<string, unknown>] => [
     TOP,
     { p01: "202609", p03: String(index + 1) },
   ]);
@@ -309,10 +309,11 @@ function openCustomizedPages(answerPages: number, total: number) {
   ];
 }
 
-function answerRequests(answerCount: number) {
+function answerRequests(answerCount: number): [string, Record<string, unknown>][] {
+  const first: [string, Record<string, unknown>] = [TOP, { p01: "202609", p03: "1" }];
   return [
-    [TOP, { p01: "202609", p03: "1" }],
-    ...Array.from({ length: answerCount }, (_, index) => [
+    first,
+    ...Array.from({ length: answerCount }, (_, index): [string, Record<string, unknown>] => [
       ANSWER,
       { seikyuYM: "202609", start: String(index), end: String(index + 1) },
     ]),
@@ -338,8 +339,8 @@ describe("the page walk stops at 100 pages", () => {
     ]);
     const capture = await collectMonth(post, "202609");
     expect(capture.transactionCount).toBe(100);
-    expect(capture.pages.map((page) => [page.kind, page.index])).toEqual(
-      Array.from({ length: 100 }, (_, index) => ["top", index]),
+    expect(capture.pages.map((page) => [page.kind, page.index] as const)).toEqual(
+      Array.from({ length: 100 }, (_, index) => ["top", index] as const),
     );
     expect(requests).toEqual(topRequests(100));
   });
@@ -357,9 +358,9 @@ describe("the page walk stops at 100 pages", () => {
     const { post, requests } = scripted(openCustomizedPages(100, 99));
     const capture = await collectMonth(post, "202609");
     expect(capture.transactionCount).toBe(99);
-    expect(capture.pages.map((page) => [page.kind, page.index])).toEqual([
-      ["top", 0],
-      ...Array.from({ length: 99 }, (_, index) => ["answer", index + 1]),
+    expect(capture.pages.map((page) => [page.kind, page.index] as const)).toEqual([
+      ["top", 0] as const,
+      ...Array.from({ length: 99 }, (_, index) => ["answer", index + 1] as const),
     ]);
     expect(requests).toEqual(answerRequests(99));
   });
