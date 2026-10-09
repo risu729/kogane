@@ -134,6 +134,7 @@ describe("SBI yen history bundle", () => {
       nextBusinessDate: "20260910",
     });
     const pages = [first, middle, last];
+    const expectedPages = structuredClone(pages);
     const bundle = bundleYenHistoryPages(pages);
     expect(bundle).toEqual({
       schemaVersion: "sbi-yen-detail-history-bundle-v1",
@@ -143,7 +144,7 @@ describe("SBI yen history bundle", () => {
       complete: true,
       pageLimitExceeded: false,
       rowLimitExceeded: false,
-      pages,
+      pages: expectedPages,
     });
     expect(bundle.pages).toBe(pages);
     expect(bundle.pages[0]).toBe(first);
