@@ -21,6 +21,7 @@ export * from "./reports.ts";
 export * from "./event-families.ts";
 export * from "./reconstruction.ts";
 export * from "./knowledge-selector.ts";
+export * from "./reconstruction-adapter.ts";
 export * from "./market-data.ts";
 export * from "./economic-contract.ts";
 export * from "./row-identity.ts";
