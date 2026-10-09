@@ -411,6 +411,7 @@ describe("the deploy workflow follows the ledger", () => {
       "Capture Container identity and pin rollback images",
       "Apply the CORE migrations",
       "Apply the READ migrations",
+      "Verify the original GlobalPass baseline immediately before publication",
       "Deploy the GlobalPass collector",
       "Capture the exact GlobalPass publication before waiting",
       "Verify the GlobalPass Container application and image",
@@ -418,6 +419,7 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the Money Forward collector",
       "Deploy the MyJCB collector",
       "Deploy the SBI Securities collector",
+      "Verify the original SBI Shinsei baseline immediately before publication",
       "Deploy the SBI Shinsei collector",
       "Capture the exact SBI Shinsei publication before waiting",
       "Verify the SBI Shinsei Container application and image",
@@ -425,6 +427,7 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the SMBC Direct collector",
       "Deploy the Mizuho collector",
       "Deploy the Sony Bank collector",
+      "Verify the original St.George baseline immediately before publication",
       "Deploy the St.George collector",
       "Capture the exact St.George publication before waiting",
       "Verify the St.George Container application and image",
@@ -525,7 +528,10 @@ describe("the deploy workflow follows the ledger", () => {
   test("the manifest is re-verified immediately before the first upload (G5-11)", () => {
     const names = workflowSteps(deployWorkflow).map((step) => step.name);
     expect(names.indexOf("Re-verify the release manifest")).toBe(
-      names.indexOf("Deploy the GlobalPass collector") - 1,
+      names.indexOf("Deploy the GlobalPass collector") - 2,
+    );
+    expect(names[names.indexOf("Deploy the GlobalPass collector") - 1]).toBe(
+      "Verify the original GlobalPass baseline immediately before publication",
     );
   });
 });
@@ -623,6 +629,25 @@ describe("the synthetic environment is an exact manual capability exception", ()
     ]);
   });
 
+  test("only the exact public coverage values can be inherited by the synthetic job", () => {
+    const coverage = {
+      KOGANE_TEST_COVERAGE: "true",
+      COVERAGE_HEAD_SHA: "${{ github.event.pull_request.head.sha || github.sha }}",
+      COVERAGE_BASE_SHA: "${{ github.event.pull_request.base.sha || github.event.before }}",
+    };
+    for (const [name, value] of Object.entries(coverage)) {
+      const workflow = Bun.YAML.parse(ci) as any;
+      expect(workflow.env[name]).toBe(value);
+      for (const changed of ["other", "${{ secrets.CONTAINER_VERIFICATION_API_TOKEN }}"]) {
+        workflow.env[name] = changed;
+        expect(check(Bun.YAML.stringify(workflow)).length).toBeGreaterThan(0);
+      }
+    }
+    const workflow = Bun.YAML.parse(ci) as any;
+    workflow.env.UNRELATED_ENV = "true";
+    expect(check(Bun.YAML.stringify(workflow)).length).toBeGreaterThan(0);
+  });
+
   for (const [name, from, to] of [
     ["automatic opt-in", "default: false", "default: true"],
     [
@@ -642,8 +667,8 @@ describe("the synthetic environment is an exact manual capability exception", ()
     ],
     [
       "outdated synthetic toolchain",
+      "version: 2026.10.6\n      - name: Install pinned verification dependencies",
       "version: 2026.10.5\n      - name: Install pinned verification dependencies",
-      "version: 2026.10.4\n      - name: Install pinned verification dependencies",
     ],
     ["changed timeout", "timeout-minutes: 45", "timeout-minutes: 46"],
     ["branch checkout", "ref: ${{ github.sha }}", "ref: ${{ github.ref }}"],
@@ -721,4 +746,17 @@ test("manual synthetic setup cannot reuse a public temp directory or omit privat
     expect(
       automationViolations([{ file: ".github/workflows/ci.yml", text: changed }], []).length,
     ).toBeGreaterThan(0);
+});
+
+test("Container total postcheck step caps retain serial gates and the 60-minute job cap", () => {
+  expect(deployWorkflow).toContain("timeout-minutes: 60");
+  const steps = workflowSteps(deployWorkflow);
+  for (const name of ["globalpass-worker", "sbi-shinsei-worker", "st-george-worker"]) {
+    const step = steps.find((entry) => entry.body.includes(`id: verify-container-${name}`))!;
+    expect(step).toBeDefined();
+    expect(step.body).toContain("timeout-minutes: 11");
+    expect(step.body).toContain(`post ${name}`);
+    expect(step.body).not.toContain("continue-on-error");
+  }
+  expect(deployWorkflow).not.toContain("actions: write");
 });

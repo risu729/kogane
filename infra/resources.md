@@ -14,7 +14,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 
 ## Summary
 
-- Wrangler configs: 28
+- Wrangler configs: 29
 - Distinct Workers that exist in the account: 14
 - Live Workers with no config in this repository: —
 - Live R2 buckets no config references: —
@@ -26,6 +26,7 @@ cron expression, Email route or D1 id (acceptance tests G0-06, G0-07, G0-12).
 | --- | --- | --- | --- |
 | test | `00000000-0000-0000-0000-000000000001` | no | kogane-evidence-browser-test |
 | test-read | `00000000-0000-0000-0000-000000000002` | no | kogane-evidence-browser-test |
+| kogane-d1-conformance-20261009 | `00000000-0000-4000-8000-000000000000` | no | kogane-d1-conformance-20261009 |
 | kogane-read | `320ebe31-a031-48a1-985f-0e6fabbd517a` | yes | kogane-evidence-browser<br>kogane-observation-pipeline<br>kogane-read-migrations |
 | kogane-raw-evidence | `b335a887-250d-45c9-bd72-af83f35fdc60` | yes | kogane-evidence-browser<br>kogane-globalpass-collector-poc<br>kogane-mizuho-collector<br>kogane-mobile-suica-collector-poc<br>kogane-moneyforward-collector-poc<br>kogane-myjcb-collector-poc<br>kogane-observation-pipeline<br>kogane-observation-read-diagnostic<br>kogane-prestia-bank-collector<br>kogane-sbi-collector-poc<br>kogane-sbi-shinsei-collector-poc<br>kogane-sbi-vc-session-poc<br>kogane-sony-bank-collector-poc<br>kogane-st-george-collector<br>kogane-vpass-collector-poc<br>kogane-vpoint-collector-poc |
 
@@ -210,6 +211,32 @@ No wrangler config.
 - Vars (names only): HARNESS_MONITOR<br>HARNESS_REVISION
 - Required secrets (names only): —
 
+### `experiments/d1-conformance`
+
+- Disposition (docs/plans/2026-10-d1-conformance.md; ADR 0054 remote gate): `isolated-synthetic-preparation` → experiments/d1-conformance
+- Required verification: Local binding tests and independent review; root-approved new-resource identity, remote evidence, CPU telemetry and cleanup remain separate gates
+- Execution status: PREPARED_REMOTE_APPROVAL_REQUIRED (plan recorded `NOT_PROVISIONED_BY_THIS_PREPARATION`)
+- Live resources: NO_LIVE_RESOURCE
+
+#### `kogane-d1-conformance-20261009` — `experiments/d1-conformance/wrangler.jsonc`
+
+- Role: not-deployed; exists in the account: no
+- Entry point: src/worker.ts
+- D1: DB → kogane-d1-conformance-20261009 `00000000-0000-4000-8000-000000000000` (migrations_dir `../../packages/storage-d1/migrations/core`) (not live)
+- R2: —
+- KV: —
+- Queues: —
+- Durable Objects: —
+- DO migration tags: —
+- Containers: —
+- Browser binding: —
+- VPC networks: —
+- Service bindings: —
+- Crons: —
+- Assets: —
+- Vars (names only): RUN_AUTHORIZATION
+- Required secrets (names only): —
+
 ### `experiments/mizuho-direct`
 
 - Disposition (direct collector feasibility follow-up, 2026-09-13): `isolated-as-experiment` → experiments/mizuho-direct (public-entry diagnostics; parsers promoted to packages/parsers)
@@ -305,7 +332,7 @@ No wrangler config.
 - Service bindings: PIPELINE → kogane-observation-pipeline
 - Crons: —
 - Assets: `../../apps/web/dist-production` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>DEPLOYMENT_SCHEDULE_TOKENS<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>HEALTH_PROBE_TOKENS<br>OPERATOR_SUBJECTS<br>OPS_API_ENABLED<br>RELEASE_SHA<br>REWARDS_V2_ENABLED<br>SCHEDULES_ENABLED<br>SESSION_REFRESH_POLICY
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>COMMANDS_ENABLED<br>DEPLOYMENT_SCHEDULE_TOKENS<br>EVIDENCE_SOURCE_ID<br>HEALTH_PROBE_TOKENS<br>MCP_DELEGATIONS<br>OPERATOR_SUBJECTS<br>OPS_API_ENABLED<br>RELEASE_SHA<br>SCHEDULES_ENABLED<br>SESSION_REFRESH_POLICY
 - Required secrets (names only): —
 
 #### `kogane-evidence-browser-test` — `services/app/wrangler.test.jsonc`
@@ -324,7 +351,7 @@ No wrangler config.
 - Service bindings: —
 - Crons: —
 - Assets: `test/assets` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>BALANCE_PROJECTION_ENABLED<br>COMMANDS_ENABLED<br>EVENTS_V2_ENABLED<br>EVIDENCE_SOURCE_ID<br>HEALTH_PROBE_TOKENS<br>OPERATOR_SUBJECTS<br>OPS_API_ENABLED<br>RELEASE_SHA<br>REWARDS_V2_ENABLED<br>SESSION_REFRESH_POLICY
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>COMMANDS_ENABLED<br>EVIDENCE_SOURCE_ID<br>HEALTH_PROBE_TOKENS<br>MCP_DELEGATIONS<br>OPERATOR_SUBJECTS<br>OPS_API_ENABLED<br>RELEASE_SHA<br>SESSION_REFRESH_POLICY
 - Required secrets (names only): —
 
 ### `services/collector-globalpass`

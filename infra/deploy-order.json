@@ -372,6 +372,17 @@
       "deploy": false,
       "healthPath": "",
       "healthAuth": "none"
+    },
+    {
+      "name": "d1-conformance",
+      "path": "experiments/d1-conformance",
+      "config": "wrangler.jsonc",
+      "worker": "kogane-d1-conformance-20261009",
+      "role": "probe",
+      "deploy": false,
+      "healthPath": "",
+      "healthAuth": "none",
+      "after": []
     }
   ]
 }

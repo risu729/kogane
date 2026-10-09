@@ -266,8 +266,11 @@ after the terminal error rejected in both arms; independent source statistics
 confirmed release. All four cleanup checks passed, the separate cleanup step
 found no remaining owned resources, and API reads confirmed Worker, application
 and namespace absence. Native, recovery, rollback and the reader-lifetime arms
-were not reached. The temporary authorization remains limited to the reviewed
-continuation session and must be retired after completion.
+were not reached. The continuation was interrupted before a revised hosted run. After its
+2026-10-09 23:00 JST authorization deadline, the unused replacement bootstrap
+Worker, remaining temporary token and dedicated GitHub environment (including
+its secret and variables) were retired. API/UI readback at 23:37 JST confirmed
+Worker, application, namespace, environment and temporary-token absence.
 
 This evidence justifies measuring stream-error propagation at the response
 returned by actual SDK `containerFetch` or native `ContainerController.fetch`

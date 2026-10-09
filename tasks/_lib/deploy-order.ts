@@ -326,6 +326,13 @@ function syntheticEnvironmentAllowed(file: string, text: string): boolean {
   }
   const job = workflow?.jobs?.["container-verification"];
   const input = workflow?.on?.workflow_dispatch?.inputs?.["container-verification"];
+  // Main's public coverage metadata may be inherited by the synthetic job.
+  // Keep each reviewed value exact so this exception cannot carry credentials.
+  const publicCoverageEnv: Record<string, string> = {
+    KOGANE_TEST_COVERAGE: "true",
+    COVERAGE_HEAD_SHA: "${{ github.event.pull_request.head.sha || github.sha }}",
+    COVERAGE_BASE_SHA: "${{ github.event.pull_request.base.sha || github.event.before }}",
+  };
   if (
     !job ||
     input?.type !== "boolean" ||
@@ -333,7 +340,11 @@ function syntheticEnvironmentAllowed(file: string, text: string): boolean {
     input.required !== false ||
     typeof input.description !== "string" ||
     Object.keys(input).sort().join(",") !== "default,description,required,type" ||
-    Object.keys(workflow.env ?? {}).some((name) => !["CI", "MISE_JOBS"].includes(name)) ||
+    Object.entries(workflow.env ?? {}).some(
+      ([name, value]) =>
+        !["CI", "MISE_JOBS"].includes(name) &&
+        (!Object.hasOwn(publicCoverageEnv, name) || value !== publicCoverageEnv[name]),
+    ) ||
     [...text.matchAll(/secrets\.([A-Za-z0-9_]+)/gu)].some(
       (match) => match[1] !== "CONTAINER_VERIFICATION_API_TOKEN",
     ) ||
@@ -364,7 +375,7 @@ function syntheticEnvironmentAllowed(file: string, text: string): boolean {
         uses: "actions/checkout",
         with: { ref: "${{ github.sha }}", "persist-credentials": false },
       },
-      { name: "Install mise", uses: "jdx/mise-action", with: { version: "2026.10.5" } },
+      { name: "Install mise", uses: "jdx/mise-action", with: { version: "2026.10.6" } },
       {
         name: "Install pinned verification dependencies",
         "timeout-minutes": 5,
