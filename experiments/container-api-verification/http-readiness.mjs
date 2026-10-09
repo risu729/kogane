@@ -92,8 +92,12 @@ export async function waitHttpReady({
           remaining();
           if (controller.signal.aborted) fail("transport");
           body = response.body;
-          // Only bootstrap/edge transition statuses are retryable; their bodies stay unread.
-          if (response.status === 404 || response.status === 503) {
+          // Only unmarked bootstrap/edge statuses are retryable; their bodies stay unread.
+          if (
+            (response.status === 404 || response.status === 503) &&
+            response.headers.get("x-verification-failure") === null &&
+            response.headers.get("x-verification-upstream-status") === null
+          ) {
             return false;
           }
           if (response.status !== 200)

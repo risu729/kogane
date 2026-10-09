@@ -38,9 +38,15 @@ export function worker() {
       const expected = `Bearer ${env.HARNESS_KEY}`;
       const digest = (value: string) => createHash("sha256").update(value).digest();
       if (!env.HARNESS_KEY || !timingSafeEqual(digest(provided), digest(expected)))
-        return Response.json({ code: "unauthorized" }, { status: 401 });
+        return Response.json(
+          { code: "unauthorized" },
+          { status: 401, headers: { "x-verification-failure": "worker_unauthorized" } },
+        );
       if (!revisions.has(env.HARNESS_REVISION))
-        return Response.json({ code: "revision_invalid" }, { status: 503 });
+        return Response.json(
+          { code: "revision_invalid" },
+          { status: 503, headers: { "x-verification-failure": "worker_revision_invalid" } },
+        );
       const path = new URL(request.url).pathname;
       const methods: Record<string, string> = {
         "/initialize": "POST",
@@ -57,7 +63,10 @@ export function worker() {
         "/exit": "POST",
       };
       if (methods[path] !== request.method)
-        return Response.json({ code: "route_missing" }, { status: 404 });
+        return Response.json(
+          { code: "route_missing" },
+          { status: 404, headers: { "x-verification-failure": "worker_route_missing" } },
+        );
       try {
         const stub = env.HARNESS.get(env.HARNESS.idFromName("synthetic-fixed-object-v1"));
         // Credentials remain in the Worker; the synthetic image receives no headers/body.

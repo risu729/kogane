@@ -58,9 +58,17 @@ for (const route of routeLabels) {
       codes.push(`verification_http_${route}_${origin}_${category}`);
   codes.push(
     `verification_http_${route}_worker_exception`,
+    `verification_http_${route}_worker_unauthorized`,
+    `verification_http_${route}_worker_revision_invalid`,
+    `verification_http_${route}_worker_route_missing`,
     `verification_http_${route}_metadata_invalid`,
   );
 }
+const workerErrors = new Map([
+  ["worker_unauthorized", 401],
+  ["worker_revision_invalid", 503],
+  ["worker_route_missing", 404],
+]);
 const canonicalCodes = Object.freeze(codes);
 /** Return the owned entry, never an untrusted string merely matching a pattern. */
 export function canonicalDriverHttpCode(value) {
@@ -93,6 +101,7 @@ export function syntheticHttpFailure(path, method, response, substage) {
   if (failure === null && upstream === null) suffix = `outer_${statusCategory(response.status)}`;
   else if (response.status === 502 && failure === "worker_exception" && upstream === null)
     suffix = "worker_exception";
+  else if (upstream === null && workerErrors.get(failure) === response.status) suffix = failure;
   else if (
     response.status === 502 &&
     failure === "upstream_http" &&

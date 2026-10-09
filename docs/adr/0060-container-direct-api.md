@@ -129,8 +129,16 @@ A subsequent attempt at `5b902fe6`
 ([run 37880738165](https://github.com/risu729/kogane/actions/runs/37880738165))
 failed a public state read with `verification_http_state_outer_not_found`
 after readiness had succeeded. The diagnostic did not identify which state check
-failed; this is not evidence of an SDK or Container failure. All four cleanup checks passed; separate API reads confirmed Worker,
-application and namespace absence. The runner uses canonical OCI manifest HEAD for registry
+failed; this is not evidence of an SDK or Container failure. Attempt `6659814e`
+([run 37882097799](https://github.com/risu729/kogane/actions/runs/37882097799))
+passed the bootstrap state read, then failed the single initialization POST with
+`verification_http_initialize_outer_not_found`, before Container startup. The
+unmarked status alone does not distinguish a public routing response from the
+Worker's own route rejection. The diagnostic follow-up assigns closed markers
+to Worker-owned authentication, revision and route errors; malformed error metadata
+fails closed, and marked errors are not retried as bootstrap propagation.
+All four cleanup checks passed for both attempts; separate API reads confirmed
+Worker, application and namespace absence. The runner uses canonical OCI manifest HEAD for registry
 ownership and absence, and shares the existing rollout deadline with public
 HTTP readiness checks. Normal CI and CodeQL passed on the earlier reviewed
 head `1f393a205`; current-head checks remain required.

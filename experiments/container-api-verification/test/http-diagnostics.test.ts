@@ -213,6 +213,116 @@ const authorized = () =>
   new Request("https://synthetic.invalid/delay", {
     headers: { authorization: "Bearer private-key" },
   });
+test("Worker-owned auth, revision and route errors have exact closed markers", async () => {
+  let forwarded = 0;
+  const service = worker();
+  const env = environment(async (request) => {
+    forwarded++;
+    expect(new URL(request.url).pathname).toBe("/initialize");
+    expect(request.method).toBe("POST");
+    expect([...request.headers]).toEqual([]);
+    expect(request.body).toBeNull();
+    return Response.json({ accepted: 1 });
+  });
+  const authorizedPost = new Request("https://synthetic.invalid/initialize", {
+    method: "POST",
+    headers: { authorization: "Bearer private-key" },
+  });
+  const success = await service.fetch(authorizedPost, env as never);
+  expect(success.status).toBe(200);
+  expect(success.headers.get("x-verification-failure")).toBeNull();
+  expect(forwarded).toBe(1);
+  const cases = [
+    [
+      await service.fetch(
+        new Request("https://synthetic.invalid/initialize", {
+          method: "POST",
+        }),
+        env as never,
+      ),
+      401,
+      "worker_unauthorized",
+    ],
+    [
+      await service.fetch(authorizedPost, {
+        ...env,
+        HARNESS_REVISION: "private-revision",
+      } as never),
+      503,
+      "worker_revision_invalid",
+    ],
+    [
+      await service.fetch(
+        new Request("https://synthetic.invalid/initialize", {
+          method: "GET",
+          headers: { authorization: "Bearer private-key" },
+        }),
+        env as never,
+      ),
+      404,
+      "worker_route_missing",
+    ],
+  ] as const;
+  for (const [response, status, suffix] of cases) {
+    expect(response.status).toBe(status);
+    expect(response.headers.get("x-verification-failure")).toBe(suffix);
+    expect(response.headers.get("x-verification-upstream-status")).toBeNull();
+    expect(response.bodyUsed).toBe(false);
+    expect(syntheticHttpFailure("/initialize", "POST", response)).toBe(
+      `verification_http_initialize_${suffix}`,
+    );
+    expect(response.bodyUsed).toBe(false);
+    expect(canonicalDriverHttpCode(`verification_http_initialize_${suffix}`)).toBe(
+      `verification_http_initialize_${suffix}`,
+    );
+  }
+  expect(forwarded).toBe(1);
+});
+
+test("worker markers require their exact status and no conflicting metadata", () => {
+  const owned = [
+    [401, "worker_unauthorized"],
+    [503, "worker_revision_invalid"],
+    [404, "worker_route_missing"],
+  ] as const;
+  for (const [status, marker] of owned) {
+    for (const wrongStatus of [401, 404, 503].filter((value) => value !== status)) {
+      expect(
+        syntheticHttpFailure(
+          "/initialize",
+          "POST",
+          new Response(null, {
+            status: wrongStatus,
+            headers: { "x-verification-failure": marker },
+          }),
+        ),
+      ).toBe("verification_http_initialize_metadata_invalid");
+    }
+    expect(
+      syntheticHttpFailure(
+        "/initialize",
+        "POST",
+        new Response(null, {
+          status,
+          headers: { "x-verification-failure": marker, "x-verification-upstream-status": "503" },
+        }),
+      ),
+    ).toBe("verification_http_initialize_metadata_invalid");
+    expect(
+      canonicalDriverHttpCode(`verification_http_initialize_${marker} private`),
+    ).toBeUndefined();
+  }
+  expect(syntheticHttpFailure("/initialize", "POST", new Response(null, { status: 404 }))).toBe(
+    "verification_http_initialize_outer_not_found",
+  );
+  expect(
+    syntheticHttpFailure(
+      "/initialize",
+      "POST",
+      new Response(null, { status: 404, headers: { "x-verification-failure": "private-forgery" } }),
+    ),
+  ).toBe("verification_http_initialize_metadata_invalid");
+});
 test("Worker keeps 502 but exposes only upstream numeric status, cancels body and strips provider metadata", async () => {
   let canceled = 0;
   const response = await worker().fetch(

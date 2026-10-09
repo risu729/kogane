@@ -138,6 +138,61 @@ test("auth, redirects and unexpected HTTP fail immediately without reading bodie
     expect(canceled).toBe(1);
   }
 });
+test("marked 404 and 503 or malformed metadata fail readiness immediately", async () => {
+  for (const [status, headers, code] of [
+    [
+      404,
+      { "x-verification-failure": "worker_route_missing" },
+      "verification_http_state_worker_route_missing",
+    ],
+    [
+      503,
+      { "x-verification-failure": "worker_revision_invalid" },
+      "verification_http_state_worker_revision_invalid",
+    ],
+    [
+      404,
+      { "x-verification-failure": "worker_revision_invalid" },
+      "verification_http_state_metadata_invalid",
+    ],
+    [
+      503,
+      { "x-verification-failure": "private-marker" },
+      "verification_http_state_metadata_invalid",
+    ],
+    [404, { "x-verification-upstream-status": "503" }, "verification_http_state_metadata_invalid"],
+  ] as const) {
+    let calls = 0,
+      canceled = 0,
+      sleeps = 0;
+    await expect(
+      waitHttpReady(
+        options({
+          fetchImpl: async () => {
+            calls++;
+            return new Response(
+              new ReadableStream(
+                {
+                  cancel() {
+                    canceled++;
+                  },
+                },
+                { highWaterMark: 0 },
+              ),
+              { status, headers },
+            );
+          },
+          sleep: async () => {
+            sleeps++;
+          },
+        }),
+      ),
+    ).rejects.toThrow(code);
+    expect(calls).toBe(1);
+    expect(canceled).toBe(1);
+    expect(sleeps).toBe(0);
+  }
+});
 test("unknown revisions, partial shapes, extra private fields and wrong counter types never become readiness", async () => {
   for (const invalid of [
     null,
