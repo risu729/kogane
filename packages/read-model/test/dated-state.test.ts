@@ -3,8 +3,7 @@
 // stood. Every account, code and amount is invented.
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { reportedStateCutoff } from "../../domain/src/reported-state";
 import {
   DATED_BALANCES_SQL,
@@ -19,6 +18,8 @@ import {
   type DatedSnapshotRow,
   type DatedStatementRow,
 } from "../src/dated-state";
+import { parserModules } from "../../parsers/scripts/parser-digests";
+import { PARSERS } from "../../parsers/src/parsers/registry";
 import { DatedStore } from "./dated-state-fixture";
 
 const SBI = {
@@ -490,19 +491,39 @@ describe("the quantities of dated positions", () => {
 });
 
 describe("which containers hold positions", () => {
-  test("exactly the parsers that emit a position observation", () => {
-    const dir = join(import.meta.dir, "../../parsers/src/parsers");
-    const emitting: string[] = [];
-    let named = 0;
-    for (const file of readdirSync(dir).filter((entry) => entry.endsWith(".ts"))) {
-      const text = readFileSync(join(dir, file), "utf8");
-      const name = /: Parser = \{\s*name: "([^"]+)"/u.exec(text)?.[1];
-      if (name !== undefined) named += 1;
-      if (!/kind: "position"/u.test(text)) continue;
-      if (name === undefined) throw new Error(`${file} emits positions but names no parser`);
-      emitting.push(name);
+  // Structural over the registry: every parser the registry lists, the
+  // module that defines it (as the digest generator resolves it) and that
+  // module's whole local import closure, so a position built in a helper
+  // module is found, and two parsers in one module are each checked. The
+  // limit: within the closure the test looks for an object literal stating
+  // `kind: "position"`; a kind computed at run time would not be seen, and a
+  // module shared by parsers marks each of them (which fails loudly here
+  // rather than slipping).
+  const RELATIVE_IMPORT = /(?:^|[\s;])(?:import|export)\b[^;]*?from\s*"(\.[^"]*)"/gu;
+  const EMITS_POSITION = /kind:\s*"position"\s*,/u;
+  function closure(entry: URL, seen = new Map<string, string>()): Map<string, string> {
+    if (seen.has(entry.href)) return seen;
+    let text: string;
+    try {
+      text = readFileSync(entry, "utf8");
+    } catch {
+      return seen; // an extension-less or directory specifier names no file here
     }
-    expect(named).toBeGreaterThan(20);
+    seen.set(entry.href, text);
+    for (const match of text.matchAll(RELATIVE_IMPORT)) closure(new URL(match[1]!, entry), seen);
+    return seen;
+  }
+
+  test("exactly the registered parsers whose code emits a position observation", async () => {
+    const modules = await parserModules();
+    const emitting: string[] = [];
+    for (const parser of PARSERS) {
+      const entry = modules.get(parser.name);
+      if (entry === undefined) throw new Error(`${parser.name} has no defining module`);
+      const texts = [...closure(entry.module).values()];
+      if (texts.some((text) => EMITS_POSITION.test(text))) emitting.push(parser.name);
+    }
+    expect(PARSERS.length).toBeGreaterThan(20);
     expect(emitting.sort()).toEqual([...DATED_POSITION_CONTAINER_PARSERS].sort());
   });
 });
