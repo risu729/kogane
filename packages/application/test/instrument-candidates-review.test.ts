@@ -6,10 +6,14 @@
 // and account here is invented.
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
-import { INSTRUMENT_FACTS_SQL } from "../../read-model/src/instrument-resolution.ts";
+import {
+  IDENTITY_OBSERVATION_COUNT_SQL,
+  INSTRUMENT_FACTS_SQL,
+} from "../../read-model/src/instrument-resolution.ts";
 import { validPayload } from "../src/command/contract.ts";
 import type { Grant } from "../src/grants.ts";
 import {
+  CURRENT_IDENTITY_OBSERVATION_BOUND,
   INSTRUMENT_CANDIDATES_MANIFEST,
   INSTRUMENT_CANDIDATES_PAGE_SIZE,
   parseInstrumentCandidatesRequest,
@@ -22,6 +26,7 @@ import {
   AGENT,
   BROKER_B,
   decide,
+  heldWorld,
   ids,
   OPERATOR,
   stubDatabase,
@@ -64,6 +69,33 @@ const untouched: SqlExecutor = {
 beforeAll(() => {
   stubDatabase().close();
 }, 60_000);
+
+/** `count` codes held at SBI on XTKS and at broker B: one open candidate each. */
+async function pairs(count: number): Promise<World> {
+  const w = new World();
+  const codes = Array.from({ length: count }, (_, index) => `SYN${String(5000 + index)}`);
+  await w.capture(
+    "sbi-securities",
+    codes.map((code) => ({
+      account: "sbi-securities:domestic",
+      code,
+      name: `Synthetic ${code}`,
+      market: "TKY",
+      currency: "JPY",
+    })),
+  );
+  await w.capture(
+    BROKER_B,
+    codes.map((code) => ({
+      account: "synthetic-broker-b:custody",
+      code,
+      name: `Other ${code}`,
+      currency: "JPY",
+      extra: { country: "JP" },
+    })),
+  );
+  return w;
+}
 
 describe("a page of the candidate read", () => {
   test("the open view lists proposed candidates with their evidence refs, commands and identifiers", async () => {
@@ -194,64 +226,7 @@ describe("a page of the candidate read", () => {
   });
 
   test("a candidate whose subject is decided elsewhere is held: keep apart only", async () => {
-    const w = new World();
-    const domestic = "sbi-securities:domestic";
-    await w.capture(
-      "sbi-securities",
-      [
-        { account: domestic, code: "SYN9101", name: "Synthetic A", market: "TKY", currency: "JPY" },
-        { account: domestic, code: "SYN9102", name: "Synthetic B", market: "TKY", currency: "JPY" },
-      ],
-      [],
-    );
-    await w.capture(BROKER_B, [
-      {
-        account: "synthetic-broker-b:custody",
-        code: "SYN9101",
-        name: "Synthetic A",
-        currency: "JPY",
-        extra: { country: "JP" },
-      },
-    ]);
-    const listing = w.identifier("mic-symbol", "XTKS", "SYN9101");
-    const other = w.identifier("mic-symbol", "XTKS", "SYN9102");
-    const broker = w.identifier("synthetic-broker-b-code", "JP", "SYN9101");
-    // A person maps broker B's code onto another listing's instrument, then
-    // confirms the listing's own mapping: both sides are settled.
-    const instrumentOf = w.db
-      .query("SELECT instrument_id AS id FROM current_instrument_mappings WHERE identifier_id=?")
-      .get(other) as { id: string };
-    expect(
-      await decide(
-        w,
-        OPERATOR,
-        "identity.assign",
-        {
-          subject: "instrument",
-          referenceId: broker,
-          targetId: instrumentOf.id,
-          reason: "synthetic earlier decision",
-        },
-        "op-first",
-      ),
-    ).toMatchObject({ stage: "commit", result: { ok: true } });
-    const sameListing = w.db
-      .query("SELECT instrument_id AS id FROM current_instrument_mappings WHERE identifier_id=?")
-      .get(listing) as { id: string };
-    expect(
-      await decide(
-        w,
-        OPERATOR,
-        "identity.assign",
-        {
-          subject: "instrument",
-          referenceId: listing,
-          targetId: sameListing.id,
-          reason: "synthetic confirmation",
-        },
-        "op-second",
-      ),
-    ).toMatchObject({ stage: "commit" });
+    const { w, listing, broker } = await heldWorld();
     const held = await review(w.sql, { view: "held" });
     expect(held.summary.held).toBe(held.items.length);
     expect(held.items).toContainEqual(
@@ -272,29 +247,8 @@ describe("a page of the candidate read", () => {
   });
 
   test("pages hold at most the page size and name the next offset", async () => {
-    const w = new World();
     const count = INSTRUMENT_CANDIDATES_PAGE_SIZE + 5;
-    const codes = Array.from({ length: count }, (_, index) => `SYN${String(5000 + index)}`);
-    await w.capture(
-      "sbi-securities",
-      codes.map((code) => ({
-        account: "sbi-securities:domestic",
-        code,
-        name: `Synthetic ${code}`,
-        market: "TKY",
-        currency: "JPY",
-      })),
-    );
-    await w.capture(
-      BROKER_B,
-      codes.map((code) => ({
-        account: "synthetic-broker-b:custody",
-        code,
-        name: `Other ${code}`,
-        currency: "JPY",
-        extra: { country: "JP" },
-      })),
-    );
+    const w = await pairs(count);
     const first = await review(w.sql);
     expect(first.total).toBe(count);
     expect(first.items).toHaveLength(INSTRUMENT_CANDIDATES_PAGE_SIZE);
@@ -306,6 +260,76 @@ describe("a page of the candidate read", () => {
       (item) => (item as ReviewCandidate).candidateId,
     );
     expect(new Set(seen).size).toBe(count);
+    // A next page the same grant would be refused is not offered.
+    const tight = { ...READER, budget: { ...READER.budget, maxRows: 99 } };
+    expect((await review(w.sql, {}, tight)).nextOffset).toBeNull();
+    const enough = { ...READER, budget: { ...READER.budget, maxRows: 100 } };
+    expect((await review(w.sql, {}, enough)).nextOffset).toBe(INSTRUMENT_CANDIDATES_PAGE_SIZE);
+  });
+
+  test("a view of exactly one page names no next offset", async () => {
+    const w = await pairs(INSTRUMENT_CANDIDATES_PAGE_SIZE);
+    const page = await review(w.sql);
+    expect(page.items).toHaveLength(INSTRUMENT_CANDIDATES_PAGE_SIZE);
+    expect(page.nextOffset).toBeNull();
+  });
+
+  test("a separated pair's evidence refs name every identifier it was separated through", async () => {
+    const w = new World();
+    const domestic = "sbi-securities:domestic";
+    await w.capture(
+      "sbi-securities",
+      [
+        {
+          account: domestic,
+          code: "SYN9102",
+          name: "Synthetic Dual",
+          market: "TKY",
+          currency: "JPY",
+        },
+        {
+          account: domestic,
+          code: "SYN9102",
+          name: "Synthetic Dual",
+          market: "NGY",
+          currency: "JPY",
+        },
+      ],
+      [
+        {
+          account: domestic,
+          currency: "JPY",
+          extra: {
+            issueCode: "SYN9102",
+            issueName: "Synthetic Dual",
+            marketLabel: "SYNTHETIC-VENUE",
+            accountLabel: "synthetic",
+          },
+        },
+      ],
+    );
+    const tokyo = w.identifier("mic-symbol", "XTKS", "SYN9102");
+    const nagoya = w.identifier("mic-symbol", "XNGO", "SYN9102");
+    const venue = w.identifier("sbi-security-code", "JP", "SYN9102");
+    const toTokyo = (await review(w.sql, { identifierId: tokyo })).items[0] as ReviewCandidate;
+    expect(
+      await decide(
+        w,
+        OPERATOR,
+        "identity.assign",
+        { ...toTokyo.commands!.adopt!.payload, reason: "synthetic: the Tokyo listing" },
+        "op-via",
+      ),
+    ).toMatchObject({ stage: "commit", result: { ok: true } });
+    const separated = await review(w.sql, { view: "separated", identifierId: venue });
+    expect(separated.items).toHaveLength(1);
+    expect(separated.items[0]).toMatchObject({ via: [tokyo] });
+    expect(separated.items[0]!.evidenceRefs).toEqual(
+      [...[nagoya, venue].sort(), tokyo].map((id) => `identifier:${id}`),
+    );
+    expect(separated.identifiers.map((row) => row.identifierId)).toEqual(
+      [nagoya, venue, tokyo].sort(),
+    );
   });
 });
 
@@ -332,6 +356,71 @@ describe("the grant decides, before anything is read", () => {
       ok: false,
       error: { code: "evidence_restricted", refs: ["scope:source", "scope:account"] },
     });
+  });
+
+  test("a grant listed on accounts alone is refused", async () => {
+    const outcome = await reviewInstrumentCandidates({
+      grant: { ...READER, scopes: { sources: "*", accounts: ["synthetic"] } },
+      sql: untouched,
+      request: request(),
+    });
+    expect(outcome).toMatchObject({
+      ok: false,
+      error: { code: "evidence_restricted", refs: ["scope:account"] },
+    });
+  });
+
+  test("the last page within maxRows is served and the next offset is refused", async () => {
+    const w = await world();
+    const last = await reviewInstrumentCandidates({
+      grant: READER,
+      sql: w.sql,
+      request: request({ offset: 950 }),
+    });
+    expect(last).toMatchObject({ ok: true, review: { items: [], nextOffset: null } });
+    expect(
+      await reviewInstrumentCandidates({
+        grant: READER,
+        sql: untouched,
+        request: request({ offset: 951 }),
+      }),
+    ).toMatchObject({
+      ok: false,
+      error: { code: "budget_exceeded", refs: ["budget:maxRows=1000"] },
+    });
+  });
+
+  test("a store past the identity observation bound is refused before the walk", async () => {
+    const statements: string[] = [];
+    const counted: SqlExecutor = {
+      all: async (text: string) => {
+        statements.push(text);
+        return [];
+      },
+      first: async <T>(text: string) => {
+        statements.push(text);
+        return { n: CURRENT_IDENTITY_OBSERVATION_BOUND + 1 } as T;
+      },
+    };
+    expect(
+      await reviewInstrumentCandidates({ grant: READER, sql: counted, request: request() }),
+    ).toMatchObject({
+      ok: false,
+      error: {
+        code: "budget_exceeded",
+        refs: [`budget:identityObservations=${String(CURRENT_IDENTITY_OBSERVATION_BOUND)}`],
+      },
+    });
+    expect(statements).toEqual([IDENTITY_OBSERVATION_COUNT_SQL]);
+  });
+
+  test("the observation count is the number of current identity observations the read walks", async () => {
+    const w = await world();
+    const current = w.db.query("SELECT count(*) AS n FROM current_identity_observations").get() as {
+      n: number;
+    };
+    expect(current.n).toBeGreaterThan(0);
+    expect(w.db.query(IDENTITY_OBSERVATION_COUNT_SQL).get()).toEqual({ n: current.n });
   });
 
   test("a page past the grant's maxRows is refused", async () => {

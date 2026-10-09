@@ -469,3 +469,50 @@ export async function decide(
   });
   return { stage: "commit", result: committed } as const;
 }
+
+/**
+ * A held candidate: broker B's `SYN9101` is mapped by a person onto another
+ * listing's instrument (`SYN9102` on XTKS), and the `SYN9101` listing's own
+ * mapping is confirmed by a person, so both sides are settled and the pair is
+ * `subject-decided-elsewhere`: it names keeping apart only.
+ */
+export async function heldWorld(): Promise<{ w: World; listing: string; broker: string }> {
+  const w = new World();
+  const domestic = "sbi-securities:domestic";
+  await w.capture("sbi-securities", [
+    { account: domestic, code: "SYN9101", name: "Synthetic A", market: "TKY", currency: "JPY" },
+    { account: domestic, code: "SYN9102", name: "Synthetic B", market: "TKY", currency: "JPY" },
+  ]);
+  await w.capture(BROKER_B, [
+    {
+      account: "synthetic-broker-b:custody",
+      code: "SYN9101",
+      name: "Synthetic A",
+      currency: "JPY",
+      extra: { country: "JP" },
+    },
+  ]);
+  const listing = w.identifier("mic-symbol", "XTKS", "SYN9101");
+  const other = w.identifier("mic-symbol", "XTKS", "SYN9102");
+  const broker = w.identifier("synthetic-broker-b-code", "JP", "SYN9101");
+  const instrumentOf = (identifier: string) =>
+    (
+      w.db
+        .query("SELECT instrument_id AS id FROM current_instrument_mappings WHERE identifier_id=?")
+        .get(identifier) as { id: string }
+    ).id;
+  for (const [referenceId, targetId, operationId] of [
+    [broker, instrumentOf(other), "op-held-first"],
+    [listing, instrumentOf(listing), "op-held-second"],
+  ] as const) {
+    const outcome = await decide(
+      w,
+      OPERATOR,
+      "identity.assign",
+      { subject: "instrument", referenceId, targetId, reason: "synthetic earlier decision" },
+      operationId,
+    );
+    if (outcome.stage !== "commit" || !outcome.result.ok) throw new Error("held world not built");
+  }
+  return { w, listing, broker };
+}

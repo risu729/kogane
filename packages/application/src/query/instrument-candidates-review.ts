@@ -40,6 +40,7 @@ import type { FinancialError, FinancialErrorCode } from "../../../domain/src/res
 import {
   INSTRUMENT_FACTS_ROW_BOUND,
   LISTED_AS_ROW_BOUND,
+  readIdentityObservationCount,
 } from "../../../read-model/src/instrument-resolution.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
@@ -79,6 +80,14 @@ export const INSTRUMENT_CANDIDATES_MAX_OFFSET = CANDIDATE_PAIR_LIMIT;
 export const INSTRUMENT_CANDIDATES_KEYS = ["view", "offset", "identifierId"] as const;
 /** An identifier id as the identity writer stores one (`ii_<sha256>`), or a test fixture's. */
 export const INSTRUMENT_IDENTIFIER_ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/u;
+/**
+ * The most current identity observations the read may walk. The facts read
+ * walks every one of them on every request, so its cost grows with captured
+ * history; past this many the review is refused (`budget_exceeded`) before
+ * the walk starts, never answered slowly or in part. Derived from the workerd
+ * measurement in the ADR 0055 amendment (2026-10-09, Cost).
+ */
+export const CURRENT_IDENTITY_OBSERVATION_BOUND = 500_000;
 /** Errors of this service carry this request id: no context is opened for it. */
 const REQUEST_ID = "instruments.candidates";
 
@@ -96,7 +105,7 @@ export interface ReviewCandidate extends ResolutionCandidate {
 export interface ReviewSeparated extends SeparatedPair {
   evidenceRefs: string[];
 }
-export interface ReviewHint extends NameHint {
+interface ReviewHint extends NameHint {
   evidenceRefs: string[];
 }
 export type ReviewItem = ReviewCandidate | ReviewSeparated | ReviewHint;
@@ -111,6 +120,8 @@ export interface InstrumentCandidatesManifest {
     relations: number;
     pageSize: number;
     maxOffset: number;
+    /** Current identity observations the read may walk (`CURRENT_IDENTITY_OBSERVATION_BOUND`). */
+    identityObservations: number;
   };
   codes: {
     evidence: readonly string[];
@@ -137,7 +148,12 @@ export interface InstrumentCandidateReview {
    * (`/api/command/v1/plan`), graded there; this answer changes nothing.
    */
   decisions: "change-lifecycle";
-  /** Items in this view (after the identifier filter), of which `items` is one page. */
+  /**
+   * Items in this view (after the identifier filter), of which `items` is one
+   * page. `nextOffset` is null past the last page and past the grant's
+   * `maxRows`, so `total` may name more items than this grant can page to;
+   * `identifierId` narrows the view.
+   */
   total: number;
   items: ReviewItem[];
   nextOffset: number | null;
@@ -160,6 +176,7 @@ export const INSTRUMENT_CANDIDATES_MANIFEST: InstrumentCandidatesManifest = {
     relations: LISTED_AS_ROW_BOUND,
     pageSize: INSTRUMENT_CANDIDATES_PAGE_SIZE,
     maxOffset: INSTRUMENT_CANDIDATES_MAX_OFFSET,
+    identityObservations: CURRENT_IDENTITY_OBSERVATION_BOUND,
   },
   codes: {
     evidence: CANDIDATE_EVIDENCE,
@@ -277,6 +294,12 @@ export async function reviewInstrumentCandidates(input: {
   if (request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE > grant.budget.maxRows)
     return fail("budget_exceeded", [`budget:maxRows=${String(grant.budget.maxRows)}`]);
 
+  // A count of one row per published parse, not a walk (read-model
+  // `IDENTITY_OBSERVATION_COUNT_SQL`); an upper bound, so the refusal fails closed.
+  if ((await readIdentityObservationCount(sql)) > CURRENT_IDENTITY_OBSERVATION_BOUND)
+    return fail("budget_exceeded", [
+      `budget:identityObservations=${String(CURRENT_IDENTITY_OBSERVATION_BOUND)}`,
+    ]);
   let resolution: InstrumentResolution;
   try {
     resolution = await queryInstrumentResolution(sql);
@@ -298,9 +321,12 @@ export async function reviewInstrumentCandidates(input: {
   );
   const items = all.slice(request.offset, request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE);
   const named = new Set(items.flatMap(namedIdentifiers));
+  // The next page only while there is one and the grant may read it: a
+  // cursor the same caller would be refused is not offered.
+  const following = request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE;
   const nextOffset =
-    request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE < all.length
-      ? request.offset + INSTRUMENT_CANDIDATES_PAGE_SIZE
+    following < all.length && following + INSTRUMENT_CANDIDATES_PAGE_SIZE <= grant.budget.maxRows
+      ? following
       : null;
   return {
     ok: true,

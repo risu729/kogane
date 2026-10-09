@@ -26,7 +26,10 @@
 // identity catalogue's instrument list already does, and reaches each
 // observation's uses by the primary key (identity_observation_id, role); no
 // index on the use table's identifier column is needed and this change adds
-// no migration. Its D1 cost is not measured.
+// no migration. Its cost is measured on `bun:sqlite` and workerd, not remote
+// D1, and the review service refuses before the walk above a count of current
+// identity observations (`IDENTITY_OBSERVATION_COUNT_SQL`; ADR 0055
+// amendment 2026-10-09, Cost).
 import type { SqlExecutor } from "./reader";
 
 /** Rows of `INSTRUMENT_FACTS_SQL` one read may return; more is refused, never cut. */
@@ -69,6 +72,24 @@ FROM stated s JOIN eligible e ON e.identifier_id=s.identifier_id
 JOIN instrument_identifiers d ON d.id=s.identifier_id
 ORDER BY e.identifier_id,s.source_id,s.currency,s.unconfirmed
 LIMIT ${INSTRUMENT_FACTS_ROW_BOUND + 1}`;
+
+/**
+ * The number of identity observations `INSTRUMENT_FACTS_SQL` walks, read
+ * without walking them: for every published parse, the observation count of
+ * its sealed identity runs (`identity_seal_complete` makes that count equal
+ * to the parse's observations, so every sealed run of one parse states the
+ * same number). It reads one row per published parse, never an observation.
+ * It is exact when every such run is eligible and an upper bound otherwise
+ * (a failed fetch run or an unbound Vpass run is counted, not walked), so a
+ * bound checked against it fails closed.
+ */
+export const IDENTITY_OBSERVATION_COUNT_SQL = `SELECT coalesce(sum(n),0) AS n FROM (
+ SELECT max(s.observation_count) AS n
+ FROM published_parse_runs pub
+ JOIN identity_runs r ON r.parse_run_id=pub.parse_run_id
+ JOIN identity_run_seals s ON s.identity_run_id=r.id
+ GROUP BY pub.parse_run_id
+)`;
 
 export interface InstrumentFactsRow {
   identifierId: string;
@@ -152,6 +173,10 @@ export interface InstrumentHistoryRow {
 
 export async function readInstrumentFacts(sql: SqlExecutor): Promise<InstrumentFactsRow[]> {
   return sql.all<InstrumentFactsRow>(INSTRUMENT_FACTS_SQL, []);
+}
+
+export async function readIdentityObservationCount(sql: SqlExecutor): Promise<number> {
+  return (await sql.first<{ n: number }>(IDENTITY_OBSERVATION_COUNT_SQL, []))?.n ?? 0;
 }
 
 export async function readListedAs(sql: SqlExecutor): Promise<ListedAsRow[]> {

@@ -20,7 +20,11 @@ import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { fullCoreSchema } from "../../read-model/test/card-usage-scale-fixture.ts";
 import { explain } from "../../read-model/test/card-usage-plan.ts";
-import { INSTRUMENT_FACTS_SQL, LISTED_AS_SQL } from "../../read-model/src/instrument-resolution.ts";
+import {
+  IDENTITY_OBSERVATION_COUNT_SQL,
+  INSTRUMENT_FACTS_SQL,
+  LISTED_AS_SQL,
+} from "../../read-model/src/instrument-resolution.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { identifyParse } from "../../storage-d1/src/core/identity-store.ts";
 import { sqliteD1 } from "../../storage-d1/test/sqlite.ts";
@@ -354,6 +358,7 @@ describe("the candidate read on a scaled store without table statistics", () => 
       .query("SELECT count(*) AS n FROM current_identity_observations")
       .get() as { n: number };
     expect(current.n).toBe(store.observations);
+    expect(store.db.query(IDENTITY_OBSERVATION_COUNT_SQL).get()).toEqual({ n: store.observations });
   });
 
   test("the facts read reaches uses, units and mappings by key and scans no observation table", () => {
@@ -374,10 +379,20 @@ describe("the candidate read on a scaled store without table statistics", () => 
       expect(text).toContain(
         `SEARCH ${alias} USING INDEX sqlite_autoindex_identity_instrument_uses_1 (identity_observation_id=? AND role=?) LEFT-JOIN`,
       );
+    // The walk itself: every published parse, through the view's covering index.
+    expect(text).toContain("SCAN pub USING COVERING INDEX published_parse_runs_run");
     const listed = explain(store.db, LISTED_AS_SQL, [])
       .map((step) => step.detail)
       .join("\n");
     expect(listed).not.toMatch(/SCAN r\b/u);
+    expect(listed).toContain("SEARCH r USING INDEX entity_relations_from");
+    // The bound's count reads identity runs and their seals, never an observation.
+    const count = explain(store.db, IDENTITY_OBSERVATION_COUNT_SQL, [])
+      .map((step) => step.detail)
+      .join("\n");
+    expect(count).not.toContain("identity_observations");
+    expect(count).not.toContain("identity_instrument_uses");
+    expect(count).toContain("SEARCH s USING INDEX sqlite_autoindex_identity_run_seals_1");
   });
 
   test("the answer on the scaled store: one proposal per code held at both brokers", async () => {
@@ -399,6 +414,7 @@ describe("the candidate read on a scaled store without table statistics", () => 
     async () => {
       const facts = await timed(() => sql.all(INSTRUMENT_FACTS_SQL, []));
       const listed = await timed(() => sql.all(LISTED_AS_SQL, []));
+      const count = await timed(() => sql.first(IDENTITY_OBSERVATION_COUNT_SQL, []));
       const resolution = await timed(() => queryInstrumentResolution(sql));
       const page = await timed(() =>
         reviewInstrumentCandidates({ grant: READER, sql, request: OPEN }),
@@ -414,7 +430,7 @@ describe("the candidate read on a scaled store without table statistics", () => 
           candidates: counted.candidates.length,
           separated: counted.summary.separated,
           hints: counted.summary.hints,
-          medianMs: { facts, listed, resolution, page },
+          medianMs: { facts, listed, count, resolution, page },
         }),
       );
     },
