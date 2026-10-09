@@ -7,10 +7,12 @@ import {
   type ApprovalReceipt,
   type ChangePlan,
   type CommandStore,
+  isEconomicEventKind,
   type Principal,
   principalCan,
 } from "./contract.ts";
 import { commandError, type CommandResult } from "./errors.ts";
+import { resolveAndSimulate } from "../operations/targets.ts";
 import { loadPlan } from "./plan.ts";
 import { currentRevisions, markStale } from "./simulate.ts";
 
@@ -60,6 +62,14 @@ export async function approve(
     return commandError("plan_expired", [plan.planId]);
   if (plan.status !== "planned" && plan.status !== "approved")
     return commandError("plan_not_open", [plan.planId]);
+  // An economic-event kind is approvable only while its planner accepts it:
+  // with none registered (ADR 0054, G2) a plan row of such a kind that
+  // reached the table any other way is refused here, so no approval of it is
+  // ever written.
+  if (isEconomicEventKind(plan.kind)) {
+    const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
+    if (!eligibility.ok) return eligibility;
+  }
 
   // SC17: the human confirmed a plan pinned to rev7. If a concurrent change
   // moved it to rev8, the approval is refused and the plan is marked stale;

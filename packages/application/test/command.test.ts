@@ -8,10 +8,12 @@ import {
   CARD_REVIEW_KINDS,
   CHANGE_KINDS,
   COMMAND_ERROR_CODES,
+  ECONOMIC_EVENT_COMMAND_KINDS,
   configuredGrantLoader,
   type GrantConfigProblem,
   isCardReviewKind,
   isChangeKind,
+  isEconomicEventKind,
   MAX_SUBJECTS_PER_LIST,
   parseSubjectList,
   planDigestOf,
@@ -46,10 +48,17 @@ describe("payloads", () => {
       "card-refund.withdraw",
       "card-installment.link",
       "card-installment.unlink",
+      "economic-event.adopt",
+      "economic-event.correct",
+      "economic-event.withdraw",
+      "economic-event.move",
     ]);
-    // The review kinds are exactly the tail the 0051 CHECK added (ADR 0017).
-    expect<readonly string[]>([...CARD_REVIEW_KINDS]).toEqual(CHANGE_KINDS.slice(7));
+    // The review kinds are exactly what the 0051 CHECK added (ADR 0017).
+    expect<readonly string[]>([...CARD_REVIEW_KINDS]).toEqual(CHANGE_KINDS.slice(7, 13));
     expect(CHANGE_KINDS.filter(isCardReviewKind)).toEqual([...CARD_REVIEW_KINDS]);
+    // The economic-event kinds are exactly the tail 0071 added (ADR 0054, G2).
+    expect<readonly string[]>([...ECONOMIC_EVENT_COMMAND_KINDS]).toEqual(CHANGE_KINDS.slice(13));
+    expect(CHANGE_KINDS.filter(isEconomicEventKind)).toEqual([...ECONOMIC_EVENT_COMMAND_KINDS]);
     // `identity.crosswalk.accept` (0058) is retired (ADR 0030 amendment): the
     // CORE CHECK still admits it for history, the vocabulary does not.
     for (const kind of [
@@ -57,6 +66,7 @@ describe("payloads", () => {
       "card-refund",
       "card-installment.relink",
       "identity.crosswalk.accept",
+      "economic-event.resolve-identity",
     ])
       expect(isChangeKind(kind)).toBe(false);
     expect(
@@ -120,6 +130,29 @@ describe("payloads", () => {
     expect(validPayload("relation.accept", { ...relation, toRef: relation.fromRef })).toBe(false);
     expect(validPayload("relation.accept", { ...relation, relationKind: "same_as" })).toBe(false);
     expect(validPayload("relation.accept", { ...relation, evidenceRefs: ["a", "a"] })).toBe(false);
+  });
+});
+
+describe("economic-event payloads (ADR 0054, G2)", () => {
+  test("go through the vocabulary's own validator, never another kind's shape", () => {
+    const relation = {
+      relationKind: "same_account",
+      fromRef: "source_account:sa_1",
+      toRef: "source_account:sa_2",
+      validFrom: null,
+      validTo: null,
+      evidenceRefs: [],
+      reason: "same institution reference",
+    };
+    const adopt = { family: "bank-movement", proposalId: "proposal-synthetic-1", reason: "ok" };
+    for (const kind of ECONOMIC_EVENT_COMMAND_KINDS) {
+      expect(validPayload(kind, relation)).toBe(false);
+      expect(validPayload(kind, { proposalId: "cs_synthetic", reason: "ok" })).toBe(false);
+      expect(validPayload(kind, adopt)).toBe(kind === "economic-event.adopt");
+    }
+    expect(validPayload("relation.accept", adopt)).toBe(false);
+    expect(validPayload("card-settlement.accept", adopt)).toBe(false);
+    expect(validPayload("economic-event.adopt", { ...adopt, amount: "1" })).toBe(false);
   });
 });
 

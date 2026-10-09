@@ -22,7 +22,7 @@ import {
   PENDING_POSTED_RELATION_KIND,
   pendingPostedReviewRequested,
 } from "../../../domain/src/pending-posted-review.ts";
-import { isCardReviewKind, type RelationPayload } from "./contract.ts";
+import { isCardReviewKind, isEconomicEventKind, type RelationPayload } from "./contract.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import {
   economicGuardCode,
@@ -326,6 +326,7 @@ async function failureReason(
   if (
     plan.kind === "card-settlement.accept" ||
     isCardReviewKind(plan.kind) ||
+    isEconomicEventKind(plan.kind) ||
     ((plan.kind === "relation.accept" || plan.kind === "relation.reject") &&
       (ownershipReviewRequested((plan.payload as RelationPayload).evidenceRefs) ||
         pendingPostedReviewRequested((plan.payload as RelationPayload).evidenceRefs) ||

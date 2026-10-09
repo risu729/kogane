@@ -17,6 +17,13 @@ import {
   isCardRefundAllocationId,
   isPortionList,
 } from "../../../domain/src/card-purchase-review.ts";
+import {
+  ECONOMIC_EVENT_COMMAND_KINDS,
+  type EconomicEventCommandKind,
+  type EconomicEventCommandPayload,
+  isEconomicEventCommandKind,
+  validEconomicEventCommandPayload,
+} from "../../../domain/src/economic-event-commands.ts";
 
 /**
  * The closed list of change kinds. There is no external money action here and
@@ -36,6 +43,7 @@ export const CHANGE_KINDS = [
   "card-refund.withdraw",
   "card-installment.link",
   "card-installment.unlink",
+  ...ECONOMIC_EVENT_COMMAND_KINDS,
 ] as const;
 export type ChangeKind = (typeof CHANGE_KINDS)[number];
 
@@ -57,6 +65,20 @@ export type CardReviewKind = (typeof CARD_REVIEW_KINDS)[number];
 
 export function isCardReviewKind(kind: unknown): kind is CardReviewKind {
   return isOneOf(CARD_REVIEW_KINDS)(kind);
+}
+
+/**
+ * The economic-event command kinds (ADR 0054, G2; CORE 0071): vocabulary
+ * only. A kind is plannable only once its planner is registered in
+ * `ECONOMIC_EVENT_PLANNERS`; until then planning, simulating, approving and
+ * committing one are refused with `unsupported_semantics` for every
+ * principal, before any row is written. The reserved
+ * `economic-event.resolve-identity` is not a change kind.
+ */
+export { ECONOMIC_EVENT_COMMAND_KINDS };
+export type { EconomicEventCommandKind, EconomicEventCommandPayload };
+export function isEconomicEventKind(kind: unknown): kind is EconomicEventCommandKind {
+  return isEconomicEventCommandKind(kind);
 }
 
 export const IDENTITY_SUBJECTS = ["account", "instrument"] as const;
@@ -132,7 +154,8 @@ export type ChangePayload =
   | IdentityReleasePayload
   | RelationPayload
   | CardSettlementPayload
-  | CardReviewPayload;
+  | CardReviewPayload
+  | EconomicEventCommandPayload;
 
 const REASON_MAX = 1000;
 
@@ -148,6 +171,8 @@ export function validPayload(kind: ChangeKind, value: unknown): value is ChangeP
     return exactKeys(value, ["proposalId", "reason"]) && isText(value.proposalId, 512) && reason;
   }
   if (isCardReviewKind(kind)) return reason && validCardReviewPayload(kind, value);
+  // Exact keys, a closed family and the same reason rule (economic-event-commands.ts).
+  if (isEconomicEventKind(kind)) return validEconomicEventCommandPayload(kind, value);
   if (kind === "identity.assign" || kind === "identity.release-override") {
     const assign = kind === "identity.assign";
     const keys = assign

@@ -26,6 +26,9 @@ export {
   type CardReviewPayload,
   CHANGE_KINDS,
   COMMAND_CAPABILITIES,
+  ECONOMIC_EVENT_COMMAND_KINDS,
+  type EconomicEventCommandKind,
+  type EconomicEventCommandPayload,
   type ApprovalReceipt,
   type BatchOutcome,
   type ChangeKind,
@@ -45,6 +48,7 @@ export {
   IDENTITY_SUBJECTS,
   isCardReviewKind,
   isChangeKind,
+  isEconomicEventKind,
   type MutationInput,
   type MutationPlanner,
   type MutationPlanners,
@@ -116,6 +120,8 @@ export {
   subjectRefOf,
 } from "./operations/sql.ts";
 export {
+  ECONOMIC_EVENT_PLANNERS,
+  type EconomicEventPlanner,
   resolveAndSimulate,
   REVIEW_PLANNERS,
   type ResolvedPlan,
