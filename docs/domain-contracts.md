@@ -118,6 +118,34 @@ policy it applies; none has a default.
   and a test fails if a production source, script or task outside the module
   names one.
 
+## `valuation-on-date.ts` — reported holdings valued at selected prices
+
+[ADR 0056, amendment of 2026-10-09](adr/0056-as-of-price-fx-selection.md#amendment-2026-10-09-valuation-on-a-date-as-implemented);
+[calculation and reports §2](calculation-and-reports.md#valuation-on-a-date).
+
+- `valueHoldingsOnDate(input)` takes `HoldingOnDate`s (source, snapshot,
+  its freshness and age, parse run, provider-scoped instrument reference,
+  instrument identity status, quote unit, quantity), a `ValuationOnDatePolicy` (`price` with exactly one
+  price kind, `fx`, `calendars`) or null, the base unit, the bound and the
+  selections, and returns `needs-policy` (`policy_missing`,
+  `policy_proposal`) or one `HOLDING_VALUE_OUTCOMES` code per holding
+  (`valued`, `unpriced`, `unconverted`, `quantity_unknown`,
+  `snapshot_stale`, `instrument_unresolved`, `policy_mismatch`), the counts,
+  a total that is `exact` only when every holding is valued, all come from
+  one source and no position container lacks a snapshot or has a stale one
+  that listed no holding (`partial-verified-scope` with both counts when one
+  does; else `absent` with
+  a `TOTAL_ABSENCE_REASONS` code), and a manifest of ids and codes, including
+  the reported state's context id, whose `canonicalDigest` is the context
+  id. Claim adoption is not applied.
+- `holdingPriceWant` and `fxCurrenciesFor` name exactly the selections a
+  holding will read, so a caller selects nothing more; a selection it needs
+  and was not handed, a duplicate, an invalid policy or base unit, or an
+  as-of date other than the reported state's throws.
+- `RESOLVED_INSTRUMENT_STATUSES` (`identified`, `provider-local`) are the
+  instrument statuses under which a holding is valued. Amounts are added with
+  `sumQuantities`; nothing is rounded except out of the FX pivot.
+
 ## `scope.ts` — what set a number covers, and adoption
 
 - `ScopeDefinition` (perimeter, sorted source refs, account / product /

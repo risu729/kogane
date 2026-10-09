@@ -95,6 +95,10 @@ a fixed window, decision 2.
   states the gap but does not count those statements.
 - Adoption across sources is not applied, so two providers reporting one
   holding both appear; P2-3 applies `selectAdoptedSet` before valuing anything.
+  _Note (2026-10-09, [ADR 0056 amendment](0056-as-of-price-fx-selection.md#amendment-2026-10-09-valuation-on-a-date-as-implemented)):_
+  the valuation on a date does not apply it; it values each listing on its
+  own and withholds a total across sources (`adoption_not_applied`). The
+  adoption rule is left to the owner.
 - No migration: measured without an index (below).
 
 ## Verification

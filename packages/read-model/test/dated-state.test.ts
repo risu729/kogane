@@ -3,17 +3,23 @@
 // stood. Every account, code and amount is invented.
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { reportedStateCutoff } from "../../domain/src/reported-state";
 import {
   DATED_BALANCES_SQL,
+  DATED_POSITION_CONTAINER_PARSERS,
+  DATED_POSITION_QUANTITIES_SQL,
   DATED_POSITIONS_SQL,
   DATED_SNAPSHOTS_SQL,
   DATED_STATEMENTS_SQL,
   type DatedBalanceRow,
+  type DatedPositionQuantityRow,
   type DatedPositionRow,
   type DatedSnapshotRow,
   type DatedStatementRow,
 } from "../src/dated-state";
+import { parserModules } from "../../parsers/scripts/parser-digests";
+import { PARSERS } from "../../parsers/src/parsers/registry";
 import { DatedStore } from "./dated-state-fixture";
 
 const SBI = {
@@ -430,5 +436,94 @@ describe("statements as of the cutoff", () => {
         (row) => row.coefficient,
       ),
     ).toEqual(["2", "4"]);
+  });
+});
+
+describe("the quantities of dated positions", () => {
+  test("each named position with its parse run and decimal-v1 quantity, an unreadable one null-valued", () => {
+    const store = new DatedStore();
+    const capture = store.capture({
+      ...SBI,
+      fetchedAt: "2026-09-09T01:00:00Z",
+      positions: [
+        { account: "sbi-a", code: "1001", quantity: "12" },
+        { account: "sbi-a", code: "1002", quantity: "0.25" },
+        { account: "sbi-a", code: "1003", quantity: "unreadable" },
+      ],
+    });
+    const [twelve, quarter, unreadable] = capture.positions as [number, number, number];
+    const rows = all<DatedPositionQuantityRow>(
+      store,
+      DATED_POSITION_QUANTITIES_SQL,
+      JSON.stringify([...capture.positions].reverse()),
+    );
+    expect(
+      rows.map((row) => [row.id, row.parse_run_id, row.value_status, row.coefficient, row.scale]),
+    ).toEqual([
+      [twelve, capture.parse, "exact", "12", 0],
+      [quarter, capture.parse, "exact", "25", 2],
+      [unreadable, capture.parse, "unparsed", null, null],
+    ]);
+    // An id that is not a position is simply absent.
+    expect(all(store, DATED_POSITION_QUANTITIES_SQL, JSON.stringify([999_999]))).toEqual([]);
+  });
+
+  test("without table statistics it reaches positions and decimals by primary key only", () => {
+    const store = new DatedStore();
+    expect(
+      store.db
+        .query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'")
+        .get(),
+    ).toEqual({ n: 0 });
+    const plan = (
+      store.db.query(`EXPLAIN QUERY PLAN ${DATED_POSITION_QUANTITIES_SQL}`).all("[1,2]") as {
+        detail: string;
+      }[]
+    ).map((row) => row.detail);
+    expect(plan.some((line) => /^SEARCH po USING INTEGER PRIMARY KEY/u.test(line))).toBe(true);
+    expect(
+      plan.some((line) =>
+        /^SEARCH d USING INDEX sqlite_autoindex_observation_decimal_values_1/u.test(line),
+      ),
+    ).toBe(true);
+    expect(plan.filter((line) => /^SCAN (po|d)\b/u.test(line))).toEqual([]);
+  });
+});
+
+describe("which containers hold positions", () => {
+  // Structural over the registry: every parser the registry lists, the
+  // module that defines it (as the digest generator resolves it) and that
+  // module's whole local import closure, so a position built in a helper
+  // module is found, and two parsers in one module are each checked. The
+  // limit: within the closure the test looks for an object literal stating
+  // `kind: "position"`; a kind computed at run time would not be seen, and a
+  // module shared by parsers marks each of them (which fails loudly here
+  // rather than slipping).
+  const RELATIVE_IMPORT = /(?:^|[\s;])(?:import|export)\b[^;]*?from\s*"(\.[^"]*)"/gu;
+  const EMITS_POSITION = /kind:\s*"position"\s*,/u;
+  function closure(entry: URL, seen = new Map<string, string>()): Map<string, string> {
+    if (seen.has(entry.href)) return seen;
+    let text: string;
+    try {
+      text = readFileSync(entry, "utf8");
+    } catch {
+      return seen; // an extension-less or directory specifier names no file here
+    }
+    seen.set(entry.href, text);
+    for (const match of text.matchAll(RELATIVE_IMPORT)) closure(new URL(match[1]!, entry), seen);
+    return seen;
+  }
+
+  test("exactly the registered parsers whose code emits a position observation", async () => {
+    const modules = await parserModules();
+    const emitting: string[] = [];
+    for (const parser of PARSERS) {
+      const entry = modules.get(parser.name);
+      if (entry === undefined) throw new Error(`${parser.name} has no defining module`);
+      const texts = [...closure(entry.module).values()];
+      if (texts.some((text) => EMITS_POSITION.test(text))) emitting.push(parser.name);
+    }
+    expect(PARSERS.length).toBeGreaterThan(20);
+    expect(emitting.sort()).toEqual([...DATED_POSITION_CONTAINER_PARSERS].sort());
   });
 });
