@@ -9,3 +9,6 @@ hk.local.pkl
 mise.local.toml
 mise.local.lock
 **/.cloudflare/
+
+# Native test coverage and invocation metadata (CI artifacts, not source).
+**/coverage/

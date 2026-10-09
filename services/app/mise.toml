@@ -22,7 +22,7 @@ depends = [
 	"//apps/web:build-production",
 	"//experiments/observation-pipeline-local:export-demo",
 ]
-run = "./node_modules/.bin/vitest run"
+run = "node ../../tasks/_lib/coverage-run.mjs vitest run"
 
 [tasks."dry-run"]
 description = "Validate the services/app deployment without uploading it."

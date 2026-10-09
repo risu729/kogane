@@ -33,7 +33,7 @@ fi
 [tasks."test"]
 description = "Run the web client's unit and browser tests."
 depends = ["//apps/web:build", "//apps/web:build-evidence", "//apps/web:build-production", "//apps/web:browser"]
-run = "bun test"
+run = "node ../../tasks/_lib/coverage-run.mjs bun test"
 
 [tasks."ci"]
 description = "Every check CI runs for apps/web."
