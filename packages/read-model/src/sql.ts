@@ -34,6 +34,12 @@ import {
   pagedCollection,
   periodMeasureSql,
 } from "./scope";
+import {
+  ELIGIBLE_VPOINT_RUNS,
+  MONEYFORWARD_SNAPSHOT_CTES,
+  myjcbPastMonthsSnapshotCtes,
+  SMBC_DIRECT_SNAPSHOT_CTES,
+} from "./current-captures";
 
 const ACTIVE = activeStateProjection.predicate;
 const PARSE_CHAIN = activeStateProjection.parseChain;
@@ -136,39 +142,6 @@ export const PARSING_HEALTH_SQL = `SELECT j.status, count(*) AS count FROM obser
                 AND failed.parser_version = j.parser_version AND failed.status = 'error'
             ), '')
         )) GROUP BY j.status`;
-
-// V Point publishes one balance across three page datasets; a run is complete
-// only when all three parsed and every expected artifact of the run parsed.
-const ELIGIBLE_VPOINT_RUNS = `eligible_vpoint_runs AS (
-         SELECT DISTINCT f.id AS fetch_run_id, fa.source_id, f.completed_at
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name IN (
-             'v-point-balance-info', 'v-point-smfg-point', 'v-point-history-page'
-           )
-         GROUP BY f.id, fa.source_id, f.completed_at
-         HAVING COUNT(DISTINCT p.parser_name) = 3
-            AND COUNT(DISTINCT p.fetch_artifact_id) = (
-              SELECT COUNT(*)
-              FROM ${visibleEvidence.fetchArtifacts} expected_fa
-              WHERE expected_fa.fetch_run_id = f.id
-                AND (
-                  expected_fa.dataset IN ('balance-info', 'smfg-point')
-                  OR expected_fa.dataset LIKE 'history-page-%'
-                )
-            )
-       ), ranked_vpoint_runs AS (
-         SELECT fetch_run_id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY source_id
-                  ORDER BY completed_at DESC, fetch_run_id DESC
-                ) AS snapshot_rank
-         FROM eligible_vpoint_runs
-       ), current_vpoint_runs AS (
-         SELECT fetch_run_id
-         FROM ranked_vpoint_runs
-         WHERE snapshot_rank = 1
-       )`;
 
 /** The `YYYYMM` statement month of a Vpass statement-page artifact key. */
 const VPASS_STATEMENT_MONTH = (artifact: string): string =>
@@ -459,37 +432,7 @@ export const VPASS_SNAPSHOT_MEMBER = `snapshot.fetch_run_id = fa.fetch_run_id
 export const MYJCB_LEDGER_MEMBER =
   "fa.id IN (SELECT fetch_artifact_id FROM current_myjcb_snapshots)";
 
-const TRANSACTION_CTES = `${MYJCB_LEDGER_SNAPSHOT_CTES}, ranked_smbc_direct_snapshots AS (
-         SELECT p.fetch_artifact_id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY fa.source_id, fa.artifact_key
-                  ORDER BY fa.fetched_at DESC, fa.id DESC
-                ) AS snapshot_rank
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name = 'smbc-direct-transactions'
-           AND fa.dataset = 'transactions-normalized'
-       ), current_smbc_direct_snapshots AS (
-         SELECT fetch_artifact_id
-         FROM ranked_smbc_direct_snapshots
-         WHERE snapshot_rank = 1
-       ), ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES}, ranked_moneyforward_snapshots AS (
-         SELECT p.fetch_artifact_id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY fa.source_id, fa.fetch_unit_key, substr(fa.artifact_key, -12, 7)
-                  ORDER BY fa.fetched_at DESC, fa.id DESC
-                ) AS snapshot_rank
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name = 'moneyforward-monthly-transactions'
-           AND fa.dataset = 'monthly-transactions'
-           AND (fa.fetch_unit_key LIKE 'moneyforward-account-v1-%'
-             OR fa.fetch_unit_key LIKE 'moneyforward-account-v2-%')
-       ), current_moneyforward_snapshots AS (
-         SELECT fetch_artifact_id
-         FROM ranked_moneyforward_snapshots
-         WHERE snapshot_rank = 1
-       ), ${ELIGIBLE_VPOINT_RUNS}, ${VPASS_STATEMENT_SNAPSHOT_CTES}`;
+const TRANSACTION_CTES = `${MYJCB_LEDGER_SNAPSHOT_CTES}, ${SMBC_DIRECT_SNAPSHOT_CTES}, ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES}, ${MONEYFORWARD_SNAPSHOT_CTES}, ${ELIGIBLE_VPOINT_RUNS}, ${VPASS_STATEMENT_SNAPSHOT_CTES}`;
 
 /**
  * Current transactions: one row per provider transaction identity. Sources
@@ -596,23 +539,7 @@ function latestBalancesInner(measureView: MeasureView | undefined): string {
     measureView === "summaries"
       ? " OR (source_id = 'myjcb' AND parser LIKE 'myjcb-credit-past-month-balances@%' AND metric = 'credit_statement_payment_amount')"
       : "";
-  return `WITH ${SNAPSHOT_CTES}, ranked_myjcb_snapshots AS (
-         SELECT p.fetch_artifact_id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY
-                    fa.source_id,
-                    substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1)
-                  ORDER BY fa.fetched_at DESC, fa.id DESC
-                ) AS snapshot_rank
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name = 'myjcb-credit-past-month-balances'
-           AND fa.dataset = 'credit-past-months'
-       ), current_myjcb_snapshots AS (
-         SELECT fetch_artifact_id
-         FROM ranked_myjcb_snapshots
-         WHERE snapshot_rank = 1
-       ), ${ELIGIBLE_VPOINT_RUNS}
+  return `WITH ${SNAPSHOT_CTES}, ${myjcbPastMonthsSnapshotCtes()}, ${ELIGIBLE_VPOINT_RUNS}
        SELECT id, source_id, source_account, metric, instrument, amount_minor,
               amount_text, as_of, observed_at, parser
        FROM (
