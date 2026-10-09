@@ -275,7 +275,7 @@ extremes) found no unsound outcome. Not verified: any real evidence, any adapter
 
 ## Note: the C adapter exists (2026-10-09, ADR 0059)
 
-[ADR 0059](0059-lot-adapter-from-selected-revisions.md) (proposed) adds the
+[ADR 0059](0059-lot-adapter-from-selected-revisions.md) (accepted) adds the
 adapter this ADR left to a later change: `adaptSelectionToLots` and
 `lotsOnSelection` in `packages/domain/src/lot-adapter.ts` map the knowledge
 selector's selected revisions to `provisional-lot-input-v0` inputs, run this

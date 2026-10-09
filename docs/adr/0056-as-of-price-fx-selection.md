@@ -14,8 +14,8 @@
   decision; a dated note there points here)
 - Amended: 2026-10-09, [valuation on a date as implemented](#amendment-2026-10-09-valuation-on-a-date-as-implemented)
   (`packages/domain/src/valuation-on-date.ts`,
-  `packages/application/src/query/valuation-on-date.ts`; proposed until its
-  pull request merges)
+  `packages/application/src/query/valuation-on-date.ts`; accepted, merged
+  2026-10-09 in #590)
 - Related: [ADR 0019](0019-dated-reported-state.md) (the exclusive bound of a
   date), [ADR 0004](0004-payment-type-shapes-from-evidence.md) (unobserved
   semantics stay unsupported), [ADR 0031](0031-sbi-shinsei-stage-category-fx-tier.md)
@@ -309,7 +309,7 @@ held only in a `PROPOSED_*` constant where it is a value.
 
 ## Amendment (2026-10-09): valuation on a date as implemented
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-10-09 in #590)
 - Issue: #552 (its second slice; acquisition, the route and the page stay open)
 
 ### Context
