@@ -446,9 +446,11 @@ export function validCommitMember(value: unknown): value is CommitMember {
  * The kind reserved for a reviewed needs-review identity resolution, the one
  * commit that may some day seal a member under an identity epoch that is no
  * longer current. CORE 0070 refuses it outright (identity_epoch_changed, for
- * every principal). Binding it to an operation receipt of this kind is G2's:
- * G2 recreates the commit trigger with that binding when it adds the kind to
- * the receipt vocabulary together with its planner (ADR 0054).
+ * every principal). It is not a command kind: G2 (CORE 0071) added the four
+ * economic-event kinds and left this one out, and whether it and a receipt
+ * binding in the commit trigger belong in the vocabulary is an open owner
+ * question (ADR 0054, amendment "G2 as implemented"). No receipt or plan of
+ * this kind can be stored.
  */
 export const IDENTITY_RESOLUTION_KIND = "economic-event.resolve-identity";
 

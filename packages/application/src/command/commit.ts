@@ -22,7 +22,7 @@ import {
   PENDING_POSTED_RELATION_KIND,
   pendingPostedReviewRequested,
 } from "../../../domain/src/pending-posted-review.ts";
-import { isCardReviewKind, type RelationPayload } from "./contract.ts";
+import { isCardReviewKind, isEconomicEventKind, type RelationPayload } from "./contract.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import {
   economicGuardCode,
@@ -195,6 +195,13 @@ export async function commit(
   if (scope.length > 0 && !Object.keys(plan.expectedRevisions).every((ref) => scope.includes(ref)))
     return commandError("approval_scope_mismatch", [approval.approval_id]);
 
+  // An economic-event kind commits only while its planner accepts it, checked
+  // before its writer runs: a writer slot alone never opens a kind whose
+  // planner is not registered (ADR 0054, G2), as `approve` checks too.
+  if (isEconomicEventKind(plan.kind)) {
+    const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
+    if (!eligibility.ok) return eligibility;
+  }
   const planner = input.planners[plan.kind];
   if (!planner) return commandError("unsupported_semantics", [plan.kind]);
 
@@ -326,6 +333,7 @@ async function failureReason(
   if (
     plan.kind === "card-settlement.accept" ||
     isCardReviewKind(plan.kind) ||
+    isEconomicEventKind(plan.kind) ||
     ((plan.kind === "relation.accept" || plan.kind === "relation.reject") &&
       (ownershipReviewRequested((plan.payload as RelationPayload).evidenceRefs) ||
         pendingPostedReviewRequested((plan.payload as RelationPayload).evidenceRefs) ||

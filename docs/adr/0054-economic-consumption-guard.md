@@ -10,7 +10,9 @@
   `packages/domain/src/row-identity.ts`,
   `packages/storage-d1/src/atomic/card-purchase-recognition.ts`,
   `services/processor/src/card-settlement-commands.ts` and
-  `packages/read-model/src/card-settlement-readiness.ts`
+  `packages/read-model/src/card-settlement-readiness.ts`; since G2 also
+  `packages/storage-d1/migrations/core/0071_economic_event_command_kinds.sql`
+  and `packages/domain/src/economic-event-commands.ts`
 
 ## Context
 
@@ -155,7 +157,10 @@ row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
   commit's operation and principal, and adds the kind to the receipt
   vocabulary with its planner (the receipt kind CHECK in force, 0058's, admits
   no such kind today). 0070 itself reads no command table, so G2 can rebuild
-  them (see "Rebuilding a table 0070 reads").
+  them (see "Rebuilding a table 0070 reads"). _G2 did not open it: whether the
+  kind and its receipt binding belong in the vocabulary is an open owner
+  question, and the exemption stays closed
+  ([amendment](#amendment-g2-as-implemented-2026-10-09))._
   That is all 0070 enforces about epochs: a new seal under the current
   epoch. It does **not** refuse a commit that supersedes a holder sealed
   under an older epoch, because it cannot tell which such supersession needs
@@ -266,6 +271,9 @@ recording the alias class on every new settlement accept.
   identity-resolution exemption it drops and recreates
   `economic_commit_log_guard` with the receipt binding, and from then on any
   rebuild of `operation_receipts` must drop and recreate that trigger too.
+  _As implemented, G2 adds the four kinds and leaves the exemption closed, so
+  no 0070 object reads a command table yet
+  ([amendment](#amendment-g2-as-implemented-2026-10-09))._
 - **G3:** its own ADR and migration 0072, own-transfer proposals (proposal-only)
   and their planners, behind the production gate below.
 - **Later:** widening the event kind CHECK (0032) for trades and FX, and the
@@ -667,3 +675,176 @@ The registry lists SBI Shinsei's card-settlement membership as unsupported.
   plan without statistics) and
   `packages/application/test/card-settlement-review-scale.test.ts` (scaled
   store).
+
+## Amendment: G2 as implemented (2026-10-09)
+
+Status: proposed until the G2 pull request merges; accepted upon merge. G2 is
+the command-kind vocabulary only: four kinds, their payload shapes and their
+refusal. No planner, no writer, no own transfer.
+
+### The vocabulary
+
+Migration `0071_economic_event_command_kinds.sql` rebuilds `change_plans`,
+`approvals`, `operation_receipts` and `decision_outbox` as one foreign-key
+graph, statement by statement as 0058 did (itself 0051): create the
+`*_expanded` tables, copy every row with explicit column lists, drop the old
+tables leaf-first, rename, and recreate every index and trigger unchanged. The
+only difference is the kind CHECK on `change_plans.kind` and
+`operation_receipts.operation_kind`, which gains `economic-event.adopt`,
+`economic-event.correct`, `economic-event.withdraw` and `economic-event.move`.
+The same four are `ECONOMIC_EVENT_COMMAND_KINDS`
+(`packages/domain/src/economic-event-commands.ts`), the tail of `CHANGE_KINDS`
+(`packages/application/src/command/contract.ts`).
+
+Payloads take exact keys (`validEconomicEventCommandPayload`, which
+`validPayload` calls). Every one names a `family` from the transaction-family
+registry (`TRANSACTION_FAMILIES`), so a planner can refuse a family it does
+not cover, and a non-blank `reason` of at most 1000 characters. No payload
+carries an amount: a restated leg cites its transaction row, and the value is
+that row's.
+
+| Kind                      | Payload                                                                                   | Checked                                                                                                                                                                                            |
+| ------------------------- | ----------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `economic-event.adopt`    | `{ family, proposalId, reason }`                                                          | the proposal reference, text of at most 512 characters                                                                                                                                             |
+| `economic-event.correct`  | `{ family, eventId, priorRevision, revision, releasedClaims, reason }`                    | `priorRevision` ≥ 1 is superseded by the restated `revision`, which is not `unknown` (that is a withdrawal); `releasedClaims` is a claim set (at most 64) of which no claim is restated            |
+| `economic-event.withdraw` | `{ family, eventId, revision, decisionRevisionId, reason }`                               | `revision` ≥ 1, the revision withdrawn; `decisionRevisionId` the decision that adopted it (its epoch), text of at most 256 characters                                                              |
+| `economic-event.move`     | `{ family, claim, from, to, reason }`, each member `{ eventId, priorRevision, revision }` | two different events, `priorRevision` ≥ 1 each; `claim` is absent from `from`'s restated claims and present in `to`'s; `to` is not `unknown` (`from` may be, when the moved claim was all it held) |
+
+A restated revision is `{ kind, state, unknownReason, legs, claims }`: the
+state belongs to the kind's state family, `unknownReason` is set exactly when
+the state is `unknown`, an `unknown` revision has no legs and no claims (the
+withdrawal shape) and any other has at least one of each; at most 64 legs,
+indexed 0..n−1 once each, and at most 64 distinct claims. A leg is
+`{ legIndex, subjectRef, role, basis, source }` with `subjectRef` in the
+canonical `account:<id>` form and `source` a `SourceFactRef` of kind
+`transaction`. What a prior revision held, whether the proposal, event or
+decision exists, and what a move's `from` member drops besides the moved claim
+are a planner's to read against the store (G3); the shapes are exercised only
+by validation and refusal tests today.
+
+### Refusal, for every principal
+
+`ECONOMIC_EVENT_PLANNERS` (`packages/application/src/operations/targets.ts`)
+is empty, so `resolveAndSimulate` answers `unsupported_semantics` with the
+kind as its ref, and:
+
+| Step       | Human operator                                                                                                                                                                                                                 | Agent (also one carrying `interpretation.accept`) |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
+| `plan`     | `unsupported_semantics`, no row                                                                                                                                                                                                | `unsupported_semantics`, no row                   |
+| `simulate` | `unsupported_semantics`                                                                                                                                                                                                        | `unsupported_semantics`                           |
+| `approve`  | `unsupported_semantics`, no approval (new: `approve` re-checks an economic-event plan's eligibility)                                                                                                                           | `approval_required`, before the plan is read      |
+| `commit`   | `unsupported_semantics`, nothing written: `commit` re-checks the plan's eligibility before any writer runs, so even a writer slot that would write is never called (the processor's slot `economicEventMutation` answers null) | `approval_required`                               |
+
+The `approve` and `commit` rows hold for a plan row, and an approval row,
+inserted directly: the lifecycle never writes either for these kinds. A
+malformed payload is still `invalid_command`, before the missing planner. No
+rule writer uses the change lifecycle, and the authority rule above (no rule,
+AI or agent adopts, corrects, withdraws or moves an own transfer) is not
+loosened by anything here.
+
+### The identity-resolution exemption stays closed (owner question)
+
+The Decision said G2 would open the reserved `economic-event.resolve-identity`:
+add it to the receipt vocabulary with its planner and recreate
+`economic_commit_log_guard` so the exemption needs a receipt of that kind. G2
+does neither. The kind is not in either CHECK, not in `CHANGE_KINDS`, and 0070
+keeps refusing it outright for every principal (`identity_epoch_changed`);
+0071 drops and recreates no 0070 object. Opening an exemption to the epoch
+rule without a reviewed resolution flow, a planner and an owner decision would
+be a guess. Open owner question, as written:
+
+> Should `economic-event.resolve-identity` become a command kind, and should
+> CORE's commit trigger then let a commit of that kind seal a member under an
+> identity epoch that is no longer current when an operation receipt of that
+> kind exists for the commit's operation and principal? Until the owner
+> answers, 0070 keeps refusing the kind for every principal, no plan or
+> receipt of it can be stored, and no migration recreates
+> `economic_commit_log_guard`.
+
+Consequence: the rule that a later rebuild of `operation_receipts` must drop
+and recreate `economic_commit_log_guard` does not apply yet, because no 0070
+object reads a command table. It applies from the migration that adds the
+binding, if the owner chooses one.
+
+### The rebuild and "Rebuilding a table 0070 reads"
+
+0070 reads no command table, so 0071 drops nothing of 0070's: it drops
+exactly the four old command tables. Proven on a store migrated through 0070
+with history of every earlier kind and status
+(`packages/storage-d1/test/economic-command-kinds-migration.test.ts`): every
+row of every table, every index and trigger (byte-identical SQL) and the
+column and foreign-key shape are unchanged, with `PRAGMA foreign_key_check`
+empty after each statement; the table SQL differs only in the widened CHECK;
+every 0070 index, trigger and view (by name, from applying 0070 to a store
+migrated through 0069) has the same `sqlite_master` row before and after, as
+does every object outside the four tables; a fresh store migrated through 0071
+has the same 0070 objects as one stopped at 0070; the four kinds are admitted
+and `economic-event.resolve-identity` and look-alike kinds refused in both
+tables; the append-only and forward-only triggers still fire; an interrupted
+0071 rolls back whole. The G1a test that rebuilds `operation_receipts` the
+0051 way now runs on a store that includes 0071.
+
+### Migration number gap
+
+0071 follows 0070. 0067 is still held by an open pull request, so the gap
+rule above applies unchanged: if it merges after 0071 is deployed, production
+applies it after 0071 while a fresh store applies it before, neither may
+depend on the other, and `services/processor/test/lanes.test.ts`, which lists
+0071 last today, is edited when it merges. A later rebuild of the four command
+tables carries 0071's kind list.
+
+### Limits kept
+
+- Nothing is executable: no planner, no writer, no own transfer; the
+  production gate is unchanged.
+- `economic_commit_log.kind` stays free text (0070). Nothing ties a commit
+  row's kind to the command vocabulary; no writer writes these kinds, and
+  binding them (through the receipt the commit is entered on) is G3's.
+- The confirmation screen has no label for the four kinds; no plan of them
+  can exist and no screen offers them.
+- A `correct` or `move` with many legs and claims can exceed the command API's
+  16 KiB body limit (`services/app/src/command-api.ts`); the planner that
+  reads them decides how a large restatement is split.
+- Not verified: applying 0071 to remote D1.
+
+### Deviations recorded in this amendment
+
+- The identity-resolution exemption is not opened (above).
+- `approve` now refuses a plan of an economic-event kind while its planner
+  refuses it; a planted plan of a card review kind is still approvable and
+  refused only at commit, as before.
+- `commit` re-checks an economic-event plan's eligibility (its planner)
+  before it calls the kind's writer, not only after a writer answered null.
+  Defence in depth found by the G2 review: a writer slot registered without
+  its planner, given a planted plan and approval, would otherwise have
+  committed its writes. The shipped slot answers null, so this was not live;
+  the check means G3 cannot open a writer without its planner.
+- The `family` field is required by the payload contract, not by a CHECK:
+  like 0045, 0051 and 0058, 0071 changes the kind lists and nothing else.
+
+### Verification of the amendment (synthetic data only)
+
+- `packages/storage-d1/test/economic-command-kinds-migration.test.ts` (6
+  tests): the rebuild proof above.
+- `packages/domain/test/economic-event-commands.test.ts` (6 tests): the four
+  kinds without the reserved one; exact keys, closed family and reason per
+  kind, with amounts, approvals and revision pins refused and no kind's
+  payload read as another's; adopt and withdraw references; correct's
+  restatement and released claims; a restated revision's completeness, leg
+  shape and absence of values; move's two members.
+- `packages/application/test/economic-event-plan.test.ts` (10 tests): no
+  planner registered; the reserved kind refused as an unknown kind; per kind,
+  plan refused for a human, an agent and an over-granted agent with no row
+  written and a malformed payload still `invalid_command`; per kind, a planted
+  plan refused at simulate, approve (human: `unsupported_semantics`; agents:
+  `approval_required`) and, with a planted approval, at commit (with an empty
+  slot, no slot, and a slot whose writer would write a valid row), every
+  table of the store (command, economic, decision and outbox tables
+  included) compared row for row after each refused step, and the approval
+  unspent.
+  `packages/application/test/command.test.ts`: the closed kind list and the
+  dispatch to the vocabulary's validator.
+- `services/processor/test/change-lifecycle.test.ts`: every kind through the
+  processor's command routes (plan, simulate, approve, commit) as a human and
+  as an agent, refused with nothing written, and each kind's writer slot.
+- `services/processor/test/lanes.test.ts`: the migration pin includes 0071.

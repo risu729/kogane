@@ -23,6 +23,7 @@ export * from "./reconstruction.ts";
 export * from "./market-data.ts";
 export * from "./valuation-on-date.ts";
 export * from "./economic-contract.ts";
+export * from "./economic-event-commands.ts";
 export * from "./row-identity.ts";
 export {
   hasExactKeys,

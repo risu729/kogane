@@ -10,11 +10,11 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `171d61e7ee8f5363100afdc9e862669cbc5eabf0258f1c96ab93f87a5d620cb4`
+Schema digest: `0ad510829d73eac010e8d9bdfeb7fe78e934a6c59c10a7767abb700f1c9448e0`
 
 ## Summary
 
-- Migrations applied: 68
+- Migrations applied: 69
 - Tables: 134 (all `STRICT`: yes)
 - Views: 44
 - Triggers: 500
@@ -272,5 +272,6 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0065_alarm_schedules.sql` | 59 | collection_schedule_revisions, collection_schedules, provider_maintenance_references, provider_maintenance_rules |
 | `0066_prestia_bank_snapshot_schedule.sql` | 3 | collection_schedule_revisions, collection_schedules, dataset_snapshot_policies |
 | `0070_economic_commit_guard.sql` | 53 | economic_identity_epochs |
+| `0071_economic_event_command_kinds.sql` | 34 | approvals_expanded, change_plans_expanded, decision_outbox_expanded, operation_receipts_expanded |
 
 Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql, 0068_ops_collector_dispatches.sql, 0069_maintenance_survey.sql

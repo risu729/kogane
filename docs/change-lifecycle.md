@@ -12,15 +12,16 @@ configuration. The command kinds are a closed list in code (`CHANGE_KINDS`,
 `packages/application/src/command/contract.ts`), and the `change_plans.kind`
 and `operation_receipts.operation_kind` CHECK constraints admit exactly the same list:
 
-| Kinds                                                                          | Since | Plannable                                                                                     |
-| ------------------------------------------------------------------------------ | ----- | --------------------------------------------------------------------------------------------- |
-| `identity.assign`, `identity.release-override`                                 | 0031  | yes                                                                                           |
-| `relation.accept`, `relation.reject`                                           | 0031  | yes                                                                                           |
-| `card-settlement.accept`, `card-settlement.reject`, `card-settlement.withdraw` | 0045  | yes ([card settlements](card-settlements.md))                                                 |
-| `card-purchase.exclude`, `card-purchase.restore`                               | 0051  | no: [refused](#card-purchase-review-kinds-migration-0051) until a planner exists              |
-| `card-refund.allocate`, `card-refund.withdraw`                                 | 0051  | no: refused until a planner exists                                                            |
-| `card-installment.link`, `card-installment.unlink`                             | 0051  | no: refused until a planner exists                                                            |
-| `identity.crosswalk.accept`                                                    | 0058  | no: retired (ADR 0030's amendment); the CORE CHECK still admits it, the vocabulary refuses it |
+| Kinds                                                                                              | Since | Plannable                                                                                                 |
+| -------------------------------------------------------------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------- |
+| `identity.assign`, `identity.release-override`                                                     | 0031  | yes                                                                                                       |
+| `relation.accept`, `relation.reject`                                                               | 0031  | yes                                                                                                       |
+| `card-settlement.accept`, `card-settlement.reject`, `card-settlement.withdraw`                     | 0045  | yes ([card settlements](card-settlements.md))                                                             |
+| `card-purchase.exclude`, `card-purchase.restore`                                                   | 0051  | no: [refused](#card-purchase-review-kinds-migration-0051) until a planner exists                          |
+| `card-refund.allocate`, `card-refund.withdraw`                                                     | 0051  | no: refused until a planner exists                                                                        |
+| `card-installment.link`, `card-installment.unlink`                                                 | 0051  | no: refused until a planner exists                                                                        |
+| `identity.crosswalk.accept`                                                                        | 0058  | no: retired (ADR 0030's amendment); the CORE CHECK still admits it, the vocabulary refuses it             |
+| `economic-event.adopt`, `economic-event.correct`, `economic-event.withdraw`, `economic-event.move` | 0071  | no: [vocabulary only](#economic-event-kinds-migration-0071), refused at every step until a planner exists |
 
 ## The four steps
 
@@ -198,6 +199,48 @@ writes nothing. The confirmation screen has labels for the six kinds, and no
 screen offers them. A later change registers one kind's planner and writer;
 none adds a kind or rebuilds these tables again.
 
+## Economic-event kinds (migration 0071)
+
+[ADR 0054](adr/0054-economic-consumption-guard.md#amendment-g2-as-implemented-2026-10-09)
+(G2) adds four kinds for the common consumption guard's human-adopted writers:
+adopt a proposal, correct an adopted revision, withdraw it, and move one
+consumed row from one event to another in one commit. Migration
+`0071_economic_event_command_kinds.sql` rebuilds the four command tables as
+0058 and 0051 did, so the two kind CHECK constraints admit them; every row,
+index and trigger is carried over unchanged, and no object of the guard's
+migration 0070 is dropped or recreated.
+
+The payload contract is `validEconomicEventCommandPayload`
+(`packages/domain/src/economic-event-commands.ts`), which `validPayload`
+calls: exact keys, a `family` from the transaction-family registry, a
+non-blank reason of at most 1000 characters, and no amount (a restated leg
+cites its transaction row):
+
+| Kind                      | Payload                                                                |
+| ------------------------- | ---------------------------------------------------------------------- |
+| `economic-event.adopt`    | `{ family, proposalId, reason }`                                       |
+| `economic-event.correct`  | `{ family, eventId, priorRevision, revision, releasedClaims, reason }` |
+| `economic-event.withdraw` | `{ family, eventId, revision, decisionRevisionId, reason }`            |
+| `economic-event.move`     | `{ family, claim, from, to, reason }`                                  |
+
+`revision` (and each move member's) restates the whole revision: kind, state,
+unknown reason, every leg (`account:` subject, role, basis, cited transaction
+row) and every claim. The ADR's amendment lists what each shape checks.
+
+**What happens today.** Nothing is executable, for any principal.
+`ECONOMIC_EVENT_PLANNERS` (`packages/application/src/operations/targets.ts`)
+is empty, so `plan` and `simulate` answer `400 unsupported_semantics` with the
+kind as ref and write nothing; `approve` re-checks an economic-event plan's
+eligibility, so a plan row of these kinds that reached the table any other
+way is refused the same way for a human and with `approval_required` for an
+agent; and `commit` re-checks the same eligibility before it calls any
+writer, so it answers `unsupported_semantics` and writes nothing even for a
+writer slot that would write (the processor's `economicEventMutation`
+returns null). The
+reserved `economic-event.resolve-identity` is not a kind here: CORE 0070
+refuses it outright, and whether it joins the vocabulary is an open owner
+question in the ADR. No screen offers or labels the four kinds.
+
 ## Tables (migration `0031_operations.sql`)
 
 Additive only. No existing table, view, trigger or row is altered, and a Worker
@@ -212,10 +255,10 @@ and 0035/0036/0037, and applies in any of those orders.
 | `operation_receipts` | `operation_id` (PK), `principal`, `operation_kind`, `payload_digest`, `plan_id`, `status` (`accepted`/`published`/`failed`), `result_json`, `created_at`, `published_at`; `UNIQUE(principal, operation_id)`.                                                                                                                                                          |
 | `decision_outbox`    | `id`, `decision_revision_id`, `principal`, `operation_id`, `target`, `enqueued_at`, `processed_at`, `attempts`, `last_error_code`, `outcome`, plus the lease/backoff columns; `UNIQUE(decision_revision_id, target)`. Migration 0038 adds `progress_code`, `pending_polls`, `blocked_code`, `required_source_revision`, `evidence_ref` and `applied_source_revision`. |
 
-Migrations 0045 and 0051 rebuilt these four tables only to widen the kind
-CHECK constraints of `change_plans` and `operation_receipts`; columns, keys, indexes and
-triggers are those of 0031 and 0038, and every row was copied with explicit
-column lists.
+Migrations 0045, 0051, 0058 and 0071 rebuilt these four tables only to widen
+the kind CHECK constraints of `change_plans` and `operation_receipts`; columns,
+keys, indexes and triggers are those of 0031 and 0038, and every row was
+copied with explicit column lists.
 
 Triggers, following 0018/0029:
 
@@ -560,6 +603,21 @@ already recorded is never undone by a DELETE — an undo is a new revision
   approved commits nothing, with the plan still `approved` and the approval
   unspent. `services/processor/test/change-lifecycle.test.ts` checks the same
   refusal through the processor route and that every kind has a writer slot.
+- `packages/application/test/economic-event-plan.test.ts`: per economic-event
+  kind, planning is refused with `unsupported_semantics` for a human, an agent
+  and an agent carrying the accepting capability, with no row written; a plan
+  row inserted directly is refused at simulate, at approve
+  (`unsupported_semantics` for the human, `approval_required` for agents) and,
+  with an approval inserted beside it, at commit (also when a writer slot
+  would write), every table of the store compared row for row after each
+  refused step. `services/processor/test/change-lifecycle.test.ts` checks the
+  same through the processor's four routes and each kind's writer slot.
+  `packages/domain/test/economic-event-commands.test.ts` checks the payload
+  shapes.
+- `packages/storage-d1/test/economic-command-kinds-migration.test.ts`: 0071
+  on a store migrated through 0070, as the 0051 test below, plus every 0070
+  index, trigger and view unchanged in `sqlite_master` and a fresh store
+  carrying the same 0070 objects.
 - `packages/storage-d1/test/command-vocabulary-migration.test.ts`: 0051 on a
   store migrated through 0050 with history of every earlier kind and status —
   every row preserved, `PRAGMA foreign_key_check` empty after each statement,

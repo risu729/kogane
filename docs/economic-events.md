@@ -358,6 +358,15 @@ with the code as the second ref (`stale_context` for `economic_claim_held`,
 `economic_revision_sealed`, `commit_failed` for the others), and the purchase
 lane counts it as `failed`.
 
+The change lifecycle names four economic-event command kinds
+(`economic-event.adopt`, `correct`, `withdraw`, `move`; migration 0071,
+[ADR 0054's G2 amendment](adr/0054-economic-consumption-guard.md#amendment-g2-as-implemented-2026-10-09)).
+They are vocabulary only: no planner or writer exists, every command of them
+is refused with `unsupported_semantics` for every principal, and no writer
+above uses them ([change lifecycle](change-lifecycle.md#economic-event-kinds-migration-0071)).
+The reserved `economic-event.resolve-identity` stays refused by 0070; whether
+it joins the vocabulary is an open owner question.
+
 Limits:
 
 - Settlements accepted before G1b carry no alias class, so the same bank debit

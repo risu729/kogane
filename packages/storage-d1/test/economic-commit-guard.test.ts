@@ -712,9 +712,11 @@ describe("migration 0070", () => {
   });
 
   test("the command tables can still be rebuilt the 0051 way after 0070", () => {
-    // G2 rebuilds operation_receipts (create a copy, drop, rename). SQLite
-    // re-checks every trigger and view on the rename, so no 0070 object may
-    // read the command tables: ADR 0054, "Rebuilding a table 0070 reads".
+    // 0071 (G2) rebuilt the command tables (create a copy, drop, rename), and a
+    // later rebuild must still work. SQLite re-checks every trigger and view on
+    // the rename, so no 0070 object may read the command tables: ADR 0054,
+    // "Rebuilding a table 0070 reads"; economic-command-kinds-migration.test.ts
+    // compares every 0070 object before and after 0071.
     const db = fullCoreDatabase();
     // (change_plans and approvals are rebuilt as one graph, as 0051 did; their
     // own pre-0070 triggers read each other. No 0070 object reads any of them.)
@@ -1623,8 +1625,9 @@ describe("identity epochs", () => {
     await expect(run(db, correction())).rejects.toThrow("identity_epoch_changed");
     expect(snapshot(db)).toEqual(before);
     expect(liveHolders(db)).toEqual(holders);
-    // The reserved resolution kind is refused outright for every principal
-    // until G2 recreates this trigger with its receipt binding.
+    // The reserved resolution kind is refused outright for every principal.
+    // G2 (0071) left the exemption closed: its receipt binding is an open
+    // owner question (ADR 0054, amendment "G2 as implemented").
     await expect(run(db, correction("economic-event.resolve-identity"))).rejects.toThrow(
       "identity_epoch_changed",
     );
@@ -1643,7 +1646,7 @@ describe("identity epochs", () => {
       ),
     ).rejects.toThrow("identity_epoch_changed");
     expect(snapshot(db)).toEqual(before);
-    // And no receipt of that kind can exist until G2 adds it to the vocabulary.
+    // And no receipt of that kind can exist: 0071 did not add it to the vocabulary.
     expect(() =>
       db.run(
         `INSERT INTO operation_receipts(operation_id,principal,operation_kind,payload_digest,plan_id,status,result_json,created_at)
