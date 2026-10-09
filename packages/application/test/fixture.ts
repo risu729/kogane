@@ -130,7 +130,7 @@ export const BALANCES: BalanceRow[] = [
 ];
 
 /** Visible fetch runs per source in the fixture store, over each source's whole history. */
-export const FETCH_RUN_TOTALS: Readonly<Record<string, number>> = Object.fromEntries(
+const FETCH_RUN_TOTALS: Readonly<Record<string, number>> = Object.fromEntries(
   OVERVIEW.sources.map((source) => [
     source.id,
     OVERVIEW.fetchRuns.filter((run) => run.source_id === source.id).length,
