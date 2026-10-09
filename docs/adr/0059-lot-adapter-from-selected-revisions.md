@@ -1,6 +1,6 @@
 # ADR 0059: A C adapter maps selected revisions to lot inputs, and answers unsupported until a securities writer exists
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-10-09 in #594)
 - Date: 2026-10-09
 - Issue: #556 (ロット・取得原価・処分配分), the C adapter slice; the issue stays open
 - Builds on: [ADR 0051](0051-provisional-lot-engine.md) (the engine; dated note

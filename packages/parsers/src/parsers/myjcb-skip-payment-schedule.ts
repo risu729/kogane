@@ -44,10 +44,15 @@ const ARTIFACT_KEY = /^([a-z0-9][a-z0-9-]{0,63})\/credit-skip-payment-(0[0-9]|1[
  */
 export const myJcbSkipPaymentSchedule: Parser = {
   name: "myjcb-skip-payment-schedule",
+  // 0.1.2: the empty row may also sit inside exactly one `div` that carries
+  // none of the reader's classes, and in both shapes its row and `item-cell`
+  // must be `div`s showing nothing but the label, with no element in the
+  // cell, as observed (ADR 0005 amendment k); every other rule, and every
+  // observation, is 0.1.1's.
   // 0.1.1: the empty row is zero rows only when it is the ledger's one
   // `content` row and shows exactly the observed label; beside other rows it
   // is refused (ADR 0005 amendment f). 0.1.0 is registered but parsed nothing.
-  version: "0.1.1",
+  version: "0.1.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return (

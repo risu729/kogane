@@ -1,6 +1,6 @@
 # ADR 0058: A knowledge selector reads adopted events at a commit-log cut, and a B adapter feeds the reconstruction fold
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-10-09 in #592)
 - Date: 2026-10-09
 - Issue: #550 (指定日状態: 採用イベントから残高・保有数量を再構成する), the selector and B adapter slice
 - Amends: [ADR 0052](0052-reconstructed-state-fold.md) (dated note there)

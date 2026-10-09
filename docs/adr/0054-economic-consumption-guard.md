@@ -487,9 +487,8 @@ re-adoption and W11 wait for G3 and #550.
 
 ## Amendment: G1b as implemented (2026-10-08)
 
-Status: proposed until the G1b pull request merges; accepted upon merge. Both
-card writers join the guard. No migration: 0070 is unchanged and the schema
-ledger does not move.
+Status: accepted (merged 2026-10-09 in #589). Both card writers join the
+guard. No migration: 0070 is unchanged and the schema ledger does not move.
 
 ### What each writer writes
 
@@ -687,9 +686,9 @@ The registry lists SBI Shinsei's card-settlement membership as unsupported.
 
 ## Amendment: G2 as implemented (2026-10-09)
 
-Status: proposed until the G2 pull request merges; accepted upon merge. G2 is
-the command-kind vocabulary only: four kinds, their payload shapes and their
-refusal. No planner, no writer, no own transfer.
+Status: accepted (merged 2026-10-09 in #591). G2 is the command-kind
+vocabulary only: four kinds, their payload shapes and their refusal. No
+planner, no writer, no own transfer.
 
 ### The vocabulary
 
