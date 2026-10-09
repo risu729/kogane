@@ -326,6 +326,45 @@ describe("resolution at the cut", () => {
     ]);
   });
 
+  test("a committed revision, an older build's unlogged successor, then a logged correction: history", async () => {
+    const h = empty();
+    write(h, { eventId: "ev:r", revision: 1, seq: 1 });
+    write(h, { eventId: "ev:r", revision: 2, seq: null });
+    write(h, { eventId: "ev:r", revision: 3, seq: 2 });
+    const selection = await at(h, 2);
+    expect(refs(selection)).toEqual(["ev:r@3:active"]);
+    expect(selection.unlogged).toEqual([]);
+  });
+
+  test("W1: a committed revision pointing at a later logged one that never declared it stays inconsistent", async () => {
+    const h = empty();
+    write(h, { eventId: "ev:x", revision: 1, seq: 1 });
+    write(h, { eventId: "ev:x", revision: 2, seq: 2, supersedes: [] });
+    h.revisions[0]!.supersededBy = "ev:x@2";
+    write(h, { eventId: "ev:x", revision: 3, seq: 3 });
+    for (const cut of [2, 3]) {
+      const selection = await at(h, cut);
+      expect(selection.inconsistent.map((entry) => entry.reasonCode)).toContain(
+        "supersession_undeclared",
+      );
+      expect(selection.revisions.every((row) => row.status === "chain_inconsistent")).toBe(true);
+    }
+  });
+
+  test("W2: an undeclared pointer into a superseded chain is reported, never washed into history", async () => {
+    const h = empty();
+    write(h, { eventId: "ev:pending", revision: 1, seq: 1 });
+    write(h, { eventId: "ev:pending", revision: 2, seq: 2 });
+    write(h, { eventId: "ev:pending", revision: 3, seq: 3 });
+    write(h, { eventId: "ev:posted", revision: 1, seq: 4, amount: "500" });
+    h.revisions.find((row) => row.eventId === "ev:posted")!.supersededBy = "ev:pending@2";
+    const selection = await at(h, 4);
+    expect(refs(selection)).toEqual(["ev:pending@3:active", "ev:posted@1:chain_inconsistent"]);
+    expect(selection.inconsistent).toEqual([
+      { eventId: "ev:posted", reasonCode: "supersession_undeclared" },
+    ]);
+  });
+
   test("a cross-event merge of a pre-log chain places every revision of it", async () => {
     const h = empty();
     write(h, { eventId: "ev:q", revision: 1, seq: null });

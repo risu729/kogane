@@ -117,7 +117,7 @@ function generate(seed: number): Model {
     const op =
       live.length === 0
         ? "adopt"
-        : pick(["adopt", "adopt", "correct", "correct", "withdraw", "merge"] as const);
+        : pick(["adopt", "adopt", "correct", "correct", "withdraw", "merge", "stray"] as const);
     const claims = (): ModelClaim[] => {
       if (next() < 0.4) return [];
       const legacy = next() < 0.3;
@@ -141,7 +141,24 @@ function generate(seed: number): Model {
       sealEpoch: model.currentEpoch,
       pins: next() < 0.2 ? { "account_mapping:sa-1": 1 } : {},
     };
-    if (op === "adopt") {
+    if (op === "stray") {
+      // A store 0070 would refuse: a new revision whose stored pointer names
+      // an existing revision that never declared it (an undeclared
+      // supersession). The selector reports what is stored.
+      eventCount += 1;
+      const target = pick(model.revisions);
+      row = {
+        ...base,
+        eventId: `ev-${eventCount}`,
+        revision: 1,
+        state: "debited",
+        legs: legs(),
+        claims: claims(),
+        commit: null,
+        supersedes: [],
+        supersededBy: ref(target),
+      };
+    } else if (op === "adopt") {
       eventCount += 1;
       row = {
         ...base,
@@ -374,6 +391,9 @@ function replay(model: Model, events: Set<string>, cut: number) {
         return false;
       seen.add(ref(row));
       row = byRef.get(row.supersededBy);
+      // Only a pointer to an unlogged revision is followed: a logged target's
+      // commit would have declared it, so an undeclared one is no history.
+      if (row !== undefined && row.commit !== null) return false;
     }
     return false;
   };
@@ -394,11 +414,17 @@ function replay(model: Model, events: Set<string>, cut: number) {
       }
     const relevant = [...new Set([...inForce, ...unknown])];
     if (relevant.length === 0) continue;
+    // A revision in force whose pointer names a revision committed by the cut
+    // that did not declare it: an undeclared supersession.
+    const undeclared = inForce.some((row) => {
+      const target = row.supersededBy === null ? undefined : byRef.get(row.supersededBy);
+      return target !== undefined && target.commit !== null && target.commit <= cut;
+    });
     const status =
-      unknown.length > 0
-        ? "knowledge_unlogged"
-        : inForce.length > 1
-          ? "chain_inconsistent"
+      undeclared || (unknown.length === 0 && inForce.length > 1)
+        ? "chain_inconsistent"
+        : unknown.length > 0
+          ? "knowledge_unlogged"
           : "active";
     for (const row of relevant) selected.set(ref(row), { row, status });
   }
@@ -503,6 +529,7 @@ function shuffle<T>(list: readonly T[], next: () => number): T[] {
 describe("the knowledge selector against a replay oracle on random stores", () => {
   const drawn = {
     prelogChains: 0,
+    inconsistent: 0,
     betweenInstants: 0,
     unlogged: 0,
     conflicts: 0,
@@ -565,6 +592,8 @@ describe("the knowledge selector against a replay oracle on random stores", () =
         expect(again.ok && again.selection.setVersion).toBe(result.selection.setVersion);
         const expected = replay(model, events, cut);
         if (expected.unlogged.length > 0) drawn.unlogged += 1;
+        if (expected.revisions.some((entry) => entry.endsWith(":chain_inconsistent")))
+          drawn.inconsistent += 1;
         if (expected.conflicts.length > 0) drawn.conflicts += 1;
         if (expected.identity.length > 0) drawn.identity += 1;
         if (expected.revisions.length > 0) drawn.inScopeCuts += 1;
@@ -661,6 +690,7 @@ describe("the knowledge selector against a replay oracle on random stores", () =
     expect(drawn.inScopeCuts).toBeGreaterThan(0);
     expect(drawn.currentState).toBeGreaterThan(0);
     expect(drawn.prelogChains).toBeGreaterThan(0);
+    expect(drawn.inconsistent).toBeGreaterThan(0);
     expect(drawn.betweenInstants).toBeGreaterThan(0);
   });
 });

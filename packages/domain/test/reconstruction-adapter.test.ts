@@ -317,6 +317,45 @@ describe("dispositions carried through", () => {
     expect(cell.gaps).toEqual(expect.arrayContaining(["identity_changed", "alias_conflict"]));
   });
 
+  test("W2 through the fold: an undeclared pointer leaves the cell for review, never an exact figure", async () => {
+    const rows = new Rows()
+      .add({
+        eventId: "ev:pending",
+        seq: 1,
+        times: [posting("2026-03-10")],
+        legs: [{ amount: "10" }],
+      })
+      .add({
+        eventId: "ev:pending",
+        revision: 2,
+        seq: 2,
+        times: [posting("2026-03-10")],
+        legs: [{ amount: "10" }],
+      })
+      .add({
+        eventId: "ev:pending",
+        revision: 3,
+        seq: 3,
+        times: [posting("2026-03-10")],
+        legs: [{ amount: "10" }],
+      })
+      .add({
+        eventId: "ev:posted",
+        seq: 4,
+        times: [posting("2026-03-12")],
+        legs: [{ amount: "500" }],
+      });
+    rows.revisions.find((row) => row.eventId === "ev:posted")!.supersededBy = "ev:pending@2";
+    const selection = await rows.select(4);
+    expect(selection.inconsistent).toEqual([
+      { eventId: "ev:posted", reasonCode: "supersession_undeclared" },
+    ]);
+    const cell = cellOf(await fold(selection, "9490"));
+    expect(cell.needsReview).toBe(true);
+    expect(cell.reconstructed.value.status).not.toBe("exact");
+    expect(cell.applied.refs).not.toContain("ev:posted@1#0");
+  });
+
   test("a kind no fold writer covers, or another writer release, is writer_unsupported", async () => {
     const rows = new Rows()
       .add({

@@ -1157,11 +1157,14 @@ function selectBody(input: SelectorInput): AdoptedSelectionBody {
   }
 
   // 2a. History the log implies: a revision known at the cut (unlogged, or
-  // committed by it) whose stored pointer names a revision superseded at the
-  // cut, or itself history, was replaced before that commit: its pointer was
-  // written when its successor was, before the successor was superseded. So a
-  // pre-log chain of any length ends where a logged correction supersedes its
-  // last revision.
+  // committed by it) whose stored pointer names an UNLOGGED revision that is
+  // superseded at the cut, or itself replaced this way, was replaced before
+  // that commit: its pointer was written when its successor was, before the
+  // successor was superseded. So a pre-log chain of any length ends where a
+  // logged correction supersedes its last revision. A pointer to a logged
+  // revision is never followed: 0070 makes that revision's commit declare
+  // what it supersedes, so an undeclared one is an inconsistency to report
+  // (`supersession_undeclared`), never history.
   const history = new Map(supersededAt);
   for (let grown = true; grown;) {
     grown = false;
@@ -1170,6 +1173,7 @@ function selectBody(input: SelectorInput): AdoptedSelectionBody {
       if (history.has(ref) || row.supersededBy === null) continue;
       // A revision committed after the cut is not known at it.
       if (logState.get(ref)!.kind === "later") continue;
+      if (logState.get(row.supersededBy)?.kind !== "unlogged") continue;
       if (!history.has(row.supersededBy)) continue;
       history.set(ref, row.supersededBy);
       grown = true;
