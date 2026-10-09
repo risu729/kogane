@@ -35,18 +35,10 @@ jobs:
     # whose head lives in another repository.
     if: >-
       github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
-    concurrency:
-      # One production change at a time, shared with rollback.yml. Never
-      # cancellable: a run may be in the middle of applying a migration, and a
-      # later push must wait rather than interrupt it (acceptance G5-13). The
-      # group is held for the whole of the called workflow. Because GitHub keeps
-      # at most one run pending per group, an overtaken run can still start
-      # late; the release ledger is what makes that harmless (G5-12).
-      group: production-deploy
-      cancel-in-progress: false
     permissions:
       contents: read # for checkout
       deployments: write # the release ledger
+      actions: read # immutable same-run release checkpoints
     # `environment: production` is declared by the called workflow: a job that
     # calls a reusable workflow cannot declare one itself.
     uses: ./.github/workflows/_deploy-workers.yml # zizmor: ignore[secrets-inherit,self-repository] -- actionlint 1.7.12 does not support $/ yet.
