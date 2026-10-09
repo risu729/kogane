@@ -169,6 +169,50 @@ describe("the agent API is off until a grant is configured", () => {
     }
   });
 
+  it("an entry body naming a principal, or any unknown key, refuses the whole table", async () => {
+    const body = { intent: "coverage" };
+    const table = (entry: Record<string, unknown>) => ({
+      AGENT_API_GRANTS: JSON.stringify({
+        "agent-principal": entry,
+        "mcp-client:agent-principal": entry,
+        "another-principal": FULL_GRANT,
+      }),
+    });
+    // The documented shape still grants its key, and only its key.
+    const valid = await call("/api/agent/v1/financial.query", {
+      body,
+      environment: table(NARROW_GRANT),
+    });
+    expect(valid.status).toBe(200);
+    expect(
+      ((await valid.json()) as { result: { resolvedQuery: { perimeterRef: string } } }).result
+        .resolvedQuery.perimeterRef,
+    ).toBe("perimeter:sources=other-test;accounts=*");
+    for (const entry of [
+      // A body principal used to override the verified key it is stored under.
+      { ...NARROW_GRANT, principal: "someone-else" },
+      { ...NARROW_GRANT, principal: "agent-principal" },
+      { ...NARROW_GRANT, note: "an unknown key" },
+    ]) {
+      const environment = table(entry);
+      for (const subject of ["agent-principal", "someone-else", "another-principal"]) {
+        const response = await call("/api/agent/v1/financial.query", {
+          body,
+          subject,
+          environment,
+        });
+        expect(response.status, subject).toBe(403);
+        expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
+      }
+      const mcp = await call("/mcp", {
+        body: { jsonrpc: "2.0", id: 1, method: "tools/list" },
+        environment,
+      });
+      expect(mcp.status).toBe(403);
+      expect(await mcp.json()).toMatchObject({ error: "agent_api_not_configured" });
+    }
+  });
+
   it("refuses a principal that has no entry in the table", async () => {
     const response = await call("/api/agent/v1/capabilities", {
       body: {},
