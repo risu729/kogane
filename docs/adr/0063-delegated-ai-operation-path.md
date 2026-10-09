@@ -100,7 +100,11 @@ For how a delegated decision is recorded in `decision_revisions.method`:
 - `manual`, with `actor_id = mcp-client:<sub>` and the audit record's
   `path = mcp`, `principal_kind = delegated`: chosen. `method` says how the
   judgement was reached (a reviewed command, not a rule); who and through which
-  path is said by the actor and the audit record.
+  path is said by the actor and the audit record. The discriminator in the
+  decision log itself is `actor_id`'s `mcp-client:` prefix, which no human
+  actor can carry (`principalFor` and `browserCaller` refuse that namespace,
+  ADR 0047); a reader that presents `method` to the owner shows a decision by
+  such an actor as delegated, not as the owner's own.
 
 For the confirmation of settings and operations writes, which have no plan:
 
@@ -251,7 +255,10 @@ an audit record; R4 is never delegated. A delegated decision is recorded with
   closed reason; its statement that the path "is not an exception to the agent
   invariants" is replaced by item 12.
 - ADR 0047 (#565): the attenuation stands; what an `mcp-client` may do beyond
-  its `AGENT_API_GRANTS` entry is now decided by its delegation. Operations
+  its `AGENT_API_GRANTS` entry is now decided by its delegation. `principalFor`
+  stops being the only gate in front of the command and operations writers:
+  `resolveDelegation` is a second one, which can only ever yield a `delegated`
+  principal with the entry's capabilities, never the operator. Operations
   tools are published on `/mcp` again only to a delegated principal holding the
   capability.
 

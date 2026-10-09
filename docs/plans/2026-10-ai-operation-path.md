@@ -56,8 +56,9 @@ The owner's elaboration, as briefed:
 - The existing audit, decision and commit logs are inventoried and reused; no
   duplicate implementation.
 - The new design gets an Opus/Codex fresh review; the initial implementation is
-  not handed to Cursor. #565's P1/P2 fixes stay mandatory and are in progress
-  separately.
+  not handed to Cursor. #565's P1/P2 fixes (P1: scope before the `LIMIT 501`
+  window; P2: a grant built from the verified key, never from its body; both
+  written out in section 8, S2) stay mandatory and are in progress separately.
 
 ## 1. Facts this plan starts from
 
@@ -88,7 +89,14 @@ these. The web app (`apps/web/src/pages/`) POSTs only from `Reconciliation`,
 maintenance edit, survey decision, lease release). The operations API's six
 routes have no page ("the web UI has no operations view",
 [ops-api](../ops-api.md#collector-execution-adr-0048)); `identity.assign` and
-`identity.release-override` are plannable over HTTP with no page.
+`identity.release-override` are plannable over HTTP with no page. The other ten
+`CHANGE_KINDS` (`card-purchase.*`, `card-refund.*`, `card-installment.*`,
+`economic-event.*`) are vocabulary only: `REVIEW_PLANNERS` and
+`ECONOMIC_EVENT_PLANNERS` (`packages/application/src/operations/targets.ts`)
+register no planner, so planning one is `unsupported_semantics` for every
+principal and no operator can perform it. They have no row in section 5 and no
+delegated capability; a planner that ships for one of them adds its capability
+and risk class in its own pull request, and until then no delegation names it.
 
 **Cloudflare facts, confirmed read-only by the owner on 2026-10-09.**
 
@@ -181,6 +189,10 @@ every delegated operation, as an unreadable grant list does today):
   `delegatedBy` is currently in `OPERATOR_SUBJECTS`: **the owner can delegate
   only to their own MCP identity**; a bare subject, another person's
   `mcp-client:` name or a delegator who is not the operator is invalid;
+- the entry body has exactly the documented keys (`capabilities` optional) and
+  no other: a body naming a `principal`, or any unknown key, is invalid, and the
+  delegated principal is always the verified map key (the lesson of #565's P2,
+  section 8);
 - `role` is one of the closed roles and `capabilities` (optional additions)
   are in the closed delegation vocabulary (3.3); an R3 or R4 operation has no
   name in it;
@@ -191,7 +203,8 @@ every delegated operation, as an unreadable grant list does today):
   it is inert (`delegation_expired`), and in both cases reads continue under
   `AGENT_API_GRANTS` alone;
 - `budget.writesPerDay` is 1–200, counted over the principal's `applied` and
-  `accepted` audit records of the last 24 hours, before execution;
+  `accepted` audit records of the last 24 hours, before execution; a write past
+  it is refused `delegation_budget_exceeded` and changes nothing;
 - at most 8 entries.
 
 The resolver (`resolveDelegation(env, caller)`) answers a
@@ -264,7 +277,11 @@ What was applied stays applied; it is undone by a reverting operation
 ### 3.5 Stages
 
 1. Read-only connection test (#565 hand-off steps 1–10): `summary.read` on one
-   source. No delegation.
+   source. No delegation. The test also confirms, by an equality check that
+   copies no value, that the owner's subject on the MCP application is the
+   subject `OPERATOR_SUBJECTS` names (ADR 0047's premise that Managed OAuth
+   forwards the same identity); the `delegatedBy` rule depends on it, and if it
+   does not hold no entry can be valid (fail closed) until a separate decision.
 2. Read expansion (slice S5), one capability per release.
 3. First delegated writes: the owner's concrete approval names the entry; the
    proposed first one is `maintainer` on one schedule source (R1 maintenance
@@ -446,7 +463,9 @@ tool name without it.
 | W12 | 確認画面 → 確定                                                       | `POST /api/command/v1/commit` → `commit` (one guarded D1 batch)                                                | `kogane.command.commit`                                 | `commands.decide.<family>`                    | R2                                                            | approval + `operationId`; commit guard                    | `plan:<planId>` · simulation counts · receipt `operationId`, decision revision ids, economic `commit_seq`        |
 | W13 | 確認画面 → 反映状況を再確認                                           | `POST /api/command/v1/operation` → receipt read                                                                | `kogane.command.operation.get`                          | `commands.plan`                               | R0                                                            | none                                                      | `operation:<operationId>` · receipt status                                                                       |
 
-### 5.2 Operator actions with no page (HTTP only today)
+### 5.2 Actions with no page (HTTP only today)
+
+H1–H7 are operator routes; H8 is the agents' existing proposal route.
 
 | #   | Operator action                                    | Existing command / API → service                                         | Proposed MCP tool                              | Capability                                    | Risk | Confirmation            | Audit target · diff · refs                                        |
 | --- | -------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------- | --------------------------------------------- | ---- | ----------------------- | ----------------------------------------------------------------- |
@@ -498,12 +517,18 @@ each (`result = "read"`, a row count, no data).
 
 Not exposed on any agent path: `GET /api/ops/v1/health` (the release
 postcheck), `POST /api/ops/v1/schedules/bootstrap` (deployment service token),
-`/api/v2/reports/:id/export`.
+`/api/v2/reports/:id/export`. The Processor's private service-binding routes
+that no App route forwards — `/release/{register,compare,activate,rollback}`,
+`/metadata/reextract`, `/sweep`, `/identity-sweep`, `/identity-revise` (the
+legacy CLI) and `/replay/*` called directly — are not operations a person can
+perform through the App today; they get no tool and stay unreachable from every
+agent path (R4 by placement).
 
 ### 5.4 Count and gaps
 
-41 rows: 13 UI writes (W1–W13), 8 HTTP-only operator actions (H1–H8) and 20
-reads (D1–D20). Operations with **no existing command or service** today:
+41 rows: 13 UI writes (W1–W13), 8 actions with no page (H1–H7 on operator
+routes, H8 the agents' proposal route) and 20 reads (D1–D20). Operations with
+**no existing command or service** today:
 
 1. Audit search and detail (D20): no table, service or route (ADR 0064, S1).
 2. A confirmation step for settings and operations writes (W1–W5, H2, H6):
@@ -541,6 +566,12 @@ reads (D1–D20). Operations with **no existing command or service** today:
 | `publication_events` (0026), `release_activation_events` (0028), `report_events` (0034) | parser publication and activation, report lifecycle            | `actor`, `reason`                                                 | none                                       | yes                                         | no agent route                                                 |
 | `account_connection_reviews`, `ingestion_attempts`, `raw_object_verification_events`    | rule-made reviews, ingest attempts, raw object checks          | verifier version, ingest client id                                | ingest client                              | yes                                         | identity and evidence pages, partly                            |
 | Worker request log (`evidence_request` JSON line)                                       | route label, status, request id, error code                    | none                                                              | route label                                | not durable (Workers Logs retention)        | the Cloudflare dashboard                                       |
+
+The effect tables those logs describe — `entity_relations`,
+`card_settlement_decisions`, `settlement_relations`, `account_mappings` and
+`instrument_mappings`, `economic_event_revisions`, and `reconciliation_proposals`
+(rule and AI proposals, `method` `rule`/`manual`/`ai`) — are referenced by id
+and revision in the same way and never copied.
 
 **Conclusion.** Every log above stays the record of _what_ changed and is
 reused by reference; none is copied. What none of them records, and what the
@@ -642,6 +673,23 @@ have; they call the same builder.
 using the operator's browser session is indistinguishable from a click and is
 recorded as `ui`.
 
+**What "in the writer's batch" requires.** A D1 batch rolls back only when a
+statement raises; a guard that matches no row (`UPDATE … WHERE revision = ?`,
+`INSERT OR IGNORE … SELECT … WHERE …`, as `updateSchedule` and the maintenance
+writers use) leaves a committed batch with no effect. So the `applied` /
+`accepted` statement is a plain `INSERT … SELECT … WHERE` joined to the
+writer's own guard or to the row the effect wrote (the commit batch's
+reservation, the new revision row at `revision + 1`, the released lease), never
+`OR IGNORE` and never unconditional: a no-op guard then leaves no record, and
+the adapter appends the `refused` record with the writer's code afterwards; a
+unique-index violation raises and rolls the effect back. Writers that are not
+one batch today become one in S1: `updateMaintenance` and #564's
+`writeMaintenanceRevision` (the revision `INSERT` and the reference `UPDATE`
+are separate calls), `decideSurveyProposal` (the accepted revision and the
+decision row are separate writes today, and a failed decision row leaves the
+revision standing) and `releaseCollectionLease` (one `UPDATE`). Alarm
+reconciliation after a settings write stays outside the batch, as today.
+
 ### 6.4 Refusals and failures
 
 After authentication, every refusal is recorded with its closed code:
@@ -685,7 +733,17 @@ the schema admits none.
     (`scope:account`) before anything is read, until per-account audit scope
     is proven;
   - `subject` is returned only when it equals the caller's own delegator;
-    otherwise it is `subj_` + the first 16 hex of its SHA-256;
+    otherwise it is `subj_` + the first 16 hex of its SHA-256, and so is the
+    subject inside `principal` (`<sub>`, `mcp-client:<sub>`), or the digest
+    would be undone by the next column; `alarm:` and `lane:` principals are
+    shown as they are;
+  - the scope columns name one source, so a record whose target or read spans
+    more than one source (a whole-store read, a card-settlement or relation
+    decision joining a card and a bank source) is written with both scope
+    columns NULL and is visible only to a `"*"` grant; otherwise a narrower
+    reader would see a row count or a target that includes another source. A
+    refused request stores only a server-resolved source in its scope columns,
+    never the caller's value;
   - the filter is in the SQL `WHERE` before `LIMIT`; pages are 50 records;
     the cursor binds the grant's perimeter and the filters (a cursor from
     another perimeter is `stale_context`); no total over the unfiltered table
@@ -755,18 +813,43 @@ need S3; S5 needs S2 (and S1 for its read records); S7 and S8 need S1.
   text; both unique partial indexes); ledger regenerated and the table
   classified `core-keep`; the `lanes.test.ts` migration pin;
   `REVISION_EXCLUDED_TABLES`; per route, a success record in the same batch as
-  the effect (a failing guard leaves neither), refusal and replay records, no
-  echo of a refused value (G3-08); a deep scan of the stored records after
-  seeding provider text with a token-shaped string and an amount.
+  the effect (a failing guard leaves neither, and a guard that matches no row
+  leaves no `applied` record, only the adapter's `refused` one), refusal and
+  replay records, no echo of a refused value (G3-08); a deep scan of the stored
+  records after seeding provider text with a token-shaped string and an amount.
 - Review gate: fresh Opus or Codex reviewer; the review checks the batch
   atomicity on every wired writer and the never-recorded list.
 
 **S2 — #565's P1/P2 fixes, then #565 merges** (in progress).
 
-- What: P1 scopes `OVERVIEW_FETCH_RUNS_SQL`'s window to the grant before its
-  `LIMIT`; P2 as recorded on #565.
+- What, on #565's branch (both are still open at its head `9c25877`):
+  - **P1 — scope before the window.** The `coverage` intent counts
+    `collectionRunCount` from `OVERVIEW_FETCH_RUNS_SQL`
+    (`packages/read-model/src/sql.ts`): the store's newest 501 fetch runs
+    (`ORDER BY id DESC LIMIT 501`, `PAGE_LIMIT`), filtered by the grant only
+    afterwards, in TypeScript (`packages/application/src/query/execute.ts`).
+    Runs of a denied source therefore push in-scope runs out of the window, so
+    an in-scope count, and whether the answer reads as complete, change with
+    activity the caller may not see. Fix: the scope predicate goes into the
+    SQL `WHERE`, per granted source, before the `LIMIT` (section 7, rules 1 and
+    2).
+  - **P2 — the grant's principal is the verified key.** `parseGrants`
+    (`packages/application/src/grants.ts`, line 162) builds each grant as
+    `{ principal, ...body }`, so a configuration entry whose body carries its
+    own `principal` key overrides the verified map key: the grant then names a
+    principal other than the one it was looked up by (the server-derived actor
+    contract is broken), and the malformed entry is accepted, because
+    `validGrant` checks the merged object, which has exactly the expected
+    keys. Fix, fail closed: an entry body with a `principal` key or any key
+    outside `scopes`, `capabilities` and `budget` makes the table unreadable
+    (empty, as for any invalid entry), and the grant is built from the verified
+    key alone. `MCP_DELEGATIONS` follows the same rule (section 3.2).
 - ADR: 0047 (#565). Migration: none.
-- Tests: #565's matrix 1–9 plus section 7's differential test on `coverage`.
+- Tests: #565's matrix 1–9 plus section 7's differential test on `coverage`
+  (at least 600 denied-source runs newer than the in-scope ones: the scoped
+  count and completeness are identical before and after); for P2, an entry
+  body naming another principal, naming its own key, and carrying an unknown
+  key — each leaves the table empty.
 - Review gate: #565's own independent review.
 
 **S3 — delegation** (after S1 and S2).
@@ -782,7 +865,10 @@ need S3; S5 needs S2 (and S1 for its read records); S7 and S8 need S1.
 - Review gate: fresh Opus or Codex reviewer; the review re-runs #565's matrix
   1–9 to show the attenuation still holds.
 
-**S4 — #564 re-shaped** (after S3; a rebase can be prepared now).
+**S4 — #564 re-shaped** (after S3; a rebase can be prepared now). Once the
+AGENTS.md rule of section 9 is in force, #564 in its current form — an
+`AGENT_API_GRANTS` capability that changes a setting without a delegation —
+contradicts it, so #564 lands as this slice, not before it.
 
 - What: section 4.6 — the capability moved to the delegation, closed
   `MAINTENANCE_CHANGE_REASONS`, the direct envelope with its R2 escape, audit.
@@ -853,7 +939,9 @@ need S3; S5 needs S2 (and S1 for its read records); S7 and S8 need S1.
 5. Out-of-scope and nonexistent targets get byte-identical refusals with no
    echo.
 6. R1: stale expected revision writes nothing; same key and payload is
-   `replayed`; same key, other payload is `idempotency_conflict`.
+   `replayed`; same key, other payload is `idempotency_conflict`; the write
+   after `budget.writesPerDay` applied records is `delegation_budget_exceeded`
+   and writes nothing but its refusal record.
 7. R2: confirm without prepare, with another principal's or delegation's
    prepare, with a changed payload, after expiry, twice, and two raced confirms
    — each refused, the effect applied at most once; a target moved between

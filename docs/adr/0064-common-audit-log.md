@@ -111,8 +111,14 @@ patterns, economic members or claims, lane tick counts or page contents.
 `executeOperation` (ADR 0063, `packages/application/src/operation-path/`) is
 the single entry every adapter calls — the UI's operator routes, the HTTP
 agent routes and the MCP dispatcher. The writer appends the `applied` or
-`accepted` record as the **last statement of its own D1 batch**, so the record
-exists exactly when the effect does; a failing guard leaves neither. Writers in
+`accepted` record as the **last statement of its own D1 batch**, as a plain
+`INSERT … SELECT … WHERE` joined to its own guard or to the row its effect
+wrote (never `OR IGNORE`, never unconditional), so the record exists exactly
+when the effect does: a guard that raises rolls back both, a guard that matches
+no row leaves neither (the adapter then records the refusal), and a
+unique-index violation on the record rolls the effect back. Writers that are
+not one batch today (the maintenance writers, the survey acceptance, lease
+release) become one in the implementation slice (plan, section 6.3). Writers in
 the Processor receive the envelope (correlation id, path, delegation ref) over
 the private `PIPELINE` binding in closed headers validated by the same schema
 and call the same builder. Refusals and failures are separate inserts by the
@@ -146,10 +152,12 @@ page). An agent reads it with `audit.read` in `AGENT_API_GRANTS`, through
 `/api/agent/v1` routes: a record is visible when its scope source is in the
 grant (`scopes.sources`, or `scopes.scheduleSources` for schedule sources); a
 record with no scope only to a `"*"` grant; a grant listed on the account axis
-is refused before any read; `subject` is shown only when it is the caller's own
-delegator, otherwise as `subj_` + 16 hex of its SHA-256; the scope is in the
-SQL `WHERE` before any `LIMIT`; no unfiltered total is returned; the cursor
-binds the perimeter and the filters.
+is refused before any read; `subject`, and the subject inside `principal`, is
+shown only when it is the caller's own delegator, otherwise as `subj_` + 16 hex
+of its SHA-256; a record whose target or read spans more than one source has no
+scope and is visible only to a `"*"` grant; a refusal's scope is only a
+server-resolved source; the scope is in the SQL `WHERE` before any `LIMIT`; no
+unfiltered total is returned; the cursor binds the perimeter and the filters.
 
 **Retention.** Kept, append-only, without pruning. A later pruning rule needs
 its own ADR, as an exception to an append-only table.
