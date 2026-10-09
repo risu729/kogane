@@ -183,7 +183,7 @@ proposals, imports, replays, projection rebuilds, survey rejections and
 maintenance revisions inside the direct envelope are R1; job edits, survey
 acceptances, card-settlement, relation and identity decisions, collection
 requests and session refreshes are R2, the target class the owner's direction
-sets (「基本的に人間ができることはすべてAIができてほしい、AI経由がメイン」); the
+sets (「基本的に人間ができることはすべてAIができてほしい。AI経由で使うのがメインになる予定なので」); the
 plan's question 1 asks only at which stage financial adoption, provider
 contact and long deferrals become delegable at R2, and until the owner answers
 they stay R3 (no delegation entry is proposed with those capabilities;

@@ -317,7 +317,10 @@ What was applied stays applied; it is undone by a reverting operation
    proposed first one is `maintainer` on one schedule source (R1 maintenance
    inside the direct envelope).
 4. Further capabilities, one per release, each after the audit of the previous
-   one has been read.
+   one has been read. No entry with a financial-adoption (`commands.decide.*`)
+   or provider-contact (`operations.collection.request`,
+   `operations.session.refresh`) capability is proposed before the owner
+   answers question 1 (section 10).
 
 ## 4. Per-risk confirmation policy
 
@@ -473,9 +476,10 @@ its bounds, and changes in four ways:
    revision outside the 7-day bound, and only that condition, is **R3 until
    the owner answers question 1** (section 10): the tool refuses it
    (`maintenance_deferral_too_long`, as #564 does today) and the operator
-   makes it in the UI. If the owner then allows it, it becomes R2
-   (prepare/confirm) up to a hard ceiling of a **31-day** joined deferral; a
-   longer one stays the operator's in every case. A spent budget, an
+   makes it in the UI. Its target class is R2 (prepare/confirm) up to a hard
+   ceiling of a **31-day** joined deferral, which applies once the owner has
+   answered question 1 (it decides only the stage); a longer one stays the
+   operator's in every case. A spent budget, an
    unregistered host or an out-of-scope source is refused with its code;
    nothing escalates them.
 4. **Audited.** Each call writes one audit record; an applied revision's
@@ -1129,7 +1133,7 @@ policy, grant, `MCP_DELEGATIONS` entry, session length, authentication or
 production change.
 
 1. **The stage at which the R2 target applies.** Following your direction
-   (「基本的に人間ができることはすべてAIができてほしい、AI経由がメイン」),
+   (「基本的に人間ができることはすべてAIができてほしい。AI経由で使うのがメインになる予定なので」),
    R2 — the AI confirms its own prepared operation, bound by digest, revision
    and idempotency key — is the stated target class for financial adoption
    (card-settlement decisions, link and ownership decisions, identity
