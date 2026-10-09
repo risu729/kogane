@@ -17,7 +17,9 @@
 //   2. at every cut, and at instants between and equal to commits, the
 //      selection equals the oracle's replay: commits applied in sequence,
 //      members becoming live and their `supersedes` dying, unlogged revisions
-//      unknown unless a visible commit superseded them.
+//      unknown unless a visible commit superseded them;
+//   3. W11 (ADR 0054): at the last commit, an active revision is the stored
+//      live one and its claims are its event's rows of live_consumption_claims.
 // Every id and amount is invented.
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
@@ -473,7 +475,14 @@ function shuffle<T>(list: readonly T[], next: () => number): T[] {
 }
 
 describe("the knowledge selector against a replay oracle on random stores", () => {
-  const drawn = { unlogged: 0, conflicts: 0, merges: 0, identity: 0, inScopeCuts: 0 };
+  const drawn = {
+    unlogged: 0,
+    conflicts: 0,
+    merges: 0,
+    identity: 0,
+    inScopeCuts: 0,
+    currentState: 0,
+  };
   for (const seed of SEEDS)
     test(`seed ${seed}`, async () => {
       const model = generate(seed);
@@ -532,6 +541,39 @@ describe("the knowledge selector against a replay oracle on random stores", () =
         if (expected.identity.length > 0) drawn.identity += 1;
         if (expected.revisions.length > 0) drawn.inScopeCuts += 1;
       }
+      // W11 (ADR 0054): at the log's last commit, what the selector resolved
+      // from history is the current state: an active revision is the live
+      // one, and its claims are exactly the live holders of its event.
+      if (model.commits.length > 0) {
+        const lastCut = await resolveSelectorCut(sql, meta, {
+          coreEpoch: EPOCH,
+          commitSeq: model.commits.length,
+        });
+        const last = await selectAdopted(selectorInput(meta, lastCut, SCOPE, rows));
+        if (!last.ok) throw new Error(last.error.code);
+        for (const row of last.selection.revisions.filter((r) => r.status === "active")) {
+          const stored = db
+            .query(
+              "SELECT superseded_by AS s FROM economic_event_revisions WHERE event_id=? AND revision=?",
+            )
+            .get(row.eventId, row.revision) as { s: string | null };
+          expect(stored.s).toBeNull();
+          const live = (
+            db
+              .query(
+                "SELECT book,consumption_key AS k FROM live_consumption_claims WHERE event_id=?",
+              )
+              .all(row.eventId) as {
+              book: string;
+              k: string;
+            }[]
+          )
+            .map((claim) => `${claim.book}|${claim.k}`)
+            .sort();
+          expect(row.claims.map((claim) => `${claim.book}|${claim.key}`).sort()).toEqual(live);
+          drawn.currentState += 1;
+        }
+      }
       if (
         model.revisions.some((row) => row.supersedes.some((prior) => prior.eventId !== row.eventId))
       )
@@ -559,5 +601,6 @@ describe("the knowledge selector against a replay oracle on random stores", () =
     expect(drawn.merges).toBeGreaterThan(0);
     expect(drawn.identity).toBeGreaterThan(0);
     expect(drawn.inScopeCuts).toBeGreaterThan(0);
+    expect(drawn.currentState).toBeGreaterThan(0);
   });
 });
