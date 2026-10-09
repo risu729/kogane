@@ -141,7 +141,9 @@ test("preview aborts at the next read checkpoint and cancels the reader", async 
   let reads = 0;
   let abortedWhenReadStarted = true;
   const originalRead = ReadableStreamDefaultReader.prototype.read;
-  ReadableStreamDefaultReader.prototype.read = function (this: ReadableStreamDefaultReader<Uint8Array>) {
+  ReadableStreamDefaultReader.prototype.read = function (
+    this: ReadableStreamDefaultReader<Uint8Array>,
+  ) {
     reads += 1;
     if (reads === 1) abortedWhenReadStarted = abort.signal.aborted;
     return originalRead.call(this);
@@ -208,7 +210,9 @@ test("preview reports the abort reason when a later read fails", async () => {
   let reads = 0;
   let secondReadRejection: unknown;
   const originalRead = ReadableStreamDefaultReader.prototype.read;
-  ReadableStreamDefaultReader.prototype.read = function (this: ReadableStreamDefaultReader<Uint8Array>) {
+  ReadableStreamDefaultReader.prototype.read = function (
+    this: ReadableStreamDefaultReader<Uint8Array>,
+  ) {
     reads += 1;
     const pending = originalRead.call(this);
     const index = reads;
