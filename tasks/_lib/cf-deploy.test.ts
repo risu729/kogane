@@ -191,7 +191,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(cf?.body).toContain(
         `&& contains(fromJson(steps.select.outputs.cf-selected), '${target.name}')`,
       );
-      expect(cf?.body).toContain("@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1");
+      expect(cf?.body).toContain("@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1");
       expect(cf?.body).toContain(`worker: ${target.worker}`);
       expect(cf?.body).toContain(
         `deploy-triggers: '${["processor", "prestia-bank-worker"].includes(target.name) ? "true" : "false"}'`,
