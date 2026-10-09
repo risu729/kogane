@@ -28,6 +28,18 @@ export const DATED_STATE_EXCLUDED_PARSERS = [
   "sony-bank-gross-balance",
 ] as const;
 
+/**
+ * The container parsers in the perimeter whose snapshots hold positions. A
+ * valuation on the date reads a container of these without a snapshot as
+ * holdings it cannot include. dated-state.test.ts fails when a parser that
+ * emits a position observation is missing here, or one here emits none.
+ */
+export const DATED_POSITION_CONTAINER_PARSERS = [
+  "sbi-domestic-cash-positions",
+  "sbi-foreign-cash-positions",
+  "sbi-vc-position-summary",
+] as const;
+
 /** More rows than this in one read is refused, never cut. */
 export const DATED_STATE_ROW_BOUND = 5000;
 

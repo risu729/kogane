@@ -3,9 +3,12 @@
 // stood. Every account, code and amount is invented.
 import type { SQLQueryBindings } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { reportedStateCutoff } from "../../domain/src/reported-state";
 import {
   DATED_BALANCES_SQL,
+  DATED_POSITION_CONTAINER_PARSERS,
   DATED_POSITION_QUANTITIES_SQL,
   DATED_POSITIONS_SQL,
   DATED_SNAPSHOTS_SQL,
@@ -483,5 +486,23 @@ describe("the quantities of dated positions", () => {
       ),
     ).toBe(true);
     expect(plan.filter((line) => /^SCAN (po|d)\b/u.test(line))).toEqual([]);
+  });
+});
+
+describe("which containers hold positions", () => {
+  test("exactly the parsers that emit a position observation", () => {
+    const dir = join(import.meta.dir, "../../parsers/src/parsers");
+    const emitting: string[] = [];
+    let named = 0;
+    for (const file of readdirSync(dir).filter((entry) => entry.endsWith(".ts"))) {
+      const text = readFileSync(join(dir, file), "utf8");
+      const name = /: Parser = \{\s*name: "([^"]+)"/u.exec(text)?.[1];
+      if (name !== undefined) named += 1;
+      if (!/kind: "position"/u.test(text)) continue;
+      if (name === undefined) throw new Error(`${file} emits positions but names no parser`);
+      emitting.push(name);
+    }
+    expect(named).toBeGreaterThan(20);
+    expect(emitting.sort()).toEqual([...DATED_POSITION_CONTAINER_PARSERS].sort());
   });
 });

@@ -4,24 +4,33 @@
 // and no default policy. A null policy is the gate `costBasis()` has: the
 // answer is `needs-policy`, never a value under an assumed one.
 //
-// Each holding is decided in the valuation order of addendum 09 §3 and ends
-// in exactly one closed outcome:
+// Each holding is decided in the valuation order of addendum 09 §3 with one
+// exception: the claim-adoption step is not applied (ADR 0019 applies no
+// adoption across sources; see the ADR 0056 amendment), so a holding two
+// sources report is valued once per listing, and only the total is withheld.
+// Each holding ends in exactly one closed outcome:
 //
 //   1. the reported state does not resolve its instrument → `instrument_unresolved`;
-//   2. its quantity is not an exact decimal                → `quantity_unknown`;
-//   3. its price selection was made under another policy, or (same-snapshot)
+//   2. its snapshot is `stale` under the reported state's own freshness policy
+//      (`dated-state-freshness-v1`): its quantity is not known on the date
+//                                                          → `snapshot_stale`;
+//   3. its quantity is not an exact decimal                → `quantity_unknown`;
+//   4. its price selection was made under another policy, or (same-snapshot)
 //      from another snapshot                               → `policy_mismatch`;
-//   4. no price is selected (missing, stale, disagreeing …) → `unpriced`, with
+//   5. no price is selected (missing, stale, disagreeing …) → `unpriced`, with
 //      the selection's refusal code; a stale price is never used;
-//   5. the value cannot be stated in the base unit         → `unconverted`, with
+//   6. the value cannot be stated in the base unit         → `unconverted`, with
 //      the FX refusal code; nothing is converted 1:1;
-//   6. otherwise                                           → `valued`, exactly,
+//   7. otherwise                                           → `valued`, exactly,
 //      in the price's unit and in the base unit, with both legs.
 //
 // A total is stated only when every holding is valued and all of them come
 // from one source; otherwise it is absent with its reason and the counts by
-// outcome (INV05, INV06: adoption across sources is not applied, ADR 0019). Amounts are added
-// with `sumQuantities` (INV03). There is no gain, no cost basis and no tax
+// outcome (INV05; INV06, since adoption across sources is not applied). When
+// a position container of the perimeter has no snapshot on the date, the
+// total is labelled `partial-verified-scope` with the containers it lacks,
+// never `exact` (§2: a partial result is never a whole total). Amounts are
+// added with `sumQuantities` (INV03). There is no gain, no cost basis and no tax
 // here, and a provider's own valuation of a holding is never its value.
 import type { RoundingInputs } from "./calculation.ts";
 import { canonicalDigest } from "./context.ts";
@@ -47,7 +56,7 @@ import {
   type SelectionManifest,
 } from "./market-data.ts";
 import { valueAtPrice } from "./metrics.ts";
-import type { IdentityStatus } from "./reported-state.ts";
+import type { Freshness as SnapshotFreshness, IdentityStatus } from "./reported-state.ts";
 import { sumQuantities, type Quantity } from "./values.ts";
 
 export const VALUATION_ON_DATE_SCHEMA = "valuation-on-date-v1";
@@ -60,6 +69,7 @@ export const HOLDING_VALUE_OUTCOMES = [
   "unpriced",
   "unconverted",
   "quantity_unknown",
+  "snapshot_stale",
   "instrument_unresolved",
   "policy_mismatch",
 ] as const;
@@ -112,6 +122,9 @@ export interface HoldingOnDate {
   sourceId: string;
   /** `artifact:<id>`: the snapshot the position was reported in. */
   snapshotRef: string;
+  /** The snapshot's freshness on the date under `dated-state-freshness-v1`, and its age in days. */
+  snapshotFreshness: SnapshotFreshness;
+  snapshotAgeDays: number;
   /** The parse run of that snapshot, which a same-snapshot price must come from. */
   parseRunId: number;
   /** The provider-scoped reference prices are keyed by (`instrument:<source>:<market>:<code>`). */
@@ -141,6 +154,17 @@ export interface ValuationOnDateInput {
     cutoff: string;
     filters: { source: string | null; account: string | null };
     quantityPolicy: string;
+    /** The reported state's own context id, so a different dated answer is a different context. */
+    contextId: string;
+    /**
+     * Containers of the perimeter that report positions and have no snapshot
+     * on the date: holdings the total cannot include.
+     */
+    positionContainersWithoutSnapshot: readonly {
+      sourceId: string;
+      parserName: string;
+      dataset: string;
+    }[];
   };
   holdings: readonly HoldingOnDate[];
   prices: readonly HoldingPriceSelection[];
@@ -187,11 +211,22 @@ export type HoldingValueOnDate = HoldingBase &
       }
     | { outcome: "quantity_unknown"; reason: string }
     | { outcome: "instrument_unresolved"; status: IdentityStatus }
+    | { outcome: "snapshot_stale"; ageDays: number }
     | { outcome: "policy_mismatch"; reason: ValuationPolicyMismatch }
   );
 
 export type ValuationTotal =
   | { status: "exact"; value: Quantity }
+  /**
+   * Every listed holding is valued, but the perimeter has position containers
+   * without a snapshot: the sum of a verified part, never the whole and not a
+   * lower bound of it (§2).
+   */
+  | {
+      status: "partial-verified-scope";
+      value: Quantity;
+      positionContainersWithoutSnapshot: number;
+    }
   | { status: "absent"; reason: TotalAbsenceReason };
 
 export interface ValuationOnDateManifest {
@@ -258,14 +293,19 @@ function instrumentResolved(holding: HoldingOnDate): boolean {
 /**
  * The price a holding needs selected under `policy`: its key and, under a
  * same-snapshot scope, its own parse run. Null when the holding ends before a
- * price is looked for (unresolved instrument, unknown quantity, no quote
+ * price is looked for (unresolved instrument, stale snapshot, unknown quantity, no quote
  * unit), so a caller selects exactly what the valuation will read.
  */
 export function holdingPriceWant(
   holding: HoldingOnDate,
   policy: PriceSelectionPolicy,
 ): { key: PriceKey; snapshotParseRunId: number | null } | null {
-  if (!instrumentResolved(holding) || holding.quantity.value.status !== "exact") return null;
+  if (
+    !instrumentResolved(holding) ||
+    holding.snapshotFreshness === "stale" ||
+    holding.quantity.value.status !== "exact"
+  )
+    return null;
   if (holding.quoteUnit === null || !isCurrencyCode(holding.quoteUnit)) return null;
   return {
     key: {
@@ -324,6 +364,8 @@ function valueOne(
   // 1. Identity, 2. quantity: decided before a price is looked for.
   if (!instrumentResolved(holding))
     return { ...base, outcome: "instrument_unresolved", status: holding.instrument.status };
+  if (holding.snapshotFreshness === "stale")
+    return { ...base, outcome: "snapshot_stale", ageDays: holding.snapshotAgeDays };
   if (holding.quantity.value.status !== "exact")
     return {
       ...base,
@@ -433,6 +475,8 @@ function reasonOf(holding: HoldingValueOnDate): string | null {
       return null;
     case "instrument_unresolved":
       return holding.status;
+    case "snapshot_stale":
+      return "stale";
     default:
       return holding.reason;
   }
@@ -497,7 +541,15 @@ export async function valueHoldingsOnDate(input: ValuationOnDateInput): Promise<
       ),
     );
     if (!sum.ok) throw new RangeError("total_not_exact");
-    total = { status: "exact", value: sum.quantity };
+    const lacking = input.reportedState.positionContainersWithoutSnapshot.length;
+    total =
+      lacking === 0
+        ? { status: "exact", value: sum.quantity }
+        : {
+            status: "partial-verified-scope",
+            value: sum.quantity,
+            positionContainersWithoutSnapshot: lacking,
+          };
   }
 
   const selection = await selectionManifest({
@@ -537,6 +589,13 @@ export async function valueHoldingsOnDate(input: ValuationOnDateInput): Promise<
       cutoff: input.reportedState.cutoff,
       filters: { ...input.reportedState.filters },
       quantityPolicy: input.reportedState.quantityPolicy,
+      contextId: input.reportedState.contextId,
+      positionContainersWithoutSnapshot: byText(
+        input.reportedState.positionContainersWithoutSnapshot.map((entry) => [
+          JSON.stringify([entry.sourceId, entry.parserName, entry.dataset]),
+          { sourceId: entry.sourceId, parserName: entry.parserName, dataset: entry.dataset },
+        ]),
+      ),
     },
     snapshots: byText(snapshots),
     holdings: byText(

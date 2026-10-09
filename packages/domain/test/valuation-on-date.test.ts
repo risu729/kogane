@@ -61,6 +61,8 @@ const REPORTED: ValuationOnDateInput["reportedState"] = {
   cutoff: "2026-09-10T15:00:00.000Z",
   filters: { source: null, account: null },
   quantityPolicy: "decimal-v1",
+  contextId: "0".repeat(64),
+  positionContainersWithoutSnapshot: [],
 };
 
 const ALPHA = "instrument:test-broker:-:ALPHA";
@@ -75,11 +77,15 @@ function holding(options: {
   status?: IdentityStatus;
   instrumentId?: string | null;
   sourceId?: string;
+  snapshotFreshness?: HoldingOnDate["snapshotFreshness"];
+  snapshotAgeDays?: number;
 }): HoldingOnDate {
   return {
     ref: options.ref,
     sourceId: options.sourceId ?? "test-broker",
     snapshotRef: `artifact:${options.parseRunId ?? 1}`,
+    snapshotFreshness: options.snapshotFreshness ?? "same-day",
+    snapshotAgeDays: options.snapshotAgeDays ?? 0,
     parseRunId: options.parseRunId ?? 1,
     instrumentRef: options.instrumentRef,
     instrument: {
@@ -531,6 +537,69 @@ describe("totals", () => {
     expect(result.total).toEqual({ status: "absent", reason: "adoption_not_applied" });
   });
 
+  test("a holding of a stale snapshot is snapshot_stale: its quantity is not known on the date", async () => {
+    const holdings = [
+      holding({ ref: "position:1", instrumentRef: BETA, quantity: "100" }),
+      holding({
+        ref: "position:2",
+        instrumentRef: BETA,
+        quantity: "100",
+        parseRunId: 2,
+        snapshotFreshness: "stale",
+        snapshotAgeDays: 40,
+      }),
+      holding({
+        ref: "position:3",
+        instrumentRef: BETA,
+        quantity: "1",
+        parseRunId: 3,
+        snapshotFreshness: "recent",
+        snapshotAgeDays: 3,
+      }),
+    ];
+    const latest = { ...PRICE, candidateScope: "latest-in-window" as const };
+    const via = input(holdings, [BETA_PRICE()]);
+    const result = computed(
+      await valueHoldingsOnDate({
+        ...via,
+        policy: { ...POLICY, price: latest },
+        prices: priceSelections(holdings, [BETA_PRICE()], latest),
+      }),
+    );
+    expect(result.holdings.map((entry) => entry.outcome)).toEqual([
+      "valued",
+      "snapshot_stale",
+      "valued",
+    ]);
+    expect(result.holdings[1]).toMatchObject({ snapshotRef: "artifact:2", ageDays: 40 });
+    expect(result.total).toEqual({ status: "absent", reason: "holding_not_valued" });
+    expect(result.manifest.holdings[1]).toMatchObject({
+      outcome: "snapshot_stale",
+      reason: "stale",
+    });
+    // The stale holding selects no price.
+    expect(holdingPriceWant(holdings[1]!, latest)).toBeNull();
+  });
+
+  test("a position container without a snapshot makes the total a partial verified scope, never exact", async () => {
+    const result = computed(
+      await valueHoldingsOnDate({
+        ...input(TWO(), [ALPHA_PRICE(), BETA_PRICE(), USD_MID()]),
+        reportedState: {
+          ...REPORTED,
+          positionContainersWithoutSnapshot: [
+            { sourceId: "test-broker", parserName: "test-positions", dataset: "positions" },
+          ],
+        },
+      }),
+    );
+    expect(result.total.status).toBe("partial-verified-scope");
+    if (result.total.status !== "partial-verified-scope") throw new Error(result.total.status);
+    expect(quantityText(result.total.value)).toBe("379378.5");
+    expect(result.total.positionContainersWithoutSnapshot).toBe(1);
+    expect(result.manifest.reportedState.positionContainersWithoutSnapshot).toHaveLength(1);
+  });
+
   test("no holdings is no total, not zero", async () => {
     const result = computed(await valueHoldingsOnDate(input([], [])));
     expect(result.total).toEqual({ status: "absent", reason: "no_holdings" });
@@ -664,6 +733,19 @@ describe("the manifest is the context", () => {
     const text = JSON.stringify(first.manifest);
     for (const amount of ["130.70", "13070", "146.25", "14625", "229378", "1500"])
       expect(text).not.toContain(amount);
+  });
+
+  test("a different reported-state context is a different valuation context", async () => {
+    const candidates = [ALPHA_PRICE(), BETA_PRICE(), USD_MID()];
+    const first = computed(await valueHoldingsOnDate(input(TWO(), candidates)));
+    const other = computed(
+      await valueHoldingsOnDate({
+        ...input(TWO(), candidates),
+        reportedState: { ...REPORTED, contextId: "1".repeat(64) },
+      }),
+    );
+    expect(other.contextId).not.toBe(first.contextId);
+    expect(other.manifest.reportedState.contextId).toBe("1".repeat(64));
   });
 
   test("a corrected price is a new context; a changed policy too", async () => {
