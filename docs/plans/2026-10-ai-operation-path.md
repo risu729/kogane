@@ -1,6 +1,7 @@
 # Plan: AI as a delegated operation path, with a common audit log
 
-- Status: **proposed**. Nothing in this plan is implemented. The decisions it
+- Status: **proposed**. Slice S1 (section 8) is implemented
+  ([audit log](../audit-log.md)); no other slice is. The decisions it
   rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and
   [ADR 0064](../adr/0064-common-audit-log.md) (common append-only audit log),

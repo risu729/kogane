@@ -203,13 +203,19 @@ function overfull(db: D1Database): D1Database {
   });
 }
 
-/** The store with every statement the Worker prepares recorded, so "reads nothing" is checkable. */
+/**
+ * The store with every statement the Worker prepares recorded, so "reads
+ * nothing" is checkable. The call's own audit record (ADR 0064), appended
+ * after the answer, is the one write every agent call makes; it is not a read
+ * of the store and is left out here (test/audit.test.ts covers it).
+ */
+const AUDIT_WRITE = /audit_records|audit_overflow_counters/u;
 function recording(db: D1Database, statements: string[]): D1Database {
   return new Proxy(db, {
     get(target, property) {
       if (property === "prepare")
         return (sql: string) => {
-          statements.push(sql);
+          if (!AUDIT_WRITE.test(sql)) statements.push(sql);
           return target.prepare(sql);
         };
       const value = Reflect.get(target, property) as unknown;
@@ -279,13 +285,17 @@ async function mcp(message: Record<string, unknown>, options: CallOptions = {}) 
   return (await response.json()) as Record<string, any>;
 }
 
-/** Every table's row count and the CORE source revision. */
+/**
+ * Every table's row count and the CORE source revision, but for the audit
+ * tables: each call's own audit record is the one write an agent call makes
+ * (ADR 0064), and it never moves the source revision.
+ */
 async function tables() {
   const names = await env.DB.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name",
   ).all<{ name: string }>();
   const counts: Record<string, number> = {};
-  for (const { name } of names.results)
+  for (const { name } of names.results.filter(({ name }) => !AUDIT_WRITE.test(name)))
     counts[name] = (await env.DB.prepare(`SELECT count(*) AS n FROM "${name}"`).first<number>(
       "n",
     ))!;

@@ -11,6 +11,8 @@
 // wire contract cannot leave the published schema behind. They are closed
 // objects of bounded identifier patterns: no URL, no host, no bucket key, no
 // table name, no ordering, no SQL (G3-13).
+import type { OperationCall } from "../../../packages/application/src/index";
+
 import { z } from "zod";
 import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
@@ -124,9 +126,11 @@ export async function callOpsTool(
   env: Env,
   /** The subject `authenticate` proved; never a body or header claim. */
   subject: string,
+  /** The tool call's audit record (ADR 0064); an accepted request's joins its batch. */
+  audit?: OperationCall,
 ): Promise<ToolResult> {
   try {
-    const context = opsContext(env, subject);
+    const context = opsContext(env, subject, audit);
     const argument: unknown = body ?? {};
     switch (name) {
       case "kogane.ops.collection.request":

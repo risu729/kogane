@@ -134,6 +134,15 @@ login or render with JavaScript cannot be read this way.
 - `POST /api/ops/v1/schedules/proposals/:id`: accept or reject one undecided
   re-survey proposal (`{"decision":"accept"}` or `"reject"`).
 
+Every write is recorded in the common audit log ([audit log](audit-log.md),
+ADR 0064) on the `ui` path: the Processor's writer ends its own batch with the
+`applied` record — a job revision, a maintenance revision with its provenance
+update, a survey decision with the revision it accepted, a lease release (whose
+only durable trace this record is) — and the App records each refusal once.
+The maintenance edit, the survey acceptance and the lease release are each one
+batch: an accepted proposal's revision and decision exist together or not at
+all. The page's `GET` is not recorded.
+
 These routes require the configured human Access operator. Writes require
 same-origin JSON, `x-kogane-settings: 1` and strict payload validation
 (maximum 16 KiB). They are not agent grants, service-token edit routes or MCP

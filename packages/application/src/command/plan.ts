@@ -20,6 +20,8 @@ import {
 import { commandError, type CommandResult } from "./errors.ts";
 import { expectedRevisionsJson } from "../operations/sql.ts";
 import { resolveAndSimulate } from "../operations/targets.ts";
+import type { OperationCall } from "../audit/call.ts";
+import type { DecisionCount } from "../audit/diff.ts";
 
 export interface PlanContext {
   actor: Principal;
@@ -28,6 +30,27 @@ export interface PlanContext {
   /** Instant, ISO 8601 with milliseconds. */
   now: string;
   ttlSeconds: number;
+  /**
+   * The audit call of the route (ADR 0064). When given, the plan's `applied`
+   * record is the last statement of the plan's own batch, joined to the row
+   * this call inserted, so a plan that already existed records nothing here.
+   */
+  audit?: OperationCall;
+}
+
+/** A simulation reduced to its sizes: the counts a decision diff may carry. */
+export function simulationCounts(simulation: Simulation): Partial<Record<DecisionCount, number>> {
+  return {
+    targets: simulation.targets.length,
+    attributedObservationsBefore: simulation.before.attributedObservations,
+    attributedObservationsAfter: simulation.after.attributedObservations,
+    relationsBefore: simulation.before.relations,
+    relationsAfter: simulation.after.relations,
+    affectedScopes: simulation.affectedScopes.length,
+    affectedParseRuns: simulation.affectedParseRuns,
+    invalidations: simulation.invalidations.length,
+    outboxTargets: (simulation.outboxTargets ?? []).length,
+  };
 }
 
 export const PLAN_TTL_SECONDS_DEFAULT = 15 * 60;
@@ -79,7 +102,24 @@ export async function createPlan(
     baseContextId: ctx.baseContextId,
   });
   const expiresAt = new Date(Date.parse(ctx.now) + ctx.ttlSeconds * 1000).toISOString();
-  const [insert] = await store.batch([
+  const audit = ctx.audit?.effect(
+    {
+      targetRef: `plan:${planId}`,
+      payloadDigest: planId,
+      diff: {
+        kind: "decision",
+        decisionRevisions: 0,
+        commitSeq: null,
+        counts: simulationCounts({ ...simulation, targets }),
+      },
+    },
+    {
+      sql: "EXISTS(SELECT 1 FROM change_plans WHERE plan_id=? AND created_at=? AND created_by=?)",
+      binds: [planId, ctx.now, ctx.actor.id],
+    },
+    { kind: "target" },
+  );
+  const [insert, recorded] = await store.batch([
     {
       sql: `INSERT INTO change_plans(plan_id,kind,payload_json,base_context_id,expected_revisions_json,simulation_json,created_by,created_at,expires_at,status)
         SELECT ?1,?2,?3,?4,?5,?6,?7,?8,?9,'planned' WHERE NOT EXISTS(SELECT 1 FROM change_plans WHERE plan_id=?1)`,
@@ -95,7 +135,9 @@ export async function createPlan(
         expiresAt,
       ],
     },
+    ...(audit ? [audit] : []),
   ]);
+  ctx.audit?.settle(recorded?.changes);
   const stored = await loadPlan(store, planId);
   if (!stored) return commandError("commit_failed", [planId]);
   return { ok: true, plan: stored, created: insert?.changes === 1 };

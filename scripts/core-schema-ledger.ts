@@ -214,6 +214,15 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "operation collector execution state",
   },
+  // The common audit record (0075, ADR 0064): one append-only envelope per
+  // operation that references the logs above by id, kept without pruning like
+  // the decision log. Its daily overflow counters are mutable bookkeeping
+  // that the Processor turns into records and deletes once the day ends.
+  audit_records: { classification: "core-keep", planRow: "common audit records (ADR 0064)" },
+  audit_overflow_counters: {
+    classification: "operational-mutable",
+    planRow: "daily audit overflow counters (ADR 0064)",
+  },
   // The shared-R2 terminal registration records (0039) sit in the same row as
   // the rest of the acquisition history: `collection_runs` is the fact that a
   // terminal was seen for one run under one registration contract, and its

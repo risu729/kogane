@@ -49,6 +49,7 @@ import {
   splitSql,
   startPipeline,
 } from "./harness.ts";
+import { envelopeHeaders, testCall } from "./audit-envelope.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -740,8 +741,16 @@ test("the internal command routes require a verified actor and refuse an agent's
     });
     return { status: response.status, json: (await response.json()) as Record<string, unknown> };
   };
-  const human = { "x-kogane-verified-actor": operator.id, "x-kogane-actor-kind": "human" };
-  const asAgent = { "x-kogane-verified-actor": agent.id, "x-kogane-actor-kind": "agent" };
+  const human = {
+    "x-kogane-verified-actor": operator.id,
+    "x-kogane-actor-kind": "human",
+    ...envelopeHeaders(),
+  };
+  const asAgent = {
+    "x-kogane-verified-actor": agent.id,
+    "x-kogane-actor-kind": "agent",
+    ...envelopeHeaders(),
+  };
   const payload = {
     subject: "account",
     referenceId: mapping.ref,
@@ -803,7 +812,11 @@ test("the card purchase review kinds have a writer slot but are refused at plan 
   const count = async () =>
     (await db.prepare("SELECT count(*) AS n FROM change_plans").first<{ n: number }>())!.n;
   const before = await count();
-  const human = { "x-kogane-verified-actor": operator.id, "x-kogane-actor-kind": "human" };
+  const human = {
+    "x-kogane-verified-actor": operator.id,
+    "x-kogane-actor-kind": "human",
+    ...envelopeHeaders(),
+  };
   const hex = (digit: string) => digit.repeat(64);
   const payload = { eventId: `purchase_${hex("a")}`, reasonCode: "card_fee", reason: "route test" };
   const response = await mf.dispatchFetch("https://pipeline.internal/command/v1/plan", {
@@ -875,8 +888,16 @@ test("the economic-event kinds are refused at every command route for every prin
       reason,
     },
   };
-  const human = { "x-kogane-verified-actor": operator.id, "x-kogane-actor-kind": "human" };
-  const asAgent = { "x-kogane-verified-actor": agent.id, "x-kogane-actor-kind": "agent" };
+  const human = {
+    "x-kogane-verified-actor": operator.id,
+    "x-kogane-actor-kind": "human",
+    ...envelopeHeaders(),
+  };
+  const asAgent = {
+    "x-kogane-verified-actor": agent.id,
+    "x-kogane-actor-kind": "agent",
+    ...envelopeHeaders(),
+  };
   const post = async (path: string, body: unknown, headers: Record<string, string>) => {
     const response = await mf.dispatchFetch(`https://pipeline.internal${path}`, {
       method: "POST",
@@ -1047,3 +1068,267 @@ test("migration 0031 applies on a seeded 0017-0035 schema and touches no existin
     await local.dispose();
   }
 }, 120_000);
+
+// ── the common audit record (ADR 0064, plan S1) ──────────────────────────
+
+/** A provider-shaped string with a token-shaped value and an amount: never to be recorded. */
+const PROVIDER_TEXT = "架空商店 eyJhbGciOiJIUzI1NiJ9.c3ludGhldGlj.dG9rZW4 ¥123,456 98765.43";
+
+async function auditRows(where = "1=1", ...binds: unknown[]) {
+  return (
+    await db
+      .prepare(`SELECT * FROM audit_records WHERE ${where} ORDER BY recorded_at,audit_id`)
+      .bind(...binds)
+      .all<Record<string, unknown>>()
+  ).results;
+}
+
+test("each command route writes its effect's record in its own batch; a replay or a read writes none here", async () => {
+  const mapping = await seedParse(240, "smbc-bank:audit");
+  const targetId = await target("target-audit");
+  const route = async (path: string, body: unknown, correlationId: string) => {
+    const response = await mf.dispatchFetch(`https://pipeline.internal${path}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-kogane-verified-actor": operator.id,
+        "x-kogane-actor-kind": "human",
+        ...envelopeHeaders(correlationId),
+      },
+      body: JSON.stringify(body),
+    });
+    return {
+      status: response.status,
+      recorded: response.headers.get("x-kogane-audit-recorded"),
+      json: (await response.json()) as Record<string, unknown>,
+    };
+  };
+  const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  // The caller's free-text reason is stored with the plan, never in the record.
+  const payload = { subject: "account", referenceId: mapping.ref, targetId, reason: PROVIDER_TEXT };
+  const planned = await route("/command/v1/plan", { kind: "identity.assign", payload }, id(1));
+  expect([planned.status, planned.recorded]).toEqual([200, "1"]);
+  const plan = planned.json.plan as ChangePlan;
+  const replanned = await route("/command/v1/plan", { kind: "identity.assign", payload }, id(2));
+  expect([replanned.status, replanned.recorded, replanned.json.created]).toEqual([
+    200,
+    null,
+    false,
+  ]);
+  const simulated = await route("/command/v1/simulate", { planId: plan.planId }, id(3));
+  expect([simulated.status, simulated.recorded]).toEqual([200, null]);
+  const approved = await route(
+    "/command/v1/approve",
+    { planId: plan.planId, planDigest: plan.planId },
+    id(4),
+  );
+  expect([approved.status, approved.recorded]).toEqual([200, "1"]);
+  const approvalId = (approved.json.approval as { approvalId: string }).approvalId;
+  const committed = await route(
+    "/command/v1/commit",
+    { operationId: "op-audit-route", planId: plan.planId, approvalId },
+    id(5),
+  );
+  expect([committed.status, committed.recorded]).toEqual([200, "1"]);
+  const recommitted = await route(
+    "/command/v1/commit",
+    { operationId: "op-audit-route", planId: plan.planId, approvalId },
+    id(6),
+  );
+  expect([recommitted.status, recommitted.recorded, recommitted.json.replayed]).toEqual([
+    200,
+    null,
+    true,
+  ]);
+  const read = await route("/command/v1/operation", { operationId: "op-audit-route" }, id(7));
+  expect([read.status, read.recorded]).toEqual([200, null]);
+  // Exactly one record per applied effect, under the correlation id of the
+  // request that applied it.
+  const rows = await auditRows("correlation_id LIKE '00000000-0000-4000-8000-%'");
+  const receipt = committed.json.receipt as { decisionRevisionId: string };
+  expect(
+    rows.map((row) => [
+      row["correlation_id"],
+      row["operation"],
+      row["result"],
+      row["path"],
+      row["subject"],
+      row["principal"],
+      row["principal_kind"],
+      row["risk_class"],
+      row["target_ref"],
+      JSON.parse(row["refs_json"] as string),
+      row["idempotency_key"],
+    ]),
+  ).toEqual([
+    [
+      id(1),
+      "command.plan",
+      "applied",
+      "ui",
+      operator.id,
+      operator.id,
+      "human",
+      "R1",
+      `plan:${plan.planId}`,
+      [],
+      null,
+    ],
+    [
+      id(4),
+      "command.approve",
+      "applied",
+      "ui",
+      operator.id,
+      operator.id,
+      "human",
+      "R2",
+      `plan:${plan.planId}`,
+      [`approval:${approvalId}`],
+      null,
+    ],
+    [
+      id(5),
+      "command.commit",
+      "applied",
+      "ui",
+      operator.id,
+      operator.id,
+      "human",
+      "R2",
+      `plan:${plan.planId}`,
+      ["operation:op-audit-route", `decision:${receipt.decisionRevisionId}`],
+      "op-audit-route",
+    ],
+  ]);
+  expect(JSON.parse(rows[2]!["diff_json"] as string)).toMatchObject({
+    kind: "decision",
+    decisionRevisions: 1,
+    commitSeq: null,
+  });
+  // Deep scan: no column of any record carries the provider text, its token
+  // or its amount.
+  const stored = JSON.stringify(await auditRows());
+  for (const needle of ["架空", "eyJ", "c3ludGhldGlj", "123,456", "98765", PROVIDER_TEXT])
+    expect(stored).not.toContain(needle);
+});
+
+test("a command without the audit envelope is refused like one without an actor, and writes nothing", async () => {
+  const mapping = await seedParse(241, "smbc-bank:envelope");
+  const targetId = await target("target-envelope");
+  const before = await counts();
+  const records = (await auditRows()).length;
+  for (const headers of [
+    {},
+    { "x-kogane-audit-path": "ui" },
+    { "x-kogane-correlation-id": "00000000-0000-4000-8000-000000000099" },
+    { ...envelopeHeaders(), "x-kogane-audit-path": "alarm" },
+    { ...envelopeHeaders(), "x-kogane-correlation-id": "not-a-uuid" },
+    // No delegation exists yet (ADR 0063): a reference is refused, not ignored.
+    { ...envelopeHeaders(), "x-kogane-delegation-ref": `dlg_${"a".repeat(64)}` },
+  ]) {
+    const response = await mf.dispatchFetch("https://pipeline.internal/command/v1/plan", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-kogane-verified-actor": operator.id,
+        "x-kogane-actor-kind": "human",
+        ...headers,
+      },
+      body: JSON.stringify({
+        kind: "identity.assign",
+        payload: { subject: "account", referenceId: mapping.ref, targetId, reason: "envelope" },
+      }),
+    });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "invalid_command" });
+  }
+  expect(await counts()).toEqual(before);
+  expect((await auditRows()).length).toBe(records);
+});
+
+test("a commit whose guard fails writes neither the effect nor its record; a raced pair records one", async () => {
+  const mapping = await seedParse(242, "smbc-bank:audit-guard");
+  const plan = await planFor(mapping.ref, await target("target-audit-guard"));
+  const approval = await approveFor(plan);
+  expect(
+    (
+      await executeIdentityCommand(
+        db,
+        {
+          operationId: "op-audit-guard-concurrent",
+          actorId: "other-operator",
+          actorVerification: "server",
+          action: "assign",
+          kind: "account",
+          referenceId: mapping.ref,
+          expectedRevision: 1,
+          targetId: await target("target-audit-guard-other"),
+          reason: "concurrent",
+        },
+        IDENTITY_POLICY_VERSION,
+      )
+    ).ok,
+  ).toBe(true);
+  const before = await counts();
+  const audit = testCall("command.commit", operator.id);
+  const stale = await commit(store, {
+    operationId: "op-audit-guard",
+    principal: operator,
+    planId: plan.planId,
+    approvalId: approval.approvalId,
+    planners: changeMutationPlanners(db),
+    now: NOW,
+    audit,
+  });
+  expect(stale).toMatchObject({ ok: false, error: "stale_context" });
+  expect(audit.recorded).toBe(false);
+  expect(await counts()).toEqual(before);
+  expect(await auditRows("idempotency_key='op-audit-guard'")).toEqual([]);
+
+  // Two different commits of one approved plan: one effect, one record.
+  const raced = await seedParse(243, "smbc-bank:audit-race");
+  const racedPlan = await planFor(raced.ref, await target("target-audit-race"));
+  const racedApproval = await approveFor(racedPlan);
+  const calls = [testCall("command.commit", operator.id), testCall("command.commit", operator.id)];
+  const results = await Promise.all(
+    ["op-audit-race-a", "op-audit-race-b"].map((operationId, index) =>
+      commit(store, {
+        operationId,
+        principal: operator,
+        planId: racedPlan.planId,
+        approvalId: racedApproval.approvalId,
+        planners: changeMutationPlanners(db),
+        now: NOW,
+        audit: calls[index]!,
+      }),
+    ),
+  );
+  expect(results.filter((result) => result.ok)).toHaveLength(1);
+  expect(calls.filter((call) => call.recorded)).toHaveLength(1);
+  expect(
+    await auditRows("operation='command.commit' AND target_ref=?", `plan:${racedPlan.planId}`),
+  ).toHaveLength(1);
+
+  // The same commit resent and raced with itself: one receipt, one record.
+  const resent = await seedParse(244, "smbc-bank:audit-resend");
+  const resentPlan = await planFor(resent.ref, await target("target-audit-resend"));
+  const resentApproval = await approveFor(resentPlan);
+  const twins = [testCall("command.commit", operator.id), testCall("command.commit", operator.id)];
+  const both = await Promise.all(
+    twins.map((audit) =>
+      commit(store, {
+        operationId: "op-audit-resend",
+        principal: operator,
+        planId: resentPlan.planId,
+        approvalId: resentApproval.approvalId,
+        planners: changeMutationPlanners(db),
+        now: NOW,
+        audit,
+      }),
+    ),
+  );
+  expect(both.every((result) => result.ok)).toBe(true);
+  expect(twins.filter((call) => call.recorded)).toHaveLength(1);
+  expect(await auditRows("idempotency_key='op-audit-resend'")).toHaveLength(1);
+});

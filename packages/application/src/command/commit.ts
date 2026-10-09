@@ -44,6 +44,9 @@ import { loadPlan } from "./plan.ts";
 import { currentRevisions } from "./simulate.ts";
 import { expectedRevisionsJson } from "../operations/sql.ts";
 import { resolveAndSimulate } from "../operations/targets.ts";
+import type { OperationCall } from "../audit/call.ts";
+import { AUDIT_IDEMPOTENCY_KEY } from "../audit/vocabulary.ts";
+import { simulationCounts } from "./plan.ts";
 import {
   approvalConsumptionWrite,
   outboxWrite,
@@ -79,6 +82,13 @@ export interface CommitInput {
   idempotencyPayloadDigest?: unknown;
   planners: MutationPlanners;
   now: string;
+  /**
+   * The route's audit call (ADR 0064). The commit's `applied` record is the
+   * last statement of the commit batch, joined to the receipt this batch
+   * reserved: a guard that fails writes neither, and a replay records nothing
+   * here.
+   */
+  audit?: OperationCall;
 }
 
 export interface CommitOutput {
@@ -264,6 +274,31 @@ export async function commit(
       outboxWrite(mutation.decisionRevisionId, principal.id, operationId, target, input.now),
     ),
   ];
+  if (input.audit)
+    writes.push(
+      input.audit.effect(
+        {
+          targetRef: `plan:${plan.planId}`,
+          refs: [`operation:${operationId}`, `decision:${mutation.decisionRevisionId}`],
+          // The caller's key names the commit; one the audit key pattern does
+          // not admit is kept only as the `operation:` reference.
+          idempotencyKey: AUDIT_IDEMPOTENCY_KEY.test(operationId) ? operationId : null,
+          payloadDigest,
+          diff: {
+            kind: "decision",
+            decisionRevisions: 1,
+            commitSeq: null,
+            counts: simulationCounts(plan.simulation),
+          },
+        },
+        {
+          sql: `EXISTS(SELECT 1 FROM operation_receipts
+            WHERE operation_id=? AND principal=? AND created_at=? AND payload_digest=?)`,
+          binds: [operationId, principal.id, input.now, payloadDigest],
+        },
+        { kind: "target-ref", ref: `operation:${operationId}` },
+      ),
+    );
 
   let results: Awaited<ReturnType<CommandStore["batch"]>>;
   try {
@@ -279,6 +314,7 @@ export async function commit(
       code,
     ]);
   }
+  if (input.audit) input.audit.settle(results.at(-1)?.changes);
   if (results[0]?.changes === 1) return { ok: true, replayed: false, receipt };
   return failureReason(
     store,

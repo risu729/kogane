@@ -4,7 +4,9 @@ import {
   type EvidenceMeta,
 } from "../../../packages/observation-shared/src/evidence-contract";
 import { authenticate } from "./auth";
-import { agentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
+import { auditedAgentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
+import { auditLogCode, beginAudit } from "./audit";
+import { AUDIT_PATH, auditApi } from "./audit-api";
 import { commandApi, isCommandPath } from "./command-api";
 import { classifyOpsPath, opsApi } from "./ops-api";
 import { healthApi } from "./health";
@@ -32,6 +34,7 @@ function classify(path: string): string {
   const ops = classifyOpsPath(path);
   if (ops !== null) return ops;
   if (isCommandPath(path)) return "command";
+  if (path === AUDIT_PATH) return "audit";
   if (path === CARD_SETTLEMENT_PATH || path === CARD_OWNERSHIP_PATH)
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
@@ -67,7 +70,7 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // (docs/agent-api.md), the change lifecycle (A09) and the operations API
   // (docs/ops-api.md). They own disjoint paths, all keep the closed 401/403
   // answers, and everything outside them stays GET-only.
-  const agentResponse = await agentApi(request, env, url, subject);
+  const agentResponse = await auditedAgentApi(request, env, url, subject);
   if (agentResponse) return agentResponse;
   const commandResponse = await commandApi(request, env, url, subject);
   if (commandResponse) return commandResponse;
@@ -79,6 +82,9 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     throw new HttpError(405, "method_not_allowed");
   const sharedQueryResponse = await catalogue(() => sharedQueryApi(request, env, url, subject));
   if (sharedQueryResponse) return sharedQueryResponse;
+  // The operator's read of the audit record (ADR 0064); a page load, not recorded.
+  const auditResponse = await catalogue(() => auditApi(env, url, subject));
+  if (auditResponse) return auditResponse;
   const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
   if (settlementResponse) return settlementResponse;
   // Operator-only and read-only; 404 unless the event reader flag is on and
@@ -168,6 +174,9 @@ export default {
     const url = new URL(request.url);
     let response: Response;
     let errorCode: string | null = null;
+    // Every audit record of this request carries its request id as the
+    // correlation id (ADR 0064).
+    beginAudit(request, requestId);
     try {
       response = await route(request, env, url);
     } catch (error) {
@@ -185,6 +194,8 @@ export default {
           requestId,
           durationMs: Date.now() - started,
           errorCode,
+          // A record of this request could not be written; the answer stands.
+          ...(auditLogCode(request) ? { auditError: auditLogCode(request) } : {}),
         }),
       );
     } catch {

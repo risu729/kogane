@@ -302,3 +302,79 @@ export {
   type ResolvedRef,
   type StoredProposal,
 } from "./propose.ts";
+
+// ── the common audit record and the operation chokepoint (ADR 0064) ─────
+export {
+  AUDIT_HEADERS,
+  AUDIT_RECORDED_HEADER,
+  type AuditEnvelope,
+  type EffectFacts,
+  OperationCall,
+  parseAuditEnvelope,
+  processorCall,
+  subjectOfPrincipal,
+} from "./audit/call.ts";
+export {
+  type AuditDiff,
+  type AuditDiffKind,
+  auditDiffSchema,
+  changedFields,
+  DECISION_COUNTS,
+  REVISION_FIELDS,
+  type RevisionField,
+} from "./audit/diff.ts";
+export {
+  AUDIT_COLUMNS,
+  type AuditActor,
+  type AuditFacts,
+  auditInstant,
+  AuditRecordError,
+  type AuditRow,
+  type AuditScope,
+  buildAuditRecord,
+  type EffectOnce,
+} from "./audit/record.ts";
+export {
+  aggregateAuditOverflow,
+  type AnswerAppend,
+  appendAnswerRecord,
+  AUDIT_PAGE_SIZE,
+  AUDIT_PAGE_SQL,
+  type AuditPageFilters,
+  auditPageFilters,
+  type AuditPageOutcome,
+  type AuditRecordView,
+  OVERFLOW_ROWS_PER_TICK,
+  readAuditPage,
+  utcDay,
+} from "./audit/store.ts";
+export {
+  AUDIT_CAP_REACHED,
+  AUDIT_DAILY_CAPS,
+  AUDIT_PATHS,
+  AUDIT_RESULTS,
+  AUDIT_WRITE_FAILED,
+  type AuditPath,
+  type AuditResult,
+  isAuditRef,
+  RISK_CLASSES,
+  type RiskClass,
+  SUBJECT_PATHS,
+  type SubjectPath,
+  type SubjectPrincipalKind,
+} from "./audit/vocabulary.ts";
+export {
+  type CatalogueEntry,
+  catalogueEntry,
+  isOperationName,
+  OPERATION_CATALOGUE,
+  type OperationName,
+  toolOperation,
+} from "./operation-path/catalogue.ts";
+export {
+  type AnswerOutcome,
+  type AnswerSink,
+  type Classifier,
+  type ExecuteContext,
+  executeOperation,
+} from "./operation-path/execute.ts";

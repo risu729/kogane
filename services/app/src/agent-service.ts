@@ -44,6 +44,7 @@ import { balanceProjectionReader, projectionFlagOn } from "./balances-v2";
 import { centralStoreCapabilities } from "./capabilities";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
 import { proposalStore } from "./proposals";
+import type { OperationCall } from "../../../packages/application/src/audit/call.ts";
 
 /** The tools every configured deployment serves. */
 export const AGENT_TOOL_NAMES = [
@@ -81,6 +82,8 @@ interface ToolContext {
   env: Env;
   grant: Grant;
   now: string;
+  /** The tool call's audit record (ADR 0064); a proposal's joins its batch. */
+  audit?: OperationCall;
 }
 
 function failure(
@@ -187,7 +190,7 @@ export async function callTool(
       const outcome = await proposeReconciliation({
         grant: context.grant,
         opened,
-        store: proposalStore(context.db),
+        store: proposalStore(context.db, context.audit),
         request: parsed.value,
         now: context.now,
       });

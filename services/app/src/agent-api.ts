@@ -22,8 +22,11 @@ import {
   DEFAULT_QUERY_LIMIT,
   type Grant,
   grantFor,
+  type OperationCall,
+  type OperationName,
   parseGrants,
   parseQueryRequest,
+  toolOperation,
 } from "../../../packages/application/src/index";
 import {
   type AgentToolName,
@@ -33,7 +36,9 @@ import {
   PURCHASES_TOOL_NAME,
   queryResponse,
   toolContext,
+  type ToolResult,
 } from "./agent-service";
+import { auditContext, auditedTool, recordThrown } from "./audit";
 import { cardPurchasesAvailable } from "./card-purchases-api";
 import { grantsUsable } from "./grants";
 import { handleMcp, MCP_TOOLS, PURCHASES_MCP_TOOLS } from "./mcp";
@@ -176,8 +181,14 @@ export async function agentApi(
       await boundedJson(request),
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
-        if (isAgentToolName(name)) return callTool(name, body, context);
-        if (ops && isOpsToolName(name)) return callOpsTool(name, body, env, subject);
+        if (isAgentToolName(name))
+          return toolCall(request, env, "mcp", subject, name, (audit) =>
+            callTool(name, body, { ...context, audit }),
+          );
+        if (ops && isOpsToolName(name))
+          return toolCall(request, env, "mcp", subject, name, (audit) =>
+            callOpsTool(name, body, env, subject, audit),
+          );
         return null;
       },
       async () => [
@@ -194,7 +205,10 @@ export async function agentApi(
   // Absent, not refused, while the deployment cannot serve it, like its route.
   if (tool === PURCHASES_TOOL_NAME && !(await cardPurchasesAvailable(env)))
     throw new HttpError(404, "not_found");
-  const outcome = await callTool(tool, await boundedJson(request), context);
+  const body = await boundedJson(request);
+  const outcome = (await toolCall(request, env, "agent-http", subject, tool, (audit) =>
+    callTool(tool, body, { ...context, audit }),
+  ))!;
   return json(outcome.body, outcome.status);
 }
 
@@ -236,4 +250,55 @@ export async function sharedQueryApi(
     parsed.value,
   );
   return json(outcome.body, outcome.status);
+}
+
+// ── the audit record of every agent call (ADR 0064) ──────────────────────
+
+/** One tool call on `path`, recorded through the chokepoint under its catalogued operation. */
+function toolCall(
+  request: Request,
+  env: Env,
+  path: "agent-http" | "mcp",
+  subject: string,
+  name: string,
+  run: (audit: OperationCall | undefined) => Promise<ToolResult>,
+): Promise<ToolResult | null> {
+  const operation = toolOperation(name, path);
+  if (operation === null) return run(undefined);
+  return auditedTool(auditContext(request, env, path, subject), operation, run);
+}
+
+/**
+ * The agent routes as `worker.ts` calls them: every refusal the transport
+ * makes before a tool runs (a method, a query string, no grant, a body too
+ * large or malformed) is recorded once, under the tool the path names on
+ * `/api/agent/v1/*` and under `mcp.request` on `/mcp`. A refusal a tool call
+ * already recorded is not recorded again, and a path no tool serves is not
+ * an operation.
+ */
+export async function auditedAgentApi(
+  request: Request,
+  env: Env,
+  url: URL,
+  /** The subject `authenticate` proved; never a body or header claim. */
+  subject: string,
+): Promise<Response | null> {
+  try {
+    return await agentApi(request, env, url, subject);
+  } catch (error) {
+    const path = url.pathname;
+    const operation: OperationName | null =
+      path === MCP_PATH
+        ? "mcp.request"
+        : path.startsWith(AGENT_PREFIX)
+          ? toolOperation(`kogane.${path.slice(AGENT_PREFIX.length)}`, "agent-http")
+          : null;
+    if (operation !== null)
+      await recordThrown(
+        auditContext(request, env, path === MCP_PATH ? "mcp" : "agent-http", subject),
+        operation,
+        error,
+      );
+    throw error;
+  }
 }

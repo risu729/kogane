@@ -136,13 +136,19 @@ async function mcp(message: Record<string, unknown>, options: CallOptions = {}) 
   return (await response.json()) as Record<string, any>;
 }
 
-/** Every table's row count, so "writes nothing" is checkable. */
+/**
+ * Every table's row count, so "writes nothing" is checkable — but for the
+ * audit tables: an agent call's own audit record (ADR 0064) is the one write
+ * it makes, and `test/audit.test.ts` covers it.
+ */
 async function tables() {
   const names = await env.DB.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name",
   ).all<{ name: string }>();
   const counts: Record<string, number> = {};
-  for (const { name } of names.results)
+  for (const { name } of names.results.filter(
+    ({ name }) => name !== "audit_records" && name !== "audit_overflow_counters",
+  ))
     counts[name] = (await env.DB.prepare(`SELECT count(*) AS n FROM "${name}"`).first<number>(
       "n",
     ))!;
