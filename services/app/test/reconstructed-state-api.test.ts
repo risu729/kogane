@@ -371,4 +371,53 @@ describe("the agent tool", () => {
     expect((await call(TOOL_PATH, { subject: "agent-principal", body })).status).toBe(403);
     expect((await call(TOOL_PATH, { body, subject: null, environment: granted })).status).toBe(401);
   });
+
+  it("records each served call as a read of one reconstruction, and nothing where the tool is absent (ADR 0064)", async () => {
+    const last = (await env.DB.prepare(
+      "SELECT coalesce(max(rowid),0) AS n FROM audit_records",
+    ).first<number>("n"))!;
+    const records = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT path,principal,subject,principal_kind,operation,risk_class,result,diff_json FROM audit_records WHERE rowid>? ORDER BY rowid",
+        )
+          .bind(last)
+          .all()
+      ).results;
+    const toolCall = {
+      jsonrpc: "2.0",
+      id: 4,
+      method: "tools/call",
+      params: { name: RECONSTRUCTED_STATE_TOOL_NAME, arguments: body },
+    };
+    // Absent: the HTTP 404 and MCP's `unknown_tool` name no served tool.
+    await call("/mcp", {
+      subject: "agent-principal",
+      body: toolCall,
+      environment: granted,
+      rewrite: withoutViews,
+    });
+    await call(TOOL_PATH, {
+      subject: "agent-principal",
+      body,
+      environment: granted,
+      rewrite: withoutViews,
+    });
+    expect(await records()).toEqual([]);
+    expect(
+      (await call(TOOL_PATH, { subject: "agent-principal", body, environment: granted })).status,
+    ).toBe(200);
+    await call("/mcp", { subject: "agent-principal", body: toolCall, environment: granted });
+    const read = {
+      principal_kind: "agent",
+      operation: "reconstructed-state.read",
+      risk_class: "R0",
+      result: "read",
+      diff_json: '{"kind":"read","rows":1,"truncated":false}',
+    };
+    expect(await records()).toEqual([
+      { path: "agent-http", principal: "agent-principal", subject: "agent-principal", ...read },
+      { path: "mcp", principal: "mcp-client:agent-principal", subject: "agent-principal", ...read },
+    ]);
+  });
 });

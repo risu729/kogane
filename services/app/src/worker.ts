@@ -4,7 +4,15 @@ import {
   type EvidenceMeta,
 } from "../../../packages/observation-shared/src/evidence-contract";
 import { authenticate, browserCaller, mcpCaller } from "./auth";
-import { agentApi, classifyAgentPath, isAgentPath, MCP_PATH, sharedQueryApi } from "./agent-api";
+import {
+  auditedAgentApi,
+  classifyAgentPath,
+  isAgentPath,
+  MCP_PATH,
+  sharedQueryApi,
+} from "./agent-api";
+import { auditLogCode, beginAudit } from "./audit";
+import { AUDIT_PATH, auditApi } from "./audit-api";
 import { commandApi, isCommandPath } from "./command-api";
 import { classifyOpsPath, opsApi } from "./ops-api";
 import { healthApi } from "./health";
@@ -34,6 +42,7 @@ function classify(path: string): string {
   const ops = classifyOpsPath(path);
   if (ops !== null) return ops;
   if (isCommandPath(path)) return "command";
+  if (path === AUDIT_PATH) return "audit";
   if (path === CARD_SETTLEMENT_PATH || path === CARD_OWNERSHIP_PATH)
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
@@ -68,14 +77,11 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // (ADR 0047). Every path below accepts only this Worker's own Access
   // application and refuses a token minted for the MCP one, as `/mcp` refuses
   // the browser's.
+  // Every agent call is recorded in the audit log (ADR 0064) under the caller
+  // resolved here: `mcp` for an MCP client, `agent-http` for a browser session.
   const agentResponse = isAgentPath(url.pathname)
-    ? await agentApi(
-        request,
-        env,
-        url,
-        url.pathname === MCP_PATH
-          ? await mcpCaller(request, env)
-          : await browserCaller(request, env),
+    ? await auditedAgentApi(request, env, url, () =>
+        url.pathname === MCP_PATH ? mcpCaller(request, env) : browserCaller(request, env),
       )
     : null;
   if (agentResponse) return agentResponse;
@@ -97,6 +103,9 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     throw new HttpError(405, "method_not_allowed");
   const sharedQueryResponse = await catalogue(() => sharedQueryApi(request, env, url, subject));
   if (sharedQueryResponse) return sharedQueryResponse;
+  // The operator's read of the audit record (ADR 0064); a page load, not recorded.
+  const auditResponse = await catalogue(() => auditApi(env, url, subject));
+  if (auditResponse) return auditResponse;
   const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
   if (settlementResponse) return settlementResponse;
   // Operator-only and read-only; 404 unless CORE 0047 exists
@@ -192,6 +201,9 @@ export default {
     const url = new URL(request.url);
     let response: Response;
     let errorCode: string | null = null;
+    // Every audit record of this request carries its request id as the
+    // correlation id (ADR 0064).
+    beginAudit(request, requestId);
     try {
       response = await route(request, env, url);
     } catch (error) {
@@ -209,6 +221,8 @@ export default {
           requestId,
           durationMs: Date.now() - started,
           errorCode,
+          // A record of this request could not be written; the answer stands.
+          ...(auditLogCode(request) ? { auditError: auditLogCode(request) } : {}),
         }),
       );
     } catch {

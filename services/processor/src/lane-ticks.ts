@@ -29,6 +29,7 @@ import type { CardDebitAccountSweepResult } from "./card-debit-account-job.ts";
 import type { CardSettlementSweepResult } from "./card-settlement-job.ts";
 import type { DispatchSummary } from "./operations/dispatch.ts";
 import type { MaintenanceSurveyResult } from "./maintenance-survey/lane.ts";
+import type { AuditOverflowResult } from "./audit-overflow.ts";
 import type { PricePromotionResult } from "./price-promotion-job.ts";
 import type { ReconciliationSweepResult } from "./reconciliation-job.ts";
 import type { RewardPromotionResult } from "./reward-claims-job.ts";
@@ -167,6 +168,7 @@ export const LANE_TICK_COUNTS = {
     "blocked",
     "published",
   ]),
+  audit_overflow: countsOf<AuditOverflowResult>(["counters", "written"]),
 } satisfies Record<string, Projection>;
 
 /** What happened to one lane on one tick, before it is reduced to a row. */

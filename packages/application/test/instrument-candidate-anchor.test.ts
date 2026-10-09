@@ -18,6 +18,8 @@ import {
   stubDatabase,
 } from "./instrument-resolution-world.ts";
 import { sqliteCommandStore } from "./sqlite-store.ts";
+import { processorCall, type OperationName } from "../src/index.ts";
+import type { Principal } from "../src/command/contract.ts";
 const NOW = "2099-01-01T00:00:00.000Z";
 beforeAll(() => stubDatabase().close(), 60_000);
 
@@ -317,4 +319,101 @@ describe("candidate assignment provenance and server pins", () => {
       ).toEqual({ uses_remaining: 1 });
       f.w.db.close();
     });
+
+  test("a stale candidate refusal writes no audit record; a pinned plan records once (ADR 0064)", async () => {
+    // The pin checks refuse before any batch, so the writer appends no record:
+    // the refusal is the App's to record, once, from the closed code.
+    const f = await fixture();
+    const records = () =>
+      f.w.db
+        .query(
+          "SELECT operation,result,target_ref FROM audit_records ORDER BY recorded_at,audit_id",
+        )
+        .all();
+    const call = (operation: OperationName, principal: Principal) =>
+      processorCall(
+        { path: "ui", correlationId: crypto.randomUUID() },
+        operation,
+        principal.id,
+        principal.kind === "human" ? "human" : "agent",
+      );
+    const planCall = call("command.plan", AGENT);
+    const planned = await createPlan(
+      "identity.assign",
+      f.payload,
+      { ...f.context, audit: planCall },
+      f.store,
+    );
+    if (!planned.ok) throw new Error("plan refused");
+    expect(planCall.recorded).toBe(true);
+    expect(records()).toEqual([
+      { operation: "command.plan", result: "applied", target_ref: `plan:${planned.plan.planId}` },
+    ]);
+    // A legacy candidate plan (no candidate pins) is refused at approve and commit.
+    const { candidate: _candidate, ...manual } = f.payload;
+    const legacyStore = {
+      ...f.store,
+      first: async <T>(sql: string, binds?: readonly unknown[]): Promise<T | null> => {
+        const row = await f.store.first<T>(sql, binds);
+        if (
+          row !== null &&
+          typeof row === "object" &&
+          sql.startsWith("SELECT plan_id,kind,payload_json")
+        )
+          Object.assign(row, { payload_json: JSON.stringify(manual) });
+        return row;
+      },
+    };
+    const approveCall = call("command.approve", OPERATOR);
+    expect(
+      await approve(legacyStore, {
+        planId: planned.plan.planId,
+        planDigest: planned.plan.planDigest,
+        actor: OPERATOR,
+        scope: [],
+        ttlSeconds: 3600,
+        now: NOW,
+        audit: approveCall,
+      }),
+    ).toMatchObject({ ok: false, error: "stale_context" });
+    const commitCall = call("command.commit", OPERATOR);
+    expect(
+      await commit(legacyStore, {
+        operationId: "op-legacy-audit",
+        principal: OPERATOR,
+        planId: planned.plan.planId,
+        approvalId: "missing",
+        planners: planners(f.w.db),
+        now: NOW,
+        audit: commitCall,
+      }),
+    ).toMatchObject({ ok: false, error: "stale_context" });
+    // An anchor that moved refuses a new plan and the pinned plan's approval.
+    await f.bump();
+    const stalePlanCall = call("command.plan", AGENT);
+    expect(
+      await createPlan(
+        "identity.assign",
+        f.payload,
+        { ...f.context, audit: stalePlanCall },
+        f.store,
+      ),
+    ).toMatchObject({ ok: false, error: "stale_context" });
+    const staleApproveCall = call("command.approve", OPERATOR);
+    expect(
+      await approve(f.store, {
+        planId: planned.plan.planId,
+        planDigest: planned.plan.planDigest,
+        actor: OPERATOR,
+        scope: [],
+        ttlSeconds: 3600,
+        now: NOW,
+        audit: staleApproveCall,
+      }),
+    ).toMatchObject({ ok: false, error: "stale_context" });
+    for (const refused of [approveCall, commitCall, stalePlanCall, staleApproveCall])
+      expect(refused.recorded).toBe(false);
+    expect(records()).toHaveLength(1);
+    f.w.db.close();
+  });
 });

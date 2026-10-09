@@ -424,6 +424,13 @@ per Processor invocation, inside the tick; the web UI has no operations view.
 
 ## Storage
 
+Every request to the six routes, and every operations MCP tool call, is
+recorded in the common audit log ([audit log](audit-log.md), ADR 0064): an
+accepted request's `accepted` record is the last statement of the acceptance
+batch (so a request exists exactly when its record does), and a re-send, a read
+or a refusal is recorded once after the answer. A validation refusal records
+the field paths, never the refused value.
+
 Migration `0040_operations_api.sql` (CORE), additive:
 
 - `ops_requests` — one accepted request. What was accepted (id, kind,

@@ -359,13 +359,16 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "price_promotion",
     "operation_dispatch",
     "decision_outbox",
+    // Unflagged (ADR 0064): the audit log's daily overflow aggregate.
+    "audit_overflow",
   ]);
 
   const enabled = { ...env, REWARD_CLAIMS_ENABLED: "true" } as unknown as Env;
   expect(rewardClaimsEnabled(enabled.REWARD_CLAIMS_ENABLED)).toBe(true);
   lines.length = 0;
   await runScheduled(enabled, undefined, (line) => lines.push(JSON.parse(line)));
-  // The reward lane runs before the decision outbox, which stays last.
+  // The reward lane runs before the decision outbox, which only the audit
+  // overflow aggregate follows.
   expect(lines.map((line) => line.event)).toEqual([
     "observation_sweep",
     "collection_scan",
@@ -375,6 +378,7 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "price_promotion",
     "operation_dispatch",
     "decision_outbox",
+    "audit_overflow",
   ]);
   // Counts and identifiers only: no amount, account label or provider text.
   expect(Object.keys(lines[4]!).sort()).toEqual([

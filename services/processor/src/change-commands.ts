@@ -28,6 +28,12 @@ import {
   simulate,
   statusForCommandError,
   type CommandErrorCode,
+  AUDIT_RECORDED_HEADER,
+  type AuditEnvelope,
+  type OperationCall,
+  type OperationName,
+  parseAuditEnvelope,
+  processorCall,
 } from "../../../packages/application/src/index.ts";
 import { IDENTITY_POLICY_VERSION } from "./identity-store.ts";
 import { identitySubjectRef } from "../../../packages/application/src/operations/sql.ts";
@@ -177,6 +183,26 @@ function principalOf(request: Request): Principal | null {
   };
 }
 
+/**
+ * The writer's answer, marked when its batch wrote the effect's audit record
+ * (ADR 0064). The App records every other outcome — a read, a replay, a
+ * refusal — after this answer, so a refusal made here is recorded once.
+ */
+function answered(body: unknown, call?: OperationCall): Response {
+  const response = Response.json(body);
+  if (call?.recorded) response.headers.set(AUDIT_RECORDED_HEADER, "1");
+  return response;
+}
+
+/** The audit call of a writing route, built from the App's envelope and the verified actor. */
+function writerCall(
+  envelope: AuditEnvelope,
+  operation: OperationName,
+  principal: Principal,
+): OperationCall {
+  return processorCall(envelope, operation, principal.id, principal.kind);
+}
+
 function fail(code: CommandErrorCode, refs?: readonly string[]): Response {
   return Response.json(refs && refs.length > 0 ? { error: code, refs } : { error: code }, {
     status: statusForCommandError(code),
@@ -194,6 +220,11 @@ export async function changeCommandRoute(
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
   const principal = principalOf(request);
   if (!principal) return fail("invalid_command");
+  // The audit envelope (ADR 0064) is required like the actor headers: the
+  // App forwards it on every command, and a request without it is refused
+  // exactly as one without a verified actor is.
+  const envelope = parseAuditEnvelope(request.headers);
+  if (!envelope) return fail("invalid_command");
   const input = await body(request);
   if (!input) return fail("invalid_command");
   const store = d1CommandStore(env.DB);
@@ -202,6 +233,7 @@ export async function changeCommandRoute(
     case "plan": {
       if (!isChangeKind(input.kind)) return fail("unsupported_semantics");
       const baseContextId = input.baseContextId;
+      const audit = writerCall(envelope, "command.plan", principal);
       const result = await createPlan(
         input.kind,
         input.payload,
@@ -215,11 +247,12 @@ export async function changeCommandRoute(
               : "identity-current-v1",
           now,
           ttlSeconds: PLAN_TTL_SECONDS_DEFAULT,
+          audit,
         },
         store,
       );
       return result.ok
-        ? Response.json({ plan: result.plan, created: result.created })
+        ? answered({ plan: result.plan, created: result.created }, audit)
         : fail(result.error, result.refs);
     }
     case "simulate": {
@@ -230,6 +263,7 @@ export async function changeCommandRoute(
     }
     case "approve": {
       const scope = Array.isArray(input.scope) ? (input.scope as string[]) : [];
+      const audit = writerCall(envelope, "command.approve", principal);
       const result = await approve(store, {
         planId: input.planId,
         planDigest: input.planDigest,
@@ -237,12 +271,14 @@ export async function changeCommandRoute(
         scope,
         ttlSeconds: APPROVAL_TTL_SECONDS_DEFAULT,
         now,
+        audit,
       });
       return result.ok
-        ? Response.json({ approval: result.approval, plan: result.plan })
+        ? answered({ approval: result.approval, plan: result.plan }, audit)
         : fail(result.error, result.refs);
     }
     case "commit": {
+      const audit = writerCall(envelope, "command.commit", principal);
       const result = await commit(store, {
         operationId: input.operationId,
         principal,
@@ -253,9 +289,10 @@ export async function changeCommandRoute(
           : { idempotencyPayloadDigest: input.idempotencyPayloadDigest }),
         planners: changeMutationPlanners(env.DB),
         now,
+        audit,
       });
       return result.ok
-        ? Response.json({ receipt: result.receipt, replayed: result.replayed })
+        ? answered({ receipt: result.receipt, replayed: result.replayed }, audit)
         : fail(result.error, result.refs);
     }
     default: {
