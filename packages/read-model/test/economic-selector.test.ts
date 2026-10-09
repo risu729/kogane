@@ -591,21 +591,16 @@ describe("plans on the complete CORE schema without statistics", () => {
     ["pins", PINS_SQL, [JSON.stringify(["account_mapping:x"])]],
   ];
   /**
-   * The only whole reads allowed: the JSON argument, the schema catalogue, the
-   * view's co-routine over its keyed arms, the identity epochs read newest
-   * first by rowid (one row), and the materialized key list.
+   * The only whole reads allowed besides the JSON argument (a virtual table):
+   * the schema catalogue, the view's co-routine over its keyed arms, the
+   * identity epochs read newest first by rowid (one row), the materialized key
+   * list and a constant row.
    */
   const ALLOWED = new Set([
-    "json_each",
-    "s",
-    "e",
-    "p",
-    "k",
-    "a",
-    "w",
     "sqlite_master",
     "economic_revision_claims",
     "economic_identity_epochs",
+    "w",
     "CONSTANT",
   ]);
 
@@ -621,7 +616,7 @@ describe("plans on the complete CORE schema without statistics", () => {
       const db = fullCoreSchema();
       const steps = explain(db, sql, args);
       const scans = steps
-        .filter((step) => step.detail.startsWith("SCAN "))
+        .filter((step) => step.detail.startsWith("SCAN ") && !step.detail.includes("VIRTUAL TABLE"))
         .map((step) => step.detail.slice(5).split(" ")[0]!)
         .filter((relation) => !ALLOWED.has(relation));
       expect(scans).toEqual([]);

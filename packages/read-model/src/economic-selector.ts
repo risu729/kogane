@@ -123,8 +123,9 @@ SELECT d.event_id FROM wanted w CROSS JOIN card_settlement_candidates c ON c.ban
  WHERE w.book='cash-movement' AND d.status='accepted' AND d.event_id IS NOT NULL`;
 
 /** ?1 JSON array of `[book, alias class text]`. Legacy holders carry no alias class. */
-export const ALIAS_HOLDERS_SQL = `SELECT DISTINCT x.event_id FROM json_each(?1) a
- CROSS JOIN economic_claims x ON x.book=json_extract(a.value,'$[0]') AND x.alias_class=json_extract(a.value,'$[1]')`;
+export const ALIAS_HOLDERS_SQL = `SELECT DISTINCT x.event_id FROM json_each(?1) wanted_alias
+ CROSS JOIN economic_claims x ON x.book=json_extract(wanted_alias.value,'$[0]')
+ AND x.alias_class=json_extract(wanted_alias.value,'$[1]')`;
 
 /** ?1 JSON array of event ids, ?2 row limit. */
 export const LEGS_SQL = `SELECT l.event_id,l.revision,l.leg_index,l.subject_ref,l.unit_ref,l.value_status,l.coefficient,l.scale,
