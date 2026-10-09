@@ -17,6 +17,7 @@ export default defineConfig({
     entrypoint: "src/worker.ts",
     workersDev: true,
     previewUrls: false,
+    domains: ["kogane-mcp.takuk.me"],
     observability: {
       enabled: true,
       redactQueryString: true,
@@ -38,10 +39,15 @@ export default defineConfig({
       ACCESS_AUDIENCE: bindings.text(
         "20cc9cb6173e2755bc3ffd5f43a9adf45b0c2ad8451a1b2d330cc2b75f0d85c8",
       ),
+      ACCESS_MCP_AUDIENCE: bindings.text(
+        "b03b28c7c41d79c4730e18ccbad8dc57f69bb6742a1e27af3bde3fae366b6921",
+      ),
       COMMANDS_ENABLED: bindings.text("true"),
       OPERATOR_SUBJECTS: bindings.text('["2c440753-9011-502c-a22d-bb013593c11a"]'),
       AGENT_GRANTS: bindings.text(""),
-      AGENT_API_GRANTS: bindings.text(""),
+      AGENT_API_GRANTS: bindings.text(
+        '{"mcp-client:2c440753-9011-502c-a22d-bb013593c11a":{"scopes":{"sources":"*","accounts":"*"},"capabilities":["summary.read","records.read"],"budget":{"maxRows":100,"maxProposalTargets":3,"maxExplainDepth":3}}}',
+      ),
       // Inert S3 declaration default, matching the canonical/test configuration.
       MCP_DELEGATIONS: bindings.text(""),
       OPS_API_ENABLED: bindings.text("true"),
