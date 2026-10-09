@@ -61,10 +61,12 @@ for current behavior.
 - [ADR 0052: Reconstructed state is a pure fold over a provisional adopted-event input, compared with reported snapshots](0052-reconstructed-state-fold.md) — accepted; amended by ADR 0058
 - [ADR 0053: A closed transaction-family registry states which families have an event writer and why the others do not](0053-transaction-family-registry.md) — accepted
 - [ADR 0054: One consumption guard for every economic writer: claims, seals and a commit log](0054-economic-consumption-guard.md) — accepted
-- [ADR 0055: Propose cross-identifier instrument candidates from stored identifier facts; adopt only through a person's mapping](0055-instrument-candidates.md) — accepted
+- [ADR 0055: Propose cross-identifier instrument candidates from stored identifier facts; adopt only through a person's mapping](0055-instrument-candidates.md) — accepted; route, page and agent read amended 2026-10-09 (proposed)
 - [ADR 0056: Price and FX selection at an as-of under an explicit, versioned policy](0056-as-of-price-fx-selection.md) — accepted; policy values are open questions
-- [ADR 0058: A knowledge selector reads adopted events at a commit-log cut, and a B adapter feeds the reconstruction fold](0058-knowledge-selector-and-reconstruction-adapter.md) — accepted; no route or page reads it yet
+- [ADR 0057: Own-transfer proposals under an explicit policy, and planners that stay unregistered behind the production gate](0057-own-transfer-proposals.md) — proposed; no policy, no lane, planners unregistered
+- [ADR 0058: A knowledge selector reads adopted events at a commit-log cut, and a B adapter feeds the reconstruction fold](0058-knowledge-selector-and-reconstruction-adapter.md) — accepted; served by `GET /api/v2/reconstructed-state`, `kogane.reconstructed-state.read` and `/reconstruction` (amendment 2026-10-09)
 - [ADR 0059: A C adapter maps selected revisions to lot inputs, and answers unsupported until a securities writer exists](0059-lot-adapter-from-selected-revisions.md) — accepted; no securities writer, no route
+- [ADR 0060: Resume verification of an exact published Container](0060-container-publication-checkpoint.md) — accepted (merged in #602)
 - [ADR 0063: The AI is a delegated operation path: a verified MCP principal the owner names may apply operations within capability, scope, confirmation and audit](0063-delegated-ai-operation-path.md) — proposed; nothing implemented, no delegation exists
 - [ADR 0064: One append-only audit record per operation, for the human UI and the AI alike, referencing the existing logs](0064-common-audit-log.md) — proposed; no table yet, migration number not fixed
 - [ADR 0066: Use the direct Container API with existing applications](0066-container-direct-api.md) — proposed; native runtime verification pending

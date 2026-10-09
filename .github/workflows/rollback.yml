@@ -21,14 +21,10 @@ permissions: {}
 jobs:
   rollback:
     name: Rollback
-    concurrency:
-      # The same group as deploy.yml, so a rollback and a release can never run
-      # against Cloudflare at the same time.
-      group: production-deploy
-      cancel-in-progress: false
     permissions:
       contents: read # for checkout
       deployments: write # the release ledger
+      actions: read # immutable same-run release checkpoints
     uses: ./.github/workflows/_deploy-workers.yml # zizmor: ignore[secrets-inherit,self-repository] -- actionlint 1.7.12 does not support $/ yet.
     # The Cloudflare credentials live in the `production` Environment and are
     # read by the called workflow's job, which is where `environment:

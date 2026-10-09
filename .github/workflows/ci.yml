@@ -41,6 +41,9 @@ jobs:
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.10.5
+      - name: Verify bounded large-artifact restore
+        timeout-minutes: 2
+        run: mise exec -- node tasks/_lib/ci/release-resume.mjs resource-check
       - name: Run repository checks and linters
         # All lint steps plus the guarded native remainder. The two processor
         # shards on separate runners complete the same local hk check graph.

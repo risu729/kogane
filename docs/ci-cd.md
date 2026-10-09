@@ -167,10 +167,11 @@ produces a successful CI run with `head_branch: main` — and its head commit
 is fetchable from this repository. A `workflow_dispatch` supplies the sha by
 hand and is held to the same test through the compare API, below.
 
-Both callers hold the concurrency group `production-deploy` with
+The called release job holds the concurrency group `production-deploy` with
 `cancel-in-progress: false`, so one production change runs at a time and a
 later merge waits instead of interrupting a migration (G5-13). The group is
-held by the calling job for the whole of the called workflow, which is also why
+held by the called release job for the entire serial attempt, including a
+selected-job rerun. This is also why
 `environment: production` is declared inside `_deploy-workers.yml`: a job that
 calls a reusable workflow cannot declare an environment itself.
 
@@ -209,7 +210,9 @@ They retain the default scheduling policy, existing app/namespaces and
 APAC/basic/max-instance settings. Their image manifest binds the Docker image,
 daemon and source measurement; identity, immutable registry digest and complete
 control-plane allocation readback are required after publication. An unverified
-Container is recorded as failed for resume. Existing older source targets use
+Container is recorded as failed until its exact published target is verified.
+Same-run checkpoint recovery is specified in ADR 0060; a failed guard can be
+rerun without publishing that Container again. Existing older source targets use
 the trusted, strict SQLite-exports/image-reference rollback adapter; actual
 production readback and controlled rollback remain verification gates. Legacy DO
 owners (SBI VC Trade, SMBC Direct, Processor) use code-only cf bindings to their
@@ -387,12 +390,13 @@ nothing to do"_ and the Workers it had never deployed stayed behind for good.
 
 A run that is cancelled or fails leaves its deployment without a `success`
 status, so the next run keeps reading the one before it — a failed deployment is
-never the environment's state. A re-run of that commit therefore deploys every
+never the environment's state. A new normal release of that commit therefore deploys every
 Worker the last _successful_ record does not place at it, including any the
 failed run had already uploaded: that re-upload is harmless (above), whereas
 believing a failed run's account of itself would not be — a Worker whose upload
-succeeded but whose postcheck failed is exactly the one that must be deployed
-and checked again. The failed deployment is not ignored either: the next run reads its
+succeeded but whose postcheck failed still requires complete verification.
+Same-run Container recovery below rechecks the immutable published target
+without starting another rollout. The failed deployment is not ignored either: the next run reads its
 payload and prints it as _"it is not the environment's state, and it may have
 applied…"_, with the migrations and the Workers that run was working through,
 because a half-finished release is exactly the situation where the log has to
@@ -516,6 +520,36 @@ previous Processor continues to understand new collector evidence during the
 upload. Explicit dependencies in `infra/deploy-order.json` are validated against
 the actual workflow order. All health postchecks precede future alarm bootstrap;
 the initial twenty-minute floor covers Cron propagation. See [schedules](schedules.md).
+
+### Same-run Container verification recovery
+
+[ADR 0060](adr/0060-container-publication-checkpoint.md) preserves the serial
+Container gates. Immediately after successful publication, the workflow saves
+the exact returned Worker UUID, unique new application version/image and
+namespace identity in an immutable receipt. Its original deployment audit
+binds the receipt artifact ID/digest; the original payload binds prepared
+artifact ID/digest, run/original-attempt, target SHA and trusted workflow SHA.
+
+Rerunning the failed release job reacquires its own `production-deploy` lock,
+refuses any newer release record (including failed/pending releases), and verifies
+artifact metadata and incrementally computed whole-ZIP checksums before restoring original
+stamped configs, bundles, cf output and Docker images. It skips only receipt-bound
+Container publication; their full 180-second guards run again against the exact
+original target. Ordinary Workers and idempotent migrations follow the original
+ordered path, and every health/lifecycle/schedule postcheck remains required.
+
+Downloads write unverified bytes only into a unique private quarantine. The helper
+promotes the closed ZIP only after its bound checksum matches, then extracts it.
+ZIP and tar files are removed after successful extraction. The Docker archive
+moves within runner temporary storage instead of being copied again, and is
+removed after the original image ID/input proof. Unexpected failures report closed
+stage codes. Required CI streams more than 2 GiB through this path with peak RSS
+below 256 MiB; it does not substitute for live recovery verification.
+
+No receipt means no safe adoption. Historical runs, publication failure before
+checkpoint binding, ordinary-only rollback runs, expired artifacts, ambiguous
+version readback or superseding publication require a new explicit normal
+release decision. This recovery has not yet been verified in production.
 
 ### Postcheck
 

@@ -14,8 +14,13 @@ import { validRewardExpiryBasis } from "./reward-contract.ts";
 import { isDecimalMinorUnit } from "../../parsers/src/money.ts";
 import { validFinancialResult } from "../../domain/src/result.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
+import {
+  INSTRUMENT_CANDIDATES_PATH,
+  validInstrumentCandidateReview,
+} from "./instrument-candidates-contract.ts";
 import { validCardOwnershipReview } from "./card-ownership-contract.ts";
 import { validCardPurchasePage } from "./card-purchase-contract.ts";
+import { validReconstructedState } from "./reconstructed-state-contract.ts";
 import { validReportedState } from "./reported-state-contract.ts";
 import { validCollectionQualityResponse } from "./collection-quality-contract.ts";
 import { validCardSettlementReviewPage } from "./card-settlement-contract.ts";
@@ -193,6 +198,7 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   cardOwnershipReview: optional(boolean),
   cardPurchaseRecognition: optional(boolean),
   reportedStateOnDate: optional(boolean),
+  reconstructedStateOnDate: optional(boolean),
   opsApi: boolean,
 });
 const globalPassEmptyMonth = object<GlobalPassEmptyMonth>({
@@ -752,8 +758,10 @@ export function validApiResponse(path: string, value: unknown): boolean {
     return validCardSettlementReviewPage(value);
   if (path === "/api/v2/card-purchases") return validCardPurchasePage(value);
   if (path === "/api/v2/reported-state") return validReportedState(value);
+  if (path === "/api/v2/reconstructed-state") return validReconstructedState(value);
   if (path.startsWith("/api/collection-quality"))
     return validCollectionQualityResponse(path, value);
+  if (path === INSTRUMENT_CANDIDATES_PATH) return validInstrumentCandidateReview(value);
   if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);
   if (path === "/api/v2/query") return validSharedQueryResponse(value);
   if (path === "/api/filter-options") {

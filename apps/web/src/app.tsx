@@ -21,12 +21,14 @@ import { EvidenceContent } from "./evidence-app.tsx";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
 import { GlobalPassEmptyMonthsNotice } from "./global-pass-empty-months.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
+import { InstrumentCandidatesPage } from "./pages/InstrumentCandidates.tsx";
 import { RewardsPage } from "./pages/Rewards.tsx";
 import { ConfirmPage } from "./pages/Confirm.tsx";
 import { CardOwnershipPage } from "./pages/CardOwnership.tsx";
 import { ReconciliationPage } from "./pages/Reconciliation.tsx";
 import { PurchasePage, PurchasesPage } from "./pages/Purchases.tsx";
 import { ReportedStatePage } from "./pages/ReportedState.tsx";
+import { ReconstructedStatePage } from "./pages/ReconstructedState.tsx";
 
 // Every destination in one list. A `feature` entry is shown only while the
 // API advertises that capability; the others are always present.
@@ -40,6 +42,12 @@ const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeat
     label: "基準日の保有状況",
     icon: NAV_ICONS.state,
     feature: "reportedStateOnDate",
+  },
+  {
+    to: "/reconstruction",
+    label: "残高の再構成",
+    icon: NAV_ICONS.reconstruction,
+    feature: "reconstructedStateOnDate",
   },
   { to: "/summaries", label: "期間実績・請求", icon: NAV_ICONS.summaries },
   { to: "/artifacts", label: "原本・証跡", icon: NAV_ICONS.artifacts },
@@ -93,8 +101,12 @@ function View({ route }: { route: Route }): ReactNode {
       return <PositionsPage />;
     case "reportedState":
       return <ReportedStatePage />;
+    case "reconstructedState":
+      return <ReconstructedStatePage />;
     case "identities":
       return <IdentitiesPage />;
+    case "instrumentCandidates":
+      return <InstrumentCandidatesPage />;
     case "rewards":
       return <RewardsPage />;
     case "cardOwnership":

@@ -71,7 +71,11 @@ const assets = { fetch: async () => new Response("synthetic shell") } as unknown
 const production: ConformanceTarget = {
   // The CORE store under test has the views the reported state reads, so this
   // Worker serves it (docs/reported-state.md); the shared constant keeps it off.
-  expected: { ...CENTRAL_STORE_CAPABILITIES, reportedStateOnDate: true },
+  expected: {
+    ...CENTRAL_STORE_CAPABILITIES,
+    reportedStateOnDate: true,
+    reconstructedStateOnDate: true,
+  },
   get: async (path, method = "GET") =>
     worker.fetch(
       new Request(`https://fixture.test${path}`, {
@@ -205,6 +209,7 @@ describe("shared contract pin", () => {
       cardOwnershipReview: false,
       cardPurchaseRecognition: false,
       reportedStateOnDate: false,
+      reconstructedStateOnDate: false,
       eventsV2: false,
       opsApi: false,
     });
