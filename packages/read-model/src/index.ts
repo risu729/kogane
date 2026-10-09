@@ -53,6 +53,7 @@ export {
   type RawDownloadReference,
   type ReaderOptions,
   ResultLimitExceededError,
+  type SourceFetchRunCount,
   type SqlExecutor,
   type TransactionQuery,
 } from "./reader";

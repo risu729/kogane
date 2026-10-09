@@ -92,8 +92,21 @@ export interface ParsingHealth {
   failed: number;
 }
 
+/** One source's visible fetch runs, counted over its whole history. */
+export interface SourceFetchRunCount {
+  source_id: string;
+  run_count: number;
+}
+
 export interface ObservationReader {
   overview(): Promise<Overview>;
+  /**
+   * The exact number of visible fetch runs of each listed source, over each
+   * source's whole history: no window, and no run of an unlisted source is
+   * read. A listed source with no visible run has no row; an empty list reads
+   * nothing. Ordered by source id.
+   */
+  fetchRunCounts(sources: readonly string[]): Promise<SourceFetchRunCount[]>;
   /**
    * D13 partial-update signal: partial fetch runs that refreshed some units of
    * a dataset on the `unit` eligibility scope. Empty for every dataset on the
