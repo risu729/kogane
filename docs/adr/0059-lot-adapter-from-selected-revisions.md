@@ -242,18 +242,30 @@ object it answers `unavailable` (`economic_guard_missing`). Otherwise:
 1. It reads each asked identifier's current mapping and its instrument by key
    (`LOT_INSTRUMENT_MAPPINGS_SQL`: an instrument of kind `crypto` is a crypto
    asset; any other kind states no class).
-2. It reads every identifier currently mapped to those instruments
-   (`LOT_INSTRUMENT_IDENTIFIERS_SQL`), so a book is computed from its
-   instrument's whole identifier set, never from the part a caller named: a
-   buy under one identifier and a sale under another of the same instrument
-   always meet in one book. No index orders `instrument_mappings` by
+2. In one statement (`LOT_INSTRUMENT_IDENTIFIERS_SQL`) it reads every
+   identifier any of whose mapping revisions names one of those instruments,
+   with whether its current mapping does. The current ones are the
+   instrument's identifier set, and all of them are selected, so a book is
+   computed from the whole set, never from the part a caller named: a buy
+   under one identifier and a sale under another of the same instrument
+   always meet in one book. The others were remapped away. They are not
+   selected (their current meaning is another instrument), but they are
+   named: they are passed to the adapter as `remappedIdentifiers`, pinned in
+   the outer manifest, and add `instrument_identifier_remapped`, which answers
+   `needs_review` rather than a book that silently misses their revisions
+   under the old instrument. No index orders `instrument_mappings` by
    instrument (CORE 0018 keys it by identifier and revision, and an index
    would be a migration), so this read passes over the mapping table once,
    as `ACCOUNT_SOURCES_SQL` passes over the account mappings, and checks each
    row's currency by the `(identifier_id, revision)` key. The plan is tested
    without statistics: one scan of the mapping table, nothing else whole.
-   The scope (asked and found) is bounded at 64 identifiers, the selector's
-   instrument bound; past it the query is refused
+   Measured by the reviewer on `bun:sqlite`, not D1, not asserted: about
+   0.3 ms at 1,000 mapping rows, 2.3 ms at 10,000 and 11.5 ms at 100,000,
+   linear. That was before the statement also returned remapped identifiers;
+   on the current statement the same script gave 0.2, 2.1–2.2 and 5.5–6.0 ms.
+   On D1 every query reads every mapping row. The read stops one row past
+   64 identifiers, the selector's instrument bound, and the scope (asked and
+   current) is bounded at 64 too; past either bound the query is refused
    (`instrument_identifier_bound_exceeded`, `LOTS_ON_SELECTION_REFUSALS`),
    never cut.
 3. It loads the selector rows for the account (ADR 0058), selects with all
@@ -272,7 +284,16 @@ instrument identifier id with a current mapping, and its seal pins
 remapped to another instrument, the writer re-revises every event that moves
 it under the new mapping (as the card purchase lane re-revises after an
 identity epoch change). Until it does, those events stay under the old pin,
-and the query reads only identifiers mapped now (see Limits).
+and the query reads only identifiers mapped now. **Rule:** an identifier
+mapped to an asked instrument earlier but not now is never read for that
+instrument, and it always makes the answer `needs_review`
+(`instrument_identifier_remapped`), so a remapping is a review, never a
+silent miss.
+
+The two mapping reads and the identifier read are separate statements with no
+snapshot shared between them. A mapping that moves between them gives the
+adapter a revision that is not the one a revision's seal pins, so that
+revision is `instrument_unresolved`: the pin check is the safeguard.
 
 ## Consequences
 
@@ -325,10 +346,9 @@ revision)` and the `instruments` primary key, and the identifier read passes
   `instrument_unresolved`; only the current mapping is read, so a mapping
   moved since the seal is refused, not read at the pinned revision. An
   identifier mapped to an instrument earlier but not now is not read for that
-  instrument. Its revisions are found only by asking for the identifier
-  itself, where the moved pin holds them `instrument_unresolved`. Until the
-  writer precondition above holds, the instrument's own book can therefore
-  miss them.
+  instrument. It is named (`instrument_identifier_remapped`, `needs_review`),
+  and its revisions are found only by asking for the identifier itself, where
+  the moved pin holds them `instrument_unresolved`.
 - **Unplaced revisions.** A held revision that no instrument leg places in a
   book (an unmapped unit, an unknown holder) makes the run `needs_review` but
   does not hold the books that are fed.
@@ -349,7 +369,7 @@ revision)` and the `instruments` primary key, and the identifier read passes
 
 Synthetic data only; no production data, D1 or Workers.
 
-- `packages/domain/test/lot-adapter.test.ts` (39 tests), on hand-built
+- `packages/domain/test/lot-adapter.test.ts` (40 tests), on hand-built
   selections (`packages/domain/test/lot-selection-fixture.ts`, set versions
   from the selector's `adoptedSetVersion`) and on today's selector through
   `selector-fixture.ts`: no security claim is `unsupported` with the manifest
@@ -373,9 +393,10 @@ Synthetic data only; no production data, D1 or Workers.
   review, an active seal-less revision (`instrument_unresolved`), two
   identifiers of one instrument sharing a book, a provisional cut (`limited`,
   `cut_provisional`, pinned and echoed), one policy ref with two contents
-  giving two contexts, the unstated fee kept absent with no cash side, and a
-  correspondence and a breakdown naming another leg.
-- `packages/application/test/lots-on-selection-query.test.ts` (14 tests) on a
+  giving two contexts, the unstated fee kept absent with no cash side, a
+  correspondence and a breakdown naming another leg, and a remapped
+  identifier answering `needs_review`.
+- `packages/application/test/lots-on-selection-query.test.ts` (17 tests) on a
   CORE store migrated through every migration with an economic history
   written through 0070's triggers: without 0070 `unavailable`; an empty log
   `unsupported` with `log_empty`, the manifest and the mappings read; 0070
@@ -383,9 +404,11 @@ Synthetic data only; no production data, D1 or Workers.
   no writer claims held `writer_unsupported`; a cash event outside the
   instrument scope; B12 (a later commit, the earlier cut's context unchanged);
   B13; refused queries and cuts; a null policy; asking for one identifier of
-  an instrument selecting its other current identifier (and not one remapped
-  away), with the same answer whichever is asked; the identifier bound
-  refused; both mapping reads' plans on the complete CORE schema without
+  an instrument selecting its other current identifier, with the same answer
+  whichever is asked, and naming one remapped away
+  (`instrument_identifier_remapped`; none named when there is none); each
+  identifier bound refused on its own (too many current, too many remapped,
+  a scope widened by asked identifiers the read does not return); both mapping reads' plans on the complete CORE schema without
   table statistics (the mapping read keyed; the identifier read one pass over
   the mapping table, its currency check keyed).
 - By hand, not in CI: subtracting instead of adding a disposal's fees,
@@ -393,8 +416,10 @@ Synthetic data only; no production data, D1 or Workers.
   check, feeding books with a held revision, skipping the pin check (or only
   for a seal-less revision), an empty fee list without a cash side, not
   checking a correspondence's or a breakdown's target leg, dropping
-  `cut_provisional`, dropping the policy copy, and not expanding the
-  identifier scope each failed tests.
+  `cut_provisional`, dropping the policy copy, not expanding the identifier
+  scope, not checking an identifier's currency, dropping
+  `instrument_identifier_remapped`, and dropping either identifier bound
+  check each failed tests.
 - `mise run //packages/domain:ci`, `//packages/read-model:ci`,
   `//packages/application:ci`, `//packages/parsers:test`, `mise run ci:root`,
   the format, lint and typo checks, and `mise run ledger:schema` (no change).
