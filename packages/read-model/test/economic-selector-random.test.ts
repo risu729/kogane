@@ -105,7 +105,9 @@ function generate(seed: number): Model {
   let eventCount = 0;
   let clock = Date.parse("2026-03-01T00:00:00.000Z");
   const steps = 10 + Math.floor(next() * 14);
-  const preLog = Math.floor(next() * 4);
+  // A long enough pre-log phase that chains of two or more unlogged
+  // revisions form before a logged correction supersedes their last one.
+  const preLog = Math.floor(next() * 7);
   for (let step = 0; step < steps; step += 1) {
     const logged = step >= preLog && next() > 0.12;
     const live = [...heads.values()].filter((row) => row.supersededBy === null);
@@ -354,12 +356,33 @@ function replay(model: Model, events: Set<string>, cut: number) {
     }
   }
   const byRef = new Map(model.revisions.map((row) => [ref(row), row]));
+  // History by the stored pointers, walked forward: a revision known at the
+  // cut whose pointer chain reaches a revision a visible commit superseded was
+  // replaced before that commit.
+  const replaced = (start: ModelRevision): boolean => {
+    const seen = new Set<string>();
+    for (let row: ModelRevision | undefined = start; row !== undefined;) {
+      if (dead.has(ref(row))) return true;
+      if (
+        seen.has(ref(row)) ||
+        (row.commit !== null && row.commit > cut) ||
+        row.supersededBy === null
+      )
+        return false;
+      seen.add(ref(row));
+      row = byRef.get(row.supersededBy);
+    }
+    return false;
+  };
+  const replacedBy = new Map(dead);
+  for (const row of model.revisions)
+    if (!dead.has(ref(row)) && replaced(row)) replacedBy.set(ref(row), row.supersededBy!);
   const selected = new Map<string, { row: ModelRevision; status: string }>();
   const unlogged: string[] = [];
   for (const eventId of events) {
     const rows = model.revisions.filter((row) => row.eventId === eventId);
-    const inForce = rows.filter((row) => live.has(ref(row)));
-    const unknown = rows.filter((row) => row.commit === null && !dead.has(ref(row)));
+    const inForce = rows.filter((row) => live.has(ref(row)) && !replacedBy.has(ref(row)));
+    const unknown = rows.filter((row) => row.commit === null && !replacedBy.has(ref(row)));
     for (const row of unknown) unlogged.push(`${ref(row)}:no_commit`);
     for (const row of inForce)
       if (row.supersededBy !== null && byRef.get(row.supersededBy)!.commit === null) {
@@ -386,7 +409,7 @@ function replay(model: Model, events: Set<string>, cut: number) {
       if (seen.has(at)) continue;
       seen.add(at);
       out.push(byRef.get(at)!);
-      for (const [prior, by] of dead) if (by === at) queue.push(prior);
+      for (const [prior, by] of replacedBy) if (by === at) queue.push(prior);
     }
     return out;
   };
@@ -476,6 +499,7 @@ function shuffle<T>(list: readonly T[], next: () => number): T[] {
 
 describe("the knowledge selector against a replay oracle on random stores", () => {
   const drawn = {
+    prelogChains: 0,
     unlogged: 0,
     conflicts: 0,
     merges: 0,
@@ -541,6 +565,19 @@ describe("the knowledge selector against a replay oracle on random stores", () =
         if (expected.identity.length > 0) drawn.identity += 1;
         if (expected.revisions.length > 0) drawn.inScopeCuts += 1;
       }
+      // A chain of two or more unlogged revisions that a logged revision ends.
+      const byRef = new Map(model.revisions.map((row) => [ref(row), row]));
+      for (const row of model.revisions) {
+        const next = row.supersededBy === null ? undefined : byRef.get(row.supersededBy);
+        const last = next?.supersededBy == null ? undefined : byRef.get(next.supersededBy);
+        if (
+          row.commit === null &&
+          next?.commit === null &&
+          last !== undefined &&
+          last.commit !== null
+        )
+          drawn.prelogChains += 1;
+      }
       // W11 (ADR 0054): at the log's last commit, what the selector resolved
       // from history is the current state: an active revision is the live
       // one, and its claims are exactly the live holders of its event.
@@ -602,5 +639,6 @@ describe("the knowledge selector against a replay oracle on random stores", () =
     expect(drawn.identity).toBeGreaterThan(0);
     expect(drawn.inScopeCuts).toBeGreaterThan(0);
     expect(drawn.currentState).toBeGreaterThan(0);
+    expect(drawn.prelogChains).toBeGreaterThan(0);
   });
 });

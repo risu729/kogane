@@ -424,6 +424,16 @@ describe("subjects, holders and what the log cannot place", () => {
     expect(rolled.coverage).toMatchObject({ status: "partial", reasons: ["knowledge_unlogged"] });
   });
 
+  test("a pre-log chain of two revisions is history once a logged correction supersedes its last", async () => {
+    const h = history();
+    h.adopt({ eventId: "ev-x", revision: 1, legs: [debit(BANK, "100")], logged: false });
+    h.adopt({ eventId: "ev-x", revision: 2, legs: [debit(BANK, "110")], logged: false });
+    h.adopt({ eventId: "ev-x", revision: 3, legs: [debit(BANK, "120")] });
+    const selection = await selectAt(h, seq(1));
+    expect(refs(selection)).toEqual(["ev-x@3:active"]);
+    expect(selection.coverage.status).toBe("logged");
+  });
+
   test("a seal under an epoch that is no longer current is identity_changed, its claim still held", async () => {
     const h = history();
     const row = h.bankRow("meisai-0004");

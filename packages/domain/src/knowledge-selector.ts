@@ -1128,6 +1128,26 @@ function selectBody(input: SelectorInput): AdoptedSelectionBody {
     }
   }
 
+  // 2a. History the log implies: a revision known at the cut (unlogged, or
+  // committed by it) whose stored pointer names a revision superseded at the
+  // cut, or itself history, was replaced before that commit: its pointer was
+  // written when its successor was, before the successor was superseded. So a
+  // pre-log chain of any length ends where a logged correction supersedes its
+  // last revision.
+  const history = new Map(supersededAt);
+  for (let grown = true; grown; ) {
+    grown = false;
+    for (const row of input.revisions) {
+      const ref = rowRef(row);
+      if (history.has(ref) || row.supersededBy === null) continue;
+      // A revision committed after the cut is not known at it.
+      if (logState.get(ref)!.kind === "later") continue;
+      if (!history.has(row.supersededBy)) continue;
+      history.set(ref, row.supersededBy);
+      grown = true;
+    }
+  }
+
   // 3. Per event: what is in force at the cut, and whether the log places it.
   const unloggedEntries: UnloggedEntry[] = [];
   const selectedRefs = new Map<
@@ -1135,7 +1155,7 @@ function selectBody(input: SelectorInput): AdoptedSelectionBody {
     { eventId: string; refs: string[]; status: AdoptedStatus }
   >();
   for (const [eventId, rows] of byEvent) {
-    const inForce = rows.filter((row) => !supersededAt.has(rowRef(row)));
+    const inForce = rows.filter((row) => !history.has(rowRef(row)));
     const candidates: LoadedRevision[] = [];
     const unknown: LoadedRevision[] = [];
     for (const row of inForce) {
@@ -1202,7 +1222,7 @@ function selectBody(input: SelectorInput): AdoptedSelectionBody {
 
   // 4. Fully load every selected revision.
   const predecessors = new Map<string, string[]>();
-  for (const [prior, successor] of supersededAt) {
+  for (const [prior, successor] of history) {
     const list = predecessors.get(successor) ?? [];
     list.push(prior);
     predecessors.set(successor, list);

@@ -310,6 +310,32 @@ describe("resolution at the cut", () => {
     expect(placed.coverage.status).toBe("logged");
   });
 
+  test("a pre-log chain of two revisions ends where a logged correction supersedes its last", async () => {
+    const h = empty();
+    write(h, { eventId: "ev:x", revision: 1, seq: null });
+    write(h, { eventId: "ev:x", revision: 2, seq: null });
+    write(h, { eventId: "ev:x", revision: 3, seq: 1 });
+    const selection = await at(h, 1);
+    expect(refs(selection)).toEqual(["ev:x@3:active"]);
+    expect(selection.unlogged).toEqual([]);
+    expect(selection.coverage.status).toBe("logged");
+    // At the cut before the correction neither pre-log revision is placed.
+    expect(refs(await at(h, 0))).toEqual([
+      "ev:x@1:knowledge_unlogged",
+      "ev:x@2:knowledge_unlogged",
+    ]);
+  });
+
+  test("a cross-event merge of a pre-log chain places every revision of it", async () => {
+    const h = empty();
+    write(h, { eventId: "ev:q", revision: 1, seq: null });
+    write(h, { eventId: "ev:q", revision: 2, seq: null });
+    write(h, { eventId: "ev:p", revision: 1, seq: 1, supersedes: [["ev:q", 2]] });
+    const selection = await at(h, 1);
+    expect(refs(selection)).toEqual(["ev:p@1:active"]);
+    expect(selection.unlogged).toEqual([]);
+  });
+
   test("an older build's successor makes the event unlogged at every cut after its prior", async () => {
     const h = empty();
     write(h, { eventId: "ev-1", revision: 1, seq: 1 });

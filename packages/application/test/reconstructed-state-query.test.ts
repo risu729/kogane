@@ -169,6 +169,17 @@ describe("what it answers today", () => {
     ]);
   });
 
+  test("a pre-log settlement corrected twice before the log, then under it, is placed", async () => {
+    const h = world();
+    settle(h, "ev-pre", "2026-03-15", { logged: false });
+    settle(h, "ev-pre", "2026-03-15", { revision: 2, logged: false });
+    settle(h, "ev-pre", "2026-03-15", { revision: 3 });
+    const result = await queryReconstructedState(storeExecutor(h.db), input());
+    expect(result.status).toBe("incomplete");
+    expect(result.knowledge!.unlogged).toEqual([]);
+    expect(result.reconstruction!.cells[0]!.applied.refs).toEqual(["ev-pre@3#0"]);
+  });
+
   test("a card account is unavailable (no reported container), its purchases listed", async () => {
     const h = world();
     h.adopt({
