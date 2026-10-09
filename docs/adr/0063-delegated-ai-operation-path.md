@@ -328,6 +328,17 @@ an audit record; R4 is never delegated. A delegated decision is recorded with
 
 ## Verification
 
+The S3 declaration-core implementation is an intentionally inert precursor:
+it validates owner declarations and derives their canonical refs, but its MCP
+capabilities status always reports delegated execution unavailable. It does
+not wire the common audit/operation path, Processor guards, prepare/confirm,
+budgets, or any write tool. A valid declaration is not execution authority.
+[The plan's S3 follow-up](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)
+tracks mandatory integration after S1 (#619) merges and reconciliation with
+#564. The declaration-core synthetic tests cover malformed/empty settings,
+identity boundaries, role/scope/time bounds, revocation, canonical references,
+closed unavailable reasons, no configuration leakage, and unchanged read/UI paths.
+
 This ADR is a design record; its pull request changes documentation only.
 The slices are verified by the tests the plan lists (section 8, the delegation
 matrix of thirteen items), on synthetic data, with an independent review per
