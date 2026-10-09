@@ -344,7 +344,7 @@ function januaryBoundaryPage(julyCount: number): Uint8Array {
 
 async function collectJanuaryBoundary(julyCount: number) {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () =>
+  globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) =>
     new Response(januaryBoundaryPage(julyCount).buffer as ArrayBuffer, {
       status: 200,
       headers: { "content-type": "text/html; charset=shift_jis" },
