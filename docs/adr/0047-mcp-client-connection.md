@@ -44,7 +44,8 @@ the origin so that "the request looks like a browser-authenticated one". The
 MCP server must validate that assertion.
 
 Four facts from this repository and the owner decide how the Worker may
-read that assertion:
+read that assertion and what it may answer inside a grant, and two later
+review findings narrow the second:
 
 1. **An MCP caller could be re-classified as the operator.** `/mcp` →
    `callOpsTool` → `opsContext` → `principalFor` grades the bare subject. If
@@ -67,6 +68,21 @@ read that assertion:
    `sourceSelectionManifestRef` named every source, and whose publication
    and parser digests moved when a source outside the grant published. The
    result data, coverage and gaps were already scoped; the context was not.
+5. **One coverage count was read outside the scope.** A later independent
+   review (at 9c25877) found that the `coverage` intent counted each
+   in-scope source's `collectionRunCount` inside the overview's fetch-run
+   list, which is the newest 501 visible runs across every source
+   (`OVERVIEW_FETCH_RUNS_SQL`), filtering by grant and `source` filter only
+   after that window was taken. A source outside the grant that recorded more
+   than 501 runs pushed the granted source's runs out of the window: its
+   count fell from 1 to 0 under the same `contextId`, with `completeness`
+   still `complete`. A denied source's activity was readable through an
+   in-scope answer, and the answer's completeness claim was wrong.
+6. **A grant entry could name a principal of its own.** The same review
+   found that `parseGrants` built each grant as `{ principal, ...body }`, so
+   an `AGENT_API_GRANTS` entry carrying a `principal` key stored, under the
+   verified key, a grant naming another principal. Not shown to widen any
+   access, but it broke the rule that the actor is the server-verified one.
 
 The current MCP revision is 2026-07-28 ([versioning][mcp-versioning]),
 stateless, with `server/discover` and per-request versions; the clients above
@@ -126,6 +142,24 @@ Tool list: filter `tools/list` by capability, or keep it per deployment.
 Kept per deployment: `kogane.capabilities` describes the principal and every
 call is graded on its own, with a closed reason.
 
+Coverage run counts (fact 5):
+
+1. **Keep counting inside the overview's window.** Rejected: the window is
+   taken across every source, so any source's activity moves every other
+   source's count; that is the side channel.
+2. **Apply the scope before the window**: the newest 501 runs of the
+   in-scope sources only. Rejected: it closes the side channel, but the
+   count is still a window, so an in-scope source's count still falls as
+   another in-scope source gets busier, and a `complete` answer would carry a
+   number that is not the source's run count.
+3. **Count per source, restricted to the in-scope sources before counting**
+   (`SELECT source_id, COUNT(*) … WHERE source_id IN (…) GROUP BY source_id`).
+   Selected: the count is exact over each source's whole history, like
+   `artifactCount` beside it, no run outside the list is read, and the plan
+   reaches runs by `idx_fetch_runs_source`. Cost: a whole-store scope reads
+   every visible run once per call, which the overview's own
+   `COUNT(*)` over the same relation already does on every call.
+
 ## Decision
 
 **Cloudflare authenticates; the Worker only verifies and attenuates.**
@@ -172,7 +206,18 @@ call is graded on its own, with a closed reason.
    relation and page limit, filtered by source before it is bounded). A
    whole-store grant — the browser reader's — keeps the overview's window,
    so the UI and agent answers stay identical.
-5. The transport is `@modelcontextprotocol/server` 2.3.1: a request of an
+5. **Coverage counts are read inside the scope.** `collectionRunCount` is
+   each in-scope source's exact number of visible fetch runs, read by
+   `fetchRunCounts` (`SOURCE_FETCH_RUN_COUNTS_SQL`, packages/read-model) for
+   the in-scope sources — the grant's sources narrowed by the `source`
+   filter — bound as one JSON array before anything is counted. The overview
+   and its 501-run window (`OVERVIEW_FETCH_RUNS_SQL`, unchanged) are no
+   longer read for it; they remain the operator overview's run list.
+6. **A grant entry is exactly `scopes`, `capabilities` and `budget`.** The
+   grant's principal is the key it is stored under; an entry with a
+   `principal` key (equal to the key or not) or any other extra key rejects
+   the whole table, as every other malformed entry already did.
+7. The transport is `@modelcontextprotocol/server` 2.3.1: a request of an
    initialize-based revision goes to the SDK's stateless
    `WebStandardStreamableHTTPServerTransport` in JSON mode, a 2026-07-28
    request to `createMcpHandler` in its default response mode (one JSON
@@ -211,6 +256,15 @@ to `""`).
   sources' publication digest with the accounts it cannot see: parse runs are
   per source, not per account.
 - A client of only the 2026-07-28 revision can connect.
+- `collectionRunCount` is exact for every caller of `coverage`, the
+  Overview page's summary included: past 501 visible runs it is the source's
+  real run count, where it used to be its share of the newest 501. The
+  operator overview's run list is still that window. A whole-store scope
+  counts every visible run on each call; a listed scope reads only its
+  sources' runs.
+- A grant table with an entry naming its own `principal` is now refused
+  whole (`403 agent_api_not_configured` on every agent path) where it used to
+  be accepted.
 - Gaps the documentation does not settle (each is an owner question, not a
   reason for code):
   - whether the protected-resource metadata Access serves names a `resource`
@@ -258,6 +312,14 @@ metadata — so the boundary has its own tests:
     another person's — `403 agent_api_not_configured` for list and call;
   - _limits_ (matrix 5): source, account and budget refusals on reads and
     proposals;
+  - _coverage counts_ (fact 5, `test/coverage-scope.test.ts`): with a grant
+    for one source, 520 sealed runs of a source outside it leave the whole
+    coverage answer — `contextId`, `resolvedQuery`, `resultRef`, every count,
+    `completeness` — byte-identical on the HTTP agent route and on `/mcp`,
+    and naming nothing of that source; the same with a `source` filter
+    narrower than a whole-store grant and than a listed grant naming both
+    sources; and each granted source's count is its exact run count past the
+    window. Each check fails on 9c25877;
   - _metadata_ (matrix 6): for a listed grant, the whole answer of every tool
     — context, manifests, digests, counts, errors — never names the denied
     source, its account or its source account, `sourceSelectionManifestRef`
@@ -283,6 +345,20 @@ metadata — so the boundary has its own tests:
   and calls the tools in `legacy` mode (2025-11-25) and in `auto` mode
   (2026-07-28), sees a refusal as a tool error, and cannot connect without a
   grant or with a browser-audience token.
+- `packages/read-model/test/source-run-counts.test.ts`: on complete-CORE
+  stores without table statistics, the count read's plan reaches runs by
+  `idx_fetch_runs_source (source_id=?)` and scans no table; on 8 random
+  stores inside the window (visible, partial, excluded and unsealed runs) it
+  equals the window count the intent used before for every scope; on 8 random
+  stores and a fixed one past the window it is the exact count, and a run of
+  an unlisted source never moves it; the shipped `OVERVIEW_FETCH_RUNS_SQL`
+  text is pinned unchanged. `packages/application/test/query.test.ts` pins
+  that `coverage` asks the reader for the in-scope sources only.
+- Grant entries (fact 6): `packages/application/test/grants.test.ts` and
+  `test/agent-api.test.ts` refuse a table whose entry names a different
+  principal, the same principal, or an unknown key (`403
+agent_api_not_configured` on the HTTP agent route and `/mcp`), and still
+  parse the documented shape under its key.
 - `test/agent-api.test.ts`, `test/ops-api.test.ts` (whose MCP block now pins
   that no operation is published or accepted on `/mcp` while HTTP still
   serves the operator), `test/purchases-explain.test.ts` and

@@ -98,13 +98,18 @@ that a source or an account it cannot see exists (SC18).
 Bounds a configured grant may not exceed: `maxRows` ≤ 1000,
 `maxProposalTargets` ≤ 50, `maxExplainDepth` ≤ 8, 64 values per scope list,
 64 principals. One invalid entry rejects the whole table, so a typo turns the
-API off rather than half-applying it.
+API off rather than half-applying it. An entry is exactly `scopes`,
+`capabilities` and `budget`: its principal is the key it is stored under, and
+an entry that carries a `principal` of its own (equal to the key or not) or
+any other key is invalid, so no grant can name a principal other than the one
+it is looked up by.
 
 ### Configuring `AGENT_API_GRANTS`
 
 `AGENT_API_GRANTS` is a wrangler `var` on `services/app` holding
 the JSON object above (principal → grant, without the `principal` field, which
-the server fills in from the verified subject). It ships as `""`.
+the server fills in from the key; an entry with a `principal` field rejects
+the whole table). It ships as `""`.
 
 To enable a grant, set the variable for the deployment — as a secret if the
 principal names should not sit in the repository:
@@ -210,6 +215,22 @@ object (`actor_not_supported`) before any grader runs.
 | `holdings`       | Adopted holdings per unit                               | `source`, `account`                                 | `summary.read` |
 | `reported-state` | What the provider reported                              | `source`, `account`, `instrument`, `metric`, `view` | `records.read` |
 | `activity`       | Adopted events in a period                              | `source`, `account`, `from`, `to`, `q`              | `records.read` |
+
+`coverage` lists each in-scope source — the grant's sources, narrowed by the
+`source` filter — with its `artifactCount` and `collectionRunCount`: the
+exact number of visible fetch artifacts and fetch runs of that source over its
+whole history, and their sums. A source without an artifact is the gap
+`no_artifacts_collected`. The run counts are read by one query restricted to
+the in-scope sources before it counts anything
+(`SOURCE_FETCH_RUN_COUNTS_SQL`, through `idx_fetch_runs_source`), so a run of
+a source outside the scope is never read and another source's activity,
+granted or not, never moves an in-scope count, the `contextId` or the
+`resultRef`. The operator overview's fetch-run list (`GET /api/overview`) is a
+different read — the newest 501 visible runs across every source — and
+`coverage` does not count inside it
+([ADR 0047](adr/0047-mcp-client-connection.md)).
+`test/coverage-scope.test.ts` pins this on the HTTP agent route and `/mcp`:
+520 runs of a source outside the scope leave the whole answer byte-identical.
 
 `holdings` reads A07's adopted balance projection and nothing else. While the
 reader flag is off or no snapshot is sealed it answers
