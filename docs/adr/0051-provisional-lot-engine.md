@@ -272,3 +272,25 @@ repository (input permutation, conservation over random histories, random
 grouping against pairwise `compareTemporal`, and 60,000 random books giving
 byte-identical results before and after the cut rule moved to running
 extremes) found no unsound outcome. Not verified: any real evidence, any adapter, D1, Workers or production data.
+
+## Note: the C adapter exists (2026-10-09, ADR 0059)
+
+[ADR 0059](0059-lot-adapter-from-selected-revisions.md) (proposed) adds the
+adapter this ADR left to a later change: `adaptSelectionToLots` and
+`lotsOnSelection` in `packages/domain/src/lot-adapter.ts` map the knowledge
+selector's selected revisions to `provisional-lot-input-v0` inputs, run this
+engine under the caller's policy and pin the outer manifest, and
+`queryLotsOnSelection` (`packages/application/src/query/lots-on-selection.ts`)
+answers one holder at one cut without a route. The engine is unchanged. What
+the adapter refuses: every selection without a `security-quantity` claim
+(`security_quantity_writer_missing`, today's answer, since CORE 0070 refuses
+the book and no writer exists), a transfer (`transfer_contract_pending`), a
+corporate action (`corporate_action_unsupported`), a shape it cannot place
+(`writer_unsupported`), an unresolved, aggregate, unpinned or classless
+instrument (`instrument_unresolved`), a holder without a wrapper key
+(`holder_unresolved`), and every book a selector disposition touches
+(`knowledge_unlogged`, `identity_changed`, `claim_conflict`, `alias_conflict`,
+`revision_chain_inconsistent`); a missing time role, consideration, fee or FX
+rate stays unknown. It produces no snapshot, split or transfer input and no
+FX rate. The open items above (transfers, fee and FX evidence, the book key's
+wrapper, opening costs, corporate actions, date-only ordering) stay open.

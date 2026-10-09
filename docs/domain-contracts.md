@@ -332,8 +332,10 @@ specific-identification`), scope, time basis, ordering rule, fee and FX
   equal digests mean equal results while `LOT_ENGINE_VERSION`, bumped on
   every allocation-rule change, is equal. The manifest holds amounts: it is a
   calculation input that a future writer stores only as a report body, never
-  in a log or tick record. No gain, no tax conclusion. No adapter produces
-  these inputs yet ([ADR 0051](adr/0051-provisional-lot-engine.md)).
+  in a log or tick record. No gain, no tax conclusion
+  ([ADR 0051](adr/0051-provisional-lot-engine.md)). The C adapter below
+  produces these inputs from selected revisions; no writer feeds it real ones
+  yet.
 
 ## `economic-contract.ts` — consumption, seals and commits
 
@@ -462,6 +464,34 @@ admitted by CORE 0071, refused by the change lifecycle until a planner exists
   or revisions without a commit, and no coverage declared
   (`coverage-producer-none-v1`). `explainLateSelections` diffs two selections.
   `KNOWN_WRITER_RELEASES` names the seal releases each fold writer stamps.
+
+## `lot-adapter.ts` — the C adapter
+
+- [ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md):
+  `adaptSelectionToLots(selection, request)` reads selected revisions with a
+  `security-quantity` claim, a leg in a requested instrument unit or a
+  reserved kind (`LOT_ADAPTER_KINDS`: `trade` mapped, `transfer` held
+  `transfer_contract_pending`, `corporate_action` held
+  `corporate_action_unsupported`) and maps a `trade` to an acquisition or
+  disposal: one security movement, one cash movement with its fee breakdowns
+  (or stated correspondences), `trade` and `settlement` times as stored
+  (`time_role_missing`, never a fallback), holder `account:<id>` with the
+  request's wrapper key, the instrument from the request's mapping when it is
+  `identified` or `provider-local`, states a class and equals the seal's
+  `instrument_mapping:` pin. Closed codes (`LOT_ADAPTER_CODES`); a book any
+  held revision touches is not fed; the selector's dispositions hold books
+  `indeterminate` or `needs_review`; key and alias conflicts among security
+  claims are found again here.
+- `lotsOnSelection(selection, request)` runs `computeLots` under the
+  request's policy and returns a status (`unsupported`, `refused`,
+  `indeterminate`, `needs_review`, `limited`, `complete`), every reason
+  (`LOTS_ON_SELECTION_REASONS`), the adaptation, the engine's result and the
+  outer manifest with its digest as `contextId`; the cut's standing is pinned
+  and echoed, and a provisional cut is at most `limited` (`cut_provisional`).
+  With no security claim the
+  answer is `unsupported` (`security_quantity_writer_missing`), which is every
+  real answer today. No FX rate, snapshot, split or transfer input is
+  produced; no gain, no tax.
 
 ## Fixtures
 

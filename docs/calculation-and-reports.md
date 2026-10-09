@@ -24,9 +24,12 @@ supply missing acquisition costs. A separate pure lot engine,
 `computeLots()` in [`lots.ts`](../packages/domain/src/lots.ts), allocates
 disposals to lots for investment analysis over a provisional input contract
 ([lots](#lots-over-a-provisional-input-contract),
-[ADR 0051](adr/0051-provisional-lot-engine.md)). Nothing produces its inputs
-yet: there is no adapter from events or observations, no transfer handling,
-no persistence, no realized or unrealized P&L and no tax output.
+[ADR 0051](adr/0051-provisional-lot-engine.md)). An adapter from the
+knowledge selector's adopted revisions exists
+([ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md)), but no writer
+adopts a security-quantity movement, so it answers `unsupported` and nothing
+real reaches the engine: there is no transfer handling, no persistence, no
+realized or unrealized P&L and no tax output.
 
 The [roadmap](roadmap.md) separates the remaining work: price/FX acquisition and
 as-of valuation can start from reported holdings; lots and disposal allocation
@@ -405,8 +408,31 @@ What it does today:
   record. `LOT_ENGINE_VERSION` is bumped on every allocation-rule change.
   There is no gain and no tax conclusion.
 
-Limits: no adapter maps events or observations to these inputs, so the
-engine runs only in tests; the input contract is provisional; own-account
+The C adapter (`packages/domain/src/lot-adapter.ts`,
+[ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md)) maps the
+knowledge selector's selected revisions to these inputs: a `trade` (a
+reserved kind no migration admits yet) whose one security movement is the
+acquisition or disposal, its cash movement's fee breakdowns as fees (101 out
+= 100 + 1 fee; 100 in = 101 gross − 1 fee), trade and settlement times from
+their own role rows with no fallback, the book from the resolved account, a
+caller-supplied wrapper key and the caller's instrument mapping pinned by the
+seal. A book any held revision touches (a selector disposition, a shape it
+cannot place, an unresolved or aggregate instrument, a transfer, a corporate
+action) is not fed. `lotsOnSelection` runs the engine under the caller's
+policy and pins an outer manifest (cut and its standing, set version,
+identity pins, alias rules, coverage producer, policy, FX policy, engine
+manifest digest); a provisional cut is never `complete`.
+`queryLotsOnSelection` answers one holder at one cut without a route, over
+every identifier currently mapped to the asked instruments, so a book is its
+instrument's whole history. Since
+CORE 0070 refuses the `security-quantity` book and no securities writer
+exists, every real answer is `unsupported`
+(`security_quantity_writer_missing`), with the manifest produced.
+
+Limits: no writer produces security-quantity movements, so the engine
+computes real lots nowhere; no FX rate, corporate-action or transfer evidence
+reaches it; the wrapper key's source is not decided; a security instrument's
+class is not recorded; the input contract is provisional; own-account
 transfers, other corporate actions and short or margin positions are not
 handled; a re-parse that pins the same row under a different JSON path is
 not detected as a duplicate; results are not stored (`calculation_results` cannot hold the lot
@@ -518,6 +544,12 @@ would discard later collection and later decisions (docs/operations.md).
   each method with exact conservation, inexact allocation refused or
   carried, fee and FX modes, splits, snapshots, ordering ties, the gates and
   determinism under input permutation.
+- `packages/domain/test/lot-adapter.test.ts` — the C adapter on hand-built
+  selections and on today's selector: typed effects (101 = 100 + 1), no
+  time-role fallback, B7–B11, the C side of B3, B12 and B13, every adapter
+  code and dispositions holding only the touched book;
+  `packages/application/test/lots-on-selection-query.test.ts` — the query on a
+  migrated CORE store, answering `unsupported`.
 - `packages/domain/test/market-data.test.ts` — each exclusion code, the six
   checks in order, date-only and zone rules, freshness at and past the limit,
   business days over a synthetic calendar (a century counted exactly and
