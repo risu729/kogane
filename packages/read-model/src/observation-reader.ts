@@ -46,9 +46,10 @@ import {
   type RawDownload,
   type ReaderOptions,
   ResultLimitExceededError,
+  type SourceFetchRunCount,
   type SqlExecutor,
 } from "./reader";
-import { CANDIDATE_LIMIT, RESULT_BOUND } from "./scope";
+import { CANDIDATE_LIMIT, GLOBAL_PASS_NOTICE_LIMIT, RESULT_BOUND } from "./scope";
 import {
   ARTIFACT_DETAIL_SQL,
   ARTIFACT_PARSE_RUNS_SQL,
@@ -59,6 +60,7 @@ import {
   countSql,
   FILTER_SOURCES_SQL,
   filterAccountsSql,
+  GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL,
   filterDimensionsSql,
   latestBalancesSql,
   observationDetailSql,
@@ -72,6 +74,7 @@ import {
   positionsSql,
   PROVENANCE_SQL,
   RAW_DOWNLOAD_SQL,
+  SOURCE_FETCH_RUN_COUNTS_SQL,
   transactionsSql,
   VISIBLE_EVIDENCE_PROBE_SQL,
 } from "./sql";
@@ -144,6 +147,15 @@ export function createObservationReader(
       };
     },
 
+    async fetchRunCounts(sources): Promise<SourceFetchRunCount[]> {
+      const listed = [...new Set(sources)].sort();
+      if (listed.length === 0) return [];
+      const rows = await list<SourceFetchRunCount>(SOURCE_FETCH_RUN_COUNTS_SQL, [
+        JSON.stringify(listed),
+      ]);
+      return rows.map((row) => ({ source_id: row.source_id, run_count: Number(row.run_count) }));
+    },
+
     unitUpdates: readUnitUpdates,
 
     async parsingHealth(): Promise<ParsingHealth> {
@@ -155,6 +167,26 @@ export function createObservationReader(
       const health: ParsingHealth = { pending: 0, running: 0, failed: 0 };
       for (const job of jobs) health[job.status] = job.count;
       return health;
+    },
+
+    async globalPassEmptyMonths() {
+      const rows = await executor.all<{
+        source_id: string;
+        activity_month: string;
+        current_fetch_run_id: number;
+        superseded_fetch_run_id: number;
+        superseded_runs: number;
+      }>(GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL, []);
+      return {
+        months: rows.slice(0, GLOBAL_PASS_NOTICE_LIMIT).map((row) => ({
+          source: row.source_id,
+          month: row.activity_month,
+          currentFetchRunId: row.current_fetch_run_id,
+          supersededFetchRunId: row.superseded_fetch_run_id,
+          supersededRuns: row.superseded_runs,
+        })),
+        truncated: rows.length > GLOBAL_PASS_NOTICE_LIMIT,
+      };
     },
 
     async listTransactions({ offset, ...scope }) {

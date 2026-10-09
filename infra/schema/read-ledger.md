@@ -10,20 +10,20 @@ built from, and the operational state of the builds. No foreign key names a CORE
 databases cannot be joined and cannot commit together (04 §1) — and losing this database costs a
 rebuild and every open cursor, never a piece of evidence, a decision or a receipt (G0-09).
 
-Schema digest: `75c2db1b78a8e251cdd1084222b653dcf97e40dcf0906987a498f5bdf19f5e15`
+Schema digest: `c8611107f13960944fee4ae91b452a9d4acf166227f2de4be0c182cada249fdc`
 
 ## Summary
 
-- Migrations applied: 2
-- Tables: 13 (all `STRICT`: yes)
+- Migrations applied: 4
+- Tables: 14 (all `STRICT`: yes)
 - Views: 0
-- Triggers: 41
-- Explicit indexes: 15
+- Triggers: 46
+- Explicit indexes: 18
 - `WITHOUT ROWID` tables: —
 
 | classification | count | tables |
 | --- | --- | --- |
-| `read-projection` | 8 | balance_read_snapshots, current_balance_projection, reward_conversion_simulations, reward_expiry_estimates, reward_expiry_snapshots, reward_snapshot_input_refs, scope_relations, snapshot_input_refs |
+| `read-projection` | 9 | balance_read_snapshots, current_balance_projection, reward_conversion_simulations, reward_expiry_estimates, reward_expiry_estimates_v2, reward_expiry_snapshots, reward_snapshot_input_refs, scope_relations, snapshot_input_refs |
 | `read-operational` | 5 | balance_snapshot_pointer, read_build_checkpoints, read_instance, reward_build_checkpoints, reward_snapshot_pointer |
 
 Tables without both an append-only `*_no_update` and `*_no_delete` guard (mutable by design —
@@ -42,7 +42,8 @@ balance_read_snapshots, balance_snapshot_pointer, read_build_checkpoints, read_i
 | `read_instance` | read-operational | READ: the identity of this physical database; a rebuild is a new one (05 §7) | yes | no | no | — | read_instance_no_delete | 4 | 0 | 0 | 3 |
 | `reward_build_checkpoints` | read-operational | READ: where a bounded reward build got to, committed with its chunk (05 §4) | yes | no | no | — | — | 7 | 1 | 0 | 2 |
 | `reward_conversion_simulations` | read-projection | READ: saved simulations replayed under the snapshot's fixed offers (04 §2, G2-20) | yes | no | yes | reward_conversion_simulations_sealed_no_update | reward_conversion_simulations_sealed_no_delete | 13 | 1 | 2 | 5 |
-| `reward_expiry_estimates` | read-projection | READ: the estimated deadlines of one snapshot (04 §2, second stage) | yes | no | yes | reward_expiry_estimates_sealed_no_update | reward_expiry_estimates_sealed_no_delete | 22 | 1 | 3 | 5 |
+| `reward_expiry_estimates` | read-projection | READ: the estimated deadlines of one snapshot (04 §2, second stage) | yes | no | yes | reward_expiry_estimates_sealed_no_update | reward_expiry_estimates_sealed_no_delete | 23 | 1 | 3 | 5 |
+| `reward_expiry_estimates_v2` | read-projection | READ: corrected bucket kinds and displayed expiry of a fixed snapshot (ADR 0049 amendment) | yes | no | yes | reward_expiry_estimates_v2_sealed_no_update | reward_expiry_estimates_v2_sealed_no_delete | 23 | 1 | 3 | 5 |
 | `reward_expiry_snapshots` | read-projection | READ: one reward build under one fixed evaluation input (04 §2, 05 §3) | yes | no | no | — | — | 27 | 0 | 2 | 2 |
 | `reward_snapshot_input_refs` | read-projection | READ: rules, offers and claims copied from the fixed reward input (04 §3) | yes | no | yes | reward_snapshot_input_refs_no_update | reward_snapshot_input_refs_no_delete | 6 | 1 | 1 | 3 |
 | `reward_snapshot_pointer` | read-operational | READ: the active reward snapshot, switched in the same batch as the seal (05 §5) | yes | no | no | — | reward_snapshot_pointer_no_delete | 9 | 1 | 0 | 3 |
@@ -66,4 +67,4 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | migration | statements | rows written into |
 | --- | --- | --- |
 
-Migrations with no `INSERT`: 0001_read_baseline.sql, 0002_reward_read.sql
+Migrations with no `INSERT`: 0001_read_baseline.sql, 0002_reward_read.sql, 0003_reward_expiry_basis.sql, 0004_reward_unclassified_buckets.sql

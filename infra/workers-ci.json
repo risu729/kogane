@@ -115,6 +115,12 @@
       "name": "vpoint-worker",
       "path": "services/collector-vpoint",
       "config": "wrangler.jsonc"
+    },
+    {
+      "name": "d1-conformance",
+      "path": "experiments/d1-conformance",
+      "config": "wrangler.jsonc",
+      "prepare": "//experiments/d1-conformance:corpus"
     }
   ],
   "excluded": [

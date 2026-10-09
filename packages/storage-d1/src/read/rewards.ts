@@ -181,7 +181,7 @@ export const NEXT_REWARD_ATTEMPT_SQL =
 
 /** Written rows of a build, in contract order, with their digests. */
 export const WRITTEN_REWARD_ESTIMATE_DIGESTS_SQL = `SELECT row_seq, row_digest
-  FROM reward_expiry_estimates WHERE snapshot_id=?1 ORDER BY row_seq`;
+  FROM reward_expiry_estimates_v2 WHERE snapshot_id=?1 ORDER BY row_seq`;
 export const WRITTEN_REWARD_SIMULATION_DIGESTS_SQL = `SELECT row_seq, row_digest
   FROM reward_conversion_simulations WHERE snapshot_id=?1 ORDER BY row_seq`;
 
@@ -199,8 +199,9 @@ export const RETIREABLE_REWARD_SNAPSHOTS_SQL = `SELECT snapshot_id FROM reward_e
 export const REWARD_ESTIMATE_PAGE_SQL = `SELECT snapshot_id, row_key, row_seq, program_id,
     holding_ref, bucket_ref, rule_id, rule_version, bucket_kind, state, deadline_basis, expires_on,
     amount_coefficient, amount_scale, amount_status, unit_ref, provider_observed_json,
-    policy_estimated_json, reason_codes_json, uncertainty_codes_json, basis_refs_json, row_digest
-  FROM reward_expiry_estimates
+    policy_estimated_json, reason_codes_json, uncertainty_codes_json, basis_refs_json, row_digest,
+    expiry_basis_json
+  FROM reward_expiry_estimates_v2
   WHERE snapshot_id=?1 AND (?2 IS NULL OR program_id=?2) AND row_seq>?3
   ORDER BY row_seq LIMIT ?4`;
 
@@ -233,6 +234,12 @@ export interface RewardEstimateRow {
   uncertainty_codes_json: string;
   basis_refs_json: string;
   row_digest: string;
+  /**
+   * The displayed and computed expiry apart (READ migration 0003, ADR 0049).
+   * Null only for a row a build before `reward-projection-v2` wrote: that
+   * build recorded no basis, which is not the same as "no computed expiry".
+   */
+  expiry_basis_json: string | null;
 }
 
 export interface RewardSimulationRow {
@@ -499,11 +506,12 @@ function insertEstimate(
 ): D1StatementLike {
   return db
     .prepare(
-      `INSERT OR IGNORE INTO reward_expiry_estimates(snapshot_id,row_key,row_seq,program_id,
+      `INSERT OR IGNORE INTO reward_expiry_estimates_v2(snapshot_id,row_key,row_seq,program_id,
         holding_ref,bucket_ref,rule_id,rule_version,bucket_kind,state,deadline_basis,expires_on,
         amount_coefficient,amount_scale,amount_status,unit_ref,provider_observed_json,
-        policy_estimated_json,reason_codes_json,uncertainty_codes_json,basis_refs_json,row_digest)
-       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22)`,
+        policy_estimated_json,reason_codes_json,uncertainty_codes_json,basis_refs_json,row_digest,
+        expiry_basis_json)
+       VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23)`,
     )
     .bind(
       snapshotId,
@@ -528,6 +536,7 @@ function insertEstimate(
       JSON.stringify(row.uncertaintyCodes),
       JSON.stringify(row.basisRefs),
       digest,
+      JSON.stringify(row.expiryBasis),
     );
 }
 
@@ -844,7 +853,7 @@ async function retireRewardSnapshot(
     .bind(snapshotId)
     .run();
   await runBatch(db, [
-    db.prepare("DELETE FROM reward_expiry_estimates WHERE snapshot_id=?1").bind(snapshotId),
+    db.prepare("DELETE FROM reward_expiry_estimates_v2 WHERE snapshot_id=?1").bind(snapshotId),
     db.prepare("DELETE FROM reward_conversion_simulations WHERE snapshot_id=?1").bind(snapshotId),
     db.prepare("DELETE FROM reward_snapshot_input_refs WHERE snapshot_id=?1").bind(snapshotId),
     db.prepare("DELETE FROM reward_build_checkpoints WHERE snapshot_id=?1").bind(snapshotId),

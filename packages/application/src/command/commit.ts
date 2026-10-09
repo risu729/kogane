@@ -22,8 +22,12 @@ import {
   PENDING_POSTED_RELATION_KIND,
   pendingPostedReviewRequested,
 } from "../../../domain/src/pending-posted-review.ts";
-import { isCardReviewKind, type RelationPayload } from "./contract.ts";
+import { isCardReviewKind, isEconomicEventKind, type RelationPayload } from "./contract.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
+import {
+  economicGuardCode,
+  type EconomicGuardCode,
+} from "../../../domain/src/economic-contract.ts";
 import {
   type ChangePlan,
   type CommandReceipt,
@@ -40,6 +44,10 @@ import { loadPlan } from "./plan.ts";
 import { currentRevisions } from "./simulate.ts";
 import { expectedRevisionsJson } from "../operations/sql.ts";
 import { resolveAndSimulate } from "../operations/targets.ts";
+import type { OperationCall } from "../audit/call.ts";
+import { AUDIT_IDEMPOTENCY_KEY } from "../audit/vocabulary.ts";
+import { simulationCounts } from "./plan.ts";
+import { instrumentCandidatePlanIsPinned } from "../operations/instrument-candidate-context.ts";
 import {
   approvalConsumptionWrite,
   outboxWrite,
@@ -51,6 +59,21 @@ import {
 
 const OPERATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u;
 
+/**
+ * The economic guard refusals (ADR 0054) a fresh plan can see: the row is
+ * consumed, the fact is held under another key, the identity epoch moved, or
+ * a revision the plan read moved. Any other guard code is a writer's own
+ * inconsistency (`commit_failed`). Either way the code is the second ref.
+ */
+const GUARD_CONFLICTS: ReadonlySet<EconomicGuardCode> = new Set([
+  "economic_claim_held",
+  "alias_conflict",
+  "identity_epoch_changed",
+  "economic_commit_prior_not_superseded",
+  "economic_event_live_conflict",
+  "economic_revision_sealed",
+]);
+
 export interface CommitInput {
   operationId: unknown;
   principal: Principal;
@@ -60,6 +83,13 @@ export interface CommitInput {
   idempotencyPayloadDigest?: unknown;
   planners: MutationPlanners;
   now: string;
+  /**
+   * The route's audit call (ADR 0064). The commit's `applied` record is the
+   * last statement of the commit batch, joined to the receipt this batch
+   * reserved: a guard that fails writes neither, and a replay records nothing
+   * here.
+   */
+  audit?: OperationCall;
 }
 
 export interface CommitOutput {
@@ -131,6 +161,7 @@ export async function commit(
 
   const plan = await loadPlan(store, input.planId);
   if (!plan) return commandError("plan_not_found");
+  if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
   const payloadDigest = await canonicalDigest({
     planId: plan.planId,
     approvalId: typeof input.approvalId === "string" ? input.approvalId : null,
@@ -176,6 +207,13 @@ export async function commit(
   if (scope.length > 0 && !Object.keys(plan.expectedRevisions).every((ref) => scope.includes(ref)))
     return commandError("approval_scope_mismatch", [approval.approval_id]);
 
+  // An economic-event kind commits only while its planner accepts it, checked
+  // before its writer runs: a writer slot alone never opens a kind whose
+  // planner is not registered (ADR 0054, G2), as `approve` checks too.
+  if (isEconomicEventKind(plan.kind)) {
+    const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
+    if (!eligibility.ok) return eligibility;
+  }
   const planner = input.planners[plan.kind];
   if (!planner) return commandError("unsupported_semantics", [plan.kind]);
 
@@ -186,6 +224,7 @@ export async function commit(
     plan,
     principal,
     operationId,
+    payloadDigest,
     now: input.now,
     guard,
   });
@@ -237,8 +276,47 @@ export async function commit(
       outboxWrite(mutation.decisionRevisionId, principal.id, operationId, target, input.now),
     ),
   ];
+  if (input.audit)
+    writes.push(
+      input.audit.effect(
+        {
+          targetRef: `plan:${plan.planId}`,
+          refs: [`operation:${operationId}`, `decision:${mutation.decisionRevisionId}`],
+          // The caller's key names the commit; one the audit key pattern does
+          // not admit is kept only as the `operation:` reference.
+          idempotencyKey: AUDIT_IDEMPOTENCY_KEY.test(operationId) ? operationId : null,
+          payloadDigest,
+          diff: {
+            kind: "decision",
+            decisionRevisions: 1,
+            commitSeq: null,
+            counts: simulationCounts(plan.simulation),
+          },
+        },
+        {
+          sql: `EXISTS(SELECT 1 FROM operation_receipts
+            WHERE operation_id=? AND principal=? AND created_at=? AND payload_digest=?)`,
+          binds: [operationId, principal.id, input.now, payloadDigest],
+        },
+        { kind: "target-ref", ref: `operation:${operationId}` },
+      ),
+    );
 
-  const results = await store.batch(writes);
+  let results: Awaited<ReturnType<CommandStore["batch"]>>;
+  try {
+    results = await store.batch(writes);
+  } catch (error) {
+    // A CORE 0070 trigger refused the batch and D1 rolled it back whole. Its
+    // closed code is the answer; the message itself never leaves here. Any
+    // other error is not this commit's to explain.
+    const code = economicGuardCode(error instanceof Error ? error.message : String(error));
+    if (code === null) throw error;
+    return commandError(GUARD_CONFLICTS.has(code) ? "stale_context" : "commit_failed", [
+      plan.planId,
+      code,
+    ]);
+  }
+  if (input.audit) input.audit.settle(results.at(-1)?.changes);
   if (results[0]?.changes === 1) return { ok: true, replayed: false, receipt };
   return failureReason(
     store,
@@ -293,6 +371,7 @@ async function failureReason(
   if (
     plan.kind === "card-settlement.accept" ||
     isCardReviewKind(plan.kind) ||
+    isEconomicEventKind(plan.kind) ||
     ((plan.kind === "relation.accept" || plan.kind === "relation.reject") &&
       (ownershipReviewRequested((plan.payload as RelationPayload).evidenceRefs) ||
         pendingPostedReviewRequested((plan.payload as RelationPayload).evidenceRefs) ||

@@ -29,6 +29,10 @@ import { CURRENT_REWARD_CONTEXT_SQL } from "../../../packages/storage-d1/src/rea
 import type { D1Like, D1StatementLike } from "../../../packages/storage-d1/src/d1.ts";
 import { checkReadCursor } from "../../../packages/storage-d1/src/read/index.ts";
 import { sha256Hex } from "../../../packages/domain/src/context.ts";
+import {
+  validBucketExpiryBasis,
+  type BucketExpiryBasis,
+} from "../../../packages/domain/src/rewards.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 
 let mf: Miniflare;
@@ -69,9 +73,38 @@ const readCount = async (sql: string, ...args: unknown[]): Promise<number> =>
 
 beforeAll(async () => {
   ({ mf, env } = await startPipeline());
-  // One published V Point parse with two buckets: one the provider dated (so
-  // it is time-limited) and one it did not.
-  await seedArtifact(env, 830, "v-point", "balance-info", "balance-info.json", { synthetic: true });
+  // One published V Point parse with two unclassified buckets: one the
+  // provider dated and one it did not. All three datasets are
+  // published in the same capture; zero history rows are still a parse.
+  await seedArtifact(
+    env,
+    830,
+    "v-point",
+    "balance-info",
+    "balance-info.json",
+    { synthetic: true },
+    false,
+  );
+  for (const [id, dataset, parser] of [
+    [831, "smfg-point", "v-point-smfg-point"],
+    [832, "history-page-0001", "v-point-history-page"],
+  ] as const) {
+    await env.DB.prepare(`INSERT INTO fetch_artifacts(id,fetch_run_id,source_id,dataset,artifact_key,
+      fetch_unit_id,declared_media_type,fetched_at_ms,recorded_at_ms,sha256,artifact_role)
+      SELECT ?,fetch_run_id,source_id,?,?,NULL,declared_media_type,fetched_at_ms,recorded_at_ms,sha256,artifact_role
+      FROM fetch_artifacts WHERE id=830`)
+      .bind(id, dataset, `${dataset}.json`)
+      .run();
+    const result =
+      await env.DB.prepare(`INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES(?,?,'1.0.0','2026-09-08T00:00:00.000Z','ok','[]') RETURNING id`)
+        .bind(id, parser)
+        .first<{ id: number }>();
+    await publishParse(env.DB, result!.id);
+  }
+  await env.DB.prepare("INSERT INTO fetch_run_seals(fetch_run_id,sealed_at_ms) VALUES(830,?)")
+    .bind(Date.parse("2026-09-08T00:00:00.000Z"))
+    .run();
   const parse = await env.DB.prepare(
     `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
      VALUES(830,'v-point-balance-info','1.0.0','2026-09-08T00:00:00.000Z','ok','[]') RETURNING id`,
@@ -186,17 +219,40 @@ test("G2-19: a build fixes its evaluation instant, publishes it, and writes noth
     evaluated_at: EVALUATED_AT,
     calendar_rule_id: "UTC:start-of-day:assumed",
     status: "complete",
-    claims_release: "reward-promotion-v1",
+    claims_release: "reward-promotion-v2",
   });
   // The deadline the provider displayed is carried across as a date, not an
   // instant, and the bucket it did not date keeps its row.
   const rows = await readAll<{ bucket_ref: string; expires_on: string | null; state: string }>(
-    `SELECT bucket_ref,expires_on,state FROM reward_expiry_estimates
+    `SELECT bucket_ref,expires_on,state FROM reward_expiry_estimates_v2
      WHERE snapshot_id=?1 AND rule_id='rule:v-point:fixed-expiry-lot' ORDER BY row_seq`,
     built.snapshotId,
   );
   expect(rows.length).toBe(2);
   expect(rows.map((row) => row.expires_on)).toEqual(["2026-12-31", null]);
+
+  // ADR 0049: every row stores the displayed and the computed expiry apart.
+  // Under the seeded fixed-lot rule the dated bucket's date is only the
+  // provider's display and nothing is computed beside it; the undated bucket
+  // is regular, a kind that rule does not cover. Each reason says so.
+  const bases = await readAll<{ rule_id: string; expiry_basis_json: string | null }>(
+    `SELECT rule_id,expiry_basis_json FROM reward_expiry_estimates_v2
+     WHERE snapshot_id=?1 ORDER BY row_seq`,
+    built.snapshotId,
+  );
+  expect(bases.length).toBe(built.estimateCount);
+  for (const row of bases) {
+    const basis: unknown = JSON.parse(row.expiry_basis_json ?? "null");
+    expect(validBucketExpiryBasis(basis)).toBe(true);
+  }
+  const lots = bases
+    .filter((row) => row.rule_id === "rule:v-point:fixed-expiry-lot")
+    .map((row) => JSON.parse(row.expiry_basis_json!) as BucketExpiryBasis);
+  expect(lots.map((basis) => basis.computed.reasonCode)).toEqual([
+    "bucket_kind_unclassified",
+    "bucket_kind_unclassified",
+  ]);
+  expect(lots.map((basis) => basis.displayed?.value.kind ?? null)).toEqual(["local-date", null]);
 
   // CORE's own reward projections are untouched: the flag moves where the rows
   // are written, never what CORE holds.
@@ -216,7 +272,7 @@ test("G2-19: the same instant rebuilds the same snapshot, a later one builds a n
   const first = await run(EVALUATED_AT);
   expect(["complete", "unchanged"]).toContain(first.status);
   const firstRows = await readAll<Record<string, unknown>>(
-    "SELECT row_key,row_digest,expires_on FROM reward_expiry_estimates WHERE snapshot_id=?1 ORDER BY row_seq",
+    "SELECT row_key,row_digest,expires_on FROM reward_expiry_estimates_v2 WHERE snapshot_id=?1 ORDER BY row_seq",
     first.snapshotId,
   );
 
@@ -227,7 +283,7 @@ test("G2-19: the same instant rebuilds the same snapshot, a later one builds a n
   expect(again.status).toBe("unchanged");
   expect(
     await readAll<Record<string, unknown>>(
-      "SELECT row_key,row_digest,expires_on FROM reward_expiry_estimates WHERE snapshot_id=?1 ORDER BY row_seq",
+      "SELECT row_key,row_digest,expires_on FROM reward_expiry_estimates_v2 WHERE snapshot_id=?1 ORDER BY row_seq",
       first.snapshotId,
     ),
   ).toEqual(firstRows);
@@ -240,7 +296,7 @@ test("G2-19: the same instant rebuilds the same snapshot, a later one builds a n
   expect(later.evaluatedAt).toBe(LATER);
   expect(
     await readAll<Record<string, unknown>>(
-      "SELECT row_key,row_digest,expires_on FROM reward_expiry_estimates WHERE snapshot_id=?1 ORDER BY row_seq",
+      "SELECT row_key,row_digest,expires_on FROM reward_expiry_estimates_v2 WHERE snapshot_id=?1 ORDER BY row_seq",
       first.snapshotId,
     ),
   ).toEqual(firstRows);
@@ -377,7 +433,7 @@ test("G0-09: dropping the reward READ tables leaves every CORE claim intact and 
   ))!.read_instance_id;
   const rowsOf = async (snapshotId: string) => ({
     estimates: await readAll<Record<string, unknown>>(
-      "SELECT row_seq,row_key,row_digest FROM reward_expiry_estimates WHERE snapshot_id=?1 ORDER BY row_seq",
+      "SELECT row_seq,row_key,row_digest FROM reward_expiry_estimates_v2 WHERE snapshot_id=?1 ORDER BY row_seq",
       snapshotId,
     ),
     simulations: await readAll<Record<string, unknown>>(
@@ -395,7 +451,7 @@ test("G0-09: dropping the reward READ tables leaves every CORE claim intact and 
   const coreDigest = async (): Promise<string> => {
     const claims = await env.DB.prepare(
       `SELECT id,claim_digest,program_id,bucket_ref,bucket_kind,quantity_coefficient,
-        observed_expiry_json FROM reward_bucket_claims ORDER BY id`,
+        observed_expiry_json FROM reward_bucket_claims_v2 ORDER BY id`,
     ).all<Record<string, unknown>>();
     const rules = await env.DB.prepare(
       "SELECT rule_id,version,family,verification FROM expiry_rules ORDER BY rule_id,version",
@@ -420,6 +476,7 @@ test("G0-09: dropping the reward READ tables leaves every CORE claim intact and 
   for (const table of [
     "reward_build_checkpoints",
     "reward_conversion_simulations",
+    "reward_expiry_estimates_v2",
     "reward_expiry_estimates",
     "reward_snapshot_input_refs",
     "reward_snapshot_pointer",
@@ -486,7 +543,7 @@ function observedCore() {
         batch: db.batch.bind(db),
       },
     } as unknown as Env),
-    captures: () => queries.filter((sql) => sql.includes("FROM reward_bucket_claims")).length,
+    captures: () => queries.filter((sql) => sql.includes("FROM reward_bucket_claims_v2")).length,
   };
 }
 
@@ -612,3 +669,86 @@ test("an unfinished build resumes before a matching published context can shortc
   });
   expect(observed.captures()).toBe(0);
 }, 30000);
+
+test("a legacy unfinished build is retired without replaying old classified inputs", async () => {
+  const revision = await currentCoreRevision(env.DB);
+  const active = await readFirst<Record<string, unknown>>(`SELECT s.* FROM reward_expiry_snapshots s
+    JOIN reward_snapshot_pointer p ON p.snapshot_id=s.snapshot_id WHERE p.id=1`);
+  expect(active).not.toBeNull();
+  const legacyId = await sha256Hex("synthetic-old-reward-v2-build");
+  const old = {
+    ...active!,
+    snapshot_id: legacyId,
+    content_key: await sha256Hex("synthetic-old-reward-v2-content"),
+    attempt: 1,
+    build_digest: await sha256Hex("synthetic-old-reward-v2-build-digest"),
+    contract_version: "reward-projection-input-v1",
+    claims_release: "reward-promotion-v1",
+    policy_release: "reward-projection-v2",
+    status: "building",
+    estimate_count: 0,
+    simulation_count: 0,
+    output_digest: null,
+    completed_at: null,
+    writer_lease: null,
+    writer_lease_until_ms: 0,
+    writer_fence: 0,
+  };
+  await env.READ.prepare(`INSERT INTO reward_expiry_snapshots(${Object.keys(old).join(",")})
+    VALUES(${Object.keys(old)
+      .map(() => "?")
+      .join(",")})`)
+    .bind(...Object.values(old))
+    .run();
+  const retired = await run("2026-11-09T00:00:00.000Z");
+  expect(retired).toMatchObject({
+    status: "retryable",
+    reasonCode: "reward_build_release_changed",
+    snapshotId: legacyId,
+  });
+  expect(
+    await readFirst<{ status: string }>(
+      "SELECT status FROM reward_expiry_snapshots WHERE snapshot_id=?",
+      legacyId,
+    ),
+  ).toEqual({ status: "retired" });
+  expect(await currentCoreRevision(env.DB)).toEqual(revision);
+  const next = await run("2026-11-09T00:00:00.000Z");
+  expect(["complete", "unchanged"]).toContain(next.status);
+  expect(next.snapshotId).not.toBe(legacyId);
+});
+
+test("bounded re-promotion cannot publish an empty or incomplete current claim set", async () => {
+  const published = await env.DB.prepare(
+    "SELECT parse_run_id FROM published_parse_runs WHERE fetch_artifact_id=830 AND parser_name='v-point-balance-info'",
+  ).first<{ parse_run_id: number }>();
+  await env.DB.prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,
+    amount_minor,amount_text,amount_scale,instrument,observed_at,raw_locator,extra_json)
+    VALUES(?,'v-point:common:bucket-2','available_point_bucket',77,'77',0,'V_POINT',
+      '2026-09-08T00:00:00.000Z','json:synthetic','{"_kogane":{"expiration":""}}')`)
+    .bind(published!.parse_run_id)
+    .run();
+  const count = await readCount("SELECT count(*) AS n FROM reward_expiry_snapshots");
+  const pointer = await readFirst<Record<string, unknown>>(
+    "SELECT * FROM reward_snapshot_pointer WHERE id=1",
+  );
+  const pending = await run("2026-11-10T00:00:00.000Z");
+  expect(pending).toMatchObject({
+    status: "pending",
+    reasonCode: "reward_promotion_incomplete",
+    active: false,
+  });
+  expect(await readCount("SELECT count(*) AS n FROM reward_expiry_snapshots")).toBe(count);
+  expect(
+    await readFirst<Record<string, unknown>>("SELECT * FROM reward_snapshot_pointer WHERE id=1"),
+  ).toEqual(pointer);
+  await promoteRewardClaims(env.DB);
+  const ready = await run("2026-11-10T00:00:00.000Z");
+  expect(ready.status).toBe("complete");
+  expect(
+    await readCount(
+      "SELECT count(*) AS n FROM reward_expiry_estimates_v2 WHERE snapshot_id=? AND bucket_kind='unclassified'",
+      ready.snapshotId,
+    ),
+  ).toBe(6);
+});

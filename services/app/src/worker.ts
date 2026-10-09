@@ -3,8 +3,16 @@ import {
   EVIDENCE_API_VERSION,
   type EvidenceMeta,
 } from "../../../packages/observation-shared/src/evidence-contract";
-import { authenticate } from "./auth";
-import { agentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
+import { authenticate, browserCaller, mcpCaller } from "./auth";
+import {
+  auditedAgentApi,
+  classifyAgentPath,
+  isAgentPath,
+  MCP_PATH,
+  sharedQueryApi,
+} from "./agent-api";
+import { auditLogCode, beginAudit } from "./audit";
+import { AUDIT_PATH, auditApi } from "./audit-api";
 import { commandApi, isCommandPath } from "./command-api";
 import { classifyOpsPath, opsApi } from "./ops-api";
 import { healthApi } from "./health";
@@ -18,7 +26,11 @@ import {
 } from "./card-settlements-api";
 import { cardPurchasesApi, CARD_PURCHASES_PATH } from "./card-purchases-api";
 import { reportedStateApi, REPORTED_STATE_PATH } from "./reported-state-api";
+import { reconstructedStateApi, RECONSTRUCTED_STATE_PATH } from "./reconstructed-state-api";
+import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
+import { instrumentCandidatesApi } from "./instrument-candidates-api";
+import { instrumentHistoryApi } from "./instrument-history-api";
 import { reportsApi } from "./reports-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
 import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
@@ -30,10 +42,14 @@ function classify(path: string): string {
   const ops = classifyOpsPath(path);
   if (ops !== null) return ops;
   if (isCommandPath(path)) return "command";
+  if (path === AUDIT_PATH) return "audit";
   if (path === CARD_SETTLEMENT_PATH || path === CARD_OWNERSHIP_PATH)
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
   if (path === REPORTED_STATE_PATH) return "reported_state";
+  if (path === RECONSTRUCTED_STATE_PATH) return "reconstructed_state";
+  if (path === "/api/collection-quality" || path.startsWith("/api/collection-quality/"))
+    return "collection_quality";
   if (path === `${PREFIX}/meta`) return "meta";
   if (/^\/api\/evidence\/v1\/sources\/[^/]+\/runs$/.test(path)) return "source_runs";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path)) return "run_artifacts";
@@ -55,16 +71,28 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (healthResponse) return healthResponse;
   const bootstrapResponse = await scheduleBootstrapApi(request, env, url);
   if (bootstrapResponse) return bootstrapResponse;
+  // The agent API (docs/agent-api.md). `/mcp` accepts only an assertion for
+  // the MCP Access application and makes it the agent-only caller
+  // `mcp-client:<sub>`; `/api/agent/v1/*` takes the browser session's subject
+  // (ADR 0047). Every path below accepts only this Worker's own Access
+  // application and refuses a token minted for the MCP one, as `/mcp` refuses
+  // the browser's.
+  // Every agent call is recorded in the audit log (ADR 0064) under the caller
+  // resolved here: `mcp` for an MCP client, `agent-http` for a browser session.
+  const agentResponse = isAgentPath(url.pathname)
+    ? await auditedAgentApi(request, env, url, () =>
+        url.pathname === MCP_PATH ? mcpCaller(request, env) : browserCaller(request, env),
+      )
+    : null;
+  if (agentResponse) return agentResponse;
   const subject = await authenticate(request, env);
   const schedulesResponse = await schedulesApi(request, env, url, subject);
   if (schedulesResponse) return schedulesResponse;
   // The only non-GET boundary of this Worker: three explicit allow-lists of
   // authenticated POST paths, each checking its own grant — the agent API
-  // (docs/agent-api.md), the change lifecycle (A09) and the operations API
-  // (docs/ops-api.md). They own disjoint paths, all keep the closed 401/403
-  // answers, and everything outside them stays GET-only.
-  const agentResponse = await agentApi(request, env, url, subject);
-  if (agentResponse) return agentResponse;
+  // (above, docs/agent-api.md), the change lifecycle (A09) and the operations
+  // API (docs/ops-api.md). They own disjoint paths, all keep the closed
+  // 401/403 answers, and everything outside them stays GET-only.
   const commandResponse = await commandApi(request, env, url, subject);
   if (commandResponse) return commandResponse;
   // Off by default: with `OPS_API_ENABLED` unset this returns null and the
@@ -75,29 +103,46 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     throw new HttpError(405, "method_not_allowed");
   const sharedQueryResponse = await catalogue(() => sharedQueryApi(request, env, url, subject));
   if (sharedQueryResponse) return sharedQueryResponse;
+  // The operator's read of the audit record (ADR 0064); a page load, not recorded.
+  const auditResponse = await catalogue(() => auditApi(env, url, subject));
+  if (auditResponse) return auditResponse;
   const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
   if (settlementResponse) return settlementResponse;
-  // Operator-only and read-only; 404 unless the event reader flag is on and
-  // CORE 0047 exists (docs/economic-events.md, HTTP).
+  // Operator-only and read-only; 404 unless CORE 0047 exists
+  // (docs/economic-events.md, HTTP).
   const purchaseResponse = await catalogue(() => cardPurchasesApi(request, env, url, subject));
   if (purchaseResponse) return purchaseResponse;
   // Reader authority and read-only; 404 unless the store has the views it
   // joins (docs/reported-state.md).
   const reportedStateResponse = await catalogue(() => reportedStateApi(request, env, url, subject));
   if (reportedStateResponse) return reportedStateResponse;
+  const reconstructedResponse = await catalogue(() =>
+    reconstructedStateApi(request, env, url, subject),
+  );
+  if (reconstructedResponse) return reconstructedResponse;
+  const collectionQualityResponse = await catalogue(() =>
+    collectionQualityApi(request, env, url, subject),
+  );
+  if (collectionQualityResponse) return collectionQualityResponse;
+  const candidatesResponse = await catalogue(() =>
+    instrumentCandidatesApi(request, env, url, subject),
+  );
+  if (candidatesResponse) return candidatesResponse;
+  const historyResponse = await catalogue(() => instrumentHistoryApi(request, env, url, subject));
+  if (historyResponse) return historyResponse;
   const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
   // Fixed report artifacts (A12). Re-display only; recomputing and sharing a
   // correction are commands, not reads (docs/calculation-and-reports.md).
   const reportResponse = await catalogue(() => reportsApi(env, url));
   if (reportResponse) return reportResponse;
-  // Reward reads are behind the deployment's own capability, so a Worker with
-  // the flag off serves exactly the routes it served before (docs/rewards.md).
+  // Reward reads. Expiry and stored simulations refuse a missing or stale
+  // READ snapshot (docs/rewards.md).
   const rewardsResponse = await catalogue(() => rewardsApi(request, env, url));
   if (rewardsResponse) return rewardsResponse;
   const observationResponse = await catalogue(() => observationApi(request, env, url));
   if (observationResponse) return observationResponse;
-  // A10 read side: 404 unless the projection exists and the reader flag is on.
+  // A10 read side: 404 unless the projection table exists.
   const eventsResponse = await catalogue(() => eventsApi(env, url));
   if (eventsResponse) return eventsResponse;
   if (env.EVIDENCE_SOURCE_ID !== "sony-bank") throw new HttpError(503, "source_not_configured");
@@ -156,6 +201,9 @@ export default {
     const url = new URL(request.url);
     let response: Response;
     let errorCode: string | null = null;
+    // Every audit record of this request carries its request id as the
+    // correlation id (ADR 0064).
+    beginAudit(request, requestId);
     try {
       response = await route(request, env, url);
     } catch (error) {
@@ -173,6 +221,8 @@ export default {
           requestId,
           durationMs: Date.now() - started,
           errorCode,
+          // A record of this request could not be written; the answer stands.
+          ...(auditLogCode(request) ? { auditError: auditLogCode(request) } : {}),
         }),
       );
     } catch {

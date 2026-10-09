@@ -25,6 +25,8 @@ describe("the READ baseline", () => {
     expect(migrationFiles(READ_MIGRATIONS_URL)).toEqual([
       "0001_read_baseline.sql",
       "0002_reward_read.sql",
+      "0003_reward_expiry_basis.sql",
+      "0004_reward_unclassified_buckets.sql",
     ]);
     expect(READ_MIGRATIONS_PATH).toBe("packages/storage-d1/migrations/read");
   });
@@ -45,6 +47,7 @@ describe("the READ baseline", () => {
       "reward_build_checkpoints",
       "reward_conversion_simulations",
       "reward_expiry_estimates",
+      "reward_expiry_estimates_v2",
       "reward_expiry_snapshots",
       "reward_snapshot_input_refs",
       "reward_snapshot_pointer",

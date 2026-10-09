@@ -1,5 +1,6 @@
 // Reward read model mappers and reader (A11). Synthetic rows only.
 import { describe, expect, test } from "bun:test";
+import { estimateExpiry } from "../../domain/src/rewards.ts";
 import {
   conversionOffer,
   createRewardReader,
@@ -150,6 +151,59 @@ describe("reward mappers", () => {
     expect(rule.verification).toBe("needs-rule-verification");
   });
 
+  test("an unreadable tier list or period never widens the rule (ADR 0049)", () => {
+    const unreadable = expiryRule({
+      ...ruleRow,
+      applicability_json: '{"bucketKinds":["regular"],"tiers":"gold","validPeriod":"2026"}',
+    });
+    // Not "every tier", and not "always in force".
+    expect(unreadable.applicability.tiers).toEqual([]);
+    expect(unreadable.applicability.validPeriod).toEqual({
+      kind: "unknown",
+      reasonCode: "stored_rule_period_invalid",
+    });
+    const absent = expiryRule({ ...ruleRow, applicability_json: '{"bucketKinds":["regular"]}' });
+    expect(absent.applicability.tiers).toEqual([]);
+    expect(absent.applicability.validPeriod?.kind).toBe("unknown");
+    // Explicit nulls keep their meaning.
+    expect(expiryRule(ruleRow).applicability).toEqual({
+      bucketKinds: ["regular"],
+      tiers: null,
+      validPeriod: null,
+    });
+
+    // Verified "no expiry" terms whose stored period cannot be read: the
+    // computed side is unavailable, never "no expiry".
+    const none = expiryRule({
+      ...ruleRow,
+      family: "none",
+      qualifying_activity_policy_ref: null,
+      applicability_json:
+        '{"bucketKinds":["regular"],"tiers":null,"validPeriod":{"kind":"period"}}',
+    });
+    const estimate = estimateExpiry(
+      none,
+      {
+        holdingRef: bucketRow.holding_ref,
+        programId: bucketRow.program_id,
+        unitRef: bucketRow.unit_ref,
+        buckets: [{ ...rewardBucket(bucketRow), kind: "regular", observedExpiry: null }],
+      },
+      {
+        windowRef: "window:synthetic",
+        completeness: "complete",
+        earliestObserved: null,
+        activities: [],
+      },
+      [],
+      { kind: "local-date", value: "2026-09-12", zone: null, basis: "derived" },
+    );
+    const computed = estimate.expiringBuckets[0]!.expiryBasis.computed;
+    expect(computed.status).toBe("unavailable");
+    expect(computed.reasonCode).toBe("rule_out_of_force");
+    expect(estimate.uncertaintyCodes).not.toContain("no_expiry_under_verified_terms");
+  });
+
   test("membership keeps its source and an invalid period becomes unknown", () => {
     expect(
       membershipState({
@@ -264,4 +318,38 @@ describe("reward reader", () => {
     });
     expect(result.rows[0]!.holding.buckets).toHaveLength(REWARD_PAGE_LIMIT);
   });
+});
+
+test("unsupported stored kinds become unclassified while preserving quantity, expiry and source refs", () => {
+  for (const kind of ["unclassified", "future-provider-enum", "", "status-like-unknown"]) {
+    const mapped = rewardBucket({ ...bucketRow, bucket_kind: kind });
+    expect(mapped.kind).toBe("unclassified");
+    expect(mapped.quantity).toEqual(rewardBucket(bucketRow).quantity);
+    expect(mapped.observedExpiry).toEqual(rewardBucket(bucketRow).observedExpiry);
+    expect(mapped.sourceFactRefs).toEqual(["balance:11"]);
+  }
+});
+
+test("the legacy reader preserves unknown kinds as holding buckets rather than qualification measures", async () => {
+  const reader = createRewardReader({
+    all: <T>() =>
+      Promise.resolve([
+        { ...bucketRow, bucket_kind: "future-provider-enum" },
+        {
+          ...bucketRow,
+          id: 2,
+          bucket_ref: "program:synthetic:undated",
+          bucket_kind: "unclassified",
+          observed_expiry_json: null,
+        },
+      ] as T[]),
+    first: <T>() => Promise.resolve(null as T | null),
+  });
+  const result = await reader.holdings({ offset: 0 });
+  expect(result.rows[0]!.holding.buckets).toHaveLength(2);
+  expect(result.rows[0]!.holding.buckets.map((bucket) => bucket.kind)).toEqual([
+    "unclassified",
+    "unclassified",
+  ]);
+  expect(result.rows[0]!.qualification).toEqual([]);
 });

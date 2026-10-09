@@ -239,6 +239,54 @@
       ]
     },
     {
+      "directory": "experiments/d1-conformance",
+      "workspace": "experiments",
+      "disposition": {
+        "source": "docs/plans/2026-10-d1-conformance.md; ADR 0054 remote gate",
+        "proposedAction": "isolated-synthetic-preparation",
+        "proposedTarget": "experiments/d1-conformance",
+        "requiredVerification": "Local binding tests and independent review; root-approved new-resource identity, remote evidence, CPU telemetry and cleanup remain separate gates",
+        "executionStatus": "PREPARED_REMOTE_APPROVAL_REQUIRED",
+        "planLiveResourceStatus": "NOT_PROVISIONED_BY_THIS_PREPARATION",
+        "liveResourceStatus": "NO_LIVE_RESOURCE"
+      },
+      "workers": [
+        {
+          "config": "experiments/d1-conformance/wrangler.jsonc",
+          "name": "kogane-d1-conformance-20261009",
+          "main": "src/worker.ts",
+          "role": "not-deployed",
+          "liveWorker": false,
+          "crons": [],
+          "emailHandler": false,
+          "d1": [
+            {
+              "binding": "DB",
+              "databaseName": "kogane-d1-conformance-20261009",
+              "databaseId": "00000000-0000-4000-8000-000000000000",
+              "migrationsDir": "../../packages/storage-d1/migrations/core",
+              "live": false
+            }
+          ],
+          "r2": [],
+          "kv": [],
+          "queueProducers": [],
+          "queueConsumers": [],
+          "durableObjects": [],
+          "durableObjectExports": [],
+          "durableObjectMigrations": [],
+          "containers": [],
+          "vpcNetworks": [],
+          "serviceBindings": [],
+          "varNames": [
+            "RUN_AUTHORIZATION"
+          ],
+          "requiredSecretNames": [],
+          "unextractedKeys": []
+        }
+      ]
+    },
+    {
       "directory": "experiments/mizuho-direct",
       "workspace": "experiments",
       "disposition": {
@@ -413,16 +461,14 @@
             "ACCESS_ISSUER",
             "AGENT_API_GRANTS",
             "AGENT_GRANTS",
-            "BALANCE_PROJECTION_ENABLED",
             "COMMANDS_ENABLED",
             "DEPLOYMENT_SCHEDULE_TOKENS",
-            "EVENTS_V2_ENABLED",
             "EVIDENCE_SOURCE_ID",
             "HEALTH_PROBE_TOKENS",
+            "MCP_DELEGATIONS",
             "OPERATOR_SUBJECTS",
             "OPS_API_ENABLED",
             "RELEASE_SHA",
-            "REWARDS_V2_ENABLED",
             "SCHEDULES_ENABLED",
             "SESSION_REFRESH_POLICY"
           ],
@@ -476,15 +522,13 @@
             "ACCESS_ISSUER",
             "AGENT_API_GRANTS",
             "AGENT_GRANTS",
-            "BALANCE_PROJECTION_ENABLED",
             "COMMANDS_ENABLED",
-            "EVENTS_V2_ENABLED",
             "EVIDENCE_SOURCE_ID",
             "HEALTH_PROBE_TOKENS",
+            "MCP_DELEGATIONS",
             "OPERATOR_SUBJECTS",
             "OPS_API_ENABLED",
             "RELEASE_SHA",
-            "REWARDS_V2_ENABLED",
             "SESSION_REFRESH_POLICY"
           ],
           "requiredSecretNames": [],
@@ -1610,6 +1654,7 @@
             "COLLECTION_ACCOUNT_ID",
             "COLLECTION_DATA_BUCKET",
             "COLLECTION_INGEST_CLIENT",
+            "OPS_COLLECTOR_DISPATCH_CONNECTIONS",
             "OPS_DISPATCH_ENABLED",
             "PURCHASE_RECOGNITION_ENABLED",
             "RECONCILIATION_ENABLED",
@@ -1685,7 +1730,7 @@
     }
   ],
   "summary": {
-    "configCount": 26,
+    "configCount": 27,
     "deployedWorkerCount": 14,
     "crons": [],
     "queues": [
@@ -1811,6 +1856,14 @@
         "live": false,
         "bindings": [
           "kogane-evidence-browser-test"
+        ]
+      },
+      {
+        "databaseName": "kogane-d1-conformance-20261009",
+        "databaseId": "00000000-0000-4000-8000-000000000000",
+        "live": false,
+        "bindings": [
+          "kogane-d1-conformance-20261009"
         ]
       },
       {

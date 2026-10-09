@@ -19,6 +19,19 @@ export const FOUR_CELL_HEAD =
  */
 export const EMPTY_ROW =
   '<div class="content"><div class="item-cell"><div class="cell w-100per">ご利用明細はございません。</div></div></div>';
+/** `EMPTY_ROW`'s `item-cell`, the one element the wrapped row adds a level above. */
+export const EMPTY_ITEM_CELL =
+  '<div class="item-cell"><div class="cell w-100per">ご利用明細はございません。</div></div>';
+/** A `content` row whose one element child is `wrapper` (open tag) around `inner`. */
+export function wrappedRow(inner: string, wrapper = "<div>"): string {
+  return `<div class="content">${wrapper}${inner}</div></div>`;
+}
+/**
+ * The empty row as one stored page shows it (ADR 0005 amendment k): `EMPTY_ROW`
+ * with one more `div` between the row and its `item-cell`, carrying none of
+ * the reader's classes. Structure only; no stored text is copied.
+ */
+export const WRAPPED_EMPTY_ROW = wrappedRow(EMPTY_ITEM_CELL);
 /** The observed head with its middle cell as two `span.row`, as stored pages show it. */
 export const SPAN_SKIP_HEAD =
   '<div class="head"><div class="cell">ご利用日</div><div class="cell"><span class="row">ご利用先など</span><span class="row">お支払日</span></div><div class="cell">今後のお支払い金額</div></div>';

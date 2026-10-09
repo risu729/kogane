@@ -218,6 +218,8 @@ describe("CORE migrations (G0-02)", () => {
     expect(entries.filter((name) => MIGRATION_FILENAME.test(name)).sort()).toEqual([
       "0001_read_baseline.sql",
       "0002_reward_read.sql",
+      "0003_reward_expiry_basis.sql",
+      "0004_reward_unclassified_buckets.sql",
     ]);
     expect(entries).toContain("README.md");
   });

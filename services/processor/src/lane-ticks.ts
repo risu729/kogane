@@ -14,6 +14,7 @@
 // later is not recorded until it is listed, and no text value is ever copied
 // (the 0049 trigger refuses one anyway).
 import { CARD_USAGE_EXCLUSIONS } from "../../../packages/domain/src/card-purchase.ts";
+import { SURVEY_FAILURE_CODES } from "../../../packages/collection/src/maintenance-survey-model.ts";
 import type { OutboxDispatchResult } from "../../../packages/storage-d1/src/core/decision-outbox.ts";
 import type { identitySweep } from "../../../packages/storage-d1/src/core/identity-store.ts";
 import {
@@ -27,6 +28,8 @@ import type { CardPurchaseSweepResult } from "./card-purchase-job.ts";
 import type { CardDebitAccountSweepResult } from "./card-debit-account-job.ts";
 import type { CardSettlementSweepResult } from "./card-settlement-job.ts";
 import type { DispatchSummary } from "./operations/dispatch.ts";
+import type { MaintenanceSurveyResult } from "./maintenance-survey/lane.ts";
+import type { AuditOverflowResult } from "./audit-overflow.ts";
 import type { PricePromotionResult } from "./price-promotion-job.ts";
 import type { ReconciliationSweepResult } from "./reconciliation-job.ts";
 import type { RewardPromotionResult } from "./reward-claims-job.ts";
@@ -130,12 +133,32 @@ export const LANE_TICK_COUNTS = {
     "stage_pending",
     "written",
   ]),
+  maintenance_survey: countsOf<MaintenanceSurveyResult>(
+    [
+      "targets",
+      "due",
+      "extracted",
+      "failed",
+      "windows",
+      "unchanged",
+      "proposed",
+      "reviewPending",
+      "known",
+    ],
+    { failures: SURVEY_FAILURE_CODES },
+  ),
   operation_dispatch: countsOf<DispatchSummary>([
     "claimed",
     "dispatched",
     "retried",
     "failed",
     "awaiting",
+    "started",
+    "declined",
+    "tracked",
+    "published",
+    "unpublished",
+    "abandoned",
   ]),
   decision_outbox: countsOf<OutboxDispatchResult>([
     "claimed",
@@ -145,6 +168,7 @@ export const LANE_TICK_COUNTS = {
     "blocked",
     "published",
   ]),
+  audit_overflow: countsOf<AuditOverflowResult>(["counters", "written"]),
 } satisfies Record<string, Projection>;
 
 /** What happened to one lane on one tick, before it is reduced to a row. */

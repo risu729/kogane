@@ -1,0 +1,43 @@
+name: Processor coverage baseline
+on:
+  workflow_dispatch:
+concurrency:
+  group: coverage-baseline-${{ github.ref }}
+  cancel-in-progress: true
+permissions: {}
+defaults:
+  run:
+    shell: bash
+jobs:
+  baseline:
+    name: Full serial processor coverage
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      CI: "true"
+      WRANGLER_SEND_METRICS: "false"
+      COVERAGE_HEAD_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.10.6
+      - name: Run the existing full serial suite with native coverage
+        run: mise run coverage:processor-baseline
+      - name: Validate baseline coverage
+        if: ${{ always() }}
+        run: mise exec --no-deps -- node tasks/_lib/coverage-summary.mjs baseline
+      - name: Upload baseline (never merged from shards)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: coverage-processor-baseline-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            coverage/
+            services/processor/coverage/
+          if-no-files-found: error
+          retention-days: 14

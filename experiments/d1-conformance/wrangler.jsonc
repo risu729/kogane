@@ -1,0 +1,35 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "kogane-d1-conformance-20261009",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-09",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "vars": {
+    "RUN_AUTHORIZATION": "disabled"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "kogane-d1-conformance-20261009",
+      "database_id": "00000000-0000-4000-8000-000000000000",
+      "migrations_dir": "../../packages/storage-d1/migrations/core"
+    }
+  ],
+  "triggers": {
+    "crons": []
+  },
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "limits": {
+    "cpu_ms": 300000
+  }
+}

@@ -869,20 +869,17 @@ resources remain active for scheduled collection and evidence retention.
 
 ## Shared DATA bucket (U09, 2026-09-11)
 
-The collector gained a `COLLECTION_TARGET` var (default `legacy`) and a `DATA`
-binding to the central `kogane-raw-evidence` bucket. In `shared` mode the
-Worker persists the run itself with `packages/collection` — sanitized provider
-captures, the normalized snapshot and the sanitized collector manifest, then
-the `terminal-v1` manifest last — and the upload to
-`kogane-collector-r2-importer` is skipped. Legacy mode is unchanged, the daily
-`0 21 * * *` cron is unchanged, and the Container image, relay and tunnel are
-untouched: the Worker writes the run, not the container. The per-source
-staging bucket is not written in shared mode: the run is stored once, in
-`DATA` (plan 00).
+The collector does not read `COLLECTION_TARGET`. Persistence is the `DATA`
+binding to `kogane-raw-evidence` only. The switch and the importer were
+retired on 2026-09-13 (`docs/collection.md`). The Worker persists the run
+itself with `packages/collection` — sanitized provider captures, the
+normalized snapshot and the sanitized collector manifest, then the
+`terminal-v1` manifest last. The daily `0 21 * * *` cron is unchanged, and
+the Container image, relay and tunnel are untouched: the Worker writes the
+run, not the container. The run is stored once, in `DATA` (plan 00).
 
-Deploy order, rollback, the artifact/role table and what the terminal states
-are in [`docs/collection.md`](../collection.md#sbi-shinsei-kogane-sbi-shinsei-collector-poc).
-Merged is not enabled: the var ships as `legacy`.
+The artifact/role table and what the terminal states are in
+[`docs/collection.md`](../collection.md#sbi-shinsei-kogane-sbi-shinsei-collector-poc).
 
 ## Person names in stored captures (2026-09-27)
 
@@ -1147,3 +1144,28 @@ Until that is run for a remaining refusal, its cause stays unknown and the
 parser's rules stay as they are
 ([ADR 0004](../adr/0004-payment-type-shapes-from-evidence.md)). Production was
 not read for this release.
+
+## Activity parser 0.1.3: the provider-id origin (2026-10-09)
+
+`sbi-shinsei-top-balances-and-activity` 0.1.3 records
+`_kogane.identityOrigin: "provider-id"` on every activity row; the external id
+stays the provider's `txnReferenceNo` exactly as received, and nothing else
+changes ([ADR 0018 note](../adr/0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin),
+[observations](../observations.md#sbi-shinsei-activity-rows-record-the-provider-id-origin-activity-parser-013)).
+It lets ADR 0054's rule 2 admit an SBI Shinsei debit that a 0.1.3 run stored,
+so a person can accept it in card settlement review; debits a 0.1.2 run stored
+are still refused (`identity_origin_unrecorded`).
+
+The owner confirmed on 2026-10-09, from read-only aggregate queries of the
+stored captures, that in the captured range every reference was re-observed
+across many captures with none missing, the stored external id always equal
+to the reference, no reference twice in one capture and no reference with
+different provider fields in different captures. Nothing shows the provider
+never reuses a reference later; a reused reference would collide with the
+earlier one's holder rather than count twice (ADR 0018 note).
+
+**Deploying is the re-parse.** The release is deployed by the CD release of
+the commit that merges it (`deploy.yml` releases every green CI run on main);
+the repair lane then re-parses the stored captures, as it did for 0.1.2
+above, and rows of 0.1.2 runs stay refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead. Production was not
+read for this release.

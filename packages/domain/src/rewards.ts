@@ -27,6 +27,7 @@ import {
   daysFromCivil,
   formatLocalDate,
   parseLocalDate,
+  periodContainsDate,
   validTemporalValue,
   validZone,
   type CivilDate,
@@ -55,7 +56,7 @@ import {
 } from "./values.ts";
 
 /** Release stamped on everything this module derives. */
-export const REWARD_POLICY_RELEASE = "reward-model-v1";
+export const REWARD_POLICY_RELEASE = "reward-model-v2";
 /** Search release; bumped whenever the traversal rules change a returned plan. */
 export const CONVERSION_SEARCH_RELEASE = "conversion-search-v1";
 
@@ -66,6 +67,8 @@ export const CONVERSION_SEARCH_RELEASE = "conversion-search-v1";
  * `time-limited` in when. `pending-award` is announced but not held, and
  * `qualification` is a status measure that is never consumable. The kinds are
  * deliberately not ordered: none of them is a superset of another.
+ * `unclassified` preserves a provider quantity whose kind has not been confirmed;
+ * it proves neither consumability nor qualification.
  */
 export const BUCKET_KINDS = [
   "regular",
@@ -73,6 +76,7 @@ export const BUCKET_KINDS = [
   "time-limited",
   "pending-award",
   "qualification",
+  "unclassified",
 ] as const;
 export type BucketKind = (typeof BUCKET_KINDS)[number];
 /** Kinds that may be summed into the holding's consumable quantity. */
@@ -226,15 +230,147 @@ export type ExpiryEstimateState = (typeof EXPIRY_ESTIMATE_STATES)[number];
 export const DEADLINE_BASES = ["provider-observed", "policy-estimated", "unknown"] as const;
 export type DeadlineBasis = (typeof DEADLINE_BASES)[number];
 
+/**
+ * Release of the expiry derivation: stamped on every computed expiry and
+ * bumped whenever the same inputs could produce a different date or reason.
+ */
+export const EXPIRY_DERIVATION_RELEASE = "reward-expiry-v2";
+
+/**
+ * The deadline the provider displayed for one bucket. An observation, never a
+ * prediction: `value` is exactly what the claim promoted, including an
+ * `unknown` with the reason the display could not be read.
+ */
+export interface DisplayedExpiry {
+  value: TemporalValue;
+  /** When the provider displayed it: the bucket claim's own observation time. */
+  observedAt: TemporalValue;
+  /** The claims the display came from. */
+  sourceFactRefs: string[];
+}
+
+/**
+ * The rule version a computed expiry was derived under, and where its terms
+ * are confirmed: `evidenceRefs` are the repository records the rule cites for
+ * the provider's own terms (docs/sources), copied from the stored rule.
+ */
+export interface ExpiryRuleBasis {
+  ruleRef: string;
+  ruleId: string;
+  version: string;
+  family: ExpiryFamily;
+  verification: RuleVerification;
+  /** The period this version's text is in force; null for an open-ended version. */
+  validPeriod: TemporalValue | null;
+  evidenceRefs: string[];
+  qualifyingActivityPolicyRef: string | null;
+  deadlineCalendar: DeadlineCalendar;
+}
+
+/** The activity facts an inactivity rule consumed. */
+export interface ExpiryActivityBasis {
+  windowRef: string;
+  completeness: HistoryCompleteness;
+  earliestObserved: TemporalValue | null;
+  /** The newest qualifying activity, which the deadline is counted from. */
+  anchorActivityRef: string | null;
+  anchorDate: LocalDateValue | null;
+}
+
+export interface ExpiryMembershipClaimBasis {
+  tier: string;
+  source: MembershipSource;
+  valid: TemporalValue;
+  evidenceRefs: string[];
+}
+
+/** The membership facts a tier-gated rule consumed. */
+export interface ExpiryMembershipBasis {
+  requiredTiers: string[];
+  /** This holding's claims for one of the required tiers, whether or not they covered the anchor. */
+  claims: ExpiryMembershipClaimBasis[];
+}
+
+export const COMPUTED_EXPIRY_STATUSES = ["date", "no-expiry", "unavailable"] as const;
+export type ComputedExpiryStatus = (typeof COMPUTED_EXPIRY_STATUSES)[number];
+
+/**
+ * Why no deadline was computed. A closed list: every code names the missing
+ * or unconfirmed input, and none of them is a date, a zero or "no expiry".
+ */
+export const COMPUTED_EXPIRY_REASONS = [
+  /** The rule is stored as needing verification: its terms are not confirmed in the repository. */
+  "rule_not_verified",
+  /** The terms are recorded but not reduced to a calculation. */
+  "rule_family_unsupported",
+  /** The evaluation day lies outside the period this rule version is in force. */
+  "rule_out_of_force",
+  /** The deadline or its anchor falls outside this version's period; what the next version does with it is not recorded. */
+  "rule_transition_unconfirmed",
+  /** This rule version does not apply to the bucket's kind. */
+  "rule_bucket_kind_not_covered",
+  /** The provider quantity is retained, but its bucket kind has not been confirmed. */
+  "bucket_kind_unclassified",
+  /** The rule fixes each lot's own deadline; only the provider's display states it. */
+  "fixed_deadline_not_derivable",
+  /** An inactivity rule whose qualifying-activity policy did not resolve. */
+  "qualifying_activity_policy_missing",
+  /** A tier-gated rule and no claim of a required tier for this holding. */
+  "membership_out_of_scope",
+  /** A required tier exists but did not cover the anchor activity (for family `none`, the evaluation day). */
+  "membership_not_retroactive",
+  /** A qualifying activity's date could not be read (or, under `member-used`, is missing), so it may be the newest one. */
+  "activity_date_unknown",
+  /** No qualifying activity in the observed history. */
+  "no_qualifying_activity_observed",
+  /** Whether the history window has gaps is unknown, so a newer qualifying activity may be missing. */
+  "history_completeness_unknown",
+] as const;
+export type ComputedExpiryReason = (typeof COMPUTED_EXPIRY_REASONS)[number];
+
+/**
+ * The deadline a rule version yields for one bucket: a derivation, kept apart
+ * from the provider's display. `date` carries a calendar day in the rule's own
+ * calendar; `no-expiry` is only reachable from verified, open-ended terms of
+ * family `none`; `unavailable` carries exactly one closed reason.
+ */
+export interface ComputedExpiry {
+  status: ComputedExpiryStatus;
+  value: LocalDateValue | null;
+  reasonCode: ComputedExpiryReason | null;
+  rule: ExpiryRuleBasis;
+  activity: ExpiryActivityBasis | null;
+  membership: ExpiryMembershipBasis | null;
+  /** Conditions that qualify the result without preventing it (an assumed zone, an older gap). */
+  uncertaintyCodes: string[];
+  release: string;
+}
+
+export const EXPIRY_AGREEMENTS = ["agree", "disagree", "not-comparable"] as const;
+export type ExpiryAgreement = (typeof EXPIRY_AGREEMENTS)[number];
+
+/** Both sides of one bucket's deadline, and whether they agree. */
+export interface BucketExpiryBasis {
+  displayed: DisplayedExpiry | null;
+  computed: ComputedExpiry;
+  agreement: ExpiryAgreement;
+}
+
 export interface ExpiringBucket {
   bucketRef: string;
   quantity: Quantity;
-  /** The deadline shown to a reader; `unknown` keeps the row listed, never dropped. */
+  /**
+   * The deadline shown first in a deadline-ordered list: the provider's
+   * readable display, else the computed date, else `unknown`. It is a
+   * presentation choice; `expiryBasis` keeps both sides apart.
+   */
   deadline: TemporalValue;
   basis: DeadlineBasis;
   providerObserved: TemporalValue | null;
+  /** The computed date, exactly `expiryBasis.computed.value`. */
   policyEstimated: TemporalValue | null;
   reasonCodes: string[];
+  expiryBasis: BucketExpiryBasis;
 }
 
 export interface ExpiryEstimate {
@@ -257,6 +393,7 @@ export const REWARD_UNCERTAINTY_CODES = [
   "rule_family_unsupported",
   "rule_out_of_force",
   "rule_bucket_kind_not_covered",
+  "bucket_kind_unclassified",
   "membership_required",
   "membership_self_reported",
   "membership_not_retroactive",
@@ -268,6 +405,7 @@ export const REWARD_UNCERTAINTY_CODES = [
   "acquisition_date_unknown",
   "activity_date_unknown",
   "deadline_passed",
+  "rule_transition_unconfirmed",
 ] as const;
 export type RewardUncertaintyCode = (typeof REWARD_UNCERTAINTY_CODES)[number];
 
@@ -565,6 +703,153 @@ export function validExpiryRule(value: unknown): value is ExpiryRule {
   );
 }
 
+function validDisplayedExpiry(value: unknown): value is DisplayedExpiry {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["value", "observedAt", "sourceFactRefs"]) &&
+    validTemporalValue(value.value) &&
+    validTemporalValue(value.observedAt) &&
+    isRefList(value.sourceFactRefs, 100)
+  );
+}
+
+function validExpiryRuleBasis(value: unknown): value is ExpiryRuleBasis {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "ruleRef",
+      "ruleId",
+      "version",
+      "family",
+      "verification",
+      "validPeriod",
+      "evidenceRefs",
+      "qualifyingActivityPolicyRef",
+      "deadlineCalendar",
+    ]) &&
+    REF(value.ruleRef) &&
+    REF(value.ruleId) &&
+    isText(value.version, 64) &&
+    value.ruleRef === `${value.ruleId}@${value.version}` &&
+    isOneOf(EXPIRY_FAMILIES)(value.family) &&
+    isOneOf(RULE_VERIFICATIONS)(value.verification) &&
+    (value.validPeriod === null || validTemporalValue(value.validPeriod)) &&
+    isRefList(value.evidenceRefs, 100) &&
+    isTextOrNull(value.qualifyingActivityPolicyRef, 512) &&
+    validDeadlineCalendar(value.deadlineCalendar)
+  );
+}
+
+function validLocalDate(value: unknown): value is LocalDateValue {
+  return validTemporalValue(value) && value.kind === "local-date";
+}
+
+function validExpiryActivityBasis(value: unknown): value is ExpiryActivityBasis {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, [
+      "windowRef",
+      "completeness",
+      "earliestObserved",
+      "anchorActivityRef",
+      "anchorDate",
+    ]) &&
+    REF(value.windowRef) &&
+    isOneOf(HISTORY_COMPLETENESS)(value.completeness) &&
+    (value.earliestObserved === null || validTemporalValue(value.earliestObserved)) &&
+    isTextOrNull(value.anchorActivityRef, 512) &&
+    (value.anchorDate === null || validLocalDate(value.anchorDate)) &&
+    (value.anchorActivityRef === null) === (value.anchorDate === null)
+  );
+}
+
+function validExpiryMembershipBasis(value: unknown): value is ExpiryMembershipBasis {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["requiredTiers", "claims"]) &&
+    isRefList(value.requiredTiers, 100) &&
+    isArrayOf(
+      (claim: unknown): claim is ExpiryMembershipClaimBasis =>
+        isRecord(claim) &&
+        hasExactKeys(claim, ["tier", "source", "valid", "evidenceRefs"]) &&
+        isText(claim.tier, 128) &&
+        isOneOf(MEMBERSHIP_SOURCES)(claim.source) &&
+        validTemporalValue(claim.valid) &&
+        isRefList(claim.evidenceRefs, 100),
+      100,
+    )(value.claims)
+  );
+}
+
+/**
+ * Whether a rule version can give this answer at all: an unverified or
+ * unsupported version never gives a date or "no expiry", and "no expiry" comes
+ * only from open-ended terms of family `none`.
+ */
+function answerableBy(status: ComputedExpiryStatus, rule: ExpiryRuleBasis): boolean {
+  if (status === "unavailable") return true;
+  if (rule.verification !== "verified") return false;
+  return status === "no-expiry"
+    ? rule.family === "none" && rule.validPeriod === null
+    : rule.family !== "none" && rule.family !== "unsupported";
+}
+
+function validComputedExpiry(value: unknown): value is ComputedExpiry {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, [
+      "status",
+      "value",
+      "reasonCode",
+      "rule",
+      "activity",
+      "membership",
+      "uncertaintyCodes",
+      "release",
+    ]) ||
+    !isOneOf(COMPUTED_EXPIRY_STATUSES)(value.status) ||
+    !(value.value === null || validLocalDate(value.value)) ||
+    !(value.reasonCode === null || isOneOf(COMPUTED_EXPIRY_REASONS)(value.reasonCode))
+  )
+    return false;
+  // The three statuses are exclusive: a date has no reason, a reason has no
+  // date, and "no expiry" has neither — it is never a missing value.
+  const shape =
+    value.status === "date"
+      ? value.value !== null && value.reasonCode === null
+      : value.status === "no-expiry"
+        ? value.value === null && value.reasonCode === null
+        : value.value === null && value.reasonCode !== null;
+  return (
+    shape &&
+    validExpiryRuleBasis(value.rule) &&
+    answerableBy(value.status as ComputedExpiryStatus, value.rule) &&
+    (value.activity === null || validExpiryActivityBasis(value.activity)) &&
+    (value.membership === null || validExpiryMembershipBasis(value.membership)) &&
+    isRefList(value.uncertaintyCodes, 100) &&
+    isText(value.release, 64)
+  );
+}
+
+/** The wire and storage shape of one bucket's displayed and computed expiry. */
+export function validBucketExpiryBasis(value: unknown): value is BucketExpiryBasis {
+  return (
+    isRecord(value) &&
+    hasExactKeys(value, ["displayed", "computed", "agreement"]) &&
+    (value.displayed === null || validDisplayedExpiry(value.displayed)) &&
+    validComputedExpiry(value.computed) &&
+    isOneOf(EXPIRY_AGREEMENTS)(value.agreement) &&
+    // Agreement needs two calendar answers: no display, an unreadable one, or
+    // no computed answer is never "agree" or "disagree", and "agree" needs a date.
+    (value.agreement === "not-comparable" ||
+      (value.displayed !== null &&
+        value.displayed.value.kind !== "unknown" &&
+        (value.agreement === "agree"
+          ? value.computed.status === "date"
+          : value.computed.status !== "unavailable")))
+  );
+}
+
 export function validConversionOffer(value: unknown): value is ConversionOffer {
   return (
     isRecord(value) &&
@@ -631,9 +916,9 @@ export interface RewardHoldingSummary {
   holdingRef: string;
   programId: string;
   unitRef: string;
-  /** Sum of the consumable buckets only, in the program's own unit. */
+  /** Sum of confirmed consumable buckets; unavailable while any bucket kind is unclassified. */
   consumable: Quantity;
-  /** Per-kind subtotals; `pending-award` and `qualification` stay outside `consumable`. */
+  /** Per-kind subtotals; unclassified, pending awards and qualification stay outside consumable. */
   byKind: { kind: BucketKind; quantity: Quantity; bucketRefs: string[] }[];
   /** Buckets deliberately left out of `consumable`, each with its reason. */
   excluded: { bucketRef: string; kind: BucketKind; reasonCode: string }[];
@@ -651,7 +936,8 @@ function bucketError(quantities: readonly Quantity[], unitRef: string): ValueErr
  * A holding's consumable quantity and its qualification measures, never mixed.
  * A holding with no consumable bucket reports an exact zero only because the
  * bucket list itself is the complete observed set; an unparsed bucket makes
- * the whole sum an error rather than a smaller number (INV05).
+ * the whole sum an error rather than a smaller number (INV05). Unclassified
+ * quantities remain in per-kind subtotals, but block an exact consumable total.
  */
 export function summarizeHolding(
   holding: RewardHolding,
@@ -675,7 +961,11 @@ export function summarizeHolding(
         bucketRef: bucket.bucketRef,
         kind: bucket.kind,
         reasonCode:
-          bucket.kind === "qualification" ? "qualification_not_consumable" : "award_not_yet_held",
+          bucket.kind === "unclassified"
+            ? "bucket_kind_unclassified"
+            : bucket.kind === "qualification"
+              ? "qualification_not_consumable"
+              : "award_not_yet_held",
       });
   }
   const byKind: RewardHoldingSummary["byKind"] = [];
@@ -707,15 +997,25 @@ export function summarizeHolding(
     holding.unitRef,
     consumableBuckets.map((bucket) => bucket.quantity),
   );
+  const unclassified = holding.buckets.some((bucket) => bucket.kind === "unclassified");
+  if (unclassified) uncertaintyCodes.push("bucket_kind_unclassified");
   const measures = qualifications.filter((measure) => measure.programId === holding.programId);
   if (measures.length > 0) uncertaintyCodes.push("qualification_measures_reported_separately");
   return {
     holdingRef: holding.holdingRef,
     programId: holding.programId,
     unitRef: holding.unitRef,
-    consumable: summed.ok
-      ? summed.quantity
-      : { unitRef: holding.unitRef, value: { status: "conflict", reasonCode: summed.error.code } },
+    consumable: unclassified
+      ? {
+          unitRef: holding.unitRef,
+          value: { status: "missing", reasonCode: "bucket_kind_unclassified" },
+        }
+      : summed.ok
+        ? summed.quantity
+        : {
+            unitRef: holding.unitRef,
+            value: { status: "conflict", reasonCode: summed.error.code },
+          },
     byKind,
     excluded,
     qualificationMeasures: measures,
@@ -755,8 +1055,16 @@ function asLocalDate(date: CivilDate, zone: string): LocalDateValue {
   return { kind: "local-date", value: formatLocalDate(date), zone, basis: "derived" };
 }
 
-function activityDate(activity: RewardActivity, basis: QualifyingActivityPolicy["dateBasis"]) {
-  return basis === "member-used" ? (activity.usedDate ?? activity.postedDate) : activity.postedDate;
+/**
+ * The date the policy anchors on. Under `member-used`, a missing usage date is
+ * an unknown date, never the provider's posting date in its place.
+ */
+function activityDate(
+  activity: RewardActivity,
+  basis: QualifyingActivityPolicy["dateBasis"],
+): TemporalValue {
+  if (basis === "provider-posted") return activity.postedDate;
+  return activity.usedDate ?? { kind: "unknown", reasonCode: "activity_used_date_missing" };
 }
 
 function push(codes: string[], code: string): void {
@@ -764,16 +1072,79 @@ function push(codes: string[], code: string): void {
 }
 
 /**
- * The deadline of a holding under one rule.
+ * Whether a stated period (or single day) covers a calendar day. A value that
+ * names no day — unknown, or an instant — covers nothing: an unreadable
+ * period is never read as "always".
+ */
+function coversDay(value: TemporalValue, day: CivilDate): boolean {
+  if (value.kind === "period") return periodContainsDate(value, day);
+  if (value.kind === "local-date") {
+    const date = parseLocalDate(value.value);
+    return date !== null && daysFromCivil(date) === daysFromCivil(day);
+  }
+  return false;
+}
+
+/** A rule version is in force on a day when it is open-ended or its period covers the day. */
+function versionInForce(rule: ExpiryRule, day: CivilDate | null): boolean {
+  const period = rule.applicability.validPeriod;
+  if (period === null) return true;
+  return day !== null && coversDay(period, day);
+}
+
+function ruleBasis(rule: ExpiryRule): ExpiryRuleBasis {
+  return {
+    ruleRef: `${rule.ruleId}@${rule.version}`,
+    ruleId: rule.ruleId,
+    version: rule.version,
+    family: rule.family,
+    verification: rule.verification,
+    validPeriod: rule.applicability.validPeriod,
+    evidenceRefs: [...new Set(rule.evidenceRefs)],
+    qualifyingActivityPolicyRef: rule.qualifyingActivity?.policyRef ?? null,
+    deadlineCalendar: { ...rule.deadlineCalendar },
+  };
+}
+
+/** Displayed against computed: only two calendar answers can agree or disagree. */
+function agreementOf(displayed: DisplayedExpiry | null, computed: ComputedExpiry): ExpiryAgreement {
+  if (displayed === null || displayed.value.kind === "unknown") return "not-comparable";
+  if (computed.status === "no-expiry")
+    // Verified terms say there is no deadline and the provider shows one.
+    return "disagree";
+  if (computed.value === null) return "not-comparable";
+  const order = compareTemporal(displayed.value, computed.value);
+  if (order.kind === "incomparable") return "not-comparable";
+  return order.order === 0 ? "agree" : "disagree";
+}
+
+/**
+ * The deadline of a holding under one rule version, with the provider's
+ * display and the computed answer kept apart per bucket.
  *
- * The anchor is the newest *qualifying* activity, never `max(activity date)`:
- * a kind the rule excludes (a family transfer) is dropped even when it is the
- * most recent row. An unverified or unsupported rule returns
- * `needs-rule-verification` with every bucket still listed under an unknown
- * deadline — the absence of a computable rule is never reported as "no
- * expiry". A history window that does not cover the anchor makes the result
- * `partial`; a provider-displayed expiry that disagrees with the computed one
- * makes it `conflict`, and both dates are returned.
+ * The displayed side is the claim's own observation and is never changed
+ * here. The computed side is a derivation from the rule version, the
+ * activity history and the membership claims, and it says which of each it
+ * used. It yields a date only when every input the rule needs is present:
+ *
+ *   * the rule is verified, of a family with a calculation, in force on the
+ *     evaluation day and applicable to the bucket's kind;
+ *   * for an inactivity rule, the anchor is the newest *qualifying* activity,
+ *     never `max(activity date)`: a kind the rule excludes (a family transfer)
+ *     is dropped even when it is the most recent row; an activity whose date
+ *     cannot be read, a history of unknown completeness, or no qualifying
+ *     activity at all leaves the date unavailable;
+ *   * a tier-gated rule needs a claim of a required tier covering the anchor
+ *     (for family `none`, the evaluation day); a tier granted later is never
+ *     applied backwards;
+ *   * the anchor and the deadline both lie inside the version's own period.
+ *     How a later version treats a deadline that crosses the boundary is not
+ *     recorded, so it is not guessed.
+ *
+ * Otherwise the computed side is `unavailable` with one closed reason. An
+ * unverified or unsupported rule is never reported as "no expiry"; a
+ * disagreement between display and computation makes the estimate
+ * `conflict` and both dates are returned.
  */
 export function estimateExpiry(
   rule: ExpiryRule,
@@ -784,206 +1155,313 @@ export function estimateExpiry(
   contextId = "context:unbound",
 ): ExpiryEstimate {
   const uncertaintyCodes: string[] = [];
+  // Codes about the inputs a computation consumed; copied onto the basis of
+  // every bucket the rule computes for, less the bucket's own reason code.
+  const derivationCodes: string[] = [];
   const sourceExpiryRefs: string[] = [];
   const zone = rule.deadlineCalendar.zone;
-  if (rule.deadlineCalendar.zoneBasis === "assumed")
+  const now = localDate(clock);
+  const basisOfRule = ruleBasis(rule);
+  if (rule.deadlineCalendar.zoneBasis === "assumed") {
     push(uncertaintyCodes, "deadline_zone_assumed");
+    push(derivationCodes, "deadline_zone_assumed");
+  }
 
-  const observedOnly = (reasonCode: string, state: ExpiryEstimateState): ExpiryEstimate => {
-    const buckets = holding.buckets
-      .filter((bucket) => bucket.kind !== "qualification")
-      .map((bucket): ExpiringBucket => {
-        if (bucket.observedExpiry) sourceExpiryRefs.push(...bucket.sourceFactRefs);
-        return {
-          bucketRef: bucket.bucketRef,
-          quantity: bucket.quantity,
-          deadline: bucket.observedExpiry ?? { kind: "unknown", reasonCode },
-          basis: bucket.observedExpiry ? "provider-observed" : "unknown",
-          providerObserved: bucket.observedExpiry,
-          policyEstimated: null,
-          reasonCodes: bucket.observedExpiry ? ["provider_expiry_only"] : [reasonCode],
-        };
-      });
-    return {
-      holdingRef: holding.holdingRef,
-      ruleRef: `${rule.ruleId}@${rule.version}`,
-      contextId,
-      state,
-      expiringBuckets: buckets,
+  // 1. The rule version itself. A failure here applies to every bucket and
+  //    makes the whole estimate needs-rule-verification.
+  let ruleFailure: ComputedExpiryReason | null = null;
+  if (rule.verification !== "verified") ruleFailure = "rule_not_verified";
+  else if (rule.family === "unsupported") ruleFailure = "rule_family_unsupported";
+  else if (!versionInForce(rule, now)) ruleFailure = "rule_out_of_force";
+  else if (rule.family === "inactivity" && !rule.qualifyingActivity)
+    ruleFailure = "qualifying_activity_policy_missing";
+  if (ruleFailure !== null)
+    push(
       uncertaintyCodes,
-      sourceExpiryRefs: [...new Set(sourceExpiryRefs)],
-      release: REWARD_POLICY_RELEASE,
-    };
-  };
-
-  if (rule.verification !== "verified") {
-    push(uncertaintyCodes, "rule_not_verified");
-    return observedOnly("expiry_terms_unverified", "needs-rule-verification");
-  }
-  if (rule.family === "unsupported") {
-    push(uncertaintyCodes, "rule_family_unsupported");
-    return observedOnly("expiry_terms_unsupported", "needs-rule-verification");
-  }
-  const inForce = rule.applicability.validPeriod
-    ? compareTemporal(clock, rule.applicability.validPeriod)
-    : null;
-  if (inForce && inForce.kind === "ordered" && inForce.order !== 0) {
-    // The clock lies wholly outside the period the rule text is in force.
-    push(uncertaintyCodes, "rule_out_of_force");
-    return observedOnly("rule_out_of_force", "needs-rule-verification");
-  }
-
-  // Membership gating: a tiered rule needs a tier claim that covers the period
-  // it is being applied to. A tier granted later is never applied backwards.
-  let membershipOk = true;
-  if (rule.applicability.tiers !== null) {
-    const tiers = rule.applicability.tiers;
-    const matching = membership.filter(
-      (state) => state.holdingRef === holding.holdingRef && tiers.includes(state.tier),
+      ruleFailure === "qualifying_activity_policy_missing"
+        ? "rule_family_unsupported"
+        : ruleFailure,
     );
-    if (matching.length === 0) {
-      push(uncertaintyCodes, "membership_out_of_scope");
-      membershipOk = false;
-    } else {
-      if (matching.some((state) => state.source === "self-reported"))
-        push(uncertaintyCodes, "membership_self_reported");
-      push(uncertaintyCodes, "membership_required");
-    }
+
+  // 2. Membership: only a tier-gated rule consumes it.
+  const tiers = rule.applicability.tiers;
+  const matching =
+    tiers === null
+      ? []
+      : membership.filter(
+          (state) =>
+            state.programId === holding.programId &&
+            state.holdingRef === holding.holdingRef &&
+            tiers.includes(state.tier),
+        );
+  const membershipBasis: ExpiryMembershipBasis | null =
+    tiers === null
+      ? null
+      : {
+          requiredTiers: [...new Set(tiers)],
+          claims: matching.map((state) => ({
+            tier: state.tier,
+            source: state.source,
+            valid: state.valid,
+            evidenceRefs: [...new Set(state.evidenceRefs)],
+          })),
+        };
+  const outOfScope = ruleFailure === null && tiers !== null && matching.length === 0;
+  if (outOfScope) {
+    push(uncertaintyCodes, "membership_out_of_scope");
+    push(derivationCodes, "membership_out_of_scope");
+  }
+  if (ruleFailure === null && tiers !== null && matching.length > 0) {
+    push(uncertaintyCodes, "membership_required");
+    push(derivationCodes, "membership_required");
   }
 
-  if (rule.family === "none") {
-    const state: ExpiryEstimateState = membershipOk ? "computed" : "partial";
-    push(uncertaintyCodes, "no_expiry_under_verified_terms");
-    return {
-      holdingRef: holding.holdingRef,
-      ruleRef: `${rule.ruleId}@${rule.version}`,
-      contextId,
-      state,
-      expiringBuckets: holding.buckets
-        .filter((bucket) => bucket.kind !== "qualification")
-        .map((bucket) => ({
-          bucketRef: bucket.bucketRef,
-          quantity: bucket.quantity,
-          deadline: bucket.observedExpiry ?? {
-            kind: "unknown" as const,
-            reasonCode: "no_expiry_under_verified_terms",
-          },
-          basis: (bucket.observedExpiry ? "provider-observed" : "unknown") as DeadlineBasis,
-          providerObserved: bucket.observedExpiry,
-          policyEstimated: null,
-          reasonCodes: ["no_expiry_under_verified_terms"],
-        })),
-      uncertaintyCodes,
-      sourceExpiryRefs: [],
-      release: REWARD_POLICY_RELEASE,
-    };
-  }
-
-  // Anchor for inactivity rules; fixed-lot and fixed-account rules have none.
+  // 3. Activity: only an inactivity rule consumes it.
   let anchor: CivilDate | null = null;
-  if (rule.family === "inactivity") {
+  let anchorRef: string | null = null;
+  let activityFailure: ComputedExpiryReason | null = null;
+  let activityBasis: ExpiryActivityBasis | null = null;
+  let notRetroactive = false;
+  if (ruleFailure === null && rule.family === "inactivity" && rule.qualifyingActivity) {
     const policy = rule.qualifyingActivity;
-    if (!policy) {
-      push(uncertaintyCodes, "rule_family_unsupported");
-      return observedOnly("qualifying_activity_policy_missing", "needs-rule-verification");
-    }
+    let undated = false;
     for (const item of activity.activities) {
       if (policy.excludedKinds.includes(item.kind)) continue;
       if (!policy.kinds.includes(item.kind)) continue;
       const date = localDate(activityDate(item, policy.dateBasis));
       if (!date) {
+        undated = true;
         push(uncertaintyCodes, "activity_date_unknown");
+        push(derivationCodes, "activity_date_unknown");
         continue;
       }
-      if (!anchor || daysFromCivil(date) > daysFromCivil(anchor)) anchor = date;
+      const later = anchor === null || daysFromCivil(date) > daysFromCivil(anchor);
+      const tie =
+        anchor !== null &&
+        daysFromCivil(date) === daysFromCivil(anchor) &&
+        anchorRef !== null &&
+        item.activityRef < anchorRef;
+      if (later || tie) {
+        anchor = date;
+        anchorRef = item.activityRef;
+      }
     }
-    if (!anchor) push(uncertaintyCodes, "no_qualifying_activity_observed");
-    if (activity.completeness === "partial") push(uncertaintyCodes, "history_incomplete");
-    if (activity.completeness === "unknown") push(uncertaintyCodes, "history_completeness_unknown");
+    if (!anchor) {
+      push(uncertaintyCodes, "no_qualifying_activity_observed");
+      push(derivationCodes, "no_qualifying_activity_observed");
+    }
+    if (activity.completeness === "partial") {
+      // The window's older end is unobserved; the newest qualifying activity
+      // inside it is still the newest one.
+      push(uncertaintyCodes, "history_incomplete");
+      push(derivationCodes, "history_incomplete");
+    }
+    if (activity.completeness === "unknown") {
+      push(uncertaintyCodes, "history_completeness_unknown");
+      push(derivationCodes, "history_completeness_unknown");
+    }
+    activityFailure = undated
+      ? "activity_date_unknown"
+      : !anchor
+        ? "no_qualifying_activity_observed"
+        : activity.completeness === "unknown"
+          ? "history_completeness_unknown"
+          : null;
+    activityBasis = {
+      windowRef: activity.windowRef,
+      completeness: activity.completeness,
+      earliestObserved: activity.earliestObserved,
+      anchorActivityRef: anchorRef,
+      anchorDate: anchor ? asLocalDate(anchor, zone) : null,
+    };
     // A tier that only starts after the anchor cannot have shaped it.
-    if (anchor && rule.applicability.tiers !== null) {
-      const covering = membership.filter(
-        (state) =>
-          state.holdingRef === holding.holdingRef &&
-          rule.applicability.tiers!.includes(state.tier) &&
-          compareTemporal(asLocalDate(anchor!, zone), state.valid).kind !== "ordered",
-      );
-      if (covering.length === 0 && membershipOk)
+    if (anchor && tiers !== null && matching.length > 0) {
+      const day = anchor;
+      const covering = matching.filter((state) => coversDay(state.valid, day));
+      if (covering.length === 0) {
+        notRetroactive = true;
         push(uncertaintyCodes, "membership_not_retroactive");
+        push(derivationCodes, "membership_not_retroactive");
+      } else if (!covering.some((state) => state.source === "provider")) {
+        push(uncertaintyCodes, "membership_self_reported");
+        push(derivationCodes, "membership_self_reported");
+      }
+    }
+  }
+  // A tier-gated "no expiry" is a claim about the evaluation day: a tier that
+  // has ended, or not yet begun, on that day cannot support it.
+  if (ruleFailure === null && rule.family === "none" && tiers !== null && matching.length > 0) {
+    const covering = now === null ? [] : matching.filter((state) => coversDay(state.valid, now));
+    if (covering.length === 0) {
+      notRetroactive = true;
+      push(uncertaintyCodes, "membership_not_retroactive");
+      push(derivationCodes, "membership_not_retroactive");
+    } else if (!covering.some((state) => state.source === "provider")) {
+      push(uncertaintyCodes, "membership_self_reported");
+      push(derivationCodes, "membership_self_reported");
     }
   }
 
-  const now = localDate(clock);
-  const expiringBuckets: ExpiringBucket[] = [];
-  let conflict = false;
-  for (const bucket of holding.buckets) {
-    if (bucket.kind === "qualification") continue;
-    const reasonCodes: string[] = [];
-    let policyEstimated: TemporalValue | null = null;
-    if (!rule.applicability.bucketKinds.includes(bucket.kind)) {
-      reasonCodes.push("rule_bucket_kind_not_covered");
-      push(uncertaintyCodes, "rule_bucket_kind_not_covered");
-    } else if (rule.family === "inactivity" && anchor && rule.qualifyingActivity) {
-      policyEstimated = asLocalDate(
-        addMonths(
+  const computedFor = (bucket: RewardBucket): ComputedExpiry => {
+    let reasonCode: ComputedExpiryReason | null =
+      bucket.kind === "unclassified" ? "bucket_kind_unclassified" : ruleFailure;
+    let status: ComputedExpiryStatus = "unavailable";
+    let value: LocalDateValue | null = null;
+    if (reasonCode === null && !rule.applicability.bucketKinds.includes(bucket.kind))
+      reasonCode = "rule_bucket_kind_not_covered";
+    if (reasonCode === null) {
+      if (rule.family === "fixed-lot" || rule.family === "fixed-account")
+        // The provider's own per-lot date is the only evidence of the lot's
+        // deadline; no acquisition date is invented from a bucket total.
+        reasonCode = "fixed_deadline_not_derivable";
+      else if (rule.family === "none") {
+        // "No expiry" is a claim about the version's terms; a version with an
+        // end cannot say what happens after it.
+        if (outOfScope) reasonCode = "membership_out_of_scope";
+        else if (notRetroactive) reasonCode = "membership_not_retroactive";
+        else if (rule.applicability.validPeriod !== null)
+          reasonCode = "rule_transition_unconfirmed";
+        else status = "no-expiry";
+      } else if (outOfScope) reasonCode = "membership_out_of_scope";
+      else if (activityFailure !== null) reasonCode = activityFailure;
+      else if (notRetroactive) reasonCode = "membership_not_retroactive";
+      else if (!anchor || !rule.qualifyingActivity) reasonCode = "no_qualifying_activity_observed";
+      else {
+        const deadline = addMonths(
           anchor,
           rule.qualifyingActivity.extensionMonths,
           rule.qualifyingActivity.endOfMonthPolicy,
-        ),
-        zone,
-      );
-    } else if (rule.family === "fixed-lot" || rule.family === "fixed-account") {
-      // The provider's own per-bucket date is the only evidence of the lot's
-      // deadline; no acquisition date is invented from a bucket total.
-      if (!bucket.observedExpiry) {
-        reasonCodes.push("acquisition_date_unknown");
-        push(uncertaintyCodes, "acquisition_date_unknown");
+        );
+        if (!versionInForce(rule, anchor) || !versionInForce(rule, deadline))
+          reasonCode = "rule_transition_unconfirmed";
+        else {
+          value = asLocalDate(deadline, zone);
+          status = "date";
+        }
       }
     }
-    if (bucket.observedExpiry) sourceExpiryRefs.push(...bucket.sourceFactRefs);
-    if (bucket.observedExpiry && policyEstimated) {
-      const order = compareTemporal(bucket.observedExpiry, policyEstimated);
-      if (order.kind === "incomparable" || order.order !== 0) {
-        conflict = true;
-        reasonCodes.push("provider_and_policy_differ");
-        push(uncertaintyCodes, "provider_and_policy_differ");
-      }
+    // Activity and membership are facts this bucket's answer consumed only
+    // when the rule computes for it at all: a rule-level failure, a kind the
+    // version does not cover and a fixed-lot rule consume neither.
+    const consumed =
+      ruleFailure === null &&
+      reasonCode !== "rule_bucket_kind_not_covered" &&
+      reasonCode !== "bucket_kind_unclassified" &&
+      (rule.family === "inactivity" || rule.family === "none");
+    return {
+      status,
+      value,
+      reasonCode,
+      rule: basisOfRule,
+      activity: consumed && rule.family === "inactivity" ? activityBasis : null,
+      membership: consumed ? membershipBasis : null,
+      uncertaintyCodes: consumed ? derivationCodes.filter((code) => code !== reasonCode) : [],
+      release: EXPIRY_DERIVATION_RELEASE,
+    };
+  };
+
+  const expiringBuckets: ExpiringBucket[] = [];
+  let conflict = false;
+  let undetermined = false;
+  for (const bucket of holding.buckets) {
+    if (bucket.kind === "qualification") continue;
+    const displayed: DisplayedExpiry | null = bucket.observedExpiry
+      ? {
+          value: bucket.observedExpiry,
+          observedAt: bucket.observedAt,
+          sourceFactRefs: [...new Set(bucket.sourceFactRefs)],
+        }
+      : null;
+    if (displayed) sourceExpiryRefs.push(...bucket.sourceFactRefs);
+    const computed = computedFor(bucket);
+    const agreement = agreementOf(displayed, computed);
+    const reasonCodes: string[] = [];
+    if (computed.reasonCode !== null) push(reasonCodes, computed.reasonCode);
+    if (computed.status === "no-expiry") {
+      push(reasonCodes, "no_expiry_under_verified_terms");
+      push(uncertaintyCodes, "no_expiry_under_verified_terms");
     }
-    const deadline: TemporalValue = bucket.observedExpiry ??
-      policyEstimated ?? { kind: "unknown", reasonCode: "expiry_not_determined" };
-    const basis: DeadlineBasis = bucket.observedExpiry
+    if (computed.reasonCode === "bucket_kind_unclassified")
+      push(uncertaintyCodes, "bucket_kind_unclassified");
+    if (computed.reasonCode === "rule_bucket_kind_not_covered")
+      push(uncertaintyCodes, "rule_bucket_kind_not_covered");
+    if (computed.reasonCode === "rule_transition_unconfirmed")
+      push(uncertaintyCodes, "rule_transition_unconfirmed");
+    if (computed.reasonCode === "fixed_deadline_not_derivable" && !displayed) {
+      push(reasonCodes, "acquisition_date_unknown");
+      push(uncertaintyCodes, "acquisition_date_unknown");
+    }
+    if (displayed && computed.status === "unavailable") push(reasonCodes, "provider_expiry_only");
+    if (agreement === "disagree") {
+      conflict = true;
+      push(reasonCodes, "provider_and_policy_differ");
+      push(uncertaintyCodes, "provider_and_policy_differ");
+    }
+    // The deadline a list is ordered by: a readable display first, then the
+    // computed date. An unreadable display is not a date.
+    const readable = displayed !== null && displayed.value.kind !== "unknown";
+    const deadline: TemporalValue = readable
+      ? displayed.value
+      : (computed.value ??
+        displayed?.value ?? {
+          kind: "unknown",
+          reasonCode:
+            computed.status === "no-expiry"
+              ? "no_expiry_under_verified_terms"
+              : (computed.reasonCode ?? "expiry_not_determined"),
+        });
+    const basis: DeadlineBasis = readable
       ? "provider-observed"
-      : policyEstimated
+      : computed.value
         ? "policy-estimated"
-        : "unknown";
-    if (basis === "provider-observed" && !policyEstimated) reasonCodes.push("provider_expiry_only");
+        : displayed
+          ? "provider-observed"
+          : "unknown";
+    // A deadline is only ever "passed" on a day some basis established.
     if (now && deadline.kind === "local-date") {
       const parsed = parseLocalDate(deadline.value);
       if (parsed && daysFromCivil(parsed) < daysFromCivil(now)) {
-        reasonCodes.push("deadline_passed");
+        push(reasonCodes, "deadline_passed");
         push(uncertaintyCodes, "deadline_passed");
       }
     }
+    if (
+      ruleFailure === null &&
+      computed.reasonCode !== "rule_bucket_kind_not_covered" &&
+      computed.status !== "no-expiry" &&
+      deadline.kind === "unknown"
+    )
+      undetermined = true;
     expiringBuckets.push({
       bucketRef: bucket.bucketRef,
       quantity: bucket.quantity,
       deadline,
       basis,
       providerObserved: bucket.observedExpiry,
-      policyEstimated,
+      policyEstimated: computed.value,
       reasonCodes,
+      expiryBasis: { displayed, computed, agreement },
     });
   }
-
   const partial =
-    !membershipOk ||
+    undetermined ||
+    outOfScope ||
+    notRetroactive ||
     uncertaintyCodes.includes("history_incomplete") ||
     uncertaintyCodes.includes("history_completeness_unknown") ||
     uncertaintyCodes.includes("no_qualifying_activity_observed") ||
-    uncertaintyCodes.includes("membership_not_retroactive") ||
     uncertaintyCodes.includes("acquisition_date_unknown") ||
-    uncertaintyCodes.includes("activity_date_unknown");
-  const state: ExpiryEstimateState = conflict ? "conflict" : partial ? "partial" : "computed";
+    uncertaintyCodes.includes("activity_date_unknown") ||
+    uncertaintyCodes.includes("bucket_kind_unclassified") ||
+    uncertaintyCodes.includes("rule_transition_unconfirmed");
+  const state: ExpiryEstimateState =
+    ruleFailure !== null
+      ? "needs-rule-verification"
+      : conflict
+        ? "conflict"
+        : partial
+          ? "partial"
+          : "computed";
   return {
     holdingRef: holding.holdingRef,
     ruleRef: `${rule.ruleId}@${rule.version}`,
@@ -1015,6 +1493,11 @@ export function availableForOffer(
   for (const bucket of buckets) {
     if (bucket.quantity.unitRef !== offer.fromUnitRef) {
       excluded.push({ bucketRef: bucket.bucketRef, reasonCode: "unit_mismatch" });
+      continue;
+    }
+    if (bucket.kind === "unclassified") {
+      excluded.push({ bucketRef: bucket.bucketRef, reasonCode: "bucket_kind_unclassified" });
+      push(uncertaintyCodes, "bucket_kind_unclassified");
       continue;
     }
     if (bucket.kind === "qualification" || bucket.kind === "pending-award") {

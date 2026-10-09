@@ -23,9 +23,11 @@ import { canonicalDigest, sha256Hex } from "../../domain/src/context.ts";
 import {
   CONVERSION_SEARCH_RELEASE,
   estimateExpiry,
+  EXPIRY_DERIVATION_RELEASE,
   REWARD_POLICY_RELEASE,
   simulateConversion,
   type ActivityHistory,
+  type BucketExpiryBasis,
   type BucketKind,
   type ConversionOffer,
   type ExpiryEstimate,
@@ -49,10 +51,17 @@ import {
 } from "./rewards.ts";
 
 /** The shape of a stored reward input; a change of shape is a new identity. */
-export const REWARD_PROJECTION_CONTRACT_VERSION = "reward-projection-input-v1";
+export const REWARD_PROJECTION_CONTRACT_VERSION = "reward-projection-input-v2";
 
-/** Bump to rebuild every estimate under new projection rules. */
-export const REWARD_PROJECTION_RELEASE = "reward-projection-v1";
+/**
+ * Bump to rebuild every estimate under new projection rules. v2: every row
+ * carries its `expiryBasis` — the provider's display and the computed answer
+ * apart, with the rule version, activity and membership facts the computed
+ * side used or the closed reason it is unavailable (ADR 0049). v3: V Point
+ * bucket inputs are confined to the latest eligible published fetch run.
+ * Even without a CORE revision change, a v2 snapshot must be rebuilt.
+ */
+export const REWARD_PROJECTION_RELEASE = "reward-projection-v3";
 
 /**
  * How the fixed instant becomes the calendar day the rules are evaluated on:
@@ -64,11 +73,14 @@ export const REWARD_PROJECTION_RELEASE = "reward-projection-v1";
 export const REWARD_EVALUATION_CALENDAR = "UTC:start-of-day:assumed";
 
 /**
- * The reward activity history the store can classify today: none. The
- * provider's own movement enum is not recorded as a value
- * (docs/sources/v-point.md §4.2), so no observed row can be called a
- * qualifying activity, and `estimateExpiry` reports `partial` instead of
- * inventing a deadline from the newest transaction (SC12).
+ * The reward activity history the store can classify today: none. The V Point
+ * history parser keeps the provider's `point_div` and `point_type` numbers
+ * with the meaning `unmapped-provider-enum` (docs/sources/v-point.md §4.2);
+ * Public UI labels confirm some enum names, but their qualifying-activity
+ * classification and date basis under the terms remain unverified. No observed row is
+ * called a qualifying activity, and the computed expiry of a regular bucket is
+ * `unavailable` with `no_qualifying_activity_observed` instead of a deadline
+ * invented from the newest transaction (SC12, ADR 0049).
  */
 export const UNCLASSIFIED_REWARD_HISTORY: ActivityHistory = {
   windowRef: "window:reward-activity:unclassified",
@@ -151,6 +163,12 @@ export interface RewardExpiryProjectionRow {
   uncertaintyCodes: string[];
   /** CORE references this row rests on, copied rather than joined (04 §3). */
   basisRefs: string[];
+  /**
+   * The provider's display (an observation) and the computed expiry (a
+   * derivation) of this bucket, apart, each with its own basis. `expiresOn`
+   * and `deadlineBasis` are only the list's ordering choice between them.
+   */
+  expiryBasis: BucketExpiryBasis;
 }
 
 /** One replayed simulation, in the shape the READ table stores. */
@@ -187,6 +205,7 @@ export async function rewardProjectionBuildDigest(): Promise<string> {
   return await canonicalDigest({
     projectionRelease: REWARD_PROJECTION_RELEASE,
     rewardPolicyRelease: REWARD_POLICY_RELEASE,
+    expiryDerivationRelease: EXPIRY_DERIVATION_RELEASE,
     conversionSearchRelease: CONVERSION_SEARCH_RELEASE,
     evaluationCalendar: REWARD_EVALUATION_CALENDAR,
     activityWindow: UNCLASSIFIED_REWARD_HISTORY.windowRef,
@@ -364,7 +383,7 @@ export function buildRewardProjection(content: RewardProjectionInputContent): Re
           bucketRef: bucket.bucketRef,
           ruleId: rule.ruleId,
           ruleVersion: rule.version,
-          bucketKind: kinds.get(bucket.bucketRef) ?? "regular",
+          bucketKind: kinds.get(bucket.bucketRef) ?? "unclassified",
           state: estimate.state,
           deadlineBasis: bucket.basis,
           expiresOn: deadlineDate(bucket.deadline),
@@ -374,6 +393,7 @@ export function buildRewardProjection(content: RewardProjectionInputContent): Re
           reasonCodes: [...bucket.reasonCodes],
           uncertaintyCodes: [...estimate.uncertaintyCodes],
           basisRefs: source ? [...source.sourceFactRefs] : [],
+          expiryBasis: bucket.expiryBasis,
         });
       }
     }

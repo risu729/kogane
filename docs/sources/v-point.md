@@ -108,7 +108,7 @@ Pay へ移行するとポイント側の減少と Pay 側の増加という二�
 `date_reflect`、`date_use`、`point_div`、`store_company`、`store_category`、`store_name`、
 `point_type`、`point`、`is_use_mbo`、`store_alliance_name`、`reason` である。
 `point_div` は獲得、利用、失効、訂正、取消等、`point_type` は通常、
-ストア限定、どこでも使える期限固定を区別する。実値はrepositoryへ記録していない。
+ストア限定、どこでも使える期限固定を区別する。公開bundleの表示語対応は下の2026-10-09記録に限定する。規約上の活動分類は未確認。
 
 公開公式資料には、V Point 履歴の CSV/PDF download、1 page 件数、総件数上限、API、欠番や取消行の
 安定 ID を確認できなかった。「export 不可」と断定せず、**公開資料で未確認** とする。3 年を超える
@@ -571,12 +571,11 @@ session値は出力・保存していない。監査はR2へのwrite/deleteやWo
 
 ## 追記: 共通DATA R2への切替（U09）
 
-`services/collector-vpoint`にvar `COLLECTION_TARGET`（既定`legacy`）とbinding
-`DATA`（`kogane-raw-evidence`）を追加した。`legacy`は現行経路そのままで、
-per-source bucketとService Binding経由の中央取り込みを変更しない。`shared`では
-同じsanitize済みbytesを`objects/<2hex>/<sha256>`へcontent-addressedで保存し、
-`runs/v-point/<runId>/terminal.json`を最後に書く。旧APIへのuploadと
-per-source bucketへのwriteは行わない。Worker名、cron、Email route、
+`services/collector-vpoint`は`COLLECTION_TARGET`を読まない。保存先は
+binding `DATA`（`kogane-raw-evidence`）だけである。切替とimporterは
+2026-09-13に廃止された（`docs/collection.md`）。同じsanitize済みbytesを
+`objects/<2hex>/<sha256>`へcontent-addressedで保存し、
+`runs/v-point/<runId>/terminal.json`を最後に書く。Worker名、cron、Email route、
 `VPointSession` Durable Object、secret、既存bucket bindingは変更しない。
 
 Email routeが受けたVポイントPay通知は`v-point-pay-email`の独立runとして
@@ -586,9 +585,72 @@ Email routeが受けたVポイントPay通知は`v-point-pay-email`の独立run�
 post-auth収集を起動した場合、両runは同じ`acquisitionSessionRef`
 （`email-<message sha256>`）を持ち、sourceは混ぜない。
 
-`shared`ではVポイントPay email reconciliation reportを作らない。旧bucketの
-prefix列挙に依存する集計であり、shared保存後のnotificationを数え落とすためで、
+VポイントPay email reconciliation reportは作らない。旧bucketの
+prefix列挙に依存する集計であり、notificationを数え落とすためで、
 source横断の再照合はterminalを読むProcessor（U08）の担当である。
-切替順はProcessor（`SHARED_R2_INGEST_ENABLED`）を先に有効化し、その後で
-`COLLECTION_TARGET=shared`。rollbackは`legacy`へ戻すだけで、既存terminalは
-そのまま有効である。詳細は`docs/collection.md`。
+Processorの`SHARED_R2_INGEST_ENABLED`は登録のゲートであり、collectorの
+保存先スイッチではない。既存terminalはそのまま有効である。詳細は`docs/collection.md`。
+
+## 2026-10-09: 公開UI enum表示語と期限算定の境界
+
+匿名で取得できた [My Page HTML](https://mypage.tsite.jp/tpoint/?hid=1) は
+[first-party asset](https://mypage.tsite.jp/_nuxt/6e0bc81.js) を直接script参照する。
+取得UTCは `2026-10-09T09:44:51.0733363+00:00`、raw HTTP body SHA256はHTML
+`9fbdadf2616f5206d2e3f878f341569167414aa00f795c81df91f467fa3ad59b`、asset
+`78df56dd541250c8a0b5aa190e2323686c02834bf8b4a6b5e78e9320afcd0692`。
+公開moduleが数値を配列indexとして表示語へ直接写像することを確認した。
+
+| field      | 値               | 公開moduleの表示語                     |
+| ---------- | ---------------- | -------------------------------------- |
+| point_div  | 1, 2, 3, 4, 5, 6 | 貯める、使う、失効、修正、取消、その他 |
+| point_type | 1, 2             | ｽﾄｱ限定、期間限定                      |
+| point_type | 0                | 空。通常ポイントとは断定しない         |
+
+これは配信moduleのlookupの証拠で、認証UIでの実行や安定したserver enum契約の
+証明ではない。ログイン、認証header、private API、口座値は取得していない。
+この記録でruntimeのexpiry activity写像を有効化していない。
+`date_use` と `date_reflect` は別のsort/group入力であり、
+[FAQ35501](https://ssl.help.tsite.jp/faq/show/35501?site_domain=qa-tsite) も利用日/反映日の
+並替を説明するが、規約第3条の最終変動日とのfield対応を確定しない。
+通常ポイントにも表示期限があるため、expiration有無はbucket kindの証拠ではない。
+
+[2026-04-01規約](https://privacy.vpoint.co.jp/terms/point/) と
+[2024-04-22公式PDF](https://privacy.cccmkhd.co.jp/wp-content/uploads/2024/04/point_20240422.pdf)
+の第3条は同一表現ではない。現行版は通常の獲得/利用/交換とストア限定でない
+固定期限ポイントの利用を期限更新対象へ明記する。中間版と既存期限の移行扱い、
+取消/修正の活動撤回、起算日/閏日/境界時刻は未確定である。旧v1 seedは歴史記録のまま
+変更せず、今回のunknown-kind gateはそれを使った実期限算定を有効にしない。
+
+### 残る最小観測（提案のみ、未実施）
+
+1. 既存の許可済み保存資料/通常認証UIで、commonの種類表示と同じ行のenumを照合する。
+   生会員番号・残高・本文をrepoへ写さず、field/value→labelの根拠refと取得物digestを記録。
+   type0が空であるだけならregularとはしない。
+2. 同じ行の利用日と反映日が異なる例を照合し、規約の最終変動日がどちらを指すかを
+   first-party説明で確認する。説明が無ければownerからサポートへ確認する文面を準備する。
+   送信・追加login・API再取得はこのPRでは実施しない。
+3. 取消/修正と元行の関係、規約改訂時の既存期限の扱いを確認し、確認済みsubsetだけを
+   分類する。同一runの全page/total/filter/sortと窓の端の根拠を固定inputに持たせる。
+   最新capture eligibilityをlifetime history completeへ昇格させない。
+
+### #554の実算定に不足する最小の観測事実
+
+新しい取得や入力契約を作る前に、次の4点を同じ会員holding・同じ取得runの根拠へ結び付ける必要がある。
+
+1. **活動と種類**：履歴rowの `point_div` / `point_type` の元field・値・表示ラベルがどれか、
+   それが通常ポイントの貯める/使う/交換か、ストア限定か、期間限定の使用かを確認する。
+   公開bundleのラベルだけでは `point_type=0`、交換、修正/取消の対象row・関係、規約上の
+   起算対象を確定できない。未確認enumを無活動として除外しない。
+2. **基準日**：同じ活動の `date_use` と `date_reflect` の値を表示と突合し、
+   規約第3条の「変動」日へ使うfield、日付のtime zone/日境界、取消・訂正後の起算日を
+   providerの説明または確認済み事例へ結び付ける。表示順や最新rowだけでは基準日を決めない。
+3. **取得窓**：同じrunのfilter・sort・全page、totalと実row数、最古/最新日、
+   providerが参照可能な期間と欠落の有無を確認する。既存適格captureの3 dataset公開は
+   生涯履歴の完全性ではない。空配列や最大3年表示だけで「起算活動なし」と断定しない。
+4. **適用規約**：起算候補日から評価日までの有効規約版、変更発効日、
+   旧期間限定ポイント使用/旧起算日の引継ぎ・経過措置を確認する。
+   2024年版と2026年4月1日版の相違は確認済みだが、対象holdingへの移行規則は未確認。
+   現行seedのopen-ended期間を根拠に過去へ現行ruleを適用しない。
+
+それぞれの確認済み事実とsource refsが揃って初めて、分類版・起算活動・取得窓・日付basis・
+適用規約を既存の固定inputへ接続する設計を決める。今回はこのadapterを実装せず、#554を閉じない。

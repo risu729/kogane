@@ -1,9 +1,8 @@
 name: Deploy Workers
-# The one job that uploads Workers to Cloudflare. `deploy.yml` calls it after a
+# The serial job that uploads Workers to Cloudflare. `deploy.yml` calls it after a
 # successful CI run on main; `rollback.yml` calls it with an earlier commit
-# (unified plan 11). Both callers hold the same `production-deploy` concurrency
-# group, so a release and a rollback can never overlap, and the group is held by
-# the calling job for the whole of this workflow.
+# (unified plan 11). This inner job holds `production-deploy` on every attempt,
+# including a selected-job rerun. Both callers use this one interlock.
 #
 # `environment: production` lives here rather than on the calling job because a
 # job that calls a reusable workflow cannot declare an environment. That is also
@@ -43,13 +42,19 @@ jobs:
   release:
     name: Release
     environment: production
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
       contents: read # for checkout
       deployments: write # the release ledger (unified plan 11 §3)
+      actions: read # exact immutable same-run checkpoint artifacts
     env:
       CI: "true"
+      SHA: ${{ inputs.sha }}
+      TRUSTED_SHA: ${{ github.workflow_sha }}
       WRANGLER_SEND_METRICS: "false"
     steps:
       - name: Check the requested commit and mode
@@ -138,11 +143,12 @@ jobs:
         run: |
           guard="${RUNNER_TEMP}/container-tools"
           mkdir -p "${guard}/tasks/_lib/ci" "${guard}/scripts"
-          for path in tasks/_lib/ci/cf-container-release.mjs scripts/jsonc.ts; do
+          for path in tasks/_lib/ci/cf-container-release.mjs tasks/_lib/ci/cf-do-identity.mjs tasks/_lib/ci/release-resume.mjs tasks/_lib/ci/github-api.mjs tasks/_lib/ci/release-ledger.mjs tasks/_lib/ci/release-manifest.mjs scripts/jsonc.ts; do
             gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${TRUSTED_SHA}" --jq '.content' | base64 --decode > "${guard}/${path}"
             test -s "${guard}/${path}"
           done
           printf 'CONTAINER_GUARD=%s\n' "${guard}/tasks/_lib/ci/cf-container-release.mjs" >> "${GITHUB_ENV}"
+          printf 'RELEASE_RESUME=%s\n' "${guard}/tasks/_lib/ci/release-resume.mjs" >> "${GITHUB_ENV}"
       - name: Checkout the exact commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -167,7 +173,7 @@ jobs:
         # its mise configuration and the scripts below are reviewed code.
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: 2026.10.4
+          version: 2026.10.6
           # No tool cache anywhere in this job: its cache scope is shared with
           # pull request CI, which runs pull request code, so a restored archive
           # is not a trusted source of the interpreter that decides whether this
@@ -177,10 +183,16 @@ jobs:
           # The ledger steps below run before the rest of the toolchain exists;
           # they need the pinned node, not whatever the runner image ships.
           MISE_ENABLE_TOOLS: node
+      - name: Find an immutable publication checkpoint from this run
+        id: resume
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node "${RELEASE_RESUME}" discover
       # Older compatible rollback commits predate tasks/automation. Select their legacy
       # entrypoint by layout only; a failed task never falls back or gets retried.
       # Both paths execute the same exact commit confirmed above, never main's tip.
       - name: Read the release ledger
+        if: steps.resume.outputs.resume != 'true'
         id: ledger
         # The newest *successful* deployment is the environment's state. A newer
         # deployment that failed or was cancelled is not — but it ran, so its
@@ -211,11 +223,16 @@ jobs:
           MODE: ${{ inputs.mode }}
           MISE_ENABLE_TOOLS: node
           RECORDED: ${{ steps.ledger.outputs.sha }}
+          RESUMING: ${{ steps.resume.outputs.resume }}
           TARGETS: ${{ inputs.targets }}
         run: |
           release_tool=(node .github/scripts/release-ledger.mjs)
           if [[ -f tasks/automation/release-ledger ]]; then
             release_tool=(mise run --no-deps automation:release-ledger)
+          fi
+          if [[ ${RESUMING} == true ]]; then
+            printf 'proceed=true\n' >> "${GITHUB_OUTPUT}"
+            exit 0
           fi
           "${release_tool[@]}" decide \
             --mode "${MODE}" --head "${SHA}" --recorded "${RECORDED}" \
@@ -226,13 +243,20 @@ jobs:
         if: steps.decide.outputs.proceed == 'true'
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: 2026.10.4
+          version: 2026.10.6
           cache: false
       - name: Install the locked dependencies
         if: steps.decide.outputs.proceed == 'true'
         run: mise run install
+      - name: Restore the original prepared release without rebuilding
+        if: steps.resume.outputs.resume == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node "${RELEASE_RESUME}" restore
       - name: Normalize admitted Container rollback exports
-        if: steps.decide.outputs.proceed == 'true'
+        if: steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true'
         env:
           MODE: ${{ inputs.mode }}
         run: node "${CONTAINER_GUARD}" normalize
@@ -243,7 +267,7 @@ jobs:
         # manifest is computed, so the manifest records exactly the
         # configuration that is uploaded and the re-verification below still
         # holds (unified plan 11 §6, docs/ci-cd.md § Postcheck).
-        if: steps.decide.outputs.proceed == 'true'
+        if: steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true'
         env:
           SHA: ${{ inputs.sha }}
         run: |
@@ -253,16 +277,16 @@ jobs:
           fi
           "${release_tool[@]}" --sha "${SHA}"
       - name: Build every deployable bundle
-        if: steps.decide.outputs.proceed == 'true'
+        if: steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true'
         run: mise run bundle
       - name: Validate every Worker without uploading
         # No Cloudflare account or token is in scope for this step, so the
         # whole build and validation happens before any credential is used
         # (acceptance G5-09, G4-16).
-        if: steps.decide.outputs.proceed == 'true'
+        if: steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true'
         run: mise run dry-run
       - name: Capture the exact local Container images
-        if: steps.decide.outputs.proceed == 'true'
+        if: steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true'
         env:
           SHA: ${{ inputs.sha }}
         run: node "${CONTAINER_GUARD}" capture
@@ -308,7 +332,7 @@ jobs:
           fi
           echo "The production Cloudflare credentials are in scope." | tee -a "${GITHUB_STEP_SUMMARY}"
       - name: Capture the existing DO namespaces and lifecycle
-        if: steps.decide.outputs.proceed == 'true'
+        if: steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true'
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -317,7 +341,7 @@ jobs:
             node tasks/_lib/ci/cf-do-identity.mjs capture "${RUNNER_TEMP}/cf-do-identity.json"
           fi
       - name: Check Container rollback schema before registry upload
-        if: steps.decide.outputs.proceed == 'true' && inputs.mode == 'rollback'
+        if: steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true' && inputs.mode == 'rollback'
         env:
           SHA: ${{ inputs.sha }}
         run: |
@@ -333,13 +357,13 @@ jobs:
             --current "${RUNNER_TEMP}/container-schema-record.json"
           test "$(sed -n 's/^core-prefix=//p' "${RUNNER_TEMP}/container-schema.outputs")" = true
       - name: Capture Container identity and pin rollback images
-        if: steps.decide.outputs.proceed == 'true'
+        if: steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true'
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: node "${CONTAINER_GUARD}" prepare
       - name: Compute the release manifest
-        if: steps.decide.outputs.proceed == 'true'
+        if: steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true'
         env:
           SHA: ${{ inputs.sha }}
           MODE: ${{ inputs.mode }}
@@ -358,10 +382,10 @@ jobs:
             --out "${RUNNER_TEMP}/release-manifest.json" \
             --record "${RUNNER_TEMP}/release-record.json"
       - name: Bind the Container image manifest to the release record
-        if: steps.decide.outputs.proceed == 'true'
+        if: steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true'
         run: node "${CONTAINER_GUARD}" bind
       - name: Upload the release manifest
-        if: steps.decide.outputs.proceed == 'true'
+        if: steps.resume.outputs.resume != 'true' && steps.decide.outputs.proceed == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-manifest-${{ inputs.sha }}
@@ -419,17 +443,41 @@ jobs:
             printf 'read-config=%s\n' "$(jq -r 'if .schema.read == null then "" else "\(.schema.read.path)/\(.schema.read.config)" end' "${order}")"
             printf 'read-database=%s\n' "$(jq -r '.schema.read.database // ""' "${order}")"
           } >> "${GITHUB_OUTPUT}"
+      - name: Preserve the exact prepared release for a verification resume
+        if: steps.decide.outputs.proceed == 'true' && steps.resume.outputs.resume != 'true'
+        run: node "${RELEASE_RESUME}" pack
+      - name: Upload the immutable prepared release
+        id: prepared
+        if: steps.decide.outputs.proceed == 'true' && steps.resume.outputs.resume != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-prepared-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/prepared.tar
+          compression-level: 0
+          if-no-files-found: error
+      - name: Bind the prepared artifact to the immutable deployment payload
+        if: steps.decide.outputs.proceed == 'true' && steps.resume.outputs.resume != 'true'
+        env:
+          ARTIFACT_ID: ${{ steps.prepared.outputs.artifact-id }}
+          ARTIFACT_DIGEST: sha256:${{ steps.prepared.outputs.artifact-digest }}
+        run: node "${RELEASE_RESUME}" bind
       - name: Open the deployment record
         id: deployment
         if: steps.decide.outputs.proceed == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          RESUMING: ${{ steps.resume.outputs.resume }}
+          ORIGINAL_DEPLOYMENT_ID: ${{ steps.resume.outputs.deployment-id }}
           DESCRIPTION: kogane ${{ inputs.mode }} ${{ inputs.sha }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           release_tool=(node .github/scripts/release-ledger.mjs)
           if [[ -f tasks/automation/release-ledger ]]; then
             release_tool=(mise run --no-deps automation:release-ledger)
+          fi
+          if [[ ${RESUMING} == true ]]; then
+            printf 'deployment-id=%s\n' "${ORIGINAL_DEPLOYMENT_ID}" >> "${GITHUB_OUTPUT}"
+            exit 0
           fi
           "${release_tool[@]}" create \
             --record "${RUNNER_TEMP}/release-record.json" \
@@ -491,9 +539,16 @@ jobs:
       # ADR 0039: the named RPC entrypoints must exist before the Processor
       # binds them. The acquisition/terminal protocol is unchanged. Uploads
       # execute no collection; future alarms are activated after all postchecks.
+      - name: Verify the original GlobalPass baseline immediately before publication
+        id: verify-publication-baseline-globalpass-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node "${RELEASE_RESUME}" verify-publication-baseline globalpass-worker
       - name: Deploy the GlobalPass collector
         id: deploy-globalpass-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'globalpass-worker')
+        if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker') && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'globalpass-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
@@ -503,8 +558,8 @@ jobs:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the GlobalPass collector with cf
         id: cf-deploy-globalpass-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'globalpass-worker')
-        uses: risu729/wrangler-deploy-action@251e42de418f3f5aece2789cc1c0f76d3f8264f5 # v2.2.0
+        if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker') && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'globalpass-worker')
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-globalpass
@@ -514,8 +569,35 @@ jobs:
           deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Capture the exact GlobalPass publication before waiting
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment-id }}
+          PUBLISHED_WORKER_VERSION: ${{ steps.cf-deploy-globalpass-worker.outputs.version-id }}
+          LEGACY_PUBLICATION: ${{ steps.deploy-globalpass-worker.outcome == 'success' }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+        run: node "${RELEASE_RESUME}" capture globalpass-worker
+      - name: Upload the immutable GlobalPass checkpoint
+        id: checkpoint-globalpass-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}-globalpass-worker
+          path: ${{ runner.temp }}/resume-receipt.json
+          if-no-files-found: error
+      - name: Bind the GlobalPass checkpoint to the deployment audit
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.checkpoint-globalpass-worker.outputs.artifact-id }}
+          ARTIFACT_DIGEST: sha256:${{ steps.checkpoint-globalpass-worker.outputs.artifact-digest }}
+        run: node "${RELEASE_RESUME}" checkpoint
       - name: Verify the GlobalPass Container application and image
         id: verify-container-globalpass-worker
+        # The helper enforces one 600-second total postcheck budget.
+        timeout-minutes: 11
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker')
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -534,7 +616,7 @@ jobs:
       - name: Deploy the Mobile Suica collector with cf
         id: cf-deploy-mobile-suica-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mobile-suica-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'mobile-suica-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-mobile-suica
@@ -556,7 +638,7 @@ jobs:
       - name: Deploy the Money Forward collector with cf
         id: cf-deploy-moneyforward-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'moneyforward-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'moneyforward-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-moneyforward
@@ -578,7 +660,7 @@ jobs:
       - name: Deploy the MyJCB collector with cf
         id: cf-deploy-myjcb-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'myjcb-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'myjcb-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-myjcb
@@ -600,7 +682,7 @@ jobs:
       - name: Deploy the SBI Securities collector with cf
         id: cf-deploy-sbi-securities-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-securities-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-securities-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-sbi-securities
@@ -609,9 +691,16 @@ jobs:
           deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Verify the original SBI Shinsei baseline immediately before publication
+        id: verify-publication-baseline-sbi-shinsei-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node "${RELEASE_RESUME}" verify-publication-baseline sbi-shinsei-worker
       - name: Deploy the SBI Shinsei collector
         id: deploy-sbi-shinsei-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'sbi-shinsei-worker')
+        if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker') && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'sbi-shinsei-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
@@ -621,8 +710,8 @@ jobs:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the SBI Shinsei collector with cf
         id: cf-deploy-sbi-shinsei-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-shinsei-worker')
-        uses: risu729/wrangler-deploy-action@251e42de418f3f5aece2789cc1c0f76d3f8264f5 # v2.2.0
+        if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker') && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-shinsei-worker')
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-sbi-shinsei
@@ -632,8 +721,35 @@ jobs:
           deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Capture the exact SBI Shinsei publication before waiting
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment-id }}
+          PUBLISHED_WORKER_VERSION: ${{ steps.cf-deploy-sbi-shinsei-worker.outputs.version-id }}
+          LEGACY_PUBLICATION: ${{ steps.deploy-sbi-shinsei-worker.outcome == 'success' }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+        run: node "${RELEASE_RESUME}" capture sbi-shinsei-worker
+      - name: Upload the immutable SBI Shinsei checkpoint
+        id: checkpoint-sbi-shinsei-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}-sbi-shinsei-worker
+          path: ${{ runner.temp }}/resume-receipt.json
+          if-no-files-found: error
+      - name: Bind the SBI Shinsei checkpoint to the deployment audit
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.checkpoint-sbi-shinsei-worker.outputs.artifact-id }}
+          ARTIFACT_DIGEST: sha256:${{ steps.checkpoint-sbi-shinsei-worker.outputs.artifact-digest }}
+        run: node "${RELEASE_RESUME}" checkpoint
       - name: Verify the SBI Shinsei Container application and image
         id: verify-container-sbi-shinsei-worker
+        # The helper enforces one 600-second total postcheck budget.
+        timeout-minutes: 11
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker')
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -652,7 +768,7 @@ jobs:
       - name: Deploy the SBI VC Trade collector with cf
         id: cf-deploy-sbi-vc-trade-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-vc-trade-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-vc-trade-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-sbi-vc-trade
@@ -674,7 +790,7 @@ jobs:
       - name: Deploy the SMBC Direct collector with cf
         id: cf-deploy-smbc-direct-backfill-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'smbc-direct-backfill-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'smbc-direct-backfill-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-smbc-direct
@@ -696,7 +812,7 @@ jobs:
       - name: Deploy the Mizuho collector with cf
         id: cf-deploy-mizuho-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mizuho-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'mizuho-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-mizuho
@@ -718,7 +834,7 @@ jobs:
       - name: Deploy the Sony Bank collector with cf
         id: cf-deploy-sony-bank-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sony-bank-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sony-bank-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-sony-bank
@@ -727,9 +843,16 @@ jobs:
           deploy-triggers: 'false'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Verify the original St.George baseline immediately before publication
+        id: verify-publication-baseline-st-george-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: node "${RELEASE_RESUME}" verify-publication-baseline st-george-worker
       - name: Deploy the St.George collector
         id: deploy-st-george-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'st-george-worker')
+        if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker') && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'st-george-worker')
         uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
         with:
           mode: production
@@ -739,8 +862,8 @@ jobs:
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       - name: Deploy the St.George collector with cf
         id: cf-deploy-st-george-worker
-        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'st-george-worker')
-        uses: risu729/wrangler-deploy-action@251e42de418f3f5aece2789cc1c0f76d3f8264f5 # v2.2.0
+        if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker') && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'st-george-worker')
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-st-george
@@ -750,8 +873,35 @@ jobs:
           deploy-triggers: 'true'
           cloudflare-account-id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           cloudflare-api-token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      - name: Capture the exact St.George publication before waiting
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker')
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          DEPLOYMENT_ID: ${{ steps.deployment.outputs.deployment-id }}
+          PUBLISHED_WORKER_VERSION: ${{ steps.cf-deploy-st-george-worker.outputs.version-id }}
+          LEGACY_PUBLICATION: ${{ steps.deploy-st-george-worker.outcome == 'success' }}
+          STEPS_JSON: ${{ toJSON(steps) }}
+        run: node "${RELEASE_RESUME}" capture st-george-worker
+      - name: Upload the immutable St.George checkpoint
+        id: checkpoint-st-george-worker
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker')
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-checkpoint-${{ github.run_id }}-${{ github.run_attempt }}-st-george-worker
+          path: ${{ runner.temp }}/resume-receipt.json
+          if-no-files-found: error
+      - name: Bind the St.George checkpoint to the deployment audit
+        if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker')
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ steps.checkpoint-st-george-worker.outputs.artifact-id }}
+          ARTIFACT_DIGEST: sha256:${{ steps.checkpoint-st-george-worker.outputs.artifact-digest }}
+        run: node "${RELEASE_RESUME}" checkpoint
       - name: Verify the St.George Container application and image
         id: verify-container-st-george-worker
+        # The helper enforces one 600-second total postcheck budget.
+        timeout-minutes: 11
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker')
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -770,7 +920,7 @@ jobs:
       - name: Deploy the PRESTIA bank collector with cf
         id: cf-deploy-prestia-bank-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'prestia-bank-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'prestia-bank-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-prestia-bank
@@ -792,7 +942,7 @@ jobs:
       - name: Deploy the Vpass collector with cf
         id: cf-deploy-vpass-json
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpass-json') && contains(fromJson(steps.select.outputs.cf-selected), 'vpass-json')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-vpass
@@ -814,7 +964,7 @@ jobs:
       - name: Deploy the V Point Pay collector with cf
         id: cf-deploy-vpoint-pay-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-pay-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-pay-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-vpoint-pay
@@ -836,7 +986,7 @@ jobs:
       - name: Deploy the V Point collector with cf
         id: cf-deploy-vpoint-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-vpoint
@@ -860,7 +1010,7 @@ jobs:
       - name: Deploy the Processor with cf
         id: cf-deploy-processor
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'processor') && contains(fromJson(steps.select.outputs.cf-selected), 'processor')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/processor
@@ -886,7 +1036,7 @@ jobs:
         # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
         # from the job's `steps` context to record, per Worker, what happened.
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app') && contains(fromJson(steps.select.outputs.cf-selected), 'app')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/app
@@ -1043,6 +1193,8 @@ jobs:
             release_tool=(mise run --no-deps automation:release-ledger)
           fi
           # Older rollback helpers only know deploy-<name>. Never map skipped aliases.
+          STEPS_JSON=$(node "${RELEASE_RESUME}" progress)
+          export STEPS_JSON
           STEPS_JSON=$(node "${CONTAINER_GUARD}" progress)
           export STEPS_JSON
           "${release_tool[@]}" progress \
@@ -1078,9 +1230,9 @@ jobs:
         # Workers that already uploaded in place and the database as it is
         # (unified plan 11 §7, acceptance G5-16). Recovery is a decision — and
         # re-running this workflow for the same commit is one of the available
-        # ones, because the next run reads this deployment's record as "may
-        # have been applied" and deploys what the ledger cannot account for
-        # rather than skipping the commit (finding 2).
+        # ones: same-run receipt-bound Containers are reverified without a new
+        # publication (ADR 0060). A fresh release uses the ordinary latest-success
+        # ledger decision; neither path treats an unchecked Worker as live.
         if: ${{ failure() && steps.deployment.outputs.deployment-id != '' }}
         env:
           GITHUB_TOKEN: ${{ github.token }}

@@ -17,6 +17,147 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## SBI Shinsei activity rows record the provider-id origin (activity parser 0.1.3)
+
+2026-10-09, [ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin).
+`sbi-shinsei-top-balances-and-activity` 0.1.3 records
+`_kogane.identityOrigin: "provider-id"` on every activity row, right after
+`amountSignSource`, as `smbc-direct-transactions` does: the row's external id
+is the provider's `txnReferenceNo` exactly as received. Nothing else changed:
+the external id, the source account, the sign, the accepted shapes and every
+other field are 0.1.2's, and the other SBI Shinsei parsers keep their versions
+and digests (`sbi-shinsei-common.ts` is untouched). The coverage-contract
+files keep the frozen 0.1.2 outputs; `coverage-contract.test.ts` applies the
+declared 0.1.3 change (the origin key on transaction rows) before its byte
+comparison. The transaction-family registry (v3) records the origin for this
+parser, and ADR 0054's rule 2 then admits a row a 0.1.3 run stored under the
+already-declared function `sbi-shinsei-txn-reference-no-v1`; a row a 0.1.2 run
+stored records none and stays refused (`identity_origin_unrecorded`).
+
+**Deploying is the re-parse.** The release is deployed by the CD release of
+the commit that merges it (`deploy.yml` releases every green CI run on main),
+so the owner's merge is the deploy decision. Rows of 0.1.2 runs stay refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead. The repair lane's cyclic scan creates a 0.1.3 job for every
+stored activity capture, as for 0.1.2 [below](#sbi-shinsei-stored-capture-shapes-activity-parser-012-board-parser-101);
+each `ok` 0.1.3 run is published in place of the 0.1.2 run, which is marked
+superseded while its rows stay stored. No migration: the dataset's snapshot
+policy row pins no parser version, and every reader pins this parser by name.
+What that changes for card settlement review (new candidates citing the
+0.1.3 rows under the same `bank_key`, pre-G1b acceptances still reserving
+them, no adoption by itself, and how a reused reference collides) is in the
+ADR note. Limits: the owner's read-only confirmation covers the captured range
+only; nothing shows the provider never reuses a reference later. Production
+was not read for this release. Tests: `packages/parsers/test/sbi-shinsei-parsers.test.ts`,
+`services/processor/test/card-settlement-sbi-shinsei-origin.test.ts`.
+
+## MyJCB: the skip-payment empty row inside one more div (schedule parser 0.1.2)
+
+2026-10-08. The owner read one stored skip-payment capture from the nightly
+run of 2026-10-06 (artifact 11644), which `myjcb-skip-payment-schedule@0.1.1`
+had refused with `schedule_row_shape_unobserved`, and reported its structure,
+counts and booleans only, no text or value
+([ADR 0005's amendment (k)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-08-k-the-skip-payment-empty-row-inside-one-more-div)):
+
+- **The page is the known empty page but for one level.** One exact skip h1,
+  one `detail-list-01` whose children are its head and then `content` rows
+  only, and the observed three-cell head. Its one `content` row is
+  `div.content > div > div.item-cell > div.cell.w-100per`: the `div` carries
+  none of the reader's classes, every level has exactly one element child,
+  the cell has none, and every level shows exactly the empty label
+  「ご利用明細はございません。」 after whitespace removal. It is amendment (f)'s
+  empty row one level down; 0.1.1 required the `item-cell` as the row's own
+  child, so the row was a row and the page was refused.
+- **`myjcb-skip-payment-schedule@0.1.2`** reads that row as the empty row,
+  under the same rule as amendment (f)'s: zero rows only as its ledger's one
+  `content` row; beside any other row, or twice, it is refused
+  (`schedule_row_shape_unobserved`). Two wrapper levels, a wrapper with a
+  reader class, another element child or text, another label, and a wrapped
+  data row are refused, and so is any level that is not a `div`, text beside
+  the label at any level, or an element inside the cell, in either shape
+  (0.1.1 took any element as the unwrapped row and its `item-cell`, text
+  beside the cell in them, and elements inside the cell; both observed
+  shapes are `div`s showing only the label). Every observation is as in
+  0.1.1; no refusal code is added.
+- **Four statement releases, digest only.** The reader's module is in the
+  digest closure of the four MyJCB statement parsers (their h1 reading,
+  amendment (j)), so `myjcb-credit-ledger@1.2.3`,
+  `myjcb-credit-past-month-balances@1.1.6`,
+  `myjcb-credit-statement-total@1.4.1` and
+  `myjcb-canonical-evidence-boundary@1.1.6` are released; each reads every
+  page as its previous release did. No migration: the processor registers
+  releases itself.
+- **The collector is unchanged.** Its shared statement reading finds the
+  `item-cell` at any depth under the row, so it already counted this row as
+  zero and stored the page by its h1.
+
+Deploying rewrites nothing. The repair lane re-parses stored artifacts under
+the five new releases: a stored skip page of this shape can then be read
+`ok` with no observation, and each re-parsed statement artifact gets an `ok`
+run with the same observations, superseding its previous one. Limits: one
+capture was read, and whether the other stored skip pages have this shape is
+not established; production replay and deployment are not verified by this
+change. Tests: `packages/parsers/test/myjcb-skip-payment-schedule.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`,
+`packages/read-model/test/card-usage.test.ts`,
+`services/processor/test/myjcb-shared-r2.test.ts`.
+
+## GLOBAL PASS: a refused page has ten records and nine detail pairs (replay diagnostics, no parser release)
+
+2026-10-08. The owner replayed one of the two importer-era pages
+`global-pass-activity@1.2.0` still refuses (artifact 679; its bytes matched
+the stored SHA-256 and size) and reported closed counts only:
+
+- **Category** `unclassified_table`.
+- **Tables.** 20 in all: one with twelve `th` (the activity table), nine with
+  four, nine with ten, and one other.
+- **Activity table.** 20 body rows: a nine-cell row and a four-cell row for
+  each of 10 records; no table inside any row.
+- **Detail tables.** Each four-`th` table has three body rows of 1, 1 and 2
+  cells; each ten-`th` table has ten rows of one cell. They lie outside the
+  activity table, in one parent `div` (ancestors `div`, `form`, `div`, `div`,
+  `body`, `html`) whose element children are a four-`th` table and a `div`
+  wrapping a ten-`th` table, nine times, then a 19th child: the other table,
+  with 2 `th`, 1 `td`, one body row of one cell and no nested table.
+
+So the page has 10 records but 9 detail pairs, plus a two-header table where
+a tenth pair would be. The parser refuses it at the unclassified-table check;
+leaving the two-header table out would not admit it either, because the
+activity table's 20 rows are not twice 9. The
+[2026-09-08 investigation](#remaining-globalpass-shape-investigation-2026-09-08)
+found that table's header list includes `Transaction Detail`. What the table
+means, and whether it belongs to the tenth record, nobody has observed; no
+accept rule is guessed ([ADR 0004](adr/0004-payment-type-shapes-from-evidence.md)).
+
+No parser changed. The replay's GLOBAL PASS `shape` now also prints, as
+indices, booleans, counts and closed classes
+([ADR 0026's amendment of 2026-10-08](adr/0026-collector-unit-coverage.md#amendment-2026-10-08-global-pass-replay-compares-records-with-detail-tables),
+[operations](operations.md#replaying-a-parser-rejection)): the detail
+tables' parent as a list of child signatures and how many pairs run in order;
+for every table of another `th` count its structure, attribute-name classes,
+where its id's number ranks among the detail tables', where each of its
+headers stands in the activity, compact and expanded header lists, and per
+cell a pattern class and the activity cells with exactly its text; which
+record each detail table carries and which records none does; for such a
+record, each cell's pattern against the carried records' and the other
+tables' cells with its text; and whether the newest capture of the same key
+with a published parse has the same desktop rows. No text, attribute value or
+number read from the page is printed, apart from the largest `colspan` of
+such a table (a column count). The owner runs
+
+```sh
+mise exec -- bun services/processor/scripts/replay-diagnostics.ts globalpass-activity 2
+```
+
+and shares the `shape` and `latestOkCapture` of each refused page; a parser
+change, if any, follows from what they show. The owner's private read-only
+replay ran the structural comparisons on this stored page. Limits: they match
+texts exactly as the parser normalises them, so a value the provider
+reformats between views is not matched. For this page `latestOkCapture`
+found no other capture with the same key and a published parse (an
+unpublished successful parse was not checked), so its row comparison
+(`recordsAlsoPresent`, `unmatchedRecordPresent`) has not run on real data. Tests:
+`services/processor/test/global-pass-rejection.test.ts`,
+`services/processor/test/parser-rejection.test.ts` (the lookup).
+
 ## GLOBAL PASS empty months are read as no rows (activity parser 1.2.0)
 
 2026-10-04. The owner observed live (round 8, English display) that a month
@@ -57,9 +198,12 @@ hidden. Limits: the empty month was seen in English only; a page whose list
 failed to load would look the same as the empty month, which the parser
 cannot tell apart (a later capture with rows supersedes it); the read model's
 per-month rule does not look at row counts, so a newer empty reading also hides
-an older run's rows for the same month, with no reason shown (pinned in
-`packages/read-model/test/global-pass-snapshots.test.ts`). Tests:
-`packages/parsers/test/global-pass-empty-month.test.ts`.
+an older run's rows for the same month (pinned in
+`packages/read-model/test/global-pass-snapshots.test.ts`); since 2026-10-08
+`/api/meta` names such months (`globalPassEmptyMonths`) and the web app shows
+them as a notice, without changing what is current
+([ADR 0026 amendment](adr/0026-collector-unit-coverage.md#amendment-2026-10-08-global-pass-empty-months-that-supersede-rows-are-reported)).
+Tests: `packages/parsers/test/global-pass-empty-month.test.ts`.
 
 **Production result.** #474 merged on 2026-10-04 and was deployed the same
 day (Deploy run 269, after the deploy-pipeline fixes #511 and #512); 1.2.0 is

@@ -5,6 +5,8 @@
 //   * A claim is only visible while the parse run it came from is still the
 //     published one, so a rollback removes it from every reward read exactly
 //     as it removes the underlying balance row (docs/publication-gate.md).
+//   * V Point claims belong to the latest eligible capture, before
+//     ranking slots. Old slots cannot fill a hole in that capture.
 //   * Only the newest claim per bucket slot is current. Claims are append-only
 //     history; the read picks one per slot instead of summing the history.
 //
@@ -27,9 +29,11 @@ import {
 import { validTemporalValue, type TemporalValue } from "../../domain/src/time";
 import type { Quantity, RoundingMode, ValueStatus } from "../../domain/src/values";
 import type { SqlExecutor } from "./reader";
+import { ELIGIBLE_VPOINT_RUNS, VPOINT_MEMBER } from "./current-captures";
+import { activeStateProjection } from "./concepts";
 
 /** Promotion release the read side treats as current (docs/rewards.md). */
-export const REWARD_READ_RELEASE = "reward-promotion-v1";
+export const REWARD_READ_RELEASE = "reward-promotion-v2";
 /** One page plus one row, so truncation is reported without a count query. */
 export const REWARD_PAGE_LIMIT = 200;
 
@@ -50,18 +54,25 @@ export function page<T>(rows: T[], offset: number, limit = REWARD_PAGE_LIMIT): P
 
 /**
  * Current buckets: the newest claim per (programme, holding, bucket slot),
- * restricted to claims whose parse run is still published. `?1` is the
+ * restricted to claims whose parse run is still published. V Point slots are
+ * additionally confined to the latest eligible published fetch run, shared
+ * with Transactions/Balances. An absent slot is absent, even when an older
+ * run still has a published claim. Empty snapshots need no sentinel claim. `?1` is the
  * promotion release, `?2` an optional programme filter, `?3` the offset.
  */
-export const CURRENT_REWARD_BUCKETS_SQL = `WITH ranked AS (
+export const CURRENT_REWARD_BUCKETS_SQL = `WITH ${ELIGIBLE_VPOINT_RUNS}, ranked AS (
   SELECT c.id,c.program_id,c.holding_ref,c.bucket_ref,c.bucket_kind,c.restriction_refs_json,
     c.unit_ref,c.quantity_coefficient,c.quantity_scale,c.quantity_status,c.observed_expiry_json,
     c.observed_at,c.parse_run_id,c.source_fact_kind,c.source_fact_id,
     row_number() OVER(PARTITION BY c.program_id,c.holding_ref,c.bucket_ref
       ORDER BY c.observed_at DESC,c.id DESC) AS rank
-  FROM reward_bucket_claims c
+  FROM reward_bucket_claims_v2 c
   JOIN published_parse_runs pub ON pub.parse_run_id=c.parse_run_id
   WHERE c.promotion_release=?1 AND (?2 IS NULL OR c.program_id=?2)
+    AND (c.program_id <> 'program:v-point' OR EXISTS (
+      SELECT 1 FROM ${activeStateProjection.parseChain}
+      WHERE p.id=c.parse_run_id AND fa.source_id='v-point' AND ${VPOINT_MEMBER}
+    ))
 )
 SELECT r.id,r.program_id,r.holding_ref,r.bucket_ref,r.bucket_kind,r.restriction_refs_json,
   r.unit_ref,r.quantity_coefficient,r.quantity_scale,r.quantity_status,r.observed_expiry_json,
@@ -251,7 +262,7 @@ function quantity(row: RewardBucketSqlRow): Quantity {
 function bucketKind(value: string): BucketKind {
   return (BUCKET_KINDS as readonly string[]).includes(value)
     ? (value as BucketKind)
-    : "qualification";
+    : "unclassified";
 }
 
 export function rewardBucket(row: RewardBucketSqlRow): RewardBucket {
@@ -317,10 +328,21 @@ export function expiryRule(row: ExpiryRuleSqlRow): ExpiryRule {
               (BUCKET_KINDS as readonly unknown[]).includes(kind),
             )
           : [],
-        tiers: Array.isArray(record.tiers)
-          ? record.tiers.filter((tier): tier is string => typeof tier === "string")
-          : null,
-        validPeriod: validTemporalValue(record.validPeriod) ? record.validPeriod : null,
+        // Only an explicit null is "every tier" or "open-ended". An unreadable
+        // tier list requires a tier no claim can name, and an unreadable
+        // period covers no day: neither widens the rule (ADR 0049).
+        tiers:
+          record.tiers === null
+            ? null
+            : Array.isArray(record.tiers)
+              ? record.tiers.filter((tier): tier is string => typeof tier === "string")
+              : [],
+        validPeriod:
+          record.validPeriod === null
+            ? null
+            : validTemporalValue(record.validPeriod)
+              ? record.validPeriod
+              : { kind: "unknown", reasonCode: "stored_rule_period_invalid" },
       };
     }
   } catch {

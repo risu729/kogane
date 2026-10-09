@@ -82,6 +82,25 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "provider execution exclusion",
   },
+  // The official-site maintenance re-survey (0069, ADR 0050): what was
+  // fetched, what it would change and the operator's decision are append-only
+  // evidence; the per-page cursor is the lane's bookkeeping.
+  maintenance_survey_fetches: {
+    classification: "core-keep",
+    planRow: "append-only maintenance survey fetch provenance",
+  },
+  maintenance_survey_proposals: {
+    classification: "core-keep",
+    planRow: "append-only maintenance survey proposals",
+  },
+  maintenance_survey_decisions: {
+    classification: "core-keep",
+    planRow: "append-only operator decisions on maintenance survey proposals",
+  },
+  maintenance_survey_cursors: {
+    classification: "operational-mutable",
+    planRow: "maintenance survey lane position and freshness",
+  },
   // acquisition_sessions, fetch_runs/units/reports/ranges/page groups → CORE
   acquisition_sessions: { classification: "core-keep", planRow: "acquisition and fetch history" },
   artifact_ranges: { classification: "core-keep", planRow: "acquisition and fetch history" },
@@ -188,6 +207,22 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "core-keep",
     planRow: "change plans, approvals and receipts",
   },
+  // The collector execution of an accepted request (0068, ADR 0048): job
+  // state that moves forward through closed states, like the scheduling
+  // receipts. The request it executes and its stage evidence stay core-keep.
+  ops_collector_dispatches: {
+    classification: "operational-mutable",
+    planRow: "operation collector execution state",
+  },
+  // The common audit record (0075, ADR 0064): one append-only envelope per
+  // operation that references the logs above by id, kept without pruning like
+  // the decision log. Its daily overflow counters are mutable bookkeeping
+  // that the Processor turns into records and deletes once the day ends.
+  audit_records: { classification: "core-keep", planRow: "common audit records (ADR 0064)" },
+  audit_overflow_counters: {
+    classification: "operational-mutable",
+    planRow: "daily audit overflow counters (ADR 0064)",
+  },
   // The shared-R2 terminal registration records (0039) sit in the same row as
   // the rest of the acquisition history: `collection_runs` is the fact that a
   // terminal was seen for one run under one registration contract, and its
@@ -286,6 +321,20 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
   economic_event_revisions: { classification: "core-keep", planRow: "economic events" },
   economic_legs: { classification: "core-keep", planRow: "economic events" },
   obligation_revisions: { classification: "core-keep", planRow: "economic events" },
+  // 0070 (ADR 0054): the common consumption guard. Claims, seals, role-typed
+  // times, leg effects and the commit log are append-only records of what was
+  // adopted and when it became known; the identity epochs are append-only
+  // declarations. None is lane state.
+  economic_claims: { classification: "core-keep", planRow: "economic events" },
+  economic_commit_log: { classification: "core-keep", planRow: "economic events" },
+  economic_event_times: { classification: "core-keep", planRow: "economic events" },
+  economic_identity_epochs: { classification: "core-keep", planRow: "economic events" },
+  economic_leg_effects: { classification: "core-keep", planRow: "economic events" },
+  economic_revision_seals: { classification: "core-keep", planRow: "economic events" },
+  // 0072 (ADR 0057): own-transfer proposals and their retirements. Append-only
+  // proposals a person reviews; nothing adopts from them. Not lane state.
+  own_transfer_proposal_retirements: { classification: "core-keep", planRow: "economic events" },
+  own_transfer_proposals: { classification: "core-keep", planRow: "economic events" },
   settlement_relations: { classification: "core-keep", planRow: "economic events" },
   // reward_programs, expiry_rules, conversion_offers → CORE
   conversion_offers: { classification: "core-keep", planRow: "reward reference claims" },
@@ -304,6 +353,10 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
   price_observation_claims: {
     classification: "core-keep",
     planRow: "prices and calculation policies",
+  },
+  reward_bucket_claims_v2: {
+    classification: "core-keep",
+    planRow: "append-only canonical reward source claims with unclassified provider semantics",
   },
   // The price promotion lane's scan progress per claim kind (0053).
   price_promotion_cursor: {
@@ -417,6 +470,11 @@ export const READ_CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> 
   reward_expiry_estimates: {
     classification: "read-projection",
     planRow: "READ: the estimated deadlines of one snapshot (04 §2, second stage)",
+  },
+  reward_expiry_estimates_v2: {
+    classification: "read-projection",
+    planRow:
+      "READ: corrected bucket kinds and displayed expiry of a fixed snapshot (ADR 0049 amendment)",
   },
   reward_conversion_simulations: {
     classification: "read-projection",

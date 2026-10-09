@@ -34,6 +34,17 @@ from a statement, or calculate net assets.
 | SMBC (`smbc-bank`, since 0044)         | any `smbc-bank` parse; non-empty provider id; newest capture `status='posted'`, `_kogane.direction='outflow'`, `_kogane.amountSignSource='direction'`, negative amount                                                              | the row's provider id | `as_of` of the form `YYYY-MM-DDT00:00:00+09:00`, its date; else none |
 | SBI Shinsei (`sbi-shinsei-bank`, 0052) | parser `sbi-shinsei-top-balances-and-activity`; non-empty `txnReferenceNo`; newest capture with no status, `JPY`, `_kogane.amountSignSource='debit'` (the provider's debit column), negative amount (a zero debit is stored as `0`) | `txnReferenceNo`      | the posting date, `YYYY-MM-DD`                                       |
 
+Both adapters propose candidates. Since ADR 0054 G1b a debit can be accepted
+only when its row records the id's origin. SMBC rows do. SBI Shinsei rows do
+from parser 0.1.3 (2026-10-09,
+[ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin)),
+which records `_kogane.identityOrigin: provider-id` beside the unchanged
+`txnReferenceNo`; a row a 0.1.2 run stored has no recorded origin, so its
+acceptance is refused (`identity_origin_unrecorded`,
+[lifecycle](#candidate-and-decision-lifecycle)). Rows of 0.1.2 runs stay refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead, and the candidates the sweep then proposes cite the 0.1.3 rows while the earlier candidates stay
+listed with the blocker `bank_debit_changed`. The rule-exception route, treating
+ADR 0018's reviewed adapter evidence as the declared origin, was not taken.
+
 The currency, status, direction and sign are judged on the newest capture of a
 provider id, so a newer capture that fails them withdraws the row instead of
 letting an older capture stand. Credits, zero debits, foreign-currency rows,
@@ -219,10 +230,59 @@ the resulting settlement candidate. Agents cannot approve these financial
 decisions.
 
 The commit rechecks the source publication/currentness, ownership, allocation
-availability and expected candidate revision in the same database batch that
-reserves the receipt. Resolved card account and statement month also guard
-against duplicates and older statements when a provider changes card ordinals. If any condition fails, it consumes no approval and writes
-no partial receipt or decision. A resend returns the existing receipt.
+availability, claim availability and expected candidate revision in the same
+database batch that reserves the receipt. Resolved card account and statement
+month also guard against duplicates and older statements when a provider
+changes card ordinals. If any condition fails, it consumes no approval and
+writes no partial receipt or decision. A resend returns the existing receipt.
+
+Since ADR 0054 G1b the acceptance and the withdrawal write the rows of the
+[common consumption guard](economic-events.md#common-consumption-guard-migration-0070)
+(migration 0070) in the same batch:
+
+- **Identity first.** An acceptance is planned only for a debit whose identity
+  a human-adopted writer may consume (`humanAdoptedRowIdentity`): the bank row
+  must carry an id the parser records as provider-issued
+  (`_kogane.identityOrigin: provider-id`) under a provider identity function
+  the transaction-family registry declares. SMBC debits qualify (`id`, from the
+  provider's `meisaiId`); SBI Shinsei debits qualify when parser 0.1.3 or later
+  stored them (`txnReferenceNo`, alias class
+  `["sbi-shinsei-bank",[<txnReferenceNo>],<resolved account>,"sbi-shinsei-txn-reference-no-v1"]`).
+  An SBI Shinsei debit a 0.1.2 run stored records no origin, so its acceptance
+  is refused with `unsupported_semantics` and the closed code
+  `identity_origin_unrecorded`, and stays refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead. Fingerprint, digest and unrecorded ids are refused the same way,
+  with their own codes. Nothing is adopted automatically.
+- **The claim.** The acceptance writes, after its legs and allocation, an
+  `economic_claims` row in book `cash-movement` for the debit: the candidate's
+  `bank_key` (the 5-tuple, re-derived by the 0070 trigger from the cited
+  observation and parse run) and its alias class
+  `["smbc-bank",[<provider id>],<resolved account>,"smbc-meisai-id-v1"]`; then
+  the accepted decision row, the event revision's seal (two legs, one claim,
+  the current identity epoch, no identity pin) and the commit row
+  (`card-settlement.accept`, the operation, the principal and the receipt's
+  payload digest). The claim is held while the event revision is live; another
+  writer's claim on the same key (`economic_claim_held`) or alias class
+  (`alias_conflict`) refuses the batch, in either order.
+- **The withdrawal** seals its `unknown` revision (no legs, no claims) and logs
+  a commit row that supersedes the accepted revision and releases its claim,
+  and still writes `card_settlement_allocation_withdrawals` as before. A
+  release whose key another live holder also holds is refused
+  (`economic_claim_conflict_unresolved`): a double holder is never washed. The
+  withdrawal plan already refuses it (`needs_scope_resolution` with that code),
+  reading the key half of `claim_available` by the candidate's id; a plan made
+  before the second holder appeared is refused by the commit row
+  (`commit_failed` with that code).
+- The plan pins the event's head, `economic-event:<event id>` (0 before an
+  acceptance, the accepted revision before a withdrawal), beside
+  `card-settlement:<id>`.
+- A refusal is answered with the closed code as the second ref: at plan time
+  `stale_context` with `economic_claim_held` or `alias_conflict` when
+  `claim_available` is 0, and at commit time the trigger's code when a batch
+  is refused (`stale_context` for the conflicts, `commit_failed` otherwise).
+
+The event revision's evidence is the statement and bank rows as `SourceFactRef`
+objects (`{kind, id, revision}`); the decisions keep citing their ids. The cash
+leg's subject stays the bare account id the 0044 readers tolerate.
 
 An accepted decision can be withdrawn through a new approved plan. Withdrawal
 retracts the interpretation, never the bank movement or original evidence.
@@ -466,6 +526,22 @@ The shipped guards were cheaper than the plan reads because SQLite evaluated
 the view's flags for the one row the guard names. The reads by id joined the
 view and evaluated them for every candidate. A rejection or withdrawal guard reads no flag.
 
+`claim_available` (ADR 0054 G1b) is a fifth column the view does not have:
+1 when no live holder other than the candidate's own accepted event holds the
+candidate's `bank_key` in book `cash-movement` (an `economic_claims` row of a
+live revision, or an accepted settlement decision of a live revision), nor the
+alias class the registry's provider identity function computes for the
+candidate's debit row and the facts' bank account
+(`providerAliasClassSql`). Each holder source is looked up through its own
+index (`economic_claims_key`, `card_settlement_candidates_bank`,
+`economic_claims_alias`). The plan read and the acceptance guard require it;
+the `カード照合` list does not show it (its review contract has no field for
+it), so a review the list shows as ready can still be refused at plan time.
+The four other columns kept their text: it is frozen before the change
+(`packages/read-model/test/card-settlement-readiness-ctes-legacy-sql.ts`,
+digest-pinned) and compared column for column on the random stores and the
+scaled store.
+
 What still grows with history: each judged set of candidates ranks the
 statement totals of its periods after reading every balance observation once
 (the `b` scan the plan checks allow in `ready_statements`, as in
@@ -480,7 +556,17 @@ candidate term.
 `card-settlement-readiness.test.ts` compares the CTEs with the view on random
 stores whose reviews draw every flag both ways. It also shows that ten
 inexactness mutations (a cut partition, a reversed order, a dropped owner,
-evidence or reservation condition) each fail that comparison.
+evidence or reservation condition) each fail that comparison. Since G1b it
+also compares the four flags with the frozen pre-G1b text, and
+`claim_available` with its definition over `live_consumption_claims` and the
+registry's alias classes on stores that draw cash-movement holders (live,
+released and refused economic claims, with and without an alias class, a
+review's own claim, and legacy settlement events), where six mutations (a
+released or withdrawn holder kept, the candidate's own event counted, legacy
+holders or alias classes ignored, the account left out of the class) each fail
+it, and checks that its plan searches the holder indexes without table
+statistics; `packages/application/test/card-settlement-review-scale.test.ts`
+compares the same on the scaled store.
 `card-settlement-review-differential.test.ts`,
 `card-settlement-review-scale.test.ts` and the processor's
 `card-settlement-scale.test.ts` compare every reader and guard with the shipped
@@ -513,8 +599,20 @@ deployed parser on the synthetic parser-boundary fixture and variants of it
 (`services/processor/test/card-settlement-sbi-shinsei.test.ts`): an
 equal-amount statement yields a candidate; credit, zero and foreign-currency
 rows do not; a re-observed `txnReferenceNo` is one payment; unknown ownership
-blocks acceptance; an accepted SBI Shinsei debit reserves the statement
-against an SMBC one. `packages/read-model/test/card-bank-debit-facts.test.ts`
+blocks acceptance; an owned SBI Shinsei candidate's debit, parsed by 0.1.3, is
+admitted under its declared alias class, and an accepted SMBC debit reserves
+the statement against it until it is withdrawn.
+`services/processor/test/card-settlement-sbi-shinsei-origin.test.ts` walks a
+capture a 0.1.2 run stored: its candidate's acceptance is refused with
+`identity_origin_unrecorded` and writes nothing; the repair lane re-parses the
+capture under 0.1.3 beside the 0.1.2 run (rows unchanged, pointer moved by an
+appended publication event, nothing adopted); the sweep proposes the 0.1.3 row
+under the same `bank_key`, which an acceptance made before G1b still reserves;
+after its withdrawal a human acceptance claims the debit under its alias class;
+and a later capture reusing the reference is refused against that holder.
+`services/processor/test/economic-card-settlement.test.ts` covers what an
+acceptance and a withdrawal write to the consumption guard, and its refusals
+([economic events](economic-events.md#common-consumption-guard-migration-0070)). `packages/read-model/test/card-bank-debit-facts.test.ts`
 shows the SMBC branch returns exactly the 0044 view's rows.
 `packages/domain/test/card-debit-account.test.ts` covers the provider-stated
 debit-account rule on synthetic inputs: bank names resolve only through the

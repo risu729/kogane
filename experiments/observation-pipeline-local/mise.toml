@@ -31,7 +31,7 @@ depends = ["//apps/web:browser"]
 [tasks."test"]
 description = "Run the local pipeline tests, including the browser tests over the built client."
 depends = ["//apps/web:build", "//apps/web:build-production", "//experiments/observation-pipeline-local:browser"]
-run = "bun test"
+run = "node ../../tasks/_lib/coverage-run.mjs bun test"
 
 [tasks."ci"]
 description = "Every check CI runs for experiments/observation-pipeline-local."

@@ -1,6 +1,7 @@
-// The tools of the agent API, bound to this Worker's read model: the five
-// that are always served, and `kogane.purchases.explain` while the deployment
-// serves card purchase recognition.
+// The tools of the agent API, bound to this Worker's read model: the six
+// that are always served, `kogane.purchases.explain` while the deployment
+// serves card purchase recognition, and `kogane.reconstructed-state.read`
+// while it serves the reconstructed state.
 //
 // There is exactly one implementation of each: the HTTP route, the MCP
 // adapter and the human UI's shared-query route all call `callTool`, so no
@@ -22,6 +23,7 @@ import {
   explainCardPurchases,
   financialError,
   type Grant,
+  grantAllowsSource,
   openContext,
   parseExplainRequest,
   parseProposalRequest,
@@ -29,17 +31,27 @@ import {
   parseQueryRequest,
   proposeReconciliation,
   type QueryRequest,
+  readReconstructedState,
+  RECONSTRUCTED_STATE_REFUSALS,
+  reconstructedStateError,
 } from "../../../packages/application/src/index";
+import {
+  parseInstrumentCandidatesRequest,
+  reviewInstrumentCandidates,
+} from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import {
   interpretationContext,
   LATEST_IDENTITY_RELEASE,
+  PAGE_LIMIT,
+  visibleEvidence,
 } from "../../../packages/read-model/src/index";
-import { balanceProjectionReader, projectionFlagOn } from "./balances-v2";
+import { balanceProjectionReader, balanceReadConfigured } from "./balances-v2";
 import { centralStoreCapabilities } from "./capabilities";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
 import { proposalStore } from "./proposals";
+import type { OperationCall } from "../../../packages/application/src/audit/call.ts";
 
 /** The tools every configured deployment serves. */
 export const AGENT_TOOL_NAMES = [
@@ -48,6 +60,7 @@ export const AGENT_TOOL_NAMES = [
   "kogane.financial.query",
   "kogane.explain",
   "kogane.reconcile.propose",
+  "kogane.instruments.candidates",
 ] as const;
 /**
  * Served only while the deployment serves card purchase recognition (the
@@ -55,13 +68,26 @@ export const AGENT_TOOL_NAMES = [
  * MCP name is `unknown_tool`, as the operator route is absent.
  */
 export const PURCHASES_TOOL_NAME = "kogane.purchases.explain";
-export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number] | typeof PURCHASES_TOOL_NAME;
+/**
+ * Served only while the deployment serves the reconstructed state (the
+ * `reconstructedStateOnDate` capability), like its GET route: otherwise its
+ * path is 404 and its MCP name is `unknown_tool`.
+ */
+export const RECONSTRUCTED_STATE_TOOL_NAME = "kogane.reconstructed-state.read";
+export type AgentToolName =
+  | (typeof AGENT_TOOL_NAMES)[number]
+  | typeof PURCHASES_TOOL_NAME
+  | typeof RECONSTRUCTED_STATE_TOOL_NAME;
 
 /** Largest request body any agent route reads, in bytes. */
 export const MAX_REQUEST_BYTES = 65_536;
 
 export function isAgentToolName(value: string): value is AgentToolName {
-  return value === PURCHASES_TOOL_NAME || (AGENT_TOOL_NAMES as readonly string[]).includes(value);
+  return (
+    value === PURCHASES_TOOL_NAME ||
+    value === RECONSTRUCTED_STATE_TOOL_NAME ||
+    (AGENT_TOOL_NAMES as readonly string[]).includes(value)
+  );
 }
 
 export interface ToolResult {
@@ -76,6 +102,8 @@ interface ToolContext {
   env: Env;
   grant: Grant;
   now: string;
+  /** The tool call's audit record (ADR 0064); a proposal's joins its batch. */
+  audit?: OperationCall;
 }
 
 function failure(
@@ -87,14 +115,27 @@ function failure(
 }
 
 /**
- * Everything the context pins, read from the shared read model once per call.
- * `publicationHighWater` is the highest visible parse run: what "current"
- * means for this answer. `parserBuildDigest` covers the visible parse-run
- * window the overview reports, which is bounded by the read model's page
- * limit; it identifies the builds behind the rows this answer can contain.
+ * Everything the context pins, read from the shared read model once per call,
+ * **inside the grant's source scope** (SC18). `visibleSources` is the granted
+ * sources the store holds; `publicationHighWater` is the highest visible
+ * parse run of those sources — what "current" means for this answer; and
+ * `parserBuildDigest` covers the builds of the newest visible parse runs of
+ * those sources, bounded by the read model's page limit. For a grant over
+ * every source (`"*"`, which is also the browser reader's) the window is the
+ * overview's own; for a listed grant it is read for the listed sources only,
+ * so a source outside the grant can neither be named in a context nor move
+ * its publication or parser digests.
  */
 async function contextInputs(context: ToolContext, overview: Overview): Promise<ContextInputs> {
-  const parseRuns = overview.parseRuns;
+  const grant = context.grant;
+  const visibleSources = overview.sources
+    .map((source) => source.id)
+    .filter((id) => grantAllowsSource(grant, id))
+    .sort();
+  const parseRuns =
+    grant.scopes.sources === "*"
+      ? overview.parseRuns
+      : await scopedParseRuns(context.db, visibleSources);
   const builds = [
     ...new Set(parseRuns.map((run) => `${run.parser_name}@${run.parser_version}`)),
   ].sort();
@@ -102,9 +143,33 @@ async function contextInputs(context: ToolContext, overview: Overview): Promise<
     now: context.now,
     publicationHighWater: `published-parse-runs@${String(parseRuns[0]?.id ?? 0)}`,
     parserBuildDigest: await canonicalDigest(builds),
-    visibleSources: overview.sources.map((source) => source.id).sort(),
+    visibleSources,
     interpretation: interpretationContext("latest", LATEST_IDENTITY_RELEASE),
   };
+}
+
+/**
+ * The newest visible parse runs of the given sources, newest first: the
+ * overview's parse-run window (`visibleEvidence.parseRuns`, the read model's
+ * page limit), restricted to those sources before it is bounded.
+ */
+async function scopedParseRuns(
+  db: D1Database,
+  sources: readonly string[],
+): Promise<Pick<Overview["parseRuns"][number], "id" | "parser_name" | "parser_version">[]> {
+  if (sources.length === 0) return [];
+  const placeholders = sources.map(() => "?").join(",");
+  const result = await db
+    .prepare(
+      `SELECT p.id, p.parser_name, p.parser_version
+         FROM ${visibleEvidence.parseRuns} p
+         JOIN observation_fetch_artifacts a ON a.id = p.fetch_artifact_id
+        WHERE a.source_id IN (${placeholders})
+        ORDER BY p.id DESC LIMIT ${String(PAGE_LIMIT)}`,
+    )
+    .bind(...sources)
+    .all<{ id: number; parser_name: string; parser_version: string }>();
+  return result.results;
 }
 
 /** `resultRef`: the hand-off id for one answer. Equal inputs give an equal ref. */
@@ -182,12 +247,27 @@ export async function callTool(
       const outcome = await proposeReconciliation({
         grant: context.grant,
         opened,
-        store: proposalStore(context.db),
+        store: proposalStore(context.db, context.audit),
         request: parsed.value,
         now: context.now,
       });
       if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       return { status: 200, body: outcome.receipt };
+    }
+    case "kogane.instruments.candidates": {
+      // The candidate review of the identity page, under this caller's grant:
+      // the capability, the perimeter, the bounds and the page are the
+      // application service's. It reads only; the commands a candidate names
+      // are planned through the change lifecycle like any other plan.
+      const parsed = parseInstrumentCandidatesRequest(body);
+      if (!parsed.ok) return failure(parsed.code, "instruments.candidates", parsed.refs);
+      const outcome = await reviewInstrumentCandidates({
+        grant: context.grant,
+        sql: d1Executor(context.db),
+        request: parsed.value,
+      });
+      if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      return { status: 200, body: outcome.review };
     }
     case "kogane.purchases.explain": {
       // Whether the deployment serves it is the transport's question (it
@@ -203,6 +283,23 @@ export async function callTool(
       });
       if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       return { status: 200, body: outcome.explanation };
+    }
+    case "kogane.reconstructed-state.read": {
+      // The GET route's own service: the request rules, the grant, the bounds
+      // and the refusal codes are decided there, once for both transports.
+      // The refusal keeps the route's status; its code is the first ref.
+      const outcome = await readReconstructedState({
+        grant: context.grant,
+        sql: d1Executor(context.db),
+        body: body ?? {},
+        now: new Date().toISOString(),
+      });
+      if (!outcome.ok)
+        return {
+          status: RECONSTRUCTED_STATE_REFUSALS[outcome.refusal].status,
+          body: reconstructedStateError(outcome.refusal, "reconstructed-state.read", outcome.refs),
+        };
+      return { status: 200, body: outcome.body };
     }
   }
 }
@@ -221,10 +318,12 @@ export async function queryResponse(
     opened,
     request,
     reader: context.reader,
-    // `holdings` reads the adopted balance projection and nothing else; it
-    // answers `unavailable` while the reader flag is off or no snapshot is
-    // sealed, rather than summing the observation rows behind it.
-    projection: projectionFlagOn(context.env) ? balanceProjectionReader(context.env) : undefined,
+    // `holdings` reads the adopted balance projection when READ is bound, and
+    // answers `unavailable` when no snapshot is sealed, rather than summing
+    // the observation rows behind it.
+    projection: balanceReadConfigured(context.env)
+      ? balanceProjectionReader(context.env)
+      : undefined,
     overview,
   });
   if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };

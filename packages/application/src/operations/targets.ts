@@ -9,7 +9,9 @@ import {
   type ChangeKind,
   type ChangePayload,
   type CommandStore,
+  type EconomicEventCommandKind,
   isCardReviewKind,
+  isEconomicEventKind,
   type ExpectedRevisions,
   type OutboxTarget,
   type PlanTarget,
@@ -117,6 +119,25 @@ export type ReviewPlanner = (
  */
 export const REVIEW_PLANNERS: Readonly<Partial<Record<CardReviewKind, ReviewPlanner>>> = {};
 
+/** Resolves one economic-event kind's targets and simulates it. */
+export type EconomicEventPlanner = (
+  store: CommandStore,
+  kind: EconomicEventCommandKind,
+  payload: ChangePayload,
+) => Promise<CommandResult<{ resolved: ResolvedPlan }>>;
+
+/**
+ * The economic-event planners (ADR 0054, G2 vocabulary; CORE 0071). None is
+ * registered: the own-transfer planners (`own-transfer-plan.ts`, ADR 0057)
+ * exist but stay out of this map until ADR 0054's production gate is met. An unregistered kind is refused with
+ * `unsupported_semantics` at plan, simulate, approve and commit, for every
+ * principal, so no plan, approval or receipt of these kinds is ever written
+ * through the lifecycle.
+ */
+export const ECONOMIC_EVENT_PLANNERS: Readonly<
+  Partial<Record<EconomicEventCommandKind, EconomicEventPlanner>>
+> = {};
+
 export async function resolveAndSimulate(
   store: CommandStore,
   kind: ChangeKind,
@@ -124,6 +145,10 @@ export async function resolveAndSimulate(
 ): Promise<CommandResult<{ resolved: ResolvedPlan }>> {
   if (isCardReviewKind(kind)) {
     const planner = REVIEW_PLANNERS[kind];
+    return planner ? planner(store, kind, payload) : commandError("unsupported_semantics", [kind]);
+  }
+  if (isEconomicEventKind(kind)) {
+    const planner = ECONOMIC_EVENT_PLANNERS[kind];
     return planner ? planner(store, kind, payload) : commandError("unsupported_semantics", [kind]);
   }
   if (kind.startsWith("card-settlement.")) return cardSettlementPlan(store, kind, payload);
@@ -166,6 +191,24 @@ async function identityPlan(
   // protection that is not there would record a decision about nothing. The
   // commit's own in-batch guards refuse both cases too.
   if (subject.revision === null) return commandError("target_missing", [subjectRef]);
+  const expectedRevisions: ExpectedRevisions = { [subjectRef]: subject.revision };
+  const candidate = assign ? assignPayload(payload).candidate : undefined;
+  if (candidate !== undefined) {
+    const anchorRef = identitySubjectRef("instrument", candidate.anchorIdentifierId);
+    const anchor = await store.first<IdentitySubjectRow>(INSTRUMENT_SUBJECT_SQL, [
+      candidate.anchorIdentifierId,
+      targetId,
+    ]);
+    if (!anchor || anchor.reference_count === 0 || anchor.revision === null)
+      return commandError("target_missing", [anchorRef]);
+    if (
+      anchor.current_target !== targetId ||
+      anchor.revision !== candidate.anchorMappingRevision ||
+      subject.revision !== candidate.subjectMappingRevision
+    )
+      return commandError("stale_context", [anchorRef, subjectRef]);
+    expectedRevisions[anchorRef] = anchor.revision;
+  }
 
   const impact = (await store.first<ImpactRow>(
     account ? ACCOUNT_IMPACT_SQL : INSTRUMENT_IMPACT_SQL,
@@ -197,7 +240,7 @@ async function identityPlan(
     ok: true,
     resolved: {
       targets: [target],
-      expectedRevisions: { [subjectRef]: revision },
+      expectedRevisions,
       simulation: {
         kind,
         targets: [target],

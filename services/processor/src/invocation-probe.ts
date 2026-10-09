@@ -48,8 +48,10 @@ const OBSERVED_LANES = [
   "reward_read_projection",
   "price_promotion",
   "report_job",
+  "maintenance_survey",
   "operation_dispatch",
   "decision_outbox",
+  "audit_overflow",
   "collection_notification",
 ] as const;
 type ObservedLane = (typeof OBSERVED_LANES)[number];

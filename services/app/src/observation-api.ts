@@ -24,8 +24,8 @@ import {
 import {
   balanceHistoryPage,
   latestBalancePage,
+  balanceReadConfigured,
   legacyLatestFromProjection,
-  projectionFlagOn,
   V2_HISTORY_PATH,
   V2_LATEST_PATH,
 } from "./balances-v2";
@@ -90,7 +90,7 @@ export async function observationApi(
   // has no such route" (05 §7, G3-01). `/api/meta` still reports the capability
   // as false until a snapshot is actually published: the route existing and
   // the route being able to answer are different statements.
-  const routing = projectionFlagOn(env)
+  const routing = balanceReadConfigured(env)
     ? withBalancesV2(capabilities, true, "read-d1")
     : capabilities;
   if (
@@ -162,6 +162,7 @@ export async function observationApi(
     return json({
       apiVersion: 1,
       parsingHealth: await reader.parsingHealth(),
+      globalPassEmptyMonths: await reader.globalPassEmptyMonths(),
       source: { kind: "central-store", classification: "financial" },
       // What this server can actually serve, not what the contract defaults
       // to: the object resolved above, which the agent API reads through the
@@ -213,11 +214,11 @@ export async function observationApi(
       latestOffset > 1_000_000
     )
       throw new HttpError(400, "invalid_offset");
-    // With the projection flag on, the same list comes from the sealed
-    // snapshot: identical rows, order and interpretation, but grouped once at
-    // build time instead of on every request. Without a snapshot the compat
+    // When READ is bound, the same list comes from the sealed snapshot:
+    // identical rows, order and interpretation, but grouped once at build
+    // time instead of on every request. Without a snapshot the compat
     // adapter declines and this route stays on the path it has today.
-    const compat = projectionFlagOn(env)
+    const compat = balanceReadConfigured(env)
       ? await legacyLatestFromProjection(
           env,
           {

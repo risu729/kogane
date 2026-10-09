@@ -12,6 +12,25 @@ import {
   type ScheduleOccurrence,
   type ScheduleSnapshot,
 } from "../../../packages/collection/src/schedule-model";
+import {
+  decideSurveyProposal,
+  maintenanceSurveyView,
+  type RevisionAppend,
+  type RevisionResult,
+  type RevisionWrite,
+  type SavedRevision,
+} from "./maintenance-survey/decisions.ts";
+import {
+  AUDIT_RECORDED_HEADER,
+  changedFields,
+  type OperationCall,
+  type OperationName,
+  parseAuditEnvelope,
+  processorCall,
+  type RevisionField,
+} from "../../../packages/application/src/index.ts";
+import type { SqlWrite } from "../../../packages/storage-d1/src/core/operations.ts";
+import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 export { jobs };
 export interface ScheduleRow {
   id: string;
@@ -138,7 +157,21 @@ function bodyObject(value: unknown): Record<string, unknown> {
 function exactKeys(v: Record<string, unknown>, keys: string[]) {
   if (Object.keys(v).some((k) => !keys.includes(k))) throw new ScheduleError("invalid_request");
 }
-export async function updateSchedule(env: Env, id: string, value: unknown, actor: string) {
+function statement(db: D1Database, write: SqlWrite): D1PreparedStatement {
+  return db.prepare(write.sql).bind(...write.binds);
+}
+/**
+ * Saves one job revision. The `applied` audit record (ADR 0064) is the last
+ * statement of the same batch, joined to the revision row this call wrote,
+ * so a version check that matched nothing leaves no revision and no record.
+ */
+export async function updateSchedule(
+  env: Env,
+  id: string,
+  value: unknown,
+  actor: string,
+  audit: OperationCall,
+) {
   const v = bodyObject(value);
   exactKeys(v, ["revision", "enabled", "timezone", "pattern"]);
   const row = await readSchedule(env.DB, id);
@@ -161,7 +194,39 @@ export async function updateSchedule(env: Env, id: string, value: unknown, actor
   const due =
     nominal === null ? null : afterMaintenance(nominal, await maintenanceForSchedule(env.DB, row));
   const now = new Date().toISOString(),
-    pattern = JSON.stringify(v.pattern);
+    pattern = JSON.stringify(v.pattern),
+    next = row.revision + 1;
+  const record = audit.effect(
+    {
+      targetRef: `schedule:${id}`,
+      refs: [`schedule:${id}@${next}`],
+      scope: row.source === null ? null : { namespace: "schedule-source", source: row.source },
+      payloadDigest: await canonicalDigest({
+        revision: v.revision,
+        enabled: v.enabled,
+        timezone: v.timezone,
+        pattern: v.pattern,
+      }),
+      diff: {
+        kind: "revision",
+        from: row.revision,
+        to: next,
+        fields: changedFields(
+          {
+            enabled: row.enabled === 1,
+            timezone: row.timezone,
+            pattern: JSON.parse(row.pattern_json) as unknown,
+          },
+          { enabled: v.enabled, timezone: v.timezone, pattern: v.pattern },
+        ),
+      },
+    },
+    {
+      sql: "EXISTS(SELECT 1 FROM collection_schedule_revisions WHERE schedule_id=? AND revision=? AND actor=? AND created_at=?)",
+      binds: [id, next, actor, now],
+    },
+    { kind: "target-ref", ref: `schedule:${id}@${next}` },
+  );
   const result = await env.DB.batch([
     env.DB.prepare(
       "UPDATE collection_schedules SET revision=revision+1,enabled=?,timezone=?,pattern_json=?,next_nominal_at=?,next_run_at=?,updated_at=?,updated_by=? WHERE id=? AND revision=?",
@@ -178,9 +243,11 @@ export async function updateSchedule(env: Env, id: string, value: unknown, actor
     ),
     env.DB.prepare(
       "INSERT OR IGNORE INTO collection_schedule_revisions(schedule_id,revision,enabled,timezone,pattern_json,actor,created_at) SELECT id,revision,enabled,timezone,pattern_json,updated_by,updated_at FROM collection_schedules WHERE id=? AND revision=? AND updated_by=? AND updated_at=?",
-    ).bind(id, row.revision + 1, actor, now),
+    ).bind(id, next, actor, now),
+    statement(env.DB, record),
   ]);
   if (result[0]?.meta.changes !== 1) throw new ScheduleError("revision_conflict", 409);
+  audit.settle(result[2]?.meta.changes);
   let actualAlarmAt: string | null = null,
     reservation = "pending";
   try {
@@ -189,9 +256,32 @@ export async function updateSchedule(env: Env, id: string, value: unknown, actor
   } catch {
     /* Persisted config is reported separately from arming. */
   }
-  return { saved: true, reservation, actualAlarmAt, revision: row.revision + 1 };
+  return { saved: true, reservation, actualAlarmAt, revision: next };
 }
-export async function updateMaintenance(env: Env, value: unknown, actor: string) {
+/** One validated maintenance revision, as statements not yet sent. */
+interface PreparedMaintenance {
+  /** The version-checked revision insert, then the provenance update guarded on that row. */
+  statements: D1PreparedStatement[];
+  id: string;
+  source: string;
+  previous: number;
+  revision: number;
+  fields: RevisionField[];
+  payloadDigest: string;
+  /** True exactly when the batch wrote this revision row. */
+  guard: SqlWrite;
+}
+/**
+ * Validates one maintenance revision and builds its statements: the
+ * version-checked insert and the reference confirmation, which is guarded on
+ * the row the insert wrote so the two are one effect. The caller sends them in
+ * one batch with whatever it appends (its audit record, a survey decision).
+ */
+async function prepareMaintenanceRevision(
+  env: Env,
+  value: unknown,
+  actor: string,
+): Promise<PreparedMaintenance> {
   const v = bodyObject(value);
   exactKeys(v, [
     "id",
@@ -238,19 +328,42 @@ export async function updateMaintenance(env: Env, value: unknown, actor: string)
   )
     throw new ScheduleError("invalid_reference");
   const previous = await env.DB.prepare(
-    "SELECT revision,source FROM provider_maintenance_rules WHERE id=? ORDER BY revision DESC LIMIT 1",
+    "SELECT revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope FROM provider_maintenance_rules WHERE id=? ORDER BY revision DESC LIMIT 1",
   )
     .bind(v.id)
-    .first<{ revision: number; source: string }>();
+    .first<{
+      revision: number;
+      source: string;
+      timezone: string;
+      pattern_json: string;
+      enabled: number;
+      reference_url: string;
+      verified_at: string;
+      scope: string;
+    }>();
   if ((previous?.revision ?? 0) !== v.revision || (previous && previous.source !== v.source))
     throw new ScheduleError("revision_conflict", 409);
   const now = new Date().toISOString();
-  const inserted =
-    await env.DB.prepare(`INSERT OR IGNORE INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at)
-    SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE COALESCE((SELECT MAX(revision) FROM provider_maintenance_rules WHERE id=?),0)=?`)
-      .bind(
+  const revision = Number(v.revision) + 1;
+  const guard: SqlWrite = {
+    sql: "EXISTS(SELECT 1 FROM provider_maintenance_rules WHERE id=? AND revision=? AND actor=? AND created_at=?)",
+    binds: [v.id, revision, actor, now],
+  };
+  const after = {
+    source: v.source,
+    timezone: v.timezone,
+    pattern: v.pattern,
+    enabled: v.enabled,
+    reference_url: v.referenceUrl,
+    verified_at: v.verifiedAt,
+    scope: v.scope,
+  };
+  return {
+    statements: [
+      env.DB.prepare(`INSERT OR IGNORE INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at)
+    SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE COALESCE((SELECT MAX(revision) FROM provider_maintenance_rules WHERE id=?),0)=?`).bind(
         v.id,
-        Number(v.revision) + 1,
+        revision,
         v.source,
         v.timezone,
         JSON.stringify(v.pattern),
@@ -262,26 +375,81 @@ export async function updateMaintenance(env: Env, value: unknown, actor: string)
         now,
         v.id,
         v.revision,
-      )
-      .run();
-  if (inserted.meta.changes !== 1) throw new ScheduleError("revision_conflict", 409);
-  await env.DB.prepare(
-    "UPDATE provider_maintenance_references SET status='confirmed',reference_url=?,verified_at=? WHERE source=?",
-  )
-    .bind(v.referenceUrl, v.verifiedAt, v.source)
-    .run();
-  const affected = jobs.filter((j) => j.source === v.source);
+      ),
+      env.DB.prepare(
+        `UPDATE provider_maintenance_references SET status='confirmed',reference_url=?,verified_at=? WHERE source=? AND ${guard.sql}`,
+      ).bind(v.referenceUrl, v.verifiedAt, v.source, ...guard.binds),
+    ],
+    id: v.id,
+    source: v.source,
+    previous: Number(v.revision),
+    revision,
+    fields: changedFields(
+      previous
+        ? {
+            source: previous.source,
+            timezone: previous.timezone,
+            pattern: JSON.parse(previous.pattern_json) as unknown,
+            enabled: previous.enabled === 1,
+            reference_url: previous.reference_url,
+            verified_at: previous.verified_at,
+            scope: previous.scope,
+          }
+        : null,
+      after,
+    ),
+    payloadDigest: await canonicalDigest({ id: v.id, revision: v.revision, ...after }),
+    guard,
+  };
+}
+/** Re-arms the source's reservations after a saved revision; answers how many are pending. */
+async function reconcileSource(env: Env, source: string): Promise<number> {
   let pending = 0;
-  for (const job of affected) {
+  for (const job of jobs.filter((j) => j.source === source)) {
     try {
       await env.SCHEDULE_ALARMS.getByName(job.id).reconcile(job.id);
     } catch {
       pending++;
     }
   }
+  return pending;
+}
+/**
+ * The operator's maintenance edit: the revision, its provenance and its
+ * `applied` audit record (ADR 0064) are one batch. Alarm reconciliation stays
+ * outside it, as before.
+ */
+export async function updateMaintenance(
+  env: Env,
+  value: unknown,
+  actor: string,
+  audit: OperationCall,
+) {
+  const prepared = await prepareMaintenanceRevision(env, value, actor);
+  const ref = `maintenance-rule:${prepared.id}@${prepared.revision}`;
+  const record = audit.effect(
+    {
+      targetRef: `maintenance-rule:${prepared.id}`,
+      refs: [ref],
+      scope: { namespace: "schedule-source", source: prepared.source },
+      payloadDigest: prepared.payloadDigest,
+      diff: {
+        kind: "revision",
+        from: prepared.previous,
+        to: prepared.revision,
+        fields: prepared.fields,
+      },
+    },
+    prepared.guard,
+    { kind: "target-ref", ref },
+  );
+  const results = await env.DB.batch([...prepared.statements, statement(env.DB, record)]);
+  if (results[0]?.meta.changes !== 1) throw new ScheduleError("revision_conflict", 409);
+  audit.settle(results[prepared.statements.length]?.meta.changes);
+  const pending = await reconcileSource(env, prepared.source);
   return {
     saved: true,
-    revision: Number(v.revision) + 1,
+    revision: prepared.revision,
     reservation: pending ? "pending" : "armed",
   };
 }
@@ -333,10 +501,16 @@ async function occurrenceViews(
   }
   return out;
 }
+/**
+ * Clears a stopped execution's lease. Its `applied` audit record (ADR 0064) is
+ * in the same batch, joined to the unlocked lease row, and is the only durable
+ * trace of a release: the lease row itself is mutable.
+ */
 export async function releaseCollectionLease(
   env: Env,
   source: string,
   value: unknown,
+  audit: OperationCall,
 ): Promise<{ released: true }> {
   if (!jobs.some((job) => job.source === source))
     throw new ScheduleError("schedule_not_found", 404);
@@ -348,15 +522,31 @@ export async function releaseCollectionLease(
     v.confirmedStopped !== true
   )
     throw new ScheduleError("confirmation_required");
-  const released = await env.DB.prepare(
-    // A repeated release is already satisfied while the source is unlocked.
-    // Check this in the same statement as the write: a newly acquired lease
-    // must never be cleared by a delayed retry of the previous reference.
-    "UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL WHERE source=? AND (lease_ref=? OR lease_ref IS NULL)",
-  )
-    .bind(source, v.leaseRef)
-    .run();
-  if (released.meta.changes !== 1) throw new ScheduleError("lease_conflict", 409);
+  const record = audit.effect(
+    {
+      targetRef: `collection-lease:${source}`,
+      scope: { namespace: "schedule-source", source },
+      diff: { kind: "release", released: true },
+    },
+    {
+      sql: "EXISTS(SELECT 1 FROM collection_execution_leases WHERE source=? AND lease_ref IS NULL)",
+      binds: [source],
+    },
+    // A repeated release while the source is unlocked releases again, and is
+    // recorded again.
+    { kind: "each" },
+  );
+  const [released, recorded] = await env.DB.batch([
+    env.DB.prepare(
+      // A repeated release is already satisfied while the source is unlocked.
+      // Check this in the same statement as the write: a newly acquired lease
+      // must never be cleared by a delayed retry of the previous reference.
+      "UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL WHERE source=? AND (lease_ref=? OR lease_ref IS NULL)",
+    ).bind(source, v.leaseRef),
+    statement(env.DB, record),
+  ]);
+  if (released?.meta.changes !== 1) throw new ScheduleError("lease_conflict", 409);
+  audit.settle(recorded?.meta.changes);
   return { released: true };
 }
 export async function scheduleSnapshot(env: Env): Promise<ScheduleSnapshot> {
@@ -443,7 +633,15 @@ export async function scheduleSnapshot(env: Env): Promise<ScheduleSnapshot> {
       latest: latest.find((o) => o.scheduleId === row.id) ?? null,
     });
   }
-  return { schedules, maintenance, occurrences, leases };
+  // The re-survey's freshness and proposals (ADR 0050); a read failure hides
+  // only that part of the page.
+  const survey = await maintenanceSurveyView(env, Date.now()).catch(() => undefined);
+  return { schedules, maintenance, occurrences, leases, ...(survey ? { survey } : {}) };
+}
+/** Marks an answer whose batch wrote the effect's audit record; the App records everything else. */
+function recorded(response: Response, audit: OperationCall): Response {
+  if (audit.recorded) response.headers.set(AUDIT_RECORDED_HEADER, "1");
+  return response;
 }
 export async function scheduleRoute(
   request: Request,
@@ -466,14 +664,49 @@ export async function scheduleRoute(
     const actor = request.headers.get("x-kogane-operator");
     if (!actor || !/^[A-Za-z0-9._:@-]{1,200}$/u.test(actor))
       throw new ScheduleError("operator_required", 403);
+    // The audit envelope (ADR 0064) travels with the operator header and is
+    // refused the same way when it is missing.
+    const envelope = parseAuditEnvelope(request.headers);
+    if (!envelope) throw new ScheduleError("operator_required", 403);
+    const call = (operation: OperationName) => processorCall(envelope, operation, actor, "human");
     const text = await request.text();
     if (text.length > 16 * 1024) throw new ScheduleError("request_too_large", 413);
     const value: unknown = JSON.parse(text);
-    if (path === "/maintenance") return Response.json(await updateMaintenance(env, value, actor));
+    if (path === "/maintenance") {
+      const audit = call("schedules.maintenance.update");
+      return recorded(Response.json(await updateMaintenance(env, value, actor, audit)), audit);
+    }
     const leaseMatch = /^\/leases\/([a-z0-9-]{1,100})$/u.exec(path);
-    if (leaseMatch) return Response.json(await releaseCollectionLease(env, leaseMatch[1]!, value));
+    if (leaseMatch) {
+      const audit = call("schedules.lease.release");
+      return recorded(
+        Response.json(await releaseCollectionLease(env, leaseMatch[1]!, value, audit)),
+        audit,
+      );
+    }
+    const proposalMatch = /^\/proposals\/([1-9][0-9]{0,15})$/u.exec(path);
+    if (proposalMatch) {
+      const audit = call("schedules.survey.decide");
+      return recorded(
+        await decideSurveyProposal(
+          env,
+          Number(proposalMatch[1]),
+          value,
+          actor,
+          surveyRevisionWriter,
+          audit,
+        ),
+        audit,
+      );
+    }
     const match = /^\/([a-z0-9-]{1,100})$/u.exec(path);
-    if (match) return Response.json(await updateSchedule(env, match[1]!, value, actor));
+    if (match) {
+      const audit = call("schedules.job.update");
+      return recorded(
+        Response.json(await updateSchedule(env, match[1]!, value, actor, audit)),
+        audit,
+      );
+    }
     throw new ScheduleError("not_found", 404);
   } catch (error) {
     return Response.json(
@@ -481,4 +714,59 @@ export async function scheduleRoute(
       { status: error instanceof ScheduleError ? error.status : 503 },
     );
   }
+}
+/**
+ * The writer an accepted maintenance-survey proposal goes through (ADR 0050):
+ * the operator route's own version-checked revision, so a proposal is adopted
+ * exactly as an operator's edit is. What the decision appends (its decision
+ * row and its audit record) is sent in the revision's own batch, so the
+ * revision, the decision and the record exist together or not at all (ADR
+ * 0064). #560's `writeMaintenanceRevision` takes this write as it is; when it
+ * merges it replaces this adapter, and the revision then also carries the
+ * proposal as its decision reference.
+ */
+async function surveyRevisionWriter(
+  env: Env,
+  write: RevisionWrite,
+  append: (saved: SavedRevision) => RevisionAppend,
+): Promise<RevisionResult> {
+  let prepared: PreparedMaintenance;
+  try {
+    prepared = await prepareMaintenanceRevision(
+      env,
+      {
+        id: write.ruleId,
+        revision: write.expectedRevision,
+        source: write.source,
+        timezone: write.change.timezone,
+        pattern: write.change.pattern,
+        enabled: write.change.enabled,
+        scope: write.change.scope,
+        referenceUrl: write.provenance.referenceUrl,
+        verifiedAt: write.provenance.verifiedAt,
+      },
+      write.actor.id,
+    );
+  } catch (error) {
+    if (error instanceof ScheduleError)
+      return { ok: false, code: error.code, status: error.status };
+    throw error;
+  }
+  const appended = append({
+    ruleId: prepared.id,
+    revision: prepared.revision,
+    previous: prepared.previous,
+    fields: prepared.fields,
+    guard: prepared.guard,
+  });
+  const results = await env.DB.batch([...prepared.statements, ...appended.statements]);
+  if (results[0]?.meta.changes !== 1) return { ok: false, code: "revision_conflict", status: 409 };
+  appended.settle(results.slice(prepared.statements.length));
+  const pending = await reconcileSource(env, prepared.source);
+  return {
+    ok: true,
+    ruleId: prepared.id,
+    revision: prepared.revision,
+    reconciled: pending === 0,
+  };
 }

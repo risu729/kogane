@@ -516,6 +516,17 @@ describe("SC12 / AT44 / AT45 / AT46 — expiry rules", () => {
       estimateExpiry(usedBasis, points, withUsed, [], day("2026-09-09")).expiringBuckets[0]!
         .policyEstimated,
     ).toEqual(derived("2027-02-15"));
+
+    // A missing usage date is not replaced by the posting date: the activity's
+    // date under this policy is unknown, so no deadline is computed (ADR 0049).
+    const withoutUsed: ActivityHistory = {
+      ...history,
+      activities: [{ ...withUsed.activities[0]!, usedDate: null }],
+    };
+    const computed = estimateExpiry(usedBasis, points, withoutUsed, [], day("2026-09-09"))
+      .expiringBuckets[0]!.expiryBasis.computed;
+    expect(computed.status).toBe("unavailable");
+    expect(computed.reasonCode).toBe("activity_date_unknown");
   });
 
   test("a deadline already in the past is reported, not hidden", () => {
@@ -993,4 +1004,47 @@ describe("SC14 / AT49-AT54 — conversion simulation and bounded search", () => 
       { offerRef: "offer:a-to-b:standard@v1", reasonCode: "needs_rule_verification" },
     ]);
   });
+});
+
+test("unclassified quantities retain exact per-kind evidence but never prove a consumable total", () => {
+  const unknown = bucket("bucket:unclassified", "unclassified", "points:a", "123.45");
+  const regular = bucket("bucket:regular", "regular", "points:a", "2500");
+  const summary = summarizeHolding(holding("points:a", [regular, unknown]));
+  expect(validRewardBucket(unknown)).toBe(true);
+  expect(summary.consumable.value).toEqual({
+    status: "missing",
+    reasonCode: "bucket_kind_unclassified",
+  });
+  expect(summary.byKind.find((group) => group.kind === "unclassified")).toEqual({
+    kind: "unclassified",
+    quantity: unknown.quantity,
+    bucketRefs: [unknown.bucketRef],
+  });
+  expect(summary.excluded).toContainEqual({
+    bucketRef: unknown.bucketRef,
+    kind: "unclassified",
+    reasonCode: "bucket_kind_unclassified",
+  });
+  expect(summary.qualificationMeasures).toEqual([]);
+  expect(unknown.quantity).toEqual(q("points:a", "123.45"));
+  expect(unknown.sourceFactRefs).toEqual(["fact:bucket:unclassified"]);
+  expect(simulateConversion(offer(), summary.consumable).feasible).toBe(false);
+});
+
+test("an offer cannot convert an unclassified bucket even when its kind is named by the offer", () => {
+  const unknown = bucket("bucket:unclassified", "unclassified", "points:a", "2500");
+  const conversion = offer({ eligibleBucketKinds: ["regular", "unclassified"] });
+  const eligibility = availableForOffer([unknown], conversion);
+  expect(eligibility.state).toBe("not-eligible");
+  expect(eligibility.eligibleBucketRefs).toEqual([]);
+  expect(eligibility.excluded).toEqual([
+    { bucketRef: unknown.bucketRef, reasonCode: "bucket_kind_unclassified" },
+  ]);
+  expect(simulateConversion(conversion, eligibility.eligible).feasible).toBe(false);
+  const mixed = availableForOffer(
+    [unknown, bucket("bucket:regular", "regular", "points:a", "2500")],
+    conversion,
+  );
+  expect(mixed.eligible).toEqual(q("points:a", "2500"));
+  expect(mixed.eligibleBucketRefs).toEqual(["bucket:regular"]);
 });

@@ -16,7 +16,9 @@
   amended 2026-09-27 (the quote basis from the provider's public pages; no
   admission yet);
   [ADR 0031](0031-sbi-shinsei-stage-category-fx-tier.md) (the stage category
-  of the same run selects the tier; see the note below)
+  of the same run selects the tier; see the note below);
+  [ADR 0056](0056-as-of-price-fx-selection.md) (as-of selection under an
+  explicit policy; see the note on Selection)
 
 ## Context
 
@@ -84,6 +86,15 @@ the FX policy.
 - **Selection.** `selectPrices` picks, per (base, quote, kind), the latest
   price with an instant effective time at or before the cutoff whose claim's
   parse run is currently published.
+  _Amended 2026-10-08 ([ADR 0056](0056-as-of-price-fx-selection.md)):_
+  `selectPrices` is unchanged and still has no production caller. Selection
+  for an as-of goes through `selectPriceCandidates` and the domain's
+  `selectPrice` under an explicit, versioned policy (freshness, admitted
+  rules, kinds and bases, date-only and multi-source rules, current or
+  known-at publications), which refuses with a closed code (`missing`,
+  `stale`, `disagree`, `sources_overlap`, `time_incomparable`,
+  `calendar_missing`) instead of breaking a tie between different prices or
+  taking an old one. No policy values are decided there; they are proposals.
 - **FX policy name.** The policy that will value with this board (P2-3) is
   `fx-sbi-shinsei-mid-v1`: pivot JPY, SBI Shinsei's mid rate. The name says
   whose rate it is because the board is a customer rate, possibly tiered by

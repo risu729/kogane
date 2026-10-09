@@ -7,6 +7,9 @@ decided in [ADR 0019](adr/0019-dated-reported-state.md). It is a list of
 provider figures, never a total: nothing is added, converted or netted, and a
 container without a capture is named, never shown as zero.
 
+What adopted events imply from a start snapshot, compared with these figures,
+is [reconstructed state](reconstructed-state.md) (served by `GET /api/v2/reconstructed-state`, an agent read and the `/reconstruction` page).
+
 | Layer        | Where                                                                                                   |
 | ------------ | ------------------------------------------------------------------------------------------------------- |
 | Snapshot CTE | `SnapshotCteOptions.cutoffParam` in `packages/parsers/src/snapshot-query.ts`                            |
@@ -125,6 +128,10 @@ result_limit_exceeded` past 5,000 rows in one read (refused, never cut), and
 `404` where the store lacks `dataset_snapshot_policies`, `card_statement_facts`
 or `card_settlement_reviews`; `/api/meta` advertises `reportedStateOnDate` on
 the same condition.
+`GET /api/v2/reconstructed-state` reads this state at both ends of a range
+and sets it beside the balances reconstructed from adopted events; it is
+served, and `reconstructedStateOnDate` advertised, on the same condition
+([reconstructed state](reconstructed-state.md#http-agent-tool-and-page)).
 
 ## Cost
 
@@ -178,6 +185,10 @@ run or identity table whole, and requires each answer under one second.
   installment remainders and loans are not shown (`liabilitiesMissing`).
 - Adoption and overlap across sources (`selectAdoptedSet`) are not applied:
   rows are listed per provider account, which is why nothing is added.
-  Valuation in a base currency is P2-3.
+  Valuation of the listed positions in a base unit, under an explicit price
+  and FX policy, is `queryValuationOnDate`
+  ([calculation and reports §2](calculation-and-reports.md#valuation-on-a-date));
+  it has no route yet, refuses holdings of `stale` snapshots, and states no
+  total across sources.
 - Nothing is stored: a reported state has no fixed report or
   `calculation_runs` row yet.

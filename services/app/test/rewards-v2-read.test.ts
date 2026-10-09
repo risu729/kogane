@@ -1,4 +1,9 @@
+import { seedRewardCapture } from "./reward-capture-fixture";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
+import {
+  validRewardExpiryBasis,
+  type RewardExpiryBasis,
+} from "../../../packages/observation-shared/src/reward-contract.ts";
 // The reward routes served from the READ database (unified plan 04 §2, 05 §7;
 // U16), over HTTP, with both sets of migrations applied to local D1s.
 //
@@ -20,7 +25,7 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { publishParse, seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry } from "./fixtures";
 import { runRewardReadProjection } from "../../processor/src/reward-read-projection";
 import { decodeReadCursor, encodeReadCursor } from "../../../packages/storage-d1/src/read/index";
 
@@ -42,18 +47,19 @@ async function token() {
     .sign(keys.privateKey);
 }
 
-/** `read` switches the store the reward routes read; never authentication. */
-async function call(path: string, options: { read?: boolean } = {}) {
+/** `read: false` drops the READ binding. `retired` is the old App env name. */
+async function call(path: string, options: { read?: boolean; retired?: string } = {}) {
+  const { READ: _read, ...withoutRead } = env;
   return worker.fetch(
     new Request(`https://fixture.test${path}`, {
       headers: { "cf-access-jwt-assertion": await token() },
     }),
     {
-      ...env,
+      ...(options.read === false ? withoutRead : env),
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: "fixture-audience",
-      REWARDS_V2_ENABLED: "true",
-      REWARD_READ_PROJECTION_ENABLED: options.read === false ? "false" : "true",
+      REWARDS_V2_ENABLED: options.retired ?? "false",
+      REWARD_READ_PROJECTION_ENABLED: "false",
     } as Env,
   );
 }
@@ -68,7 +74,15 @@ async function build(evaluatedAt = EVALUATED_AT) {
 }
 
 interface ExpiryPage {
-  rows: { bucketRef: string; expiresOn: string | null; ruleRef: string }[];
+  rows: {
+    bucketRef: string;
+    bucketKind: string;
+    quantity: unknown;
+    policyEstimated: unknown;
+    expiresOn: string | null;
+    ruleRef: string;
+    expiryBasis: RewardExpiryBasis | null;
+  }[];
   page: { hasMore: boolean; nextCursor: string | null; limit: number };
   snapshot: { snapshotId: string; evaluatedAt: string; evaluationCalendar: string };
 }
@@ -89,7 +103,7 @@ beforeAll(async () => {
   jwks = {
     keys: [{ ...(await exportJWK(keys.publicKey)), kid: "fixture", alg: "RS256", use: "sig" }],
   };
-  const run = await seedRun({ count: 1 });
+  const run = await seedRewardCapture();
   const parse = await env.DB.prepare(
     `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
      VALUES(?,'v-point-balance-info','1.0.0','2026-09-07','ok','[]') RETURNING id`,
@@ -105,12 +119,12 @@ beforeAll(async () => {
     expiry: string | null,
   ) =>
     env.DB.prepare(
-      `INSERT INTO reward_bucket_claims(claim_digest,parse_run_id,source_fact_kind,source_fact_id,
+      `INSERT INTO reward_bucket_claims_v2(claim_digest,parse_run_id,source_fact_kind,source_fact_id,
         program_id,holding_ref,bucket_ref,bucket_kind,restriction_refs_json,unit_ref,
         quantity_coefficient,quantity_scale,quantity_status,observed_expiry_json,observed_at,
         promotion_release,recorded_at)
        VALUES(?1,?2,'balance',?3,'program:v-point','program:v-point:member',?4,?5,'[]',
-         'points:v-point',?6,0,'exact',?7,'2026-09-08T00:00:00.000Z','reward-promotion-v1',
+         'points:v-point',?6,0,'exact',?7,'2026-09-08T00:00:00.000Z','reward-promotion-v2',
          '2026-09-09T00:00:00.000Z')`,
     ).bind(digest, parse!.id, Number(digest.slice(-2)), bucket, kind, amount, expiry);
   await env.DB.batch([
@@ -180,11 +194,18 @@ describe("the reward routes over the READ database", () => {
     );
     const expiry = await call("/api/v2/rewards/expiry");
     expect(expiry.status).toBe(503);
+    for (const retired of ["false", "0", "true"]) {
+      const again = await call("/api/v2/rewards/expiry", { retired });
+      expect(again.status).toBe(503);
+      expect(await again.json()).toMatchObject({ error: "reward_read_model_unavailable" });
+    }
   });
 
-  it("the retired reader flag cannot fall back to CORE before READ is built", async () => {
-    for (const path of ["/api/v2/rewards/expiry", "/api/v2/rewards/simulations"])
-      expect((await call(path, { read: false })).status).toBe(503);
+  it("the retired reader flag cannot fall back to CORE", async () => {
+    for (const path of ["/api/v2/rewards/expiry", "/api/v2/rewards/simulations"]) {
+      expect((await call(path, { retired: "true" })).status).toBe(503);
+      expect((await call(path, { read: false, retired: "true" })).status).toBe(503);
+    }
   });
 
   it("G2-19: a published snapshot answers with the instant it was evaluated at", async () => {
@@ -206,6 +227,31 @@ describe("the reward routes over the READ database", () => {
     const dated = first.rows.filter((row) => row.expiresOn !== null);
     expect(dated.some((row) => row.expiresOn === "2026-12-31")).toBe(true);
     expect(first.rows.some((row) => row.expiresOn === null)).toBe(true);
+
+    // ADR 0049: every row carries the displayed and the computed expiry
+    // apart. The dated lot's date is the provider's display only; the regular
+    // bucket has no classified activity, so nothing is computed and the
+    // reason says why.
+    for (const row of first.rows) expect(validRewardExpiryBasis(row.expiryBasis)).toBe(true);
+    const lot = first.rows.find(
+      (row) =>
+        row.bucketRef === "program:v-point:slot-a" &&
+        row.ruleRef === "rule:v-point:fixed-expiry-lot@v1",
+    )!;
+    expect(lot.expiryBasis?.displayed?.value).toMatchObject({ value: "2026-12-31" });
+    expect(lot.expiryBasis?.computed.reasonCode).toBe("fixed_deadline_not_derivable");
+    const regular = first.rows.find(
+      (row) =>
+        row.bucketRef === "program:v-point:slot-b" &&
+        row.ruleRef === "rule:v-point:regular-inactivity@v1",
+    )!;
+    expect(regular.expiresOn).toBeNull();
+    expect(regular.expiryBasis?.displayed).toBeNull();
+    expect(regular.expiryBasis?.computed).toMatchObject({
+      status: "unavailable",
+      reasonCode: "no_qualifying_activity_observed",
+      rule: { ruleRef: "rule:v-point:regular-inactivity@v1", verification: "verified" },
+    });
 
     // Read again: the same published snapshot, the same rows. Nothing was
     // recomputed from the wall clock between the two requests.
@@ -276,5 +322,104 @@ describe("the reward routes over the READ database", () => {
     expect(after.snapshot.snapshotId).toBe(later.snapshotId);
     expect(after.snapshot.evaluatedAt).toBe("2026-12-01T00:00:00.000Z");
     expect(before.snapshot.evaluatedAt).toBe(EVALUATED_AT);
+  });
+});
+
+describe("corrected bucket interpretation", () => {
+  it("keeps dated and undated unclassified buckets on the real READ route", async () => {
+    const parse = await env.DB.prepare(
+      "SELECT parse_run_id FROM reward_bucket_claims_v2 WHERE claim_digest='reward-read-claim-01'",
+    ).first<{ parse_run_id: number }>();
+    for (const [id, slot, amount, display] of [
+      [
+        999,
+        "unclassified-dated",
+        "777",
+        { kind: "local-date", value: "2026-12-31", zone: "Asia/Tokyo", basis: "provider" },
+      ],
+      [1000, "unclassified-undated", "888", null],
+    ] as const)
+      await env.DB.prepare(`INSERT INTO reward_bucket_claims_v2(claim_digest,parse_run_id,source_fact_kind,source_fact_id,
+        program_id,holding_ref,bucket_ref,bucket_kind,restriction_refs_json,unit_ref,
+        quantity_coefficient,quantity_scale,quantity_status,observed_expiry_json,observed_at,promotion_release,recorded_at)
+        VALUES(?,?,'balance',?,'program:v-point','program:v-point:member',?,'unclassified','[]','points:v-point',
+          ?,0,'exact',?,'2026-09-08T00:00:00.000Z','reward-promotion-v2','2026-09-09T00:00:00.000Z')`)
+        .bind(
+          `synthetic-${slot}`,
+          parse!.parse_run_id,
+          id,
+          `program:v-point:${slot}`,
+          amount,
+          display === null ? null : JSON.stringify(display),
+        )
+        .run();
+    expect((await build()).status).toBe("complete");
+    const response = await call("/api/v2/rewards/expiry?limit=200");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as ExpiryPage;
+    expect(validApiResponse("/api/v2/rewards/expiry", body)).toBe(true);
+    const rows = body.rows.filter((row) => row.bucketRef.includes("unclassified-"));
+    expect(rows).toHaveLength(4);
+    for (const row of rows) {
+      expect(row.bucketKind).toBe("unclassified");
+      expect(row.policyEstimated).toBeNull();
+      expect(row.expiryBasis?.computed).toMatchObject({
+        status: "unavailable",
+        reasonCode: "bucket_kind_unclassified",
+      });
+      expect(row.quantity).toMatchObject({
+        unitRef: "points:v-point",
+        value: { status: "exact", value: { scale: 0 } },
+      });
+      if (row.bucketRef.endsWith("-dated")) {
+        expect(row.expiresOn).toBe("2026-12-31");
+        expect(row.expiryBasis?.displayed?.sourceFactRefs).toEqual(["balance:999"]);
+      } else {
+        expect(row.expiresOn).toBeNull();
+        expect(row.expiryBasis?.displayed).toBeNull();
+      }
+    }
+  });
+
+  it("refuses an active legacy release instead of returning an empty corrected page", async () => {
+    const built = await build();
+    expect(["complete", "unchanged"]).toContain(built.status);
+    const page = (await (await call("/api/v2/rewards/expiry?limit=25")).json()) as ExpiryPage;
+    const cursor = page.page.nextCursor!;
+    const row = await env.READ.prepare("SELECT * FROM reward_expiry_snapshots WHERE snapshot_id=?")
+      .bind(built.snapshotId)
+      .first<Record<string, unknown>>();
+    const id = "9".repeat(64);
+    const legacy = {
+      ...row!,
+      snapshot_id: id,
+      content_key: "8".repeat(64),
+      contract_version: "reward-projection-input-v1",
+      claims_release: "reward-promotion-v1",
+      policy_release: "reward-projection-v2",
+    };
+    await env.READ.prepare(
+      `INSERT INTO reward_expiry_snapshots(${Object.keys(legacy).join(",")}) VALUES(${Object.keys(
+        legacy,
+      )
+        .map(() => "?")
+        .join(",")})`,
+    )
+      .bind(...Object.values(legacy))
+      .run();
+    await env.READ.prepare("UPDATE reward_snapshot_pointer SET snapshot_id=? WHERE id=1")
+      .bind(id)
+      .run();
+    const response = await call("/api/v2/rewards/expiry");
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: "reward_read_model_context_changed" });
+    await env.READ.prepare("UPDATE reward_snapshot_pointer SET snapshot_id=? WHERE id=1")
+      .bind(built.snapshotId)
+      .run();
+    const decoded = decodeReadCursor(cursor)!;
+    const legacyCursor = encodeReadCursor({ ...decoded, snapshotId: id });
+    const continued = await call(`/api/v2/rewards/expiry?limit=25&cursor=${legacyCursor}`);
+    expect(continued.status).toBe(410);
+    expect(await continued.json()).toMatchObject({ error: "context_expired" });
   });
 });

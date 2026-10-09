@@ -36,7 +36,13 @@ import {
   type RewardSnapshotRow,
 } from "../../../packages/storage-d1/src/read/index.ts";
 import { createCoreProjectionSource, d1Executor } from "../../../packages/read-model/src/index";
+import {
+  validRewardExpiryBasis,
+  type RewardExpiryBasis,
+} from "../../../packages/observation-shared/src/reward-contract.ts";
 import { HttpError, json } from "./http";
+import { REWARD_PROJECTION_RELEASE } from "../../../packages/read-model/src/reward-projection";
+import { REWARD_READ_RELEASE } from "../../../packages/read-model/src/rewards";
 
 /** Rows per page; the same shape of limit the v2 balance routes accept. */
 export const REWARD_READ_PAGE_LIMITS = [25, 50, 100, 200] as const;
@@ -84,6 +90,13 @@ async function snapshotRefusal(
   read: D1Like,
   snapshot: RewardSnapshotRow,
 ): Promise<string | null> {
+  // The old snapshot classified common V Point by expiry display. It is
+  // retained as history, never served as the current corrected contract.
+  if (
+    snapshot.policy_release !== REWARD_PROJECTION_RELEASE ||
+    snapshot.claims_release !== REWARD_READ_RELEASE
+  )
+    return "reward_read_model_context_changed";
   const revision = await createCoreProjectionSource(d1Executor(env.DB)).coreRevision();
   const pointer = await rewardPointer(read);
   const vouched =
@@ -141,7 +154,13 @@ async function continuation(
     snapshotReadable: named !== null,
   });
   if (rejection === "cursor_mismatch") throw new HttpError(400, "cursor_mismatch");
-  if (rejection !== null || named === null) throw new HttpError(410, "context_expired");
+  if (
+    rejection !== null ||
+    named === null ||
+    named.policy_release !== REWARD_PROJECTION_RELEASE ||
+    named.claims_release !== REWARD_READ_RELEASE
+  )
+    throw new HttpError(410, "context_expired");
   return { snapshot: named, afterRowSeq: cursor.position };
 }
 
@@ -157,6 +176,22 @@ function temporal(value: string | null): unknown {
   if (value === null) return null;
   try {
     return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The stored displayed/computed basis of one row, or null when the build that
+ * wrote it recorded none (before `reward-projection-v2`) or the stored value
+ * no longer validates. Null is "not recorded"; it is never read as "no
+ * computed expiry" and nothing is reconstructed from the other columns.
+ */
+function expiryBasis(value: string | null): RewardExpiryBasis | null {
+  if (value === null) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return validRewardExpiryBasis(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -190,6 +225,9 @@ function estimateDto(row: RewardEstimateRow) {
     reasonCodes: refs(row.reason_codes_json),
     uncertaintyCodes: refs(row.uncertainty_codes_json),
     basisRefs: refs(row.basis_refs_json),
+    // The provider's display and the computed expiry apart, each with its
+    // basis (ADR 0049). `expiresOn`/`basis` above are only the list's order.
+    expiryBasis: expiryBasis(row.expiry_basis_json),
   };
 }
 

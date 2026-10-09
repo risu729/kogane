@@ -908,24 +908,21 @@ limit, card-control, registration, or settings screen except to leave it.
 
 ## Shared DATA bucket (U09, 2026-09-11)
 
-The GLOBAL PASS collector gained a `COLLECTION_TARGET` var (default `legacy`)
-and a `DATA` binding to the central `kogane-raw-evidence` bucket. In `shared`
-mode the Worker persists the run itself with `packages/collection` — the
-already-sanitized monthly activity pages and the collector manifest, then the
-`terminal-v1` manifest last — and the upload to
-`kogane-collector-r2-importer` is skipped. Legacy mode is unchanged, the daily
-`17 18 * * *` cron is unchanged, and the Container image, relay, browser
+The GLOBAL PASS collector does not read `COLLECTION_TARGET`. Persistence is
+the `DATA` binding to `kogane-raw-evidence` only. The switch and the importer
+were retired on 2026-09-13 (`docs/collection.md`). The Worker persists the run
+itself with `packages/collection` — the already-sanitized monthly activity
+pages and the collector manifest, then the `terminal-v1` manifest last. The
+daily `17 18 * * *` cron is unchanged, and the Container image, relay, browser
 binding and tunnels are untouched: the Worker writes the run, not the
-container. The per-source staging bucket is not written in shared mode: the
-run is stored once, in `DATA` (plan 00).
+container. The run is stored once, in `DATA` (plan 00).
 
 A successful run still declares `coverageStatus: partial`, because the provider
 exposes a rolling window of statement months and the collector stores only
 the first page of a month (below).
 
-Deploy order, rollback and the artifact/role table are in
+Artifact roles and terminal fields are in
 [`docs/collection.md`](../collection.md#prestia-globalpass-kogane-globalpass-collector-poc).
-Merged is not enabled: the var ships as `legacy`.
 
 ## GLOBAL PASS activity pages and refusals (2026-09-27)
 
@@ -1173,3 +1170,17 @@ Its output is a closed code per refused page (for example
 options, tables by `th` count, the activity table's rows by cell count and
 how many of the parser's required and the surveyed English and Japanese
 labels it has, the pager), with no text, value or date.
+
+One of the two (artifact 679), replayed by the owner, is `unclassified_table`:
+10 records in the activity table but 9 compact/expanded pairs, in one parent
+`div` outside the activity table, followed in that `div` by a table with two
+headers and one cell
+([observations](../observations.md#global-pass-a-refused-page-has-ten-records-and-nine-detail-pairs-replay-diagnostics-no-parser-release)).
+What that table means and whether it belongs to the tenth record is
+unobserved, and no parser change follows from the counts alone. The replay's
+shape now also prints which record each pair carries, the record without a
+pair, and how the two-header table's headers and cell compare with the
+activity and detail tables, as positions, booleans and pattern classes, and
+compares the page with the newest capture of the same key that has a
+published parse
+([ADR 0026's amendment of 2026-10-08](../adr/0026-collector-unit-coverage.md#amendment-2026-10-08-global-pass-replay-compares-records-with-detail-tables)).

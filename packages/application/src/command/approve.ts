@@ -7,12 +7,16 @@ import {
   type ApprovalReceipt,
   type ChangePlan,
   type CommandStore,
+  isEconomicEventKind,
   type Principal,
   principalCan,
 } from "./contract.ts";
 import { commandError, type CommandResult } from "./errors.ts";
+import { resolveAndSimulate } from "../operations/targets.ts";
 import { loadPlan } from "./plan.ts";
 import { currentRevisions, markStale } from "./simulate.ts";
+import type { OperationCall } from "../audit/call.ts";
+import { instrumentCandidatePlanIsPinned } from "../operations/instrument-candidate-context.ts";
 
 export const APPROVAL_TTL_SECONDS_DEFAULT = 10 * 60;
 const APPROVAL_TTL_SECONDS_MAX = 60 * 60;
@@ -28,6 +32,8 @@ export interface ApproveInput {
   ttlSeconds: number;
   uses?: number;
   now: string;
+  /** The route's audit call (ADR 0064): the approval's record joins its batch. */
+  audit?: OperationCall;
 }
 
 export async function approve(
@@ -54,12 +60,21 @@ export async function approve(
 
   const plan = await loadPlan(store, input.planId);
   if (!plan) return commandError("plan_not_found");
+  if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
   if (typeof input.planDigest !== "string" || input.planDigest !== plan.planDigest)
     return commandError("stale_context", [plan.planId]);
   if (Date.parse(plan.expiresAt) <= Date.parse(input.now))
     return commandError("plan_expired", [plan.planId]);
   if (plan.status !== "planned" && plan.status !== "approved")
     return commandError("plan_not_open", [plan.planId]);
+  // An economic-event kind is approvable only while its planner accepts it:
+  // with none registered (ADR 0054, G2) a plan row of such a kind that
+  // reached the table any other way is refused here, so no approval of it is
+  // ever written.
+  if (isEconomicEventKind(plan.kind)) {
+    const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
+    if (!eligibility.ok) return eligibility;
+  }
 
   // SC17: the human confirmed a plan pinned to rev7. If a concurrent change
   // moved it to rev8, the approval is refused and the plan is marked stale;
@@ -78,7 +93,19 @@ export async function approve(
   const createdAt = input.now;
   const expiresAt = new Date(Date.parse(createdAt) + input.ttlSeconds * 1000).toISOString();
   const approvalId = await commandKey("ap", [plan.planId, input.actor.id, createdAt, scope, uses]);
-  const [insert] = await store.batch([
+  const audit = input.audit?.effect(
+    {
+      targetRef: `plan:${plan.planId}`,
+      refs: [`approval:${approvalId}`],
+      diff: { kind: "none" },
+    },
+    {
+      sql: "EXISTS(SELECT 1 FROM approvals WHERE approval_id=? AND created_at=? AND approver_actor=?)",
+      binds: [approvalId, createdAt, input.actor.id],
+    },
+    { kind: "target-ref", ref: `approval:${approvalId}` },
+  );
+  const [insert, , recorded] = await store.batch([
     {
       sql: `INSERT INTO approvals(approval_id,plan_id,plan_digest,approver_actor,approver_verification,scope_json,expires_at,uses_remaining,created_at)
         SELECT ?1,?2,?3,?4,'server',?5,?6,?7,?8
@@ -100,7 +127,9 @@ export async function approve(
         AND EXISTS(SELECT 1 FROM approvals WHERE approval_id=?2)`,
       binds: [plan.planId, approvalId],
     },
+    ...(audit ? [audit] : []),
   ]);
+  input.audit?.settle(recorded?.changes);
   if (insert?.changes !== 1) {
     const existing = await store.first<{ approval_id: string }>(
       "SELECT approval_id FROM approvals WHERE approval_id=?1",

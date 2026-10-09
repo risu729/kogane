@@ -238,11 +238,24 @@ describe("production observation API", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body).toMatchObject({ parsingHealth: { pending: 1, running: 1, failed: 1 } });
+    // No GLOBAL PASS month in this store: the notice is present and empty.
+    expect(body).toMatchObject({ globalPassEmptyMonths: { months: [], truncated: false } });
     expect(validApiResponse("/api/meta", body)).toBe(true);
     expect(body).toMatchObject({
       source: { kind: "central-store", classification: "financial" },
-      // Served wherever the store has the views it reads (docs/reported-state.md).
-      capabilities: { ...CENTRAL_STORE_CAPABILITIES, reportedStateOnDate: true },
+      // Schema-backed reads follow the tables this store has. Reward routes
+      // are served; their snapshot-backed read model stays none until published.
+      // Reconstructed state is served wherever the reported-state views are.
+      capabilities: {
+        ...CENTRAL_STORE_CAPABILITIES,
+        reportedStateOnDate: true,
+        reconstructedStateOnDate: true,
+        eventsV2: true,
+        rewardsV2: true,
+        cardPurchaseRecognition: true,
+        cardSettlementReconciliation: true,
+        cardOwnershipReview: true,
+      },
     });
   });
   it("clears repaired historical failures but keeps newer failures and replacement work visible", async () => {

@@ -11,6 +11,12 @@
 // Both are allow-lists: `resolvePrincipal` refuses a subject the deployment
 // does not name, and `grantFor` answers `null` for one it has no grant for.
 
+// ── delegation declarations (ADR 0063, S3 core only) ───────────────────
+export { parseDelegations } from "./delegation/parse.ts";
+export { resolveDelegation } from "./delegation/resolve.ts";
+export { delegationCapabilities, delegationExecutionReadiness } from "./delegation/readiness.ts";
+export * from "./delegation/contract.ts";
+
 // ── command services (A09) ───────────────────────────────────────────
 export { APPROVAL_TTL_SECONDS_DEFAULT, approve, type ApproveInput } from "./command/approve.ts";
 export {
@@ -26,6 +32,9 @@ export {
   type CardReviewPayload,
   CHANGE_KINDS,
   COMMAND_CAPABILITIES,
+  ECONOMIC_EVENT_COMMAND_KINDS,
+  type EconomicEventCommandKind,
+  type EconomicEventCommandPayload,
   type ApprovalReceipt,
   type BatchOutcome,
   type ChangeKind,
@@ -45,6 +54,7 @@ export {
   IDENTITY_SUBJECTS,
   isCardReviewKind,
   isChangeKind,
+  isEconomicEventKind,
   type MutationInput,
   type MutationPlanner,
   type MutationPlanners,
@@ -116,6 +126,8 @@ export {
   subjectRefOf,
 } from "./operations/sql.ts";
 export {
+  ECONOMIC_EVENT_PLANNERS,
+  type EconomicEventPlanner,
   resolveAndSimulate,
   REVIEW_PLANNERS,
   type ResolvedPlan,
@@ -164,6 +176,45 @@ export {
   type StageReport,
   type StageState,
 } from "./operations/requests.ts";
+
+// ── collector execution of operations (issue #544, ADR 0048) ─────────
+export {
+  COLLECTOR_ACTIONS,
+  COLLECTOR_DISPATCH_STATES,
+  COLLECTOR_EXECUTION_STATES,
+  COLLECTOR_START_TTL_MS,
+  type CollectorAction,
+  collectorActionForKind,
+  type CollectorDispatchRow,
+  type CollectorDispatchState,
+  collectorExecution,
+  type CollectorExecutionReport,
+  type CollectorExecutionState,
+  type CollectorRunArtifacts,
+  type CollectorRunTrail,
+  collectorRunTrails,
+  expiresAtFor,
+  PUBLICATION_HORIZON_MS,
+  readCollectorDispatch,
+  RUN_TRAIL_STATES,
+  type RunTrailState,
+  type StageVerdict,
+  storedRunIds,
+  trailOutcome,
+  type TrailOutcome,
+} from "./operations/collector-trail.ts";
+export {
+  abandonStartedCollectorDispatches,
+  claimCollectorStart,
+  type CollectorBinding,
+  collectedDispatchesDue,
+  type CollectorOutcome,
+  recordCollectorDeclined,
+  recordCollectorOutcome,
+  recordCollectorWait,
+  trackCollectorPublication,
+  type TrackingResult,
+} from "./operations/collector-dispatch.ts";
 
 // ── query services (A08) ─────────────────────────────────────────────
 export {
@@ -236,6 +287,26 @@ export {
   withoutReviewAffordances,
 } from "./query/purchases-explain.ts";
 export {
+  parseReconstructedStateRequest,
+  readReconstructedState,
+  RECONSTRUCTED_STATE_ACCOUNT,
+  RECONSTRUCTED_STATE_CAPABILITY,
+  RECONSTRUCTED_STATE_DATE,
+  RECONSTRUCTED_STATE_EPOCH,
+  RECONSTRUCTED_STATE_INSTANT,
+  RECONSTRUCTED_STATE_KEYS,
+  RECONSTRUCTED_STATE_PARAMETERS,
+  RECONSTRUCTED_STATE_REFUSAL_CODES,
+  RECONSTRUCTED_STATE_REFUSALS,
+  RECONSTRUCTED_STATE_SET_VERSION,
+  type ReconstructedStateBody,
+  type ReconstructedStateOutcome,
+  type ReconstructedStateRefusal,
+  type ReconstructedStateRequest,
+  reconstructedStateBodyFromQuery,
+  reconstructedStateError,
+} from "./query/reconstructed-state-read.ts";
+export {
   DEFAULT_EXPLAIN_DEPTH,
   explain,
   type ExplainReader,
@@ -257,3 +328,79 @@ export {
   type ResolvedRef,
   type StoredProposal,
 } from "./propose.ts";
+
+// ── the common audit record and the operation chokepoint (ADR 0064) ─────
+export {
+  AUDIT_HEADERS,
+  AUDIT_RECORDED_HEADER,
+  type AuditEnvelope,
+  type EffectFacts,
+  OperationCall,
+  parseAuditEnvelope,
+  processorCall,
+  subjectOfPrincipal,
+} from "./audit/call.ts";
+export {
+  type AuditDiff,
+  type AuditDiffKind,
+  auditDiffSchema,
+  changedFields,
+  DECISION_COUNTS,
+  REVISION_FIELDS,
+  type RevisionField,
+} from "./audit/diff.ts";
+export {
+  AUDIT_COLUMNS,
+  type AuditActor,
+  type AuditFacts,
+  auditInstant,
+  AuditRecordError,
+  type AuditRow,
+  type AuditScope,
+  buildAuditRecord,
+  type EffectOnce,
+} from "./audit/record.ts";
+export {
+  aggregateAuditOverflow,
+  type AnswerAppend,
+  appendAnswerRecord,
+  AUDIT_PAGE_SIZE,
+  AUDIT_PAGE_SQL,
+  type AuditPageFilters,
+  auditPageFilters,
+  type AuditPageOutcome,
+  type AuditRecordView,
+  OVERFLOW_ROWS_PER_TICK,
+  readAuditPage,
+  utcDay,
+} from "./audit/store.ts";
+export {
+  AUDIT_CAP_REACHED,
+  AUDIT_DAILY_CAPS,
+  AUDIT_PATHS,
+  AUDIT_RESULTS,
+  AUDIT_WRITE_FAILED,
+  type AuditPath,
+  type AuditResult,
+  isAuditRef,
+  RISK_CLASSES,
+  type RiskClass,
+  SUBJECT_PATHS,
+  type SubjectPath,
+  type SubjectPrincipalKind,
+} from "./audit/vocabulary.ts";
+export {
+  type CatalogueEntry,
+  catalogueEntry,
+  isOperationName,
+  OPERATION_CATALOGUE,
+  type OperationName,
+  toolOperation,
+} from "./operation-path/catalogue.ts";
+export {
+  type AnswerOutcome,
+  type AnswerSink,
+  type Classifier,
+  type ExecuteContext,
+  executeOperation,
+} from "./operation-path/execute.ts";

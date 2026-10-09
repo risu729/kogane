@@ -1,9 +1,10 @@
 // The agent API routes and the human UI's shared-query route.
 //
 // One of the browser's two non-GET surfaces (the other is A09's change
-// lifecycle). It is an explicit allow-list: exactly five POST paths plus
-// `/mcp`, and a sixth path (`purchases.explain`) only while the deployment
-// serves card purchase recognition, each with a bounded JSON body, each behind
+// lifecycle). It is an explicit allow-list: exactly six POST paths plus
+// `/mcp`, a seventh path (`purchases.explain`) only while the deployment
+// serves card purchase recognition and an eighth (`reconstructed-state.read`)
+// only while it serves the reconstructed state, each with a bounded JSON body, each behind
 // the same Access gate as every read route, and each behind a grant looked up
 // by the verified principal. `AGENT_API_GRANTS` absent means no principal has
 // a grant, so every agent route answers 403 — that is the deployed default,
@@ -15,15 +16,24 @@
 // `AGENT_API_GRANTS`
 // and an agent grant is never widened to serve a page.
 //
-// The principal on both paths is the subject `authenticate` returned. Nothing
+// The principal of the shared query route is the subject `authenticate`
+// returned. An agent path receives an `AgentCaller` decided at the boundary
+// (`src/auth.ts`, ADR 0047): on `/mcp`, only an identity that came through the
+// MCP Access application, as the agent-only `mcp-client:<sub>`; on
+// `/api/agent/v1/*`, the browser session's subject as before. The caller
+// object, never a bare subject, is what reaches every tool and grader. Nothing
 // here parses the token again, and nothing reads an actor from a body or a
 // header (review rule 9, addendum 10 section 5).
 import {
   DEFAULT_QUERY_LIMIT,
   type Grant,
   grantFor,
+  type OperationCall,
+  type OperationName,
   parseGrants,
   parseQueryRequest,
+  subjectOfPrincipal,
+  toolOperation,
 } from "../../../packages/application/src/index";
 import {
   type AgentToolName,
@@ -32,14 +42,26 @@ import {
   MAX_REQUEST_BYTES,
   PURCHASES_TOOL_NAME,
   queryResponse,
+  RECONSTRUCTED_STATE_TOOL_NAME,
   toolContext,
+  type ToolResult,
 } from "./agent-service";
+import { auditContext, auditedTool, recordThrown, recordTransportStatus } from "./audit";
+import { type AgentCaller, authenticate } from "./auth";
 import { cardPurchasesAvailable } from "./card-purchases-api";
 import { grantsUsable } from "./grants";
-import { handleMcp, MCP_TOOLS, PURCHASES_MCP_TOOLS } from "./mcp";
+import {
+  assertAgentTransport,
+  handleMcp,
+  MCP_TOOLS,
+  PURCHASES_MCP_TOOLS,
+  RECONSTRUCTED_STATE_MCP_TOOLS,
+} from "./mcp";
+import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { opsApiEnabled } from "./ops-api";
 import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
 import { HttpError, json } from "./http";
+import { mcpDelegationCapabilities } from "./delegation";
 
 const AGENT_PREFIX = "/api/agent/v1/";
 export const MCP_PATH = "/mcp";
@@ -132,24 +154,28 @@ export function readerGrant(principal: string): Grant {
 }
 
 /**
- * POST routes. Returns `null` when the path is not an agent path. The
- * principal is the subject the Access gate proved, the same one the change
- * lifecycle uses; nothing here reads the token a second time.
+ * POST routes. Returns `null` when the path is not an agent path. The caller
+ * is the one the Access gate proved (`mcpCaller` or `browserCaller`); nothing
+ * here reads the token a second time.
  */
 export async function agentApi(
   request: Request,
   env: Env,
   url: URL,
-  /** The subject `authenticate` proved; never a body or header claim. */
-  subject: string,
+  /** The caller the boundary proved; never a body or header claim. */
+  caller: AgentCaller,
 ): Promise<Response | null> {
   const path = url.pathname;
   if (!isAgentPath(path)) return null;
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
   if (url.search) throw new HttpError(400, "invalid_query");
-  const grant = agentGrant(env, subject);
+  assertAgentTransport(request, url);
+  const grant = agentGrant(env, caller.principal);
   if (grant === null) throw new HttpError(403, "agent_api_not_configured");
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/u, "Z");
+  // Query/proposal clocks keep their existing whole-second contract. Authority
+  // validity must not round backwards across a subsecond issuedAt/notAfter.
+  const delegationNow = new Date().toISOString();
+  const now = delegationNow.replace(/\.\d{3}Z$/u, "Z");
   const context = toolContext(env, grant, now);
 
   if (path === MCP_PATH) {
@@ -158,43 +184,75 @@ export async function agentApi(
     // and the operations tools are graded by the change lifecycle's principal
     // inside `callOpsTool`, exactly as their HTTP routes are. With
     // `OPS_API_ENABLED` off they are neither listed nor callable, so the MCP
-    // surface matches the routes this deployment actually serves.
+    // surface matches the routes this deployment actually serves. An MCP
+    // client is never an operator (ADR 0047): they are not published to one,
+    // and `callOpsTool` refuses its caller object before any grader runs.
     const ops = opsApiEnabled(env);
     // A deployment whose command grant lists cannot be read grades nobody, so
     // it can authorize none of the operations tools; publishing them would
     // describe a capability this deployment does not have. They stay callable,
     // so a client that asks anyway is told `grants_misconfigured` rather than
     // "no such tool".
-    const listOps = ops && grantsUsable(env);
+    const listOps = ops && caller.kind !== "mcp-client" && grantsUsable(env);
     // The purchase explanation exists exactly while the operator route does
     // (`cardPurchaseRecognition`): otherwise it is neither listed nor callable.
     // That needs the store's schema, so it is asked once, and only by a message
     // that depends on it: `initialize`, `ping` and notifications touch no table.
     let served: Promise<boolean> | undefined;
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
+    // The reconstructed state likewise exists exactly while its GET route does.
+    let reconstructedServed: Promise<boolean> | undefined;
+    const reconstructed = (): Promise<boolean> =>
+      (reconstructedServed ??= reconstructedStateAvailable(env));
     const message = await handleMcp(
-      await boundedJson(request),
+      request,
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
-        if (isAgentToolName(name)) return callTool(name, body, context);
-        if (ops && isOpsToolName(name)) return callOpsTool(name, body, env, subject);
+        if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
+        // An MCP client's capabilities also carry its delegation declaration
+        // (#628, inert: nothing executes under it); recorded like any call.
+        if (name === "kogane.capabilities" && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async (audit) => {
+            const result = await callTool(name, body, { ...context, audit });
+            if (result.status !== 200) return result;
+            return {
+              ...result,
+              body: {
+                ...(result.body as Record<string, unknown>),
+                delegation: await mcpDelegationCapabilities(env, caller, delegationNow),
+              },
+            };
+          });
+        if (isAgentToolName(name))
+          return toolCall(request, env, caller, name, (audit) =>
+            callTool(name, body, { ...context, audit }),
+          );
+        if (ops && isOpsToolName(name))
+          return toolCall(request, env, caller, name, (audit) =>
+            callOpsTool(name, body, env, caller, audit),
+          );
         return null;
       },
       async () => [
         ...MCP_TOOLS,
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),
+        ...((await reconstructed()) ? RECONSTRUCTED_STATE_MCP_TOOLS : []),
         ...(listOps ? OPS_MCP_TOOLS : []),
       ],
     );
-    if (message === null) return new Response(null, { status: 202 });
-    return json(message);
+    return message;
   }
   const tool = toolForPath(path);
   if (tool === null) throw new HttpError(404, "not_found");
   // Absent, not refused, while the deployment cannot serve it, like its route.
   if (tool === PURCHASES_TOOL_NAME && !(await cardPurchasesAvailable(env)))
     throw new HttpError(404, "not_found");
-  const outcome = await callTool(tool, await boundedJson(request), context);
+  if (tool === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructedStateAvailable(env)))
+    throw new HttpError(404, "not_found");
+  const body = await boundedJson(request);
+  const outcome = (await toolCall(request, env, caller, tool, (audit) =>
+    callTool(tool, body, { ...context, audit }),
+  ))!;
   return json(outcome.body, outcome.status);
 }
 
@@ -236,4 +294,102 @@ export async function sharedQueryApi(
     parsed.value,
   );
   return json(outcome.body, outcome.status);
+}
+
+// ── the audit record of every agent call (ADR 0064) ──────────────────────
+
+/** The audit path of a caller: `mcp` for an MCP client, `agent-http` for a browser session. */
+function auditPath(caller: AgentCaller): "agent-http" | "mcp" {
+  return caller.kind === "mcp-client" ? "mcp" : "agent-http";
+}
+
+/**
+ * The audit context of one agent caller: its principal as the boundary built
+ * it (`mcp-client:<sub>` on `/mcp`), the subject that principal stands for,
+ * graded `agent`.
+ */
+function agentAudit(request: Request, env: Env, caller: AgentCaller) {
+  return auditContext(
+    request,
+    env,
+    auditPath(caller),
+    subjectOfPrincipal(caller.principal),
+    caller.principal,
+  );
+}
+
+/** One tool call of `caller`, recorded through the chokepoint under its catalogued operation. */
+function toolCall(
+  request: Request,
+  env: Env,
+  caller: AgentCaller,
+  name: string,
+  run: (audit: OperationCall | undefined) => Promise<ToolResult>,
+): Promise<ToolResult | null> {
+  const operation = toolOperation(name, auditPath(caller));
+  if (operation === null) return run(undefined);
+  return auditedTool(agentAudit(request, env, caller), operation, run);
+}
+
+/** The operation a refusal of `path` before any tool ran is recorded under, or null. */
+function transportOperation(path: string): OperationName | null {
+  if (path === MCP_PATH) return "mcp.request";
+  if (path.startsWith(AGENT_PREFIX))
+    return toolOperation(`kogane.${path.slice(AGENT_PREFIX.length)}`, "agent-http");
+  return null;
+}
+
+/**
+ * The agent routes as `worker.ts` calls them, with the caller the boundary
+ * resolves (`mcpCaller` on `/mcp`, `browserCaller` on `/api/agent/v1/*`).
+ *
+ * Every refusal the transport makes after the caller is known and before a
+ * tool runs (a method, a query string, the transport check, no grant, a body
+ * too large or not JSON) is recorded once, under the tool the path names on
+ * `/api/agent/v1/*` and under `mcp.request` on `/mcp`; a refusal a tool call
+ * already recorded is not recorded again, and a path no tool serves is not an
+ * operation. A caller that cannot be resolved has no subject (401) and is not
+ * recorded — except a browser session whose verified subject claims the
+ * agent-only namespace (`403 actor_not_supported`): that is a refusal of a
+ * named subject, and it is recorded on `agent-http` with that subject.
+ */
+export async function auditedAgentApi(
+  request: Request,
+  env: Env,
+  url: URL,
+  resolveCaller: () => Promise<AgentCaller>,
+): Promise<Response | null> {
+  const path = url.pathname;
+  let caller: AgentCaller;
+  try {
+    caller = await resolveCaller();
+  } catch (error) {
+    const operation = transportOperation(path);
+    if (
+      operation !== null &&
+      path !== MCP_PATH &&
+      error instanceof HttpError &&
+      error.status === 403 &&
+      error.code === "actor_not_supported"
+    ) {
+      // `browserCaller` verified the session and refused its subject; the
+      // subject is read again from the same verified assertion to name it.
+      const subject = await authenticate(request, env).catch(() => null);
+      if (subject !== null)
+        await recordThrown(auditContext(request, env, "agent-http", subject), operation, error);
+    }
+    throw error;
+  }
+  try {
+    const response = await agentApi(request, env, url, caller);
+    // The MCP SDK answers a transport refusal (a body that is not JSON, too
+    // large, the wrong media type) itself, with an HTTP status: recorded here.
+    if (response !== null && path === MCP_PATH)
+      await recordTransportStatus(agentAudit(request, env, caller), response.status);
+    return response;
+  } catch (error) {
+    const operation = transportOperation(path);
+    if (operation !== null) await recordThrown(agentAudit(request, env, caller), operation, error);
+    throw error;
+  }
 }

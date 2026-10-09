@@ -26,6 +26,7 @@ import {
 } from "./concepts";
 import {
   type CollectionScope,
+  GLOBAL_PASS_NOTICE_LIMIT,
   type MeasureView,
   PAGE_LIMIT,
   type PageLimit,
@@ -33,6 +34,12 @@ import {
   pagedCollection,
   periodMeasureSql,
 } from "./scope";
+import {
+  ELIGIBLE_VPOINT_RUNS,
+  MONEYFORWARD_SNAPSHOT_CTES,
+  myjcbPastMonthsSnapshotCtes,
+  SMBC_DIRECT_SNAPSHOT_CTES,
+} from "./current-captures";
 
 const ACTIVE = activeStateProjection.predicate;
 const PARSE_CHAIN = activeStateProjection.parseChain;
@@ -63,6 +70,22 @@ export const OVERVIEW_SOURCES_SQL = `SELECT s.id, s.provider, s.ingestion,
 
 export const OVERVIEW_FETCH_RUNS_SQL = `SELECT id, source_id, tool, external_run_id, status, started_at, completed_at
   FROM ${visibleEvidence.fetchRuns} ORDER BY id DESC LIMIT ${PAGE_LIMIT}`;
+
+/**
+ * Visible fetch runs per listed source, counted over each source's whole
+ * history: the `coverage` intent's `collectionRunCount`. `?1` is a JSON array
+ * of source ids, applied before anything is counted, so a run of a source
+ * outside the list is never read and cannot move a listed source's count.
+ * That is the difference from `OVERVIEW_FETCH_RUNS_SQL`, the operator
+ * overview's newest-runs window, which is taken across every source before a
+ * caller could filter it. One row per listed source that has a visible run,
+ * reached through `idx_fetch_runs_source (source_id, id DESC)`.
+ */
+export const SOURCE_FETCH_RUN_COUNTS_SQL = `SELECT f.source_id, COUNT(*) AS run_count
+  FROM ${visibleEvidence.fetchRuns} f
+ WHERE f.source_id IN (SELECT value FROM json_each(?1))
+ GROUP BY f.source_id
+ ORDER BY f.source_id`;
 
 export const OVERVIEW_PARSE_RUNS_SQL = `SELECT id, fetch_artifact_id, parser_name, parser_version, parsed_at, status,
        error, warnings_json, superseded_by_parse_run_id
@@ -119,39 +142,6 @@ export const PARSING_HEALTH_SQL = `SELECT j.status, count(*) AS count FROM obser
                 AND failed.parser_version = j.parser_version AND failed.status = 'error'
             ), '')
         )) GROUP BY j.status`;
-
-// V Point publishes one balance across three page datasets; a run is complete
-// only when all three parsed and every expected artifact of the run parsed.
-const ELIGIBLE_VPOINT_RUNS = `eligible_vpoint_runs AS (
-         SELECT DISTINCT f.id AS fetch_run_id, fa.source_id, f.completed_at
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name IN (
-             'v-point-balance-info', 'v-point-smfg-point', 'v-point-history-page'
-           )
-         GROUP BY f.id, fa.source_id, f.completed_at
-         HAVING COUNT(DISTINCT p.parser_name) = 3
-            AND COUNT(DISTINCT p.fetch_artifact_id) = (
-              SELECT COUNT(*)
-              FROM ${visibleEvidence.fetchArtifacts} expected_fa
-              WHERE expected_fa.fetch_run_id = f.id
-                AND (
-                  expected_fa.dataset IN ('balance-info', 'smfg-point')
-                  OR expected_fa.dataset LIKE 'history-page-%'
-                )
-            )
-       ), ranked_vpoint_runs AS (
-         SELECT fetch_run_id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY source_id
-                  ORDER BY completed_at DESC, fetch_run_id DESC
-                ) AS snapshot_rank
-         FROM eligible_vpoint_runs
-       ), current_vpoint_runs AS (
-         SELECT fetch_run_id
-         FROM ranked_vpoint_runs
-         WHERE snapshot_rank = 1
-       )`;
 
 /** The `YYYYMM` statement month of a Vpass statement-page artifact key. */
 const VPASS_STATEMENT_MONTH = (artifact: string): string =>
@@ -374,6 +364,62 @@ export const GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES = `eligible_global_pass_snapshot
        )`;
 
 /**
+ * A visible transaction row of `snapshot`'s run and month, read through the
+ * same active chain the Transactions page reads, so "had rows" means rows the
+ * page showed while that snapshot was current.
+ */
+const GLOBAL_PASS_MONTH_ROWS = (snapshot: string): string => `SELECT 1
+           FROM ${activeStateProjection.observationChain("transaction_observations", "t")}
+           WHERE ${ACTIVE}
+             AND p.parser_name = 'global-pass-activity'
+             AND fa.dataset = 'globalpass-activity'
+             AND fa.fetch_run_id = ${snapshot}.fetch_run_id
+             AND fa.source_id = ${snapshot}.source_id
+             AND ${GLOBAL_PASS_MONTH("fa")} = ${snapshot}.activity_month`;
+
+/**
+ * GLOBAL PASS months whose current snapshot is empty while an older snapshot
+ * of the same month had rows (ADR 0026's amendment of 2026-10-08). The
+ * currentness rule is `GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES`, composed verbatim
+ * and unchanged: this read names the months where that rule hid rows, it never
+ * moves a page back into the current set and never counts a row. Per month: the
+ * current run, the newest older eligible run that had rows, and how many older
+ * eligible runs had rows. Every current snapshot is probed once for a row (an
+ * EXISTS that stops at the first), and only a month whose current snapshot has
+ * none probes its older snapshots; each probe reaches the run's pages through
+ * the artifact index. The result is bounded to `GLOBAL_PASS_NOTICE_LIMIT`
+ * months plus one row for truncation.
+ */
+export const GLOBAL_PASS_EMPTY_MONTH_NOTICE_SQL = `WITH ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES}, emptied_global_pass_months AS (
+         SELECT latest.source_id, latest.activity_month, latest.fetch_run_id
+         FROM ranked_global_pass_snapshots latest
+         WHERE latest.snapshot_rank = 1
+           AND NOT EXISTS (${GLOBAL_PASS_MONTH_ROWS("latest")})
+       ), superseded_global_pass_rows AS (
+         SELECT emptied.source_id, emptied.activity_month,
+                emptied.fetch_run_id AS current_fetch_run_id,
+                older.fetch_run_id AS superseded_fetch_run_id,
+                ROW_NUMBER() OVER (
+                  PARTITION BY emptied.source_id, emptied.activity_month
+                  ORDER BY older.snapshot_rank
+                ) AS newest_superseded,
+                COUNT(*) OVER (
+                  PARTITION BY emptied.source_id, emptied.activity_month
+                ) AS superseded_runs
+         FROM emptied_global_pass_months emptied
+         JOIN ranked_global_pass_snapshots older
+           ON older.source_id = emptied.source_id
+          AND older.activity_month = emptied.activity_month
+          AND older.snapshot_rank > 1
+         WHERE EXISTS (${GLOBAL_PASS_MONTH_ROWS("older")})
+       )
+       SELECT source_id, activity_month, current_fetch_run_id, superseded_fetch_run_id, superseded_runs
+       FROM superseded_global_pass_rows
+       WHERE newest_superseded = 1
+       ORDER BY source_id, activity_month DESC
+       LIMIT ${GLOBAL_PASS_NOTICE_LIMIT + 1}`;
+
+/**
  * The artifact `fa` belongs to `snapshot`, a `current_vpass_snapshots` row:
  * the current snapshot of the artifact's own card-month.
  */
@@ -386,37 +432,7 @@ export const VPASS_SNAPSHOT_MEMBER = `snapshot.fetch_run_id = fa.fetch_run_id
 export const MYJCB_LEDGER_MEMBER =
   "fa.id IN (SELECT fetch_artifact_id FROM current_myjcb_snapshots)";
 
-const TRANSACTION_CTES = `${MYJCB_LEDGER_SNAPSHOT_CTES}, ranked_smbc_direct_snapshots AS (
-         SELECT p.fetch_artifact_id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY fa.source_id, fa.artifact_key
-                  ORDER BY fa.fetched_at DESC, fa.id DESC
-                ) AS snapshot_rank
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name = 'smbc-direct-transactions'
-           AND fa.dataset = 'transactions-normalized'
-       ), current_smbc_direct_snapshots AS (
-         SELECT fetch_artifact_id
-         FROM ranked_smbc_direct_snapshots
-         WHERE snapshot_rank = 1
-       ), ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES}, ranked_moneyforward_snapshots AS (
-         SELECT p.fetch_artifact_id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY fa.source_id, fa.fetch_unit_key, substr(fa.artifact_key, -12, 7)
-                  ORDER BY fa.fetched_at DESC, fa.id DESC
-                ) AS snapshot_rank
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name = 'moneyforward-monthly-transactions'
-           AND fa.dataset = 'monthly-transactions'
-           AND (fa.fetch_unit_key LIKE 'moneyforward-account-v1-%'
-             OR fa.fetch_unit_key LIKE 'moneyforward-account-v2-%')
-       ), current_moneyforward_snapshots AS (
-         SELECT fetch_artifact_id
-         FROM ranked_moneyforward_snapshots
-         WHERE snapshot_rank = 1
-       ), ${ELIGIBLE_VPOINT_RUNS}, ${VPASS_STATEMENT_SNAPSHOT_CTES}`;
+const TRANSACTION_CTES = `${MYJCB_LEDGER_SNAPSHOT_CTES}, ${SMBC_DIRECT_SNAPSHOT_CTES}, ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES}, ${MONEYFORWARD_SNAPSHOT_CTES}, ${ELIGIBLE_VPOINT_RUNS}, ${VPASS_STATEMENT_SNAPSHOT_CTES}`;
 
 /**
  * Current transactions: one row per provider transaction identity. Sources
@@ -523,23 +539,7 @@ function latestBalancesInner(measureView: MeasureView | undefined): string {
     measureView === "summaries"
       ? " OR (source_id = 'myjcb' AND parser LIKE 'myjcb-credit-past-month-balances@%' AND metric = 'credit_statement_payment_amount')"
       : "";
-  return `WITH ${SNAPSHOT_CTES}, ranked_myjcb_snapshots AS (
-         SELECT p.fetch_artifact_id,
-                ROW_NUMBER() OVER (
-                  PARTITION BY
-                    fa.source_id,
-                    substr(fa.artifact_key, 1, instr(fa.artifact_key, '/') - 1)
-                  ORDER BY fa.fetched_at DESC, fa.id DESC
-                ) AS snapshot_rank
-         FROM ${PARSE_CHAIN}
-         WHERE ${ACTIVE}
-           AND p.parser_name = 'myjcb-credit-past-month-balances'
-           AND fa.dataset = 'credit-past-months'
-       ), current_myjcb_snapshots AS (
-         SELECT fetch_artifact_id
-         FROM ranked_myjcb_snapshots
-         WHERE snapshot_rank = 1
-       ), ${ELIGIBLE_VPOINT_RUNS}
+  return `WITH ${SNAPSHOT_CTES}, ${myjcbPastMonthsSnapshotCtes()}, ${ELIGIBLE_VPOINT_RUNS}
        SELECT id, source_id, source_account, metric, instrument, amount_minor,
               amount_text, as_of, observed_at, parser
        FROM (
@@ -771,3 +771,6 @@ export const RAW_DOWNLOAD_SQL = `SELECT o.sha256, o.blob_key, o.byte_size,
         a.artifact_key, a.mime AS declared_media_type
       FROM raw_objects o JOIN ${visibleEvidence.fetchArtifacts} a ON a.sha256 = o.sha256
       WHERE o.sha256 = ? ORDER BY a.id ASC LIMIT 1`;
+
+/** The period expressions the collection quality read groups by (collection-quality.ts). */
+export { GLOBAL_PASS_MONTH, VPASS_STATEMENT_MONTH };

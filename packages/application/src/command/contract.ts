@@ -17,6 +17,13 @@ import {
   isCardRefundAllocationId,
   isPortionList,
 } from "../../../domain/src/card-purchase-review.ts";
+import {
+  ECONOMIC_EVENT_COMMAND_KINDS,
+  type EconomicEventCommandKind,
+  type EconomicEventCommandPayload,
+  isEconomicEventCommandKind,
+  validEconomicEventCommandPayload,
+} from "../../../domain/src/economic-event-commands.ts";
 
 /**
  * The closed list of change kinds. There is no external money action here and
@@ -36,6 +43,7 @@ export const CHANGE_KINDS = [
   "card-refund.withdraw",
   "card-installment.link",
   "card-installment.unlink",
+  ...ECONOMIC_EVENT_COMMAND_KINDS,
 ] as const;
 export type ChangeKind = (typeof CHANGE_KINDS)[number];
 
@@ -59,6 +67,20 @@ export function isCardReviewKind(kind: unknown): kind is CardReviewKind {
   return isOneOf(CARD_REVIEW_KINDS)(kind);
 }
 
+/**
+ * The economic-event command kinds (ADR 0054, G2; CORE 0071): vocabulary
+ * only. A kind is plannable only once its planner is registered in
+ * `ECONOMIC_EVENT_PLANNERS`; until then planning, simulating, approving and
+ * committing one are refused with `unsupported_semantics` for every
+ * principal, before any row is written. The reserved
+ * `economic-event.resolve-identity` is not a change kind.
+ */
+export { ECONOMIC_EVENT_COMMAND_KINDS };
+export type { EconomicEventCommandKind, EconomicEventCommandPayload };
+export function isEconomicEventKind(kind: unknown): kind is EconomicEventCommandKind {
+  return isEconomicEventCommandKind(kind);
+}
+
 export const IDENTITY_SUBJECTS = ["account", "instrument"] as const;
 export type IdentitySubject = (typeof IDENTITY_SUBJECTS)[number];
 
@@ -67,6 +89,13 @@ export interface IdentityAssignPayload {
   referenceId: string;
   targetId: string;
   reason: string;
+  /** Candidate provenance; direct manual assignments omit it. */
+  candidate?: {
+    candidateId: string;
+    anchorIdentifierId: string;
+    anchorMappingRevision: number;
+    subjectMappingRevision: number;
+  };
 }
 export interface IdentityReleasePayload {
   subject: IdentitySubject;
@@ -132,7 +161,8 @@ export type ChangePayload =
   | IdentityReleasePayload
   | RelationPayload
   | CardSettlementPayload
-  | CardReviewPayload;
+  | CardReviewPayload
+  | EconomicEventCommandPayload;
 
 const REASON_MAX = 1000;
 
@@ -148,16 +178,35 @@ export function validPayload(kind: ChangeKind, value: unknown): value is ChangeP
     return exactKeys(value, ["proposalId", "reason"]) && isText(value.proposalId, 512) && reason;
   }
   if (isCardReviewKind(kind)) return reason && validCardReviewPayload(kind, value);
+  // Exact keys, a closed family and the same reason rule (economic-event-commands.ts).
+  if (isEconomicEventKind(kind)) return validEconomicEventCommandPayload(kind, value);
   if (kind === "identity.assign" || kind === "identity.release-override") {
     const assign = kind === "identity.assign";
+    const candidate = assign && Object.hasOwn(value, "candidate");
     const keys = assign
-      ? ["subject", "referenceId", "targetId", "reason"]
+      ? ["subject", "referenceId", "targetId", "reason", ...(candidate ? ["candidate"] : [])]
       : ["subject", "referenceId", "reason"];
     return (
       exactKeys(value, keys) &&
       isOneOf(IDENTITY_SUBJECTS)(value.subject) &&
       isText(value.referenceId, 512) &&
       (!assign || isText(value.targetId, 512)) &&
+      (!candidate ||
+        (value.subject === "instrument" &&
+          isRecord(value.candidate) &&
+          exactKeys(value.candidate, [
+            "candidateId",
+            "anchorIdentifierId",
+            "anchorMappingRevision",
+            "subjectMappingRevision",
+          ]) &&
+          isText(value.candidate.candidateId, 512) &&
+          isText(value.candidate.anchorIdentifierId, 128) &&
+          value.candidate.anchorIdentifierId !== value.referenceId &&
+          Number.isSafeInteger(value.candidate.anchorMappingRevision) &&
+          (value.candidate.anchorMappingRevision as number) > 0 &&
+          Number.isSafeInteger(value.candidate.subjectMappingRevision) &&
+          (value.candidate.subjectMappingRevision as number) > 0)) &&
       reason
     );
   }
@@ -430,6 +479,12 @@ export interface MutationInput {
   plan: ChangePlan;
   principal: Principal;
   operationId: string;
+  /**
+   * The digest the receipt reservation records for this operation: with the
+   * plan id it names this payload's receipt, so an economic writer's entry
+   * (`receiptEntry`, ADR 0054) is true only for the batch that reserved it.
+   */
+  payloadDigest: string;
   now: string;
   guard: CommitGuard;
 }

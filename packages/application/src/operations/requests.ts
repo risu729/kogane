@@ -33,6 +33,8 @@ import {
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import type { CommandStore, PreparedWrite, Principal } from "../command/contract.ts";
 import { commandError, type CommandResult } from "../command/errors.ts";
+import { collectorExecution, type CollectorExecutionReport } from "./collector-trail.ts";
+import type { OperationCall } from "../audit/call.ts";
 
 export const OPERATION_KINDS = [
   "collection",
@@ -156,6 +158,13 @@ export interface OperationReceipt {
   failureCode: string | null;
   acceptedAt: string;
   updatedAt: string;
+  /**
+   * For a `collection` or `session-refresh` request: its collector execution
+   * — state, timestamps, the runs it reported and how far each got toward
+   * publication (ADR 0048). Null for the other kinds, and on the acceptance
+   * answer, which reports only what was stored.
+   */
+  execution: CollectorExecutionReport | null;
 }
 
 export interface AcceptedOperation {
@@ -288,6 +297,7 @@ function receiptOf(row: OpsRow, stages: readonly StageRow[]): OperationReceipt {
     failureCode: row.failure_code,
     acceptedAt: row.created_at,
     updatedAt: row.updated_at,
+    execution: null,
   };
 }
 
@@ -298,7 +308,16 @@ async function loadReceipt(
 ): Promise<OperationReceipt | null> {
   const row = await store.first<OpsRow>(SELECT_ROW, [operationId, principal]);
   if (!row) return null;
-  return receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId]));
+  const receipt = receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId]));
+  return {
+    ...receipt,
+    execution: await collectorExecution(store, {
+      operationId,
+      kind: row.kind,
+      status: row.status,
+      acceptedAt: row.created_at,
+    }),
+  };
 }
 
 export interface OperationContext {
@@ -307,6 +326,12 @@ export interface OperationContext {
   principal: Principal;
   /** ISO-8601 second precision, supplied by the adapter. */
   now: string;
+  /**
+   * The route's or tool's audit call (ADR 0064). An accepted request's
+   * `accepted` record is the last statement of the acceptance batch, joined
+   * to the request row this call inserted; a re-send records nothing here.
+   */
+  audit?: OperationCall;
 }
 
 interface AcceptInput extends OperationContext {
@@ -360,7 +385,30 @@ async function accept(input: AcceptInput): Promise<CommandResult<AcceptedOperati
         ],
       },
       ...(input.extraWrites?.(operationId) ?? []),
+      ...(input.audit
+        ? [
+            input.audit.effect(
+              {
+                targetRef: operationId,
+                scope:
+                  input.sourceId === null
+                    ? null
+                    : { namespace: "core-source", source: input.sourceId },
+                idempotencyKey: request.idempotencyKey ?? null,
+                payloadDigest,
+                diff: { kind: "request", status: input.status },
+              },
+              {
+                sql: `EXISTS(SELECT 1 FROM ops_requests
+                  WHERE operation_id=? AND principal=? AND created_at=? AND payload_digest=?)`,
+                binds: [operationId, principal.id, now, payloadDigest],
+              },
+              { kind: "target" },
+            ),
+          ]
+        : []),
     ]);
+    input.audit?.settle(outcomes.at(-1)?.changes);
     // The insert is guarded on the row not existing, so a request that lost a
     // race to another sender of the same key inserts nothing — and *that*, not
     // the earlier read, is what says whether this call created the record.
@@ -412,9 +460,9 @@ export async function requestCollection(
     kind: "collection",
     sourceId: request.source,
     status: "accepted",
-    // Recorded, not sent. The Service Binding call to the collector is U09's;
-    // until it exists (and after it fails) this row is what the Processor cron
-    // re-dispatches, so a lost notification never loses the request (02 §5).
+    // Recorded, not sent. The Processor's dispatch lane starts it over the
+    // collector's named RPC once (ADR 0048); until then this row is what the
+    // lane re-reads, so a lost notification never loses the request (02 §5).
     dispatchState: "dispatch_pending",
   });
 }

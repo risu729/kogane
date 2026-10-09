@@ -19,8 +19,8 @@ depends = ["//services/collector-smbc-direct:types"]
 # exactly as it was and keeps `worker-test/` (a vitest suite) out of bun's
 # discovery.
 run = [
-	"./node_modules/.bin/vitest run",
-	"bun test ./test",
+	"node ../../tasks/_lib/coverage-run.mjs vitest run",
+	"node ../../tasks/_lib/coverage-run.mjs bun test ./test",
 ]
 
 [tasks."dry-run"]

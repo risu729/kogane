@@ -17,6 +17,13 @@ expiry estimates and the replay of saved conversion simulations, built from an
 input that fixes the evaluation instant. Same rules, same database, its own
 flag (`docs/rewards.md` §12).
 
+`0003_reward_expiry_basis.sql` adds one nullable column,
+`reward_expiry_estimates.expiry_basis_json`: the provider's displayed expiry
+and the computed expiry of each estimate, apart, with the rule version,
+activity and membership facts the computed side used or its closed reason
+(ADR 0049, `docs/rewards.md` §2.1). Rows of builds before
+`reward-projection-v2` keep NULL.
+
 Rules that already hold:
 
 - CORE migrations live in `../core/` and are immutable once applied. READ
@@ -25,3 +32,9 @@ Rules that already hold:
   these directories, never from a checked-in schema dump.
 - A destructive READ change rebuilds an empty READ from the latest schema; it
   never edits an applied file.
+
+`0004_reward_unclassified_buckets.sql` adds the current
+`reward_expiry_estimates_v2` projection with an explicit unclassified kind.
+The original estimate table and sealed rows remain historical. New App/Processor
+releases require v2 promotion and a rebuilt snapshot; they do not serve a legacy
+release as the corrected interpretation (ADR 0049 amendment).

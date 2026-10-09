@@ -75,7 +75,7 @@ in the ledger, and the order matters because of the foreign keys:
 read_build_checkpoints, scope_relations, snapshot_input_refs,
 current_balance_projection, balance_snapshot_pointer, balance_read_snapshots,
 reward_build_checkpoints, reward_conversion_simulations,
-reward_expiry_estimates, reward_snapshot_input_refs, reward_snapshot_pointer,
+reward_expiry_estimates_v2, reward_expiry_estimates, reward_snapshot_input_refs, reward_snapshot_pointer,
 reward_expiry_snapshots,
 read_instance
 ```
@@ -128,8 +128,9 @@ until the pointer switches.
   `infra/schema/core-ledger.md` and the CORE tables are not part of this
   procedure at all.
 
-If the App feature gates were paused, re-enable `BALANCE_PROJECTION_ENABLED=1`
-and `REWARDS_V2_ENABLED=true` through the normal Actions release.
+The App does not have a balance or reward route flag to turn back on. With no
+published snapshot it keeps answering `503` on the v2 balance routes and on
+reward expiry and simulations.
 
 ## 5. What to tell people
 
