@@ -198,4 +198,213 @@ describe("mobile-suica: the shared target persists the legacy bytes (U09 parity,
     expect(result.manifest.safeErrorCode).toBeUndefined();
     expect(result.manifest.units.map((unit) => unit.coverageStatus)).toEqual(["partial"]);
   });
+
+  test("persists a 99-row January page as a complete single page", async () => {
+    const collection = await collectJanuaryBoundary(91);
+    expect(collection.rows).toHaveLength(99);
+    // complete is this page's row count under 100.
+    expect(collection.complete).toBe(true);
+    expect(collection.pageCount).toBe(1);
+    expect(collection.artifacts).toHaveLength(3);
+    expect(collection.artifacts.map((artifact) => artifact.filename)).toEqual([
+      "sf-history-page-0001.html",
+      "sf-history.json",
+      "collection-summary.json",
+    ]);
+    const history = jsonObject(artifactBody(collection.artifacts, "sf-history.json"));
+    const historyRows = rowDates(history.rows);
+    expect(history.transactionCount).toBe(99);
+    expect(historyRows).toHaveLength(99);
+    expect(history.complete).toBe(true);
+    expect(history.pageCount).toBe(1);
+    expect(history.asOfDateJst).toBe("2026-01-15");
+    expect(historyRows.filter((date) => date === "2026-01-14")).toHaveLength(2);
+    expect(historyRows.filter((date) => date === "2025-12-31")).toHaveLength(2);
+    expect(history.transactionCount).toBe(collection.rows.length);
+    expect(history.complete).toBe(collection.complete);
+    const summary = jsonObject(artifactBody(collection.artifacts, "collection-summary.json"));
+    expect(summary.transactionCount).toBe(99);
+    expect(summary.complete).toBe(true);
+    expect(summary.pageCount).toBe(1);
+    expect(summary.asOfDateJst).toBe("2026-01-15");
+    expect(summary.transactionCount).toBe(collection.rows.length);
+    expect(summary.complete).toBe(collection.complete);
+
+    const runId = crypto.randomUUID();
+    const result = await persistMobileSuicaRun(new FakeR2Bucket(), {
+      runId,
+      producerVersion: PRODUCER_VERSION,
+      attemptId: `attempt-${runId}`,
+      startedAt: "2026-09-11T00:00:00.000Z",
+      completedAt: "2026-09-11T00:00:30.000Z",
+      status: "success",
+      asOfDateJst: "2026-01-15",
+      complete: true,
+      artifacts: collection.artifacts,
+      failureCodes: [],
+    });
+    expect(result.outcome).toBe("persisted");
+    if (result.outcome !== "persisted") return;
+    expect(result.manifest.providerOutcome).toBe("success");
+    expect(result.manifest.coverageStatus).toBe("complete");
+    expect(result.manifest.safeErrorCode).toBeUndefined();
+    expect(result.manifest.artifacts).toHaveLength(3);
+    expect(result.objects).toHaveLength(3);
+    expect(result.manifest.units).toHaveLength(1);
+    const unit = result.manifest.units[0]!;
+    expect(unit.unitKey).toBe("account");
+    expect(unit.artifactCount).toBe(3);
+    expect(unit.coverageStatus).toBe("complete");
+    expect(unit.safeErrorCode).toBeUndefined();
+  });
+
+  test("persists a 100-row January page as partial when the history boundary is unproven", async () => {
+    const collection = await collectJanuaryBoundary(92);
+    expect(collection.rows).toHaveLength(100);
+    expect(collection.complete).toBe(false);
+    expect(collection.pageCount).toBe(1);
+    expect(collection.artifacts).toHaveLength(3);
+    expect(collection.artifacts.map((artifact) => artifact.filename)).toEqual([
+      "sf-history-page-0001.html",
+      "sf-history.json",
+      "collection-summary.json",
+    ]);
+    const history = jsonObject(artifactBody(collection.artifacts, "sf-history.json"));
+    const historyRows = rowDates(history.rows);
+    expect(history.transactionCount).toBe(100);
+    expect(historyRows).toHaveLength(100);
+    expect(history.complete).toBe(false);
+    expect(history.pageCount).toBe(1);
+    expect(history.asOfDateJst).toBe("2026-01-15");
+    expect(historyRows.filter((date) => date === "2026-01-14")).toHaveLength(2);
+    expect(historyRows.filter((date) => date === "2025-12-31")).toHaveLength(2);
+    expect(history.transactionCount).toBe(collection.rows.length);
+    expect(history.complete).toBe(collection.complete);
+    const summary = jsonObject(artifactBody(collection.artifacts, "collection-summary.json"));
+    expect(summary.transactionCount).toBe(100);
+    expect(summary.complete).toBe(false);
+    expect(summary.pageCount).toBe(1);
+    expect(summary.asOfDateJst).toBe("2026-01-15");
+    expect(summary.transactionCount).toBe(collection.rows.length);
+    expect(summary.complete).toBe(collection.complete);
+
+    const runId = crypto.randomUUID();
+    const result = await persistMobileSuicaRun(new FakeR2Bucket(), {
+      runId,
+      producerVersion: PRODUCER_VERSION,
+      attemptId: `attempt-${runId}`,
+      startedAt: "2026-09-11T00:00:00.000Z",
+      completedAt: "2026-09-11T00:00:30.000Z",
+      status: "partial",
+      asOfDateJst: "2026-01-15",
+      complete: false,
+      artifacts: collection.artifacts,
+      failureCodes: ["history_boundary_unproven"],
+    });
+    expect(result.outcome).toBe("persisted");
+    if (result.outcome !== "persisted") return;
+    expect(result.manifest.providerOutcome).toBe("partial");
+    expect(result.manifest.coverageStatus).toBe("partial");
+    expect(result.manifest.safeErrorCode).toBe("history_boundary_unproven");
+    expect(result.manifest.artifacts).toHaveLength(3);
+    expect(result.objects).toHaveLength(3);
+    expect(result.manifest.units).toHaveLength(1);
+    const unit = result.manifest.units[0]!;
+    expect(unit.unitKey).toBe("account");
+    expect(unit.artifactCount).toBe(3);
+    expect(unit.coverageStatus).toBe("partial");
+    expect(unit.safeErrorCode).toBe("history_boundary_unproven");
+  });
 });
+
+function januaryBoundaryPage(julyCount: number): Uint8Array {
+  const monthDays = [
+    ...Array.from({ length: 2 }, () => "01/14"),
+    ...Array.from({ length: 2 }, () => "01/01"),
+    ...Array.from({ length: 2 }, () => "12/31"),
+    ...Array.from({ length: 2 }, () => "12/01"),
+    ...Array.from({ length: julyCount }, () => "07/20"),
+  ];
+  const rows = monthDays
+    .map(
+      (monthDay) =>
+        `<tr><td><input name="printCheck"></td><td>${monthDay}</td><td>物販</td><td>店舗</td><td></td><td></td><td>\\1,234</td><td>-100</td></tr>`,
+    )
+    .join("");
+  const html = [
+    "<html><body>利用履歴<form>",
+    `<input type="hidden" name="baseVariable" value="${BASE_VARIABLE_SECRET}">`,
+    '<input type="hidden" name="specifyYearMonth" value="2026/01">',
+    "<table><tr><td></td><td>月日</td><td>種別</td><td>利用場所</td><td>種別</td><td>利用場所</td><td>残高</td><td>入金・利用額</td></tr>",
+    rows,
+    "</table></form></body></html>",
+  ].join("");
+  return new Uint8Array(encode(html, "shift_jis"));
+}
+
+async function collectJanuaryBoundary(julyCount: number) {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (_input: string | URL | Request, _init?: RequestInit) =>
+    new Response(januaryBoundaryPage(julyCount).buffer as ArrayBuffer, {
+      status: 200,
+      headers: { "content-type": "text/html; charset=shift_jis" },
+    })) as typeof fetch;
+  try {
+    return await collectMobileSuica({
+      session: {
+        cookieHeader: `ASP.NET_SessionId=${COOKIE_SECRETS[0]}; sc_auth=${COOKIE_SECRETS[1]}; TS0184138d=${COOKIE_SECRETS[2]}`,
+        formBody: `baseVariable=${BASE_VARIABLE_SECRET}&specifyYearMonth=2026%2F09`,
+        userAgent: "synthetic-agent",
+        capturedAt: "2026-09-11T00:00:00.000Z",
+      },
+      asOfDateJst: "2026-01-15",
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+function artifactBody(
+  artifacts: readonly { filename: string; body: string | Uint8Array }[],
+  filename: string,
+): string | Uint8Array {
+  const artifact = artifacts.find((entry) => entry.filename === filename);
+  if (!artifact) throw new Error(`missing artifact ${filename}`);
+  return artifact.body;
+}
+
+function jsonObject(body: string | Uint8Array): {
+  transactionCount: unknown;
+  complete: unknown;
+  pageCount: unknown;
+  asOfDateJst: unknown;
+  rows: unknown;
+} {
+  if (typeof body !== "string") throw new Error("expected a JSON string artifact");
+  const value: unknown = JSON.parse(body);
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new Error("expected a JSON object");
+  }
+  return {
+    transactionCount: "transactionCount" in value ? value.transactionCount : undefined,
+    complete: "complete" in value ? value.complete : undefined,
+    pageCount: "pageCount" in value ? value.pageCount : undefined,
+    asOfDateJst: "asOfDateJst" in value ? value.asOfDateJst : undefined,
+    rows: "rows" in value ? value.rows : undefined,
+  };
+}
+
+function rowDates(rows: unknown): string[] {
+  if (!Array.isArray(rows)) throw new Error("sf-history rows are not an array");
+  return rows.map((row) => {
+    if (
+      typeof row !== "object" ||
+      row === null ||
+      !("date" in row) ||
+      typeof row.date !== "string"
+    ) {
+      throw new Error("sf-history row is missing date");
+    }
+    return row.date;
+  });
+}
