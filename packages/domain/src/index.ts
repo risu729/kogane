@@ -20,6 +20,8 @@ export * from "./lots.ts";
 export * from "./reports.ts";
 export * from "./event-families.ts";
 export * from "./reconstruction.ts";
+export * from "./knowledge-selector.ts";
+export * from "./reconstruction-adapter.ts";
 export * from "./market-data.ts";
 export * from "./valuation-on-date.ts";
 export * from "./economic-contract.ts";
