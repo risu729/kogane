@@ -195,6 +195,13 @@ export async function commit(
   if (scope.length > 0 && !Object.keys(plan.expectedRevisions).every((ref) => scope.includes(ref)))
     return commandError("approval_scope_mismatch", [approval.approval_id]);
 
+  // An economic-event kind commits only while its planner accepts it, checked
+  // before its writer runs: a writer slot alone never opens a kind whose
+  // planner is not registered (ADR 0054, G2), as `approve` checks too.
+  if (isEconomicEventKind(plan.kind)) {
+    const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
+    if (!eligibility.ok) return eligibility;
+  }
   const planner = input.planners[plan.kind];
   if (!planner) return commandError("unsupported_semantics", [plan.kind]);
 

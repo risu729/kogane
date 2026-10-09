@@ -117,6 +117,22 @@ function counts(db: ReturnType<typeof migratedDatabase>) {
     ]),
   );
 }
+/**
+ * A writer that would write: one well-formed decision revision. It is what
+ * a writer slot filled before its planner would hand the commit (the review
+ * probe); `commit` must refuse before it runs.
+ */
+const writingMutation = (id: string) => async () => ({
+  writes: [
+    {
+      sql: `INSERT INTO decision_revisions VALUES(?1,'relation',?2,1,'accept','manual','operator',NULL,
+        'synthetic probe','[]',NULL,NULL,?3)`,
+      binds: [id, `relation-${id}`, now],
+    },
+  ],
+  decisionRevisionId: id,
+  result: {},
+});
 const unsupported = (kind: string) => ({
   ok: false as const,
   error: "unsupported_semantics" as const,
@@ -131,6 +147,21 @@ describe("the economic-event kinds are vocabulary only", () => {
     expect(Object.keys(ECONOMIC_EVENT_PLANNERS)).toEqual([]);
     for (const kind of ECONOMIC_EVENT_COMMAND_KINDS)
       expect(validPayload(kind, PAYLOADS[kind])).toBe(true);
+  });
+
+  test("the probe writer's statement is valid: run on its own it writes its row", async () => {
+    const db = migratedDatabase();
+    try {
+      const mutation = await writingMutation("decision-probe-valid")();
+      await sqliteCommandStore(db).batch(mutation.writes);
+      expect(
+        db
+          .query("SELECT count(*) AS n FROM decision_revisions WHERE id='decision-probe-valid'")
+          .get(),
+      ).toEqual({ n: 1 });
+    } finally {
+      db.close();
+    }
   });
 
   test("planning the reserved resolution kind is refused as an unknown kind", async () => {
@@ -217,7 +248,13 @@ describe("the economic-event kinds are vocabulary only", () => {
           [planId, planId, later, now],
         );
         const planted = counts(db);
-        for (const planners of [{ [kind]: async () => null }, {}])
+        // An empty slot, no slot, and a slot whose writer would write: the
+        // commit checks the planner before any writer runs.
+        for (const planners of [
+          { [kind]: async () => null },
+          {},
+          { [kind]: writingMutation(`decision-probe-${index}`) },
+        ])
           expect(
             await commit(store, {
               operationId: `op-${index}`,
@@ -235,7 +272,7 @@ describe("the economic-event kinds are vocabulary only", () => {
               principal: actor,
               planId,
               approvalId: "approval-planted",
-              planners: { [kind]: async () => null },
+              planners: { [kind]: writingMutation(`decision-probe-agent-${index}`) },
               now,
             }),
           ).toEqual({ ok: false, error: "approval_required" });

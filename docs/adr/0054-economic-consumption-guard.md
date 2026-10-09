@@ -728,12 +728,12 @@ by validation and refusal tests today.
 is empty, so `resolveAndSimulate` answers `unsupported_semantics` with the
 kind as its ref, and:
 
-| Step       | Human operator                                                                                                                     | Agent (also one carrying `interpretation.accept`) |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| `plan`     | `unsupported_semantics`, no row                                                                                                    | `unsupported_semantics`, no row                   |
-| `simulate` | `unsupported_semantics`                                                                                                            | `unsupported_semantics`                           |
-| `approve`  | `unsupported_semantics`, no approval (new: `approve` re-checks an economic-event plan's eligibility)                               | `approval_required`, before the plan is read      |
-| `commit`   | `unsupported_semantics`, nothing written (the processor's slot `economicEventMutation` answers null; `failureReason` re-simulates) | `approval_required`                               |
+| Step       | Human operator                                                                                                                                                                                                                 | Agent (also one carrying `interpretation.accept`) |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------- |
+| `plan`     | `unsupported_semantics`, no row                                                                                                                                                                                                | `unsupported_semantics`, no row                   |
+| `simulate` | `unsupported_semantics`                                                                                                                                                                                                        | `unsupported_semantics`                           |
+| `approve`  | `unsupported_semantics`, no approval (new: `approve` re-checks an economic-event plan's eligibility)                                                                                                                           | `approval_required`, before the plan is read      |
+| `commit`   | `unsupported_semantics`, nothing written: `commit` re-checks the plan's eligibility before any writer runs, so even a writer slot that would write is never called (the processor's slot `economicEventMutation` answers null) | `approval_required`                               |
 
 The `approve` and `commit` rows hold for a plan row, and an approval row,
 inserted directly: the lifecycle never writes either for these kinds. A
@@ -813,6 +813,12 @@ tables carries 0071's kind list.
 - `approve` now refuses a plan of an economic-event kind while its planner
   refuses it; a planted plan of a card review kind is still approvable and
   refused only at commit, as before.
+- `commit` re-checks an economic-event plan's eligibility (its planner)
+  before it calls the kind's writer, not only after a writer answered null.
+  Defence in depth found by the G2 review: a writer slot registered without
+  its planner, given a planted plan and approval, would otherwise have
+  committed its writes. The shipped slot answers null, so this was not live;
+  the check means G3 cannot open a writer without its planner.
 - The `family` field is required by the payload contract, not by a CHECK:
   like 0045, 0051 and 0058, 0071 changes the kind lists and nothing else.
 
@@ -831,8 +837,9 @@ tables carries 0071's kind list.
   plan refused for a human, an agent and an over-granted agent with no row
   written and a malformed payload still `invalid_command`; per kind, a planted
   plan refused at simulate, approve (human: `unsupported_semantics`; agents:
-  `approval_required`) and, with a planted approval, at commit, every command
-  and economic table unchanged and the approval unspent.
+  `approval_required`) and, with a planted approval, at commit (with an empty
+  slot, no slot, and a slot whose writer would write a valid row), every
+  command and economic table unchanged and the approval unspent.
   `packages/application/test/command.test.ts`: the closed kind list and the
   dispatch to the vocabulary's validator.
 - `services/processor/test/change-lifecycle.test.ts`: every kind through the

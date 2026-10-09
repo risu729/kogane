@@ -233,8 +233,10 @@ is empty, so `plan` and `simulate` answer `400 unsupported_semantics` with the
 kind as ref and write nothing; `approve` re-checks an economic-event plan's
 eligibility, so a plan row of these kinds that reached the table any other
 way is refused the same way for a human and with `approval_required` for an
-agent; and `commit` reaches the processor's `economicEventMutation`, which
-returns null, so it answers `unsupported_semantics` and writes nothing. The
+agent; and `commit` re-checks the same eligibility before it calls any
+writer, so it answers `unsupported_semantics` and writes nothing even for a
+writer slot that would write (the processor's `economicEventMutation`
+returns null). The
 reserved `economic-event.resolve-identity` is not a kind here: CORE 0070
 refuses it outright, and whether it joins the vocabulary is an open owner
 question in the ADR. No screen offers or labels the four kinds.
