@@ -6,10 +6,25 @@ const runId = "123e4567-e89b-42d3-a456-426614174000";
 const privateValue = "synthetic-private-financial-value";
 const csvBytes = new Uint8Array([0x82, 0xa0, 0x2c, 0x31, 0x0d, 0x0a]);
 
-function provider(total: number, csvStatus = 200, invalidHistory = false) {
+const HISTORY_PATH = "/custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories";
+const HISTORY_PAGER_PATH =
+  "/custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories-pager";
+
+function provider(
+  total: number,
+  csvStatus = 200,
+  invalidHistory = false,
+  shape?: {
+    currencyTotals?: Readonly<Record<string, number>>;
+    secondPage?: "changed-total" | "short";
+  },
+) {
   const csvCurrencies: string[] = [];
+  const requests: string[] = [];
+  const historyPages: { currency: string; countCnt: number; rows: number }[] = [];
   const fetcher = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const path = new URL(String(input)).pathname;
+    requests.push(path);
     if (path.endsWith("/input/"))
       return new Response("", { headers: { "set-cookie": `FSID=${privateValue}` } });
     if (path.endsWith("revision.json")) return new Response("1");
@@ -27,13 +42,22 @@ function provider(total: number, csvStatus = 200, invalidHistory = false) {
           ? new Response(csvBytes, { headers: { "content-type": "text/csv" } })
           : Response.json({ errors: [{ code: privateValue }] }, { status: csvStatus });
       }
-      const count = currency === "JPY" ? total : 0;
+      const declared = shape?.currencyTotals?.[currency] ?? (currency === "JPY" ? total : 0);
+      const start = Number(body.acquisitionStrtCnt);
+      const secondPage = currency === "JPY" && start > 1 ? shape?.secondPage : undefined;
+      let count = declared;
+      let rows = Math.min(3, Math.max(0, declared - start + 1));
+      if (secondPage === "changed-total") {
+        count = declared + 1;
+        rows = Math.min(3, Math.max(0, count - start + 1));
+      } else if (secondPage === "short") {
+        rows = 0;
+      }
+      const countCnt = invalidHistory ? -1 : count;
+      historyPages.push({ currency, countCnt, rows });
       return Response.json({
-        countCnt: invalidHistory ? -1 : count,
-        transactionHistInfo: Array.from(
-          { length: Math.min(3, Math.max(0, count - body.acquisitionStrtCnt + 1)) },
-          () => ({ privateValue }),
-        ),
+        countCnt,
+        transactionHistInfo: Array.from({ length: rows }, () => ({ privateValue })),
       });
     }
     if (path.endsWith("debit-sso/login-usage-dtl-inq"))
@@ -48,7 +72,7 @@ function provider(total: number, csvStatus = 200, invalidHistory = false) {
       );
     throw new Error(`unexpected request ${privateValue}`);
   };
-  return { fetcher, csvCurrencies };
+  return { fetcher, csvCurrencies, requests, historyPages };
 }
 
 function collect(mock: ReturnType<typeof provider>) {
@@ -76,6 +100,59 @@ async function capture<T>(task: () => Promise<T>, throwing = false) {
   } finally {
     spies.forEach((spy) => spy.mockRestore());
   }
+}
+
+async function expectSecondPageRefused(secondPage: "changed-total" | "short") {
+  const mock = provider(4, 200, false, { secondPage });
+  const { value, records } = await capture(async () => {
+    try {
+      await collect(mock);
+    } catch (error) {
+      return failure("collect", error);
+    }
+    throw new Error("expected failure");
+  });
+  expect(value.errorType).toBe("SonyBankStageError");
+  expect(value.diagnostics?.stage).toBe("history");
+  expect(mock.csvCurrencies).toEqual([]);
+  expect(
+    mock.requests.filter((path) => path.includes("ordinary-deposit-transaction-histories")),
+  ).toEqual([HISTORY_PATH, HISTORY_PAGER_PATH]);
+  expect(
+    mock.requests.some(
+      (path) =>
+        path.includes("debit-sso") || path.includes("vcfb") || path.startsWith("/statement"),
+    ),
+  ).toBe(false);
+  expect(mock.requests).toHaveLength(9);
+  expect(records).toContainEqual(
+    expect.objectContaining({
+      phase: "collection",
+      providerOperation: "EABA0600S1fE10",
+      outcome: "completed",
+      currency: "JPY",
+      page: 1,
+      rowCount: 3,
+      transactionCount: 4,
+    }),
+  );
+  expect(
+    records.some(
+      (record) => record.providerOperation === "EABA0600S1fE12" || record.stage === "history-csv",
+    ),
+  ).toBe(false);
+  expect(
+    records.some(
+      (record) =>
+        record.providerOperation === "EABA0600S1fE11" &&
+        record.phase === "collection" &&
+        record.outcome === "completed",
+    ),
+  ).toBe(false);
+  expect(JSON.stringify(records)).not.toContain(privateValue);
+  expect(JSON.stringify(value)).not.toContain(privateValue);
+  expect(JSON.stringify(records)).not.toContain("1234567");
+  return mock;
 }
 
 describe("Sony history CSV follows the official empty-history guard", () => {
@@ -180,6 +257,120 @@ describe("Sony history CSV follows the official empty-history guard", () => {
     });
     expect(value.diagnostics?.stage).toBe("history");
     expect(mock.csvCurrencies).toEqual([]);
+  });
+
+  test("a second page that changes the total refuses before CSV and stops within two pages", async () => {
+    const mock = await expectSecondPageRefused("changed-total");
+    expect(mock.historyPages).toEqual([
+      { currency: "JPY", countCnt: 4, rows: 3 },
+      { currency: "JPY", countCnt: 5, rows: 2 },
+    ]);
+  });
+
+  test("a short second page refuses before CSV and stops within two pages", async () => {
+    const mock = await expectSecondPageRefused("short");
+    expect(mock.historyPages).toEqual([
+      { currency: "JPY", countCnt: 4, rows: 3 },
+      { currency: "JPY", countCnt: 4, rows: 0 },
+    ]);
+  });
+
+  test("empty JPY with one positive foreign currency requests only that CSV and keeps its bytes", async () => {
+    const mock = provider(0, 200, false, { currencyTotals: { USD: 4 } });
+    const { value, records } = await capture(() => collect(mock));
+    expect(mock.csvCurrencies).toEqual(["USD"]);
+    expect(mock.requests.filter((path) => path.endsWith("csv/load"))).toHaveLength(1);
+    expect(mock.historyPages.filter((page) => page.currency === "JPY")).toEqual([
+      { currency: "JPY", countCnt: 0, rows: 0 },
+    ]);
+    expect(mock.historyPages.filter((page) => page.currency === "USD")).toEqual([
+      { currency: "USD", countCnt: 4, rows: 3 },
+      { currency: "USD", countCnt: 4, rows: 1 },
+    ]);
+    expect(mock.historyPages.filter((page) => page.currency === "EUR")).toEqual([
+      { currency: "EUR", countCnt: 0, rows: 0 },
+    ]);
+    const pagesByCurrency = new Map<string, number>();
+    for (const page of mock.historyPages)
+      pagesByCurrency.set(page.currency, (pagesByCurrency.get(page.currency) ?? 0) + 1);
+    expect(pagesByCurrency.get("JPY")).toBe(1);
+    expect(pagesByCurrency.get("USD")).toBe(2);
+    expect([...pagesByCurrency.values()].every((count) => count <= 2)).toBe(true);
+    expect(value.transactionCount).toBe(0);
+    expect(value.artifacts.some((artifact) => artifact.dataset === "yen-history-csv")).toBe(false);
+    expect(
+      value.artifacts
+        .filter((artifact) => artifact.dataset.endsWith("-csv"))
+        .map((artifact) => artifact.dataset),
+    ).toEqual(["foreign-history-usd-csv"]);
+    expect(
+      new Uint8Array(
+        value.artifacts.find((artifact) => artifact.dataset === "foreign-history-usd-csv")!
+          .body as ArrayBuffer,
+      ),
+    ).toEqual(csvBytes);
+    expect(
+      JSON.parse(
+        String(
+          value.artifacts.find((artifact) => artifact.dataset === "yen-history-page-0001")?.body,
+        ),
+      ),
+    ).toEqual({ countCnt: 0, transactionHistInfo: [] });
+    const summary = JSON.parse(
+      String(value.artifacts.find((artifact) => artifact.dataset === "collection-summary")?.body),
+    );
+    expect(summary.transactionCount).toBe(0);
+    expect(summary.foreignTransactionCount).toBe(4);
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        stage: "history-csv",
+        currency: "JPY",
+        outcome: "skipped",
+        reason: "zero_transactions",
+        transactionCount: 0,
+      }),
+    );
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        stage: "history-csv",
+        currency: "EUR",
+        outcome: "skipped",
+        reason: "zero_transactions",
+        transactionCount: 0,
+      }),
+    );
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        providerOperation: "EABA0600S1fE11",
+        currency: "USD",
+        page: 2,
+        rowCount: 1,
+        transactionCount: 4,
+      }),
+    );
+    expect(records).toContainEqual(
+      expect.objectContaining({
+        phase: "request",
+        providerOperation: "EABA0600S1fE12",
+        currency: "USD",
+        httpStatus: 200,
+        durationMs: expect.any(Number),
+      }),
+    );
+    expect(
+      records.some(
+        (record) =>
+          record.phase === "request" &&
+          record.providerOperation === "EABA0600S1fE12" &&
+          record.currency !== "USD",
+      ),
+    ).toBe(false);
+    expect(value.artifacts.some((artifact) => artifact.dataset === "wallet-history-202609")).toBe(
+      true,
+    );
+    expect(JSON.stringify(records)).not.toContain(privateValue);
+    expect(JSON.stringify(records)).not.toContain("1234567");
+    expect(JSON.stringify(records)).not.toContain("https://");
   });
 
   test("throwing loggers cannot change successful collection or real CSV failure", async () => {

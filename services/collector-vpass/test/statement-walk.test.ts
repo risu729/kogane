@@ -28,7 +28,7 @@ const rows = (count: number) =>
 /** A finalized page in the observed shape; only `allCnt`'s type is known. */
 function finalizedPage(
   rowCount: number,
-  k3: { allCnt: unknown; nextPageRow: unknown; [field: string]: unknown },
+  k3: { allCnt: unknown; nextPageRow?: unknown; [field: string]: unknown },
 ) {
   return envelope({
     WebMeisaiCommonDisplayServiceBean: { comSeikyuYMList: [] },
@@ -236,5 +236,132 @@ describe("the customized walk stops on its stated numeric `total`", () => {
     const capture = await collectMonth(post, "202609");
     expect(capture.transactionCount).toBe(2);
     expect(await monthCoverage(capture)).toBe("stated_total_mismatch");
+  });
+});
+
+describe("the finalized walk refuses a missing, empty, or repeated cursor", () => {
+  test("a missing or empty `nextPageRow` fails the month before another page is requested", async () => {
+    // `allCnt` is a readable count and the page has rows, so the stated-total
+    // and empty-page stops do not fire. The cursor check is what refuses it.
+    const cases = [
+      ["absent", finalizedPage(2, { allCnt: "4" })],
+      ["empty", finalizedPage(2, { allCnt: "4", nextPageRow: "" })],
+      ["not a string or number", finalizedPage(2, { allCnt: "4", nextPageRow: null })],
+    ] as const;
+    for (const [label, page] of cases) {
+      const { post, requests } = scripted([page]);
+      await expect(collectMonth(post, "202609")).rejects.toThrow(
+        "202609 returned an invalid page cursor",
+      );
+      expect([label, requests]).toEqual([label, [[TOP, { p01: "202609", p03: "1" }]]]);
+    }
+  });
+
+  test("a `nextPageRow` that repeats an earlier cursor fails the month before another page is requested", async () => {
+    // "3" then "5" are new cursors. The third page repeats the first cursor,
+    // as a string or as the same number. A further page is scripted so a walk
+    // that continued would have to ask for it.
+    for (const repeated of ["3", 3] as const) {
+      const { post, requests } = scripted([
+        finalizedPage(1, { allCnt: "9", nextPageRow: "3" }),
+        finalizedPage(1, { allCnt: "9", nextPageRow: "5", pageNo: "2" }),
+        finalizedPage(1, { allCnt: "9", nextPageRow: repeated, pageNo: "3" }),
+        finalizedPage(1, { allCnt: "9", nextPageRow: "7", pageNo: "4" }),
+      ]);
+      await expect(collectMonth(post, "202609")).rejects.toThrow(
+        "202609 returned an invalid page cursor",
+      );
+      expect([repeated, requests]).toEqual([
+        repeated,
+        [
+          [TOP, { p01: "202609", p03: "1" }],
+          [TOP, { p01: "202609", p03: "3" }],
+          [TOP, { p01: "202609", p03: "5" }],
+        ],
+      ]);
+    }
+  });
+});
+
+/** Finalized pages whose cursors are new and whose stated total does not end the month. */
+function openFinalizedPages(count: number) {
+  return Array.from({ length: count }, (_, index) =>
+    finalizedPage(1, { allCnt: "100000", nextPageRow: String(index + 2) }),
+  );
+}
+
+function topRequests(count: number): [string, Record<string, unknown>][] {
+  return Array.from({ length: count }, (_, index): [string, Record<string, unknown>] => [
+    TOP,
+    { p01: "202609", p03: String(index + 1) },
+  ]);
+}
+
+/**
+ * A customized top page with no rows, then one-row answer pages. The top page's
+ * `pageSize` is 2, so each answer is requested across two row slots while the
+ * captured count advances by the single row that page returns.
+ */
+function openCustomizedPages(answerPages: number, total: number) {
+  return [
+    customizedPage(0, total),
+    ...Array.from({ length: answerPages }, () => customizedPage(1, total)),
+  ];
+}
+
+function answerRequests(answerCount: number): [string, Record<string, unknown>][] {
+  const first: [string, Record<string, unknown>] = [TOP, { p01: "202609", p03: "1" }];
+  return [
+    first,
+    ...Array.from({ length: answerCount }, (_, index): [string, Record<string, unknown>] => [
+      ANSWER,
+      { seikyuYM: "202609", start: String(index), end: String(index + 1) },
+    ]),
+  ];
+}
+
+describe("the page walk stops at 100 pages", () => {
+  test("a finalized month that is still open after 100 pages fails and does not request the next scripted page", async () => {
+    // The first page is fetched before the loop. Each of the 100 iterations
+    // then fetches the following page before the bound is checked, so the
+    // failure is thrown after 101 calls. The 102nd scripted page stays unused.
+    // `allCnt` stays above every cursor, and the cursors do not repeat.
+    const { post, requests } = scripted(openFinalizedPages(102));
+    await expect(collectMonth(post, "202609")).rejects.toThrow("202609 exceeded 100 pages");
+    expect(requests).toEqual(topRequests(101));
+  });
+
+  test("a finalized month that ends on the 100th page makes no further request", async () => {
+    const { post, requests } = scripted([
+      ...openFinalizedPages(99),
+      finalizedPage(1, { allCnt: "100", nextPageRow: "101" }),
+      finalizedPage(1, { allCnt: "100", nextPageRow: "200" }),
+    ]);
+    const capture = await collectMonth(post, "202609");
+    expect(capture.transactionCount).toBe(100);
+    expect(capture.pages.map((page) => [page.kind, page.index] as const)).toEqual(
+      Array.from({ length: 100 }, (_, index) => ["top", index] as const),
+    );
+    expect(requests).toEqual(topRequests(100));
+  });
+
+  test("a customized month that is still short of its total after the bound fails and does not request the next scripted page", async () => {
+    // One top page and 99 answer pages are the calls made while `page < 100`.
+    // The stated total is still above those rows. A 100th answer page is
+    // scripted and must stay unrequested.
+    const { post, requests } = scripted(openCustomizedPages(100, 10_000));
+    await expect(collectMonth(post, "202609")).rejects.toThrow("202609 exceeded 100 pages");
+    expect(requests).toEqual(answerRequests(99));
+  });
+
+  test("a customized month that reaches its total on the last accepted answer page makes no further request", async () => {
+    const { post, requests } = scripted(openCustomizedPages(100, 99));
+    const capture = await collectMonth(post, "202609");
+    expect(capture.transactionCount).toBe(99);
+    expect(capture.pages.map((page) => [page.kind, page.index] as const)).toEqual([
+      ["top", 0] as const,
+      ...Array.from({ length: 99 }, (_, index) => ["answer", index + 1] as const),
+    ]);
+    expect(requests).toEqual(answerRequests(99));
   });
 });
