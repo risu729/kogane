@@ -1,13 +1,20 @@
 # Container API synthetic verification
 
-The latest completed SDK baseline attempt, run 37915871908 at `7d0e8bc6`,
-failed the public stream-error gate with clean EOF. Its same-DO diagnostic
-observed the expected reader error in both SDK and raw-port responses after
-35 bytes and more than 35 seconds. This establishes a measurement-boundary
-distinction, not a Cloudflare defect or runtime equivalence. Reader-lifetime,
-native, recovery and rollback phases remain unverified. All four owned-resource
-cleanup checks and independent Worker/application/namespace absence reads passed.
-The revised acceptance check below still requires successful hosted execution.
+The latest completed SDK baseline attempt, [run 37957689144](https://github.com/risu729/kogane/actions/runs/37957689144)
+at `becff3cc`, failed the in-DO stream release gate with
+`verification_stream_check_streams`. Its error code does not distinguish a
+nonzero stream count before the error arm from one after it. One instance was
+running and none had failed; all four runtime cleanup checks, separate cleanup
+and independent Worker/application/namespace absence reads passed. Normal CI
+and CodeQL passed at that exact head. Reader-lifetime, native, recovery and
+rollback remain unverified.
+
+The earlier run 37915871908 at `7d0e8bc6` failed the public stream-error gate
+with clean EOF. Its same-DO diagnostic observed the expected reader error in
+both SDK and raw-port responses after 35 bytes and more than 35 seconds. This
+establishes a measurement-boundary distinction, not a Cloudflare defect or
+runtime equivalence. The revised acceptance check below still requires
+successful hosted execution.
 Cleanup runs after each attempt; failed or interrupted cleanup requires separate
 absence confirmation. Temporary authorization must be retired after the session.
 
@@ -174,8 +181,16 @@ followed by a genuine reader exception at least 35 seconds after stream fetch
 begins. Clean EOF, missing or partial body, early error, timeout and outer abort
 fail. Running checks precede restart-capable statistics requests; process
 identity and POST count must stay unchanged and the source stream must release.
-Observation and cancellation use finite deadlines within the public request
-ceiling. The driver validates the closed report and runs one stream-error check
+Observation, cancellation and before/after release checks share the original
+46-second request ceiling. A release check polls only a validated single owned
+stream, with 100 ms spacing, at most 31 samples and a three-second cap. Running
+state precedes every statistics request; the first valid sample anchors process
+identity and POST count, which every later sample must preserve. Multiple
+streams, malformed responses, stopped processes and changed identity or POST
+count fail immediately. Persistent nonzero streams fail with a closed
+before/after category and bounded observations. No polling occurs during the
+single delayed error arm, whose 35-second measurement starts after the initial
+release check. The driver validates the closed report and runs one stream-error check
 per applicable phase. The unchanged public source route and diagnostic remain
 available separately; phase acceptance adds no second public stream probe.
 Reports expose closed categories and counts, never UUIDs, payloads or provider

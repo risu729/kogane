@@ -3,7 +3,7 @@
 - Owner: risu729
 - Started: 2026-10-05
 - Expires: 2026-10-12
-- Status: Run 37915871908 reproduced public clean EOF while SDK/raw readers inside the DO both raised the expected error. Revised stream-error boundary awaits hosted verification; reader-lifecycle parity, native and rollback remain unverified.
+- Status: Run 37957689144 at becff3cc failed the SDK in-DO stream release gate; its current code does not distinguish before/after release failure. Runtime cleanup and independent absence checks passed. Earlier run 37915871908 reproduced public clean EOF while SDK/raw readers inside the DO raised the expected error. Reader-lifecycle parity, native, recovery and rollback remain unverified.
 
 ## Question
 
@@ -39,6 +39,15 @@ inside the DO without a lease, requires the complete delayed error sequence,
 rejects timeouts and aborts, and verifies process and stream release. It still
 requires successful hosted execution. No diagnostic may promote failed or
 unreached reader/native/recovery/rollback stages to success.
+The renewed hosted attempt at `becff3cc` (run 37957689144) failed with
+`verification_stream_check_streams` in the SDK baseline. One instance remained
+running and none had failed; native and later stages were not reached. The same
+error code covers before and after stream counts, so the failure does not yet
+identify the release boundary. All runtime cleanup checks and independent API
+absence checks passed at 2026-10-10 01:20 JST. The renewed temporary token and
+GitHub environment must be retired by 2026-10-10 02:45 JST; the experiment's
+longer research expiry does not extend that authorization.
+
 A separate GitHub environment and a dedicated scoped token isolate this check
 from production credentials. The normal CI and production release never deploy
 this experiment. The manual verification job requires explicit selection.

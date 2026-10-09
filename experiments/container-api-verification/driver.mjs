@@ -32,6 +32,7 @@ function recordPath(temp, name) {
       "container-api-verification-baseline.json",
       "container-api-verification-recovery.json",
       "container-api-verification-stream-failure.json",
+      "container-api-verification-stream-check-failure.json",
     ].includes(name)
   )
     closed("record");
@@ -496,6 +497,8 @@ const streamCheckReasons = new Set([
   "identity",
   "posts",
   "streams",
+  "streams_before",
+  "streams_after",
   "fetch",
   "http",
   "body",
@@ -506,8 +509,52 @@ const streamCheckReasons = new Set([
   "partial",
   "timing",
 ]);
+export function streamCheckFailureRecord(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !==
+      "code,elapsedMs,failureCode,identityMatches,postsMatches,running,samples,stage,streams" ||
+    value.code !== "stream_check_failure_observation" ||
+    ![
+      "timeout",
+      "process",
+      "stats",
+      "identity",
+      "posts",
+      "streams_before",
+      "streams_after",
+    ].includes(value.failureCode) ||
+    !["before", "after"].includes(value.stage) ||
+    (value.failureCode === "streams_before" && value.stage !== "before") ||
+    (value.failureCode === "streams_after" && value.stage !== "after") ||
+    !Number.isSafeInteger(value.samples) ||
+    value.samples < 0 ||
+    value.samples > 31 ||
+    !Number.isSafeInteger(value.elapsedMs) ||
+    value.elapsedMs < 0 ||
+    value.elapsedMs > 46_000 ||
+    ![0, 1, null].includes(value.running) ||
+    ![0, 1, 2, null].includes(value.streams) ||
+    ![0, 1, null].includes(value.identityMatches) ||
+    ![0, 1, null].includes(value.postsMatches)
+  )
+    closed("stream_check_report");
+  return {
+    code: "stream_check_failure_observation",
+    failureCode: value.failureCode,
+    stage: value.stage,
+    samples: value.samples,
+    elapsedMs: value.elapsedMs,
+    running: value.running,
+    streams: value.streams,
+    identityMatches: value.identityMatches,
+    postsMatches: value.postsMatches,
+  };
+}
 /** Read a finite report from the actual controller response boundary. */
-export async function verifyStreamErrorCheck({ request }) {
+export async function verifyStreamErrorCheck({ request, temp }) {
   const response = await request("/stream-error-check");
   const reader = response.body?.getReader();
   if (!reader) closed("stream_check_report");
@@ -568,7 +615,27 @@ export async function verifyStreamErrorCheck({ request }) {
       closed("stream_check_report");
     return report;
   }
-  if (keys !== "code" || !streamCheckReasons.has(report.code)) closed("stream_check_report");
+  if (!streamCheckReasons.has(report.code)) closed("stream_check_report");
+  if (keys === "code,observation") {
+    const record = streamCheckFailureRecord({
+      code: "stream_check_failure_observation",
+      failureCode: report.code,
+      ...report.observation,
+    });
+    if (
+      !report.observation ||
+      Object.keys(report.observation).sort().join(",") !==
+        "elapsedMs,identityMatches,postsMatches,running,samples,stage,streams"
+    )
+      closed("stream_check_report");
+    if (temp) {
+      try {
+        writeRecord(temp, "container-api-verification-stream-check-failure.json", record);
+      } catch {
+        // Private diagnostic persistence must not erase the validated primary failure.
+      }
+    }
+  } else if (keys !== "code") closed("stream_check_report");
   closed(`stream_check_${report.code}`);
 }
 /** Retained public-edge diagnostic; phase acceptance uses the in-DO check above. */
@@ -845,7 +912,7 @@ export async function verifyPhase({
   await canceled.read();
   await canceled.cancel();
   counts.cancelChecks++;
-  await verifyStreamErrorCheck({ request });
+  await verifyStreamErrorCheck({ request, temp });
   counts.streamFailureChecks++;
   counts.idleObservedMs = await verifyReaderIdleCycle({ arm: "resume", request, json, waitState });
   counts.cancelIdleObservedMs = await verifyReaderIdleCycle({

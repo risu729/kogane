@@ -1378,6 +1378,10 @@ test("execution and cleanup errors are both reported without erasing the initial
     "baseline_sdk_verify_exhausted_valid",
     "baseline_sdk_verify_stream_clean",
     "baseline_sdk_verify_stream_missing",
+    "baseline_sdk_verify_check_before",
+    "baseline_sdk_verify_check_after",
+    "baseline_sdk_verify_check_forged",
+    "baseline_sdk_verify_check_missing",
   ]) {
     const temp = mkdtempSync(resolve(tmpdir(), "verification-dual-"));
     let pushed = false,
@@ -1386,17 +1390,32 @@ test("execution and cleanup errors are both reported without erasing the initial
     const reports: string[] = [];
     let comparisonCalls = 0,
       streamComparisonCalls = 0;
-    const original = failing.startsWith("baseline_sdk_verify_stream")
-      ? failing.endsWith("missing")
-        ? "verification_stream_failure_missing_body"
-        : "verification_stream_failure_clean_eof"
-      : failing.startsWith("baseline_sdk_verify_exhausted")
-        ? "verification_backpressure_exhausted_late"
-        : failing === "baseline_sdk_verify"
-          ? "verification_sentinel"
-          : failing === "baseline_sdk_http_ready"
-            ? "verification_state_timeout"
-            : "verification_runner_child";
+    const checkFailure = failing.startsWith("baseline_sdk_verify_check");
+    const checkObservation = {
+      code: "stream_check_failure_observation",
+      failureCode: "streams_" + (failing.endsWith("after") ? "after" : "before"),
+      stage: failing.endsWith("after") ? "after" : "before",
+      samples: 31,
+      elapsedMs: 3000,
+      running: 1,
+      streams: 1,
+      identityMatches: 1,
+      postsMatches: 1,
+    };
+    const original = checkFailure
+      ? "verification_stream_check_" +
+        (failing.endsWith("after") ? "streams_after" : "streams_before")
+      : failing.startsWith("baseline_sdk_verify_stream")
+        ? failing.endsWith("missing")
+          ? "verification_stream_failure_missing_body"
+          : "verification_stream_failure_clean_eof"
+        : failing.startsWith("baseline_sdk_verify_exhausted")
+          ? "verification_backpressure_exhausted_late"
+          : failing === "baseline_sdk_verify"
+            ? "verification_sentinel"
+            : failing === "baseline_sdk_http_ready"
+              ? "verification_state_timeout"
+              : "verification_runner_child";
     const api = async (path: string, options: any = {}) => {
       if (options.method === "DELETE") {
         removed = true;
@@ -1465,7 +1484,8 @@ test("execution and cleanup errors are both reported without erasing the initial
             if (
               current === failing ||
               ((failing.startsWith("baseline_sdk_verify_exhausted") ||
-                failing.startsWith("baseline_sdk_verify_stream")) &&
+                failing.startsWith("baseline_sdk_verify_stream") ||
+                checkFailure) &&
                 current === "baseline_sdk_verify")
             ) {
               if (failing.startsWith("baseline_sdk_verify_stream")) {
@@ -1480,6 +1500,13 @@ test("execution and cleanup errors are both reported without erasing the initial
                   terminal: missing ? "missing_body" : "clean_eof",
                 });
               }
+              if (checkFailure && !failing.endsWith("missing"))
+                protectedFile(
+                  resolve(temp, "container-api-verification-stream-check-failure.json"),
+                  failing.endsWith("forged")
+                    ? { ...checkObservation, private: token }
+                    : checkObservation,
+                );
               throw new Error(original);
             }
             if (args.includes("push")) pushed = true;
@@ -1494,11 +1521,19 @@ test("execution and cleanup errors are both reported without erasing the initial
           code: "verification_execution_failed",
           stage:
             failing.startsWith("baseline_sdk_verify_exhausted") ||
-            failing.startsWith("baseline_sdk_verify_stream")
+            failing.startsWith("baseline_sdk_verify_stream") ||
+            checkFailure
               ? "baseline_sdk_verify"
               : failing,
           error: original,
         },
+        ...(checkFailure
+          ? [
+              failing.endsWith("missing") || failing.endsWith("forged")
+                ? { code: "verification_stream_check_failure_observation_unavailable" }
+                : { ...checkObservation, code: "verification_stream_check_failure_observation" },
+            ]
+          : []),
         ...(failing.startsWith("baseline_sdk_verify_stream")
           ? [
               {
@@ -1530,6 +1565,10 @@ test("execution and cleanup errors are both reported without erasing the initial
           "baseline_sdk_verify_exhausted_valid",
           "baseline_sdk_verify_stream_clean",
           "baseline_sdk_verify_stream_missing",
+          "baseline_sdk_verify_check_before",
+          "baseline_sdk_verify_check_after",
+          "baseline_sdk_verify_check_forged",
+          "baseline_sdk_verify_check_missing",
         ].includes(failing)
           ? [
               {
@@ -2547,4 +2586,14 @@ test("stream-error comparison caps response and cancels stalled body", async () 
     }),
   ).rejects.toThrow("stream_error_comparison_timeout");
   expect(cancelled).toBe(2);
+});
+
+test("before and after release failure codes are exact complete owned diagnostics", () => {
+  for (const stage of ["before", "after"]) {
+    const code = `verification_stream_check_streams_${stage}`;
+    expect(driverFailure(code)).toBe(code);
+    expect(diagnosticCode(new Error(code))).toBe(code);
+    expect(driverFailure(code + "_private")).toBe("verification_runner_child");
+    expect(diagnosticCode(new Error(code + "_private"))).toBe("verification_runner_failed");
+  }
 });

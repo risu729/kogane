@@ -103,6 +103,8 @@ const DRIVER_CODES = new Set(
     "stream_check_identity",
     "stream_check_posts",
     "stream_check_streams",
+    "stream_check_streams_before",
+    "stream_check_streams_after",
     "stream_check_fetch",
     "stream_check_http",
     "stream_check_body",
@@ -1748,6 +1750,22 @@ export async function execute(
     const code = diagnosticCode(error);
     failure = new Error(code);
     report(JSON.stringify({ code: "verification_execution_failed", stage, error: code }));
+    if (stage.endsWith("_verify") && code.startsWith("verification_stream_check_")) {
+      try {
+        const { readRecord, streamCheckFailureRecord } = await import("./driver.mjs");
+        const observation = streamCheckFailureRecord(
+          readRecord(input.temp, "container-api-verification-stream-check-failure.json"),
+        );
+        if (code !== `verification_stream_check_${observation.failureCode}`) fail("driver_output");
+        report(
+          JSON.stringify({ ...observation, code: "verification_stream_check_failure_observation" }),
+        );
+      } catch {
+        report(
+          JSON.stringify({ code: "verification_stream_check_failure_observation_unavailable" }),
+        );
+      }
+    }
     if (
       stage === "baseline_sdk_verify" &&
       [

@@ -1,4 +1,13 @@
 // Verify the actual SDK/native returned Response inside the DO, before public HTTP buffering.
+export type ReleaseObservation = {
+  stage: "before" | "after";
+  samples: number;
+  elapsedMs: number;
+  running: 0 | 1 | null;
+  streams: 0 | 1 | 2 | null;
+  identityMatches: 0 | 1 | null;
+  postsMatches: 0 | 1 | null;
+};
 export type StreamErrorCheckReport =
   | { code: "pass"; bytes: 35; reads: number; elapsedMs: number }
   | {
@@ -9,6 +18,8 @@ export type StreamErrorCheckReport =
         | "identity"
         | "posts"
         | "streams"
+        | "streams_before"
+        | "streams_after"
         | "fetch"
         | "http"
         | "body"
@@ -18,6 +29,7 @@ export type StreamErrorCheckReport =
         | "eof"
         | "partial"
         | "timing";
+      observation?: ReleaseObservation;
     };
 type Failure = Exclude<StreamErrorCheckReport["code"], "pass">;
 type Stats = { processIdentity: string; posts: number; streams: number };
@@ -26,6 +38,7 @@ type Dependencies = {
   running: () => boolean;
   outerSignal?: AbortSignal;
   now?: () => number;
+  sleep?: (milliseconds: number) => Promise<void>;
   timeoutMs?: number;
   cancelTimeoutMs?: number;
   onEvent?: (event: "running" | "stats" | "fetch" | "read_error" | "cancel") => void;
@@ -45,6 +58,7 @@ export async function checkStreamError({
   running,
   outerSignal,
   now = Date.now,
+  sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
   timeoutMs = 46_000,
   cancelTimeoutMs = 3_000,
   onEvent,
@@ -56,7 +70,11 @@ export async function checkStreamError({
       // Observability cannot alter the gate.
     }
   };
+  const globalStarted = now();
   const aborter = new AbortController();
+  let observation: ReleaseObservation | undefined;
+  let releaseDeadline: Promise<never> | undefined;
+  let releaseState: { expired: boolean } | undefined;
   let timedOut = false;
   let rejectDeadline!: (reason: CheckFailure) => void;
   const deadline = new Promise<never>((_, reject) => {
@@ -70,16 +88,27 @@ export async function checkStreamError({
   const timer = setTimeout(timeout, timeoutMs);
   const outerAbort = () => timeout();
   outerSignal?.addEventListener("abort", outerAbort, { once: true });
-  const bounded = <T>(operation: Promise<T>) => Promise.race([operation, deadline]);
+  const bounded = <T>(operation: Promise<T>) =>
+    Promise.race(releaseDeadline ? [operation, deadline, releaseDeadline] : [operation, deadline]);
   const cancel = async (reader: ReadableStreamDefaultReader<Uint8Array>) => {
     let cancelTimer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await Promise.race([
-        reader.cancel(),
-        new Promise<never>((_, reject) => {
-          cancelTimer = setTimeout(() => reject(new Error("cancel_timeout")), cancelTimeoutMs);
-        }),
-      ]);
+      const operation = reader.cancel();
+      if (timedOut || outerSignal?.aborted) {
+        void operation.catch(() => {});
+        return;
+      }
+      await bounded(
+        Promise.race([
+          operation,
+          new Promise<never>((_, reject) => {
+            cancelTimer = setTimeout(
+              () => reject(new Error("cancel_timeout")),
+              Math.max(0, Math.min(cancelTimeoutMs, timeoutMs - (now() - globalStarted))),
+            );
+          }),
+        ]),
+      );
     } catch {
       // A terminal read error normally makes cancel reject; after stats prove release.
     } finally {
@@ -88,11 +117,12 @@ export async function checkStreamError({
     }
   };
   const fetchOwned = async (request: Request) => {
+    const ownedRelease = releaseState;
     const operation = fetchBoundary(request);
     let claimed = false;
     void operation.then(
       (response) => {
-        if (!claimed && aborter.signal.aborted && response.body) {
+        if (!claimed && (aborter.signal.aborted || ownedRelease?.expired) && response.body) {
           try {
             void cancel(response.body.getReader());
           } catch {
@@ -108,7 +138,10 @@ export async function checkStreamError({
   };
   const sample = async (): Promise<Stats> => {
     emit("running");
-    if (!running()) fail("process"); // /stats would auto-start a stopped process.
+    const isRunning = running();
+    if (observation) observation.running = isRunning ? 1 : 0;
+    if (!isRunning) fail("process"); // /stats would auto-start a stopped process.
+    if (observation) observation.samples++;
     let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
     let complete = false;
     try {
@@ -156,12 +189,73 @@ export async function checkStreamError({
       if (reader && !complete) await cancel(reader);
     }
   };
+  let baseline: Stats | undefined;
+  const release = async (stage: "before" | "after"): Promise<Stats> => {
+    const started = now();
+    observation = {
+      stage,
+      samples: 0,
+      elapsedMs: 0,
+      running: null,
+      streams: null,
+      identityMatches: null,
+      postsMatches: null,
+    };
+    const reason = stage === "before" ? "streams_before" : "streams_after";
+    let stageTimer: ReturnType<typeof setTimeout> | undefined;
+    const stageState = { expired: false };
+    releaseState = stageState;
+    releaseDeadline = new Promise<never>((_, reject) => {
+      stageTimer = setTimeout(() => {
+        stageState.expired = true;
+        reject(new CheckFailure(reason));
+      }, 3_000);
+    });
+    try {
+      for (;;) {
+        if (timedOut || outerSignal?.aborted) fail("timeout");
+        if (now() - globalStarted >= timeoutMs) {
+          timeout();
+          fail("timeout");
+        }
+        if (observation.samples >= 31 || now() - started >= 3_000) fail(reason);
+        const stats = await sample();
+        observation.streams = stats.streams === 0 ? 0 : stats.streams === 1 ? 1 : 2;
+        baseline ??= stats;
+        observation.identityMatches = stats.processIdentity === baseline.processIdentity ? 1 : 0;
+        observation.postsMatches = stats.posts === baseline.posts ? 1 : 0;
+        // Timers can run after promise microtasks; elapsed time also guards late success.
+        if (now() - globalStarted >= timeoutMs) {
+          timeout();
+          fail("timeout");
+        }
+        if (now() - started >= 3_000) fail(reason);
+        if (!observation.identityMatches) fail("identity");
+        if (!observation.postsMatches) fail("posts");
+        if (stats.streams === 0) {
+          observation = undefined;
+          return stats;
+        }
+        if (stats.streams !== 1) fail(reason);
+        if (observation.samples >= 31) fail(reason);
+        const remaining = Math.min(3_000 - (now() - started), timeoutMs - (now() - globalStarted));
+        if (remaining <= 0) fail(reason);
+        await bounded(sleep(Math.min(100, remaining)));
+      }
+    } finally {
+      if (observation)
+        observation.elapsedMs = Math.min(46_000, Math.max(0, Math.trunc(now() - started)));
+      stageState.expired = true;
+      if (stageTimer) clearTimeout(stageTimer);
+      releaseDeadline = undefined;
+      releaseState = undefined;
+    }
+  };
   let streamReader: ReadableStreamDefaultReader<Uint8Array> | undefined;
   let result: StreamErrorCheckReport = { code: "fetch" };
   try {
     if (outerSignal?.aborted) fail("timeout");
-    const baseline = await sample();
-    if (baseline.streams !== 0) fail("streams");
+    await release("before");
     emit("fetch");
     // Time starts after baseline stats, so a slow stats request cannot satisfy the source delay.
     const started = now();
@@ -218,19 +312,20 @@ export async function checkStreamError({
     // A read-error stream can reject cancel. Source release is judged by the next /stats.
     await cancel(streamReader!);
     streamReader = undefined;
-    const after = await sample();
-    if (after.processIdentity !== baseline.processIdentity) fail("identity");
-    if (after.posts !== baseline.posts) fail("posts");
-    if (after.streams !== 0) fail("streams");
+    await release("after");
+    if (now() - globalStarted >= timeoutMs) timeout();
     if (timedOut || outerSignal?.aborted) fail("timeout");
     result = { code: "pass", bytes: 35, reads, elapsedMs };
   } catch (error) {
-    result = { code: timedOut ? "timeout" : error instanceof CheckFailure ? error.code : "fetch" };
+    result = {
+      code: timedOut ? "timeout" : error instanceof CheckFailure ? error.code : "fetch",
+      ...(observation ? { observation: { ...observation } } : {}),
+    };
   } finally {
-    clearTimeout(timer);
-    outerSignal?.removeEventListener("abort", outerAbort);
     if (streamReader) await cancel(streamReader!);
     aborter.abort();
+    clearTimeout(timer);
+    outerSignal?.removeEventListener("abort", outerAbort);
   }
   return result;
 }

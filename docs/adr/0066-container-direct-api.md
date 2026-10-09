@@ -282,13 +282,36 @@ at least 35 seconds after the stream request began. A deadline, outer abort,
 early error, partial body, missing body or clean EOF fails. Running-state checks
 before Container statistics prevent a restart from masking process loss;
 same-process, unchanged POST count and released-stream checks remain required.
-Observation and cancellation are bounded within the existing request deadline.
+Observation and cancellation share the original 46-second request deadline.
+Before the error arm and after terminal cleanup, a release-condition check may
+poll a valid single owned stream for at most three seconds, with 100 ms spacing
+and at most 31 samples. A count above one, stopped process, malformed response,
+changed identity or changed POST count fails immediately. Every sample checks
+running state before statistics; the first valid sample anchors identity and
+POST count even when a stream is still releasing. The error arm runs once, and
+its 35-second clock begins after the before-release check. No polling occurs
+during the delayed error response. Persistent nonzero streams fail with a
+closed before/after category and bounded state/count diagnostics. Waiting for
+release never converts EOF, an abort or a deadline into a reader error.
 The driver runs this check once per applicable phase and validates its closed
 report. It does not add another public 36-second probe. The public route and
 diagnostic remain available for characterization, outside phase acceptance.
 
-These attempts do not establish runtime equivalence. Final CI and the following
-runtime gates are still pending:
+Normal CI and CodeQL passed at `becff3cc`, which includes the current main
+composition. After renewed authorization, the hosted attempt at that exact head
+([run 37957689144](https://github.com/risu729/kogane/actions/runs/37957689144))
+failed the SDK baseline with `verification_stream_check_streams`. The helper
+used the same code for a nonzero stream count before and after its error arm,
+so this result does not distinguish delayed release after the preceding public
+reader cancellation from failed release after the producer error. At failure,
+one instance was running and none had failed. Native, reader-lifetime, recovery
+and rollback phases were not reached. All four runtime cleanup checks and the
+separate cleanup step passed; independent API reads at 2026-10-10 01:20 JST
+confirmed Worker, application and namespace absence. The temporary token and
+dedicated environment remain bounded by the renewed 02:45 JST stop deadline.
+
+Neither attempt establishes runtime equivalence or a Cloudflare defect. The
+following hosted runtime gates remain pending:
 
 1. Deploy SDK 0.3.7 with a fixed class/migration/image; seed synthetic KV and SQL
    sentinels and record application, namespace and exact Worker version.
