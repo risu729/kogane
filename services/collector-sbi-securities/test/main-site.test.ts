@@ -35,6 +35,21 @@ function record(did: number): Record<string, unknown> {
   };
 }
 
+function chainPage(
+  pageNumber: number,
+  records: Record<string, unknown>[],
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return page({
+    depositRecordList: records,
+    pageCount: 3,
+    pageNumber,
+    pageSize: 2,
+    totalCount: 5,
+    ...overrides,
+  });
+}
+
 describe("SBI yen history bundle", () => {
   test("preserves every provider field in a deterministic complete bundle", () => {
     const providerPage = page();
@@ -106,5 +121,59 @@ describe("SBI yen history bundle", () => {
       /provider row limit/u,
     );
     expect(() => bundleYenHistoryPages([page({ unexpected: true })])).toThrow(/fields changed/u);
+  });
+
+  test("preserves every provider field in a three-page bundle with a shorter final page", () => {
+    const first = chainPage(1, [record(101), record(102)]);
+    const middle = chainPage(2, [record(103), record(104)], {
+      detailsConditions: ["fixture-middle"],
+      nextBusinessDate: "20260909",
+    });
+    const last = chainPage(3, [record(105)], {
+      detailsConditions: ["fixture-final"],
+      nextBusinessDate: "20260910",
+    });
+    const pages = [first, middle, last];
+    const expectedPages = structuredClone(pages);
+    const bundle = bundleYenHistoryPages(pages);
+    expect(bundle).toEqual({
+      schemaVersion: "sbi-yen-detail-history-bundle-v1",
+      pageCount: 3,
+      pageSize: 2,
+      totalCount: 5,
+      complete: true,
+      pageLimitExceeded: false,
+      rowLimitExceeded: false,
+      pages: expectedPages,
+    });
+    expect(bundle.pages).toBe(pages);
+    expect(bundle.pages[0]).toBe(first);
+    expect(bundle.pages[1]).toBe(middle);
+    expect(bundle.pages[2]).toBe(last);
+    expect(last.depositRecordList).toEqual([record(105)]);
+    expect((last.depositRecordList as unknown[]).length).toBeLessThan(bundle.pageSize);
+  });
+
+  test("rejects reordered middle and final pages and an underfilled final total", () => {
+    const first = chainPage(1, [record(101), record(102)]);
+    const middle = chainPage(2, [record(103), record(104)]);
+    const last = chainPage(3, [record(105)]);
+    expect(() => bundleYenHistoryPages([first, last, middle])).toThrow(
+      /expected pageNumber 2 but received 3/u,
+    );
+    expect(() =>
+      bundleYenHistoryPages([
+        chainPage(1, [record(201), record(202)]),
+        chainPage(2, [record(203), record(204)]),
+        chainPage(2, [record(205)]),
+      ]),
+    ).toThrow(/expected pageNumber 3 but received 2/u);
+    expect(() =>
+      bundleYenHistoryPages([
+        chainPage(1, [record(301), record(302)]),
+        chainPage(2, [record(303), record(304)]),
+        chainPage(3, []),
+      ]),
+    ).toThrow(/collected 4 of 5 rows/u);
   });
 });
