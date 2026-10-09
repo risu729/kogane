@@ -40,11 +40,11 @@ Container and the shared network were retained. See
 ## 2. May be rebuilt, and only inside READ
 
 `balance_read_snapshots`, `current_balance_projection`, `scope_relations` and the second-stage
-candidates `expiry_estimates`, `conversion_simulations` are the `read-candidate` tables. The
-first three now exist on both sides: CORE still carries the projection of migration 0030, and U11
-added the READ database (`kogane-read`,
-`packages/storage-d1/migrations/read`, `infra/schema/read-ledger.md`) that the same build writes
-instead when `READ_PROJECTION_ENABLED` is on. U16 did the same for the second-stage pair: READ
+candidates `expiry_estimates`, `conversion_simulations` are the `read-candidate` tables. Migration
+0042 dropped those CORE tables. The live projection is the READ database (`kogane-read`,
+`packages/storage-d1/migrations/read`, `infra/schema/read-ledger.md`), written only while Processor
+`BALANCE_PROJECTION_ENABLED` is `"1"`. There is no `READ_PROJECTION_ENABLED` switch and no CORE
+fallback. U16 did the same for the second-stage pair: READ
 migration `0002_reward_read.sql` holds `reward_expiry_estimates` and
 `reward_conversion_simulations`, built from an input that fixes the evaluation instant, under
 `REWARD_READ_PROJECTION_ENABLED`. The CORE tables of migration 0033 keep their rows, and the
@@ -61,12 +61,9 @@ the estimates and the replays, never a claim or a rule. Losing READ must leave e
 The procedure is `docs/read-rebuild-runbook.md`; the contract of the second database is
 `docs/read-model-d1.md`.
 
-The CORE half of that pair is **not** dropped when READ takes over. With `READ_PROJECTION_ENABLED`
-off — the default — the `0030` tables are the live projection; with it on they stop being written
-and become the rollback target for the whole READ change, and G0-09 (losing READ leaves CORE
-untouched) is only demonstrable while they exist. Removing them is a later work item with a new
-migration of its own, never an edit to `0030`; `docs/legacy-retirement.md` §6 records the
-supersession and the evidence that work item would need.
+Migration 0042 already dropped the CORE projection tables. G0-09 still holds: losing READ leaves
+the canonical CORE rows untouched, and nothing in this section restores a CORE projection by
+turning a flag off. `docs/legacy-retirement.md` §6 records that supersession.
 
 ## 3. CORE backup runbook — D1 (not executed)
 

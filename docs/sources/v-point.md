@@ -571,12 +571,11 @@ session値は出力・保存していない。監査はR2へのwrite/deleteやWo
 
 ## 追記: 共通DATA R2への切替（U09）
 
-`services/collector-vpoint`にvar `COLLECTION_TARGET`（既定`legacy`）とbinding
-`DATA`（`kogane-raw-evidence`）を追加した。`legacy`は現行経路そのままで、
-per-source bucketとService Binding経由の中央取り込みを変更しない。`shared`では
-同じsanitize済みbytesを`objects/<2hex>/<sha256>`へcontent-addressedで保存し、
-`runs/v-point/<runId>/terminal.json`を最後に書く。旧APIへのuploadと
-per-source bucketへのwriteは行わない。Worker名、cron、Email route、
+`services/collector-vpoint`は`COLLECTION_TARGET`を読まない。保存先は
+binding `DATA`（`kogane-raw-evidence`）だけである。切替とimporterは
+2026-09-13に廃止された（`docs/collection.md`）。同じsanitize済みbytesを
+`objects/<2hex>/<sha256>`へcontent-addressedで保存し、
+`runs/v-point/<runId>/terminal.json`を最後に書く。Worker名、cron、Email route、
 `VPointSession` Durable Object、secret、既存bucket bindingは変更しない。
 
 Email routeが受けたVポイントPay通知は`v-point-pay-email`の独立runとして
@@ -586,9 +585,8 @@ Email routeが受けたVポイントPay通知は`v-point-pay-email`の独立run�
 post-auth収集を起動した場合、両runは同じ`acquisitionSessionRef`
 （`email-<message sha256>`）を持ち、sourceは混ぜない。
 
-`shared`ではVポイントPay email reconciliation reportを作らない。旧bucketの
-prefix列挙に依存する集計であり、shared保存後のnotificationを数え落とすためで、
+VポイントPay email reconciliation reportは作らない。旧bucketの
+prefix列挙に依存する集計であり、notificationを数え落とすためで、
 source横断の再照合はterminalを読むProcessor（U08）の担当である。
-切替順はProcessor（`SHARED_R2_INGEST_ENABLED`）を先に有効化し、その後で
-`COLLECTION_TARGET=shared`。rollbackは`legacy`へ戻すだけで、既存terminalは
-そのまま有効である。詳細は`docs/collection.md`。
+Processorの`SHARED_R2_INGEST_ENABLED`は登録のゲートであり、collectorの
+保存先スイッチではない。既存terminalはそのまま有効である。詳細は`docs/collection.md`。

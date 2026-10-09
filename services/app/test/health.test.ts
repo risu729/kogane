@@ -320,12 +320,14 @@ describe("what the postcheck reads", () => {
     await env.EVIDENCE.delete(DATA_MARKER_KEY);
   });
 
-  it("reports READ as required once a READ flag is on", async () => {
-    const response = await call({
-      environment: { PIPELINE: pipeline().binding, READ_PROJECTION_ENABLED: "true" },
-    });
-    expect(response.json.read).toMatchObject({ required: true, ok: true });
-    expect(response.status).toBe(200);
+  it("keeps READ required when the retired projection flag is set", async () => {
+    for (const value of ["true", "false", "1", "0"]) {
+      const response = await call({
+        environment: { PIPELINE: pipeline().binding, READ_PROJECTION_ENABLED: value },
+      });
+      expect(response.json.read).toMatchObject({ required: true, ok: true });
+      expect(response.status).toBe(200);
+    }
   });
 });
 

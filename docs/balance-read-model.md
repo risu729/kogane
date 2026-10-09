@@ -218,16 +218,18 @@ routinely holds more rows than the latest list.
 
 ## Capabilities and the v1 route
 
-`/api/meta` advertises `balancesV2` and `balancesV2Pagination` only when the
-reader flag is on **and** a sealed snapshot exists; otherwise the v2 paths
-answer 404. The v1 routes keep `paginationVersion: "offset-v1"`.
+`/api/meta` advertises `balancesV2` and `balancesV2Pagination` only when a
+sealed snapshot can be served. The v2 paths exist whenever the READ binding
+is present and answer `503 read_model_unavailable` until that snapshot is
+published. With no READ binding those paths answer 404. The v1 routes keep
+`paginationVersion: "offset-v1"`.
 
-`/api/balances` is unchanged. With the flag on it is served through a compat
-adapter over the same projection — identical rows, order, offset window and
-`interpretation` record, proved by a parity test on one synthetic fixture. The
-adapter declines whenever the snapshot is behind the published evidence, so
-the v1 promise of current data and its 413 for an oversized candidate set are
-kept exactly.
+`/api/balances` is unchanged. When READ is bound and a snapshot is published
+it is served through a compat adapter over the same projection — identical
+rows, order, offset window and `interpretation` record, proved by a parity
+test on one synthetic fixture. The adapter declines when the snapshot is
+missing or behind the published evidence, so the v1 promise of current data
+and its 413 for an oversized candidate set stay on the request-time list.
 
 ## The `holdings` query intent
 
@@ -236,7 +238,7 @@ from this projection, so the human UI, the agent API and the MCP adapter all
 read one adopted set rather than three sums. It reads the sealed snapshot's
 adopted rows for the granted scope, sums them per unit in exact integer
 arithmetic, and reports `liabilitiesCoverage: "unknown"` with no `netWorth`
-field. Without the reader flag or a sealed snapshot it answers
+field. Without the READ binding or a sealed snapshot it answers
 `unavailable` / `projection_not_built` instead of computing a figure from the
 observation rows behind the projection. See
 [Agent API](agent-api.md#intents) for the intent's contract.
@@ -327,17 +329,19 @@ Component-level compatibility with an old schema does not authorize an old
 production Worker rollback.
 
 GitHub Actions applies the CORE and READ schemas, then deploys Processor before
-App. Processor `BALANCE_PROJECTION_ENABLED=1` builds into READ; the App's same
-flag exposes the published snapshot. Production enables both. The full procedure
-and recovery controls are in [The READ database](read-model-d1.md).
+App. Processor `BALANCE_PROJECTION_ENABLED=1` builds into READ. The App reads
+that snapshot whenever the READ binding is present; it does not have its own
+copy of the flag. The full procedure and recovery controls are in
+[The READ database](read-model-d1.md).
 
 ## Rollback
 
-Set `BALANCE_PROJECTION_ENABLED=0` on the evidence browser. `/api/meta` stops
-advertising `balancesV2`, the v2 routes answer 404, and `/api/balances`
-returns to today's query path unchanged. Set it to `0` on the pipeline to stop
-building. The projection tables can then be dropped and rebuilt later; no
-observation, parse, publication or identity row depends on them.
+Set Processor `BALANCE_PROJECTION_ENABLED=0` to stop building. The App keeps
+the v2 routes: with no published snapshot they answer
+`503 read_model_unavailable`, and `/api/meta` reports `balancesV2: false`.
+`/api/balances` uses the sealed snapshot when one is published and otherwise
+stays on the request-time list. No observation, parse, publication or identity
+row depends on the projection tables.
 
 ## Verified locally
 

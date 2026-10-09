@@ -71,10 +71,18 @@ const assets = { fetch: async () => new Response("synthetic shell") } as unknown
 const production: ConformanceTarget = {
   // The CORE store under test has the views the reported state reads, so this
   // Worker serves it (docs/reported-state.md); the shared constant keeps it off.
+  // Schema that is present is advertised. Reward routes are served; a missing
+  // snapshot keeps `rewardsV2ReadModel` at `none` and expiry at 503.
+  // Reconstructed state is served wherever the reported-state views are.
   expected: {
     ...CENTRAL_STORE_CAPABILITIES,
     reportedStateOnDate: true,
     reconstructedStateOnDate: true,
+    eventsV2: true,
+    rewardsV2: true,
+    cardPurchaseRecognition: true,
+    cardSettlementReconciliation: true,
+    cardOwnershipReview: true,
   },
   get: async (path, method = "GET") =>
     worker.fetch(
@@ -200,9 +208,11 @@ describe("shared contract pin", () => {
       financialProducts: true,
       evidenceHistory: true,
       sharedQuery: true,
-      // rewardsV2, commands, eventsV2 and opsApi are default off here: each
-      // deployment's own flag decides, and /api/meta reports what the
-      // running Worker actually serves.
+      // These stay false in the shared constant. The Worker sets rewardsV2
+      // true, eventsV2 from economic_event_revisions, and
+      // reconstructedStateOnDate from the reported-state views. commands
+      // follows COMMANDS_ENABLED and opsApi follows OPS_API_ENABLED.
+      // /api/meta reports what the running Worker serves.
       rewardsV2: false,
       commands: false,
       cardSettlementReconciliation: false,

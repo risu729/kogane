@@ -10,7 +10,11 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { AGENT_TOOL_NAMES, RECONSTRUCTED_STATE_TOOL_NAME } from "../src/agent-service";
+import {
+  AGENT_TOOL_NAMES,
+  PURCHASES_TOOL_NAME,
+  RECONSTRUCTED_STATE_TOOL_NAME,
+} from "../src/agent-service";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 
 const APP_AUD = "fixture-app-audience";
@@ -99,9 +103,11 @@ describe("the official SDK client against /mcp", () => {
           mode === "legacy" ? "2025-11-25" : "2026-07-28",
         );
         const listed = await client.listTools();
-        // The agent tools and, on this store, the reconstructed state's read.
+        // The agent tools, the purchase explanation (CORE 0047 is applied; the
+        // retired reader name is not read) and the reconstructed state's read.
         expect(listed.tools.map((tool) => tool.name)).toEqual([
           ...AGENT_TOOL_NAMES,
+          PURCHASES_TOOL_NAME,
           RECONSTRUCTED_STATE_TOOL_NAME,
         ]);
         const capabilities = await client.callTool({ name: "kogane.capabilities", arguments: {} });

@@ -47,7 +47,7 @@ import {
   PAGE_LIMIT,
   visibleEvidence,
 } from "../../../packages/read-model/src/index";
-import { balanceProjectionReader, projectionFlagOn } from "./balances-v2";
+import { balanceProjectionReader, balanceReadConfigured } from "./balances-v2";
 import { centralStoreCapabilities } from "./capabilities";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
 import { proposalStore } from "./proposals";
@@ -315,10 +315,12 @@ export async function queryResponse(
     opened,
     request,
     reader: context.reader,
-    // `holdings` reads the adopted balance projection and nothing else; it
-    // answers `unavailable` while the reader flag is off or no snapshot is
-    // sealed, rather than summing the observation rows behind it.
-    projection: projectionFlagOn(context.env) ? balanceProjectionReader(context.env) : undefined,
+    // `holdings` reads the adopted balance projection when READ is bound, and
+    // answers `unavailable` when no snapshot is sealed, rather than summing
+    // the observation rows behind it.
+    projection: balanceReadConfigured(context.env)
+      ? balanceProjectionReader(context.env)
+      : undefined,
     overview,
   });
   if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };

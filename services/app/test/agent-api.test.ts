@@ -320,10 +320,10 @@ describe("capabilities describe this deployment, not the contract's defaults", (
     const report = (await (
       await call("/api/agent/v1/capabilities", { body: {}, environment })
     ).json()) as { api: Record<string, unknown>; scopes: unknown };
-    // eventsV2 is computed from the projection actually present in this store,
-    // so an agent is never told about a route this deployment cannot serve.
+    // eventsV2 follows the projection table in this store. The retired env
+    // name does not hide a table that is present.
     expect(report.api).toEqual(meta.capabilities);
-    expect(report.api["eventsV2"]).toBe(false);
+    expect(report.api["eventsV2"]).toBe(true);
     expect(report.api["commands"]).toBe(false);
     expect(report.api["sharedQuery"]).toBe(true);
   });
@@ -575,6 +575,13 @@ describe("untrusted provider content (AT71)", () => {
         properties: ["identifierId", "offset", "view"],
         annotations: readOnly,
       },
+      {
+        name: "kogane.purchases.explain",
+        required: [],
+        closed: false,
+        properties: ["eventId", "offset", "period"],
+        annotations: readOnly,
+      },
       // Published because this store has the reported state's views.
       {
         name: "kogane.reconstructed-state.read",
@@ -604,8 +611,8 @@ describe("untrusted provider content (AT71)", () => {
   });
 
   it("adds exactly the purchase explanation while card purchase recognition is served", async () => {
-    // This store has CORE 0047; the reader flag decides (docs/economic-events.md, HTTP).
-    const served = { ...grants({ "agent-principal": FULL_GRANT }), EVENTS_V2_ENABLED: "true" };
+    // This store has CORE 0047. The retired env name does not decide.
+    const served = { ...grants({ "agent-principal": FULL_GRANT }), EVENTS_V2_ENABLED: "0" };
     const listed = (await (
       await call("/mcp", {
         body: { jsonrpc: "2.0", id: 1, method: "tools/list" },
@@ -639,7 +646,24 @@ describe("untrusted provider content (AT71)", () => {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     });
     expect(purchases.inputSchema["properties"].actions).toBeUndefined();
-    // With the reader flag off it is not a tool and not a route.
+    // Missing CORE 0047 hides the tool even when the retired name is on.
+    const missingSchema = {
+      ...grants({ "agent-principal": FULL_GRANT }),
+      DB: new Proxy(env.DB, {
+        get(target, property) {
+          if (property === "prepare")
+            return (sql: string) =>
+              target.prepare(
+                sql.includes("sqlite_master") && sql.includes("card_purchase_recognitions")
+                  ? "SELECT 0 AS present"
+                  : sql,
+              );
+          const value = Reflect.get(target, property) as unknown;
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }),
+      EVENTS_V2_ENABLED: "true",
+    };
     const offCall = (await (
       await call("/mcp", {
         body: {
@@ -648,37 +672,36 @@ describe("untrusted provider content (AT71)", () => {
           method: "tools/call",
           params: { name: PURCHASES_TOOL_NAME, arguments: {} },
         },
-        environment: grants({ "agent-principal": FULL_GRANT }),
+        environment: missingSchema,
       })
     ).json()) as { error: { code: number; message: string } };
     expect(offCall.error).toEqual({ code: -32602, message: "unknown_tool" });
     const offRoute = await call("/api/agent/v1/purchases.explain", {
       body: {},
-      environment: grants({ "agent-principal": FULL_GRANT }),
+      environment: missingSchema,
     });
     expect(offRoute.status).toBe(404);
     // Like every agent path: Access first, then the grant, and POST only.
+    // The retired name does not grant anyone.
     const path = "/api/agent/v1/purchases.explain";
     expect((await call(path, { body: {}, jwt: null, environment: served })).status).toBe(401);
-    expect(
-      (await call(path, { body: {}, environment: { EVENTS_V2_ENABLED: "true" } })).status,
-    ).toBe(403);
+    expect((await call(path, { body: {}, environment: { EVENTS_V2_ENABLED: "0" } })).status).toBe(
+      403,
+    );
     expect((await call(path, { environment: served })).status).toBe(405);
   });
 
-  it("lists the six tools and the reconstructed-state read, with the same names the HTTP routes serve", async () => {
+  it("lists the tools this store serves, with the same names the HTTP routes serve", async () => {
     const listed = (await mcp({ jsonrpc: "2.0", id: 1, method: "tools/list" })) as {
       result: { tools: { name: string }[] };
     };
-    // The six, and the reconstructed state's read while its route is served.
+    // CORE 0047 is applied here, so the purchase explanation follows the
+    // always-served tools. The reconstructed state's read follows it while
+    // that route is served.
     expect(listed.result.tools.map((tool) => tool.name)).toEqual([
-      "kogane.capabilities",
-      "kogane.context.open",
-      "kogane.financial.query",
-      "kogane.explain",
-      "kogane.reconcile.propose",
-      "kogane.instruments.candidates",
-      "kogane.reconstructed-state.read",
+      ...AGENT_TOOL_NAMES,
+      PURCHASES_TOOL_NAME,
+      RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
     expect(MCP_TOOLS.map((tool) => tool.name)).toEqual([...AGENT_TOOL_NAMES]);
     expect(

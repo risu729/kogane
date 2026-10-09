@@ -66,10 +66,9 @@ import { organizationContext, organizeRows } from "./observation-organization";
 export const V2_LATEST_PATH = "/api/v2/balances/latest";
 export const V2_HISTORY_PATH = "/api/v2/balances/history";
 
-/** Reader-side flag. Off keeps `/api/balances` on today's code path exactly. */
-export function projectionFlagOn(env: Env): boolean {
-  const flag: string = env.BALANCE_PROJECTION_ENABLED;
-  return flag === "1";
+/** This deployment reads balance snapshots when the READ binding is present. */
+export function balanceReadConfigured(env: Env): boolean {
+  return readBinding(env) !== null;
 }
 
 /** The READ binding, when this deployment has one. */
