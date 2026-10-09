@@ -367,6 +367,40 @@ describe("queryValuationOnDate", () => {
     expect(result.manifest.selection.selected).not.toContain("px-1001-fresh");
   });
 
+  test("a position container whose stale snapshot listed nothing makes the total partial, not exact", async () => {
+    // The reviewer's input: the world, but the VC position summary's only
+    // snapshot is a complete-empty capture 40 days before the date.
+    const store = world({ vc: false });
+    const vc = store.capture({
+      source: "sbi-vc-trade",
+      dataset: "position-summary",
+      parser: "sbi-vc-position-summary",
+      version: "0.2.0",
+      fetchedAt: "2026-08-01T00:30:00Z",
+    });
+    const result = await queryValuationOnDate(counting(store), REQUEST, POLICIES);
+    expect(result.counts.valued).toBe(2);
+    expect(result.reportedState.coverage.staleSnapshots.map((entry) => entry.ref)).toEqual([
+      `artifact:${vc.artifact}`,
+    ]);
+    // Every position container has a snapshot; only other containers lack one.
+    expect(result.manifest.reportedState.positionContainersWithoutSnapshot).toEqual([]);
+    expect(result.total).toMatchObject({
+      status: "partial-verified-scope",
+      positionContainersWithoutSnapshot: 0,
+      stalePositionContainersWithoutHoldings: 1,
+    });
+    expect(result.total.status !== "absent" && text(result.total.value)).toBe("379378.5");
+    expect(result.manifest.reportedState.stalePositionSnapshotsWithoutHoldings).toEqual([
+      {
+        ref: `artifact:${vc.artifact}`,
+        sourceId: "sbi-vc-trade",
+        parserName: "sbi-vc-position-summary",
+        ageDays: 40,
+      },
+    ]);
+  });
+
   test("a recent snapshot whose own price is older than the policy allows is unpriced stale", async () => {
     const store = new DatedStore();
     emptyVc(store);

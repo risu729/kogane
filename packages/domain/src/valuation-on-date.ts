@@ -27,9 +27,10 @@
 // A total is stated only when every holding is valued and all of them come
 // from one source; otherwise it is absent with its reason and the counts by
 // outcome (INV05; INV06, since adoption across sources is not applied). When
-// a position container of the perimeter has no snapshot on the date, the
-// total is labelled `partial-verified-scope` with the containers it lacks,
-// never `exact` (§2: a partial result is never a whole total). Amounts are
+// a position container of the perimeter has no snapshot on the date, or its
+// stale snapshot listed no holding, the total is labelled
+// `partial-verified-scope` with the counts, never `exact` (§2: a partial
+// result is never a whole total). Amounts are
 // added with `sumQuantities` (INV03). There is no gain, no cost basis and no tax
 // here, and a provider's own valuation of a holding is never its value.
 import type { RoundingInputs } from "./calculation.ts";
@@ -165,10 +166,24 @@ export interface ValuationOnDateInput {
       parserName: string;
       dataset: string;
     }[];
+    /**
+     * Snapshots of those containers that the reported state lists as `stale`
+     * (`dated-state-freshness-v1`). One that no holding came from said
+     * "nothing" too long ago to read as nothing on the date (INV05).
+     */
+    stalePositionSnapshots: readonly StalePositionSnapshot[];
   };
   holdings: readonly HoldingOnDate[];
   prices: readonly HoldingPriceSelection[];
   fx: readonly PriceSelection[];
+}
+
+export interface StalePositionSnapshot {
+  /** `artifact:<id>`. */
+  ref: string;
+  sourceId: string;
+  parserName: string;
+  ageDays: number;
 }
 
 interface HoldingBase {
@@ -219,13 +234,15 @@ export type ValuationTotal =
   | { status: "exact"; value: Quantity }
   /**
    * Every listed holding is valued, but the perimeter has position containers
-   * without a snapshot: the sum of a verified part, never the whole and not a
-   * lower bound of it (§2).
+   * without a snapshot, or whose stale snapshot listed no holding: what they
+   * hold on the date is unknown, so this is the sum of a verified part, never
+   * the whole and not a lower bound of it (§2).
    */
   | {
       status: "partial-verified-scope";
       value: Quantity;
       positionContainersWithoutSnapshot: number;
+      stalePositionContainersWithoutHoldings: number;
     }
   | { status: "absent"; reason: TotalAbsenceReason };
 
@@ -235,7 +252,10 @@ export interface ValuationOnDateManifest {
   asOf: { date: string; effectiveBefore: string; knowledge: SelectionBound["knowledge"]["mode"] };
   baseUnit: string;
   policies: { policyId: string; digest: string }[];
-  reportedState: ValuationOnDateInput["reportedState"];
+  reportedState: Omit<ValuationOnDateInput["reportedState"], "stalePositionSnapshots"> & {
+    /** Stale position snapshots no holding came from, which make the total partial. */
+    stalePositionSnapshotsWithoutHoldings: StalePositionSnapshot[];
+  };
   /** Every snapshot a holding came from, with its parse run. */
   snapshots: { snapshotRef: string; parseRunId: number }[];
   /** Ids and codes only, sorted by ref: no amount is held here. */
@@ -527,6 +547,12 @@ export async function valueHoldingsOnDate(input: ValuationOnDateInput): Promise<
   >;
   for (const holding of holdings) counts[holding.outcome] += 1;
 
+  // A stale snapshot that holdings came from has made each of them
+  // `snapshot_stale`; one no holding came from is counted here.
+  const held = new Set(input.holdings.map((holding) => holding.snapshotRef));
+  const staleEmpty = input.reportedState.stalePositionSnapshots.filter(
+    (snapshot) => !held.has(snapshot.ref),
+  );
   let total: ValuationTotal;
   if (holdings.length === 0) total = { status: "absent", reason: "no_holdings" };
   else if (counts.valued !== holdings.length)
@@ -543,12 +569,13 @@ export async function valueHoldingsOnDate(input: ValuationOnDateInput): Promise<
     if (!sum.ok) throw new RangeError("total_not_exact");
     const lacking = input.reportedState.positionContainersWithoutSnapshot.length;
     total =
-      lacking === 0
+      lacking === 0 && staleEmpty.length === 0
         ? { status: "exact", value: sum.quantity }
         : {
             status: "partial-verified-scope",
             value: sum.quantity,
             positionContainersWithoutSnapshot: lacking,
+            stalePositionContainersWithoutHoldings: staleEmpty.length,
           };
   }
 
@@ -594,6 +621,17 @@ export async function valueHoldingsOnDate(input: ValuationOnDateInput): Promise<
         input.reportedState.positionContainersWithoutSnapshot.map((entry) => [
           JSON.stringify([entry.sourceId, entry.parserName, entry.dataset]),
           { sourceId: entry.sourceId, parserName: entry.parserName, dataset: entry.dataset },
+        ]),
+      ),
+      stalePositionSnapshotsWithoutHoldings: byText(
+        staleEmpty.map((entry) => [
+          entry.ref,
+          {
+            ref: entry.ref,
+            sourceId: entry.sourceId,
+            parserName: entry.parserName,
+            ageDays: entry.ageDays,
+          },
         ]),
       ),
     },

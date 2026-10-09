@@ -13,7 +13,8 @@
 //   4. `valueHoldingsOnDate`: one closed outcome per holding, a total only when
 //      every holding is valued and all come from one source (labelled
 //      `partial-verified-scope` when a position container of the perimeter
-//      has no snapshot), and the manifest whose digest is the context.
+//      has no snapshot, or a stale one that listed no holding), and the
+//      manifest whose digest is the context.
 //
 // It never writes, never fetches, has no clock (the caller states today's
 // date) and no default policy: a request without one is refused
@@ -289,6 +290,16 @@ export async function queryValuationOnDate(
           sourceId: entry.sourceId,
           parserName: entry.parserName,
           dataset: entry.dataset,
+        })),
+      stalePositionSnapshots: state.coverage.staleSnapshots
+        .filter((entry) =>
+          (DATED_POSITION_CONTAINER_PARSERS as readonly string[]).includes(entry.parserName),
+        )
+        .map((entry) => ({
+          ref: entry.ref,
+          sourceId: entry.sourceId,
+          parserName: entry.parserName,
+          ageDays: entry.ageDays,
         })),
     },
     holdings,

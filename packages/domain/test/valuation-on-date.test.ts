@@ -63,6 +63,7 @@ const REPORTED: ValuationOnDateInput["reportedState"] = {
   quantityPolicy: "decimal-v1",
   contextId: "0".repeat(64),
   positionContainersWithoutSnapshot: [],
+  stalePositionSnapshots: [],
 };
 
 const ALPHA = "instrument:test-broker:-:ALPHA";
@@ -598,6 +599,45 @@ describe("totals", () => {
     expect(quantityText(result.total.value)).toBe("379378.5");
     expect(result.total.positionContainersWithoutSnapshot).toBe(1);
     expect(result.manifest.reportedState.positionContainersWithoutSnapshot).toHaveLength(1);
+  });
+
+  test("a stale position snapshot that listed no holding makes the total partial, never exact", async () => {
+    const stale = {
+      ref: "artifact:77",
+      sourceId: "test-broker",
+      parserName: "test-positions",
+      ageDays: 40,
+    };
+    const result = computed(
+      await valueHoldingsOnDate({
+        ...input(TWO(), [ALPHA_PRICE(), BETA_PRICE(), USD_MID()]),
+        reportedState: { ...REPORTED, stalePositionSnapshots: [stale] },
+      }),
+    );
+    expect(result.total).toMatchObject({
+      status: "partial-verified-scope",
+      positionContainersWithoutSnapshot: 0,
+      stalePositionContainersWithoutHoldings: 1,
+    });
+    expect(result.manifest.reportedState.stalePositionSnapshotsWithoutHoldings).toEqual([stale]);
+    // A stale snapshot a holding came from is not counted here: the holding
+    // itself is snapshot_stale, and the total is absent.
+    const held = holding({
+      ref: "position:3",
+      instrumentRef: BETA,
+      quantity: "1",
+      parseRunId: 77,
+      snapshotFreshness: "stale",
+      snapshotAgeDays: 40,
+    });
+    const absent = computed(
+      await valueHoldingsOnDate({
+        ...input([...TWO(), held], [ALPHA_PRICE(), BETA_PRICE(), USD_MID()]),
+        reportedState: { ...REPORTED, stalePositionSnapshots: [stale] },
+      }),
+    );
+    expect(absent.total).toEqual({ status: "absent", reason: "holding_not_valued" });
+    expect(absent.manifest.reportedState.stalePositionSnapshotsWithoutHoldings).toEqual([]);
   });
 
   test("no holdings is no total, not zero", async () => {
