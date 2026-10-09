@@ -91,13 +91,19 @@ earlier decision, made as above. An agent reads the same list through
 
 Staleness: the page reads the candidate again before it plans, and plans
 nothing unless the same candidate, with the same commands and the same
-mapping revisions of both identifiers, is still listed. The server pins only
-the subject's mapping revision of an `identity.assign` plan; the anchor is
-not pinned. So an agent's or a direct API adoption plan made from an older
-read can adopt the subject into an instrument the anchor has since left.
-The confirmation screen shows the subject only, not the anchor; read the
-candidate again (`kogane.instruments.candidates` with
-`identifierId=<subject>`) before approving such a plan.
+mapping revisions of both identifiers, is still listed. Candidate adoption
+plans include a `candidate` provenance bundle, verified by the server against
+the current open candidate. Both anchor and subject mappings are pinned in
+the plan and checked at approval and in the atomic commit batch; an anchor
+revision change, including a same-target correction, refuses the plan.
+A direct manual assignment remains available without candidate provenance;
+it cannot name an `instrument-candidate:` context without the bundle. The
+confirmation screen still shows the assignment target generically.
+
+Each identifier card has `訂正履歴を見る`, which loads all stored mapping,
+decision and `listed_as` relation entries, oldest first. It is refused whole
+if the history exceeds the reader's row budget. Effective-date mappings are
+not supported; the agent/MCP history adapter awaits shared audit integration.
 
 The read is refused with `budget:identityObservations=500000` once the
 store holds more current identity observations than that; raising the bound
