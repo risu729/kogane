@@ -22,11 +22,18 @@
 //   debit and credit sides, zero debits, foreign currencies, a status and a
 //   sign source the parser never sets, timed dates, and re-observed provider
 //   ids whose newer capture changes side or currency;
-// - settlement candidates keyed by string, missing and numeric facts.
+// - settlement candidates keyed by string, missing and numeric facts;
+// - holders of bank rows in book `cash-movement` (CORE 0070, ADR 0054):
+//   accepted settlements whose events have live or withdrawn revisions, and
+//   economic claims with no alias class, the row's own alias class or another
+//   row's, live or released, beside the reviews' own claims. They are drawn
+//   last, with their own generator, so every draw before them is unchanged.
 //
 // `drawn` records which of these a seed drew, so a test can check that the
 // seeds together drew them all. Every value is synthetic.
 import type { Database } from "bun:sqlite";
+import { aliasClassText, INITIAL_IDENTITY_EPOCH } from "../../domain/src/economic-contract";
+import { declaredAliasClass } from "../../domain/src/row-identity";
 import { fullCoreSchema } from "./card-usage-scale-fixture";
 
 const PRODUCER = "collector-r2-importer";
@@ -711,6 +718,8 @@ class Builder {
             String(credit ? amount : -amount),
             this.chance(0.1, "date-only bank time") ? date : `${date}T00:00:00+09:00`,
             JSON.stringify({
+              // The provider id the parser keeps beside its external id.
+              id: externalId,
               _kogane: {
                 direction: credit ? "inflow" : "outflow",
                 amountSignSource: this.chance(0.05, "other sign source") ? "text" : "direction",
@@ -775,6 +784,7 @@ class Builder {
             foreign ? "USD" : "JPY",
             this.chance(0.06, "SBI Shinsei timed date") ? `${date}T00:00:00+09:00` : date,
             JSON.stringify({
+              txnReferenceNo: externalId,
               _kogane: {
                 sourceView: "top_activity",
                 // A negative row whose side is not the provider's own column.
@@ -1115,6 +1125,181 @@ class Reviews {
   }
 }
 
+interface BankRow {
+  id: number;
+  parse_run_id: number;
+  key: string;
+  source_id: string;
+  parser_name: string;
+  source_account: string;
+  extra_json: string;
+}
+
+/**
+ * The holders of bank rows in book `cash-movement` that
+ * `live_consumption_claims` (CORE 0070) lists, drawn after the reviews with
+ * their own generator. Accepted settlements' events get their revision (the
+ * legacy holders; a withdrawn one is superseded by its withdrawal, as the
+ * writer does), some reviews' own events claim their own debit, and other
+ * events claim bank rows with no alias class, the row's own alias class or
+ * another row's, and are then kept or released. A claim the 0070 triggers
+ * refuse (a key or class already held) is left out and recorded.
+ */
+class EconomicClaims {
+  private readonly drawn: Set<string>;
+
+  constructor(
+    private readonly builder: Builder,
+    private readonly next: () => number,
+  ) {
+    this.drawn = builder.drawn;
+  }
+
+  private chance(probability: number, state?: string): boolean {
+    const hit = this.next() < probability;
+    if (hit && state !== undefined) this.drawn.add(state);
+    return hit;
+  }
+
+  private pick<T>(values: readonly T[]): T {
+    return values[Math.floor(this.next() * values.length)]!;
+  }
+
+  private revision(event: string, revision: number, state: "debited" | "unknown"): void {
+    const decision = `dr-economic-${this.builder.id()}`;
+    this.builder.run(
+      `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+       VALUES(?,'relation',?,?,?,'manual','synthetic-operator',NULL,'synthetic','[]',?,NULL,'2026-09-03')`,
+      decision,
+      `event:${event}`,
+      revision,
+      revision === 1 ? "accept" : "supersede",
+      revision === 1 ? null : revision - 1,
+    );
+    this.builder.run(
+      `INSERT INTO economic_event_revisions(event_id,revision,kind,state,unknown_reason,effective_time_json,basis,evidence_support_json,decision_revision_id,created_at)
+       VALUES(?,?,'card_settlement',?,?,'{}','cash-movement','["synthetic-evidence"]',?,'2026-09-03')`,
+      event,
+      revision,
+      state,
+      state === "unknown" ? "conflicting_evidence" : null,
+      decision,
+    );
+    if (revision > 1)
+      this.builder.run(
+        "UPDATE economic_event_revisions SET superseded_by=? WHERE event_id=? AND revision=?",
+        `${event}@${revision}`,
+        event,
+        revision - 1,
+      );
+  }
+
+  private claim(event: string, row: BankRow, alias: string | null): boolean {
+    try {
+      this.builder.run(
+        `INSERT INTO economic_claims(event_id,revision,book,consumption_key,alias_class,identity_epoch,observation_id,parse_run_id)
+         VALUES(?,1,'cash-movement',?,?,?,?,?)`,
+        event,
+        row.key,
+        alias,
+        INITIAL_IDENTITY_EPOCH,
+        row.id,
+        row.parse_run_id,
+      );
+      return true;
+    } catch {
+      this.drawn.add("economic claim: refused");
+      return false;
+    }
+  }
+
+  private aliasOf(row: BankRow, accountId: string): string | null {
+    let extra: unknown;
+    try {
+      extra = JSON.parse(row.extra_json);
+    } catch {
+      return null;
+    }
+    const alias = declaredAliasClass({
+      sourceId: row.source_id,
+      parserName: row.parser_name,
+      sourceAccount: row.source_account,
+      extra,
+      accountId,
+    });
+    return alias === null ? null : aliasClassText(alias);
+  }
+
+  write(): void {
+    const { db } = this.builder;
+    // The legacy holders: every reviewed settlement's event, written as the
+    // settlement writer writes it, or (drawn) never written.
+    const settled = db
+      .query(
+        `SELECT d.event_id,max(d.revision) AS revision,c.id AS proposal_id,c.bank_key,c.bank_observation_id,c.bank_parse_run_id
+         FROM card_settlement_decisions d JOIN card_settlement_candidates c ON c.id=d.proposal_id
+         WHERE d.event_id IS NOT NULL GROUP BY d.event_id ORDER BY d.event_id`,
+      )
+      .all() as {
+      event_id: string;
+      revision: number;
+      proposal_id: string;
+      bank_key: string;
+      bank_observation_id: number;
+      bank_parse_run_id: number;
+    }[];
+    for (const event of settled) {
+      if (!this.chance(0.8, "economic claim: legacy settlement event")) continue;
+      this.revision(event.event_id, 1, "debited");
+      if (event.revision > 1) this.revision(event.event_id, 2, "unknown");
+      else if (this.chance(0.4)) {
+        // The review's own claim of its debit, as the G1b writer records it.
+        const own = db
+          .query(
+            `SELECT t.id,t.parse_run_id,json_array(a.source_id,fr.producer_id,ses.external_id_namespace,t.source_account,t.external_id) AS key,
+              a.source_id,p.parser_name,t.source_account,t.extra_json
+             FROM transaction_observations t JOIN parse_runs p ON p.id=t.parse_run_id JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+             JOIN fetch_runs fr ON fr.id=a.fetch_run_id JOIN acquisition_sessions ses ON ses.id=fr.acquisition_session_id
+             WHERE t.id=? AND t.parse_run_id=?`,
+          )
+          .get(event.bank_observation_id, event.bank_parse_run_id) as BankRow | null;
+        if (own !== null && own.key === event.bank_key)
+          if (this.claim(event.event_id, own, this.aliasOf(own, "acct-k")))
+            this.drawn.add("economic claim: a review's own claim");
+      }
+    }
+    const rows = db
+      .query(
+        `SELECT t.id,t.parse_run_id,json_array(a.source_id,fr.producer_id,ses.external_id_namespace,t.source_account,t.external_id) AS key,
+          a.source_id,p.parser_name,t.source_account,t.extra_json
+         FROM transaction_observations t JOIN parse_runs p ON p.id=t.parse_run_id JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+         JOIN fetch_runs fr ON fr.id=a.fetch_run_id JOIN acquisition_sessions ses ON ses.id=fr.acquisition_session_id
+         WHERE t.external_id IS NOT NULL AND t.external_id<>'' AND a.source_id IN ('smbc-bank','sbi-shinsei-bank')
+         ORDER BY t.id`,
+      )
+      .all() as BankRow[];
+    if (rows.length === 0) return;
+    const holders = 3 + Math.floor(this.next() * 5);
+    for (let index = 0; index < holders; index += 1) {
+      const row = this.pick(rows);
+      const event = `economic-holder-${this.builder.id()}`;
+      this.revision(event, 1, "debited");
+      const account = this.pick(["acct-k", "acct-x"] as const);
+      const same = rows.filter((other) => other.source_id === row.source_id);
+      const alias = this.chance(0.25, "economic claim: no alias class")
+        ? null
+        : this.chance(0.5, "economic claim: another row's alias class")
+          ? this.aliasOf(this.pick(same), account)
+          : this.aliasOf(row, account);
+      if (!this.claim(event, row, alias)) continue;
+      this.drawn.add(
+        alias === null ? "economic claim: held without class" : "economic claim: held",
+      );
+      if (this.chance(0.3, "economic claim: released")) this.revision(event, 2, "unknown");
+    }
+  }
+}
+
 /** One random store; `drawn` collects the states the seed drew. */
 export function randomSettlementStore(seed: number, drawn: Set<string>): RandomSettlementStore {
   const builder = new Builder(random(seed), drawn);
@@ -1139,6 +1324,7 @@ export function randomSettlementStore(seed: number, drawn: Set<string>): RandomS
     }
   builder.candidates();
   new Reviews(builder).write();
+  new EconomicClaims(builder, random(seed + 7_919)).write();
   const triples: [string, string, string][] = [];
   for (const account of RANDOM_ACCOUNTS)
     for (const source of ["vpass", "myjcb"])
@@ -1224,4 +1410,16 @@ export const READINESS_STATES = [
   "review: withdrawn",
   "review: superseded allocation",
   "review: other allocation",
+] as const;
+
+/** The holder states the claim checks require the seeds together to draw. */
+export const ECONOMIC_CLAIM_STATES = [
+  "economic claim: legacy settlement event",
+  "economic claim: a review's own claim",
+  "economic claim: no alias class",
+  "economic claim: another row's alias class",
+  "economic claim: held",
+  "economic claim: held without class",
+  "economic claim: released",
+  "economic claim: refused",
 ] as const;

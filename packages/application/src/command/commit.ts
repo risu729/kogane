@@ -22,8 +22,12 @@ import {
   PENDING_POSTED_RELATION_KIND,
   pendingPostedReviewRequested,
 } from "../../../domain/src/pending-posted-review.ts";
-import { isCardReviewKind, type RelationPayload } from "./contract.ts";
+import { isCardReviewKind, isEconomicEventKind, type RelationPayload } from "./contract.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
+import {
+  economicGuardCode,
+  type EconomicGuardCode,
+} from "../../../domain/src/economic-contract.ts";
 import {
   type ChangePlan,
   type CommandReceipt,
@@ -50,6 +54,21 @@ import {
 } from "../../../storage-d1/src/atomic/decision-commit.ts";
 
 const OPERATION_ID = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u;
+
+/**
+ * The economic guard refusals (ADR 0054) a fresh plan can see: the row is
+ * consumed, the fact is held under another key, the identity epoch moved, or
+ * a revision the plan read moved. Any other guard code is a writer's own
+ * inconsistency (`commit_failed`). Either way the code is the second ref.
+ */
+const GUARD_CONFLICTS: ReadonlySet<EconomicGuardCode> = new Set([
+  "economic_claim_held",
+  "alias_conflict",
+  "identity_epoch_changed",
+  "economic_commit_prior_not_superseded",
+  "economic_event_live_conflict",
+  "economic_revision_sealed",
+]);
 
 export interface CommitInput {
   operationId: unknown;
@@ -176,6 +195,13 @@ export async function commit(
   if (scope.length > 0 && !Object.keys(plan.expectedRevisions).every((ref) => scope.includes(ref)))
     return commandError("approval_scope_mismatch", [approval.approval_id]);
 
+  // An economic-event kind commits only while its planner accepts it, checked
+  // before its writer runs: a writer slot alone never opens a kind whose
+  // planner is not registered (ADR 0054, G2), as `approve` checks too.
+  if (isEconomicEventKind(plan.kind)) {
+    const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
+    if (!eligibility.ok) return eligibility;
+  }
   const planner = input.planners[plan.kind];
   if (!planner) return commandError("unsupported_semantics", [plan.kind]);
 
@@ -186,6 +212,7 @@ export async function commit(
     plan,
     principal,
     operationId,
+    payloadDigest,
     now: input.now,
     guard,
   });
@@ -238,7 +265,20 @@ export async function commit(
     ),
   ];
 
-  const results = await store.batch(writes);
+  let results: Awaited<ReturnType<CommandStore["batch"]>>;
+  try {
+    results = await store.batch(writes);
+  } catch (error) {
+    // A CORE 0070 trigger refused the batch and D1 rolled it back whole. Its
+    // closed code is the answer; the message itself never leaves here. Any
+    // other error is not this commit's to explain.
+    const code = economicGuardCode(error instanceof Error ? error.message : String(error));
+    if (code === null) throw error;
+    return commandError(GUARD_CONFLICTS.has(code) ? "stale_context" : "commit_failed", [
+      plan.planId,
+      code,
+    ]);
+  }
   if (results[0]?.changes === 1) return { ok: true, replayed: false, receipt };
   return failureReason(
     store,
@@ -293,6 +333,7 @@ async function failureReason(
   if (
     plan.kind === "card-settlement.accept" ||
     isCardReviewKind(plan.kind) ||
+    isEconomicEventKind(plan.kind) ||
     ((plan.kind === "relation.accept" || plan.kind === "relation.reject") &&
       (ownershipReviewRequested((plan.payload as RelationPayload).evidenceRefs) ||
         pendingPostedReviewRequested((plan.payload as RelationPayload).evidenceRefs) ||

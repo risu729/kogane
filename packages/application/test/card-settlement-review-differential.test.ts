@@ -39,6 +39,21 @@ if (!Number.isSafeInteger(SEED_COUNT) || SEED_COUNT < 1)
 const SEEDS = Array.from({ length: SEED_COUNT }, (_, index) => index + 1);
 const drawn = new Set<string>();
 
+/**
+ * The columns the shipped reads had: the plan read adds `claim_available` and
+ * the review's `event_id` (ADR 0054, G1b), which
+ * packages/read-model/test/card-settlement-readiness.test.ts compares.
+ */
+function shippedColumns(found: unknown[]): unknown[] {
+  return found.map((row) =>
+    Object.fromEntries(
+      Object.entries(row as Record<string, unknown>).filter(
+        ([name]) => name !== "claim_available" && name !== "event_id",
+      ),
+    ),
+  );
+}
+
 function rows(db: Database, sql: string, args: readonly unknown[]): unknown[] {
   return db.query(sql).all(...(args as SQLQueryBindings[]));
 }
@@ -102,7 +117,7 @@ describe("card settlement readiness reads on random stores", () => {
           [CARD_SETTLEMENT_PLAN_SQL, LEGACY_CARD_SETTLEMENT_PLAN_SQL],
           [OWNERSHIP_REVIEW_CANDIDATE_SQL, LEGACY_OWNERSHIP_REVIEW_CANDIDATE_SQL],
         ] as const)
-          expect(rows(db, sql, [id])).toEqual(rows(db, legacy, [id]));
+          expect(shippedColumns(rows(db, sql, [id]))).toEqual(rows(db, legacy, [id]));
         for (const expected of [revision, revision + 1]) {
           const [guard] = rows(db, `SELECT ${OWNERSHIP_REVIEW_CANDIDATE_GUARD_SQL} AS ok`, [
             id,

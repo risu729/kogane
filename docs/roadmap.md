@@ -15,18 +15,18 @@ the relevant rollout records.
 
 ## Current position
 
-| Original phases                         | Implemented foundation                                                                                                                                | Work still needed for product completion                                                                     |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| 0–3: collection, evidence, observations | Source collectors, shared raw evidence, versioned parsing and publication                                                                             | Coverage by account and data type; collection requests connected to execution and visible results            |
-| 4–5: accounts and instruments           | Provider-local identities, mappings and append-only corrections                                                                                       | Evidence-backed resolution across direct providers, aggregators and brokers; review of unresolved identities |
-| 6–7: reconciliation and economic events | Candidate matching, decisions, event/leg/allocation/obligation/settlement contracts                                                                   | More transaction families and continuous event production from adopted observations                          |
-| 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots; reported state on a date (positions, provider valuations, balances, card payables) | Adoption across sources on a date, dated identity, liabilities beyond provider statements                    |
-| 9 + 13: prices and valuation            | Price contracts, pure valuation functions and fixed report artifacts                                                                                  | Price/FX acquisition, selection policies and portfolio valuation from actual holdings                        |
-| 10: rewards                             | Bucket claims, expiry and conversion functions, READ projections                                                                                      | Classified activity history, verified applicable rules, membership and usable conversion offers              |
-| 11: derived balances and positions      | Difference contracts and reconciliation readers                                                                                                       | Applying adopted events to a starting snapshot to reconstruct balances and quantities                        |
-| 12 + 14: cost basis and P&L             | Input gates and some P&L decomposition functions                                                                                                      | Lots, carried cost, disposal allocation, realized and unrealized P&L                                         |
-| 15: tax                                 | Refusal when required policy or inputs are missing                                                                                                    | Verified rules and tested outputs for a named jurisdiction, period and asset/account class                   |
-| 16: AI / MCP                            | Shared query/explanation/proposal service and transports                                                                                              | Complete analysis and correction flows using the same services as the UI                                     |
+| Original phases                         | Implemented foundation                                                                                                                                                                                                                                                                                             | Work still needed for product completion                                                                                             |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 0–3: collection, evidence, observations | Source collectors, shared raw evidence, versioned parsing and publication; operations-API collection requests executed through the named collector RPC and traced to publication                                                                                                                                   | Coverage by account and data type; enabling and verifying request dispatch in production, requested windows, READ projection tracing |
+| 4–5: accounts and instruments           | Provider-local identities, mappings and append-only corrections                                                                                                                                                                                                                                                    | Evidence-backed resolution across direct providers, aggregators and brokers; review of unresolved identities                         |
+| 6–7: reconciliation and economic events | Candidate matching, decisions, event/leg/allocation/obligation/settlement contracts                                                                                                                                                                                                                                | More transaction families and continuous event production from adopted observations                                                  |
+| 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots; reported state on a date (positions, provider valuations, balances, card payables)                                                                                                                                                              | Adoption across sources on a date, dated identity, liabilities beyond provider statements                                            |
+| 9 + 13: prices and valuation            | Price contracts, pure valuation functions, fixed report artifacts; as-of price/FX selection under explicit policies (values not yet decided)                                                                                                                                                                       | Price/FX acquisition, owner-decided selection policy values and portfolio valuation from actual holdings                             |
+| 10: rewards                             | Bucket claims, expiry and conversion functions, READ projections with displayed and computed expiry apart and their basis                                                                                                                                                                                          | Classified activity history, verified applicable rules, membership and usable conversion offers                                      |
+| 11: derived balances and positions      | Difference contracts and reconciliation readers; a pure fold from a start snapshot and adopted events, a knowledge selector over the commit log and a one-account query, without a route ([ADR 0052](adr/0052-reconstructed-state-fold.md), [ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md)) | Applying adopted events to a starting snapshot to reconstruct balances and quantities                                                |
+| 12 + 14: cost basis and P&L             | Input gates, some P&L decomposition functions, a pure lot/disposal-allocation engine over provisional inputs, and an adapter from selected revisions that answers unsupported until a securities writer exists ([ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md))                                       | A securities writer, transfers with carried cost, fee and FX evidence, persisted results, realized and unrealized P&L                |
+| 15: tax                                 | Refusal when required policy or inputs are missing                                                                                                                                                                                                                                                                 | Verified rules and tested outputs for a named jurisdiction, period and asset/account class                                           |
+| 16: AI / MCP                            | Shared query/explanation/proposal service and transports                                                                                                                                                                                                                                                           | Complete analysis and correction flows using the same services as the UI                                                             |
 
 Current implementation and limits are maintained in [current status](current-status.md).
 The detailed source-by-source fixes and dated rollout observations previously
@@ -89,6 +89,13 @@ MoneyForward, and the same instrument held at different brokers, with explicit
 evidence. Preserve different products with similar names and unresolved
 references. Expose the existing correction history in the review flow.
 
+Collection timing depends on provider maintenance windows. The official-site
+re-survey only proposes window changes for an operator to accept
+([ADR 0050](adr/0050-maintenance-survey-proposals.md)); no page is enabled
+until the owner confirms its URL, terms and cadence, so the windows are still
+refreshed by hand, and pages that are PDFs, need a login or render with
+JavaScript stay manual ([schedules](schedules.md#official-site-re-survey)).
+
 Source expansion remains part of this work: the inventory includes further
 payments, banks, overseas accounts and reward programs. Complete representative
 flows first, then extend them under the same contracts.
@@ -115,6 +122,14 @@ functions alone do not complete this stage.
 | FX and overseas transfers                          | Changes per currency, explicit fees and unexplained differences         |
 | Securities orders, executions, settlement and cash | Quantity changes linked to the relevant cash movement                   |
 | Reward exchanges and stored-value funding          | Request, deduction, arrival, cancellation and return as separate stages |
+
+Limit: only the card purchase and card settlement rows have an event writer
+today. No event is written for bank or stored-value movements, transfers, FX, remittances,
+securities, crypto, reward exchanges or stored-value funding; the
+transaction-family registry states, per parser, which family its rows belong to
+and the closed reasons no event is written
+([economic events](economic-events.md#non-card-families-unsupported-today),
+[ADR 0053](adr/0053-transaction-family-registry.md)).
 
 Connect candidate review, acceptance, rejection and correction to guarded
 commands and the UI. Amount/date proximity stays a proposal; provider evidence

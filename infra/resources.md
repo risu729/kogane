@@ -759,7 +759,7 @@ No wrangler config.
 - Service bindings: SCHEDULE_GLOBALPASS → kogane-globalpass-collector-poc<br>SCHEDULE_VPASS → kogane-vpass-collector-poc<br>SCHEDULE_MYJCB → kogane-myjcb-collector-poc<br>SCHEDULE_SBI_SECURITIES → kogane-sbi-collector-poc<br>SCHEDULE_SBI_SHINSEI → kogane-sbi-shinsei-collector-poc<br>SCHEDULE_SONY_BANK → kogane-sony-bank-collector-poc<br>SCHEDULE_SBI_VC_TRADE → kogane-sbi-vc-session-poc<br>SCHEDULE_MOBILE_SUICA → kogane-mobile-suica-collector-poc<br>SCHEDULE_MONEYFORWARD → kogane-moneyforward-collector-poc<br>SCHEDULE_VPOINT → kogane-vpoint-collector-poc<br>SCHEDULE_MIZUHO → kogane-mizuho-collector<br>SCHEDULE_ST_GEORGE → kogane-st-george-collector<br>SCHEDULE_PRESTIA_BANK → kogane-prestia-bank-collector
 - Crons: —
 - Assets: —
-- Vars (names only): BALANCE_PROJECTION_ENABLED<br>COLLECTION_ACCOUNT_ID<br>COLLECTION_DATA_BUCKET<br>COLLECTION_INGEST_CLIENT<br>OPS_DISPATCH_ENABLED<br>PURCHASE_RECOGNITION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>RELEASE_SHA<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SCHEDULES_ENABLED<br>SHARED_R2_INGEST_ENABLED
+- Vars (names only): BALANCE_PROJECTION_ENABLED<br>COLLECTION_ACCOUNT_ID<br>COLLECTION_DATA_BUCKET<br>COLLECTION_INGEST_CLIENT<br>OPS_COLLECTOR_DISPATCH_CONNECTIONS<br>OPS_DISPATCH_ENABLED<br>PURCHASE_RECOGNITION_ENABLED<br>RECONCILIATION_ENABLED<br>RELEASE_CANDIDATES_ENABLED<br>RELEASE_SHA<br>REPORTS_ENABLED<br>REWARD_CLAIMS_ENABLED<br>REWARD_READ_PROJECTION_ENABLED<br>SCHEDULES_ENABLED<br>SHARED_R2_INGEST_ENABLED
 - Required secrets (names only): —
 
 #### `kogane-observation-ops-local` — `services/processor/wrangler.ops.jsonc`

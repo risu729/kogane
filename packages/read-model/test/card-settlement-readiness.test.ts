@@ -6,12 +6,29 @@
 // and decisions drawn around the ones the store holds. Each flag both holds and
 // fails across the seeds, and each change listed in MUTATIONS, which would make
 // the CTEs inexact, fails the comparison on some seed. Every value is synthetic.
+//
+// ADR 0054 G1b added `claim_available`, which the view does not have. The
+// CTEs' other columns are compared with their text before it (frozen in
+// card-settlement-readiness-ctes-legacy-sql.ts, digest-pinned) as well as
+// with the view, and `claim_available` with its definition over
+// `live_consumption_claims` and the registry's alias classes, computed apart.
 import type { Database, SQLQueryBindings } from "bun:sqlite";
+import { createHash } from "node:crypto";
 import { beforeAll, describe, expect, test } from "bun:test";
-import { cardSettlementReadinessCtes } from "../src/card-settlement-readiness";
+import { aliasClassText } from "../../domain/src/economic-contract";
+import { declaredAliasClass } from "../../domain/src/row-identity";
+import {
+  CARD_SETTLEMENT_KEY_AVAILABLE_SQL,
+  cardSettlementReadinessCtes,
+} from "../src/card-settlement-readiness";
+import {
+  LEGACY_CARD_SETTLEMENT_READINESS_CTES,
+  LEGACY_CARD_SETTLEMENT_READINESS_CTES_SHA256,
+} from "./card-settlement-readiness-ctes-legacy-sql";
 import { explain } from "./card-usage-plan";
 import { fullCoreSchema } from "./card-usage-scale-fixture";
 import {
+  ECONOMIC_CLAIM_STATES,
   READINESS_STATES,
   randomSettlementStore,
   type RandomSettlementStore,
@@ -30,9 +47,9 @@ const FLAGS = ["statement_current", "bank_current", "ownership_current", "alloca
 const drawn = new Set<string>();
 
 const COLUMNS = `id,${FLAGS.join(",")}`;
-const keyed = (ctes: string): string =>
+const keyed = (ctes: string, columns = COLUMNS): string =>
   `WITH chosen AS (SELECT value AS id FROM json_each(?1)), ${ctes}
- SELECT ${COLUMNS} FROM readiness ORDER BY id`;
+ SELECT ${columns} FROM readiness ORDER BY id`;
 const shipped = `SELECT ${COLUMNS} FROM card_settlement_readiness
  WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id`;
 
@@ -213,5 +230,271 @@ describe("keyed card settlement readiness on random stores", () => {
     // The view it stands in for fails the same check: its ownership source
     // materializes the candidate identity runs of every published parse.
     expect(statementPlanProblems(explain(db, shipped, args))).not.toEqual([]);
+  });
+});
+
+/**
+ * `claim_available` computed apart from the CTEs: no live holder in
+ * `live_consumption_claims` (the CORE 0070 union of economic claims and the
+ * legacy settlement holders), in book `cash-movement`, of the candidate's
+ * bank_key or of the alias class `declaredAliasClass` gives its debit row and
+ * its facts' account, other than the event of the candidate's accepted review.
+ */
+function claimReference(db: Database, ids: readonly string[]): Record<string, number> {
+  const holders = db
+    .query(
+      "SELECT consumption_key,alias_class,event_id FROM live_consumption_claims WHERE book='cash-movement'",
+    )
+    .all() as { consumption_key: string; alias_class: string | null; event_id: string }[];
+  const found: Record<string, number> = {};
+  for (const id of new Set(ids)) {
+    const row = db
+      .query(
+        `SELECT c.bank_key,c.facts_json,a.source_id,p.parser_name,t.source_account,t.extra_json,
+          (SELECT r.event_id FROM card_settlement_reviews r WHERE r.id=c.id AND r.status='accepted') AS own
+         FROM card_settlement_candidates c JOIN transaction_observations t ON t.id=c.bank_observation_id
+         JOIN parse_runs p ON p.id=t.parse_run_id JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE c.id=?`,
+      )
+      .get(id) as {
+      bank_key: string;
+      facts_json: string;
+      source_id: string;
+      parser_name: string;
+      source_account: string;
+      extra_json: string;
+      own: string | null;
+    } | null;
+    if (row === null) continue;
+    let extra: unknown = null;
+    try {
+      extra = JSON.parse(row.extra_json);
+    } catch {
+      extra = null;
+    }
+    const facts = JSON.parse(row.facts_json) as { bankDebit?: { accountId?: unknown } };
+    const alias = declaredAliasClass({
+      sourceId: row.source_id,
+      parserName: row.parser_name,
+      sourceAccount: row.source_account,
+      extra,
+      accountId: facts.bankDebit?.accountId,
+    });
+    const aliasText = alias === null ? null : aliasClassText(alias);
+    const held = holders.some(
+      (holder) =>
+        holder.event_id !== row.own &&
+        (holder.consumption_key === row.bank_key ||
+          (aliasText !== null && holder.alias_class === aliasText)),
+    );
+    found[id] = held ? 0 : 1;
+  }
+  return found;
+}
+
+/** What made a candidate's claim unavailable, for the coverage check. */
+function claimCauses(db: Database, id: string): string[] {
+  const causes: string[] = [];
+  const own = `(SELECT r.event_id FROM card_settlement_reviews r WHERE r.id=c.id AND r.status='accepted')`;
+  if (
+    db
+      .query(
+        `SELECT 1 FROM card_settlement_candidates c JOIN economic_claims x ON x.book='cash-movement' AND x.consumption_key=c.bank_key
+         JOIN economic_event_revisions r ON r.event_id=x.event_id AND r.revision=x.revision AND r.superseded_by IS NULL
+         WHERE c.id=? AND x.event_id IS NOT ${own}`,
+      )
+      .get(id)
+  )
+    causes.push("claim_available=0: economic claim of the key");
+  if (
+    db
+      .query(
+        `SELECT 1 FROM card_settlement_candidates c JOIN card_settlement_candidates k ON k.bank_key=c.bank_key
+         JOIN card_settlement_decisions d ON d.proposal_id=k.id AND d.status='accepted'
+         JOIN economic_event_revisions r ON r.event_id=d.event_id AND r.revision=d.revision AND r.superseded_by IS NULL
+         WHERE c.id=? AND d.event_id IS NOT ${own}`,
+      )
+      .get(id)
+  )
+    causes.push("claim_available=0: legacy settlement holder");
+  return causes;
+}
+
+describe("claim_available on random stores (ADR 0054, G1b)", () => {
+  const stores = new Map<number, RandomSettlementStore>();
+  const store = (seed: number): RandomSettlementStore => {
+    let found = stores.get(seed);
+    if (found === undefined) {
+      found = randomSettlementStore(seed, drawn);
+      stores.set(seed, found);
+    }
+    return found;
+  };
+  const claimDrawn = new Set<string>();
+  const WITH_CLAIM = `${COLUMNS},claim_available`;
+
+  test("the frozen text is the text before claim_available, byte for byte", () => {
+    expect(createHash("sha256").update(LEGACY_CARD_SETTLEMENT_READINESS_CTES).digest("hex")).toBe(
+      LEGACY_CARD_SETTLEMENT_READINESS_CTES_SHA256,
+    );
+    expect(LEGACY_CARD_SETTLEMENT_READINESS_CTES).not.toContain("claim_available");
+    // The current text is the frozen text with one column added at its end.
+    const current = cardSettlementReadinessCtes();
+    const head = LEGACY_CARD_SETTLEMENT_READINESS_CTES.slice(
+      0,
+      LEGACY_CARD_SETTLEMENT_READINESS_CTES.lastIndexOf(" AS allocation_available"),
+    );
+    expect(current.startsWith(`${head} AS allocation_available,\n`)).toBe(true);
+    expect(current.endsWith(" AS claim_available\nFROM ready_candidates ready_candidate)")).toBe(
+      true,
+    );
+  });
+
+  test.each(SEEDS)(
+    "seed %i: the old columns equal the frozen text's, and claim_available its definition",
+    (seed) => {
+      const { db } = store(seed);
+      const every = ids(db);
+      const sets = [
+        every,
+        every.filter((_, index) => index % 2 === seed % 2),
+        [...every.slice(0, 3), ...every.slice(0, 3)],
+        ...every.slice(0, 6).map((id) => [id]),
+        ["cs_missing", ""],
+        [],
+      ];
+      const text = keyed(cardSettlementReadinessCtes(), WITH_CLAIM);
+      const legacy = keyed(LEGACY_CARD_SETTLEMENT_READINESS_CTES);
+      for (const set of sets) {
+        const args = [JSON.stringify(set)];
+        const found = all(db, text, args) as Record<string, number | string>[];
+        // The four flags the frozen text had, row for row.
+        const old: unknown[] = found.map((row) =>
+          Object.fromEntries(Object.entries(row).filter(([name]) => name !== "claim_available")),
+        );
+        expect(old).toEqual(all(db, legacy, args));
+        const reference = claimReference(db, set);
+        expect(Object.fromEntries(found.map((row) => [row["id"], row["claim_available"]]))).toEqual(
+          reference,
+        );
+        for (const row of found) {
+          claimDrawn.add(`claim_available=${row["claim_available"]}`);
+          if (row["claim_available"] === 0)
+            for (const cause of claimCauses(db, String(row["id"]))) claimDrawn.add(cause);
+        }
+      }
+      // The alias term alone: a candidate whose key nobody else holds and whose class someone does.
+      for (const id of every) {
+        const keyOnly = claimCauses(db, id).length === 0;
+        const row = all(db, text, [JSON.stringify([id])])[0] as Record<string, number> | undefined;
+        if (keyOnly && row?.["claim_available"] === 0)
+          claimDrawn.add("claim_available=0: alias class only");
+      }
+    },
+  );
+
+  test("the seeds together drew every holder state and every cause", () => {
+    for (const seed of SEEDS) store(seed);
+    const required = [
+      ...ECONOMIC_CLAIM_STATES,
+      "claim_available=0",
+      "claim_available=1",
+      "claim_available=0: economic claim of the key",
+      "claim_available=0: legacy settlement holder",
+      "claim_available=0: alias class only",
+    ];
+    expect(required.filter((state) => !drawn.has(state) && !claimDrawn.has(state))).toEqual([]);
+  });
+
+  const CLAIM_MUTATIONS: [string, string, string][] = [
+    [
+      "a released economic claim still holds",
+      " AND held.consumption_key=ready_candidate.bank_key AND held_revision.superseded_by IS NULL",
+      " AND held.consumption_key=ready_candidate.bank_key",
+    ],
+    [
+      "a withdrawn settlement still holds",
+      " WHERE holder_candidate.bank_key=ready_candidate.bank_key AND holder_revision.superseded_by IS NULL",
+      " WHERE holder_candidate.bank_key=ready_candidate.bank_key",
+    ],
+    [
+      "the candidate's own event holds against it",
+      "  AND held.event_id IS NOT (SELECT self.event_id",
+      "  AND held.event_id IS NOT NULL AND 1 IS NOT (SELECT self.event_id",
+    ],
+    [
+      "legacy holders are ignored",
+      " AND NOT EXISTS(SELECT 1 FROM card_settlement_candidates holder_candidate",
+      " AND 1 OR NOT EXISTS(SELECT 1 FROM card_settlement_candidates holder_candidate",
+    ],
+    [
+      "alias classes are ignored",
+      " AND NOT EXISTS(SELECT 1 FROM transaction_observations debit",
+      " AND 1 OR NOT EXISTS(SELECT 1 FROM transaction_observations debit",
+    ],
+    [
+      "the alias class ignores the account",
+      ",json_extract(ready_candidate.facts_json,'$.bankDebit.accountId'),'",
+      ",'acct-k','",
+    ],
+  ];
+
+  test.each(CLAIM_MUTATIONS)("the comparison catches: %s", (_, from, to) => {
+    const ctes = cardSettlementReadinessCtes();
+    expect(ctes).toContain(from);
+    // Every occurrence: the alias class has one branch per declared function.
+    const mutated = keyed(ctes.replaceAll(from, to), WITH_CLAIM);
+    const caught = SEEDS.some((seed) => {
+      const { db } = store(seed);
+      const every = ids(db);
+      const found = all(db, mutated, [JSON.stringify(every)]) as Record<string, number | string>[];
+      return (
+        JSON.stringify(
+          Object.fromEntries(found.map((row) => [row["id"], row["claim_available"]])),
+        ) !== JSON.stringify(claimReference(db, every))
+      );
+    });
+    expect(caught).toBe(true);
+  });
+
+  test("the key half a plan reads alone equals the CTEs' key terms and searches by key only", () => {
+    const { db } = store(1);
+    const steps = explain(db, CARD_SETTLEMENT_KEY_AVAILABLE_SQL, ["cs_missing"]);
+    expect(
+      steps
+        .filter((step) => step.detail.startsWith("SCAN ") && !step.detail.includes("VIRTUAL TABLE"))
+        .map((step) => step.detail),
+    ).toEqual([]);
+    for (const id of ids(db)) {
+      const [found] = all(db, CARD_SETTLEMENT_KEY_AVAILABLE_SQL, [id]) as {
+        key_available: number;
+      }[];
+      const causes = claimCauses(db, id).filter(
+        (cause) => cause !== "claim_available=0: alias class only",
+      );
+      expect(found!.key_available).toBe(causes.length === 0 ? 1 : 0);
+    }
+  });
+
+  test("its plan reads holders by key, alias class and candidate only, without table statistics", () => {
+    const { db } = store(1);
+    expect(
+      db.query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'").get(),
+    ).toEqual({ n: 0 });
+    const args = [JSON.stringify(ids(db))];
+    const steps = explain(db, keyed(cardSettlementReadinessCtes(), WITH_CLAIM), args);
+    expect(statementPlanProblems(steps)).toEqual([]);
+    const details = steps.map((step) => step.detail);
+    for (const index of [
+      "economic_claims_key",
+      "economic_claims_alias",
+      "card_settlement_candidates_bank",
+    ])
+      expect(
+        details.some(
+          (detail) =>
+            detail.includes(`USING INDEX ${index}`) ||
+            detail.includes(`USING COVERING INDEX ${index}`),
+        ),
+      ).toBe(true);
   });
 });

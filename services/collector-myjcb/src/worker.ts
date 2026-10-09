@@ -1,5 +1,6 @@
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
+  scheduledFailure,
   scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
@@ -238,7 +239,7 @@ export async function alarmCollection(
 ): Promise<ScheduledResult> {
   try {
     return scheduledResult(await runSharedCollection(env, "scheduled"));
-  } catch {
-    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  } catch (error) {
+    return scheduledFailure(error);
   }
 }

@@ -7,7 +7,7 @@ import {
   moneyForwardMonthlyTransactions,
 } from "../../../packages/parsers/src/parsers/moneyforward-parser.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
-import { currentTransactions } from "../src/queries.ts";
+import { currentTransactions, observationDetail } from "../src/queries.ts";
 import {
   insertFetchArtifact,
   insertFetchRun,
@@ -373,6 +373,130 @@ describe("moneyforward Layer B parsers", () => {
     expect(result.blocked).toBe(2);
     expect(result.observations).toBe(2);
     expect(currentTransactions(store)).toHaveLength(2);
+    store.db.close();
+  });
+
+  test("validates both calendar edges and lets a later empty snapshot supersede only its month", () => {
+    const withEdges = (
+      selected: string,
+      neighbors: readonly string[],
+      occurrences = 1,
+    ): Uint8Array =>
+      new TextEncoder().encode(
+        [
+          tooltip(selected, occurrences),
+          ...neighbors.map((date) => tooltip(date).replace(' id="calendar"', "")),
+        ].join(""),
+      );
+    const dates = (rows: { as_of: string | null }[]): (string | null)[] =>
+      rows.map((row) => row.as_of).sort();
+    const februaryKey = "account-01-month-2099-02.html";
+    const decemberKey = "account-01-month-2099-12.html";
+    const february = withEdges("2099-02-03", ["2099-01-31", "2099-03-01"], 2);
+    const december = withEdges("2099-12-15", ["2099-11-30", "2100-01-04"]);
+    expect(
+      moneyForwardMonthlyTransactions
+        .parse(february, meta({ artifactKey: februaryKey }))
+        .observations.map((row) => row.asOf),
+    ).toEqual(["2099-02-03", "2099-02-03"]);
+    expect(
+      moneyForwardMonthlyTransactions
+        .parse(december, meta({ artifactKey: decemberKey }))
+        .observations.map((row) => row.asOf),
+    ).toEqual(["2099-12-15"]);
+    const invalidNeighbor = new TextEncoder().encode(
+      tooltip("2099-02-04") +
+        tooltip("2099-03-02").replace(' id="calendar"', "").replace("-123", "unsigned"),
+    );
+    expect(() =>
+      moneyForwardMonthlyTransactions.parse(invalidNeighbor, meta({ artifactKey: februaryKey })),
+    ).toThrow(/signed JPY/u);
+
+    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-edges-")));
+    upsertSource(store, {
+      id: "moneyforward-me",
+      provider: "MoneyForward ME",
+      ingestion: "collector-r2",
+    });
+    addSnapshot(store, "february-complete", "2099-04-01T00:00:00.000Z", february, februaryKey);
+    addSnapshot(
+      store,
+      "february-invalid-neighbor",
+      "2099-04-02T00:00:00.000Z",
+      invalidNeighbor,
+      februaryKey,
+    );
+    addSnapshot(store, "december-complete", "2099-04-03T00:00:00.000Z", december, decemberKey);
+    expect(runParsers(store).errors).toBe(1);
+    expect(dates(currentTransactions(store))).toEqual(["2099-02-03", "2099-02-03", "2099-12-15"]);
+    const siblingBefore = currentTransactions(store)
+      .filter((row) => row.as_of === "2099-02-03")
+      .map((row) => ({ id: row.id, external_id: row.external_id }));
+
+    addSnapshot(
+      store,
+      "december-empty",
+      "2099-04-04T00:00:00.000Z",
+      fixture("account-01-month-2099-03-empty.html"),
+      decemberKey,
+    );
+    expect(runParsers(store).errors).toBe(1);
+    expect(dates(currentTransactions(store))).toEqual(["2099-02-03", "2099-02-03"]);
+
+    // A different in-month value makes the newest snapshot distinguishable from
+    // the December rows the empty snapshot removed.
+    const restored = new TextEncoder().encode(
+      new TextDecoder()
+        .decode(withEdges("2099-12-28", ["2099-11-30", "2100-01-04"]))
+        .replace("SYNTHETIC", "SYNTHETIC RESTORE")
+        .replace("-123", "-456"),
+    );
+    const restoredParsed = moneyForwardMonthlyTransactions.parse(
+      restored,
+      meta({ artifactKey: decemberKey }),
+    );
+    expect(restoredParsed.observations).toHaveLength(1);
+    const restoredObservation = restoredParsed.observations[0];
+    if (restoredObservation?.kind !== "transaction") throw new Error("Expected one transaction");
+    expect(restoredObservation).toMatchObject({
+      asOf: "2099-12-28",
+      amountMinor: -456,
+      description: "SYNTHETIC RESTORE",
+    });
+    addSnapshot(store, "december-restored", "2099-04-05T00:00:00.000Z", restored, decemberKey);
+    expect(runParsers(store).errors).toBe(1);
+    const current = currentTransactions(store);
+    expect(dates(current)).toEqual(["2099-02-03", "2099-02-03", "2099-12-28"]);
+    const sibling = current.filter((row) => row.as_of === "2099-02-03");
+    expect(sibling.map((row) => ({ id: row.id, external_id: row.external_id }))).toEqual(
+      siblingBefore,
+    );
+    for (const row of sibling) {
+      expect(row.amount_minor).toBe("-123");
+      expect(row.description).toBe("SYNTHETIC");
+      expect(observationDetail(store, "transaction", row.id)?.provenance).toMatchObject({
+        external_run_id: "february-complete",
+        fetched_at: "2099-04-01T00:00:00.000Z",
+        parse_status: "ok",
+        superseded_by_parse_run_id: null,
+      });
+    }
+    const restoredRows = current.filter((row) => row.as_of === "2099-12-28");
+    expect(restoredRows).toHaveLength(1);
+    expect(restoredRows[0]).toMatchObject({
+      amount_minor: "-456",
+      description: "SYNTHETIC RESTORE",
+      external_id: restoredObservation.externalId,
+    });
+    expect(current.some((row) => row.as_of === "2099-12-15")).toBe(false);
+    expect(observationDetail(store, "transaction", restoredRows[0]!.id)?.provenance).toMatchObject({
+      external_run_id: "december-restored",
+      fetched_at: "2099-04-05T00:00:00.000Z",
+      parse_status: "ok",
+      fetch_status: "success",
+      superseded_by_parse_run_id: null,
+      source_id: "moneyforward-me",
+    });
     store.db.close();
   });
 

@@ -33,6 +33,7 @@ import {
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import type { CommandStore, PreparedWrite, Principal } from "../command/contract.ts";
 import { commandError, type CommandResult } from "../command/errors.ts";
+import { collectorExecution, type CollectorExecutionReport } from "./collector-trail.ts";
 
 export const OPERATION_KINDS = [
   "collection",
@@ -156,6 +157,13 @@ export interface OperationReceipt {
   failureCode: string | null;
   acceptedAt: string;
   updatedAt: string;
+  /**
+   * For a `collection` or `session-refresh` request: its collector execution
+   * — state, timestamps, the runs it reported and how far each got toward
+   * publication (ADR 0048). Null for the other kinds, and on the acceptance
+   * answer, which reports only what was stored.
+   */
+  execution: CollectorExecutionReport | null;
 }
 
 export interface AcceptedOperation {
@@ -288,6 +296,7 @@ function receiptOf(row: OpsRow, stages: readonly StageRow[]): OperationReceipt {
     failureCode: row.failure_code,
     acceptedAt: row.created_at,
     updatedAt: row.updated_at,
+    execution: null,
   };
 }
 
@@ -298,7 +307,16 @@ async function loadReceipt(
 ): Promise<OperationReceipt | null> {
   const row = await store.first<OpsRow>(SELECT_ROW, [operationId, principal]);
   if (!row) return null;
-  return receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId]));
+  const receipt = receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId]));
+  return {
+    ...receipt,
+    execution: await collectorExecution(store, {
+      operationId,
+      kind: row.kind,
+      status: row.status,
+      acceptedAt: row.created_at,
+    }),
+  };
 }
 
 export interface OperationContext {
@@ -412,9 +430,9 @@ export async function requestCollection(
     kind: "collection",
     sourceId: request.source,
     status: "accepted",
-    // Recorded, not sent. The Service Binding call to the collector is U09's;
-    // until it exists (and after it fails) this row is what the Processor cron
-    // re-dispatches, so a lost notification never loses the request (02 §5).
+    // Recorded, not sent. The Processor's dispatch lane starts it over the
+    // collector's named RPC once (ADR 0048); until then this row is what the
+    // lane re-reads, so a lost notification never loses the request (02 §5).
     dispatchState: "dispatch_pending",
   });
 }
