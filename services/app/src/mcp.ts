@@ -32,6 +32,11 @@ import {
   CARD_PURCHASE_EVENT_ID,
   CARD_PURCHASE_PERIOD,
 } from "../../../packages/application/src/query/card-purchases.ts";
+import {
+  INSTRUMENT_CANDIDATE_VIEWS,
+  INSTRUMENT_CANDIDATES_MAX_OFFSET,
+  INSTRUMENT_IDENTIFIER_ID,
+} from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import { RELATION_KINDS } from "../../../packages/domain/src/decisions.ts";
 import { MAX_REQUEST_BYTES, type ToolResult } from "./agent-service";
 import { HttpError } from "./http";
@@ -156,6 +161,22 @@ export const MCP_TOOLS = [
       openWorldHint: false,
     },
   },
+  {
+    name: "kogane.instruments.candidates",
+    title: "Instrument identity candidates across identifiers",
+    description:
+      "One page of the ADR 0055 candidate read: which stored instrument identifiers may denote the same instrument, on which evidence, which pairs are kept apart and why, with closed status, hold, conflict and gap codes. Read-only. A proposed candidate names the identity.assign or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
+    inputSchema: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        view: { type: "string", enum: [...INSTRUMENT_CANDIDATE_VIEWS] },
+        offset: { type: "integer", minimum: 0, maximum: INSTRUMENT_CANDIDATES_MAX_OFFSET },
+        identifierId: { type: "string", pattern: INSTRUMENT_IDENTIFIER_ID.source },
+      },
+    },
+    annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+  },
 ] as const;
 
 /**
@@ -268,7 +289,7 @@ function serverFor(run: Dispatch, tools: PublishedTools): Server {
  * status and closed code — and logs that code; nothing else of the failure
  * crosses the boundary (G3-08).
  *
- * `tools` is what this deployment publishes — the five read/propose tools,
+ * `tools` is what this deployment publishes — the six read/propose tools,
  * plus the purchase explanation while card purchase recognition is served and
  * the operations tools while their flag is on — and `run` is the one
  * dispatcher for all of them. The adapter never decides which tools exist: a

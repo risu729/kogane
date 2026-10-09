@@ -118,6 +118,8 @@ export type Route =
   /** Every account as its providers last reported it on a chosen date. */
   | { name: "reportedState" }
   | { name: "identities" }
+  /** The instrument candidate review (ADR 0055). */
+  | { name: "instrumentCandidates" }
   | { name: "rewards" }
   | { name: "reconciliation" }
   | { name: "cardOwnership"; proposalId: string }
@@ -161,6 +163,9 @@ export function matchRoute(path: string): Route {
     if (first === "purchases") return { name: "purchases" };
     if (first === "artifacts") return { name: "artifacts" };
   }
+
+  if (first === "identities" && second === "instrument-candidates" && segments.length === 2)
+    return { name: "instrumentCandidates" };
 
   if (first === "confirm" && segments.length === 2 && second !== undefined) {
     if (/^[0-9a-f]{64}$/u.test(second)) return { name: "confirm", planId: second };

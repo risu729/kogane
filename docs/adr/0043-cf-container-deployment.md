@@ -84,7 +84,9 @@ redirects and have bounded time/response size. Child CLI errors and API failures
 print closed codes rather than captured stdout, stderr, provider text or tokens.
 
 A publication whose application/image readback has not succeeded is recorded as
-failed, even when Worker publication succeeded. Resume includes that Worker.
+failed, even when Worker publication succeeded. ADR 0060 adds immutable same-run
+publication checkpoints: a bound Container is reverified without republishing;
+a new normal release still follows the ordinary ledger decision.
 The operation is not transactional: Worker publication can precede an image,
 application, trigger or readback failure. No automatic rollback is attempted.
 

@@ -1,8 +1,8 @@
 // The agent API routes and the human UI's shared-query route.
 //
 // One of the browser's two non-GET surfaces (the other is A09's change
-// lifecycle). It is an explicit allow-list: exactly five POST paths plus
-// `/mcp`, and a sixth path (`purchases.explain`) only while the deployment
+// lifecycle). It is an explicit allow-list: exactly six POST paths plus
+// `/mcp`, and a seventh path (`purchases.explain`) only while the deployment
 // serves card purchase recognition, each with a bounded JSON body, each behind
 // the same Access gate as every read route, and each behind a grant looked up
 // by the verified principal. `AGENT_API_GRANTS` absent means no principal has

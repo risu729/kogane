@@ -1,4 +1,4 @@
-// The tools of the agent API, bound to this Worker's read model: the five
+// The tools of the agent API, bound to this Worker's read model: the six
 // that are always served, and `kogane.purchases.explain` while the deployment
 // serves card purchase recognition.
 //
@@ -31,6 +31,10 @@ import {
   proposeReconciliation,
   type QueryRequest,
 } from "../../../packages/application/src/index";
+import {
+  parseInstrumentCandidatesRequest,
+  reviewInstrumentCandidates,
+} from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import {
@@ -51,6 +55,7 @@ export const AGENT_TOOL_NAMES = [
   "kogane.financial.query",
   "kogane.explain",
   "kogane.reconcile.propose",
+  "kogane.instruments.candidates",
 ] as const;
 /**
  * Served only while the deployment serves card purchase recognition (the
@@ -228,6 +233,21 @@ export async function callTool(
       });
       if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       return { status: 200, body: outcome.receipt };
+    }
+    case "kogane.instruments.candidates": {
+      // The candidate review of the identity page, under this caller's grant:
+      // the capability, the perimeter, the bounds and the page are the
+      // application service's. It reads only; the commands a candidate names
+      // are planned through the change lifecycle like any other plan.
+      const parsed = parseInstrumentCandidatesRequest(body);
+      if (!parsed.ok) return failure(parsed.code, "instruments.candidates", parsed.refs);
+      const outcome = await reviewInstrumentCandidates({
+        grant: context.grant,
+        sql: d1Executor(context.db),
+        request: parsed.value,
+      });
+      if (!outcome.ok) return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      return { status: 200, body: outcome.review };
     }
     case "kogane.purchases.explain": {
       // Whether the deployment serves it is the transport's question (it

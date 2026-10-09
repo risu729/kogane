@@ -684,14 +684,14 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
     env.DB.prepare("SELECT count(*) AS n FROM ops_requests").first<number>("n");
 
   it("publishes no operations tool to the operator's own MCP client, flag on or off", async () => {
-    const five = MCP_TOOLS.map((tool) => tool.name);
-    expect(five).toHaveLength(5);
+    const six = MCP_TOOLS.map((tool) => tool.name);
+    expect(six).toHaveLength(6);
     for (const flag of ["", "true"]) {
       const listed = await mcp("tools/list", {}, { ...THROUGH_MCP, OPS_API_ENABLED: flag });
       expect(
         listed.result.tools.map((tool: any) => tool.name),
         flag,
-      ).toEqual(five);
+      ).toEqual(six);
     }
     // The definitions still exist, generated from the routes' schemas.
     expect(OPS_TOOL_NAMES).toEqual([

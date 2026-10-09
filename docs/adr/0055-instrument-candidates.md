@@ -1,6 +1,8 @@
 # ADR 0055: Propose cross-identifier instrument candidates from stored identifier facts; adopt only through a person's mapping
 
-- Status: accepted (merged 2026-10-08 in #578)
+- Status: accepted (merged 2026-10-08 in #578); the
+  [2026-10-09 amendment](#amendment-2026-10-09-route-and-page-as-implemented)
+  (route, page, agent read tool and cost) is proposed
 - Date: 2026-10-08
 - Issue: part of #546
 
@@ -28,6 +30,9 @@ inside SBI, though:
 Correction already exists: `identity.assign` appends a manual mapping
 revision with its decision through the change lifecycle, which grants approval
 and commit to humans only ([change lifecycle](../change-lifecycle.md)).
+[2026-10-09: that is today's grant lists, not a principle: only
+`OPERATOR_SUBJECTS` may approve or commit under them; see the
+[amendment](#amendment-2026-10-09-route-and-page-as-implemented).]
 `listed_as` is a typed relation kind (ADR 0001, UC31), and `relation.accept` /
 `relation.reject` can already name `instrument:` and `identifier:` references.
 What was missing is the statement of which identifiers may denote the same
@@ -199,7 +204,11 @@ tests reuse `packages/storage-d1/test/sqlite.ts`,
   unit and unit by primary key. No index on
   `identity_instrument_uses(identifier_id)` is needed for that plan, and none
   is added. Its D1 cost is not measured and must be measured before a route
-  serves the read.
+  serves the read. [Amended 2026-10-09: this precondition is replaced by a
+  plan check without statistics plus `bun:sqlite` and workerd measurements,
+  and a fail-closed bound on the observations the read walks; remote D1
+  remains unmeasured. See the
+  [amendment's Cost](#cost).]
 
 Limits of this decision, stated so nobody reads more into an answer than it
 says:
@@ -289,4 +298,315 @@ nothing more:
 - `mise run //packages/domain:ci`, `mise run //packages/read-model:ci`,
   `mise run //packages/application:ci`, `mise run ci:root`.
 
-D1 cost of the facts read is not measured (see Consequences).
+D1 cost of the facts read is not measured (see Consequences). [Amended
+2026-10-09: measured on `bun:sqlite` and on workerd through Miniflare, not on
+remote D1; see the [amendment's Cost](#cost).]
+
+## Amendment 2026-10-09: route and page as implemented
+
+- Status: proposed (until its PR merges)
+- Date: 2026-10-09
+- Issue: part of #546; the owner approved this slice on 2026-10-09
+  ("候補confirm/reject UI・既存service接続")
+- Carried by: `reviewInstrumentCandidates` and
+  `parseInstrumentCandidatesRequest` in
+  `packages/application/src/query/instrument-candidates-review.ts`;
+  `services/app/src/instrument-candidates-api.ts` (the route), the
+  `kogane.instruments.candidates` case of `services/app/src/agent-service.ts`
+  and its schema in `services/app/src/mcp.ts`;
+  `packages/observation-shared/src/instrument-candidates-contract.ts` (the
+  wire check); `apps/web/src/pages/InstrumentCandidates.tsx`,
+  `apps/web/src/instrument-candidates-api.ts` and
+  `apps/web/src/instrument-candidate-display.tsx` (the page)
+
+### Context
+
+The decision above left the HTTP route, the page and the MCP tool undecided
+and required the facts read's D1 cost to be measured before a route served it
+(Consequences, last item). The owner approved connecting the read to the
+existing services and a page. The owner's direction for this slice:
+everything a person can do through the UI, an AI holding explicit
+owner-delegated grants should be able to do through the same application
+layer, so the route and page add no new human-only constraint and keep the
+existing grant checks exactly as they are; the agent read is the main path;
+the delegated AI operation path and the shared audit log for human and AI
+operations are designed in [ADR 0063](0063-delegated-ai-operation-path.md)
+and [ADR 0064](0064-common-audit-log.md), not here.
+
+### Options considered
+
+1. **An operator-only route, like the card settlement review.** Rejected: it
+   adds a human-only check to a read, which the owner's direction excludes,
+   and an agent would need a second, stripped read.
+2. **Separate reads for the page and for an agent.** Rejected: two answers
+   to one question that neither can show to be wrong (AT72).
+3. **A new command kind (`instrument.link`, `different_instrument`) for the
+   two decisions.** Not needed: the decision above already names
+   `identity.assign` to adopt and `relation.reject` of `listed_as` to keep
+   apart, and both are change kinds the lifecycle plans today. No migration.
+4. **One application service graded by a grant, called by the route with the
+   browser's reader grant and by an agent tool with the agent's grant;
+   decisions planned through the existing command API.** Chosen.
+5. **For the cost precondition:** measure on remote D1 (not possible here:
+   no production or remote store is read for this work), or replace it with
+   the plan check without statistics, `bun:sqlite` and workerd measurements
+   and a fail-closed bound on what the read walks. The second is chosen; see
+   Cost.
+
+### Decision
+
+1. **Service.** `reviewInstrumentCandidates({ grant, sql, request })` returns
+   one page of `queryInstrumentResolution`, or a `financial-error-v1`
+   refusal. It requires `records.read` (`unauthorized`,
+   `capability:records.read`) and a whole-store perimeter, sources and
+   accounts `"*"` (`evidence_restricted`, `scope:source` / `scope:account`):
+   candidates pair identifiers across sources, so a listed grant would be
+   shown identifiers or counts outside it. Both refusals, and the paging
+   budget, are decided before anything is read.
+2. **Request**, a closed object: `view` (`open`: proposed with no hold;
+   `held`: proposed with a hold; `decided`: adopted or rejected;
+   `separated`; `hints`; default `open`), `offset` (0 to 5,000, the pair
+   bound) and `identifierId` (only the items naming that identifier;
+   `^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$`). An unknown key is
+   `unsupported_semantics`, a malformed value `invalid_query` naming the key,
+   an identifier the read does not hold `evidence_restricted`
+   (`identifierId`).
+3. **Answer** (`kogane-instrument-candidates-v1`): the resolved query; a
+   manifest (policy, the read's bounds, the page size, the observation
+   bound, every closed code list and the two command kinds); the summary
+   counts of the whole read with `held` beside them;
+   `decisions: "change-lifecycle"`; `total` of the view; at most 50 `items`,
+   each with `evidenceRefs` (`identifier:<id>` of both sides and of every
+   `via`); `nextOffset`, null past the last page and wherever the next page
+   would exceed the grant's `maxRows`; and the `identifiers` the page's items
+   name, with their facts, mapping method and revision, sources, currencies,
+   provider market wording and state. A proposed candidate keeps the
+   `commands` of the decision above.
+4. **Bounds.** Before the walk, the number of current identity observations
+   is read from the identity run seals (`IDENTITY_OBSERVATION_COUNT_SQL`, one
+   row per published parse, no observation read; exact when every sealed
+   run is eligible, an upper bound otherwise). Above
+   `CURRENT_IDENTITY_OBSERVATION_BOUND` (500,000) the answer is
+   `budget_exceeded` (`budget:identityObservations=500000`) and the walk
+   does not start. The read keeps its own bounds (5,000 pairs, 1,000 hints,
+   10,000 fact rows, 10,000 relations; past one the answer is
+   `budget_exceeded`, `budget:instrumentResolution`, never cut). A page is 50
+   items, and `offset + 50` above the grant's `maxRows` is `budget_exceeded`
+   (`budget:maxRows=<n>`).
+5. **Route.** `GET /api/identity/instrument-candidates?view=&offset=&identifierId=`,
+   registered in its own module ahead of the identity catalogue (GET and
+   HEAD only, as `worker.ts` answers 405 to any other method before a read
+   route), behind the Access gate like every identity route, under the
+   reader grant a signed-in browser already has over every GET route
+   (`readerGrant`: `summary.read`, `records.read`, `evidence.read`, whole
+   store, `maxRows` 1,000). A repeated, unknown, empty or over-long parameter
+   is `400 invalid_query`; a non-numeric offset `400 invalid_offset`; a
+   malformed value `400 invalid_query` with the key as ref. The service's
+   refusals travel as `financial-error-v1` with their status (403, 413). No
+   new capability flag: the page follows the existing `identities`
+   capability.
+6. **Agent read tool.** `kogane.instruments.candidates`
+   (`POST /api/agent/v1/instruments.candidates` and MCP `tools/call`),
+   read-only, always listed with the other agent tools, graded by the
+   caller's `AGENT_API_GRANTS` entry through the same service, so it answers
+   byte for byte what the route answers to the same request under an
+   equivalent grant. It carries the same `commands`: an agent that wants a
+   decision plans that payload through the change lifecycle, where the
+   existing command grant lists (`OPERATOR_SUBJECTS`, `AGENT_GRANTS`) grade
+   it.
+7. **Page.** `/identities/instrument-candidates` (`銘柄の同一性の候補`), linked
+   from `/identities`: the summary counts, one tab per view, one card per
+   item with both identifiers (label, namespace/scope/value, kind, sources,
+   currencies or `確認できない記録あり`, mapping method and revision, state),
+   the evidence, agreement, gap and conflict codes in words beside the code,
+   a held candidate's hold in words, and for a proposed candidate a reason
+   field and the two buttons (`同じ銘柄として採用する内容を確認`, never
+   shown while held; `別の銘柄として扱う内容を確認`). A button first reads the
+   candidate again (its view, filtered to the subject) and plans nothing
+   unless the same candidate is still there with the same anchor, subject
+   and commands and neither identifier's mapping revision moved; then it
+   plans the candidate's own command payload with the reason and
+   `baseContextId = candidateId` through `POST /api/command/v1/plan`, and
+   opens `/confirm/:planId`, where approval and commit stay exactly as the
+   change lifecycle grades them today. An adoption plan whose pinned
+   `instrument_mapping:<subject>` revision differs from the revision on the
+   card (a change between the two requests) is not offered either. Either
+   refusal says `候補が更新されています`. The buttons follow the `commands`
+   capability. The page does not render `providerMarket`; the answer
+   carries it.
+
+   **Staleness is checked by the page, not by the server, for the anchor.**
+   The `identity.assign` planner pins the subject's mapping revision only:
+   its payload names the subject and the target instrument, not the anchor
+   identifier, so pinning the anchor would need a new payload field or a
+   change to what `identity.assign` pins for every caller, and the commit's
+   guards check the pinned subject only. Neither is done here. So an agent
+   or a direct API plan of an adopt payload gets only the server's subject
+   pin; the anchor is not pinned, and such a plan can adopt the subject into
+   an instrument the anchor has since left (a person re-mapped the anchor
+   after the candidate was read). The page's re-read closes that window up
+   to the plan request. `baseContextId = candidateId` is recorded with the
+   plan and pins nothing.
+
+8. **Principal and ids.** The route passes the Access subject as the grant's
+   principal; a plan carries the subject the command API verifies as its
+   actor, `baseContextId` the candidate id, and the existing approval and
+   operation ids. Nothing here adds a context type.
+
+### Cost
+
+**Decision on the precondition.** The remote D1 measurement required by
+Consequences (its last item) is replaced by the plan check without
+statistics plus `bun:sqlite` and workerd measurements, and by the
+fail-closed observation bound of Decision 4; remote D1 remains unmeasured.
+
+Measured as [read model: cost](../read-model.md#cost) requires, on the
+complete CORE schema without table statistics: on `bun:sqlite` (bun 1.4.2,
+foreign keys on, `packages/application/test/instrument-resolution-scale.test.ts`
+with `KOGANE_INSTRUMENT_RESOLUTION_SCALE=full` and
+`KOGANE_INSTRUMENT_RESOLUTION_DAYS`) and on workerd's SQLite through
+Miniflare (the services/app workers pool with every CORE migration,
+`services/app/test/instrument-resolution-workerd.test.ts` with
+`KOGANE_LOAD_INSTRUMENT_DAYS`, Layer A through the ingest path). One run each
+in the development container, which other work shared at the time, so the
+figures are indicative. The synthetic store in both: SBI Securities
+captured daily, 150 domestic codes held on XTKS, 10 trades a day on an
+unmapped venue, 30 foreign codes with a RIC; a synthetic second broker
+holding 100 of the codes daily; every capture current; identifiers written
+by the production identity writer. 430 identifiers, 430 fact rows, 350
+candidates, no `listed_as` relation. Median of five:
+
+| Current identity observations | Facts read, `bun:sqlite` | Facts read, workerd | One page, `bun:sqlite` | One page, workerd | Count, `bun:sqlite` | Count, workerd |
+| ----------------------------- | ------------------------ | ------------------- | ---------------------- | ----------------- | ------------------- | -------------- |
+| 105,850 (365 days)            | 652 ms                   | 868 ms              | 659 ms                 | 884 ms            | 0.5 ms              | 2 ms           |
+| 211,700 (730 days)            | 1,484 ms                 | 1,965 ms            | 1,473 ms               | 2,007 ms          | 1.2 ms              | 2 ms           |
+
+"One page" is the service with the count, the walk and the page; "Count" is
+`IDENTITY_OBSERVATION_COUNT_SQL` alone.
+
+The plan, without statistics: `current_identity_observations` scans the
+published parse runs (`SCAN pub USING COVERING INDEX
+published_parse_runs_run`), reaches each sealed identity run and its
+observations by index, and the facts read reaches each observation's uses,
+trade unit and unit by the use table's primary key and each identifier by
+key; `eligible` scans the current instrument mappings (the mapping catalogue,
+not observation history); no observation table is named. The `listed_as`
+read is a range on `entity_relations_from`. The count scans the identity runs
+and reaches each seal by key; it names no observation or use table. The
+CI-scale run asserts those plan shapes and that the count equals the current
+identity observations; the timings print only with the full scale.
+
+**The bound.** Every request walks every current identity observation once,
+roughly linear in captured history: 868 ms for 105,850 and 1,965 ms for
+211,700 on workerd here, about 0.8 to 0.95 s per 100,000. The
+count costs milliseconds (one row per published parse), so the bound is
+cheap to enforce and is enforced. 500,000 observations extrapolate to about
+5 s on workerd, against the 30-second CPU limit a Worker request has by
+default (`services/app` sets no `limits.cpu_ms`) and the D1 query time limit
+the identity catalogue once hit in production (33.7 s,
+[identity query performance](../identity-query-performance.md)), leaving
+room for remote D1 being slower than local workerd, which is unmeasured. At
+the synthetic shape above that is about 4.7 years of daily captures. A store
+past it is refused, never answered slowly or in part; raising the bound
+needs a remote D1 measurement first.
+
+What this does not bound: how often the read runs. The walk is linear in
+history and is acceptable today for a single owner reading the page behind
+Access; routine agent polling of `kogane.instruments.candidates` needs a
+written bound (a rate, or a cached or projected candidate set) before it is
+configured. Not measured: remote D1, a store with `listed_as` relations, or
+history beyond 730 days.
+
+### Consequences and limits
+
+- Nothing adopts on a click or on the server: a click plans, and a plan
+  changes nothing until it is approved and committed through the change
+  lifecycle. Under today's grant lists (`AGENT_API_GRANTS` for the read,
+  `OPERATOR_SUBJECTS` and `AGENT_GRANTS` for commands) an agent can read and
+  plan, and cannot approve or commit; this slice neither widens nor narrows
+  that.
+- A signed-in reader can page to offset 950 of a view (`maxRows` 1,000; no
+  `nextOffset` is offered past it); `identifierId` narrows a larger view. An
+  agent pages within its own `maxRows`.
+- The anchor of an adoption is checked by the page only (Decision 7).
+- The confirmation screen shows an `identity.assign` or `relation.reject`
+  plan generically (targets, revisions, staleness); it does not read the
+  candidate back. The server's pinned subject revision makes an approval of
+  a moved subject mapping stale.
+- `queryInstrumentHistory` is still served by no route.
+- `/api/identity/*` requests, this one included, are logged with the route
+  class `unknown_api`: `classify` in `services/app/src/worker.ts` names no
+  identity route. Left unchanged to keep this slice's `worker.ts` edit to
+  the registration (five lines: the import and the registration call).
+
+### Open items for the owner
+
+- **Audit binding.** The existing types carry the principal (`Grant.principal`,
+  the plan's `createdBy`, the approval's `approverActor`), the plan id, the
+  approval id and the commit's `operationId` (the commit's idempotency key).
+  None carries a channel (ui, mcp, api) or a correlation id, a read has no
+  per-request id (its errors carry the constant `instruments.candidates`),
+  and a plan request has no idempotency key of its own. ADR 0064 supplies
+  them (`path`, `correlation_id`, `idempotency_key` on an `audit_records`
+  row, written through ADR 0063's `executeOperation`); this slice implements
+  neither. Against those ADRs: the read tool already follows ADR 0063 §10 (it
+  calls the route's own service and refuses a listed source or account grant
+  before any read), and it writes no ADR 0064 `read` record, which every
+  agent and MCP tool call will need once `audit_records` and
+  `executeOperation` exist. Its `commands` reach every `records.read`
+  caller; ADR 0063 §10 strips decision payloads only from ADR 0013's card
+  purchase candidates, and an agent's plan of them is still graded by the
+  change lifecycle.
+- **A server-side anchor pin** for adoption plans (Decision 7): a payload
+  field naming the anchor, or a planner that pins the target instrument's
+  identifiers. Either changes `identity.assign` for every caller.
+- **A rate bound for agent polling**, or a cached or projected candidate
+  set, before routine polling is configured; and a remote D1 measurement
+  before the observation bound is raised.
+- **A candidate panel on the confirmation screen**, like the settlement and
+  purchase-link panels.
+- Everything the decision above lists as not decided stays so: mappings for
+  a period, provider identifier changes, which providers state ISIN, share
+  class or product class, crypto identity across exchanges. Financial rules,
+  price source selection and adoption semantics are not decided here.
+
+### Verification
+
+Synthetic data only, no production access:
+
+- `packages/application/test/instrument-candidates-review.test.ts`: the open
+  view (evidence refs, commands, named identifiers; nothing written), the
+  separated and hints views, a separated pair's `via` in its evidence refs,
+  the identifier filter and its refusal, a decision through the lifecycle
+  moving a candidate to `decided` (an agent's plan stops at approval under
+  today's grants), a held candidate offering keep-apart only, paging past
+  50, a view of exactly 50, no `nextOffset` past `maxRows`, offset 950
+  served and 951 refused, the four grant refusals (capability, both axes,
+  accounts alone, `maxRows`) before any read, the observation bound refused
+  after the count and before the walk, the count equal to the current
+  identity observations, the read bound, and the closed request.
+- `packages/application/test/instrument-resolution-scale.test.ts`: the plans
+  and the answer on the CI scale; the `bun:sqlite` timings with the full
+  scale.
+- `services/app/test/instrument-resolution-workerd.test.ts`: on workerd, the
+  read, the page and the count against the store at two days; the workerd
+  timings with `KOGANE_LOAD_INSTRUMENT_DAYS` (`--reporter=verbose` prints
+  them).
+- `services/app/test/instrument-candidates-api.test.ts`: the route over the
+  real Worker and CORE migrations with identifiers from the production
+  writer (page, views, filter, parameter refusals, Access, GET-only, the
+  `maxRows` and unknown-identifier refusals, nothing written), and the agent
+  tool (listed, equal to the route over HTTP and MCP, the grant refusals);
+  `agent-api.test.ts` and `ops-api.test.ts` pin the new tool list.
+- `apps/web/test/instrument-candidates-contract.test.ts` (every view the
+  service produces, a held one included, passes the wire check; unknown
+  codes, a status in the wrong view, foreign command kinds and a held
+  candidate naming an adoption do not; the route) and
+  `apps/web/test/instrument-candidates.browser.test.ts` (Chromium against the
+  production build: codes in words, an adoption and a keep-apart plan the
+  server's payload with the reason and open the confirmation screen, a
+  candidate whose anchor moved after the page was shown is read again and
+  nothing is planned, a pinned subject revision that moved between the
+  re-read and the plan is refused, a held candidate shows its reason and
+  only the keep-apart button, decided, separated and hint views, disabled
+  actions without `commands`, no horizontal scroll at 390 px).
