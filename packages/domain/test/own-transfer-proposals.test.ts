@@ -170,6 +170,8 @@ describe("the policy is explicit and versioned", () => {
   test("other run refusals: the bound, the epoch and the ownership version", async () => {
     const rows = Array.from({ length: OWN_TRANSFER_ROWS_MAX + 1 }, (_, i) => debitA(i + 1));
     expect(await run(rows)).toEqual({ ok: false, refusal: "input_bound_exceeded" });
+    // The bound itself is admitted.
+    expect((await run(rows.slice(0, OWN_TRANSFER_ROWS_MAX))).ok).toBe(true);
     expect(await run([], { identityEpoch: "Not An Epoch" })).toEqual({
       ok: false,
       refusal: "identity_epoch_invalid",
@@ -452,6 +454,99 @@ describe("pairing", () => {
       OWN_TRANSFER_ROW_REFUSALS,
     ])
       expect(new Set(list).size).toBe(list.length);
+  });
+});
+
+describe("review round 1: closed ownership, ids and competing counterparts", () => {
+  test("an ownership state other than self or other is unresolved; self needs an account id", async () => {
+    const odd: AccountOwnershipSource = {
+      version: "synthetic-ownership-odd",
+      ownershipOf: (_sourceId, sourceAccount) =>
+        sourceAccount === "smbc-bank:synthetic-a"
+          ? ({ state: "maybe", accountId: "acct-synthetic-a" } as unknown as AccountOwnership)
+          : sourceAccount === "smbc-bank:synthetic-b"
+            ? ({ state: "self" } as unknown as AccountOwnership)
+            : ownership.ownershipOf(_sourceId, sourceAccount),
+    };
+    const result = await ok([debitA(), creditB()], { ownership: odd });
+    expect(result.rowRefusals).toEqual([
+      { observationId: 1, code: "ownership_unresolved" },
+      { observationId: 2, code: "ownership_unresolved" },
+    ]);
+    expect(result.proposals).toEqual([]);
+  });
+
+  test("an observation id given twice is refused for both rows: row_invalid", async () => {
+    const result = await ok([debitA(1), creditB(1), creditB(2)]);
+    expect(result.rowRefusals).toEqual([
+      { observationId: 1, code: "row_invalid" },
+      { observationId: 1, code: "row_invalid" },
+    ]);
+  });
+
+  test("the identity epoch is part of the proposal id", async () => {
+    const base = (await ok([debitA(), creditB()])).proposals[0]!.proposalId;
+    const later = (await ok([debitA(), creditB()], { identityEpoch: "identity-epoch-2" }))
+      .proposals[0]!.proposalId;
+    expect(later).not.toBe(base);
+  });
+
+  test("a competing credit refused as duplicate_unresolved still makes the pair need review", async () => {
+    // Credit 3 (account c) is one provider row under two producers whose
+    // values disagree: refused, but it fits debit 1 as well as credit 2 does.
+    const twinA = smbc({
+      id: 3,
+      account: "smbc-bank:synthetic-c",
+      amount: "1000",
+      meisai: "meisai-3",
+    });
+    const twinB = smbc({
+      id: 4,
+      account: "smbc-bank:synthetic-c",
+      amount: "1000",
+      meisai: "meisai-3",
+      producer: "producer-2",
+      date: "2030-01-11",
+    });
+    const result = await ok([debitA(), creditB(), twinA, twinB]);
+    expect(result.rowRefusals.map((r) => r.code)).toEqual([
+      "duplicate_unresolved",
+      "duplicate_unresolved",
+    ]);
+    expect(result.proposals.map((p) => p.status)).toEqual(["needs_review"]);
+    expect(result.proposals[0]!.codes).toContain("candidate_not_unique");
+    // A group that does not fit (another amount) leaves the pair proposed.
+    const far = [
+      smbc({ id: 3, account: "smbc-bank:synthetic-c", amount: "5000", meisai: "meisai-3" }),
+      smbc({
+        id: 4,
+        account: "smbc-bank:synthetic-c",
+        amount: "5000",
+        meisai: "meisai-3",
+        producer: "producer-2",
+        date: "2030-01-11",
+      }),
+    ];
+    expect((await ok([debitA(), creditB(), ...far])).proposals.map((p) => p.status)).toEqual([
+      "proposed",
+    ]);
+  });
+
+  test("a competing credit without a posting day still makes the pair need review", async () => {
+    const dateless = smbc({ id: 3, account: "smbc-bank:synthetic-c", amount: "1000", date: null });
+    const result = await ok([debitA(), creditB(), dateless]);
+    expect(result.rowRefusals).toEqual([{ observationId: 3, code: "posting_date_missing" }]);
+    expect(result.proposals.map((p) => p.status)).toEqual(["needs_review"]);
+    // On the debit's own account it cannot be a counterpart: the pair stays proposed.
+    const sameAccount = smbc({
+      id: 3,
+      account: "smbc-bank:synthetic-a",
+      amount: "1000",
+      date: null,
+    });
+    expect((await ok([debitA(), creditB(), sameAccount])).proposals.map((p) => p.status)).toEqual([
+      "proposed",
+    ]);
   });
 });
 

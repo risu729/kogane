@@ -14,6 +14,7 @@ import {
   migrationSql,
   splitSqlStatements,
 } from "../src/migrations.ts";
+import { fullCoreDatabase } from "./sqlite.ts";
 
 const MIGRATION = "0071_economic_event_command_kinds.sql";
 const GUARD_MIGRATION = "0070_economic_commit_guard.sql";
@@ -273,6 +274,13 @@ test("a fresh store migrated through 0071 has the same 0070 objects as one stopp
       through0070.exec(migrationSql(CORE_MIGRATIONS_URL, file));
     expect(migrationFiles(CORE_MIGRATIONS_URL)).toContain(MIGRATION);
     expect(objectsNamed(fresh, names)).toEqual(objectsNamed(through0070, names));
+    // Every later migration too: the full store keeps every 0070 object as 0070 made it.
+    const full = fullCoreDatabase();
+    try {
+      expect(objectsNamed(full, names)).toEqual(objectsNamed(through0070, names));
+    } finally {
+      full.close();
+    }
     expect(untouched(fresh)).toEqual(untouched(through0070));
     expect(fresh.query("PRAGMA foreign_key_check").all()).toEqual([]);
     for (const [index, kind] of NEW_KINDS.entries()) {

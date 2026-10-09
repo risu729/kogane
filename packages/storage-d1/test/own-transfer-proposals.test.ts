@@ -147,6 +147,14 @@ describe("own_transfer_proposals", () => {
   test("a proposal is written once; a replay writes nothing; no amount is stored", async () => {
     const { db, proposal, write } = await stored();
     expect(await batch(db, [write])).toEqual([0]);
+    // The same id stating something else (a re-run that now needs review)
+    // fails loudly instead of leaving the stored status in force.
+    const restated = withBind(
+      withBind(withBind(withBind(write, 1, "e".repeat(64)), 20, "e".repeat(64)), 2, "needs_review"),
+      3,
+      '["both_accounts_self","same_currency","date_within_window","amount_equal","candidate_not_unique"]',
+    );
+    await expect(batch(db, [restated])).rejects.toThrow("replacement is forbidden");
     const rows = db.query("SELECT * FROM own_transfer_proposals").all() as Record<
       string,
       unknown

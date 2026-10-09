@@ -279,6 +279,51 @@ describe("economic-event.adopt", () => {
     });
   });
 
+  test("a stored status that lags the engine: another unretired proposal on either row needs review", async () => {
+    const w = world();
+    // The first run sees only 101 and 102: proposed.
+    const [first] = await propose(w, [101, 102]);
+    expect(first!.status).toBe("proposed");
+    // A later run under another policy version also sees 105: both pairs on
+    // 101 need review, and the earlier row is still `proposed`.
+    const run = await proposeOwnTransfers({
+      rows: engineRows(w.db, [101, 102, 105]),
+      ownership,
+      policy: { ...POLICY, policyVersion: "synthetic-own-transfer-policy-2" },
+      identityEpoch: INITIAL_IDENTITY_EPOCH,
+      held: { keys: [], aliasClasses: [] },
+    });
+    if (!run.ok) throw new Error(run.refusal);
+    await write(
+      w.store,
+      run.proposals.map((proposal) =>
+        ownTransferProposalWrite({
+          proposal,
+          manifest: run.manifest,
+          now: "2030-01-10T00:00:00.000Z",
+        }),
+      ),
+    );
+    expect(
+      refusalOf(await plan(w, "economic-event.adopt", adoptPayload(first!.proposalId))),
+    ).toEqual({
+      error: "needs_scope_resolution",
+      code: "proposal_needs_review",
+    });
+    // Once the competing proposals are retired, the earlier one is unique again.
+    await write(
+      w.store,
+      run.proposals.map((proposal) =>
+        ownTransferProposalRetirementWrite({
+          proposalId: proposal.proposalId,
+          reason: "engine_superseded",
+          now: "2030-01-11T00:00:00.000Z",
+        }),
+      ),
+    );
+    expect((await plan(w, "economic-event.adopt", adoptPayload(first!.proposalId))).ok).toBe(true);
+  });
+
   test("evidence that moved, a rekeyed identity and an unrecorded origin are refused", async () => {
     const w = world();
     const [proposal] = await propose(w, [101, 102]);
@@ -290,7 +335,18 @@ describe("economic-event.adopt", () => {
       held: { keys: [], aliasClasses: [] },
     });
     if (!run.ok) throw new Error(run.refusal);
+    // Each variant cites the same rows as the one before it, which would make
+    // the pair not unique (proposal_needs_review): retire the one before.
+    let previous = proposal!.proposalId;
     const store = async (mutated: OwnTransferProposal) => {
+      await write(w.store, [
+        ownTransferProposalRetirementWrite({
+          proposalId: previous,
+          reason: "evidence_changed",
+          now: "2030-01-10T00:00:00.000Z",
+        }),
+      ]);
+      previous = mutated.proposalId;
       await write(w.store, [
         ownTransferProposalWrite({
           proposal: mutated,
@@ -305,7 +361,7 @@ describe("economic-event.adopt", () => {
     const moved = {
       ...proposal!,
       proposalId: id("1"),
-      debit: { ...proposal!.debit, parseRunId: 3 },
+      debit: { ...proposal!.debit, parseRunId: 3, evidenceRef: transactionRowRef(101, 3) },
     };
     expect(refusalOf(await store(moved))).toEqual({
       error: "stale_context",
@@ -620,26 +676,24 @@ describe("economic-event.correct", () => {
 
   test("a full restatement releasing exactly what it drops resolves", async () => {
     const { w, eventId, payload } = await adopted();
-    const result = await plan(w, "economic-event.correct", payload([101, 105], [101, 105], [102]));
+    const result = await plan(w, "economic-event.correct", payload([101], [101], [102]));
     if (!result.ok) throw new Error(`${result.error} ${result.refs}`);
     expect(result.resolved.expectedRevisions).toEqual({ [economicEventSubject(eventId)]: 1 });
   });
 
   test("released claims that are not exactly the dropped ones, a claim without its leg, another kind", async () => {
     const { w, payload } = await adopted();
-    expect(
-      refusalOf(await plan(w, "economic-event.correct", payload([101, 105], [101, 105], []))),
-    ).toEqual({
+    expect(refusalOf(await plan(w, "economic-event.correct", payload([101], [101], [])))).toEqual({
       error: "needs_scope_resolution",
       code: "released_claims_mismatch",
     });
     expect(
-      refusalOf(await plan(w, "economic-event.correct", payload([101, 105], [101, 104], [102]))),
+      refusalOf(await plan(w, "economic-event.correct", payload([101], [101, 102], []))),
     ).toEqual({
       error: "needs_scope_resolution",
       code: "claim_without_leg",
     });
-    const fee = payload([101, 105], [101, 105], [102]);
+    const fee = payload([101], [101], [102]);
     expect(
       refusalOf(
         await plan(w, "economic-event.correct", {
@@ -653,31 +707,30 @@ describe("economic-event.correct", () => {
     });
   });
 
-  test("a restated row held elsewhere, or with an unrecorded origin, is refused", async () => {
+  test("a row new to the event, a row restated under another account, or with an unrecorded origin, is refused", async () => {
     const { w, payload } = await adopted();
-    await write(
-      w.store,
-      memberWrites(w.db, [
-        {
-          eventId: "other-synthetic",
-          revision: 1,
-          legs: [105],
-          writerRelease: "synthetic-writer-v1",
-        },
-      ]),
-    );
+    // 105 was never cited by this event: no account to keep, no ownership read yet.
     expect(
       refusalOf(await plan(w, "economic-event.correct", payload([101, 105], [101, 105], [102]))),
-    ).toEqual({
-      error: "stale_context",
-      code: "alias_conflict",
-    });
+    ).toEqual({ error: "needs_scope_resolution", code: "row_new_to_event" });
+    // The reviewer's probe: 101 restated under acct-b computes another alias
+    // class and would pass the holder check as another fact (INV06).
+    const moved = payload([101, 102], [101, 102], []);
+    const legs = moved.revision.legs.map((leg, index) =>
+      index === 0 ? { ...leg, subjectRef: "account:acct-synthetic-b" } : leg,
+    );
+    expect(
+      refusalOf(
+        await plan(w, "economic-event.correct", {
+          ...moved,
+          revision: { ...moved.revision, legs },
+        }),
+      ),
+    ).toEqual({ error: "needs_scope_resolution", code: "leg_account_changed" });
+    // Identity is checked first: the SBI-Shinsei-shaped row refuses with rule 2's code.
     expect(
       refusalOf(await plan(w, "economic-event.correct", payload([101, 201], [101, 201], [102]))),
-    ).toEqual({
-      error: "needs_scope_resolution",
-      code: "identity_origin_unrecorded",
-    });
+    ).toEqual({ error: "needs_scope_resolution", code: "identity_origin_unrecorded" });
   });
 
   test("a holder sealed under an older identity epoch goes to review; a withdrawal stays plannable", async () => {
@@ -756,6 +809,48 @@ describe("economic-event.move and W5", () => {
         code: "move_restates_other_claims",
       },
     );
+  });
+
+  test("the to member's restatement is checked too: an unrecorded origin, a claim without its leg", async () => {
+    const { w, movePayload } = await two();
+    const base = movePayload([101], [103, 104, 102]);
+    // `to` also cites the SBI-Shinsei-shaped row as a leg.
+    const withShinsei = {
+      ...base,
+      to: {
+        ...base.to,
+        revision: payloadClaims(w, restated([103, 104, 102, 201]), [103, 104, 102]),
+      },
+    };
+    expect(refusalOf(await plan(w, "economic-event.move", withShinsei))).toEqual({
+      error: "needs_scope_resolution",
+      code: "identity_origin_unrecorded",
+    });
+    // `to` claims the moved row without a leg citing it.
+    const noLeg = {
+      ...base,
+      to: { ...base.to, revision: payloadClaims(w, restated([103, 104]), [103, 104, 102]) },
+    };
+    expect(refusalOf(await plan(w, "economic-event.move", noLeg))).toEqual({
+      error: "needs_scope_resolution",
+      code: "claim_without_leg",
+    });
+  });
+
+  test("the moved row keeps the account the from member adopted it under", async () => {
+    const { w, movePayload } = await two();
+    const base = movePayload([101], [103, 104, 102]);
+    const legs = base.to.revision.legs.map((leg, index) =>
+      index === 2 ? { ...leg, subjectRef: "account:acct-synthetic-c" } : leg,
+    );
+    expect(
+      refusalOf(
+        await plan(w, "economic-event.move", {
+          ...base,
+          to: { ...base.to, revision: { ...base.to.revision, legs } },
+        }),
+      ),
+    ).toEqual({ error: "needs_scope_resolution", code: "leg_account_changed" });
   });
 
   test("W5: the move's two-member batch fails whole at any statement, and commits whole", async () => {

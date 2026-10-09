@@ -4,7 +4,11 @@
 // (the engine refuses without one: `policy_missing`).
 //
 // Each statement is conditional on its own row not existing, so a replay
-// writes nothing; CORE 0072's triggers refuse a code outside the closed list,
+// writes nothing. A proposal row is skipped only when the same id with the
+// same digest is stored: the same id with another digest (a re-run that now
+// states something else about the pair, such as `needs_review`) reaches
+// `own_transfer_proposals_no_replace` and fails loudly, never silently
+// leaving the old status in force. CORE 0072's triggers refuse a code outside the closed list,
 // a status that disagrees with the codes, and a proposal under an identity
 // epoch that is no longer current.
 import { aliasClassText, consumptionKeyText } from "../../../domain/src/economic-contract.ts";
@@ -44,7 +48,7 @@ export function ownTransferProposalWrite(input: {
  credit_observation_id,credit_parse_run_id,credit_consumption_key,credit_alias_class,credit_account_id,
  policy_version,engine_release,identity_epoch,manifest_json,created_at)
  SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?
- WHERE NOT EXISTS(SELECT 1 FROM own_transfer_proposals WHERE proposal_id=?)`,
+ WHERE NOT EXISTS(SELECT 1 FROM own_transfer_proposals WHERE proposal_id=? AND proposal_digest=?)`,
     binds: [
       proposal.proposalId,
       proposal.proposalDigest,
@@ -66,6 +70,7 @@ export function ownTransferProposalWrite(input: {
       JSON.stringify(manifest),
       canonicalKnownAt(input.now),
       proposal.proposalId,
+      proposal.proposalDigest,
     ],
   };
 }

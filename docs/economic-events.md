@@ -426,8 +426,9 @@ already holds is `alias_conflict` or `economic_claim_held`. Cross-currency and
 same-account pairs are refused; a row in more than one candidate makes each of
 them `needs_review`, never chosen. Amounts are compared as exact decimals and
 never stored or logged; a proposal names its rows and pins the policy
-version, engine release and identity epoch, and its run manifest the alias
-rule, registry, ownership and arithmetic versions.
+version, engine release and identity epoch, and its run manifest the policy
+digest and the alias rule, registry, ownership, arithmetic and contract
+versions.
 
 | Object                              | Role                                                                                                                                                                                                                                                                      |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

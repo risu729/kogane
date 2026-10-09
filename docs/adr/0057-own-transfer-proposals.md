@@ -41,7 +41,9 @@ production gate". What the code holds before this ADR:
 - The domain already has a stage C matcher (`stageCProposals`,
   `reconcile.ts`): equal opposite amounts on nearby days across two sources,
   under a built-in `DEFAULT_MATCH_OPTIONS` window, with no identity admission,
-  no ownership input, no fee rule and the same-source case skipped.
+  no fee rule and the same-source case skipped. Its owner input
+  (`MatchFact.ownerRef`) only adds the rejection condition
+  `owner_not_established`; it never refuses a pair.
 - ADR 0054's acceptance tests W5 for `move` and W6's re-adoption were deferred
   to G3 because they need an own-transfer writer.
 - ADR 0054's production gate is not met: remote D1 conformance (that a trigger
@@ -55,7 +57,7 @@ production gate". What the code holds before this ADR:
 1. **Extend `stageCProposals`.** Rejected as the engine: it carries a default
    window (no policy may have defaults here), skips two accounts of one source
    (two SMBC accounts are the plainest own transfer), admits rows without the
-   identity rules and has nowhere to state ownership or a fee rule. Its
+   identity rules, never refuses on ownership and has no fee rule. Its
    pending/posted callers would change if it did. Its building blocks are
    reused instead: the exact decimal helpers of `values.ts`, the civil-day
    arithmetic of `time.ts`, `humanAdoptedRowIdentity`, the registry lookups
@@ -86,8 +88,9 @@ no storage, no clock. Inputs are explicit:
   (`input_bound_exceeded`, never cut).
 - **Ownership** (#545): an `AccountOwnershipSource` with a version and
   `ownershipOf(sourceId, sourceAccount)` answering `self` with the account id,
-  `other`, or `unresolved`. `unresolved` is `ownership_unresolved` and `other`
-  is `owner_not_self`; nothing is guessed.
+  `other`, or `unresolved`. `other` is `owner_not_self`; `unresolved`, any
+  other state and a `self` without an account id are `ownership_unresolved`;
+  nothing is guessed.
 - **Policy**: `OwnTransferPolicy` with `policyVersion`, `family:
 "bank-movement"`, `currencyRule: "same-currency"`, `window: {
 minDaysAfterDebit, maxDaysAfterDebit }` (inclusive, within ±31 days) and
@@ -101,16 +104,27 @@ minDaysAfterDebit, maxDaysAfterDebit }` (inclusive, within ±31 days) and
 - **Identity epoch** the rows were read under, and the **held** cash-movement
   keys and alias classes (from the guard's tables).
 
-Per row, in order: shape (`row_invalid`), family (`family_unsupported`
-unless the registry files the parser's rows under `bank-movement`), ownership,
-identity (`humanAdoptedRowIdentity` with the owner's account: the five codes
-of ADR 0054 unchanged), then `amount_not_exact`, `amount_zero`,
-`currency_invalid`, `posting_date_missing`. Rule 3: admitted rows of one alias
-class that agree on key and values are one fact captured again (the lowest
-observation is kept, the others `same_fact_recaptured`); any disagreement
-(another key, as from another producer, or another value) refuses all of them
-`duplicate_unresolved`. A held alias class is `alias_conflict` and a held key
-`economic_claim_held`.
+Per row, in order: shape (`row_invalid`, also for every row of an observation
+id given twice), family (`family_unsupported` unless the registry files the
+parser's rows under `bank-movement`), ownership, identity
+(`humanAdoptedRowIdentity` with the owner's account: the five codes of ADR
+0054 unchanged; `identity_absent`, `identity_fingerprint_only`,
+`identity_digest_not_provider` and `identity_resolver_missing` pass through
+from it and are covered by `packages/domain/test/row-identity.test.ts`, while
+this engine's tests exercise `identity_origin_unrecorded` and
+`identity_fingerprint_only` end to end), then `amount_not_exact`,
+`amount_zero`, `currency_invalid`, `posting_date_missing`.
+
+Rule 3: admitted rows of one alias class are one fact captured again only
+when they agree on exactly these fields: the key text, the amount (compared
+numerically, so `1000` equals `1000.00`), the currency and the posting day.
+`extra`, the parser and the parse run are not compared. The lowest
+observation is kept and the others are `same_fact_recaptured`. This is
+INV06-safe: the rows share one key, and claims are made by key, so keeping
+one of them can never count the fact twice; any disagreement (another key, as
+from another producer, or another value) refuses all of them
+`duplicate_unresolved` rather than choosing one. A held alias class is
+`alias_conflict` and a held key `economic_claim_held`.
 
 Every debit (negative) is checked against every credit, first failure wins:
 `same_account`, `currency_differs` (cross-currency is not supported),
@@ -119,7 +133,12 @@ pair that passes is a candidate with `both_accounts_self`, `same_currency`,
 `date_within_window` and `amount_equal` or `difference_within_policy`. A row
 in more than one candidate is never assigned: every candidate it is in is
 `needs_review` with `candidate_not_unique` (ties, one debit and two credits,
-two debits and one credit). Heuristics only propose (INV07).
+two debits and one credit). A counterpart refused for another reason still
+competes: a usable row that would also pair with a row of a
+`duplicate_unresolved` group, or with a row refused `posting_date_missing`
+(checked without the window, which cannot exclude it), counts that as another
+candidate, so its proposals are `needs_review` too; the refusal never picks
+the pair. Heuristics only propose (INV07).
 
 A proposal names its rows (observation, parse run, `SourceFactRef`, key,
 alias class, account) and never an amount. `proposalId` is `otp_` +
@@ -178,17 +197,24 @@ re-verifies; the simulation carries counts and source ids only.
 Refusals, each with the closed code as the second ref
 (`OWN_TRANSFER_PLAN_REFUSALS`):
 
-| Kind       | Refused when                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| every kind | the family is not `bank-movement` (`unsupported_semantics`, `family_unsupported`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `adopt`    | the proposal is missing (`target_missing`, `proposal_missing`), retired (`stale_context`, `proposal_not_in_force`), made under another identity epoch (`stale_context`, `identity_epoch_changed`) or ambiguous (`needs_scope_resolution`, `proposal_needs_review`); its event exists (`proposal_adopted`) or was withdrawn (W6: `withdrawn_readoption`); a cited row moved (`evidence_changed`), fails an identity rule (its code) or computes another alias class (`identity_rekeyed`); a key or class has a live holder (`economic_claim_held`, `alias_conflict`) |
-| `withdraw` | the event is missing, not sealed by the own-transfer writer release (`event_not_own_transfer`), sealed but not logged (`knowledge_unlogged`); the named revision is not the live head (`revision_not_head`) or is already withdrawn (W6: `already_withdrawn`); the named decision did not adopt it (`decision_epoch_mismatch`); a released key has another live holder (`economic_claim_conflict_unresolved`)                                                                                                                                                       |
-| `correct`  | the head checks above; a withdrawn head (`withdrawn_readoption`); a head sealed under an older identity epoch (`needs_scope_resolution`, `identity_epoch_changed`: routed to review, the holder kept); `releasedClaims` not exactly the dropped claims (`released_claims_mismatch`); a restatement that is not a cash-movement `transfer` (`restatement_unsupported`), a claim no leg cites (`claim_without_leg`), a cited row that moved or fails identity, a new claim held elsewhere; a released key held elsewhere                                              |
-| `move`     | the head checks for both members (W5: both heads are pinned, and the writer's batch is one two-member commit); the claim not held by `from` or already by `to` (`move_claim_not_held`); a restatement that changes any other claim (`move_restates_other_claims`); the restatement checks of `correct` for each member                                                                                                                                                                                                                                              |
+| Kind       | Refused when                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| every kind | the family is not `bank-movement` (`unsupported_semantics`, `family_unsupported`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `adopt`    | the proposal is missing (`target_missing`, `proposal_missing`), retired (`stale_context`, `proposal_not_in_force`), made under another identity epoch (`stale_context`, `identity_epoch_changed`) or ambiguous (`needs_scope_resolution`, `proposal_needs_review`); its event exists (`proposal_adopted`) or was withdrawn (W6: `withdrawn_readoption`); a cited row moved (`evidence_changed`), fails an identity rule (its code) or computes another alias class (`identity_rekeyed`); a key or class has a live holder (`economic_claim_held`, `alias_conflict`); another unretired proposal cites either row's alias class (`needs_scope_resolution`, `proposal_needs_review`: a stored status can lag a later run) |
+| `withdraw` | the event is missing, not sealed by the own-transfer writer release (`event_not_own_transfer`), sealed but not logged (`knowledge_unlogged`); the named revision is not the live head (`revision_not_head`) or is already withdrawn (W6: `already_withdrawn`); the named decision did not adopt it (`decision_epoch_mismatch`); a released key has another live holder (`economic_claim_conflict_unresolved`)                                                                                                                                                                                                                                                                                                           |
+| `correct`  | the head checks above; a withdrawn head (`withdrawn_readoption`); a head sealed under an older identity epoch (`needs_scope_resolution`, `identity_epoch_changed`: routed to review, the holder kept); `releasedClaims` not exactly the dropped claims (`released_claims_mismatch`); a restatement that is not a cash-movement `transfer` (`restatement_unsupported`), a claim no leg cites (`claim_without_leg`), a cited row that moved or fails identity, a leg citing a row the event never cited (`row_new_to_event`) or a row under another account than the event adopted it under (`leg_account_changed`), a new claim held elsewhere; a released key held elsewhere                                            |
+| `move`     | the head checks for both members (W5: both heads are pinned, and the writer's batch is one two-member commit); the claim not held by `from` or already by `to` (`move_claim_not_held`); a restatement that changes any other claim (`move_restates_other_claims`); the restatement checks of `correct` for each member, the moved row keeping the account `from` adopted it under                                                                                                                                                                                                                                                                                                                                       |
 
 A withdrawal of a head sealed under an older epoch stays plannable: it
 restates nothing, and ADR 0054 makes the reviewed withdrawal the explicit
-review.
+review. For a correction or a move this ADR is stricter than ADR 0054's
+Decision, which counts a reviewed correction as the explicit review of an
+old-epoch holder: here they are routed to review (`identity_epoch_changed`),
+because they restate claims whose alias classes were computed under the old
+identity, and the epoch exemption (`economic-event.resolve-identity`) is an
+open owner question. The route that remains is to withdraw the old-epoch head
+and adopt a new proposal made under the current epoch; its id differs from
+the old one because the identity epoch is hashed into it.
 
 ### Registration stays off, because the production gate is not met
 
@@ -234,10 +260,22 @@ Rollback). 0072 stays; an older build never reads or writes its tables.
 
 ### Limits
 
-- The planners check the proposal's account ids only through the alias class
-  they recompute; they do not re-read the account mapping or ownership (#545
-  supplies no stored ownership read yet). A remapped source account shows as
-  `identity_rekeyed` only when the class changes.
+- The planners do not re-read the account mapping or ownership (#545 supplies
+  no stored ownership read yet). Adopt recomputes each alias class from the
+  account the proposal stored, so a source account remapped since the
+  proposal is not visible to it (it is not `identity_rekeyed`; only a change
+  of the provider identity function or of the row is). A correction or move
+  keeps each row's account as the event adopted it (from the prior claims'
+  alias classes and the adopted proposal; `leg_account_changed`) and refuses
+  a row the event never cited (`row_new_to_event`) until an ownership read
+  exists; a move's moved row keeps the account `from` gave it.
+- A stored proposal's status is what the run that wrote it saw. A later run
+  that states something else under the same id fails at the store
+  (`own_transfer_proposals_no_replace`; the builder skips only the same id
+  with the same digest) instead of leaving the old status silently in force,
+  and adopt treats any other unretired proposal citing either row as not
+  unique. Retiring superseded proposals is the job of a lane that does not
+  exist yet.
 - Whether a cited row is still published or current is not checked; the
   planner checks that the row exists under its parse run with the same key.
 - A retired proposal id never returns; the same pair under the same policy,
@@ -298,7 +336,7 @@ update (2026-10-09), compared with the code:
 
 Synthetic data only; nothing read from production.
 
-- `packages/domain/test/own-transfer-proposals.test.ts` (19 tests): no policy
+- `packages/domain/test/own-transfer-proposals.test.ts` (24 tests): no policy
   and every malformed or unversioned policy refused; the bound, epoch and
   ownership-version refusals; an SMBC-shaped row with `identityOrigin:
 provider-id` admitted with its alias class; an SBI-Shinsei-shaped row
@@ -316,16 +354,21 @@ provider-id` admitted with its alias class; an SBI-Shinsei-shaped row
   bounds; ties in both directions `needs_review` and two disjoint pairs
   proposed; permutation determinism and a recapture keeping the id; and a
   mutation-style comparison of 600 perturbations of amount, day and fee bound
-  against an independent integer oracle.
+  against an independent integer oracle; review round 1: a 500-row run admitted,
+  an unknown ownership state and a `self` without an account unresolved, an
+  observation id given twice `row_invalid`, the identity epoch changing the
+  proposal id, and a competing `duplicate_unresolved` group or dateless credit
+  making the pair `needs_review` (and not when it does not fit).
 - `packages/storage-d1/test/own-transfer-proposals.test.ts` (7 tests): 0072
   leaves every earlier object's `sqlite_master` row unchanged and its objects
   name no table but their own and `economic_identity_epochs`; a proposal
-  written once, a replay writing nothing, no amount stored; no update, delete
+  written once, a replay writing nothing, the same id with another digest
+  refused loudly, no amount stored; no update, delete
   or `INSERT OR REPLACE`; closed codes, each once, `needs_review` exactly with
   `candidate_not_unique`; the current epoch only; one account, key or class on
   both sides refused; the builders' contract; retirements once, closed,
   append-only, and only of an existing proposal.
-- `packages/application/test/own-transfer-plan.test.ts` (21 tests), on the
+- `packages/application/test/own-transfer-plan.test.ts` (24 tests), on the
   migrated CORE schema with an engine run over stored synthetic rows and a
   synthetic writer standing in for G3-b: nothing registered, and the lifecycle
   refusing an in-force proposal's adoption with nothing written; each kind's
@@ -340,9 +383,16 @@ provider-id` admitted with its alias class; an SBI-Shinsei-shaped row
   stays plannable; a planted double holder refused at withdraw; W5 for `move`
   (the two-member batch fails whole at every statement and on the second
   member's own seal, and commits whole with nothing released and the moved
-  claim held once; a third holder of it is refused).
+  claim held once; a third holder of it is refused); a stored `proposed` row
+  refused once a later run's proposals cite its rows and adoptable again when
+  they are retired; a correction citing a new row, or a known row under
+  another account (the reviewer's probe), refused; a move whose `to` member
+  cites an unrecorded-origin row, claims a row no leg cites, or moves the row
+  to another account, refused.
 - `packages/storage-d1/test/economic-command-kinds-migration.test.ts` compares
-  a store stopped at 0071 (not the newest migration) with one stopped at 0070.
+  a store stopped at 0071 (not the newest migration) with one stopped at 0070,
+  and keeps comparing the full store's 0070 objects with 0070's, so every
+  later migration is checked.
 - `services/processor/test/lanes.test.ts`: the migration pin ends at 0072.
 - `infra/schema/core-ledger.{json,md}` regenerated; both tables `core-keep`.
 

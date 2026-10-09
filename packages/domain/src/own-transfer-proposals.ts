@@ -332,7 +332,8 @@ interface AdmittedRow {
   row: OwnTransferRowInput;
   leg: OwnTransferLeg;
   amount: ExactDecimal;
-  day: number;
+  /** Null only for a row refused `posting_date_missing`, kept as a competitor. */
+  day: number | null;
 }
 
 type IdentityCode = Extract<
@@ -360,9 +361,14 @@ function admitRow(
   const entry = transactionFamilyEntry(sourceId, row.parserName);
   if (entry === null || !entry.families.some((member) => member.family === OWN_TRANSFER_FAMILY))
     return { refusal: "family_unsupported" };
-  const owner = ownership.ownershipOf(sourceId, sourceAccount);
-  if (owner.state === "unresolved") return { refusal: "ownership_unresolved" };
-  if (owner.state === "other") return { refusal: "owner_not_self" };
+  // Closed: only `self` with an account id is ownership; `other` is someone
+  // else's account and anything else (an unknown state included) is unresolved.
+  const owner: unknown = ownership.ownershipOf(sourceId, sourceAccount);
+  if (!isRecord(owner) || owner.state !== "self" || !isText(owner.accountId, 256))
+    return {
+      refusal:
+        isRecord(owner) && owner.state === "other" ? "owner_not_self" : "ownership_unresolved",
+    };
   const identity = humanAdoptedRowIdentity({
     sourceId,
     parserName: row.parserName,
@@ -377,13 +383,14 @@ function admitRow(
   if (isZeroDecimal(amount.value)) return { refusal: "amount_zero" };
   if (typeof row.currency !== "string" || !CURRENCY.test(row.currency))
     return { refusal: "currency_invalid" };
+  // A row without a posting day is refused by the caller, which still counts
+  // it as a competing counterpart (ambiguity), so it is returned with no day.
   const date = typeof row.postingDate === "string" ? parseLocalDate(row.postingDate) : null;
-  if (date === null) return { refusal: "posting_date_missing" };
   return {
     admitted: {
       row,
       amount: amount.value,
-      day: daysBetween({ year: 1970, month: 1, day: 1 }, date),
+      day: date === null ? null : daysBetween({ year: 1970, month: 1, day: 1 }, date),
       leg: {
         observationId: row.observationId,
         parseRunId: row.parseRunId,
@@ -414,9 +421,13 @@ function pairCheck(
 ): { refusal: OwnTransferPairRefusal } | { codes: OwnTransferProposalCode[] } {
   if (debit.leg.accountId === credit.leg.accountId) return { refusal: "same_account" };
   if (debit.row.currency !== credit.row.currency) return { refusal: "currency_differs" };
-  const days = credit.day - debit.day;
-  if (days < policy.window.minDaysAfterDebit || days > policy.window.maxDaysAfterDebit)
-    return { refusal: "date_outside_window" };
+  // A side without a day is only ever checked as a competitor: the window
+  // cannot exclude it, so it fits on the other checks alone.
+  if (debit.day !== null && credit.day !== null) {
+    const days = credit.day - debit.day;
+    if (days < policy.window.minDaysAfterDebit || days > policy.window.maxDaysAfterDebit)
+      return { refusal: "date_outside_window" };
+  }
   const difference = subtractDecimals(negateDecimal(debit.amount), credit.amount);
   const zero = { coefficient: "0", scale: 0 };
   const allowed = maxDifference(policy, debit.row.currency);
@@ -462,15 +473,22 @@ export async function proposeOwnTransfers(
 
   const rowRefusals: { observationId: number; code: OwnTransferRowRefusal }[] = [];
   const admitted: AdmittedRow[] = [];
+  const dateless: AdmittedRow[] = [];
   const rows = [...input.rows].sort((a, b) => a.observationId - b.observationId);
+  // One observation is one row: an id given twice is not a row the engine can cite.
+  const seen = new Map<unknown, number>();
+  for (const row of rows) seen.set(row?.observationId, (seen.get(row?.observationId) ?? 0) + 1);
   for (const row of rows) {
-    const result = admitRow(row, input.ownership);
-    if ("refusal" in result)
-      rowRefusals.push({
-        observationId: isSafeInt(row?.observationId) ? row.observationId : 0,
-        code: result.refusal,
-      });
-    else admitted.push(result.admitted);
+    const result =
+      (seen.get(row?.observationId) ?? 0) > 1
+        ? ({ refusal: "row_invalid" } as const)
+        : admitRow(row, input.ownership);
+    const observationId = isSafeInt(row?.observationId) ? row.observationId : 0;
+    if ("refusal" in result) rowRefusals.push({ observationId, code: result.refusal });
+    else if (result.admitted.day === null) {
+      rowRefusals.push({ observationId, code: "posting_date_missing" });
+      dateless.push(result.admitted);
+    } else admitted.push(result.admitted);
   }
 
   // Rule 3: rows of one alias class are one fact observed again only when
@@ -483,11 +501,13 @@ export async function proposeOwnTransfers(
   const heldKeys = new Set(input.held.keys);
   const heldAliases = new Set(input.held.aliasClasses);
   const usable: AdmittedRow[] = [];
+  const unresolved: AdmittedRow[][] = [];
   for (const [alias, group] of byAlias) {
     const [first, ...rest] = group as [AdmittedRow, ...AdmittedRow[]];
     if (!rest.every((row) => sameValues(first, row))) {
       for (const row of group)
         rowRefusals.push({ observationId: row.leg.observationId, code: "duplicate_unresolved" });
+      unresolved.push(group);
       continue;
     }
     for (const row of rest)
@@ -534,6 +554,20 @@ export async function proposeOwnTransfers(
   for (const { debit, credit } of candidates)
     for (const id of [debit.leg.observationId, credit.leg.observationId])
       degree.set(id, (degree.get(id) ?? 0) + 1);
+  // A counterpart refused for another reason still competes: a group of rows
+  // that may be one fact (`duplicate_unresolved`), or a row without a posting
+  // day (the window cannot exclude it). Either fitting a usable row makes that
+  // row's candidates need review instead of letting the refusal pick for it.
+  const fits = (row: AdmittedRow, other: AdmittedRow): boolean => {
+    const debit = row.amount.coefficient.startsWith("-");
+    if (debit === other.amount.coefficient.startsWith("-")) return false;
+    return "codes" in (debit ? pairCheck(row, other, policy) : pairCheck(other, row, policy));
+  };
+  const competitors: AdmittedRow[][] = [...unresolved, ...dateless.map((row) => [row])];
+  for (const row of usable)
+    for (const group of competitors)
+      if (group.some((other) => fits(row, other)))
+        degree.set(row.leg.observationId, (degree.get(row.leg.observationId) ?? 0) + 1);
 
   const policyDigest = await canonicalDigest(policy as unknown as Record<string, unknown>);
   const proposals: OwnTransferProposal[] = [];

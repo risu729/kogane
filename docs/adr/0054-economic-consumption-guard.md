@@ -170,8 +170,8 @@ row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
   Routing old-epoch holders to needs-review (`identity_epoch_changed`, holder
   kept) is the planners' job (G3) and the selector's (#550, ADR 0058).
   _Pointer (2026-10-09): ADR 0057's planners route a correction or move of a
-  holder sealed under an older epoch to review and refuse a withdrawal that
-  names another decision (`decision_epoch_mismatch`); they are not registered._
+  holder sealed under an older epoch to review (stricter than this paragraph,
+  as ADR 0057 states); they are not registered._
 - **Knowledge selector interface** (#550, ADR 0058): a cut is
   `{coreEpoch, commitSeq}` or `{coreEpoch, instant}` resolved to the largest
   sequence whose `known_at` is at or before the instant (equal instants all
@@ -193,6 +193,7 @@ row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
   keys; no rule, AI or agent adopts, corrects, withdraws or moves an own
   transfer. A future rule needs an owner-authorised, versioned policy as
   [ADR 0034](0034-card-settlement-automation-prerequisites.md) required.
+  _Pointer (2026-10-09): see [ADR 0057](0057-own-transfer-proposals.md): nothing adopts while the production gate is unmet; who may act is decided by the lifecycle's grants, with no principal-kind rule here._
 
 ### Identity: eight fail-closed rules
 
@@ -763,7 +764,7 @@ inserted directly: the lifecycle never writes either for these kinds. A
 malformed payload is still `invalid_command`, before the missing planner. No
 rule writer uses the change lifecycle, and the authority rule above (no rule,
 AI or agent adopts, corrects, withdraws or moves an own transfer) is not
-loosened by anything here.
+loosened by anything here. _Pointer (2026-10-09): see [ADR 0057](0057-own-transfer-proposals.md): nothing adopts while the production gate is unmet; who may act is decided by the lifecycle's grants, with no principal-kind rule here._
 
 ### The identity-resolution exemption stays closed (owner question)
 

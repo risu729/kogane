@@ -81,6 +81,8 @@ export const OWN_TRANSFER_PLAN_REFUSALS = [
   "claim_without_leg",
   "move_claim_not_held",
   "move_restates_other_claims",
+  "row_new_to_event",
+  "leg_account_changed",
 ] as const;
 type OwnTransferPlanRefusal = (typeof OWN_TRANSFER_PLAN_REFUSALS)[number];
 
@@ -92,6 +94,11 @@ const OWN_TRANSFER_PROPOSAL_SQL = `SELECT p.proposal_id,p.status,p.identity_epoc
  (SELECT r.reason_code FROM own_transfer_proposal_retirements r WHERE r.proposal_id=p.proposal_id) AS retired,
  ${CURRENT_EPOCH} AS current_epoch
  FROM own_transfer_proposals p WHERE p.proposal_id=?1`;
+
+/** Another unretired proposal citing either alias class (served by 0072's alias indexes). */
+const OWN_TRANSFER_COMPETING_SQL = `SELECT count(*) AS n FROM own_transfer_proposals o
+ WHERE o.proposal_id<>?1 AND (o.debit_alias_class IN (?2,?3) OR o.credit_alias_class IN (?2,?3))
+ AND NOT EXISTS(SELECT 1 FROM own_transfer_proposal_retirements r WHERE r.proposal_id=o.proposal_id)`;
 
 /** One cited row with its own key, as CORE 0070's claim trigger derives it. */
 const OWN_TRANSFER_ROW_SQL = `SELECT a.source_id,p.parser_name,t.source_account,t.external_id,t.extra_json,
@@ -195,13 +202,22 @@ async function rederive(
   const row = await store.first<RowRow>(OWN_TRANSFER_ROW_SQL, [leg.observationId, leg.parseRunId]);
   if (!row || row.consumption_key !== leg.key)
     return refuse("stale_context", subject, "evidence_changed");
+  return admitStoredRow(subject, row, leg.accountId);
+}
+
+/** A row already read, admitted under an account through ADR 0054's identity rules. */
+function admitStoredRow(
+  subject: string,
+  row: RowRow,
+  accountId: string,
+): { ok: true; aliasClass: AliasClass; sourceId: string } | Refusal {
   const identity = humanAdoptedRowIdentity({
     sourceId: row.source_id,
     parserName: row.parser_name,
     sourceAccount: row.source_account,
     externalId: row.external_id,
     extra: parseJson(row.extra_json),
-    accountId: leg.accountId,
+    accountId,
   });
   if (!identity.admitted) return refuse("needs_scope_resolution", subject, identity.refusal);
   return { ok: true, aliasClass: identity.aliasClass, sourceId: row.source_id };
@@ -266,7 +282,9 @@ async function ownTransferHead(
   eventId: string,
   revision: number,
   options: { restates: boolean },
-): Promise<{ ok: true; head: HeadRow; claims: BookClaim[] } | Refusal> {
+): Promise<
+  { ok: true; head: HeadRow; claims: BookClaim[]; accounts: Map<string, string> } | Refusal
+> {
   const subject = economicEventSubject(eventId);
   const head = await store.first<HeadRow>(OWN_TRANSFER_HEAD_SQL, [eventId]);
   if (!head) return commandError("target_missing", [subject]);
@@ -281,10 +299,44 @@ async function ownTransferHead(
       : refuse("stale_context", subject, "already_withdrawn");
   if (options.restates && head.seal_epoch !== head.current_epoch)
     return refuse("needs_scope_resolution", subject, "identity_epoch_changed");
-  const claims = claimsOf(
-    await store.all<ClaimRow>(OWN_TRANSFER_CLAIMS_SQL, [eventId, head.revision]),
-  );
-  return { ok: true, head, claims };
+  const rows = await store.all<ClaimRow>(OWN_TRANSFER_CLAIMS_SQL, [eventId, head.revision]);
+  return {
+    ok: true,
+    head,
+    claims: claimsOf(rows),
+    accounts: await knownAccounts(store, eventId, rows),
+  };
+}
+
+/**
+ * The account each row the event already cites was adopted under, by its
+ * 5-tuple: from the prior revision's claims (the account their alias class
+ * carries) and from the proposal the event adopted. A restated leg must keep
+ * that account; a row the event never cited has no account to keep, and is
+ * refused until an ownership read exists (ADR 0057, Limits).
+ */
+async function knownAccounts(
+  store: CommandStore,
+  eventId: string,
+  claims: readonly ClaimRow[],
+): Promise<Map<string, string>> {
+  const accounts = new Map<string, string>();
+  for (const claim of claims) {
+    const alias = parseJson(claim.alias_class);
+    if (Array.isArray(alias) && typeof alias[2] === "string")
+      accounts.set(claim.consumption_key, alias[2]);
+  }
+  const prefix = ownTransferEventId("");
+  if (eventId.startsWith(prefix)) {
+    const proposal = await store.first<ProposalRow>(OWN_TRANSFER_PROPOSAL_SQL, [
+      eventId.slice(prefix.length),
+    ]);
+    if (proposal) {
+      accounts.set(proposal.debit_consumption_key, proposal.debit_account_id);
+      accounts.set(proposal.credit_consumption_key, proposal.credit_account_id);
+    }
+  }
+  return accounts;
 }
 
 const TRANSACTION_ID = /^transaction:([1-9][0-9]*)$/u;
@@ -301,6 +353,7 @@ async function checkRestatement(
   revision: RestatedRevision,
   own: ReadonlySet<string>,
   priorClaims: readonly BookClaim[],
+  accounts: ReadonlyMap<string, string>,
 ): Promise<{ ok: true; sources: string[]; parseRuns: number[] } | Refusal> {
   if (
     revision.kind !== "transfer" ||
@@ -315,13 +368,15 @@ async function checkRestatement(
     if (!id || !run) return refuse("needs_scope_resolution", subject, "restatement_unsupported");
     const row = await store.first<RowRow>(OWN_TRANSFER_ROW_SQL, [Number(id[1]), Number(run[1])]);
     if (!row) return refuse("stale_context", subject, "evidence_changed");
-    const derived = await rederive(store, subject, {
-      observationId: Number(id[1]),
-      parseRunId: Number(run[1]),
-      key: row.consumption_key,
-      accountId: leg.subjectRef.slice("account:".length),
-    });
+    const accountId = leg.subjectRef.slice("account:".length);
+    const derived = admitStoredRow(subject, row, accountId);
     if (!derived.ok) return derived;
+    // The alias class carries the account, so a row restated under another
+    // account would pass the holder check as another fact (INV06).
+    const known = accounts.get(row.consumption_key);
+    if (known === undefined) return refuse("needs_scope_resolution", subject, "row_new_to_event");
+    if (known !== accountId)
+      return refuse("needs_scope_resolution", subject, "leg_account_changed");
     legKeys.set(row.consumption_key, derived);
     parseRuns.add(Number(run[1]));
   }
@@ -389,6 +444,15 @@ const planOwnTransferAdopt: EconomicEventPlanner = async (store, kind, payload) 
   if (proposal.identity_epoch !== proposal.current_epoch)
     return refuse("stale_context", subject, "identity_epoch_changed");
   if (proposal.status !== "proposed")
+    return refuse("needs_scope_resolution", subject, "proposal_needs_review");
+  // A stored status can lag the engine: another unretired proposal citing
+  // either row's alias class means the pair is not unique, whatever this row says.
+  const competing = await store.first<{ n: number }>(OWN_TRANSFER_COMPETING_SQL, [
+    proposalId,
+    proposal.debit_alias_class,
+    proposal.credit_alias_class,
+  ]);
+  if ((competing?.n ?? 0) > 0)
     return refuse("needs_scope_resolution", subject, "proposal_needs_review");
   const eventId = ownTransferEventId(proposalId);
   const eventSubject = economicEventSubject(eventId);
@@ -474,7 +538,14 @@ const planOwnTransferCorrect: EconomicEventPlanner = async (store, kind, payload
   if (!sameBookClaims(releasedClaims, releasedBookClaims(head.claims, revision.claims)))
     return refuse("needs_scope_resolution", subject, "released_claims_mismatch");
   const own = new Set([eventId]);
-  const restated = await checkRestatement(store, subject, revision, own, head.claims);
+  const restated = await checkRestatement(
+    store,
+    subject,
+    revision,
+    own,
+    head.claims,
+    head.accounts,
+  );
   if (!restated.ok) return restated;
   const conflict = await releaseConflict(store, subject, releasedClaims, own);
   if (conflict) return conflict;
@@ -526,6 +597,8 @@ const planOwnTransferMove: EconomicEventPlanner = async (store, kind, payload) =
   )
     return refuse("needs_scope_resolution", fromSubject, "move_restates_other_claims");
   const own = new Set([from.eventId, to.eventId]);
+  // The moved row's account is the one the from member adopted it under.
+  const accounts = new Map([...fromHead.accounts, ...toHead.accounts]);
   const sources: string[] = [];
   const parseRuns = new Set<number>();
   for (const [subject, member, prior] of [
@@ -534,10 +607,14 @@ const planOwnTransferMove: EconomicEventPlanner = async (store, kind, payload) =
   ] as const) {
     if (member.revision.state === "unknown") continue;
     // The moved claim was the from member's own: it is not "new" to the to member.
-    const restated = await checkRestatement(store, subject, member.revision, own, [
-      ...prior,
-      claim,
-    ]);
+    const restated = await checkRestatement(
+      store,
+      subject,
+      member.revision,
+      own,
+      [...prior, claim],
+      accounts,
+    );
     if (!restated.ok) return restated;
     sources.push(...restated.sources);
     for (const run of restated.parseRuns) parseRuns.add(run);
