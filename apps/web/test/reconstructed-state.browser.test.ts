@@ -18,6 +18,7 @@ import {
   WORLD_EMPTY_LOG,
   WORLD_FROM,
   WORLD_NO_GUARD,
+  WORLD_NO_TIME,
   WORLD_TO,
 } from "../../../packages/application/test/reconstructed-state-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
@@ -83,6 +84,8 @@ describe.if(runnable)("reconstructed state", () => {
           cell.partition = "complete";
           cell.explanation.status = "difference_unexplained";
           cell.explanation.reasonCode = null;
+          // The fold reaches a complete cell only when the families are evented.
+          body.reconstruction!.accounts[0]!.familyCoverage = "evented";
           return Response.json({ ...body, account: UNEXPLAINED, status: "complete", reasons: [] });
         }
         if (url.pathname.startsWith("/api/"))
@@ -205,6 +208,18 @@ describe.if(runnable)("reconstructed state", () => {
     expect(table).toContain("説明できない差");
     expect(table).toContain("-500 JPY");
     expect(table).not.toContain("一致");
+    await page.close();
+  }, 30_000);
+
+  test("a figure the fold cannot compute is shown absent with its reason, never as zero", async () => {
+    const page = await open();
+    await ask(page, WORLD_NO_TIME);
+    await answered(page);
+    const table = await page.getByRole("region", { name: "残高ごとの比較" }).innerText();
+    expect(table).toContain("算出できない");
+    expect(table).toContain("event_time_unknown");
+    expect(table).not.toMatch(/(?:^|\s)0 JPY/u);
+    expect(table).not.toContain("-0 JPY");
     await page.close();
   }, 30_000);
 

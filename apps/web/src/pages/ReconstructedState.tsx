@@ -166,14 +166,24 @@ function ReasonList({ codes, label }: { codes: readonly string[]; label: string 
   );
 }
 
+/**
+ * A reported figure as the fold compares it: oriented asset-positive. A
+ * liability-positive figure was negated for that, so the provider's own
+ * figure is shown beside it with the note that its sign was inverted.
+ */
 function Reported({ value }: { value: ReconstructionStart | null }): ReactNode {
   if (value === null) return <Nullable value={null} placeholder="報告値なし" />;
   return (
     <>
-      <SettlementQuantity value={value.reported} />
+      <SettlementQuantity value={value.oriented} />
+      {value.signMeaning === "liability-positive" ? (
+        <span className="dim reconstructed-captured">
+          取得元の表示 <SettlementQuantity value={value.reported} />
+          （負債として報告された値の符号を反転）
+        </span>
+      ) : null}
       <span className="dim reconstructed-captured">
-        {" "}
-        · 取得 <time dateTime={value.capturedAt}>{value.capturedAt}</time>
+        取得 <time dateTime={value.capturedAt}>{value.capturedAt}</time>
       </span>
     </>
   );
@@ -214,7 +224,13 @@ function Components({ cell }: { cell: ReconstructedCell }): ReactNode {
   return (
     <ul className="plain-list">
       <li>
-        適用 {cell.applied.count} 件 <SettlementQuantity value={cell.applied.total} />
+        適用 {cell.applied.count} 件
+        {cell.applied.count === 0 ? null : (
+          <>
+            {" "}
+            <SettlementQuantity value={cell.applied.total} />
+          </>
+        )}
       </li>
       {cell.pending.count === 0 ? null : (
         <li>
@@ -244,7 +260,8 @@ function CellTable({ cells }: { cells: ReconstructedCell[] }): ReactNode {
     <div className="table-scroll" role="region" aria-label="残高ごとの比較" tabIndex={0}>
       <table className="reconstructed-state-table">
         <caption>
-          差は「終了日の報告値 − 再構成値」です。差を調整として記録したり、0
+          差は「終了日の報告値 −
+          再構成値」で、どちらも資産を正とした向きです。差を調整として記録したり、0
           として扱ったりはしません。
         </caption>
         <thead>

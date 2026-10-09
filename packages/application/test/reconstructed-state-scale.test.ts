@@ -15,67 +15,27 @@ import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { explain } from "../../read-model/test/card-usage-plan.ts";
-import {
-  STATEMENT_CI_SCALE,
-  STATEMENT_SCALE,
-  scaledStore,
-} from "../../read-model/test/card-usage-scale-fixture.ts";
-import type { DatedStore } from "../../read-model/test/dated-state-fixture.ts";
-import { EconomicHistory, day } from "../../read-model/test/economic-history-fixture.ts";
-import { KNOWN_WRITER_RELEASES } from "../../domain/src/reconstruction-adapter.ts";
 import { readReconstructedState } from "../src/query/reconstructed-state-read.ts";
+import { reconstructedScaleStore } from "./reconstructed-state-scale-store.ts";
 import { WORLD_GRANT } from "./reconstructed-state-world.ts";
 
 const FULL = process.env["KOGANE_RECONSTRUCTED_STATE_SCALE"] === "full";
 const TIMEOUT = FULL ? 1_800_000 : 120_000;
-const OPTIONS = FULL ? STATEMENT_SCALE : STATEMENT_CI_SCALE;
-const EVENTS = FULL ? 1_500 : 150;
-const REVISIONS = FULL ? 3 : 2;
-const ACCOUNT = "acct-bank";
-const TODAY = OPTIONS.today;
-const FROM = new Date(Date.parse(`${TODAY}T00:00:00Z`) - 365 * 86_400_000)
-  .toISOString()
-  .slice(0, 10);
-const NOW = new Date(Date.parse(`${TODAY}T00:00:00Z`) + 86_400_000).toISOString();
-const SETTLEMENT_RELEASE = KNOWN_WRITER_RELEASES["card-settlement-review"][0]!;
 
 let db: Database;
+let ACCOUNT = "";
+let FROM = "";
+let TODAY = "";
+let NOW = "";
+let EVENTS = 0;
+let REVISIONS = 0;
 /** Commits the scaled store's own lanes logged before these settlements. */
 let existingCommits = 0;
 
 beforeAll(async () => {
-  const built = await scaledStore(OPTIONS);
-  db = built.store.db;
-  // `adopt` writes through the store's database only.
-  const h = new EconomicHistory({ db } as unknown as DatedStore);
-  existingCommits = (
-    db.query("SELECT count(*) AS n FROM economic_commit_log").get() as { n: number }
-  ).n;
-  let clock = Date.parse(`${FROM}T00:00:00Z`);
-  for (let event = 0; event < EVENTS; event += 1) {
-    const posting = new Date(Date.parse(`${FROM}T00:00:00Z`) + (event % 360) * 86_400_000)
-      .toISOString()
-      .slice(0, 10);
-    for (let revision = 1; revision <= REVISIONS; revision += 1) {
-      clock += 60_000;
-      h.adopt({
-        eventId: `ev-scale-${event}`,
-        revision,
-        legs: [
-          {
-            subject: ACCOUNT,
-            amount: String(100 + revision),
-            role: "decrease",
-            basis: "cash-movement",
-          },
-          { subject: "acct-card-0", amount: null, role: "unresolved", basis: "obligation-change" },
-        ],
-        times: [["posting", day(posting)]],
-        knownAt: new Date(clock).toISOString(),
-        writerRelease: SETTLEMENT_RELEASE,
-      });
-    }
-  }
+  const built = await reconstructedScaleStore(FULL);
+  ({ db, account: ACCOUNT, from: FROM, to: TODAY, now: NOW } = built);
+  ({ events: EVENTS, revisions: REVISIONS, existingCommits } = built);
 }, TIMEOUT);
 
 /** The store as the service's executor, recording every statement it runs. */

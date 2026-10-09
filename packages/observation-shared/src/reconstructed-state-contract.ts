@@ -78,6 +78,40 @@ export const RECONSTRUCTED_STATE_WIRE_REASONS = [
   "nothing_to_reconstruct",
   "positions_not_folded",
 ] as const;
+/** The reasons that decide each status, by precedence (the query's own groups). */
+export const RECONSTRUCTED_STATE_STATUS_GROUPS = {
+  unavailable: ["economic_guard_missing", "no_reported_container"],
+  indeterminate: [
+    "log_empty",
+    "cut_before_log_start",
+    "knowledge_unlogged",
+    "snapshot_boundary_unknown",
+  ],
+  needs_review: [
+    "identity_changed",
+    "claim_conflict",
+    "alias_conflict",
+    "revision_chain_inconsistent",
+    "writer_unsupported",
+    "revision_left_out",
+  ],
+} as const;
+
+/**
+ * The status the query derives from its reasons, or null when the reasons
+ * are not in the query's order (each once) and so cannot be its answer.
+ */
+export function statusOfReasons(reasons: readonly string[]): string | null {
+  const order = reasons.map((reason) =>
+    (RECONSTRUCTED_STATE_WIRE_REASONS as readonly string[]).indexOf(reason),
+  );
+  if (order.some((index, at) => index < 0 || (at > 0 && index <= order[at - 1]!))) return null;
+  if (reasons.length === 0) return "complete";
+  for (const [status, group] of Object.entries(RECONSTRUCTED_STATE_STATUS_GROUPS))
+    if ((group as readonly string[]).includes(reasons[0]!)) return status;
+  return "incomplete";
+}
+
 /** `LATE_UNAVAILABLE_REASONS` of the query. */
 export const RECONSTRUCTED_STATE_LATE_UNAVAILABLE = [
   "no_end_capture",
@@ -253,27 +287,67 @@ const component = (value: unknown, extra: string[] = []): boolean =>
   list(value.refs, text) &&
   extra.every((key) => count(value[key]));
 
-function validExplanation(value: unknown): boolean {
-  return (
-    record(value) &&
-    exactKeys(value, [
-      "status",
-      "reasonCode",
-      "reported",
-      "remainder",
-      "lateRecorded",
-      "pendingShownApart",
-      "sameDayBoundary",
-    ]) &&
-    member(EXPLANATION_STATUSES)(value.status) &&
-    (value.reasonCode === null ||
-      member([...NOT_COMPARABLE_REASONS, ...FOLD_UNAVAILABLE_REASONS])(value.reasonCode)) &&
-    (value.reported === null || validStart(value.reported)) &&
-    validQuantity(value.remainder) &&
-    (value.lateRecorded === null || totalRefs(value.lateRecorded)) &&
-    totalRefs(value.pendingShownApart) &&
-    totalRefs(value.sameDayBoundary)
-  );
+/** An exact quantity, and whether it is zero. */
+function exactValue(value: unknown): "zero" | "non-zero" | null {
+  if (!record(value) || !record(value.value) || value.value.status !== "exact") return null;
+  const decimal = value.value.value;
+  return record(decimal) && decimal.coefficient === "0" ? "zero" : "non-zero";
+}
+
+/**
+ * The explanation as the fold derives it (reconstruction.ts, step 7): a status
+ * that compares (`reconciled`, the two boundary statuses, an unexplained
+ * difference) has no reason code, a complete cell with no gap, the reported
+ * end and an exact remainder, zero exactly when the status says it matches
+ * without the boundary candidates; a status that does not compare names its
+ * reason. So a difference can never be shown as matched, nor an unexplained
+ * one as anything but a non-zero figure.
+ */
+function validExplanation(value: unknown, cell: { gaps: unknown; partition: unknown }): boolean {
+  if (
+    !(
+      record(value) &&
+      exactKeys(value, [
+        "status",
+        "reasonCode",
+        "reported",
+        "remainder",
+        "lateRecorded",
+        "pendingShownApart",
+        "sameDayBoundary",
+      ]) &&
+      member(EXPLANATION_STATUSES)(value.status) &&
+      (value.reasonCode === null ||
+        member([...NOT_COMPARABLE_REASONS, ...FOLD_UNAVAILABLE_REASONS])(value.reasonCode)) &&
+      (value.reported === null || validStart(value.reported)) &&
+      validQuantity(value.remainder) &&
+      (value.lateRecorded === null || totalRefs(value.lateRecorded)) &&
+      totalRefs(value.pendingShownApart) &&
+      totalRefs(value.sameDayBoundary)
+    )
+  )
+    return false;
+  switch (value.status) {
+    case "not_comparable":
+      return member(NOT_COMPARABLE_REASONS)(value.reasonCode);
+    case "unavailable":
+      return member(FOLD_UNAVAILABLE_REASONS)(value.reasonCode);
+    default: {
+      const remainder = exactValue(value.remainder);
+      const compared =
+        value.reasonCode === null &&
+        value.reported !== null &&
+        Array.isArray(cell.gaps) &&
+        cell.gaps.length === 0 &&
+        cell.partition === "complete" &&
+        remainder !== null;
+      if (!compared) return false;
+      if (value.status === "reconciled" || value.status === "consistent_with_boundary_exclusion")
+        return remainder === "zero";
+      if (value.status === "difference_unexplained") return remainder === "non-zero";
+      return true;
+    }
+  }
 }
 
 const windowBound = (value: unknown): boolean =>
@@ -329,7 +403,7 @@ function validCell(value: unknown): boolean {
     list(value.gaps, member(RECONSTRUCTION_GAPS)) &&
     member(RESULT_PARTITIONS)(value.partition) &&
     bool(value.needsReview) &&
-    validExplanation(value.explanation)
+    validExplanation(value.explanation, { gaps: value.gaps, partition: value.partition })
   );
 }
 
@@ -521,8 +595,11 @@ export function validReconstructedState(value: unknown): boolean {
         value.contextId,
       ].every((field) => field === null)
     );
-  // A computed answer is never `complete` with a reason, nor anything else without one.
-  if ((value.status === "complete") !== (value.reasons.length === 0)) return false;
+  // The status is the one the query derives: the group of the first reason,
+  // the reasons in the query's order, `complete` exactly when there is none.
+  if (statusOfReasons(value.reasons as string[]) !== value.status) return false;
+  // The missing guard computes nothing, so it never sits beside a reconstruction.
+  if ((value.reasons as string[]).includes("economic_guard_missing")) return false;
   return (
     validCut(value.cut) &&
     member(CUT_STANDINGS)(value.cutStanding) &&

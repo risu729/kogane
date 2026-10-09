@@ -74,7 +74,7 @@ export const RECONSTRUCTED_STATE_REFUSALS = {
   invalid_account: { status: 400, category: "invalid_query" },
   invalid_date: { status: 400, category: "invalid_query" },
   invalid_range: { status: 400, category: "invalid_query" },
-  range_too_long: { status: 400, category: "budget_exceeded" },
+  range_too_long: { status: 400, category: "invalid_query" },
   range_in_future: { status: 400, category: "invalid_query" },
   basis_unsupported: { status: 400, category: "unsupported_semantics" },
   invalid_cut: { status: 400, category: "invalid_query" },

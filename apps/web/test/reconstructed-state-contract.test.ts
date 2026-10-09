@@ -9,6 +9,7 @@ import {
   LATE_UNAVAILABLE_REASONS,
   RECONSTRUCTED_STATE_QUERY_SCHEMA,
   RECONSTRUCTED_STATE_REASONS,
+  RECONSTRUCTED_STATE_STATUS_REASONS,
   RECONSTRUCTED_STATE_STATUSES,
 } from "../../../packages/application/src/query/reconstructed-state.ts";
 import { RECONSTRUCTED_STATE_REFUSAL_CODES } from "../../../packages/application/src/query/reconstructed-state-read.ts";
@@ -30,9 +31,11 @@ import {
 } from "../../../packages/observation-shared/src/api-validation.ts";
 import {
   RECONSTRUCTED_STATE_LATE_UNAVAILABLE,
+  RECONSTRUCTED_STATE_STATUS_GROUPS,
   RECONSTRUCTED_STATE_QUERY_SCHEMA as WIRE_SCHEMA,
   RECONSTRUCTED_STATE_WIRE_REASONS,
   RECONSTRUCTED_STATE_WIRE_STATUSES,
+  statusOfReasons,
   validReconstructedState,
 } from "../../../packages/observation-shared/src/reconstructed-state-contract.ts";
 import { clientFeatures } from "../src/capabilities.ts";
@@ -89,6 +92,106 @@ describe("reconstructed state HTTP contract", () => {
     expect(mutate((copy) => (cell(copy)["explanation"]["remainder"] = -500))).toBe(false);
     expect(mutate((copy) => delete copy["manifest"])).toBe(false);
     expect(mutate((copy) => (copy["late"] = null))).toBe(false);
+  });
+
+  test("an explanation's status is tied to its figures, and the status to its reasons", async () => {
+    const body = await answer(WORLD_BANK);
+    const mutate = (change: (copy: Record<string, any>) => void): boolean => {
+      const copy = structuredClone(body) as Record<string, any>;
+      change(copy);
+      return validReconstructedState(copy);
+    };
+    const cell = (copy: Record<string, any>) => copy["reconstruction"]["cells"][0];
+    /** The cell as the fold gives it once coverage is declared: complete, no gap. */
+    const compared = (copy: Record<string, any>, status: string) => {
+      copy["status"] = "complete";
+      copy["reasons"] = [];
+      cell(copy)["gaps"] = [];
+      cell(copy)["partition"] = "complete";
+      cell(copy)["explanation"]["status"] = status;
+      cell(copy)["explanation"]["reasonCode"] = null;
+    };
+    // The bank cell's remainder is −500: unexplained, never matched.
+    expect(mutate((copy) => compared(copy, "difference_unexplained"))).toBe(true);
+    expect(mutate((copy) => compared(copy, "reconciled"))).toBe(false);
+    expect(mutate((copy) => compared(copy, "consistent_with_boundary_exclusion"))).toBe(false);
+    const zero = (copy: Record<string, any>) =>
+      (cell(copy)["explanation"]["remainder"]["value"]["value"] = { coefficient: "0", scale: 0 });
+    expect(
+      mutate((copy) => {
+        compared(copy, "reconciled");
+        zero(copy);
+      }),
+    ).toBe(true);
+    expect(
+      mutate((copy) => {
+        compared(copy, "difference_unexplained");
+        zero(copy);
+      }),
+    ).toBe(false);
+    // An unexplained difference has no gap, a complete cell, no reason and the reported end.
+    expect(
+      mutate((copy) => {
+        compared(copy, "difference_unexplained");
+        cell(copy)["gaps"] = ["history_gap"];
+      }),
+    ).toBe(false);
+    expect(
+      mutate((copy) => {
+        compared(copy, "difference_unexplained");
+        cell(copy)["partition"] = "partial-verified-scope";
+      }),
+    ).toBe(false);
+    expect(
+      mutate((copy) => {
+        compared(copy, "difference_unexplained");
+        cell(copy)["explanation"]["reasonCode"] = "reconstruction_incomplete";
+      }),
+    ).toBe(false);
+    expect(
+      mutate((copy) => {
+        compared(copy, "difference_unexplained");
+        cell(copy)["explanation"]["reported"] = null;
+      }),
+    ).toBe(false);
+    // A status that does not compare names its reason.
+    expect(mutate((copy) => (cell(copy)["explanation"]["reasonCode"] = null))).toBe(false);
+    expect(
+      mutate((copy) => {
+        cell(copy)["explanation"]["status"] = "unavailable";
+        cell(copy)["explanation"]["reasonCode"] = null;
+      }),
+    ).toBe(false);
+    // The status is the group of the first reason, the reasons in the query's order.
+    expect(mutate((copy) => (copy["status"] = "needs_review"))).toBe(false);
+    expect(mutate((copy) => (copy["reasons"] = [...copy["reasons"]].reverse()))).toBe(false);
+    expect(
+      mutate((copy) => {
+        copy["status"] = "unavailable";
+        copy["reasons"] = ["economic_guard_missing", ...copy["reasons"]];
+      }),
+    ).toBe(false);
+  });
+
+  test("the status groups are the query's precedence", async () => {
+    expect(statusOfReasons([])).toBe("complete");
+    expect(statusOfReasons(["family_not_evented"])).toBe("incomplete");
+    expect(statusOfReasons(["writer_unsupported", "family_not_evented"])).toBe("needs_review");
+    expect(statusOfReasons(["family_not_evented", "writer_unsupported"])).toBeNull();
+    const groups = Object.values(RECONSTRUCTED_STATE_STATUS_GROUPS).flat() as string[];
+    expect(groups).toEqual([...RECONSTRUCTED_STATE_REASONS].slice(0, groups.length) as string[]);
+    expect(Object.keys(RECONSTRUCTED_STATE_STATUS_GROUPS)).toEqual(
+      [...RECONSTRUCTED_STATE_STATUSES].slice(0, 3),
+    );
+    for (const [status, group] of Object.entries(RECONSTRUCTED_STATE_STATUS_GROUPS))
+      expect([status, [...group]]).toEqual([
+        status,
+        [
+          ...RECONSTRUCTED_STATE_STATUS_REASONS[
+            status as keyof typeof RECONSTRUCTED_STATE_STATUS_GROUPS
+          ],
+        ],
+      ]);
   });
 
   test("an answer without a reconstruction must be the missing guard, with nothing else", async () => {

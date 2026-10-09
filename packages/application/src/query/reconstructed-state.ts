@@ -16,7 +16,10 @@
 // movement sits on a snapshot's boundary), `needs_review` (an identity
 // changed, two holders of one claim, an inconsistent chain, a shape the fold
 // cannot take), `incomplete` (a cell's gaps) or `complete`. Every reason is a
-// closed code. No route, page or service calls this yet (ADR 0058).
+// closed code. `readReconstructedState` (reconstructed-state-read.ts) serves
+// it to `GET /api/v2/reconstructed-state`, the agent tool
+// `kogane.reconstructed-state.read` and the /reconstruction page (ADR 0058,
+// amendment of 2026-10-09).
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import { validKnowledgeCut, type KnowledgeCut } from "../../../domain/src/economic-contract.ts";
 import {
@@ -140,6 +143,12 @@ const REVIEW_REASONS = [
   "revision_left_out",
 ] as const;
 const INCOMPLETE_EXTRA = ["nothing_to_reconstruct", "positions_not_folded"] as const;
+/** The reasons that decide each status above `incomplete`, in precedence order. */
+export const RECONSTRUCTED_STATE_STATUS_REASONS = {
+  unavailable: UNAVAILABLE_REASONS,
+  indeterminate: INDETERMINATE_REASONS,
+  needs_review: REVIEW_REASONS,
+} as const;
 export const RECONSTRUCTED_STATE_REASONS = [
   ...UNAVAILABLE_REASONS,
   ...INDETERMINATE_REASONS,

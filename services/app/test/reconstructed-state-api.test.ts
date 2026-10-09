@@ -295,7 +295,7 @@ describe("the agent tool", () => {
     expect(refused.status).toBe(400);
     expect(await refused.json()).toMatchObject({
       schemaVersion: "financial-error-v1",
-      code: "budget_exceeded",
+      code: "invalid_query",
       refs: ["refusal:range_too_long", "maxDays:366"],
     });
     const summaryOnly = await call(TOOL_PATH, {

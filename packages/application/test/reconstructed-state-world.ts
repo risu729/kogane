@@ -32,6 +32,8 @@ export const WORLD_CARD = "acct-card";
 export const WORLD_PRE_LOG = "acct-pre-log";
 /** A bank account in a store with an empty commit log: `indeterminate`, provisional cut. */
 export const WORLD_EMPTY_LOG = "acct-empty-log";
+/** A bank account whose settlement has no posting time, as the writer stores it today: no figure. */
+export const WORLD_NO_TIME = "acct-no-time";
 /** A bank account in a store without CORE 0070: `unavailable`, nothing computed. */
 export const WORLD_NO_GUARD = "acct-no-guard";
 export const WORLD_FROM = "2026-03-01";
@@ -118,6 +120,8 @@ export function reconstructedStateWorlds(): Map<string, EconomicHistory> {
   const preLog = bankWorld(WORLD_PRE_LOG, 9_000);
   settle(preLog, WORLD_PRE_LOG, "ev-pre", { logged: false });
   const emptyLog = bankWorld(WORLD_EMPTY_LOG, 9_000);
+  const noTime = bankWorld(WORLD_NO_TIME, 9_000);
+  settle(noTime, WORLD_NO_TIME, "ev-no-time", { times: [] });
   const noGuard = bankWorld(WORLD_NO_GUARD, 9_000);
   noGuard.db.exec(
     "DROP VIEW unlogged_economic_revisions; DROP VIEW consumption_claim_conflicts; DROP VIEW live_consumption_claims; DROP VIEW economic_revision_claims",
@@ -127,6 +131,7 @@ export function reconstructedStateWorlds(): Map<string, EconomicHistory> {
     [WORLD_CARD, bank],
     [WORLD_PRE_LOG, preLog],
     [WORLD_EMPTY_LOG, emptyLog],
+    [WORLD_NO_TIME, noTime],
     [WORLD_NO_GUARD, noGuard],
   ]);
 }
