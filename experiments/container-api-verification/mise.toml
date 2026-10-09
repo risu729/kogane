@@ -11,7 +11,7 @@ run = "./node_modules/.bin/tsc --noEmit"
 
 [tasks.test]
 description = "Run synthetic local-server and driver predicate checks; no runtime claim."
-run = "bun test ./test/*.test.ts"
+run = "node ../../tasks/_lib/coverage-run.mjs bun test ./test/*.test.ts"
 
 [tasks.dry-run]
 wait_for = ["//:ci:workspaces", "//:ci:remainder:workspaces", "//packages/storage-d1:test"]
