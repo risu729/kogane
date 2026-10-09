@@ -160,7 +160,7 @@ version, the arithmetic version and the contract version.
 `proposed|needs_review`; `codes_json` is a set of the closed codes; a guard
 trigger refuses an unknown or repeated code, a status that disagrees with
 `candidate_not_unique`, and a proposal under an identity epoch that is not the
-current one (`own_transfer_proposal_invalid`). CHECKs refuse one account, key
+current one (`own_transfer_proposal_invalid`). CHECK constraints refuse one account, key
 or alias class on both sides. Each row pins `policy_version`,
 `engine_release`, `identity_epoch` (a foreign key to
 `economic_identity_epochs`) and the run's `manifest_json`. No amount, provider
