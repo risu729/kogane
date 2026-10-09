@@ -379,7 +379,12 @@ across sources.
   parsers that emit position observations) has no snapshot on D, the total is
   `partial-verified-scope` with the number of such containers, never
   `exact`: a partial result is never labelled a whole total (calculation and
-  reports §2), and it is not a lower bound either. Values are added with
+  reports §2), and it is not a lower bound either. The same holds, counted
+  beside it as `stalePositionContainersWithoutHoldings`, for a position
+  container whose chosen snapshot the reported state lists as `stale` and
+  from which no holding came: its old "nothing" is not read as nothing on D
+  (INV05; a partial scope rather than an absent total, so the two cases read
+  alike). Values are added with
   `sumQuantities`. There is no subtotal over some valued holdings, no gain, no
   cost basis and no tax; a provider's own valuation of a holding is never its
   value.
@@ -474,7 +479,8 @@ With synthetic data only:
 
 - `packages/domain/test/valuation-on-date.test.ts`: every outcome code,
   `snapshot_stale` (40 days, no price wanted) beside a `recent` snapshot
-  valued, `partial-verified-scope` with one lacking container, a different
+  valued, `partial-verified-scope` with one lacking container and with one
+  stale snapshot that listed no holding, a different
   reported-state context giving a new context, a
   provider-local mapping valued, a stale price `unpriced` with its id and age
   and the same price valued at the limit, zero and negative prices excluded
@@ -490,7 +496,8 @@ With synthetic data only:
   returns each position's parse run and decimal-v1 quantity (an unreadable one
   `unparsed`) and, without table statistics, searches positions and decimals
   by primary key only; `DATED_POSITION_CONTAINER_PARSERS` equals the parsers
-  that emit a position observation.
+  that emit a position observation, found through the parser registry, each
+  parser's defining module and its local import closure.
 - `packages/application/test/valuation-on-date-query.test.ts`: on migrated
   CORE with synthetic snapshots, identities, snapshot prices and an
   exchange-rate board: two holdings valued (one in two exact hops) with an
@@ -500,7 +507,8 @@ With synthetic data only:
   `latest-in-window` policy with a fresh price available, and the total
   absent; a recent snapshot's own price older than the policy allows
   `unpriced` `stale`; the same holdings `partial-verified-scope` when the
-  VC position container has no snapshot; unresolved instruments and unreadable quantities select no
+  VC position container has no snapshot, and when its only snapshot is a
+  complete-empty capture 40 days old; unresolved instruments and unreadable quantities select no
   price; no holdings, no total; the source and account filters,
   `unknown_source` and `unknown_account`; a card statement changing the
   reported state's context and so the valuation's;

@@ -132,8 +132,9 @@ policy it applies; none has a default.
   (`valued`, `unpriced`, `unconverted`, `quantity_unknown`,
   `snapshot_stale`, `instrument_unresolved`, `policy_mismatch`), the counts,
   a total that is `exact` only when every holding is valued, all come from
-  one source and no position container lacks a snapshot
-  (`partial-verified-scope` with the count when one does; else `absent` with
+  one source and no position container lacks a snapshot or has a stale one
+  that listed no holding (`partial-verified-scope` with both counts when one
+  does; else `absent` with
   a `TOTAL_ABSENCE_REASONS` code), and a manifest of ids and codes, including
   the reported state's context id, whose `canonicalDigest` is the context
   id. Claim adoption is not applied.

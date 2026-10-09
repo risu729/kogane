@@ -287,7 +287,10 @@ source; otherwise it is absent with `holding_not_valued`,
 every listed holding is valued but a container that holds positions
 (`DATED_POSITION_CONTAINER_PARSERS`) has no snapshot on D, the total is
 `partial-verified-scope` with the number of such containers, never `exact`:
-as above, a partial result is never a whole total and not a lower bound.
+as above, a partial result is never a whole total and not a lower bound. A
+position container whose snapshot the reported state lists as `stale` and
+that listed no holding makes the total `partial-verified-scope` too, counted
+as `stalePositionContainersWithoutHoldings`: what it holds on D is unknown.
 There is no subtotal over some valued holdings, no gain, cost basis or tax,
 and a provider's own valuation is never the value.
 
@@ -539,7 +542,8 @@ would discard later collection and later decisions (docs/operations.md).
 - `packages/domain/test/valuation-on-date.test.ts` — every holding outcome
   (a stale snapshot's holding `snapshot_stale`), stale and non-positive prices, inexact bases, missing and unquotable rates,
   policy mismatches, totals absent for an unvalued holding, two sources or
-  none and `partial-verified-scope` for a lacking position container, a USD holding into AUD rounded once, the `needs-policy` gate, and a
+  none and `partial-verified-scope` for a lacking position container or a
+  stale one that listed no holding, a USD holding into AUD rounded once, the `needs-policy` gate, and a
   context id stable across equal inputs and new for a corrected price;
   `packages/application/test/valuation-on-date-query.test.ts` — the query on
   migrated CORE with synthetic snapshots, prices and a board, known-at
