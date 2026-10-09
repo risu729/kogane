@@ -12,16 +12,21 @@ acceptance, no simulation, no commit, no calculation job, no collection
 request, no export, and no external money action in _this_ API. Those
 capabilities are not disabled by a flag; they have no name in the grant type.
 
-The operations API ([ops-api.md](ops-api.md)) shares this Worker's `/mcp`
-transport and nothing else: it is a different tool set, graded by the change
-lifecycle's operator capability rather than by a grant here, published only
-while its own flag is on, and no capability in the table below reaches it.
+The operations API ([ops-api.md](ops-api.md)) is not served over `/mcp`:
+`/mcp` has only agent-only callers
+([ADR 0047](adr/0047-mcp-client-connection.md)), and an operation needs the
+change lifecycle's operator capability, which no capability in the table
+below reaches.
 
 **Agent access is not configured in the committed deployment.**
 `AGENT_API_GRANTS` and `AGENT_GRANTS` are empty. With an absent or empty
 agent-API grant map, every agent route and the shared `/mcp` transport answers
 403 after authentication. An enabled operations flag does not bypass that
-transport gate. Schedule/maintenance settings currently have an operator HTTP
+transport gate. How a real MCP client connects — Cloudflare Access Managed
+OAuth on a dedicated MCP application, bound to an agent-only principal — and
+the owner's steps to get there are in
+[Connecting an MCP client](#connecting-an-mcp-client); none of them has been
+taken. Schedule/maintenance settings currently have an operator HTTP
 API but no MCP tool; see [schedules](schedules.md#settings-api).
 
 ## Why the application service exists
@@ -43,10 +48,14 @@ answers byte for byte (AT72).
 
 ## Grants
 
-A grant is looked up **after** the Cloudflare Access check, by the subject
-`authenticate` returned. Nothing here parses the token a second time and
-nothing reads an actor from a request body or header, which is the same rule
-the change lifecycle follows. A valid token with no grant is still refused.
+A grant is looked up **after** the Cloudflare Access check, by the principal
+that check proved (`browserCaller` or `mcpCaller`, `src/auth.ts`): a browser
+session's subject, exactly as `authenticate` returns it, or — on `/mcp`, for an
+identity that came through the MCP Access application — the agent-only
+`mcp-client:<sub>` ([ADR 0047](adr/0047-mcp-client-connection.md)). Nothing
+here parses the token a second time and nothing reads an actor from a request
+body or header, which is the same rule the change lifecycle follows. A valid
+token with no grant is still refused.
 
 | Capability               | Allows                                                                                                                            | Notes                                                   |
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
@@ -79,19 +88,28 @@ A grant also carries a scope and a budget:
 A listed scope is **not** a display filter. Each source in the list is read
 with its own reader query, and every count, gap, coverage record, error and
 explanation is computed inside the list, so a narrower grant recomputes
-smaller numbers rather than subtracting hidden ones. Nothing tells the caller
+smaller numbers rather than subtracting hidden ones. The context an answer
+is pinned to is built inside the list too: its source selection names only
+granted sources, and its publication and parser-build digests are read from
+those sources' parse runs, so another source's activity does not move it
+([ADR 0047](adr/0047-mcp-client-connection.md)). Nothing tells the caller
 that a source or an account it cannot see exists (SC18).
 
 Bounds a configured grant may not exceed: `maxRows` ≤ 1000,
 `maxProposalTargets` ≤ 50, `maxExplainDepth` ≤ 8, 64 values per scope list,
 64 principals. One invalid entry rejects the whole table, so a typo turns the
-API off rather than half-applying it.
+API off rather than half-applying it. An entry is exactly `scopes`,
+`capabilities` and `budget`: its principal is the key it is stored under, and
+an entry that carries a `principal` of its own (equal to the key or not) or
+any other key is invalid, so no grant can name a principal other than the one
+it is looked up by.
 
 ### Configuring `AGENT_API_GRANTS`
 
 `AGENT_API_GRANTS` is a wrangler `var` on `services/app` holding
 the JSON object above (principal → grant, without the `principal` field, which
-the server fills in from the verified subject). It ships as `""`.
+the server fills in from the key; an entry with a `principal` field rejects
+the whole table). It ships as `""`.
 
 To enable a grant, set the variable for the deployment — as a secret if the
 principal names should not sit in the repository:
@@ -174,8 +192,10 @@ never told about a route this store cannot serve, and a page and an agent read
 one description of the deployment.
 
 `POST /mcp` is a Streamable-HTTP JSON-RPC 2.0 endpoint (`initialize`, `ping`,
-`tools/list`, `tools/call`, notifications). It is hand-rolled: no MCP SDK is a
-dependency, so nothing Node-only reaches workerd. It holds no logic, no
+`tools/list`, `tools/call`, notifications), served by the official MCP
+TypeScript SDK (`@modelcontextprotocol/server`) for the initialize-based
+revisions and the stateless 2026-07-28 revision alike; what a client meets on
+it is in [Connecting an MCP client](#connecting-an-mcp-client). It holds no logic, no
 session state and no authorization of its own — including which tools exist:
 the adapter publishes the list it is handed and dispatches by name, so a tool
 set that is off is neither listed nor callable. `kogane.purchases.explain`
@@ -186,14 +206,11 @@ applied) it is appended to the six above, and otherwise its name is
 grant checks every agent path makes. `kogane.reconstructed-state.read` follows
 `GET /api/v2/reconstructed-state` the same way: listed after them while
 `/api/meta` reports `reconstructedStateOnDate: true` (the store has the
-reported state's views), otherwise `unknown_tool` and `404 not_found`. With `OPS_API_ENABLED` on **and
-this deployment's command grant lists readable**, the six `kogane.ops.*` tools
-of [ops-api.md](ops-api.md) are appended after them; with the flag off,
-`tools/list` holds no operations tool and an operations tool name is
-`unknown_tool`. While the grant lists cannot be read, they are not published
-either — a deployment that grades nobody can authorize none of them — but they
-stay callable, so a client that asks anyway is told
-`grants_misconfigured` rather than that the tool does not exist.
+reported state's views), otherwise `unknown_tool` and `404 not_found`. The six
+`kogane.ops.*` tools of [ops-api.md](ops-api.md) are never published on
+`/mcp`, whose callers are all agent-only: with `OPS_API_ENABLED` off an
+operations tool name is `unknown_tool`, and with it on `callOpsTool` refuses
+the call from the caller object (`actor_not_supported`) before any grader runs.
 
 ### Intents
 
@@ -203,6 +220,26 @@ stay callable, so a client that asks anyway is told
 | `holdings`       | Adopted holdings per unit                               | `source`, `account`                                 | `summary.read` |
 | `reported-state` | What the provider reported                              | `source`, `account`, `instrument`, `metric`, `view` | `records.read` |
 | `activity`       | Adopted events in a period                              | `source`, `account`, `from`, `to`, `q`              | `records.read` |
+
+`coverage` lists each in-scope source — the grant's sources, narrowed by the
+`source` filter — with its `artifactCount` and `collectionRunCount`: the
+exact number of visible fetch artifacts and fetch runs of that source over its
+whole history, and their sums. A source without an artifact is the gap
+`no_artifacts_collected`. The run counts are read by one query restricted to
+the in-scope sources before it counts anything
+(`SOURCE_FETCH_RUN_COUNTS_SQL`, through `idx_fetch_runs_source`), so a run of
+a source outside the scope is never read and never moves an in-scope count.
+Runs do not enter the context either, so a source's runs outside the scope,
+denied or merely filtered out, leave the whole answer unchanged, `contextId`
+and `resultRef` included. A publication is different: the context pins the
+grant's publication high-water, not the filter's, so a granted source outside
+the `source` filter that publishes a parse moves the `contextId` (and so the
+`resultRef`), while a denied source's does not (see Grants). The operator
+overview's fetch-run list (`GET /api/overview`) is a different read — the
+newest 501 visible runs across every source — and `coverage` does not count
+inside it ([ADR 0047](adr/0047-mcp-client-connection.md)).
+`test/coverage-scope.test.ts` pins this on the HTTP agent route and `/mcp`:
+520 runs of a source outside the scope leave the whole answer byte-identical.
 
 `holdings` reads A07's adopted balance projection and nothing else. While the
 reader flag is off or no snapshot is sealed it answers
@@ -555,9 +592,282 @@ Converting them to JSON does not make them instructions.
 is 404); the category is advisory.
 
 Authentication failures keep the transport's own closed responses (401 with
-`{error, requestId}`), unchanged from every GET route.
+`{error, requestId}`), unchanged from every GET route. Every answer an MCP
+client can get, transport refusals included, is in
+[the refusal table](#refusals-a-client-sees).
 
 Requests are bounded at 64 KiB; a larger body is 413 before it reaches a tool.
+
+## Connecting an MCP client
+
+This section is the connection design of
+[ADR 0047](adr/0047-mcp-client-connection.md). The Worker code is in this
+repository and tested with synthetic keys, audiences and principals.
+**Every step marked _owner_ is executed by the owner outside the repository;
+none has been taken and none is verified against production.** Placeholders:
+`<app-host>` is the App Worker's hostname, `<mcp-aud>` the AUD tag of the MCP
+Access application, `<owner-sub>` the owner's Access user id (the UUID
+`OPERATOR_SUBJECTS` already names), `<source-id>` a CORE source id. No real
+value belongs in this file.
+
+### How a request becomes a principal
+
+Cloudflare does all of the authentication; the Worker verifies the result and
+attenuates it.
+
+1. The client calls `https://<app-host>/mcp`. The **MCP Access application**
+   (its own Access application, separate from the browser one) answers
+   `401` with a `WWW-Authenticate` header that points at Access's OAuth
+   discovery metadata ([Managed OAuth][cf-managed-oauth]).
+2. The client registers itself (DCR), opens the owner's browser at Access's
+   login, and receives an opaque access token. Access applies the MCP
+   application's policy at login and again at every refresh.
+3. With that token, Access forwards the request with a signed
+   `Cf-Access-Jwt-Assertion` whose `aud` is `<mcp-aud>`.
+4. `mcpCaller` (`src/auth.ts`) verifies issuer, signature, `type`, `aud`
+   and `sub`, and names the caller **`mcp-client:<sub>`**.
+5. The grant is `AGENT_API_GRANTS["mcp-client:<sub>"]`, and the tool runs.
+
+| Assertion reaching the Worker                                            | On `/mcp`                                  | On every other route                           |
+| ------------------------------------------------------------------------ | ------------------------------------------ | ---------------------------------------------- |
+| MCP application (`aud` = `ACCESS_MCP_AUDIENCE`)                          | caller `mcp-client:<sub>`, agent-only      | `401 authentication_required`                  |
+| browser application (`aud` = `ACCESS_AUDIENCE`)                          | `401 authentication_required`              | `<sub>`, as before                             |
+| both audiences in one assertion                                          | `401 authentication_required`              | `401 authentication_required`                  |
+| service token (no `sub`)                                                 | `401 authentication_required`              | unchanged (health and bootstrap only)          |
+| subject starting `mcp-client:`                                           | `401 authentication_required`              | `403 actor_not_supported` on `/api/agent/v1/*` |
+| `ACCESS_MCP_AUDIENCE` unset or `""` (committed)                          | `401 authentication_required` for everyone | as before                                      |
+| `ACCESS_MCP_AUDIENCE` = `ACCESS_AUDIENCE`, padded or over 256 characters | `503 auth_not_configured`                  | as before (ignored)                            |
+
+**Agent-only attenuation.** The boundary turns the assertion into an
+`AgentCaller` object once (`mcpCaller`, `src/auth.ts`), and that object —
+not the subject it came from — is what every grader and tool receives.
+`mcp-client:<sub>` is graded by its own `AGENT_API_GRANTS` entry and by
+nothing else: the bare `<sub>`'s entry is not a fallback. `callOpsTool`
+refuses an `mcp-client` caller with `403 actor_not_supported` before
+`opsContext` or `principalFor` runs, and the operations tools are not
+published on `/mcp`; `principalFor` also refuses the `mcp-client:` name as a
+string, even when `<sub>` is the operator. It reaches no other route. It can
+record an inert proposal (actor `mcp-client:<sub>`) under
+`interpretation.propose`, and nothing approves or commits. The same person
+keeps the operator's rights over the browser application, whose audience and
+routes are unchanged — and only there: no caller can request an operation
+over MCP.
+
+### Endpoint and transport
+
+- URL: `https://<app-host>/mcp` (or a dedicated hostname routed to this
+  Worker, if the gaps below require one).
+- Served by the official MCP TypeScript SDK, `@modelcontextprotocol/server`
+  (pinned): the initialize-based revisions through its stateless Streamable
+  HTTP transport and the stateless 2026-07-28 revision through
+  `createMcpHandler`, both answering one JSON object per request from one
+  server definition. No session (`Mcp-Session-Id` is never minted), no SSE
+  stream; `GET` and `DELETE` are `405`.
+- A client must send `Accept: application/json, text/event-stream` and
+  `Content-Type: application/json` (the SDK answers `406` / `415`
+  otherwise), as every MCP client does.
+- An `Origin` that is present and not the Worker's own is
+  `403 origin_not_allowed` on every agent path, before the body or the grant
+  is read. Bodies are bounded at 64 KiB (`413`).
+
+### Refusals a client sees
+
+| Failure                                                                                                                                                           | Answered by                           | HTTP / result                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------- |
+| no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access                     | Access's own `401` (Managed OAuth) — not this Worker                                   |
+| assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                                | `401 authentication_required`                                                          |
+| Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                                | `503 identity_keys_unavailable` / `503 auth_not_configured`                            |
+| an unexpected failure inside a tool or the tool list (the store, a bug)                                                                                           | Worker                                | `500 internal_error`; the exception text never reaches the client or the log           |
+| `Origin` of another site                                                                                                                                          | Worker                                | `403 origin_not_allowed`                                                               |
+| principal not in `AGENT_API_GRANTS` (empty or unreadable table included)                                                                                          | Worker                                | `403 agent_api_not_configured`                                                         |
+| `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                | `405 method_not_allowed` / `400 invalid_query`                                         |
+| media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                   | `415` / `406` / `400` / `400` / `413`                                                  |
+| unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                      | JSON-RPC `-32601`; `-32602 unknown_tool`                                               |
+| an operations tool, while the operations API is on                                                                                                                | `callOpsTool`, from the caller object | `isError: true`, `{"error":"actor_not_supported"}`; nothing written                    |
+| capability not granted                                                                                                                                            | tool                                  | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                   |
+| source, account or row outside the scope                                                                                                                          | tool                                  | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`) |
+| raw evidence without `evidence.read`                                                                                                                              | tool                                  | not an error: `explain` has no raw-locator node, `restricted: ["evidence.read"]`       |
+| page or proposal beyond the budget                                                                                                                                | tool                                  | `isError: true`, `code: budget_exceeded`, `refs: ["budget:…"]`                         |
+| approve, commit                                                                                                                                                   | —                                     | no such tool; every command route is `401` for an MCP token                            |
+
+A tool's refusal is the same financial error object its HTTP route answers,
+in `structuredContent`; `content[0].text` is that object serialised.
+
+### Which client connects, and how
+
+Every row is owner-executed and production-unverified. The Worker-side
+mapping, the grant shape and the local checks are the same for all of them.
+
+| Client                                          | Flow it presents ([Claude][claude-auth], [ChatGPT][openai-auth], [Codex][codex-mcp])                                                                                                                                                                      | Owner creates in Cloudflare                                                                  | Worker mapping           | Grants                                                                                                  | Client-side registration                                                                                       |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| claude.ai (also Claude Desktop and mobile)      | OAuth 2.0 code + PKCE `S256`; discovery from the `401`; CIMD if advertised, else DCR; redirect `https://claude.ai/api/mcp/auth_callback`; calls from `160.79.104.0/21`                                                                                    | the MCP Access application with Managed OAuth, an identity policy, that redirect URI allowed | `mcp-client:<owner-sub>` | `AGENT_API_GRANTS` entry for `mcp-client:<owner-sub>`; nothing in `AGENT_GRANTS` or `OPERATOR_SUBJECTS` | Customize → Connectors → Add custom connector → URL, sign in, OAuth client "Register automatically"            |
+| ChatGPT (developer mode app)                    | OAuth 2.1 code + PKCE `S256`; `resource` on authorize and token; CIMD, DCR or a predefined client; redirect `https://chatgpt.com/connector_platform_oauth_redirect` if the server returns `iss`, else `https://chatgpt.com/connector/oauth/{callback_id}` | the same application; both redirect forms allowed (`https://chatgpt.com/connector/oauth/*`)  | `mcp-client:<owner-sub>` | the same entry                                                                                          | Settings → Apps → Advanced settings → Developer mode; create an app with the URL and OAuth                     |
+| Codex (CLI, IDE extension, ChatGPT desktop app) | OAuth via `codex mcp login`; CIMD, else DCR; local callback listener                                                                                                                                                                                      | the same application with "allow localhost/loopback clients" on                              | `mcp-client:<owner-sub>` | the same entry                                                                                          | `[mcp_servers.kogane] url = "https://<app-host>/mcp"` in `~/.codex/config.toml`, then `codex mcp login kogane` |
+| Claude Code (optional)                          | OAuth with its own CIMD, else DCR; loopback redirect on any port                                                                                                                                                                                          | as Codex                                                                                     | `mcp-client:<owner-sub>` | the same entry                                                                                          | `claude mcp add --transport http kogane https://<app-host>/mcp`, then `/mcp` to sign in                        |
+
+### Owner hand-off, in order
+
+Each step is **owner-executed and production-unverified**; the label says what
+kind of change it is. Steps 1–2 open nothing.
+
+1. _Code_ — review and merge this change. With `ACCESS_MCP_AUDIENCE` unset
+   and the grants empty, the deployment opens nothing new.
+2. _Local check_ — on the commit to be deployed, run the
+   [local checks](#local-checks-before-any-production-change).
+3. _Production permission change_ — create the MCP Access application: Zero
+   Trust → Access controls → Applications → Add → Self-hosted, destination
+   `<app-host>/mcp`, the same identity provider as the browser application.
+   Do not edit the browser application or its policies.
+4. _Production permission change_ — give it one Allow policy that includes
+   only the owner's identity. It cannot reuse the browser application's
+   device-posture requirement, because the clients call from their own
+   clouds; restricting it to the clients' published egress ranges is
+   optional.
+5. _Production permission change_ — turn on Managed OAuth on that
+   application (Advanced settings; API `oauth_configuration.enabled`). Allowed
+   redirect URIs for dynamically registered clients:
+   `https://claude.ai/api/mcp/auth_callback`,
+   `https://chatgpt.com/connector_platform_oauth_redirect` and
+   `https://chatgpt.com/connector/oauth/*`; allow localhost and loopback
+   clients only for Codex or Claude Code. Access token lifetime 5–15 minutes,
+   grant session 1–2 weeks, as the page recommends.
+6. _Live check, nothing granted yet_ — `curl -si -X POST https://<app-host>/mcp`
+   without credentials must answer `401` with a `WWW-Authenticate` header.
+   Fetch the metadata it names and record: does `resource` equal
+   `https://<app-host>/mcp`; does the authorization server metadata list
+   `registration_endpoint`, `S256` in `code_challenge_methods_supported`,
+   `client_id_metadata_document_supported` and
+   `authorization_response_iss_parameter_supported`. If `resource` is not the
+   MCP URL, or the discovery paths answer from the browser application, stop
+   and decide the dedicated-hostname question below before going on.
+7. _Configuration change (a PR)_ — set `ACCESS_MCP_AUDIENCE` to `<mcp-aud>`
+   in both `services/app/wrangler.jsonc` and
+   `services/app/cloudflare.config.ts` (the configuration parity guard requires
+   both; an AUD tag is not a secret, and `ACCESS_AUDIENCE` is already
+   committed). Deployed, `/mcp` then answers `403 agent_api_not_configured`.
+8. _Grant addition (a PR)_ — set `AGENT_API_GRANTS` in both files to the
+   JSON string of
+
+   ```jsonc
+   {
+     "mcp-client:<owner-sub>": {
+       "scopes": { "sources": ["<source-id>"], "accounts": "*" },
+       "capabilities": ["summary.read"],
+       "budget": { "maxRows": 200, "maxProposalTargets": 3, "maxExplainDepth": 3 },
+     },
+   }
+   ```
+
+   and leave `AGENT_GRANTS` and `OPERATOR_SUBJECTS` as they are. Listing
+   `mcp-client:<owner-sub>` there has no effect, and listing the bare
+   `<owner-sub>` in `AGENT_GRANTS` would overlap `OPERATOR_SUBJECTS` and stop
+   every command surface with `503 grants_misconfigured`.
+
+9. _Client registration_ — add the connector in claude.ai, the app in
+   ChatGPT, and the server in Codex, as the table above says, signing in at
+   Access's login as the owner.
+10. _Live check, and the evidence that a client really connected_ — in
+    each client (claude.ai, ChatGPT, Codex), in a fresh conversation with
+    only this connector enabled, ask for these four calls and keep what each
+    shows:
+    - `kogane.capabilities` — evidence: the tool result shows
+      `"principal": "mcp-client:<owner-sub>"`, `"capabilities": ["summary.read"]`
+      and the listed source;
+    - `kogane.financial.query` with `{"intent":"coverage"}` — evidence: a
+      result with `"schemaVersion": "kogane-query-response-v1"`;
+    - the same with `filters.source` set to a source outside the grant —
+      evidence: `isError` with `"code": "evidence_restricted"`;
+    - `{"intent":"activity"}` — evidence: `"code": "unauthorized"` with
+      `capability:records.read`.
+      Corroborate each client from the server side for the same minutes: the
+      Access log of the MCP application shows the owner's sign-in and the
+      requests, and the Worker's request log shows
+      `"route":"mcp","status":200` lines (codes only; it never logs a
+      principal). A client that only lists tools, or a request made with the
+      browser's cookie, is not evidence. Before sharing any of it, replace the
+      owner's subject with `<owner-sub>`. The browser UI and the operator's
+      routes must behave as before.
+11. _Grant additions, later, one release each_ — `records.read`; then
+    `interpretation.propose` (ChatGPT asks for confirmation before a tool
+    without `readOnlyHint`; a proposal stays `proposed` until the operator
+    decides); `evidence.read` only as a separate decision.
+
+Revocation, fastest first: remove the owner from the MCP application's policy
+(Access refuses at the next refresh, at most one access-token lifetime
+later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
+(`401` or `403` at the Worker); disconnect the client.
+
+### Gaps, with the evidence and the owner's question
+
+- **Protected-resource `resource`.** claude.ai requires the metadata's
+  `resource` to equal the URL entered, path included ([Claude][claude-auth]);
+  the Managed OAuth page does not say what Access publishes. _Question:_
+  what does step 6 show?
+- **Path-scoped application.** The Managed OAuth page describes discovery at
+  the application's domain (`/.well-known/oauth-authorization-server`); it
+  does not say how a path-scoped application on a hostname whose root belongs
+  to another application serves it. _Question:_ if step 6 fails, is a
+  dedicated hostname for the MCP endpoint (a custom domain on this Worker)
+  acceptable?
+- **CIMD and `iss`.** The page documents DCR only. Without CIMD, claude.ai
+  and Codex use DCR; without `iss`, ChatGPT uses the per-callback redirect
+  URI, which the `/*` allow-list entry covers. Nothing to decide unless step 6
+  shows no `registration_endpoint`, in which case no target client can
+  register and the question goes back to Cloudflare.
+- **Assertion claims.** The page says the origin sees a request "the same
+  as a browser-authenticated" one and does not list claims; the Worker
+  requires `sub` and refuses an assertion without it.
+- **Device posture.** The MCP application's policy is identity-based by
+  necessity. _Question:_ is that acceptable for this endpoint, with the
+  attenuation above as the compensating control?
+- **Plans.** ChatGPT developer mode is documented for paid plans on the web,
+  with conflicting statements about write actions on personal plans; the
+  only write here is a proposal. _Question:_ which ChatGPT plan will be used?
+- **Tool names with dots.** Allowed by the 2025-11-25 naming guidance;
+  whether claude.ai and ChatGPT accept them is seen at step 10.
+
+### Contract for tools on `/mcp`
+
+What another tool set (maintenance, #560; operation tracking, #544) relies on:
+
+- **Registration.** A tool is a closed JSON Schema definition appended to the
+  list `agentApi` hands `handleMcp` (`src/agent-api.ts`), and a branch in the
+  same dispatcher. The SDK publishes the list as given and routes
+  `tools/call` by name; a name the dispatcher returns `null` for is
+  `unknown_tool`. A tool set that is off — for the deployment, or for this
+  caller — is neither listed nor dispatched.
+- **Identity.** The dispatcher has the `AgentCaller` the boundary proved
+  (`caller`, `src/auth.ts`) and its resolved `Grant`. Pass the caller object
+  on; never derive a role from `caller.principal`, and never read identity
+  from a body, a header or a tool argument. On `/mcp` the caller is always
+  `kind: "mcp-client"`.
+- **Capability.** A tool graded by the agent API declares the
+  `AgentCapability` it needs and checks it with `grantAllows` on that `Grant`
+  (scope and budget likewise). A tool that would need an operator must refuse
+  an `mcp-client` caller from the caller object before any grader runs, as
+  `callOpsTool` does, and is not published to one.
+- **Result.** Return a `ToolResult` (`status`, `body`): a 4xx status with a
+  closed code reaches the client as `isError: true` with the same object the
+  HTTP route answers. No tool approves or commits for an agent-only
+  principal; a tool that writes appends a proposal.
+
+### Local checks before any production change
+
+```sh
+mise run //services/app:ci
+# or only the MCP and agent API suites:
+cd services/app && mise exec -- ./node_modules/.bin/vitest run \
+  test/mcp-client.test.ts test/mcp-sdk-client.test.ts test/agent-api.test.ts \
+  test/ops-api.test.ts test/purchases-explain.test.ts test/health.test.ts
+```
+
+They run the real Worker under workerd with synthetic Access keys, audiences,
+principals and store; nothing reaches Access, D1 or a client.
+
+[cf-managed-oauth]: https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/managed-oauth/
+[claude-auth]: https://claude.com/docs/connectors/building/authentication
+[openai-auth]: https://developers.openai.com/plugins/build/auth
+[codex-mcp]: https://learn.chatgpt.com/docs/extend/mcp?surface=cli
 
 ## What was verified locally, and what was not
 
@@ -589,9 +899,39 @@ on and off, and
 `packages/observation-shared/test/card-purchase-candidates.test.ts` pins the
 contract (`validAgentCardPurchasePage` refuses an action or a plan payload).
 
-Not verified: no deployed instance, no live Access policy, no real provider
-data, and no MCP client has connected to `/mcp`. Passing a client's connection
-check is not a completion criterion (addendum 10 §10).
+The boundary has its own tests; the agent and MCP tests that passed before it
+were not evidence of it (they never presented an MCP-audience token, never
+had one person as both operator and MCP client, and never inspected context
+metadata). `test/mcp-client.test.ts` covers the same person as operator in
+the browser and agent-only on `/mcp` (no operations tool, no `ops_requests`
+row, `callOpsTool`, `opsContext` and `principalFor` each refusing the MCP
+caller); an MCP-audience token refused on every ordinary route (commands
+including approve and commit, card settlements and purchases, operations and
+health, browser reads, the shared query, raw evidence, the HTTP agent routes,
+assets) and `/mcp` refusing the browser audience, both audiences, another
+audience or issuer, an expired or forged assertion, service tokens and
+spoofed headers; the grant failing closed (absent, empty, unparsable,
+mis-shaped, out-of-vocabulary, only the bare subject's, another person's);
+source, account and budget limits on reads and proposals; the whole answer
+of every tool naming no denied source or account, the context's source
+selection being exactly the granted source, and a denied source's new
+publication leaving a scoped context identical; a server-derived proposal
+actor that a body or header cannot change, and adopted answers identical
+before and after a proposal; unpublished tools; an internal failure inside
+a tool or the tool list answered `500 internal_error` in both eras with no
+exception text in the answer or the log; the connection in both eras; the SDK's transport refusals; tool definitions against SEP-986 and
+Claude Code's load-time checks; each single capability; and the UI's
+`GET /api/v2/query`, `POST /api/agent/v1/financial.query` and MCP in both
+eras returning deep-equal objects with the same gap reasons.
+`test/mcp-sdk-client.test.ts` drives `/mcp` with the official
+`@modelcontextprotocol/client` in `legacy` (2025-11-25) and `auto`
+(2026-07-28) negotiation.
+
+Not verified: no deployed instance, no MCP Access application, Managed OAuth
+setting or policy, no real provider data, and no MCP client has connected to
+`/mcp` — every step in [Connecting an MCP client](#connecting-an-mcp-client)
+is unexercised against production. Passing a client's connection check is
+not a completion criterion (addendum 10 §10).
 
 ## Deploy order and rollback
 

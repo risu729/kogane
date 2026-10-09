@@ -82,6 +82,7 @@ function everyRead(reader: ObservationReader): Promise<unknown>[] {
     reader.unitUpdates(),
     reader.parsingHealth(),
     reader.globalPassEmptyMonths(),
+    reader.fetchRunCounts(["s", "sony-bank"]),
     reader.listTransactions(NO_FILTER),
     reader.listTransactions(FULL_TRANSACTION_SCOPE),
     reader.listLatestBalances({ ...NO_FILTER, limit: CANDIDATE_LIMIT }),
@@ -212,6 +213,7 @@ describe("named concepts in the final SQL", () => {
     filterDimensions: sql.filterDimensionsSql(sql.balanceFilterScope(undefined)),
     overviewSources: sql.OVERVIEW_SOURCES_SQL,
     overviewFetchRuns: sql.OVERVIEW_FETCH_RUNS_SQL,
+    sourceFetchRunCounts: sql.SOURCE_FETCH_RUN_COUNTS_SQL,
     overviewParseRuns: sql.OVERVIEW_PARSE_RUNS_SQL,
     rawDownload: sql.RAW_DOWNLOAD_SQL,
     ...Object.fromEntries(

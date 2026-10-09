@@ -99,10 +99,13 @@ reaches 0003. The Processor's
 calls no collector. These are repository facts, not live database/deployment readback.
 
 App names a human operator in `OPERATOR_SUBJECTS`. `AGENT_GRANTS` and
-`AGENT_API_GRANTS` remain empty. The MCP handler requires an agent-API grant
-before listing tools, including the separate operations tool set; the operations
-flag alone does not make MCP usable. See [agent API](agent-api.md) and
-[operations API](ops-api.md).
+`AGENT_API_GRANTS` remain empty. `/mcp` accepts only identities from a
+dedicated MCP Access application (Cloudflare Access Managed OAuth), binds each
+to the agent-only principal `mcp-client:<sub>` and serves it no operations
+tool; `ACCESS_MCP_AUDIENCE` is unset, so `/mcp` accepts nobody, and no MCP
+client has connected ([ADR 0047](adr/0047-mcp-client-connection.md),
+[connecting a client](agent-api.md#connecting-an-mcp-client)). See
+[agent API](agent-api.md) and [operations API](ops-api.md).
 
 Schedule and maintenance edits use the operator-only
 [HTTP settings API](schedules.md#settings-api), with version checks, verified

@@ -8,6 +8,7 @@ import {
   parseGrants,
   perimeterRefFor,
   validGrant,
+  type Grant,
 } from "../src/grants.ts";
 import { capabilitiesFor } from "../src/capabilities.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
@@ -62,6 +63,34 @@ describe("grants are deny-by-default", () => {
         budget: { maxRows: 100_000, maxProposalTargets: 1, maxExplainDepth: 1 },
       }),
     ).toBe(false);
+  });
+
+  test("an entry body never names its own principal: a principal or any unknown key rejects the table", () => {
+    const valid: Omit<Grant, "principal"> = {
+      scopes: { sources: ["fixture-a"], accounts: "*" },
+      capabilities: ["summary.read"],
+      budget: { maxRows: 10, maxProposalTargets: 2, maxExplainDepth: 2 },
+    };
+    // The synthetic shape docs/agent-api.md documents still parses, under its key.
+    const table = parseGrants(JSON.stringify({ "reporting-agent": valid }));
+    expect(table.size).toBe(1);
+    expect(grantFor(table, "reporting-agent")).toEqual({ principal: "reporting-agent", ...valid });
+    // A body naming a different principal used to override the key it is
+    // stored under; the whole table is now refused instead.
+    for (const body of [
+      { ...valid, principal: "fixture-operator" },
+      { ...valid, principal: "reporting-agent" },
+      { principal: "fixture-operator", ...valid },
+      { ...valid, note: "an unknown key" },
+    ]) {
+      const refused = parseGrants(JSON.stringify({ "reporting-agent": body, other: valid }));
+      expect(refused.size).toBe(0);
+      expect(grantFor(refused, "reporting-agent")).toBeNull();
+      expect(grantFor(refused, "fixture-operator")).toBeNull();
+    }
+    // A missing key is refused as before.
+    const { budget: _budget, ...withoutBudget } = valid;
+    expect(parseGrants(JSON.stringify({ "reporting-agent": withoutBudget })).size).toBe(0);
   });
 
   test("an authenticated principal with no entry has no grant", () => {
