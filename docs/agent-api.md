@@ -533,13 +533,14 @@ written but the refusal record:
    capability until slice S3 connects the delegated audit record, the
    operation path and the Processor's delegation guards.
 
-When S3 connects it, the call reaches the Processor's single writer, which
-holds the direct envelope: R1 within the seven-day joined-deferral bound and
-30 revisions per principal per rolling day; beyond the bound it refuses
-(`maintenance_deferral_too_long`, R3 until the owner answers the plan's
-question 1), and the operator makes such a revision in the UI
-([schedules](schedules.md#agent-maintenance-tools)). No prepare/confirm step
-exists (S3), so no revision of a class that needs one can be offered.
+No route reaches the Processor's single writer as a delegated principal. The
+writer itself already holds the direct envelope for one: R1 within the
+seven-day joined-deferral bound and 30 revisions per principal per rolling
+day; beyond the bound it refuses (`maintenance_deferral_too_long`, R3 until
+the owner answers the plan's question 1), and the operator makes such a
+revision in the UI ([schedules](schedules.md#agent-maintenance-tools)). No
+prepare/confirm step exists (S3), so no revision of a class that needs one is
+offered.
 
 ## Contexts, cursors and hand-off
 

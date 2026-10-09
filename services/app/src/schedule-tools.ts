@@ -53,25 +53,16 @@ import type { ToolResult } from "./agent-service";
 import type { AgentCaller } from "./auth";
 import type { DelegationVars } from "./delegation";
 
-const SCHEDULE_READ_TOOL = "kogane.schedules.maintenance.read";
-const SCHEDULE_UPDATE_TOOL = "kogane.schedules.maintenance.update";
-export const SCHEDULE_TOOL_NAMES = [SCHEDULE_READ_TOOL, SCHEDULE_UPDATE_TOOL] as const;
-export type ScheduleToolName = (typeof SCHEDULE_TOOL_NAMES)[number];
+/** On `/mcp` and, as `schedules.maintenance.read`, on `/api/agent/v1/*`. */
+export const SCHEDULE_READ_TOOL = "kogane.schedules.maintenance.read";
+/** On `/mcp` only: a browser session yields no delegation. */
+export const SCHEDULE_UPDATE_TOOL = "kogane.schedules.maintenance.update";
 /** The capability a delegation must hold for the update tool (ADR 0063). */
 const UPDATE_CAPABILITY = "schedules.maintenance.update";
-
-export function isScheduleToolName(value: string): value is ScheduleToolName {
-  return (SCHEDULE_TOOL_NAMES as readonly string[]).includes(value);
-}
 
 /** The tools exist exactly while the settings routes do (`SCHEDULES_ENABLED`). */
 export function schedulesServed(env: Pick<Env, "SCHEDULES_ENABLED">): boolean {
   return (env.SCHEDULES_ENABLED as string | undefined) === "true";
-}
-
-/** The schedule tool an `/api/agent/v1/*` path names: the read only. */
-export function scheduleReadPath(name: string): boolean {
-  return name === SCHEDULE_READ_TOOL;
 }
 
 const sourceId = z.string().regex(/^[a-z0-9-]{1,100}$/u);

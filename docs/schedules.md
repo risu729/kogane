@@ -191,8 +191,9 @@ caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows
 
 **The writer.** Every maintenance revision goes through the Processor's single
 writer, `writeMaintenanceRevision(env, write, append)`
-(`services/processor/src/schedule-store.ts`): the operator's edit, an accepted
-re-survey proposal and, once S3 connects it, a delegated principal. It sends
+(`services/processor/src/schedule-store.ts`): the operator's edit and an
+accepted re-survey proposal call it, and no route calls it as a delegated
+principal yet. It sends
 the revision, its provenance update and what its caller appends — the audit
 record ([audit log](audit-log.md)), an acceptance row — as one batch, so they
 exist together or not at all. Its actors are the operator and a delegated
