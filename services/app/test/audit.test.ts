@@ -681,6 +681,47 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
     }
   });
 
+  it("records a tool that throws on /mcp once, as failed, though the transport rethrows it", async () => {
+    // Every statement but the audit log's own fails, so the tool throws
+    // inside the MCP SDK, which answers its JSON-RPC error and then rethrows.
+    const failing = new Proxy(env.DB, {
+      get(target, key) {
+        if (key === "prepare")
+          return (sql: string) => {
+            if (!/audit_records|audit_overflow_counters/u.test(sql))
+              throw new Error("synthetic_store_failure");
+            return target.prepare(sql);
+          };
+        const value = Reflect.get(target, key, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const thrown = await call("/mcp", {
+      via: "mcp",
+      subject: AGENT,
+      body: {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "kogane.financial.query", arguments: { intent: "activity" } },
+      },
+      headers: MCP_HEADERS,
+      environment: { DB: failing },
+    });
+    expect(thrown.response.status).toBe(500);
+    expect((await recordsOf(thrown.requestId)).map(brief)).toEqual([
+      {
+        path: "mcp",
+        subject: AGENT,
+        principal: MCP_AGENT,
+        principalKind: "agent",
+        operation: "financial.query",
+        result: "failed",
+        resultCode: "internal_error",
+      },
+    ]);
+  });
+
   it("records a browser session whose subject claims the agent-only namespace, under that subject", async () => {
     const claimed = await call("/api/agent/v1/capabilities", {
       subject: "mcp-client:someone@synthetic.test",
