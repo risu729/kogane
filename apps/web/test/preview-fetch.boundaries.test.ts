@@ -93,21 +93,42 @@ test("preview rejects a multi-chunk sum past the preview limit and cancels", asy
   expect(head.byteLength).toBe(PREVIEW_LIMIT);
   expect(tail.byteLength < PREVIEW_LIMIT).toBe(true);
   expect(head.byteLength + tail.byteLength).toBe(PREVIEW_LIMIT + 1);
+  const parts = [head, tail];
+  let index = 0;
   let cancelled = false;
-  const stream = new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.enqueue(head);
-      controller.enqueue(tail);
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        const part = parts[index];
+        index += 1;
+        if (part === undefined) {
+          controller.close();
+          return;
+        }
+        controller.enqueue(part);
+      },
+      cancel() {
+        cancelled = true;
+      },
     },
-    cancel() {
-      cancelled = true;
-    },
-  });
+    new CountQueuingStrategy({ highWaterMark: 0 }),
+  );
   respond(new Response(stream));
-  // expectedSize stays at the limit, so a per-chunk check would finish the body and reject with 409.
-  await expect(
-    fetchPreview(url, new AbortController().signal, digest(head), head.byteLength),
-  ).rejects.toMatchObject({ status: 413 });
+  // The next read after the tail closes. A per-chunk check reaches that EOF and
+  // rejects with 409. The running sum throws 413 before that read, so cancel still runs.
+  const rejected = await fetchPreview(
+    url,
+    new AbortController().signal,
+    digest(head),
+    head.byteLength,
+  ).then(
+    () => {
+      throw new Error("preview resolved");
+    },
+    (error: { status?: number }) => error,
+  );
+  expect(rejected.status).toBe(413);
+  expect(index).toBe(2);
   expect(cancelled).toBe(true);
   expect(stream.locked).toBe(false);
 });
@@ -117,21 +138,42 @@ test("preview aborts at the next read checkpoint and cancels the reader", async 
   const reason = new Error("read-checkpoint");
   let pulls = 0;
   let cancelled = false;
-  const stream = new ReadableStream<Uint8Array>({
-    pull(controller) {
-      pulls += 1;
-      controller.enqueue(Uint8Array.of(0x41));
-      abort.abort(reason);
+  let reads = 0;
+  let abortedWhenReadStarted = true;
+  const originalRead = ReadableStreamDefaultReader.prototype.read;
+  ReadableStreamDefaultReader.prototype.read = function (this: ReadableStreamDefaultReader<Uint8Array>) {
+    reads += 1;
+    if (reads === 1) abortedWhenReadStarted = abort.signal.aborted;
+    return originalRead.call(this);
+  } as typeof originalRead;
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) {
+          controller.enqueue(Uint8Array.of(0x41));
+          abort.abort(reason);
+          return;
+        }
+        controller.close();
+      },
+      cancel() {
+        cancelled = true;
+      },
     },
-    cancel() {
-      cancelled = true;
-    },
-  });
-  respond(new Response(stream));
-  await expect(fetchPreview(url, abort.signal, digest("A"), 1)).rejects.toBe(reason);
-  expect(pulls).toBe(1);
-  expect(cancelled).toBe(true);
-  expect(stream.locked).toBe(false);
+    new CountQueuingStrategy({ highWaterMark: 0 }),
+  );
+  try {
+    respond(new Response(stream));
+    await expect(fetchPreview(url, abort.signal, digest("A"), 1)).rejects.toBe(reason);
+    expect(abortedWhenReadStarted).toBe(false);
+    expect(reads).toBe(1);
+    expect(pulls).toBe(1);
+    expect(cancelled).toBe(true);
+    expect(stream.locked).toBe(false);
+  } finally {
+    ReadableStreamDefaultReader.prototype.read = originalRead;
+  }
 });
 
 test("preview aborts after the response returns and before reading a chunk", async () => {
@@ -161,22 +203,49 @@ test("preview aborts after the response returns and before reading a chunk", asy
 test("preview reports the abort reason when a later read fails", async () => {
   const abort = new AbortController();
   const reason = new Error("abort-wins");
+  const streamError = new Error("stream-broke");
   let pulls = 0;
-  const stream = new ReadableStream<Uint8Array>({
-    pull(controller) {
-      pulls += 1;
-      if (pulls === 1) {
-        controller.enqueue(Uint8Array.of(0x41));
-        return;
-      }
-      abort.abort(reason);
-      controller.error(new Error("stream-broke"));
+  let reads = 0;
+  let secondReadRejection: unknown;
+  const originalRead = ReadableStreamDefaultReader.prototype.read;
+  ReadableStreamDefaultReader.prototype.read = function (this: ReadableStreamDefaultReader<Uint8Array>) {
+    reads += 1;
+    const pending = originalRead.call(this);
+    const index = reads;
+    void pending.then(
+      () => {},
+      (error: unknown) => {
+        if (index === 2) secondReadRejection = error;
+      },
+    );
+    return pending;
+  } as typeof originalRead;
+  const stream = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) {
+          controller.enqueue(Uint8Array.of(0x41));
+          return;
+        }
+        queueMicrotask(() => {
+          abort.abort(reason);
+          controller.error(streamError);
+        });
+      },
     },
-  });
-  respond(new Response(stream));
-  await expect(fetchPreview(url, abort.signal, digest("A"), 1)).rejects.toBe(reason);
-  expect(pulls).toBe(2);
-  expect(stream.locked).toBe(false);
+    new CountQueuingStrategy({ highWaterMark: 0 }),
+  );
+  try {
+    respond(new Response(stream));
+    await expect(fetchPreview(url, abort.signal, digest("A"), 1)).rejects.toBe(reason);
+    expect(reads).toBe(2);
+    expect(pulls).toBe(2);
+    expect(secondReadRejection).toBe(streamError);
+    expect(stream.locked).toBe(false);
+  } finally {
+    ReadableStreamDefaultReader.prototype.read = originalRead;
+  }
 });
 
 test("preview reports an interrupted read when the stream fails", async () => {
