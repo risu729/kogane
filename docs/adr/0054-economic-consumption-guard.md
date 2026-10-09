@@ -389,6 +389,12 @@ None is tested here; each needs the selector or an engine adapter.
 Pointer (2026-10-09): B1, B2, B4–B6, the B side of B3, B12 and B13, and W11
 are tested by [ADR 0058](0058-knowledge-selector-and-reconstruction-adapter.md#verification).
 
+Pointer (2026-10-09): B7–B11 and the C side of B3, B12 and B13 are tested by
+[ADR 0059](0059-lot-adapter-from-selected-revisions.md#verification) on
+hand-built selections (no writer admits `security-quantity` yet); B9 is
+tested as refused (`corporate_action_unsupported`,
+`transfer_contract_pending`), the engine's own split lineage by ADR 0051.
+
 ### Not verified (owner items)
 
 - Remote D1: that a trigger `RAISE` inside `batch()` rolls the whole batch
