@@ -20,6 +20,7 @@ import { hasExactKeys, isRecord, isRefList, isText } from "../../../domain/src/g
 import {
   selectAdopted,
   type AdoptedSelection,
+  type CutStanding,
   type SelectionScope,
 } from "../../../domain/src/knowledge-selector.ts";
 import {
@@ -117,6 +118,8 @@ export interface LotsOnSelectionQueryResult {
   schemaVersion: typeof LOTS_ON_SELECTION_QUERY_SCHEMA;
   status: LotsOnSelectionQueryStatus;
   reasons: LotsOnSelectionQueryReason[];
+  /** The selector's standing of the cut (`provisional` never answers complete); null when unavailable. */
+  cutStanding: CutStanding | null;
   account: string;
   instruments: string[];
   knowledge: {
@@ -226,6 +229,7 @@ export async function queryLotsOnSelection(
       ...empty,
       status: "unavailable",
       reasons: ["economic_guard_missing"],
+      cutStanding: null,
       knowledge: null,
       adaptation: null,
       lots: null,
@@ -271,6 +275,7 @@ export async function queryLotsOnSelection(
     ...empty,
     status: result.status,
     reasons: result.reasons,
+    cutStanding: result.cutStanding,
     knowledge: {
       setVersion: selection.setVersion,
       coverage: selection.coverage,

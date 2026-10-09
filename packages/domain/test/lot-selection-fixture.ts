@@ -13,11 +13,13 @@ import {
   type AdoptedSelection,
   type AdoptedSelectionBody,
   type AdoptedStatus,
+  type CutStanding,
   type KnowledgeCoverage,
   type SelectedAdoptedRevision,
   type SelectedConflict,
   type SelectedLeg,
   type SelectionFlag,
+  type UnloggedReason,
   type UnsupportedEntry,
 } from "../src/knowledge-selector.ts";
 import type { LotAdapterRequest, LotInstrumentMapping } from "../src/lot-adapter.ts";
@@ -77,6 +79,10 @@ export interface FixtureRevision {
   /** Seal pins; default: `instrument_mapping:<unit>` at 1 for every instrument unit of its legs. */
   pins?: Record<string, number>;
   flags?: SelectionFlag[];
+  /** The stored pointer as the selector shows it at the cut. */
+  supersededBy?: string;
+  /** Why the log does not place it (default: `no_commit` for a revision without a commit). */
+  unloggedReason?: UnloggedReason;
 }
 
 const INSTRUMENT_UNITS = new Set([ALPHA_UNIT, BETA_UNIT, "ii-test-unmapped", "ii-test-loose"]);
@@ -201,7 +207,7 @@ function revisionOf(spec: FixtureRevision, defaultSeq: number): SelectedAdoptedR
           },
     supersedes:
       revision > 1 && seq !== null ? [{ eventId: spec.eventId, revision: revision - 1 }] : [],
-    supersededBy: null,
+    supersededBy: spec.supersededBy ?? null,
     seal:
       seq === null
         ? null
@@ -233,6 +239,7 @@ export interface SelectionFields {
   conflicts?: SelectedConflict[];
   unsupported?: UnsupportedEntry[];
   coverage?: KnowledgeCoverage;
+  cutStanding?: CutStanding;
 }
 
 /** A selection at `cut` (default: the highest commit given) of these revisions, in any order. */
@@ -268,12 +275,18 @@ export async function selection(
     claims: revisions.flatMap((revision) => revision.claims),
     conflicts: fields.conflicts ?? [],
     unlogged: revisions
-      .filter((revision) => revision.commit === null)
-      .map((revision) => ({
-        eventId: revision.eventId,
-        revision: revision.revision,
-        reasonCode: "no_commit" as const,
-      })),
+      .filter((revision) => revision.status === "knowledge_unlogged")
+      .flatMap((revision) => {
+        const spec = specs.find(
+          (entry) =>
+            entry.eventId === revision.eventId && (entry.revision ?? 1) === revision.revision,
+        )!;
+        const reasonCode =
+          spec.unloggedReason ?? (revision.commit === null ? ("no_commit" as const) : null);
+        return reasonCode === null
+          ? []
+          : [{ eventId: revision.eventId, revision: revision.revision, reasonCode }];
+      }),
     inconsistent: [],
     identityChanged: revisions
       .filter((revision) => revision.flags.includes("identity_changed"))
@@ -284,12 +297,20 @@ export async function selection(
       })),
     unsupported: fields.unsupported ?? [],
     coverage: fields.coverage ?? {
-      status: revisions.some((revision) => revision.commit === null) ? "partial" : "logged",
-      reasons: revisions.some((revision) => revision.commit === null) ? ["knowledge_unlogged"] : [],
+      status: revisions.some((revision) => revision.status === "knowledge_unlogged")
+        ? "partial"
+        : "logged",
+      reasons: revisions.some((revision) => revision.status === "knowledge_unlogged")
+        ? ["knowledge_unlogged"]
+        : [],
       logStart: { commitSeq: 1, knownAt: "2030-02-01T00:00:00.000Z" },
     },
   };
-  return { ...body, setVersion: await adoptedSetVersion(body) };
+  return {
+    ...body,
+    setVersion: await adoptedSetVersion(body),
+    cutStanding: fields.cutStanding ?? "final",
+  };
 }
 
 export const ALPHA_MAPPING: LotInstrumentMapping = {

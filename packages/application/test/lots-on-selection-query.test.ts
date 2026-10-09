@@ -130,7 +130,14 @@ describe("what it answers today", () => {
     const h = world();
     const result = await queryLotsOnSelection(storeExecutor(h.db), input());
     expect(result.status).toBe("unsupported");
-    expect(result.reasons).toEqual(["security_quantity_writer_missing", "log_empty"]);
+    // An empty log is asked at the caller's instant, which a commit may still reach.
+    expect(result.reasons).toEqual([
+      "security_quantity_writer_missing",
+      "log_empty",
+      "cut_provisional",
+    ]);
+    expect(result.manifest!.lots.cutStanding).toBe("provisional");
+    expect(result.cutStanding).toBe("provisional");
     expect(result.lots).toMatchObject({ status: "computed", books: [] });
     expect(result.adaptation).toMatchObject({ securityClaims: 0, inputs: [], entries: [] });
     const manifest = result.manifest!;
@@ -235,6 +242,7 @@ describe("B12 and B13", () => {
     moveShares(h, "ev-1", "2026-04-01T00:00:00.000Z");
     const first = await queryLotsOnSelection(storeExecutor(h.db), input());
     expect(first.manifest!.lots.cut.resolved.commitSeq).toBe(1);
+    expect(first.cutStanding).toBe("final");
     moveShares(h, "ev-2", "2026-04-02T00:00:00.000Z");
     const later = await queryLotsOnSelection(storeExecutor(h.db), input());
     expect(later.manifest!.lots.cut.resolved.commitSeq).toBe(2);
@@ -311,6 +319,7 @@ describe("refused queries", () => {
       "security_quantity_writer_missing",
       "policy_missing",
       "log_empty",
+      "cut_provisional",
     ]);
     expect(result.manifest!.lots.lotsManifestDigest).toBeNull();
     expect(result.contextId).toMatch(/^[0-9a-f]{64}$/u);

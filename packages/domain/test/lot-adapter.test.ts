@@ -463,15 +463,40 @@ describe("B10: a sale after a withdrawal is never filled with a short", () => {
       allocatedCost: null,
     });
     expect(after.status).toBe("indeterminate");
-    // A withdrawal the log does not place is held for that reason alone.
+    // A withdrawal the log does not place is held for that reason alone. As
+    // the selector does, the acquisition it points at is selected too
+    // (`successor_unlogged`), and holds the sale's book.
     const unlogged = await run([
-      { eventId: "acq", revision: 2, state: "unknown", seq: null, legs: [], claims: [], times: [] },
+      buy("acq", "2030-01-06", "10", "1000", {
+        seq: 1,
+        status: "knowledge_unlogged",
+        unloggedReason: "successor_unlogged",
+        supersededBy: "acq@2",
+      }),
+      {
+        eventId: "acq",
+        revision: 2,
+        state: "unknown",
+        seq: null,
+        legs: [],
+        claims: [],
+        times: [],
+      },
       sell("dis", "2030-01-08", "4", "480", { seq: 2 }),
     ]);
     expect(entryOf(unlogged, "acq", 2)).toMatchObject({
       outcome: "held",
       codes: ["knowledge_unlogged"],
+      books: [],
     });
+    expect(entryOf(unlogged, "acq", 1)).toMatchObject({
+      outcome: "held",
+      codes: ["knowledge_unlogged"],
+    });
+    expect(unlogged.adaptation.books).toMatchObject([
+      { status: "indeterminate", refs: ["event:acq@1", "event:dis@1"] },
+    ]);
+    expect(unlogged.adaptation.inputs).toEqual([]);
     expect(unlogged.status).toBe("indeterminate");
   });
 });
@@ -671,6 +696,22 @@ describe("every code the adapter gives", () => {
       buy("zero", "2030-01-06", "0", "1000"),
       buy("fee-over", "2030-01-06", "10", "1", { fee: "2" }),
       buy("ev 1", "2030-01-06", "10", "1000"),
+      // A stated consideration that restates the fee leg, not the security movement.
+      buy("corr-of", "2030-01-06", "10", "1000", {
+        legs: [
+          { unit: ALPHA_UNIT, amount: "10", role: "increase", effect: "movement" },
+          { account: BANK, amount: "1000", role: "decrease", effect: "correspondence", of: 2 },
+          { account: BANK, amount: "5", role: "fee", effect: "correspondence", of: 0 },
+        ],
+      }),
+      // A fee breakdown of a leg that is not the cash movement.
+      buy("bd-of", "2030-01-06", "10", "1001", {
+        legs: [
+          { unit: ALPHA_UNIT, amount: "10", role: "increase", effect: "movement" },
+          { account: BANK, amount: "1001", role: "decrease", effect: "movement" },
+          { account: BANK, amount: "1", role: "fee", effect: "breakdown", of: 9 },
+        ],
+      }),
     ];
     for (const spec of shapes) {
       const { entry } = await held(spec);
@@ -800,8 +841,14 @@ describe("every code the adapter gives", () => {
       }),
     ]);
     expect(entryOf(noCash, "acq").codes).toEqual(["consideration_missing", "fee_unknown"]);
+    // The fee is handed over absent, never as an empty list ("none stated").
+    const fees = inputOf(noCash, "acq")!.fees;
+    expect(fees).toHaveLength(1);
+    expect(fees[0]!.value.status).toBe("missing");
     const lot = bookOf(noCash).remainingLots![0]!;
     expect(amountText(lot.cost)).toBe("unknown:consideration_missing");
+    expect(amountText(lot.acquisitionFees)).toBe("unknown:fee_unknown");
+    expect(noCash.reasons).toContain("unknown_acquisition_fee");
   });
 
   test("fx_rate_missing: amounts outside the cost unit are kept unknown, no rate is invented", async () => {
@@ -830,6 +877,7 @@ describe("every code the adapter gives", () => {
     const cases: [Partial<FixtureRevision>, LotAdapterCode, LotsOnSelectionStatus][] = [
       [{ flags: ["identity_changed"] }, "identity_changed", "needs_review"],
       [{ status: "chain_inconsistent" }, "revision_chain_inconsistent", "needs_review"],
+      // Seal-less, so it pins no mapping either; the book is indeterminate first.
       [{ seq: null }, "knowledge_unlogged", "indeterminate"],
     ];
     for (const [fields, code, status] of cases) {
@@ -851,7 +899,9 @@ describe("every code the adapter gives", () => {
           ],
         }),
       );
-      expect(entryOf(result, "acq-2").codes).toEqual([code]);
+      expect(entryOf(result, "acq-2").codes).toEqual(
+        code === "knowledge_unlogged" ? [code, "instrument_unresolved"] : [code],
+      );
       expect(result.adaptation.books.map((book) => [book.instrumentRef, book.status])).toEqual([
         [ALPHA, status],
         [BETA, "fed"],
@@ -934,5 +984,73 @@ describe("the engine's gates and the manifest pins", () => {
       ],
     });
     expect((await lotsOnSelection(chosen, twice)).ok).toBe(false);
+  });
+});
+
+describe("review fixes", () => {
+  test("an active revision without a seal pins no mapping: instrument_unresolved, never fed", async () => {
+    const result = await run([
+      buy("acq", "2030-01-06", "10", "1000", { seq: null, status: "active" }),
+    ]);
+    expect(entryOf(result, "acq")).toMatchObject({
+      outcome: "held",
+      codes: ["instrument_unresolved"],
+    });
+    expect(result.adaptation.inputs).toEqual([]);
+    expect(result.status).toBe("needs_review");
+  });
+
+  test("two identifiers of one instrument share its book; naming one of them never completes it", async () => {
+    const specs = [
+      buy("acq", "2030-01-06", "10", "1000"),
+      sell("dis", "2030-01-08", "4", "480", {
+        legs: [
+          { unit: BETA_UNIT, amount: "4", role: "decrease", effect: "movement" },
+          { account: BANK, amount: "480", role: "increase", effect: "movement" },
+        ],
+      }),
+    ];
+    const twin = { ...ALPHA_MAPPING, unitRef: BETA_UNIT };
+    const both = await run(specs, request({ instruments: [ALPHA_MAPPING, twin] }));
+    const book = bookOf(both);
+    expect(quantityText(book.remainingLots![0]!.remainingQuantity)).toBe("6");
+    expect(book.disposals[0]!.outcome).toBe("allocated");
+    expect(both.status).toBe("complete");
+    // Only one identifier's mapping given: the sale cannot be placed, so the run needs review.
+    const one = await run(specs, request({ instruments: [ALPHA_MAPPING] }));
+    expect(entryOf(one, "dis")).toMatchObject({
+      outcome: "held",
+      codes: ["instrument_unresolved"],
+      books: [],
+    });
+    expect(one.status).toBe("needs_review");
+  });
+
+  test("a provisional cut is pinned and echoed, and never answers complete", async () => {
+    const specs = [buy("acq", "2030-01-06", "10", "1000")];
+    const final = await run(specs);
+    expect(final).toMatchObject({ status: "complete", cutStanding: "final", reasons: [] });
+    const provisional = await run(specs, request(), { cutStanding: "provisional" });
+    expect(provisional.status).toBe("limited");
+    expect(provisional.reasons).toEqual(["cut_provisional"]);
+    expect(provisional.cutStanding).toBe("provisional");
+    expect(provisional.manifest.cutStanding).toBe("provisional");
+    expect(provisional.contextId).not.toBe(final.contextId);
+    expect(provisional.lots).toEqual(final.lots);
+  });
+
+  test("the manifest pins the policy itself: one id and version with another method is another context", async () => {
+    const specs = [buy("acq", "2030-01-06", "10", "1000")];
+    const fifo = await run(specs, request({ policy: policy({ purpose: "tax" }) }));
+    const average = await run(
+      specs,
+      request({ policy: policy({ purpose: "tax", method: "moving-average" }) }),
+    );
+    expect(fifo.status).toBe("refused");
+    expect(average.status).toBe("refused");
+    expect(fifo.manifest.lotsManifestDigest).toBeNull();
+    expect(fifo.manifest.policyRef).toBe(average.manifest.policyRef);
+    expect(fifo.manifest.policy).toEqual(policy({ purpose: "tax" }));
+    expect(average.contextId).not.toBe(fifo.contextId);
   });
 });

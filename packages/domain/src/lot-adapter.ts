@@ -45,6 +45,7 @@ import { hasExactKeys, isArrayOf, isOneOf, isRecord, isSafeInt, isText } from ".
 import {
   KNOWLEDGE_SELECTOR_RELEASE,
   type AdoptedSelection,
+  type CutStanding,
   type ResolvedCut,
   type SelectedAdoptedRevision,
   type SelectedLeg,
@@ -547,7 +548,7 @@ function mapRevision(revision: SelectedAdoptedRevision, context: Context): Mappe
   if (
     !PLACEABLE_STATUSES.includes(mapping.status) ||
     mapping.instrumentClass === null ||
-    (revision.seal !== null && pinned !== mapping.mappingRevision)
+    pinned !== mapping.mappingRevision
   )
     codes.add("instrument_unresolved");
   const holder = security.accountId === null ? undefined : context.holders.get(security.accountId);
@@ -810,6 +811,7 @@ export const LOTS_ON_SELECTION_REASONS = [
   "consideration_missing",
   "fee_unknown",
   "fx_rate_missing",
+  "cut_provisional",
   "unknown_cost",
   "unknown_acquisition_fee",
   "unknown_proceeds",
@@ -848,6 +850,12 @@ export interface LotsOnSelectionManifest {
   contract: typeof LOT_INPUT_CONTRACT;
   engineVersion: typeof LOT_ENGINE_VERSION;
   cut: { requested: KnowledgeCut; resolved: ResolvedCut; knownAt: string | null };
+  /**
+   * The selector's standing of the cut: `provisional` for an instant at or
+   * after the log's last commit (a commit may still land at that instant), so
+   * the answer is never `complete` (`cut_provisional`).
+   */
+  cutStanding: CutStanding;
   setVersion: string;
   /** The current identity epoch and every pin of the selected revisions' seals: `[ref, subject, revision]`. */
   identity: { epoch: string; pins: [string, string, number][] };
@@ -859,6 +867,8 @@ export interface LotsOnSelectionManifest {
   instruments: LotInstrumentMapping[];
   lotSelections: LotSelectionChoice[];
   policyRef: string | null;
+  /** A copy of the policy: its ref names it, but only its content says what was computed. */
+  policy: LotPolicy | null;
   /** The policy's FX policy ref; no rate ref, since no rate is in evidence. */
   fx: { policyRef: string | null; rateRefs: string[] };
   /** `canonicalDigest` of the engine's manifest; null when the engine refused the run. */
@@ -867,6 +877,8 @@ export interface LotsOnSelectionManifest {
 
 export interface LotsOnSelection {
   status: LotsOnSelectionStatus;
+  /** The selector's standing of the cut, echoed (also pinned in the manifest). */
+  cutStanding: CutStanding;
   reasons: LotsOnSelectionReason[];
   adaptation: LotAdaptation;
   lots: LotResult;
@@ -888,7 +900,8 @@ const plain = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
  * `unsupported` (no security claim, a transfer, a corporate action, an
  * unsupported class), `refused` (the engine refused the run), `indeterminate`
  * (the log or the time does not place something), `needs_review`, `limited`
- * (something not stated or not known), else `complete`. Every applicable
+ * (something not stated or not known, or a provisional cut: `cut_provisional`),
+ * else `complete`. Every applicable
  * reason is listed. No gain, no tax.
  */
 export async function lotsOnSelection(
@@ -904,6 +917,8 @@ export async function lotsOnSelection(
   let indeterminate = false;
   let limited = false;
   if (adaptation.securityClaims === 0) reasons.add("security_quantity_writer_missing");
+  // A provisional cut may still gain a commit at its instant: never complete.
+  if (selection.cutStanding === "provisional") reasons.add("cut_provisional");
   for (const reason of selection.coverage.reasons) reasons.add(reason);
   for (const entry of adaptation.entries) for (const code of entry.codes) reasons.add(code);
   for (const book of adaptation.books) for (const code of book.codes) reasons.add(code);
@@ -968,6 +983,7 @@ export async function lotsOnSelection(
       resolved: { coreEpoch: selection.cut.coreEpoch, commitSeq: selection.cut.commitSeq },
       knownAt: selection.cutKnownAt,
     },
+    cutStanding: selection.cutStanding,
     setVersion: selection.setVersion,
     identity: { epoch: selection.currentIdentityEpoch, pins },
     aliasRuleVersions: adaptation.aliasRuleVersions,
@@ -977,6 +993,7 @@ export async function lotsOnSelection(
     instruments: plain(request.instruments).sort((a, b) => cmp(a.unitRef, b.unitRef)),
     lotSelections: plain(request.lotSelections).sort((a, b) => cmp(a.disposalRef, b.disposalRef)),
     policyRef: policy === null ? null : lotPolicyRef(policy),
+    policy: policy === null ? null : plain(policy),
     fx: { policyRef: policy?.fxPolicyRef ?? null, rateRefs: [] },
     lotsManifestDigest: lots.status === "computed" ? await canonicalDigest(lots.manifest) : null,
   };
@@ -984,6 +1001,7 @@ export async function lotsOnSelection(
     ok: true,
     result: {
       status,
+      cutStanding: selection.cutStanding,
       reasons: ordered,
       adaptation,
       lots,
