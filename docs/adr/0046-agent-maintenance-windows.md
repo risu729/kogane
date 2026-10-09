@@ -266,8 +266,8 @@ write, append)` stays the only code that writes a maintenance revision; it
   ceiling, is not built: no prepare/confirm step exists (slice S3), and a
   deferral longer than 31 days stays the operator's in every case.
 - **Migration.** CORE 0067 never merged; it is renumbered CORE 0076 (the
-  next free number after main's 0075; open #632 holds 0073, and 0074 is
-  reserved) and rewritten: `actor_kind IN ('operator','delegated')`; a
+  number this pull request took after main's 0075; #632 then took 0077, and
+  no file uses 0073 or 0074) and rewritten: `actor_kind IN ('operator','delegated')`; a
   closed `change_reason` CHECK, required with every actor kind and
   `operator-edit` only for the operator; the partial index
   `maintenance_agent_writes` on `actor_kind='delegated'`, which the budget

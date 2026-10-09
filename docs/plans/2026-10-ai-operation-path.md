@@ -1025,8 +1025,8 @@ contradicts it, so #564 lands as this slice, not before it.
 - Status (2026-10-09): implemented on #564 ahead of S3's execution
   integration, up to the delegation gate
   ([ADR 0046's amendment](../adr/0046-agent-maintenance-windows.md#amendment-a-delegated-operation-not-an-agent-grant-2026-10-09)).
-  The migration is CORE 0076 (main reached 0075, #632 holds 0073, 0074 is
-  reserved). The write capability is in `MCP_DELEGATIONS` only; the update
+  The migration is CORE 0076 (taken after main's 0075; #632 then took
+  0077, and no file uses 0073 or 0074). The write capability is in `MCP_DELEGATIONS` only; the update
   tool resolves the delegation with #628's core, checks capability, closed
   arguments and scope, and is refused by `delegationExecutionReadiness`
   (`available: false`), so it relays nothing and is published to nobody; the
