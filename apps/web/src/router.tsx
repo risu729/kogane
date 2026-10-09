@@ -117,6 +117,8 @@ export type Route =
   | { name: "positions" }
   /** Every account as its providers last reported it on a chosen date. */
   | { name: "reportedState" }
+  /** One account's balances reconstructed from adopted events beside the reported ones. */
+  | { name: "reconstructedState" }
   | { name: "identities" }
   /** The instrument candidate review (ADR 0055). */
   | { name: "instrumentCandidates" }
@@ -157,6 +159,7 @@ export function matchRoute(path: string): Route {
     if (first === "summaries") return { name: "summaries" };
     if (first === "positions") return { name: "positions" };
     if (first === "state") return { name: "reportedState" };
+    if (first === "reconstruction") return { name: "reconstructedState" };
     if (first === "identities") return { name: "identities" };
     if (first === "rewards") return { name: "rewards" };
     if (first === "reconciliation") return { name: "reconciliation" };

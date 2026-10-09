@@ -675,3 +675,25 @@
 .reported-state-table {
   min-width: 44rem;
 }
+
+/* ── reconstructed state ───────────────────────────────────────────── */
+
+/* Reported, reconstructed, reported and the difference side by side: the
+ * exact figures keep one line each and the table scrolls in its region. */
+.reconstructed-state-table {
+  min-width: 60rem;
+}
+
+/* The unit and the exact figures never break inside a word. */
+.reconstructed-state-table th[scope="row"] {
+  white-space: nowrap;
+}
+
+.reconstructed-state-table td.num {
+  min-width: 8rem;
+}
+
+.reconstructed-captured {
+  display: block;
+  font-size: var(--text-sm);
+}
