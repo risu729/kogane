@@ -21,6 +21,7 @@ import { EvidenceContent } from "./evidence-app.tsx";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
 import { GlobalPassEmptyMonthsNotice } from "./global-pass-empty-months.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
+import { InstrumentCandidatesPage } from "./pages/InstrumentCandidates.tsx";
 import { RewardsPage } from "./pages/Rewards.tsx";
 import { ConfirmPage } from "./pages/Confirm.tsx";
 import { CardOwnershipPage } from "./pages/CardOwnership.tsx";
@@ -95,6 +96,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <ReportedStatePage />;
     case "identities":
       return <IdentitiesPage />;
+    case "instrumentCandidates":
+      return <InstrumentCandidatesPage />;
     case "rewards":
       return <RewardsPage />;
     case "cardOwnership":

@@ -2,9 +2,10 @@
 // stored instrument identifiers may denote the same instrument, on what
 // evidence, what keeps a pair apart, and where each identifier stands. A read
 // only: it never writes and never adopts. A candidate names the existing
-// commands a person would plan to decide it (`identity.assign` to adopt,
+// commands a plan would carry to decide it (`identity.assign` to adopt,
 // `relation.reject` of `listed_as` to keep apart); the change lifecycle
-// grants those to humans only.
+// grades who may plan, approve and commit them, and under today's grant lists
+// only `OPERATOR_SUBJECTS` may approve or commit.
 import {
   identifierResolutions,
   instrumentCandidates,

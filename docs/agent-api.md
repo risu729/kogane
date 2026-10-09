@@ -48,12 +48,12 @@ A grant is looked up **after** the Cloudflare Access check, by the subject
 nothing reads an actor from a request body or header, which is the same rule
 the change lifecycle follows. A valid token with no grant is still refused.
 
-| Capability               | Allows                                                                       | Notes                                                   |
-| ------------------------ | ---------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                           | The first capability an agent should get                |
-| `records.read`           | `reported-state`, `activity`, and `purchases.explain` on a whole-store scope | Never implies `evidence.read`                           |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                  | A separate grant; raw bytes are still a different route |
-| `interpretation.propose` | `reconcile.propose`                                                          | Proposals only; never adoption                          |
+| Capability               | Allows                                                                                                | Notes                                                   |
+| ------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                    | The first capability an agent should get                |
+| `records.read`           | `reported-state`, `activity`, `purchases.explain` and `instruments.candidates` on a whole-store scope | Never implies `evidence.read`                           |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                           | A separate grant; raw bytes are still a different route |
+| `interpretation.propose` | `reconcile.propose`                                                                                   | Proposals only; never adoption                          |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
 exist in this vocabulary: `interpretation.accept`, `calculation.run`,
@@ -150,18 +150,19 @@ and it belongs in its own change.
 
 ## Tools
 
-Five tools, plus a sixth while the deployment serves card purchase
+Six tools, plus a seventh while the deployment serves card purchase
 recognition, one implementation each (`src/agent-service.ts`), reachable two
 ways.
 
-| Tool                       | HTTP                                   | MCP `tools/call`           | Requires                                                                                                                      |
-| -------------------------- | -------------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `kogane.capabilities`      | `POST /api/agent/v1/capabilities`      | `kogane.capabilities`      | any grant                                                                                                                     |
-| `kogane.context.open`      | `POST /api/agent/v1/context.open`      | `kogane.context.open`      | any grant                                                                                                                     |
-| `kogane.financial.query`   | `POST /api/agent/v1/financial.query`   | `kogane.financial.query`   | per intent (table below)                                                                                                      |
-| `kogane.explain`           | `POST /api/agent/v1/explain`           | `kogane.explain`           | `summary.read`                                                                                                                |
-| `kogane.reconcile.propose` | `POST /api/agent/v1/reconcile.propose` | `kogane.reconcile.propose` | `interpretation.propose`                                                                                                      |
-| `kogane.purchases.explain` | `POST /api/agent/v1/purchases.explain` | `kogane.purchases.explain` | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation)) |
+| Tool                            | HTTP                                        | MCP `tools/call`                | Requires                                                                                                                      |
+| ------------------------------- | ------------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.capabilities`           | `POST /api/agent/v1/capabilities`           | `kogane.capabilities`           | any grant                                                                                                                     |
+| `kogane.context.open`           | `POST /api/agent/v1/context.open`           | `kogane.context.open`           | any grant                                                                                                                     |
+| `kogane.financial.query`        | `POST /api/agent/v1/financial.query`        | `kogane.financial.query`        | per intent (table below)                                                                                                      |
+| `kogane.explain`                | `POST /api/agent/v1/explain`                | `kogane.explain`                | `summary.read`                                                                                                                |
+| `kogane.reconcile.propose`      | `POST /api/agent/v1/reconcile.propose`      | `kogane.reconcile.propose`      | `interpretation.propose`                                                                                                      |
+| `kogane.instruments.candidates` | `POST /api/agent/v1/instruments.candidates` | `kogane.instruments.candidates` | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                |
+| `kogane.purchases.explain`      | `POST /api/agent/v1/purchases.explain`      | `kogane.purchases.explain`      | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation)) |
 
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
@@ -179,7 +180,7 @@ the adapter publishes the list it is handed and dispatches by name, so a tool
 set that is off is neither listed nor callable. `kogane.purchases.explain`
 follows the operator route it shares a query with: while `/api/meta` reports
 `cardPurchaseRecognition: true` (the event reader flag on and CORE 0047
-applied) it is appended to the five above, and otherwise its name is
+applied) it is appended to the six above, and otherwise its name is
 `unknown_tool` and its HTTP path answers `404 not_found`, after the Access and
 grant checks every agent path makes. With `OPS_API_ENABLED` on **and
 this deployment's command grant lists readable**, the six `kogane.ops.*` tools
@@ -325,6 +326,52 @@ and `rawLocator` is the parser's position inside an artifact, not a
 `fetch_artifact:` or `raw:` locator; reaching those still takes `explain` and
 `evidence.read`. The operator route itself is unchanged and still refuses an
 agent principal (`403 operator_required`).
+
+### Instrument candidates
+
+`kogane.instruments.candidates` reads one page of the cross-identifier
+instrument candidate review ([identity](identity.md#review-page-route-and-agent-tool),
+[ADR 0055 amendment 2026-10-09](adr/0055-instrument-candidates.md#amendment-2026-10-09-route-and-page-as-implemented)).
+It is the browser route's own service (`reviewInstrumentCandidates`), so an
+agent and the `銘柄の同一性の候補` page read one answer; the route runs it under
+the reader grant, this tool under the caller's grant.
+
+Input, a closed object (every key optional): `view` (`open`, `held`,
+`decided`, `separated`, `hints`; default `open`), `offset` (0 to 5,000) and
+`identifierId` (only the items naming that identifier). Output:
+`kogane-instrument-candidates-v1` with the manifest (policy, bounds, every
+closed code), the summary counts, `decisions: "change-lifecycle"`, `total`,
+at most 50 `items` with their `evidenceRefs`, `nextOffset` (null past the
+last page and where the next page would exceed the grant's `maxRows`) and the
+identifiers the items name.
+
+Each call walks every current identity observation, linear in captured
+history (ADR 0055 amendment, Cost). Routine polling of this tool needs a
+written bound (a rate, or a cached or projected candidate set) before it is
+configured.
+
+Authorization, in order, after the Access check and the grant lookup:
+`records.read`, else `403 unauthorized`; sources and accounts both `"*"`, else
+`403 evidence_restricted` (`scope:source`, `scope:account`), because pairs
+span sources; `offset + 50` within `maxRows`, else `413 budget_exceeded`.
+All three are decided before the store is read. A store holding more than
+500,000 current identity observations (counted from the identity run seals
+before the walk) is `413 budget_exceeded` (`budget:identityObservations=500000`);
+a store past the read's own bounds is `413 budget_exceeded`
+(`budget:instrumentResolution`); an
+`identifierId` the read does not hold is `403 evidence_restricted`; an
+unknown key is `400 unsupported_semantics` and a malformed value
+`400 invalid_query`.
+
+It reads and never writes. A proposed candidate carries `commands`: the
+`identity.assign` (adopt; absent while the candidate is held) and
+`relation.reject` of `listed_as` (keep apart) payloads that would decide it.
+Deciding is a plan of that payload, with a reason, through the change
+lifecycle's command API, graded there by its own grant lists exactly as a
+plan from the page is; under today's lists an agent can plan and cannot
+approve or commit. The server pins only the subject's mapping revision of an
+adoption plan, not the anchor's: read the candidate again right before
+planning, as the page does.
 
 ## Contexts, cursors and hand-off
 
