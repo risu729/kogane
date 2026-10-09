@@ -311,6 +311,9 @@ export async function queryLotsOnSelection(
     .filter((row) => row.current !== 1)
     .map((row) => row.identifier_id)
     .sort();
+  // The read stops one row past the bound (the rows include remapped
+  // identifiers), and the scope adds asked identifiers the read does not
+  // return: each check refuses what the other does not see.
   if (
     related.length > LOTS_QUERY_MAX_IDENTIFIERS ||
     scopeIdentifiers.length > LOTS_QUERY_MAX_IDENTIFIERS

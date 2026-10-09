@@ -441,6 +441,49 @@ describe("a book is the instrument's, whatever identifiers are asked", () => {
     expect(result.reasons).not.toContain("instrument_identifier_remapped");
   });
 
+  /** `count` identifiers of the share, mapped to it now or (when `remapped`) only earlier. */
+  function many(h: EconomicHistory, count: number, remapped: boolean) {
+    for (let index = 0; index < count; index += 1) {
+      const id = `ii-share-${remapped ? "r" : "x"}${index}`;
+      h.db.run("INSERT INTO instrument_identifiers VALUES(?,'synthetic','test',?,'{}')", [id, id]);
+      h.db.run(
+        "INSERT INTO instrument_mappings VALUES(?,?,1,'inst-share','manual','synthetic',1,'2026-01-01','Synthetic','identified')",
+        [`im-${id}-1`, id],
+      );
+      if (remapped)
+        h.db.run(
+          "INSERT INTO instrument_mappings VALUES(?,?,2,'inst-coin','manual','synthetic',1,'2026-01-02','Synthetic','identified')",
+          [`im-${id}-2`, id],
+        );
+    }
+  }
+
+  test("more remapped identifiers than the read's bound is refused, never cut", async () => {
+    const h = world();
+    many(h, LOTS_QUERY_MAX_IDENTIFIERS, true);
+    await expect(
+      queryLotsOnSelection(storeExecutor(h.db), input({ instruments: [SHARE] })),
+    ).rejects.toThrow("instrument_identifier_bound_exceeded");
+    // One fewer fits: they are named, not selected.
+    const fits = world();
+    many(fits, LOTS_QUERY_MAX_IDENTIFIERS - 1, true);
+    const result = await queryLotsOnSelection(
+      storeExecutor(fits.db),
+      input({ instruments: [SHARE] }),
+    );
+    expect(result.manifest!.scopeIdentifiers).toEqual([SHARE]);
+    expect(result.manifest!.lots.remappedIdentifiers).toHaveLength(LOTS_QUERY_MAX_IDENTIFIERS - 1);
+  });
+
+  test("a scope larger than the bound with asked identifiers the read does not return is refused", async () => {
+    const h = world();
+    many(h, LOTS_QUERY_MAX_IDENTIFIERS - 15, false);
+    const unmapped = Array.from({ length: 15 }, (_, index) => `ii-unmapped-${index}`);
+    await expect(
+      queryLotsOnSelection(storeExecutor(h.db), input({ instruments: [SHARE, ...unmapped] })),
+    ).rejects.toThrow("instrument_identifier_bound_exceeded");
+  });
+
   test("more identifiers than the bound is refused, never cut", async () => {
     const h = world();
     for (let index = 0; index < LOTS_QUERY_MAX_IDENTIFIERS; index += 1) {
