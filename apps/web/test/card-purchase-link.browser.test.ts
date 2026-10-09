@@ -58,6 +58,13 @@ describe.if(runnable)("pending-to-posted link review", () => {
   let plannedStatus: string | null = null;
   /** The kind the last plan request named; a simulation answers for that plan. */
   let plannedKind = "relation.accept";
+  // Each page stamps this epoch. A command is recorded only after its body is
+  // read, and only when the stamp still matches: a confirmation page's
+  // simulate can finish that read after the next case has cleared `posted`.
+  let epoch = 0;
+  /** Set only by the epoch regression; the normal path does not wait on it. */
+  let pauseAfterBody: Promise<void> | null = null;
+  let noteBodyRead: (() => void) | null = null;
   const requests: URL[] = [];
   const posted: { operation: string; body: Record<string, unknown> }[] = [];
   beforeEach(() => {
@@ -68,6 +75,9 @@ describe.if(runnable)("pending-to-posted link review", () => {
     pinDrift = 0;
     plannedStatus = null;
     plannedKind = "relation.accept";
+    epoch += 1;
+    pauseAfterBody = null;
+    noteBodyRead = null;
     requests.length = 0;
     posted.length = 0;
   });
@@ -97,7 +107,7 @@ describe.if(runnable)("pending-to-posted link review", () => {
             },
           });
         if (url.pathname === "/api/v2/card-purchases") {
-          requests.push(url);
+          if (request.headers.get("x-test-epoch") === String(epoch)) requests.push(url);
           const eventId = url.searchParams.get("eventId");
           if (eventId === null) return Response.json({ apiVersion: 2, ...purchasePage(items()) });
           const item = items().find((entry) => entry.eventId === eventId);
@@ -107,7 +117,14 @@ describe.if(runnable)("pending-to-posted link review", () => {
         }
         if (url.pathname.startsWith("/api/command/v1/")) {
           const operation = url.pathname.split("/").at(-1)!;
+          const seenEpoch = request.headers.get("x-test-epoch");
           const body = (await request.json()) as Record<string, unknown>;
+          noteBodyRead?.();
+          if (pauseAfterBody) await pauseAfterBody;
+          // Compare with the live epoch. A snapshot taken before the body
+          // read still matches the previous page and would record its command.
+          if (seenEpoch !== String(epoch))
+            return Response.json({ error: "stale_case" }, { status: 409 });
           posted.push({ operation, body });
           if (operation === "plan") plannedKind = String(body.kind);
           const shown = merged ? mergedCandidate() : candidate;
@@ -164,7 +181,10 @@ describe.if(runnable)("pending-to-posted link review", () => {
   });
 
   async function open(path: string, heading: string) {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    const page = await browser.newPage({
+      viewport: { width: 1280, height: 1000 },
+      extraHTTPHeaders: { "x-test-epoch": String(epoch) },
+    });
     await page.goto(origin + path);
     await page.getByRole("heading", { name: heading, exact: true }).waitFor();
     await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
@@ -345,6 +365,53 @@ describe.if(runnable)("pending-to-posted link review", () => {
       baseContextId: `card-purchase-link:${candidate.proposalId}`,
     });
     await page.close();
+  }, 30_000);
+
+  test("a command body that finishes after the case epoch moves is not recorded", async () => {
+    let release!: () => void;
+    let reached!: () => void;
+    pauseAfterBody = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const bodyRead = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    noteBodyRead = reached;
+    const stale = String(epoch);
+    const inflight = fetch(`${origin}/api/command/v1/plan`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-test-epoch": stale },
+      body: JSON.stringify({ kind: "relation.reject" }),
+    });
+    try {
+      await bodyRead;
+      epoch += 1;
+      posted.length = 0;
+      requests.length = 0;
+      plannedKind = "relation.accept";
+      release();
+      const response = await inflight;
+      expect(response.status).toBe(409);
+      expect(posted).toEqual([]);
+      expect(plannedKind).toBe("relation.accept");
+      noteBodyRead = null;
+
+      pinDrift = 1;
+      const page = await openDetail();
+      await page.getByLabel("判断の理由", { exact: true }).fill("同じ利用と確認した");
+      await page.getByRole("button", { name: "同一の利用として統合", exact: true }).click();
+      await page
+        .getByRole("alert")
+        .filter({ hasText: "候補または利用の記録が更新されています" })
+        .waitFor();
+      expect(new URL(page.url()).pathname).toBe(`/purchases/${POSTED_EVENT}`);
+      expect(posted.map((row) => row.operation)).toEqual(["plan"]);
+      await page.close();
+    } finally {
+      release();
+      noteBodyRead = null;
+      pauseAfterBody = null;
+    }
   }, 30_000);
 
   test("a plan pinned to anything but the candidate on screen is not opened", async () => {
