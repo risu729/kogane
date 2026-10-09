@@ -18,8 +18,9 @@
 //   6. otherwise                                           → `valued`, exactly,
 //      in the price's unit and in the base unit, with both legs.
 //
-// A total is stated only when every holding is valued; otherwise it is
-// absent with its reason and the counts by outcome (INV05). Amounts are added
+// A total is stated only when every holding is valued and all of them come
+// from one source; otherwise it is absent with its reason and the counts by
+// outcome (INV05, INV06: adoption across sources is not applied, ADR 0019). Amounts are added
 // with `sumQuantities` (INV03). There is no gain, no cost basis and no tax
 // here, and a provider's own valuation of a holding is never its value.
 import type { RoundingInputs } from "./calculation.ts";
@@ -73,8 +74,17 @@ export const VALUATION_POLICY_MISMATCHES = [
 ] as const;
 export type ValuationPolicyMismatch = (typeof VALUATION_POLICY_MISMATCHES)[number];
 
-/** Why there is no total. Closed; a total is never a partial sum. */
-export const TOTAL_ABSENCE_REASONS = ["holding_not_valued", "no_holdings"] as const;
+/**
+ * Why there is no total. Closed; a total is never a partial sum, and never a
+ * sum across sources: adoption across sources is not applied (ADR 0019), so
+ * two sources could list one holding and a cross-source sum could count it
+ * twice (INV06).
+ */
+export const TOTAL_ABSENCE_REASONS = [
+  "no_holdings",
+  "holding_not_valued",
+  "adoption_not_applied",
+] as const;
 export type TotalAbsenceReason = (typeof TOTAL_ABSENCE_REASONS)[number];
 
 /**
@@ -98,6 +108,8 @@ export interface ValuationOnDatePolicy {
 export interface HoldingOnDate {
   /** `position:<id>`. */
   ref: string;
+  /** The provider source that reported it. */
+  sourceId: string;
   /** `artifact:<id>`: the snapshot the position was reported in. */
   snapshotRef: string;
   /** The parse run of that snapshot, which a same-snapshot price must come from. */
@@ -475,6 +487,8 @@ export async function valueHoldingsOnDate(input: ValuationOnDateInput): Promise<
   if (holdings.length === 0) total = { status: "absent", reason: "no_holdings" };
   else if (counts.valued !== holdings.length)
     total = { status: "absent", reason: "holding_not_valued" };
+  else if (new Set(input.holdings.map((holding) => holding.sourceId)).size > 1)
+    total = { status: "absent", reason: "adoption_not_applied" };
   else {
     const sum = sumQuantities(
       input.baseUnit,

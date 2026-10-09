@@ -214,6 +214,7 @@ export async function queryValuationOnDate(
     const ref = instrumentRef(account.sourceId, position.market, position.securityCode);
     return {
       ref: position.ref,
+      sourceId: account.sourceId,
       snapshotRef: position.snapshotRef,
       parseRunId: row.parse_run_id,
       instrumentRef: ref,

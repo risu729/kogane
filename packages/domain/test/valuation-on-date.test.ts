@@ -74,9 +74,11 @@ function holding(options: {
   parseRunId?: number;
   status?: IdentityStatus;
   instrumentId?: string | null;
+  sourceId?: string;
 }): HoldingOnDate {
   return {
     ref: options.ref,
+    sourceId: options.sourceId ?? "test-broker",
     snapshotRef: `artifact:${options.parseRunId ?? 1}`,
     parseRunId: options.parseRunId ?? 1,
     instrumentRef: options.instrumentRef,
@@ -510,6 +512,23 @@ describe("totals", () => {
     );
     expect(result.counts).toMatchObject({ valued: 2, unpriced: 1 });
     expect(result.total).toEqual({ status: "absent", reason: "holding_not_valued" });
+  });
+
+  test("holdings of two sources have no total: adoption across sources is not applied", async () => {
+    const holdings = [
+      holding({ ref: "position:1", instrumentRef: BETA, quantity: "1" }),
+      holding({
+        ref: "position:2",
+        instrumentRef: BETA,
+        quantity: "1",
+        sourceId: "other-broker",
+        parseRunId: 2,
+      }),
+    ];
+    const other = candidate({ key: key(BETA, "JPY"), id: "beta-run-2", amount: "1500", run: 2 });
+    const result = computed(await valueHoldingsOnDate(input(holdings, [BETA_PRICE(), other])));
+    expect(result.counts.valued).toBe(2);
+    expect(result.total).toEqual({ status: "absent", reason: "adoption_not_applied" });
   });
 
   test("no holdings is no total, not zero", async () => {
