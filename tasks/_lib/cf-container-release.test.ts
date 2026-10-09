@@ -23,6 +23,8 @@ import {
   verifyApplicationIdentity,
   verifyApplicationRollout,
   waitForApplicationRollout,
+  waitForApplicationPostcheck,
+  CONTAINER_POSTCHECK_TIMEOUT_MS,
   registryImage,
   verifyRegistryImage,
   cloudflareApi,
@@ -796,7 +798,7 @@ test("the basic application preset requires all three exact expanded numeric res
   }
 });
 
-describe("rollout polling uses the existing deadline rather than a shorter attempt cap", () => {
+describe("rollout polling uses the 600-second deadline rather than a shorter attempt cap", () => {
   const state = (pending: boolean, verified = true) => {
     const snapshot = applicationSnapshot(target, app(), bindings(), account);
     return {
@@ -810,7 +812,7 @@ describe("rollout polling uses the existing deadline rather than a shorter attem
     };
   };
 
-  test("a rollout completing after the old 25th poll succeeds within 180 seconds", async () => {
+  test("a rollout completing after the old 25th poll succeeds within 600 seconds", async () => {
     let elapsed = 0;
     let reads = 0;
     const deadlines: number[] = [];
@@ -829,12 +831,12 @@ describe("rollout polling uses the existing deadline rather than a shorter attem
     );
     expect(elapsed).toBe(130000);
     expect(reads).toBe(27);
-    expect(new Set(deadlines)).toEqual(new Set([180000]));
+    expect(new Set(deadlines)).toEqual(new Set([600000]));
     expect(snapshot.activeRolloutId).toBeNull();
   });
 
   for (const mode of ["pending", "unverified"] as const) {
-    test(mode + " stops at the unchanged 180-second deadline", async () => {
+    test(mode + " stops at the 600-second deadline", async () => {
       let elapsed = 0;
       let reads = 0;
       await expect(
@@ -851,8 +853,8 @@ describe("rollout polling uses the existing deadline rather than a shorter attem
           },
         ),
       ).rejects.toThrow("cf_container_rollout_pending");
-      expect(elapsed).toBe(180000);
-      expect(reads).toBe(36);
+      expect(elapsed).toBe(600000);
+      expect(reads).toBe(120);
     });
   }
 
@@ -862,7 +864,7 @@ describe("rollout polling uses the existing deadline rather than a shorter attem
     await expect(
       waitForApplicationRollout(
         async () => {
-          elapsed += 179000;
+          elapsed += 599000;
           return state(true);
         },
         {
@@ -874,13 +876,13 @@ describe("rollout polling uses the existing deadline rather than a shorter attem
         },
       ),
     ).rejects.toThrow("cf_container_rollout_pending");
-    expect(elapsed).toBe(180000);
+    expect(elapsed).toBe(600000);
     expect(waits.at(-1)).toBe(1000);
     elapsed = 0;
     await expect(
       waitForApplicationRollout(
         async () => {
-          elapsed = 180001;
+          elapsed = 600001;
           return state(false);
         },
         { now: () => elapsed },
@@ -912,17 +914,17 @@ describe("rollout polling uses the existing deadline rather than a shorter attem
   });
 
   test("control-plane calls cannot begin or confirm results beyond their shared deadline", async () => {
-    let elapsed = 180000;
+    let elapsed = 600000;
     let requests = 0;
     const api = cloudflareApi({
       accountId: account,
       token: "synthetic-token",
-      deadline: 180000,
+      deadline: 600000,
       now: () => elapsed,
       reportDiagnostic: () => {},
       fetchImpl: async () => {
         requests++;
-        elapsed = 180001;
+        elapsed = 600001;
         return new Response(JSON.stringify({ success: true, result: {} }));
       },
     });
@@ -930,7 +932,7 @@ describe("rollout polling uses the existing deadline rather than a shorter attem
       "cf_container_rollout_pending",
     );
     expect(requests).toBe(0);
-    elapsed = 179999;
+    elapsed = 599999;
     await expect(api(`containers/applications/${target.appId}`)).rejects.toThrow(
       "cf_container_rollout_pending",
     );
@@ -947,13 +949,13 @@ describe("rollout polling uses the existing deadline rather than a shorter attem
     try {
       // Keep the logical deadline stable until the real native timer aborts.
       // This avoids a loaded test host consuming the budget before fetch starts.
-      let clock = 179900;
+      let clock = 599900;
       let signalAborted = false;
       let reads = 0;
       const limitedApi = cloudflareApi({
         accountId: account,
         token: "synthetic-token",
-        deadline: 180000,
+        deadline: 600000,
         now: () => clock,
         reportDiagnostic: () => {},
         fetchImpl: async (_url: string, init: RequestInit) =>
@@ -967,7 +969,7 @@ describe("rollout polling uses the existing deadline rather than a shorter attem
               () => {
                 clearTimeout(watchdog);
                 signalAborted = signal.aborted;
-                clock = 180000;
+                clock = 600000;
                 reject(signal.reason);
               },
               { once: true },
@@ -998,4 +1000,173 @@ describe("rollout polling uses the existing deadline rather than a shorter attem
       timeoutSpy.mockRestore();
     }
   });
+});
+
+describe("the total postcheck budget includes registry proof and final live state", () => {
+  const complete = () => {
+    const snapshot = applicationSnapshot(target, app(), bindings(), account);
+    return {
+      snapshot,
+      versions: [
+        { version: snapshot.version, configuration: { image: snapshot.image }, percentage: 100 },
+      ],
+    };
+  };
+  test("a target completing after 180 seconds succeeds, with no deadline reset for proof", async () => {
+    let clock = 0,
+      reads = 0,
+      proofs = 0;
+    const deadlines: number[] = [];
+    const snapshot = await waitForApplicationPostcheck(
+      async (deadline: number) => {
+        deadlines.push(deadline);
+        reads++;
+        const state = complete();
+        if (clock < 590000) state.snapshot.activeRolloutId = "00000000-0000-4000-8000-000000000001";
+        return state;
+      },
+      async (_snapshot: unknown, deadline: number) => {
+        deadlines.push(deadline);
+        proofs++;
+        clock += 9999;
+      },
+      {
+        now: () => clock,
+        wait: async (ms: number) => {
+          clock += ms;
+        },
+      },
+    );
+    expect(CONTAINER_POSTCHECK_TIMEOUT_MS).toBe(600000);
+    expect(clock).toBe(599999);
+    expect(proofs).toBe(1);
+    expect(reads).toBe(120); // 119 convergence reads plus the final complete readback
+    expect(new Set(deadlines)).toEqual(new Set([600000]));
+    expect(snapshot.activeRolloutId).toBeNull();
+  });
+  test("an inherited deadline covers slow initial reads, proof and final response", async () => {
+    for (const latePhase of ["initial", "proof", "final"]) {
+      let clock = 599990,
+        reads = 0,
+        proofs = 0;
+      await expect(
+        waitForApplicationPostcheck(
+          async (deadline: number) => {
+            expect(deadline).toBe(600000);
+            reads++;
+            if ((latePhase === "initial" && reads === 1) || (latePhase === "final" && reads === 2))
+              clock = 600000;
+            return complete();
+          },
+          async (_snapshot: unknown, deadline: number) => {
+            expect(deadline).toBe(600000);
+            proofs++;
+            if (latePhase === "proof") clock = 600000;
+          },
+          { deadline: 600000, now: () => clock },
+        ),
+      ).rejects.toThrow("cf_container_rollout_pending");
+      expect(proofs).toBe(latePhase === "initial" ? 0 : 1);
+      expect(reads).toBe(latePhase === "final" ? 2 : 1);
+    }
+  });
+  test("a final pending state polls within the same budget and cannot gain another 600 seconds", async () => {
+    let clock = 595000,
+      reads = 0,
+      proofs = 0;
+    const deadlines: number[] = [];
+    await expect(
+      waitForApplicationPostcheck(
+        async (deadline: number) => {
+          deadlines.push(deadline);
+          reads++;
+          const state = complete();
+          if (reads === 2) state.snapshot.activeRolloutId = "00000000-0000-4000-8000-000000000001";
+          return state;
+        },
+        async () => {
+          proofs++;
+        },
+        {
+          deadline: 600000,
+          now: () => clock,
+          wait: async (ms: number) => {
+            clock += ms;
+          },
+        },
+      ),
+    ).rejects.toThrow("cf_container_rollout_pending");
+    expect(clock).toBe(600000);
+    expect(reads).toBe(2);
+    expect(proofs).toBe(1);
+    expect(new Set(deadlines)).toEqual(new Set([600000]));
+  });
+  test("registry errors and final identity failures never become another polling attempt", async () => {
+    for (const phase of ["proof", "final"]) {
+      let reads = 0,
+        proofs = 0,
+        waits = 0;
+      await expect(
+        waitForApplicationPostcheck(
+          async () => {
+            reads++;
+            if (phase === "final" && reads === 2)
+              throw Error("cf_container_publication_superseded");
+            return complete();
+          },
+          async () => {
+            proofs++;
+            if (phase === "proof") throw Error("cf_container_registry_image_mismatch");
+          },
+          {
+            now: () => 0,
+            wait: async () => {
+              waits++;
+            },
+          },
+        ),
+      ).rejects.toThrow(phase === "proof" ? "registry_image_mismatch" : "publication_superseded");
+      expect(proofs).toBe(1);
+      expect(waits).toBe(0);
+      expect(reads).toBe(phase === "proof" ? 1 : 2);
+    }
+  });
+});
+
+test("malformed inactive allocation entries fail immediately even beside a bound complete target", async () => {
+  const snapshot = applicationSnapshot(target, app(), bindings(), account);
+  const valid = {
+    version: snapshot.version,
+    percentage: 100,
+    configuration: { image: snapshot.image },
+  };
+  for (const versions of [
+    { versions: [valid] },
+    [valid, { version: "bogus", percentage: 0, configuration: { image: snapshot.image } }],
+    [valid, { version: 2, percentage: 0 }],
+  ]) {
+    let reads = 0,
+      waits = 0,
+      proofs = 0;
+    await expect(
+      waitForApplicationPostcheck(
+        async () => {
+          reads++;
+          return { snapshot, versions };
+        },
+        async () => {
+          proofs++;
+        },
+        {
+          now: () => 0,
+          wait: async () => {
+            waits++;
+          },
+        },
+      ),
+    ).rejects.toThrow("cf_container_version_shape");
+    expect(reads).toBe(1);
+    expect(waits).toBe(0);
+    expect(proofs).toBe(0);
+  }
 });

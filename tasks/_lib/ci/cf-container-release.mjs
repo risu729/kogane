@@ -15,6 +15,8 @@ import { fileURLToPath } from "node:url";
 import { parseJsonc } from "../../../scripts/jsonc.ts";
 import { resolve } from "node:path";
 
+export const CONTAINER_POSTCHECK_TIMEOUT_MS = 600000;
+
 export const CONTAINER_TARGETS = [
   {
     name: "globalpass-worker",
@@ -238,8 +240,29 @@ export function verifyApplicationIdentity(before, after) {
     if (!same(before[key], after[key])) fail("namespace_changed");
 }
 
+/** Unknown allocation entries are never evidence, including inactive zero-percent entries. */
+export function verifyApplicationVersions(versions) {
+  if (
+    !Array.isArray(versions) ||
+    versions.some(
+      (entry) =>
+        !entry ||
+        typeof entry !== "object" ||
+        typeof entry.configuration?.image !== "string" ||
+        !entry.configuration.image ||
+        !Number.isSafeInteger(entry.version) ||
+        entry.version < 0 ||
+        !Number.isFinite(entry.percentage) ||
+        entry.percentage < 0 ||
+        entry.percentage > 100,
+    )
+  )
+    fail("version_shape");
+}
+
 /** Control-plane completion only; zero sleeping instances do not need waking. */
 export function verifyApplicationRollout(snapshot, versions) {
+  verifyApplicationVersions(versions);
   if (snapshot.activeRolloutId !== null) fail("rollout_pending");
   if (
     !Number.isInteger(snapshot.version) ||
@@ -265,36 +288,21 @@ export function verifyApplicationBaseline(before, current, versions) {
     current.image !== before.image
   )
     fail("baseline_changed");
-  if (
-    !Array.isArray(versions) ||
-    versions.some(
-      (entry) =>
-        !entry ||
-        typeof entry !== "object" ||
-        typeof entry.configuration?.image !== "string" ||
-        !entry.configuration.image ||
-        !Number.isSafeInteger(entry.version) ||
-        entry.version < 0 ||
-        !Number.isFinite(entry.percentage) ||
-        entry.percentage < 0 ||
-        entry.percentage > 100,
-    )
-  )
-    fail("version_shape");
+  verifyApplicationVersions(versions);
   if (versions.some((entry) => entry.version > before.version)) fail("baseline_changed");
   verifyApplicationRollout(current, versions);
 }
 
-/** Keep the existing 180-second rollout window; an attempt cap must not shorten it. */
+/** All reads and waits consume one absolute postcheck deadline; never reset it. */
 export async function waitForApplicationRollout(
   readState,
   {
     now = Date.now,
     wait = (ms) => new Promise((resolveWait) => setTimeout(resolveWait, ms)),
     publication,
+    deadline = now() + CONTAINER_POSTCHECK_TIMEOUT_MS,
   } = {},
 ) {
-  const deadline = now() + 180000;
   while (now() < deadline) {
     const { snapshot, versions } = await readState(deadline);
     if (now() >= deadline) fail("rollout_pending");
@@ -317,6 +325,42 @@ export async function waitForApplicationRollout(
     await wait(Math.min(5000, remaining));
   }
   fail("rollout_pending");
+}
+
+/** Registry proof and the final complete readback share the original polling budget. */
+export async function waitForApplicationPostcheck(
+  readState,
+  verifyImage,
+  { now = Date.now, wait, publication, deadline = now() + CONTAINER_POSTCHECK_TIMEOUT_MS } = {},
+) {
+  return waitForApplicationRollout(
+    async (sharedDeadline) => {
+      const state = await readState(sharedDeadline);
+      if (now() >= sharedDeadline) fail("rollout_pending");
+      if (
+        publication &&
+        (state.snapshot.version !== publication.version ||
+          state.snapshot.image !== publication.image)
+      )
+        return state;
+      try {
+        verifyApplicationRollout(state.snapshot, state.versions);
+      } catch (error) {
+        if (
+          !["cf_container_rollout_pending", "cf_container_rollout_unverified"].includes(
+            error.message,
+          )
+        )
+          throw error;
+        return state;
+      }
+      await verifyImage(state.snapshot, sharedDeadline);
+      if (now() >= sharedDeadline) fail("rollout_pending");
+      // A registry-time replacement or resumed rollout must never become verified.
+      return readState(sharedDeadline);
+    },
+    { now, wait, publication, deadline },
+  );
 }
 
 /** Use the authenticated current namespace, while refusing any baseline drift. */
@@ -589,6 +633,7 @@ export function cloudflareApi({
       if (deadline !== undefined && now() >= deadline) fail("rollout_pending");
       reject("api_unavailable");
     }
+    if (deadline !== undefined && now() >= deadline) fail("rollout_pending");
     // Production credentials POST returns 201; every GET still requires 200.
     if (
       response.status !== 200 &&
@@ -729,6 +774,7 @@ async function main() {
     console.log(JSON.stringify(counts));
     return;
   }
+  const postDeadline = command === "post" ? Date.now() + CONTAINER_POSTCHECK_TIMEOUT_MS : undefined;
   const temp = process.env.RUNNER_TEMP;
   const plan = JSON.parse(readFileSync(resolve(temp, "release-plan.json"), "utf8"));
   const order = JSON.parse(readFileSync(resolve(root, "infra/deploy-order.json"), "utf8"));
@@ -895,27 +941,33 @@ async function main() {
     if (!target) fail("target_unknown");
     const image = JSON.parse(readFileSync(path, "utf8")).find((entry) => entry.name === argument);
     const before = JSON.parse(readFileSync(baseline, "utf8"));
+    const original = before.snapshots.find((entry) => entry.name === argument);
     const receipt = JSON.parse(readFileSync(resolve(temp, "resume-receipt.json"), "utf8"));
     const bound = receipt.targets.find((entry) => entry.name === argument);
     if (!bound) fail("publication_receipt_missing");
     const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-    const api = cloudflareApi({ accountId, token: process.env.CLOUDFLARE_API_TOKEN });
-    const snapshot = await waitForApplicationRollout(
+    const api = cloudflareApi({
+      accountId,
+      token: process.env.CLOUDFLARE_API_TOKEN,
+      deadline: postDeadline,
+    });
+    const snapshot = await waitForApplicationPostcheck(
       async (deadline) => {
-        // All four control-plane reads share the remaining polling window.
+        // Every initial/final identity and allocation read shares the entry budget.
         const rolloutApi = cloudflareApi({
           accountId,
           token: process.env.CLOUDFLARE_API_TOKEN,
           deadline,
         });
+        await currentRegistryNamespace(rolloutApi, before.registryNamespace);
         const current = await readApplication(target, rolloutApi, accountId);
-        verifyApplicationIdentity(
-          before.snapshots.find((entry) => entry.name === argument),
-          current,
-        );
+        verifyApplicationIdentity(original, current);
         const versions = await rolloutApi(`containers/applications/${target.appId}/versions`);
+        verifyApplicationVersions(versions);
         if (
           current.workerVersion !== bound.workerVersion ||
+          current.version < original.version ||
+          (current.version === original.version && current.image !== original.image) ||
           current.version > bound.version ||
           versions.some((entry) => entry.version > bound.version) ||
           (current.version === bound.version && current.image !== bound.image)
@@ -925,21 +977,25 @@ async function main() {
         // while GET application still describes the previous desired version.
         return { snapshot: current, versions };
       },
-      { publication: bound },
+      async (current, deadline) => {
+        const credentials = await api("containers/registries/registry.cloudflare.com/credentials", {
+          expiration_minutes: 5,
+          permissions: ["pull"],
+        });
+        const registryNamespace = await currentRegistryNamespace(api, before.registryNamespace);
+        await verifyRegistryImage({
+          target,
+          image: current.image,
+          imageId: image.imageId,
+          registryNamespace,
+          deadline,
+          ...credentials,
+        });
+        if (image.legacy && image.registryImage !== current.image) fail("rollback_image_changed");
+      },
+      { publication: bound, deadline: postDeadline },
     );
-    const credentials = await api("containers/registries/registry.cloudflare.com/credentials", {
-      expiration_minutes: 5,
-      permissions: ["pull"],
-    });
-    const registryNamespace = await currentRegistryNamespace(api, before.registryNamespace);
-    await verifyRegistryImage({
-      target,
-      image: snapshot.image,
-      imageId: image.imageId,
-      registryNamespace,
-      ...credentials,
-    });
-    if (image.legacy && image.registryImage !== snapshot.image) fail("rollback_image_changed");
+    if (Date.now() >= postDeadline) fail("rollout_pending");
     // applicationSnapshot returned only validated operational IDs, digest and rollout scalars.
     writeFileSync(resolve(temp, `container-${argument}-verified.json`), JSON.stringify(snapshot));
   } else if (command === "progress") {

@@ -234,7 +234,7 @@ describe("same-run ledger and immutable artifact trust", () => {
   });
 });
 
-describe("exact publication readback and the unchanged convergence window", () => {
+describe("exact publication readback and the bounded convergence window", () => {
   test("uniquely captures intended new version even while current desired version is old", () => {
     expect(
       publicationCandidate(
@@ -343,7 +343,7 @@ describe("exact publication readback and the unchanged convergence window", () =
     expect(now).toBe(130000);
     verifyApplicationRollout(snapshot, [{ version: 4, percentage: 100, configuration: { image } }]);
   });
-  test("a permanently old but complete application still fails at exactly 180 seconds", async () => {
+  test("a permanently old but complete application still fails at exactly 600 seconds", async () => {
     let now = 0;
     await expect(
       waitForApplicationRollout(
@@ -360,7 +360,7 @@ describe("exact publication readback and the unchanged convergence window", () =
         },
       ),
     ).rejects.toThrow("rollout_pending");
-    expect(now).toBe(180000);
+    expect(now).toBe(600000);
   });
 });
 
@@ -996,3 +996,170 @@ test("real Node capture waits for allocation visibility and rechecks proof befor
     rmSync(temp, { recursive: true, force: true });
   }
 });
+
+for (const phase of [
+  "success",
+  "namespace-late",
+  "credentials-late",
+  "registry-fetch-late",
+  "registry-child-late",
+  "cf-body-late",
+  "registry-body-late",
+  "final-late",
+  "final-namespace",
+  "final-worker",
+  "final-image",
+  "final-older",
+  "unknown",
+  "malformed-other",
+  "malformed-array",
+] as const)
+  test(
+    "native postcheck shares 600 seconds across CF, registry and final readback: " + phase,
+    () => {
+      const { spawnSync } = require("node:child_process");
+      const temp = mkdtempSync(resolve(tmpdir(), "kogane-postcheck-cli-"));
+      try {
+        const imageId = `sha256:${"f".repeat(64)}`;
+        const registryBytes = JSON.stringify({ config: { digest: imageId } });
+        const childDigest = `sha256:${createHash("sha256").update(registryBytes).digest("hex")}`;
+        const indexBytes = JSON.stringify({
+          manifests: [{ digest: childDigest, platform: { os: "linux", architecture: "amd64" } }],
+        });
+        const indexDigest = `sha256:${createHash("sha256").update(indexBytes).digest("hex")}`;
+        const newImage = `registry.cloudflare.com/synthetic/${target.appName}@${indexDigest}`;
+        writeFileSync(
+          resolve(temp, "container-baseline.json"),
+          JSON.stringify({ registryNamespace: "synthetic", snapshots: [before] }),
+        );
+        writeFileSync(
+          resolve(temp, "resume-receipt.json"),
+          JSON.stringify({ targets: [{ ...before, version: 4, image: newImage }] }),
+        );
+        writeFileSync(
+          resolve(temp, "release-plan.json"),
+          JSON.stringify({ selected: [target.name] }),
+        );
+        const trace = resolve(temp, "trace.json"),
+          bootstrap = resolve(temp, "bootstrap.mjs");
+        writeFileSync(
+          bootstrap,
+          `
+      import {writeFileSync} from 'node:fs';
+      let clock=0,reads=0,registryReads=0; const signals=[]; Date.now=()=>clock;
+      const nativeTimeout=AbortSignal.timeout.bind(AbortSignal);
+      AbortSignal.timeout=(ms)=>{signals.push(ms);return nativeTimeout(ms)};
+      globalThis.setTimeout=(done,ms)=>{clock+=ms;queueMicrotask(done);return {unref(){}}};
+      const mode=process.env.MOCK_MODE;
+      process.on('exit',()=>writeFileSync(${JSON.stringify(trace)},JSON.stringify({clock,reads,registryReads,signals})));
+      globalThis.fetch=async(url,options={})=>{
+        const text=String(url);let value;
+        if(text.startsWith('https://registry.cloudflare.com/')){
+          registryReads++;
+          const bytes=text.endsWith(${JSON.stringify(indexDigest)})?${JSON.stringify(indexBytes)}:${JSON.stringify(registryBytes)};
+          if(mode==='registry-fetch-late'||mode==='registry-child-late'&&registryReads===2)clock=600000;
+          if(mode==='registry-body-late')return new Response(new ReadableStream({pull(controller){clock=600000;controller.enqueue(new TextEncoder().encode(bytes));controller.close()}}));
+          return new Response(bytes);
+        }
+        if(text.endsWith('/containers/me')){
+          if(mode==='namespace-late')clock=600000;
+          value={external_account_id:mode==='final-namespace'&&registryReads>0?'alien':'synthetic'};
+        } else if(text.endsWith('/credentials')){
+          if(mode==='credentials-late')clock=600000;
+          value={account_id:'synthetic',registry_host:'registry.cloudflare.com',username:'synthetic',password:'synthetic'};
+        } else if(text.endsWith('/deployments')){
+          reads++;
+          if(mode==='unknown')return new Response('synthetic', {status:403});
+          value={deployments:[{versions:[{version_id:mode==='final-worker'&&registryReads>0?'ffffffff-ffff-4fff-afff-ffffffffffff':${JSON.stringify(versionId)},percentage:100}]}]};
+        } else if(text.includes('/workers/scripts/'))value={resources:{bindings:[{type:'durable_object_namespace',class_name:${JSON.stringify(target.className)},namespace_id:${JSON.stringify("e".repeat(32))}}]}};
+        else if(text.endsWith('/versions')){value=[{version:mode==='delayed'&&reads===1?3:4,percentage:100,configuration:{image:mode==='delayed'&&reads===1?${JSON.stringify(image)}:${JSON.stringify(newImage)}}}];if(mode==='malformed-other')value.push({version:'bogus',percentage:0,configuration:{image:${JSON.stringify(newImage)}}});if(mode==='malformed-array')value={versions:value};}
+        else if(text.includes('/containers/applications/')){
+          if(mode==='delayed'&&reads===1)clock=590000;
+          if(mode==='final-late'&&registryReads>0)clock=600000;
+          value={id:${JSON.stringify(target.appId)},name:${JSON.stringify(target.appName)},account_id:${JSON.stringify("b".repeat(32))},scheduling_policy:'default',max_instances:2,configuration:{vcpu:0.25,memory_mib:1024,disk:{size_mb:4000},image:(mode==='delayed'&&reads===1)||(mode==='final-image'&&registryReads>0)||mode==='final-older'&&registryReads>0?${JSON.stringify(image)}:${JSON.stringify(newImage)}},constraints:{regions:['APAC']},durable_objects:{namespace_id:${JSON.stringify("e".repeat(32))}},version:mode==='final-older'&&registryReads>0?2:mode==='delayed'&&reads===1?3:4,active_rollout_id:mode==='final-active'&&reads===2?'11111111-1111-4111-a111-111111111111':null};
+        } else throw Error('unexpected request');
+        if(mode==='cf-body-late')return {status:200,json:async()=>{clock=600000;return {success:true,result:value}}};
+        return Response.json({success:true,result:value});
+      };`,
+        );
+        const saved = resolve(temp, `container-${target.name}-verified.json`);
+        const run = (mode: string) => {
+          rmSync(saved, { force: true });
+          writeFileSync(
+            resolve(temp, "container-manifest.json"),
+            JSON.stringify([
+              { name: target.name, imageId, legacy: mode === "legacy", registryImage: newImage },
+            ]),
+          );
+          return spawnSync(
+            "node",
+            [
+              "--import",
+              bootstrap,
+              resolve(REPO_ROOT, "tasks/_lib/ci/cf-container-release.mjs"),
+              "post",
+              target.name,
+            ],
+            {
+              cwd: REPO_ROOT,
+              env: {
+                ...process.env,
+                RUNNER_TEMP: temp,
+                MOCK_MODE: mode,
+                CLOUDFLARE_ACCOUNT_ID: "b".repeat(32),
+                CLOUDFLARE_API_TOKEN: "synthetic",
+              },
+              encoding: "utf8",
+            },
+          );
+        };
+        for (const mode of phase === "success"
+          ? ["success", "delayed", "legacy", "final-active"]
+          : []) {
+          const result = run(mode);
+          expect(result.status).toBe(0);
+          expect(result.stderr).toBe("");
+          expect(JSON.parse(readFileSync(saved, "utf8"))).toMatchObject({
+            version: 4,
+            image: newImage,
+            workerVersion: versionId,
+            activeRolloutId: null,
+          });
+          const observed = JSON.parse(readFileSync(trace, "utf8"));
+          expect(observed.reads).toBeGreaterThanOrEqual(2);
+          if (mode === "delayed") {
+            expect(observed.clock).toBe(595000);
+            expect(observed.signals).toContain(5000);
+          }
+          if (mode === "final-active") {
+            expect(observed.clock).toBe(5000);
+            expect(observed.registryReads).toBe(4);
+          }
+        }
+        for (const [mode, code] of [
+          ["namespace-late", "rollout_pending"],
+          ["credentials-late", "rollout_pending"],
+          ["registry-fetch-late", "rollout_pending"],
+          ["registry-child-late", "rollout_pending"],
+          ["cf-body-late", "rollout_pending"],
+          ["registry-body-late", "rollout_pending"],
+          ["final-late", "rollout_pending"],
+          ["final-namespace", "registry_namespace_changed"],
+          ["final-worker", "publication_superseded"],
+          ["final-image", "publication_superseded"],
+          ["final-older", "publication_superseded"],
+          ["unknown", "api_http"],
+          ["malformed-other", "version_shape"],
+          ["malformed-array", "version_shape"],
+        ].filter(([mode]) => mode === phase)) {
+          const result = run(mode!);
+          expect(result.status).toBe(1);
+          expect(result.stderr).toContain(`cf_container_${code}`);
+          expect(readdirSync(temp)).not.toContain(`container-${target.name}-verified.json`);
+          expect(result.stderr).not.toContain("synthetic-token");
+        }
+      } finally {
+        rmSync(temp, { recursive: true, force: true });
+      }
+    },
+  );

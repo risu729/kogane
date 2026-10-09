@@ -5,7 +5,7 @@
 
 ## Context
 
-Default-scheduling Container convergence can outlast the existing 180-second
+Default-scheduling Container convergence can outlast the original 180-second
 postcheck. Republishing the same Worker and image on a failed-job rerun starts
 another rollout. A control-plane snapshot observed later does not establish that
 it belongs to the original publication, even when the image content is identical.
@@ -111,8 +111,9 @@ exact Worker UUID and rejects a newer application version or desired image
 replacement. Success additionally requires the bound application version/image
 to be the desired target, exactly 100% allocation, every other version at 0%,
 no active rollout, unchanged app/namespace/default/APAC/basic/max-instance
-settings and the original registry image-config digest. The polling deadline
-remains 180 seconds. Health postchecks, DO lifecycle checks and schedule alarm
+settings and the original registry image-config digest. At initial adoption the
+polling deadline was 180 seconds; the total postcheck amendment below changes it
+explicitly. Health postchecks, DO lifecycle checks and schedule alarm
 reconciliation still follow the final publication.
 
 ## Consequences
@@ -134,7 +135,7 @@ release. Hosted/live recovery remains separate from offline synthetic checks.
 
 Synthetic tests cover immutable binding/checksum failures, run/source/attempt
 substitution, expired artifacts, all newer ledger states, exact Worker and
-application supersession, ambiguity, old-version false success, the unchanged
+application supersession, ambiguity, old-version false success, the original
 180-second window, serial guard ordering, Container-only publication skips and
 failure-safe progress merging. The ordinary release, rollback schema, registry,
 DO and deployment-order guard suites remain applicable. Hosted CI exercises real
@@ -164,9 +165,9 @@ successful extraction, delete the tar. Move the extracted Docker archive within
 RUNNER_TEMP before copying the remaining small prepared files, with no fallback
 copy across filesystems. Delete that archive only after Docker load and the
 original exact image ID and input-digest checks succeed. This leaves at most two
-large archive representations during either extraction boundary. Identity,
-ledger, immutable-artifact, baseline and 180-second convergence checks retain
-their original contract.
+large archive representations during either extraction boundary.
+At that amendment's adoption, identity, ledger, immutable-artifact, baseline and
+180-second convergence checks retained their original contract.
 
 Unexpected restore errors report only closed stage codes; signed URLs, tokens,
 raw filesystem errors and command stderr are not printed. CI adds a mandatory
@@ -209,9 +210,10 @@ proof, never a latest or baseline-plus-one guess. Recheck the same candidate
 version/image, Worker UUID, namespace and application identity after registry
 verification. No receipt is written if that proof has changed or expired.
 
-The separate mandatory 180-second rollout guard, serial downstream gates,
-immutable artifact trust, supersession refusal and no historical receipt adoption
-remain unchanged. Synthetic clock and real Node CLI tests cover delayed visibility,
+At that amendment's adoption the separate mandatory 180-second rollout guard,
+serial downstream gates, immutable artifact trust, supersession refusal and no
+historical receipt adoption remained unchanged. Synthetic clock and real Node
+CLI tests cover delayed visibility,
 expiry and late responses, ambiguous versions, identity/image drift, legacy UUID
 replacement and unstable original baselines.
 
@@ -229,3 +231,59 @@ also passed. Deployment 6955120054 recorded success status 19505918237 at
 completed successfully at 07:33:09 UTC. This same-run proof does not establish
 the unobserved candidate count in the earlier failed captures or remove the
 privileged manual mutation timing limitation described above.
+
+## Proposed amendment: 600-second total Container postcheck (2026-10-09)
+
+The owner explicitly authorizes changing the original 180-second polling
+contract to a 600-second total postcheck budget. This is a deadline extension,
+not a hidden delay before the old guard or repeated fresh polling windows.
+Observed completion of one rollout occurred more than four minutes after its
+guard started and by just over eight minutes; the exact completion time was not
+observed. That supports a finite longer candidate budget, not a guarantee that
+all future rollouts complete within ten minutes.
+
+Create one absolute deadline at the `post` command's entry, before prepared
+metadata is read. Every Worker/application/allocation and authenticated registry
+namespace read, registry pull-credential request, immutable registry manifest
+body, and final complete live readback uses its remaining budget. Individual
+requests still have at most 30 seconds. Reject results at or beyond the deadline,
+including a response that completes late. After registry proof, re-read the exact
+Worker UUID, application version/image, DO and registry namespaces, resource
+policy and allocations. The final bound target must be at 100%, all others at 0%,
+with no active rollout. A final pending state may poll again only under the same
+entry deadline. Unknown responses, identity drift and supersession fail
+immediately; never refresh the accepted original baseline.
+
+The serial three Container boundaries, all seventeen normal Workers, explicit
+rollback subsets, immutable artifact/source/trusted-workflow bindings and
+supersession refusal retain their acceptance rules. The separate 30-second
+publication-capture deadline is unchanged. There is no new dispatch, automatic
+rerun controller, permission, token, collector invocation or scale change.
+Existing runs retain their original trusted workflow and deadline; this change
+does not patch or transplant their checkpoints.
+
+Each Container postcheck step has an 11-minute fail-safe timeout around the
+helper's ten-minute budget. The release job remains capped at 60 minutes. Three
+complete postcheck budgets consume at most 30 minutes, and three capture budgets
+at most another 90 seconds, excluding artifact upload time. One observed
+[original job](https://github.com/risu729/kogane/actions/runs/37903737597/job/113732081758)
+completed its prepared archive three minutes 51 seconds after job start,
+including checkout/toolchain work; the archive-packing step itself took 61 seconds.
+The
+[resumed job](https://github.com/risu729/kogane/actions/runs/37903737597/job/113737270531)
+restored its original release in six minutes 31 seconds. These observations are
+not worst-case bounds:
+setup, upload/download, migrations, ordinary publication, health/DO checks and
+schedule reconciliation must also fit within the job cap. A job timeout remains
+a failed release; it cannot report unchecked targets as successful. A killed
+process might not write a final failure status, so its existing pending ledger
+must not be interpreted as success. No automatic rollback is added.
+
+Reverting this deadline policy affects future trusted runs, while original
+same-run recovery and explicit rollback remain available under their existing
+proofs. Synthetic clock and native Node tests verify delayed success beyond the
+old limit, exact 600-second expiry, near-boundary success, shared CF/registry/body
+budgets, final identity drift, resumed final pending state without clock reset,
+legacy image proof, serial ordering and unchanged capture/artifact trust. The
+successful same-run proof recorded above exercised the earlier 180-second guard;
+it does not establish live success for this new deadline policy.
