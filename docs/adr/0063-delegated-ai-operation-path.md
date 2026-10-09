@@ -170,13 +170,13 @@ with per-target checks in their own pull request.
 **5. Every operation has a risk class, and the class decides the
 confirmation.**
 
-| Class | Meaning                                                                                     | Delegated                                                               |
-| ----- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| R0    | read                                                                                        | allowed, no confirmation                                                |
-| R1    | bounded, reversible by a further operation, no adopted financial state, no provider contact | direct: one call with an idempotency key and the expected revision      |
-| R2    | changes adopted state or a collection schedule, or contacts a provider                      | two-step: prepare → confirmation digest → confirm with the same payload |
-| R3    | needs a runtime judgement the server cannot verify, with no reverting operation             | not delegable now; the operator in the UI                               |
-| R4    | authority, secrets, deployment                                                              | never; no tool and no route                                             |
+| Class | Meaning                                                                                                                                            | Delegated                                                               |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| R0    | read                                                                                                                                               | allowed, no confirmation                                                |
+| R1    | bounded, reversible by a further operation, no adopted financial state, no provider contact                                                        | direct: one call with an idempotency key and the expected revision      |
+| R2    | changes adopted state or a collection schedule, or contacts a provider                                                                             | two-step: prepare → confirmation digest → confirm with the same payload |
+| R3    | needs a runtime judgement the server cannot verify, with no reverting operation; or held for the owner's decision (deferral beyond 7 days, item 8) | not delegable now; the operator in the UI                               |
+| R4    | authority, secrets, deployment                                                                                                                     | never; no tool and no route                                             |
 
 The assignment of every operation is the plan's mapping (section 5): plans,
 proposals, imports, replays, projection rebuilds, survey rejections and

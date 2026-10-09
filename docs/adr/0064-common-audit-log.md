@@ -84,21 +84,20 @@ revision. Columns: `audit_id` (`aud_` + UUID), `recorded_at` (canonical UTC
 milliseconds), `path` (`ui` / `agent-http` / `mcp` / `alarm` / `lane`),
 `subject` (the verified Access subject; NULL exactly for `alarm` and `lane`),
 `principal`, `principal_kind` (`human` / `agent` / `delegated` /
-`automatic`, the change lifecycle's `human` for the operator), `delegation_ref` (set exactly for `delegated`), `operation`
-(pattern-checked; the closed list is `OPERATION_CATALOGUE` in code),
+`automatic`, the change lifecycle's `human` for the operator),
+`delegation_ref` (set exactly for `delegated`), `operation` (pattern-checked;
+the closed list is `OPERATION_CATALOGUE` in code),
 `risk_class` (`R0`–`R4`), `step` (`call` / `prepare` / `confirm`),
 `scope_namespace` + `scope_source`, `target_ref`, `result` (`applied` /
 `accepted` / `prepared` / `read` / `replayed` / `refused` / `failed` /
-`overflow`),
-`result_code` (required for `refused` and `failed`), `reason_code`,
+`overflow`), `result_code` (required for `refused` and `failed`), `reason_code`,
 `correlation_id`, `idempotency_key`, `payload_digest`, `confirmation_digest` +
 `confirm_expires_at` (set exactly on `prepared`), `confirms_audit_id` (set
 exactly on `confirm`), `reverts_audit_id`, `refs_json` (≤ 16 closed refs into
 the existing logs) and `diff_json` (≤ 2,048 bytes, one closed schema per kind:
 `revision`, `decision`, `request`, `read`, `lane`, `release`, `overflow`,
 `none`; the `lane` kind holds only the sizes of the ranges its refs name).
-Every
-column is an enum, a bounded pattern, a digest, a count or a canonical time;
+Every column is an enum, a bounded pattern, a digest, a count or a canonical time;
 there is no free-text column. Indexes: by principal, by scope, by operation
 (each with `recorded_at`), by target and by correlation id; unique partial
 indexes on `confirms_audit_id` and on `(principal, operation,
@@ -198,8 +197,9 @@ get it from the unique index on `(principal, operation, idempotency_key)`.
 
 ## Consequences
 
-- Every operator write gains one row and every agent or MCP tool call one row;
-  the effect batches gain one statement.
+- Every operator write gains one row and every agent or MCP tool call one row,
+  below the daily caps (past them, one aggregated row per day); the effect
+  batches gain one statement.
 - Lease release gets its first durable trace (who released which source, and
   when); its own table stays mutable.
 - The Processor's command and schedule routes must accept and validate the
@@ -217,8 +217,8 @@ get it from the unique index on `(principal, operation, idempotency_key)`.
 
 This ADR is a design record; its pull request changes documentation only.
 The implementation slice (plan S1) is verified on synthetic data by: the
-migration guards (no update, delete or replace; the CHECK constraints refuse free text and
-mismatched optional columns; both unique partial indexes); the regenerated
+migration guards (no update, delete or replace; the CHECK constraints refuse
+free text and mismatched optional columns; both unique partial indexes); the regenerated
 schema ledger with the table classified `core-keep`; the migration pin in
 `services/processor/test/lanes.test.ts`; per route, a success record in the
 same batch as the effect (a failing guard leaves neither), refusal and replay

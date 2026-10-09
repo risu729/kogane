@@ -131,7 +131,9 @@ Goals:
 3. Each operation runs through the same application service as the UI does;
    the MCP tool only translates transport.
 4. Every operation, from every path, leaves one append-only audit record
-   (refusals and failures included) that the AI can read within its scope.
+   (refusals and failures included) that the AI can read within its scope;
+   reads, prepares and refusals past a principal's daily caps are aggregated
+   into one record per day instead (section 6.4).
 5. No read reveals an out-of-scope source, account, count or digest.
 
 Non-goals (this plan and its first slices):
@@ -317,13 +319,13 @@ What was applied stays applied; it is undone by a reverting operation
 
 ### 4.1 Risk classes
 
-| Class | Meaning                                                                                                 | Delegated confirmation                                                                                  |
-| ----- | ------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| R0    | Read; nothing changes                                                                                   | none                                                                                                    |
-| R1    | Bounded and reversible by a further operation; changes no adopted financial state; contacts no provider | **direct**: one call, with an idempotency key and, where the target is versioned, the expected revision |
-| R2    | Changes adopted state or a collection schedule, or contacts a provider                                  | **two-step**: prepare returns a confirmation digest; confirm presents it with the identical payload     |
-| R3    | Needs a judgement about runtime state the server cannot verify; a wrong call has no reverting operation | operator in the UI only; not delegable now                                                              |
-| R4    | Authority, secrets, deployment                                                                          | no tool, no route; never delegable                                                                      |
+| Class | Meaning                                                                                                                                                                                | Delegated confirmation                                                                                  |
+| ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| R0    | Read; nothing changes                                                                                                                                                                  | none                                                                                                    |
+| R1    | Bounded and reversible by a further operation; changes no adopted financial state; contacts no provider                                                                                | **direct**: one call, with an idempotency key and, where the target is versioned, the expected revision |
+| R2    | Changes adopted state or a collection schedule, or contacts a provider                                                                                                                 | **two-step**: prepare returns a confirmation digest; confirm presents it with the identical payload     |
+| R3    | Needs a judgement about runtime state the server cannot verify, a wrong call having no reverting operation; or held for the owner's decision (maintenance deferral beyond 7 days, 4.6) | operator in the UI only; not delegable now                                                              |
+| R4    | Authority, secrets, deployment                                                                                                                                                         | no tool, no route; never delegable                                                                      |
 
 A delegation entry may make a class stricter for itself (never looser); that
 is the only per-entry override, and it is a later addition, not part of S3.
@@ -1065,7 +1067,9 @@ contradicts it, so #564 lands as this slice, not before it.
    refused, the effect applied at most once; a target moved between prepare
    and confirm is refused with the writer's code. H2 and H6 prepare without a
    revision, and a repeat under the same key is the same `op_` operation.
-8. Every call writes exactly one record with closed fields; a writer failure
+8. Every call below the caps of item 13 writes exactly one record with closed
+   fields (a lost Processor answer adds the App's `failed` record under the
+   same correlation id, section 6.3); a writer failure
    leaves no effect and no `applied` record; deep scan of `audit_records`
    after seeding provider text containing a token-shaped string and an amount.
 9. Revocation, each of the five ways: the next call is refused; earlier
