@@ -269,11 +269,13 @@ the tests, 100 shares at 1,500 JPY and 12 shares at 130.70 USD at a 146.25
 mid are 150,000 and 229,378.5 JPY, total 379,378.5 JPY.
 
 What is absent, and why: each holding that is not valued names one closed
-outcome in the valuation order, never a zero:
+outcome in the valuation order, never a zero. The order's first step, claim
+adoption, is not applied (see below):
 
 | Outcome                 | When                                                                                                                                                              |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `instrument_unresolved` | no current instrument mapping with status `identified` or `provider-local` (the status is kept)                                                                   |
+| `snapshot_stale`        | the reported state classifies its snapshot `stale` (`dated-state-freshness-v1`, more than 3 days before D): its quantity on D is not known; ref and age are kept  |
 | `quantity_unknown`      | the decimal-v1 quantity is not exact (its status and reason are kept)                                                                                             |
 | `policy_mismatch`       | a selection handed in under another policy, from another snapshot or of another key                                                                               |
 | `unpriced`              | the price selection's refusal (`missing`, `stale` with ids and age, `disagree`, …), `unsupported_pair` without a currency, `price_not_positive`, an inexact basis |
@@ -281,26 +283,40 @@ outcome in the valuation order, never a zero:
 
 The total is stated only when every holding is valued and all come from one
 source; otherwise it is absent with `holding_not_valued`,
-`adoption_not_applied` (adoption across sources is not applied, so two
-sources could list one holding) or `no_holdings`, beside the counts per
-outcome. There is no partial subtotal, gain, cost basis or tax, and a
-provider's own valuation is never the value. A null policy is refused
+`adoption_not_applied` or `no_holdings`, beside the counts per outcome. When
+every listed holding is valued but a container that holds positions
+(`DATED_POSITION_CONTAINER_PARSERS`) has no snapshot on D, the total is
+`partial-verified-scope` with the number of such containers, never `exact`:
+as above, a partial result is never a whole total and not a lower bound.
+There is no subtotal over some valued holdings, no gain, cost basis or tax,
+and a provider's own valuation is never the value.
+
+Claim adoption is not applied: no relation claims exist for positions and
+the adoption rule is the owner's to decide (ADR 0056 amendment, open items).
+A holding two sources report is therefore valued once per listing, and only
+the total is withheld (`adoption_not_applied`) whenever the holdings come
+from more than one source. Today only SBI Securities and SBI VC Trade report
+positions, which cannot list one holding, but without a source filter the
+total is withheld whenever both report positions. A null policy is refused
 `policy_missing` before anything is read (the domain function answers
 `needs-policy`, as `costBasis()` does), a proposal or a policy with two price
-kinds `invalid_policy`, an account that does not exist `unknown_account`, and
+kinds `invalid_policy`, a source or an account that does not exist
+`unknown_source` or `unknown_account`, and
 more than 500 holdings or 500 price keys and currencies is refused, never cut.
 The manifest (engine, as-of, base unit, policies by digest, the reported
-state's date, cutoff, filters and quantity policy, snapshots and holdings by
-id with outcomes, and the selection manifest) holds no amount; its digest is
-the context id, so a corrected price gives a new context.
+state's date, cutoff, filters, quantity policy, context id and position
+containers without a snapshot, snapshots and holdings by id with outcomes,
+and the selection manifest) holds no amount; its digest is the context id, so
+a corrected price, or a different reported-state answer on D, gives a new
+context.
 
 This is not the report job: the report job values only at a price claimed
 from the holding's own snapshot, without FX, and writes fixed reports; this
 query values at a policy-selected as-of price and says so in its manifest.
 Neither replaces the other today. Limits: the knowledge mode bounds prices and
 rates, not the positions and identities, which are read as they are now; the
-total covers the listed holdings, with containers without a snapshot reported
-beside it rather than refusing it, and values no cash balance; values rounded
+total covers the listed holdings and values no cash balance; a holding of a
+`recent` snapshot (1–3 days old) is valued at prices for D; values rounded
 out of the pivot are rounded per holding before they are added; the whole
 query is not measured at scale.
 
@@ -520,15 +536,16 @@ would discard later collection and later decisions (docs/operations.md).
   end to end; the same inputs give the same context id, a new price a new one;
   unquotable currencies, malformed requests, misaligned bounds, ambiguous ids
   and proposals.
-- `packages/domain/test/valuation-on-date.test.ts` — every holding outcome,
-  stale and non-positive prices, inexact bases, missing and unquotable rates,
+- `packages/domain/test/valuation-on-date.test.ts` — every holding outcome
+  (a stale snapshot's holding `snapshot_stale`), stale and non-positive prices, inexact bases, missing and unquotable rates,
   policy mismatches, totals absent for an unvalued holding, two sources or
-  none, a USD holding into AUD rounded once, the `needs-policy` gate, and a
+  none and `partial-verified-scope` for a lacking position container, a USD holding into AUD rounded once, the `needs-policy` gate, and a
   context id stable across equal inputs and new for a corrected price;
   `packages/application/test/valuation-on-date-query.test.ts` — the query on
   migrated CORE with synthetic snapshots, prices and a board, known-at
-  before a correction, refusals, the 500-holding and 500-selection bounds, and
-  plans without statistics for its account check
+  before a correction, a 40-day-old snapshot under `latest-in-window`, a
+  lacking VC container, `unknown_source`, refusals, the 500-holding and 500-selection bounds, and
+  plans without statistics for its account and source checks
   (`packages/read-model/test/dated-state.test.ts` for its quantity read).
 - `packages/domain/test/reports.test.ts` — body validation and digest
   stability, storage key, event shapes, replayability and capabilities (AT66).

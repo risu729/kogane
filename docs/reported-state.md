@@ -184,6 +184,7 @@ run or identity table whole, and requires each answer under one second.
   Valuation of the listed positions in a base unit, under an explicit price
   and FX policy, is `queryValuationOnDate`
   ([calculation and reports §2](calculation-and-reports.md#valuation-on-a-date));
-  it has no route yet and states no total across sources.
+  it has no route yet, refuses holdings of `stale` snapshots, and states no
+  total across sources.
 - Nothing is stored: a reported state has no fixed report or
   `calculation_runs` row yet.

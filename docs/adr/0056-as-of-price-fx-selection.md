@@ -348,8 +348,13 @@ across sources.
 - **Domain.** `valueHoldingsOnDate` (`packages/domain/src/valuation-on-date.ts`)
   takes the holdings, the policy (`price`, `fx`, `calendars`), the base unit,
   the bound and the selections, and decides each holding in the valuation
-  order, ending in exactly one of `instrument_unresolved` (the reported state
-  has no instrument mapping with status `identified` or `provider-local`),
+  order (with the exception below: claim adoption is not applied), ending in
+  exactly one of `instrument_unresolved` (the reported state has no
+  instrument mapping with status `identified` or `provider-local`),
+  `snapshot_stale` (the reported state classifies the holding's snapshot
+  `stale` under its own `dated-state-freshness-v1`, more than 3 days before D;
+  the holding's quantity on D is not known, so no price is selected for it and
+  its snapshot ref and age are kept; no new threshold is introduced),
   `quantity_unknown` (the decimal-v1 quantity is not exact; its status and
   reason are kept), `policy_mismatch` (`price_selection_policy`,
   `price_selection_scope`, `fx_selection_policy`, `fx_selection_key`: a
@@ -366,31 +371,51 @@ across sources.
   `same-snapshot` policy narrows it to the position's own parse run.
 - **Totals.** A total is stated only when every holding is valued and all
   holdings come from one source; otherwise it is `absent` with
-  `holding_not_valued`, `adoption_not_applied` (two sources could list one
-  holding, and adoption across sources is not applied, INV06) or
-  `no_holdings`, beside the counts per outcome. Values are added with
-  `sumQuantities`. There is no partial subtotal, no gain, no cost basis and no
-  tax; a provider's own valuation of a holding is never its value.
+  `holding_not_valued`, `adoption_not_applied` (see below) or `no_holdings`,
+  beside the counts per outcome. When every listed holding is valued but a
+  container of the perimeter that holds positions
+  (`DATED_POSITION_CONTAINER_PARSERS`: the SBI Securities domestic and
+  foreign positions and SBI VC Trade's position summary, checked against the
+  parsers that emit position observations) has no snapshot on D, the total is
+  `partial-verified-scope` with the number of such containers, never
+  `exact`: a partial result is never labelled a whole total (calculation and
+  reports §2), and it is not a lower bound either. Values are added with
+  `sumQuantities`. There is no subtotal over some valued holdings, no gain, no
+  cost basis and no tax; a provider's own valuation of a holding is never its
+  value.
+- **Claim adoption is not applied.** The valuation order starts with claim
+  adoption, so that an overlap is reported as an overlap and not as an
+  unpriced holding, and [ADR 0019](0019-dated-reported-state.md) leaves
+  `selectAdoptedSet` to this phase. This query does not apply it: no relation
+  claims exist for positions, and which route adopts a holding two sources
+  report is not decided. What follows: a holding two sources report is
+  valued once per listing, each on its own row; only the total is withheld,
+  with `adoption_not_applied`, whenever the holdings come from more than one
+  source. Today only `sbi-securities` and `sbi-vc-trade` produce positions,
+  and they cannot list one holding, but the rule does not know that, so a
+  total without a source filter is withheld whenever both report positions.
 - **The gate.** A null policy answers `needs-policy` with `policy_missing`,
   the shape `costBasis()` has; a policy whose id starts with `proposal:`
   answers `policy_proposal`. No function has a default policy.
 - **Manifest.** `valuation-on-date-v1`: the engine version
   (`valuation-on-date-engine-v1`), the as-of (date, `effectiveBefore`,
   knowledge mode), the base unit, the three policies by id and digest, the
-  reported state's date, cutoff, filters and quantity policy (`decimal-v1`),
-  every snapshot with its parse run, every holding by ref with its outcome,
+  reported state's date, cutoff, filters, quantity policy (`decimal-v1`),
+  context id and position containers without a snapshot, every snapshot with its parse run, every holding by ref with its outcome,
   reason, price id and FX price ids, and the selection manifest with its
   digest, recomputed from the selections handed in. It holds ids and codes,
   never an amount. Its `canonicalDigest` is the context id: equal inputs give
-  one id in any order, and a corrected price, a changed policy or a changed
-  outcome gives another.
+  one id in any order, and a corrected price, a changed policy, a changed
+  outcome or a different reported-state answer on D (its context id moves
+  with any statement or settlement it lists, too) gives another.
 - **Application.** `queryValuationOnDate`
   (`packages/application/src/query/valuation-on-date.ts`) refuses
   `policy_missing` before any read, then `invalid_policy` (invalid parts, two
   price kinds, a proposal, an ambiguous id, or a zone in which the Tokyo date
   does not end at `reportedStateCutoff(D)`), `invalid_request`,
-  `date_in_future` (after the caller's stated today; the query has no clock)
-  and `unknown_account` (`ACCOUNT_EXISTS_SQL`, by primary key). It then reads
+  `date_in_future` (after the caller's stated today; the query has no clock),
+  `unknown_source` (`SOURCE_EXISTS_SQL`) and `unknown_account`
+  (`ACCOUNT_EXISTS_SQL`), each by primary key. It then reads
   the reported state on D under the requested source and account
   (`queryDatedState`), each position's parse run and decimal-v1 quantity
   (`DATED_POSITION_QUANTITIES_SQL`, by primary keys), and selects one price per
@@ -422,9 +447,10 @@ across sources.
 - **Limits.** The knowledge mode bounds prices and rates only: positions,
   identities and account mappings are read as they are now (the reported
   state's own limits), so a `known-at` answer is not the holdings as known at
-  K. The total covers the holdings the reported state lists; a perimeter
-  container without a snapshot is reported beside it, not counted as a reason
-  for its absence, and cash balances are not valued. A holding is valued at
+  K. The total covers the holdings the reported state lists: a position
+  container without a snapshot makes it `partial-verified-scope`, and cash
+  balances are not valued. A holding of a `recent` snapshot (1–3 days old)
+  is valued at prices for D; only `stale` snapshots are refused. A holding is valued at
   its position's currency only; another source's price for the same
   instrument is not used. Values rounded out of the pivot are rounded per
   holding before the total adds them. The query as a whole was not measured
@@ -432,11 +458,24 @@ across sources.
   statement-scale store, [reported state: cost](../reported-state.md#cost)),
   the keyed quantity read and the candidate read (above).
 
+### Open items for the owner
+
+- **The adoption rule for holdings.** Whether, and by which relation claims
+  and authority, a holding reported by two sources is adopted once before
+  valuation (`selectAdoptedSet`), and so whether a cross-source total may be
+  stated, is the owner's decision; until then the total is withheld
+  (`adoption_not_applied`). Not decided here.
+- The fourteen selection questions above, and which surface uses this query
+  or the report job.
+
 ### Verification
 
 With synthetic data only:
 
-- `packages/domain/test/valuation-on-date.test.ts`: every outcome code, a
+- `packages/domain/test/valuation-on-date.test.ts`: every outcome code,
+  `snapshot_stale` (40 days, no price wanted) beside a `recent` snapshot
+  valued, `partial-verified-scope` with one lacking container, a different
+  reported-state context giving a new context, a
   provider-local mapping valued, a stale price `unpriced` with its id and age
   and the same price valued at the limit, zero and negative prices excluded
   from selection and refused when handed in selected, an inexact basis
@@ -450,17 +489,23 @@ With synthetic data only:
 - `packages/read-model/test/dated-state.test.ts`: `DATED_POSITION_QUANTITIES_SQL`
   returns each position's parse run and decimal-v1 quantity (an unreadable one
   `unparsed`) and, without table statistics, searches positions and decimals
-  by primary key only.
+  by primary key only; `DATED_POSITION_CONTAINER_PARSERS` equals the parsers
+  that emit a position observation.
 - `packages/application/test/valuation-on-date-query.test.ts`: on migrated
   CORE with synthetic snapshots, identities, snapshot prices and an
   exchange-rate board: two holdings valued (one in two exact hops) with an
   exact total; the same context on the same store, a new one after a
   corrected rate, and the first rate under `known-at` before the correction
-  was recorded; a stale snapshot price `unpriced` though another snapshot's
-  price is fresh; unresolved instruments and unreadable quantities select no
-  price; no holdings, no total; the account filter and `unknown_account`;
+  was recorded; a 40-day-old snapshot's holding `snapshot_stale` under a
+  `latest-in-window` policy with a fresh price available, and the total
+  absent; a recent snapshot's own price older than the policy allows
+  `unpriced` `stale`; the same holdings `partial-verified-scope` when the
+  VC position container has no snapshot; unresolved instruments and unreadable quantities select no
+  price; no holdings, no total; the source and account filters,
+  `unknown_source` and `unknown_account`; a card statement changing the
+  reported state's context and so the valuation's;
   `policy_missing` with no read; invalid policies and requests;
   `date_in_future`; 501 holdings and 501 selections refused, 500 answered;
-  the account check's plan without statistics.
+  the account and source checks' plans without statistics.
 - `mise run //packages/domain:ci`, `//packages/read-model:ci`,
   `//packages/application:ci`, `//packages/parsers:test` and `mise run ci:root`.

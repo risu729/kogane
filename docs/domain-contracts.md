@@ -123,17 +123,20 @@ policy it applies; none has a default.
 [ADR 0056, amendment of 2026-10-09](adr/0056-as-of-price-fx-selection.md#amendment-2026-10-09-valuation-on-a-date-as-implemented);
 [calculation and reports §2](calculation-and-reports.md#valuation-on-a-date).
 
-- `valueHoldingsOnDate(input)` takes `HoldingOnDate`s (source, snapshot and
-  parse run, provider-scoped instrument reference, instrument identity status,
-  quote unit, quantity), a `ValuationOnDatePolicy` (`price` with exactly one
+- `valueHoldingsOnDate(input)` takes `HoldingOnDate`s (source, snapshot,
+  its freshness and age, parse run, provider-scoped instrument reference,
+  instrument identity status, quote unit, quantity), a `ValuationOnDatePolicy` (`price` with exactly one
   price kind, `fx`, `calendars`) or null, the base unit, the bound and the
   selections, and returns `needs-policy` (`policy_missing`,
   `policy_proposal`) or one `HOLDING_VALUE_OUTCOMES` code per holding
   (`valued`, `unpriced`, `unconverted`, `quantity_unknown`,
-  `instrument_unresolved`, `policy_mismatch`), the counts, a total that is
-  `exact` only when every holding is valued and all come from one source
-  (else `absent` with a `TOTAL_ABSENCE_REASONS` code), and a manifest of ids
-  and codes whose `canonicalDigest` is the context id.
+  `snapshot_stale`, `instrument_unresolved`, `policy_mismatch`), the counts,
+  a total that is `exact` only when every holding is valued, all come from
+  one source and no position container lacks a snapshot
+  (`partial-verified-scope` with the count when one does; else `absent` with
+  a `TOTAL_ABSENCE_REASONS` code), and a manifest of ids and codes, including
+  the reported state's context id, whose `canonicalDigest` is the context
+  id. Claim adoption is not applied.
 - `holdingPriceWant` and `fxCurrenciesFor` name exactly the selections a
   holding will read, so a caller selects nothing more; a selection it needs
   and was not handed, a duplicate, an invalid policy or base unit, or an
