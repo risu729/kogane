@@ -109,6 +109,7 @@ describe("what it answers today", () => {
     expect(result.reasons).toEqual(["log_empty", "family_not_evented", "history_coverage_unknown"]);
     expect(result.cut!.resolved).toEqual({ coreEpoch: "core-epoch-1", commitSeq: 0 });
     expect(result.cut!.requested).toEqual({ coreEpoch: "core-epoch-1", instant: NOW });
+    expect(result.cutStanding).toBe("provisional");
   });
 
   test("a bank account with a logged settlement: incomplete, the settlement applied and listed", async () => {
@@ -245,6 +246,7 @@ describe("acceptance", () => {
     const latest = await queryReconstructedState(storeExecutor(h.db), input());
     expect(latest.cut!.resolved.commitSeq).toBe(2);
     expect(latest.contextId).not.toBe(first.contextId);
+    expect([first.cutStanding, old.cutStanding]).toEqual(["final", "final"]);
     expect(latest.reconstruction!.cells[0]!.applied.refs).toEqual(["ev-1@1#0", "ev-2@1#0"]);
     // The late part: what entered between the end capture's cut and this one.
     expect(latest.late).toMatchObject({ entered: ["ev-1@1", "ev-2@1"], left: [] });

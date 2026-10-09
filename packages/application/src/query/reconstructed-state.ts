@@ -23,6 +23,7 @@ import {
   KNOWLEDGE_SELECTOR_RELEASE,
   selectAdopted,
   type AdoptedSelection,
+  type CutStanding,
   type ResolvedCut,
   type SelectionScope,
 } from "../../../domain/src/knowledge-selector.ts";
@@ -65,7 +66,7 @@ export const RECONSTRUCTED_STATE_QUERY_SCHEMA = "reconstructed-state-query-v1";
 /** The longest range asked about, in days. */
 export const RECONSTRUCTION_RANGE_MAX_DAYS = 366;
 
-export const RECONSTRUCTED_STATE_INPUT_ERRORS = [
+const RECONSTRUCTED_STATE_INPUT_ERRORS = [
   "invalid_query",
   "range_too_long",
   "range_in_future",
@@ -83,8 +84,12 @@ export class ReconstructedStateInputError extends Error {
   }
 }
 
-/** A refusal of the fold or the selector: a programming error or a bound, never a partial answer. */
-export class ReconstructedStateRefusedError extends Error {
+/**
+ * A refusal of the fold or the selector: a programming error or a bound, never
+ * a partial answer. Module-private: a caller recognises it by its `name` and
+ * reads its `code` and `refs`.
+ */
+class ReconstructedStateRefusedError extends Error {
   readonly code: string;
   readonly refs: string[];
   constructor(code: string, refs: string[]) {
@@ -197,6 +202,13 @@ export interface ReconstructedStateResult {
   range: { from: string; to: string };
   basis: "cash";
   cut: ReconstructedStateManifest["cut"] | null;
+  /**
+   * `provisional` for an instant cut at or after the log's last known_at: a
+   * later commit from a lagging worker clock can still resolve the same
+   * instant to a later sequence. The manifest's resolved sequence reproduces
+   * the answer either way. Not part of the manifest.
+   */
+  cutStanding: CutStanding | null;
   knowledge: ReconstructedStateKnowledge | null;
   reported: {
     start: { date: string; contextId: string };
@@ -337,6 +349,7 @@ export async function queryReconstructedState(
       status: "unavailable",
       reasons: ["economic_guard_missing"],
       cut: null,
+      cutStanding: null,
       knowledge: null,
       reported: null,
       reconstruction: null,
@@ -415,6 +428,11 @@ export async function queryReconstructedState(
   });
   refusedIfNot(folded);
   const state = folded.state;
+  // The fold already diffed the two selections inside each cell (the late
+  // total and the legs that entered or left it); it does not return the list
+  // of revisions that entered or left the whole scope, so that list is diffed
+  // here once more from the same two selections. Only the selections are
+  // re-checked twice; no row is read again.
   let late: LateExplanation | null = null;
   if (baseline !== null) {
     const explained = explainLate(baseline.knowledge, now.knowledge);
@@ -499,6 +517,7 @@ export async function queryReconstructedState(
     status,
     reasons: sorted,
     cut: manifest.cut,
+    cutStanding: now.selection.cutStanding,
     knowledge: {
       setVersion: now.selection.setVersion,
       coverage: now.selection.coverage,
