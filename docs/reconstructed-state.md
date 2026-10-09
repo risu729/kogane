@@ -9,13 +9,16 @@ decided in [ADR 0052](adr/0052-reconstructed-state-fold.md). It sits beside
 reported figure and the reconstructed figure are two columns, and the
 difference between them is shown, never absorbed.
 
-**Today there is an engine and a query, but no route or page.**
 `packages/domain/src/reconstruction.ts` folds; the knowledge selector
 ([ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md)) reads
 the stored event rows at a cut of the economic commit log, the B adapter turns
 its selection into the fold's input, and `queryReconstructedState` composes
-them for one account, one range, on the cash basis. No route, page or service
-calls the query yet, so nothing in production computes a reconstructed state.
+them for one account, one range, on the cash basis. One application service,
+`readReconstructedState`, serves it as `GET /api/v2/reconstructed-state`, as
+the agent tool `kogane.reconstructed-state.read` and through the
+`残高の再構成` page (`/reconstruction`); see
+[below](#http-agent-tool-and-page). It is computed per request and never
+stored.
 
 | Piece             | Where                                                                                                                                                                                                                            |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -28,6 +31,10 @@ calls the query yet, so nothing in production computes a reconstructed state.
 | Manifest          | `canonicalReconstructionManifest(manifest)`, digested by the caller                                                                                                                                                              |
 | Policy            | `RECONSTRUCTION_FOLD_V1` (`reconstruction-fold-v1`), passed explicitly                                                                                                                                                           |
 | Query             | `packages/application/src/query/reconstructed-state.ts`: `queryReconstructedState(sql, input)`                                                                                                                                   |
+| Service           | `packages/application/src/query/reconstructed-state-read.ts`: `readReconstructedState({ grant, sql, body, now })`, `reconstructedStateBodyFromQuery`                                                                             |
+| Route, tool       | `services/app/src/reconstructed-state-api.ts` (`GET /api/v2/reconstructed-state`), `kogane.reconstructed-state.read` (`src/agent-service.ts`, `src/mcp.ts`)                                                                      |
+| Wire contract     | `packages/observation-shared/src/reconstructed-state-contract.ts`: `validReconstructedState`                                                                                                                                     |
+| Page              | `apps/web/src/pages/ReconstructedState.tsx` (`/reconstruction`)                                                                                                                                                                  |
 | Tests             | `packages/domain/test/{reconstruction,knowledge-selector,reconstruction-adapter}.test.ts`, `packages/read-model/test/economic-selector*.test.ts`, `packages/application/test/reconstructed-state-query.test.ts` (synthetic only) |
 
 ## Inputs
@@ -120,6 +127,45 @@ share one capture), and an outer manifest pinning the releases, the cut, the
 set version, the identity epoch and pins, alias rule versions, the coverage
 producer, both snapshot contexts and the fold manifest's digest, with its
 `contextId`.
+
+## HTTP, agent tool and page
+
+`GET /api/v2/reconstructed-state?account=…&from=YYYY-MM-DD&to=YYYY-MM-DD`
+with optional `basis=cash`, a cut (`coreEpoch` with exactly one of
+`commitSeq`, at least 1, or `instant`, a UTC instant) and `setVersion` (the
+set version the answer must still have). GET and HEAD only, under the reader
+authority every signed-in subject has over the GET routes, like
+`/api/v2/reported-state`; no new authentication. It exists, and `/api/meta`
+advertises `reconstructedStateOnDate`, exactly where the reported state's
+views exist (`404` elsewhere); without CORE 0070 it answers `200` with
+`unavailable` (`economic_guard_missing`) and nothing computed. The answer is
+`{ apiVersion: 2, ...queryReconstructedState(...) }`.
+
+Refusals, one closed code each (the same codes the agent tool carries as
+`refusal:<code>`, [agent API](agent-api.md#reconstructed-state)):
+
+| Status | Code                                                                                                                                                                                                                                                                             |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `invalid_query`, `scope_unsupported` (several accounts, an instrument), `invalid_account`, `invalid_date`, `invalid_range`, `range_too_long` (over 366 days), `range_in_future` (after today in Tokyo), `basis_unsupported`, `invalid_cut`, `cut_in_future`, `cut_after_log_end` |
+| 404    | `unknown_account` (no `accounts` row)                                                                                                                                                                                                                                            |
+| 409    | `cut_epoch_not_current`, `set_version_changed`                                                                                                                                                                                                                                   |
+| 413    | `result_limit_exceeded`: a selector, fold or reported-state bound, refused rather than cut                                                                                                                                                                                       |
+
+The page `残高の再構成` (`/reconstruction`, shown while the capability is)
+asks for one account (the accounts reported on the end date are offered), a
+range and a cut (latest, a sequence or an instant). Per currency it shows the
+start's reported balance, the reconstructed balance, the end's reported
+balance and the difference `reported − reconstructed` with the fold's
+explanation status and reason, the applied, pending, same-day and
+late-recorded components and the cell's gaps; then the status and every
+reason, the knowledge used (requested and resolved cut, `known_at`,
+`final` or `provisional`, set version, identity epoch, log coverage, the
+selector's unlogged, inconsistent, identity, conflict and unsupported
+entries), the late part and each leg's disposition. Every code is shown
+beside its words. A difference is shown as a difference, never as an
+adjustment or a zero; an absent figure is shown with its reason; a refusal is
+shown with its code. A pin button re-asks the resolved sequence. The page
+writes, adopts and approves nothing, and shows no valuation.
 
 ## Step 1: knowledge selection
 
@@ -255,7 +301,12 @@ Any input order gives the same output and the same id.
 - Knowledge, chain and adapter-flag blocks apply whatever the date: a flagged
   chain dated outside the window still blocks the cell, and a flagged leg no
   account resolves blocks every requested cell of its unit.
-- No route, page or service calls the query; that is the next step.
+- Route cost: one answer for an account with 1,500 settlements (4,500
+  revisions) on the statement-scale store took about 1.1–2.0 s on
+  `bun:sqlite` (ADR 0058, amendment of 2026-10-09); not measured on workerd or
+  D1, and not checked against Workers' CPU limit.
+- The page and the route answer one account and a range; an instrument
+  quantity is never folded (positions are counted), and no valuation is shown.
 - The input is provisional. Of ADR 0052's held questions, 2 and 8 are
   answered, 1 mostly and 5 partly; 4, 7 and 10 are narrowed but still held,
   and 3, 6, 9 and 11 are held as written (ADR 0052, amendment).

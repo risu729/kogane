@@ -48,12 +48,12 @@ A grant is looked up **after** the Cloudflare Access check, by the subject
 nothing reads an actor from a request body or header, which is the same rule
 the change lifecycle follows. A valid token with no grant is still refused.
 
-| Capability               | Allows                                                                                                | Notes                                                   |
-| ------------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                    | The first capability an agent should get                |
-| `records.read`           | `reported-state`, `activity`, `purchases.explain` and `instruments.candidates` on a whole-store scope | Never implies `evidence.read`                           |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                           | A separate grant; raw bytes are still a different route |
-| `interpretation.propose` | `reconcile.propose`                                                                                   | Proposals only; never adoption                          |
+| Capability               | Allows                                                                                                                            | Notes                                                   |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                | The first capability an agent should get                |
+| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                       | A separate grant; raw bytes are still a different route |
+| `interpretation.propose` | `reconcile.propose`                                                                                                               | Proposals only; never adoption                          |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
 exist in this vocabulary: `interpretation.accept`, `calculation.run`,
@@ -151,18 +151,19 @@ and it belongs in its own change.
 ## Tools
 
 Six tools, plus a seventh while the deployment serves card purchase
-recognition, one implementation each (`src/agent-service.ts`), reachable two
-ways.
+recognition and an eighth while it serves the reconstructed state, one
+implementation each (`src/agent-service.ts`), reachable two ways.
 
-| Tool                            | HTTP                                        | MCP `tools/call`                | Requires                                                                                                                      |
-| ------------------------------- | ------------------------------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `kogane.capabilities`           | `POST /api/agent/v1/capabilities`           | `kogane.capabilities`           | any grant                                                                                                                     |
-| `kogane.context.open`           | `POST /api/agent/v1/context.open`           | `kogane.context.open`           | any grant                                                                                                                     |
-| `kogane.financial.query`        | `POST /api/agent/v1/financial.query`        | `kogane.financial.query`        | per intent (table below)                                                                                                      |
-| `kogane.explain`                | `POST /api/agent/v1/explain`                | `kogane.explain`                | `summary.read`                                                                                                                |
-| `kogane.reconcile.propose`      | `POST /api/agent/v1/reconcile.propose`      | `kogane.reconcile.propose`      | `interpretation.propose`                                                                                                      |
-| `kogane.instruments.candidates` | `POST /api/agent/v1/instruments.candidates` | `kogane.instruments.candidates` | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                |
-| `kogane.purchases.explain`      | `POST /api/agent/v1/purchases.explain`      | `kogane.purchases.explain`      | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation)) |
+| Tool                              | HTTP                                          | MCP `tools/call`                  | Requires                                                                                                                      |
+| --------------------------------- | --------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.capabilities`             | `POST /api/agent/v1/capabilities`             | `kogane.capabilities`             | any grant                                                                                                                     |
+| `kogane.context.open`             | `POST /api/agent/v1/context.open`             | `kogane.context.open`             | any grant                                                                                                                     |
+| `kogane.financial.query`          | `POST /api/agent/v1/financial.query`          | `kogane.financial.query`          | per intent (table below)                                                                                                      |
+| `kogane.explain`                  | `POST /api/agent/v1/explain`                  | `kogane.explain`                  | `summary.read`                                                                                                                |
+| `kogane.reconcile.propose`        | `POST /api/agent/v1/reconcile.propose`        | `kogane.reconcile.propose`        | `interpretation.propose`                                                                                                      |
+| `kogane.instruments.candidates`   | `POST /api/agent/v1/instruments.candidates`   | `kogane.instruments.candidates`   | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                |
+| `kogane.purchases.explain`        | `POST /api/agent/v1/purchases.explain`        | `kogane.purchases.explain`        | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation)) |
+| `kogane.reconstructed-state.read` | `POST /api/agent/v1/reconstructed-state.read` | `kogane.reconstructed-state.read` | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))      |
 
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
@@ -182,7 +183,10 @@ follows the operator route it shares a query with: while `/api/meta` reports
 `cardPurchaseRecognition: true` (the event reader flag on and CORE 0047
 applied) it is appended to the six above, and otherwise its name is
 `unknown_tool` and its HTTP path answers `404 not_found`, after the Access and
-grant checks every agent path makes. With `OPS_API_ENABLED` on **and
+grant checks every agent path makes. `kogane.reconstructed-state.read` follows
+`GET /api/v2/reconstructed-state` the same way: listed after them while
+`/api/meta` reports `reconstructedStateOnDate: true` (the store has the
+reported state's views), otherwise `unknown_tool` and `404 not_found`. With `OPS_API_ENABLED` on **and
 this deployment's command grant lists readable**, the six `kogane.ops.*` tools
 of [ops-api.md](ops-api.md) are appended after them; with the flag off,
 `tools/list` holds no operations tool and an operations tool name is
@@ -372,6 +376,47 @@ plan from the page is; under today's lists an agent can plan and cannot
 approve or commit. The server pins only the subject's mapping revision of an
 adoption plan, not the anchor's: read the candidate again right before
 planning, as the page does.
+
+### Reconstructed state
+
+`kogane.reconstructed-state.read` is `GET /api/v2/reconstructed-state` for an
+agent: both call one application service,
+`readReconstructedState` (`packages/application/src/query/reconstructed-state-read.ts`),
+which validates the request, grades the grant, runs `queryReconstructedState`
+([reconstructed state](reconstructed-state.md#http-agent-tool-and-page)) and
+maps every refusal to one closed code. The body is the route's answer, field
+for field (`validReconstructedState` in
+`packages/observation-shared/src/reconstructed-state-contract.ts`).
+
+Input, a closed object:
+
+| Key          | Shape                                                  | Means                                                                   |
+| ------------ | ------------------------------------------------------ | ----------------------------------------------------------------------- |
+| `account`    | a resolved account id                                  | Required; one account (an array, `accounts` or `instrument` is refused) |
+| `from`, `to` | `YYYY-MM-DD`                                           | Required; `from` before `to`, at most 366 days, `to` not after today    |
+| `basis`      | `"cash"`                                               | Optional; the only basis answered                                       |
+| `cut`        | `{coreEpoch, commitSeq ≥ 1}` or `{coreEpoch, instant}` | Optional; the latest commit of the current epoch when absent            |
+| `setVersion` | 64 hex                                                 | Optional; refused with `set_version_changed` if the answer's differs    |
+
+Authorization, before the request is read: `records.read`, else
+`403 unauthorized` with refs `refusal:capability_missing`,
+`capability:records.read`; and, as for `purchases.explain`, a whole-store
+perimeter, else `403 evidence_restricted` (`refusal:scope_restricted`,
+`scope:source`, `scope:account`), because the answer reads the account's
+reported state through every source its mappings name and its events through
+every claim holder. That is today's grant model, not a rule about who may
+read: the browser's reader authority and an agent grant that holds the same
+capability and perimeter get the same answer.
+
+Every refusal carries the route's code as its first ref (`refusal:<code>`) and
+the route's HTTP status; the `financial-error-v1` code is its category:
+`invalid_query`, `invalid_account`, `invalid_date`, `invalid_range`,
+`range_in_future`, `invalid_cut`, `cut_in_future`, `cut_after_log_end`
+(`400 invalid_query`); `scope_unsupported`, `basis_unsupported`
+(`400 unsupported_semantics`); `range_too_long` (`400 budget_exceeded`);
+`cut_epoch_not_current`, `set_version_changed` (`409 stale_context`);
+`unknown_account` (`404 evidence_restricted`); `result_limit_exceeded`
+(`413 budget_exceeded`). It reads and never writes, adopts or approves.
 
 ## Contexts, cursors and hand-off
 

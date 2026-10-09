@@ -128,6 +128,10 @@ result_limit_exceeded` past 5,000 rows in one read (refused, never cut), and
 `404` where the store lacks `dataset_snapshot_policies`, `card_statement_facts`
 or `card_settlement_reviews`; `/api/meta` advertises `reportedStateOnDate` on
 the same condition.
+`GET /api/v2/reconstructed-state` reads this state at both ends of a range
+and sets it beside the balances reconstructed from adopted events; it is
+served, and `reconstructedStateOnDate` advertised, on the same condition
+([reconstructed state](reconstructed-state.md#http-agent-tool-and-page)).
 
 ## Cost
 
