@@ -18,7 +18,7 @@
 // are refused, never cut. It is not the report job: that job values a holding
 // only at a price claimed from the holding's own snapshot (ADR 0020), this
 // query at a policy-selected as-of price, and the manifest says which.
-import { isText } from "../../../domain/src/guards.ts";
+import { hasExactKeys, isRecord, isText } from "../../../domain/src/guards.ts";
 import {
   isCurrencyCode,
   PROPOSAL_POLICY_PREFIX,
@@ -160,8 +160,11 @@ export async function queryValuationOnDate(
     !validDate(request.today) ||
     !isCurrencyCode(request.baseUnit) ||
     !(
-      (request.knowledge.mode === "current" && Object.keys(request.knowledge).length === 1) ||
-      (request.knowledge.mode === "known-at" && validKnownAtInstant(request.knowledge.knownAt))
+      isRecord(request.knowledge) &&
+      ((request.knowledge.mode === "current" && hasExactKeys(request.knowledge, ["mode"])) ||
+        (request.knowledge.mode === "known-at" &&
+          hasExactKeys(request.knowledge, ["mode", "knownAt"]) &&
+          validKnownAtInstant(request.knowledge.knownAt)))
     ) ||
     (request.source !== undefined && !isText(request.source, 128)) ||
     (request.account !== undefined && !isText(request.account, 256))

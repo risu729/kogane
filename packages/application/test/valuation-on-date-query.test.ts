@@ -415,6 +415,8 @@ describe("refusals", () => {
       { ...REQUEST, baseUnit: "yen" },
       { ...REQUEST, knowledge: { mode: "known-at", knownAt: "2026-09-10T03:00:00.0001Z" } },
       { ...REQUEST, source: "" },
+      { ...REQUEST, knowledge: { mode: "current", knownAt: "2026-09-10T03:00:00Z" } },
+      { ...REQUEST, knowledge: null },
     ] as ValuationOnDateRequest[])
       expect(await refusal(sql, request, POLICIES)).toBe("invalid_request");
     expect(await refusal(sql, { ...REQUEST, date: "2026-09-13" }, POLICIES)).toBe("date_in_future");
