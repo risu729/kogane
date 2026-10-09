@@ -285,7 +285,7 @@ data, D1 or Workers were involved.
 
 ## Amendment: stored rows reach the fold through the knowledge selector (2026-10-09, ADR 0058)
 
-Status: proposed until the ADR 0058 pull request merges; accepted upon merge.
+Status: accepted (merged 2026-10-09 in #592).
 
 - **Resolution.** For stored rows, which revision is in force at a cut is now
   decided by the knowledge selector (`packages/domain/src/knowledge-selector.ts`
