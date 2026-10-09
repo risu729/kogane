@@ -207,17 +207,17 @@ it("serves holdings in the browser's validated contract", async () => {
 });
 
 describe("reward reads", () => {
-  it("is absent while the flag is off, and /api/meta says so", async () => {
-    expect((await get("/api/v2/rewards/holdings", false)).status).toBe(404);
-    expect((await get("/api/v2/rewards/expiry", false)).status).toBe(404);
-    const meta = (await (await get("/api/meta", false)).json()) as {
-      capabilities: { rewardsV2: boolean };
-    };
-    expect(meta.capabilities.rewardsV2).toBe(false);
-    const on = (await (await get("/api/meta", true)).json()) as {
-      capabilities: { rewardsV2: boolean };
-    };
-    expect(on.capabilities.rewardsV2).toBe(true);
+  it("stays available when the retired flag is off, and expiry still needs a snapshot", async () => {
+    expect((await get("/api/v2/rewards/holdings", false)).status).toBe(200);
+    const expiry = await get("/api/v2/rewards/expiry", false);
+    expect(expiry.status).toBe(503);
+    expect(await expiry.json()).toMatchObject({ error: "reward_read_model_unavailable" });
+    for (const enabled of [false, true]) {
+      const meta = (await (await get("/api/meta", enabled)).json()) as {
+        capabilities: { rewardsV2: boolean };
+      };
+      expect(meta.capabilities.rewardsV2).toBe(true);
+    }
   });
 
   it("requires authentication before any capability applies", async () => {

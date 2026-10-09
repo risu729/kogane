@@ -243,8 +243,17 @@ describe("production observation API", () => {
     expect(validApiResponse("/api/meta", body)).toBe(true);
     expect(body).toMatchObject({
       source: { kind: "central-store", classification: "financial" },
-      // Served wherever the store has the views it reads (docs/reported-state.md).
-      capabilities: { ...CENTRAL_STORE_CAPABILITIES, reportedStateOnDate: true },
+      // Schema-backed reads follow the tables this store has. Reward routes
+      // are served; their snapshot-backed read model stays none until published.
+      capabilities: {
+        ...CENTRAL_STORE_CAPABILITIES,
+        reportedStateOnDate: true,
+        eventsV2: true,
+        rewardsV2: true,
+        cardPurchaseRecognition: true,
+        cardSettlementReconciliation: true,
+        cardOwnershipReview: true,
+      },
     });
   });
   it("clears repaired historical failures but keeps newer failures and replacement work visible", async () => {

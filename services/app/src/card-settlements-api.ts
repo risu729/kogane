@@ -1,7 +1,6 @@
 import { queryCardOwnership } from "../../../packages/application/src/query/card-ownership.ts";
 import { queryCardSettlements } from "../../../packages/application/src/query/card-settlements.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
-import { flagOn } from "./events-api";
 import { principalFor } from "./grants";
 import { HttpError, json } from "./http";
 
@@ -10,7 +9,6 @@ export const CARD_OWNERSHIP_PATH = `${CARD_SETTLEMENT_PATH}/ownership`;
 
 /** A schema-ahead deployment does not advertise a route it cannot serve. */
 export async function cardSettlementsAvailable(env: Env): Promise<boolean> {
-  if (!flagOn(env.EVENTS_V2_ENABLED)) return false;
   const row = await env.DB.prepare(
     "SELECT count(*) AS present FROM sqlite_master WHERE type='view' AND name IN ('card_settlement_reviews','card_settlement_readiness')",
   ).first<{ present: number }>();

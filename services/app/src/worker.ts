@@ -81,8 +81,8 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (sharedQueryResponse) return sharedQueryResponse;
   const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
   if (settlementResponse) return settlementResponse;
-  // Operator-only and read-only; 404 unless the event reader flag is on and
-  // CORE 0047 exists (docs/economic-events.md, HTTP).
+  // Operator-only and read-only; 404 unless CORE 0047 exists
+  // (docs/economic-events.md, HTTP).
   const purchaseResponse = await catalogue(() => cardPurchasesApi(request, env, url, subject));
   if (purchaseResponse) return purchaseResponse;
   // Reader authority and read-only; 404 unless the store has the views it
@@ -103,13 +103,13 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // correction are commands, not reads (docs/calculation-and-reports.md).
   const reportResponse = await catalogue(() => reportsApi(env, url));
   if (reportResponse) return reportResponse;
-  // Reward reads are behind the deployment's own capability, so a Worker with
-  // the flag off serves exactly the routes it served before (docs/rewards.md).
+  // Reward reads. Expiry and stored simulations refuse a missing or stale
+  // READ snapshot (docs/rewards.md).
   const rewardsResponse = await catalogue(() => rewardsApi(request, env, url));
   if (rewardsResponse) return rewardsResponse;
   const observationResponse = await catalogue(() => observationApi(request, env, url));
   if (observationResponse) return observationResponse;
-  // A10 read side: 404 unless the projection exists and the reader flag is on.
+  // A10 read side: 404 unless the projection table exists.
   const eventsResponse = await catalogue(() => eventsApi(env, url));
   if (eventsResponse) return eventsResponse;
   if (env.EVIDENCE_SOURCE_ID !== "sony-bank") throw new HttpError(503, "source_not_configured");

@@ -71,7 +71,17 @@ const assets = { fetch: async () => new Response("synthetic shell") } as unknown
 const production: ConformanceTarget = {
   // The CORE store under test has the views the reported state reads, so this
   // Worker serves it (docs/reported-state.md); the shared constant keeps it off.
-  expected: { ...CENTRAL_STORE_CAPABILITIES, reportedStateOnDate: true },
+  // Schema that is present is advertised. Reward routes are served; a missing
+  // snapshot keeps `rewardsV2ReadModel` at `none` and expiry at 503.
+  expected: {
+    ...CENTRAL_STORE_CAPABILITIES,
+    reportedStateOnDate: true,
+    eventsV2: true,
+    rewardsV2: true,
+    cardPurchaseRecognition: true,
+    cardSettlementReconciliation: true,
+    cardOwnershipReview: true,
+  },
   get: async (path, method = "GET") =>
     worker.fetch(
       new Request(`https://fixture.test${path}`, {
