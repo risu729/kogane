@@ -1,6 +1,6 @@
-// `myjcb-skip-payment-schedule` 0.1.1 (ADR 0005 amendments e and f) on synthetic
-// pages only: the observed three-cell head is read, every other shape is
-// refused with a closed code, and nothing is a transaction or a balance.
+// `myjcb-skip-payment-schedule` 0.1.2 (ADR 0005 amendments e, f and k) on
+// synthetic pages only: the observed three-cell head is read, every other shape
+// is refused with a closed code, and nothing is a transaction or a balance.
 import { describe, expect, test } from "bun:test";
 import { myJcbSkipPaymentSchedule } from "../src/parsers/myjcb-skip-payment-schedule.ts";
 import { SKIP_PAYMENT_SCHEDULE_PARSER_CODES } from "../src/parsers/myjcb-skip-payment-schedule.ts";
@@ -8,7 +8,9 @@ import { PARSERS, PARSER_DIGESTS } from "../src/parsers/registry.ts";
 import {
   BONUS_HEAD,
   BONUS_HEADING,
+  EMPTY_ITEM_CELL,
   EMPTY_ROW,
+  FOUR_CELL_HEAD,
   REFUSAL_CASES,
   ROWS,
   SKIP_HEAD,
@@ -18,18 +20,21 @@ import {
   skipMeta,
   skipPage,
   skipRow,
+  WRAPPED_EMPTY_ROW,
+  wrappedRow,
 } from "./myjcb-skip-payment-fixture.ts";
 
 const parse = (html: string, meta = skipMeta()) =>
   myJcbSkipPaymentSchedule.parse(bytes(html), meta);
 
 describe("myjcb-skip-payment-schedule", () => {
-  test("is registered at 0.1.1 with a recorded digest, and accepts only MyJCB credit-schedule HTML", () => {
+  test("is registered at 0.1.2 with a recorded digest, and accepts only MyJCB credit-schedule HTML", () => {
     expect(PARSERS).toContain(myJcbSkipPaymentSchedule);
-    // 0.1.0 is registered in production with its own digest, so the changed
-    // empty-row rule is a new version (migration 0028's digest trigger).
-    expect(myJcbSkipPaymentSchedule.version).toBe("0.1.1");
-    expect(PARSER_DIGESTS.releases["myjcb-skip-payment-schedule"]?.version).toBe("0.1.1");
+    // 0.1.0 and 0.1.1 are registered in production with their own digests, so
+    // each changed empty-row rule is a new version (migration 0028's digest
+    // trigger).
+    expect(myJcbSkipPaymentSchedule.version).toBe("0.1.2");
+    expect(PARSER_DIGESTS.releases["myjcb-skip-payment-schedule"]?.version).toBe("0.1.2");
     expect(myJcbSkipPaymentSchedule.accepts(skipMeta())).toBe(true);
     expect(myJcbSkipPaymentSchedule.accepts(skipMeta({ mime: "text/html; charset=utf-8" }))).toBe(
       true,
@@ -84,7 +89,7 @@ describe("myjcb-skip-payment-schedule", () => {
     );
   });
 
-  test("0.1.1's whole observation is frozen (unchanged from 0.1.0): a change to it is a new release", () => {
+  test("0.1.2's whole observation is frozen (unchanged from 0.1.0 and 0.1.1): a change to it is a new release", () => {
     expect(parse(skipPage()).observations[0]).toEqual({
       kind: "scheduled_payment",
       sourceAccount: "myjcb:synthetic-conn:root",
@@ -221,5 +226,187 @@ describe("myjcb-skip-payment-schedule", () => {
         skipPage({ h1: [BONUS_HEADING], asOf: [], ledgers: [ledger(BONUS_HEAD, [EMPTY_ROW])] }),
       ),
     ).toThrow(/^schedule_kind_unobserved$/u);
+  });
+});
+
+describe("myjcb-skip-payment-schedule: the wrapped empty row (ADR 0005 amendment k)", () => {
+  const empty = { observations: [], warnings: [] };
+  /** What a `content` row holds, without the row itself. */
+  const inner = (row: string) => row.slice('<div class="content">'.length, -"</div>".length);
+  /** `ROWS[0]`'s `item-cell`: a data row's. */
+  const DATA_ITEM_CELL = inner(ROWS[0]!);
+  /** The empty `item-cell` under two wrapper levels. */
+  const TWICE_WRAPPED_EMPTY_ROW = wrappedRow(inner(WRAPPED_EMPTY_ROW));
+  /** `EMPTY_ITEM_CELL` with a `span` in place of the `item-cell`'s `div`. */
+  const SPAN_ITEM_CELL =
+    '<span class="item-cell"><div class="cell w-100per">ご利用明細はございません。</div></span>';
+  /** `EMPTY_ITEM_CELL` with a `span` in place of the cell's `div`. */
+  const SPAN_CELL_ITEM_CELL =
+    '<div class="item-cell"><span class="cell w-100per">ご利用明細はございません。</span></div>';
+  const ROW_SHAPE = /^schedule_row_shape_unobserved$/u;
+
+  test("the lone wrapped empty row is zero rows, with or without the as-of heading", () => {
+    expect(parse(skipPage({ ledgers: [ledger(SKIP_HEAD, [WRAPPED_EMPTY_ROW])] }))).toEqual(empty);
+    expect(parse(skipPage({ ledgers: [ledger(SPAN_SKIP_HEAD, [WRAPPED_EMPTY_ROW])] }))).toEqual(
+      empty,
+    );
+    expect(
+      parse(skipPage({ asOf: [], ledgers: [ledger(SPAN_SKIP_HEAD, [WRAPPED_EMPTY_ROW])] })),
+    ).toEqual(empty);
+    // The wrapper may carry classes the reader does not read (this one is
+    // invented), and whitespace between the levels is not text.
+    expect(
+      parse(
+        skipPage({
+          ledgers: [
+            ledger(SPAN_SKIP_HEAD, [wrappedRow(EMPTY_ITEM_CELL, '<div class="synthetic-wrap">')]),
+          ],
+        }),
+      ),
+    ).toEqual(empty);
+    expect(
+      parse(
+        skipPage({
+          ledgers: [
+            ledger(SPAN_SKIP_HEAD, [
+              '<div class="content">\n  <div>\n    <div class="item-cell">\n      <div class="cell w-100per">\n        ご利用明細は ございません。\n      </div>\n    </div>\n  </div>\n</div>',
+            ]),
+          ],
+        }),
+      ),
+    ).toEqual(empty);
+    // 0.1.1's empty row is still the empty row.
+    expect(parse(skipPage({ ledgers: [ledger(SPAN_SKIP_HEAD, [EMPTY_ROW])] }))).toEqual(empty);
+  });
+
+  test("wherever it stands, the wrapped empty row reads exactly as 0.1.1's empty row", () => {
+    const outcome = (html: string) => {
+      try {
+        return parse(html);
+      } catch (error) {
+        return (error as Error).message;
+      }
+    };
+    const pages = (row: string) => [
+      skipPage({ ledgers: [ledger(SKIP_HEAD, [row])] }),
+      skipPage({ asOf: [], ledgers: [ledger(SKIP_HEAD, [row])] }),
+      skipPage({ ledgers: [ledger(SKIP_HEAD, [row, ...ROWS])] }),
+      skipPage({ ledgers: [ledger(SKIP_HEAD, [...ROWS, row])] }),
+      skipPage({ asOf: [], ledgers: [ledger(SKIP_HEAD, [row, ROWS[0]!])] }),
+      skipPage({ ledgers: [ledger(SKIP_HEAD, [row, row])] }),
+      skipPage({ ledgers: [ledger(SKIP_HEAD, [row]), ledger(SKIP_HEAD, ROWS)] }),
+      skipPage({ ledgers: [ledger(SKIP_HEAD, [row]), ledger(SKIP_HEAD, [row])] }),
+      skipPage({ ledgers: [ledger(FOUR_CELL_HEAD, [row])] }),
+      skipPage({ h1: [BONUS_HEADING], asOf: [], ledgers: [ledger(BONUS_HEAD, [row])] }),
+    ];
+    const wrapped = pages(WRAPPED_EMPTY_ROW).map(outcome);
+    expect(wrapped).toEqual(pages(EMPTY_ROW).map(outcome));
+    // The comparison is not vacuous: it covers zero rows, rows read beside
+    // an empty ledger, and refusals at four different checks.
+    expect(wrapped.filter((result) => typeof result !== "string")).toHaveLength(4);
+    expect(new Set(wrapped.filter((result) => typeof result === "string"))).toEqual(
+      new Set([
+        "schedule_row_shape_unobserved",
+        "schedule_as_of_invalid",
+        "schedule_head_unobserved",
+        "schedule_kind_unobserved",
+      ]),
+    );
+  });
+
+  test.each([
+    ...["detail-list-01", "head", "content", "item-cell", "cell", "w-100per"].map(
+      (name) =>
+        [
+          `the wrapper carries the reader's class ${name}`,
+          wrappedRow(EMPTY_ITEM_CELL, `<div class="${name}">`),
+        ] as const,
+    ),
+    ["two wrapper levels", TWICE_WRAPPED_EMPTY_ROW],
+    ["a wrapper with a second element child", wrappedRow(`${EMPTY_ITEM_CELL}<span></span>`)],
+    ["a wrapper with two empty item-cells", wrappedRow(`${EMPTY_ITEM_CELL}${EMPTY_ITEM_CELL}`)],
+    ["text in the wrapper beside the item-cell", wrappedRow(`x${EMPTY_ITEM_CELL}`)],
+    [
+      "text in the row beside the wrapper",
+      `<div class="content">x<div>${EMPTY_ITEM_CELL}</div></div>`,
+    ],
+    [
+      "text in the item-cell beside the cell",
+      wrappedRow(EMPTY_ITEM_CELL.replace('<div class="item-cell">', '<div class="item-cell">x')),
+    ],
+    ["another label in the wrapped cell", WRAPPED_EMPTY_ROW.replace("ございません", "ありません")],
+    [
+      "an element inside the wrapped cell",
+      wrappedRow(EMPTY_ITEM_CELL.replace(/>(ご利用明細はございません。)</u, "><span>$1</span><")),
+    ],
+    [
+      "a wrapper around the cell's parent without the item-cell class",
+      wrappedRow(EMPTY_ITEM_CELL.replace('<div class="item-cell">', "<div>")),
+    ],
+    [
+      "an item-cell with a second element child, wrapped",
+      wrappedRow(EMPTY_ITEM_CELL.replace("</div></div>", "</div><span></span></div>")),
+    ],
+    [
+      "an item-cell with two empty cells, wrapped",
+      wrappedRow(
+        EMPTY_ITEM_CELL.replace(
+          "</div></div>",
+          '</div><div class="cell w-100per">ご利用明細はございません。</div></div>',
+        ),
+      ),
+    ],
+    [
+      "text in the row after the wrapper",
+      `<div class="content"><div>${EMPTY_ITEM_CELL}</div>x</div>`,
+    ],
+    // Since 0.1.2 the unwrapped row is held to the same levels: nothing but
+    // the label in the row and its `item-cell`, and no element in the cell.
+    [
+      "text in the unwrapped row beside the item-cell",
+      `<div class="content">x${EMPTY_ITEM_CELL}</div>`,
+    ],
+    [
+      "an amount in the unwrapped row beside the item-cell",
+      `<div class="content">${EMPTY_ITEM_CELL}12,000円</div>`,
+    ],
+    [
+      "text in the unwrapped item-cell beside the cell",
+      `<div class="content">${EMPTY_ITEM_CELL.replace('<div class="item-cell">', '<div class="item-cell">x')}</div>`,
+    ],
+    [
+      "an element inside the unwrapped cell",
+      EMPTY_ROW.replace(/>(ご利用明細はございません。)</u, "><span>$1</span><"),
+    ],
+    ["a line break inside the unwrapped cell", EMPTY_ROW.replace("明細は", "明細は<br>")],
+    // Every observed level is a `div`; any other element is a row, in the
+    // wrapped shape and, since 0.1.2, in the unwrapped one too.
+    ["a span wrapper", `<div class="content"><span>${EMPTY_ITEM_CELL}</span></div>`],
+    ["a section wrapper", `<div class="content"><section>${EMPTY_ITEM_CELL}</section></div>`],
+    // The HTML parser closes a `p` before a `div`, so this reaches the reader
+    // as siblings, not as a wrapper; refused either way.
+    ["a p wrapper", `<div class="content"><p>${EMPTY_ITEM_CELL}</p></div>`],
+    ["a span.content row, wrapped", `<span class="content"><div>${EMPTY_ITEM_CELL}</div></span>`],
+    ["a span.content row, unwrapped", `<span class="content">${EMPTY_ITEM_CELL}</span>`],
+    ["a span.item-cell, wrapped", wrappedRow(SPAN_ITEM_CELL)],
+    ["a span.item-cell, unwrapped", `<div class="content">${SPAN_ITEM_CELL}</div>`],
+    ["a span.cell.w-100per, wrapped", wrappedRow(SPAN_CELL_ITEM_CELL)],
+    ["a span.cell.w-100per, unwrapped", `<div class="content">${SPAN_CELL_ITEM_CELL}</div>`],
+    ["a wrapped data row", wrappedRow(DATA_ITEM_CELL)],
+  ])("%s is a row, and the page is refused", (_name, row) => {
+    expect(() => parse(skipPage({ ledgers: [ledger(SKIP_HEAD, [row])] }))).toThrow(ROW_SHAPE);
+  });
+
+  test("beside any other row, or twice, the wrapped empty row is refused", () => {
+    for (const rows of [
+      [WRAPPED_EMPTY_ROW, ROWS[0]!],
+      [ROWS[0]!, WRAPPED_EMPTY_ROW],
+      [WRAPPED_EMPTY_ROW, ...ROWS],
+      [WRAPPED_EMPTY_ROW, WRAPPED_EMPTY_ROW],
+      [WRAPPED_EMPTY_ROW, EMPTY_ROW],
+      [EMPTY_ROW, WRAPPED_EMPTY_ROW],
+      [wrappedRow(DATA_ITEM_CELL), ...ROWS],
+    ])
+      expect(() => parse(skipPage({ ledgers: [ledger(SKIP_HEAD, rows)] }))).toThrow(ROW_SHAPE);
   });
 });
