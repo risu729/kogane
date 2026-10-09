@@ -1599,6 +1599,41 @@ describe("prepare and write share one validation (the contract plan slice S3 bui
     expect(await revisions("vpass-bound-probe")).toEqual([]);
   });
 
+  test("prepare answers the principal's remaining budget, and none for the operator", async () => {
+    const { sqlite, env } = freshStore();
+    const delegatedCreate = make("delegated");
+    expect(await prepareMaintenanceRevision(env, delegatedCreate)).toEqual({
+      ok: true,
+      source: "vpass",
+      ruleId: null,
+      expectedRevision: 0,
+      currentRevision: 0,
+      deferralClass: "within-7d",
+      budgetRemaining: 30,
+    });
+    // Twenty-nine of this principal's revisions in the rolling day leave one;
+    // another principal's, and one older than a day, count for nothing.
+    const add = (id: string, principal: string, createdAt: string) =>
+      sqlite
+        .query(
+          'INSERT INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason) VALUES(?,1,\'sbi-shinsei\',\'UTC\',\'{"kind":"weekly","weekdays":[1],"start":"01:00","end":"02:00"}\',0,?,?,\'collection\',?,?,\'delegated\',\'correction\')',
+        )
+        .run(id, REFERENCE, verified(), principal, createdAt);
+    for (let i = 0; i < 29; i++) add(`synthetic-used-${i}`, DELEGATE, new Date().toISOString());
+    add("synthetic-used-other", OTHER_DELEGATE, new Date().toISOString());
+    add("synthetic-used-old", DELEGATE, iso(Date.now() - DAY - 60_000));
+    for (const deferralBound of BOUNDS)
+      expect(
+        await prepareMaintenanceRevision(env, delegatedCreate, { deferralBound }),
+      ).toMatchObject({ ok: true, budgetRemaining: 1 });
+    expect(await prepareMaintenanceRevision(env, make("operator"))).toMatchObject({
+      ok: true,
+      ruleId: "vpass-prepared",
+      budgetRemaining: null,
+    });
+    sqlite.close();
+  });
+
   test("the current-revision read is the writer's own, and reads nothing else", async () => {
     const { sqlite, env } = freshStore();
     existing("vpass-current", "vpass", "operator", OPERATOR)(sqlite);
