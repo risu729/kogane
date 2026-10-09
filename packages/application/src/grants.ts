@@ -3,12 +3,15 @@
 // Deny by default. A principal with no grant has no capability and no scope,
 // and every entry point refuses before it reads anything. Capabilities are the
 // minimal set of addendum 10 section 2 that the MVP gate allows: three read
-// capabilities and one proposal capability, plus two maintenance-settings
-// capabilities (ADR 0046) that reach public maintenance windows and nothing
-// else. `interpretation.accept`, `calculation.run`, `collection.request`,
-// `report.export`, the admin capabilities, job enable/disable, lease release
-// and every external money action are deliberately absent from this type, so
-// no configuration can name them.
+// capabilities and one proposal capability, plus one maintenance-settings read
+// (ADR 0046) that reaches public maintenance windows and nothing else.
+// `interpretation.accept`, `calculation.run`, `collection.request`,
+// `report.export`, the admin capabilities, every settings write (a maintenance
+// revision, a job edit, enable/disable, lease release) and every external
+// money action are deliberately absent from this type, so no configuration can
+// name them. A maintenance revision is an operation the owner may delegate
+// (`schedules.maintenance.update` in MCP_DELEGATIONS, ADR 0063), never a grant
+// here.
 //
 // A grant is not an authentication decision. The transport authenticates the
 // principal (Cloudflare Access) and then looks its grant up here; a valid
@@ -31,12 +34,6 @@ export const AGENT_CAPABILITIES = [
    * implies it.
    */
   "schedules.read",
-  /**
-   * One new revision of one maintenance rule of a source in
-   * `scopes.scheduleSources`, with a reason, through the Processor's settings
-   * service. Never a job edit, enable/disable, lease release or collection.
-   */
-  "schedules.maintenance.update",
 ] as const;
 export type AgentCapability = (typeof AGENT_CAPABILITIES)[number];
 
@@ -63,9 +60,10 @@ export interface Grant {
     sources: ScopeSet;
     accounts: ScopeSet;
     /**
-     * Source ids of `config/alarm-jobs.json` whose maintenance settings the
-     * `schedules.*` capabilities reach. Separate from `sources`, which scopes
-     * financial reads; absent means none.
+     * Source ids of `config/alarm-jobs.json` whose maintenance settings
+     * `schedules.read` reaches, and the outer bound of a delegation's schedule
+     * scope (ADR 0063). Separate from `sources`, which scopes financial reads;
+     * absent means none.
      */
     scheduleSources?: ScopeSet;
   };
@@ -96,7 +94,7 @@ export function grantAllowsSource(grant: Grant, sourceId: string): boolean {
   return scopeHas(grant.scopes.sources, sourceId);
 }
 
-/** Whether the `schedules.*` capabilities reach this source; absent scope reaches none. */
+/** Whether `schedules.read` reaches this source; an absent scope reaches none. */
 export function grantAllowsScheduleSource(grant: Grant, source: string): boolean {
   const scope = grant.scopes.scheduleSources;
   return scope !== undefined && scopeHas(scope, source);

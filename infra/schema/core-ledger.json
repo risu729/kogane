@@ -1073,12 +1073,6 @@
       "sha256": "67621a515660753b1846bee314eee76d69b0aec67f375f4c9a724a316bafd3c8"
     },
     {
-      "file": "0067_maintenance_change_provenance.sql",
-      "statementCount": 4,
-      "insertStatements": [],
-      "sha256": "5b565437761076652bee2420220d3688eb9cba6d2bd11a01088a4dfd44433650"
-    },
-    {
       "file": "0068_ops_collector_dispatches.sql",
       "statementCount": 5,
       "insertStatements": [],
@@ -1135,6 +1129,12 @@
       "statementCount": 14,
       "insertStatements": [],
       "sha256": "3e5a5c2ebce700b5914ca0dfefe2d55ddf49c75c2d2ec011677bff39b77e61ff"
+    },
+    {
+      "file": "0076_maintenance_change_provenance.sql",
+      "statementCount": 4,
+      "insertStatements": [],
+      "sha256": "0b374b9e0c9434e8789eb8485760648cfd1cc0a46794e9d4aada51bf37265348"
     }
   ],
   "tables": [
@@ -13922,7 +13922,7 @@
         "maintenance_no_delete"
       ],
       "appendOnly": true,
-      "sqlSha256": "eda817d81f64d544"
+      "sqlSha256": "eb2571a92dbe5f3e"
     },
     {
       "name": "publication_events",
@@ -20924,7 +20924,7 @@
     {
       "name": "maintenance_agent_writes",
       "table": "provider_maintenance_rules",
-      "sqlSha256": "628b36ffb11ad868"
+      "sqlSha256": "cab3c1e216c7a262"
     },
     {
       "name": "maintenance_source",
@@ -21449,6 +21449,6 @@
       "0070_economic_commit_guard.sql",
       "0071_economic_event_command_kinds.sql"
     ],
-    "schemaSha256": "23f77f8e5db7b0f72062db8cbb3eba3134d602a3a7f54cc953f81adbec5724ce"
+    "schemaSha256": "e1820c1efb22a4f15187d923d05dfa0d1ec812a3c94077c1fb247e20a9181b9e"
   }
 }

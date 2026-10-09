@@ -61,10 +61,11 @@ import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { opsApiEnabled } from "./ops-api";
 import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
 import {
-  callScheduleTool,
-  isScheduleToolName,
+  readScheduleTool,
+  scheduleReadPath,
   scheduleToolsFor,
   schedulesServed,
+  updateScheduleTool,
 } from "./schedule-tools";
 import { HttpError, json } from "./http";
 import { mcpDelegationCapabilities } from "./delegation";
@@ -206,8 +207,9 @@ export async function agentApi(
     // that depends on it: `initialize`, `ping` and notifications touch no table.
     let served: Promise<boolean> | undefined;
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
-    // Maintenance tools (ADR 0046) exist while the settings routes do, are
-    // graded by this API's grant, and are listed only to a grant holding them.
+    // The maintenance tools (ADR 0046) exist while the settings routes do. The
+    // read is listed to a grant holding `schedules.read`; the revision is
+    // listed to nobody, since no delegation executes yet (ADR 0063).
     const schedules = schedulesServed(env);
     // The reconstructed state likewise exists exactly while its GET route does.
     let reconstructedServed: Promise<boolean> | undefined;
@@ -240,9 +242,14 @@ export async function agentApi(
           return toolCall(request, env, caller, name, (audit) =>
             callOpsTool(name, body, env, caller, audit),
           );
-        if (schedules && isScheduleToolName(name))
+        // The maintenance read is graded by this API's grant, as on its HTTP
+        // route; the maintenance revision only by the caller's delegation,
+        // which nothing executes under yet (ADR 0063, plan S3/S4).
+        if (schedules && name === "kogane.schedules.maintenance.read")
+          return toolCall(request, env, caller, name, () => readScheduleTool(body, env, grant));
+        if (schedules && name === "kogane.schedules.maintenance.update")
           return toolCall(request, env, caller, name, () =>
-            callScheduleTool(name, body, env, grant),
+            updateScheduleTool(body, env, caller, delegationNow),
           );
         return null;
       },
@@ -255,6 +262,17 @@ export async function agentApi(
       ],
     );
     return message;
+  }
+  // The maintenance read is the one schedule tool on this route: a browser
+  // session yields no delegation, so the revision has no HTTP agent route.
+  const scheduleTool = `kogane.${path.slice(AGENT_PREFIX.length)}`;
+  if (scheduleReadPath(scheduleTool)) {
+    if (!schedulesServed(env)) throw new HttpError(404, "not_found");
+    const body = await boundedJson(request);
+    const outcome = (await toolCall(request, env, caller, scheduleTool, () =>
+      readScheduleTool(body, env, grant),
+    ))!;
+    return json(outcome.body, outcome.status);
   }
   const tool = toolForPath(path);
   if (tool === null) throw new HttpError(404, "not_found");

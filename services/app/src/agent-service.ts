@@ -49,7 +49,6 @@ import {
 } from "../../../packages/read-model/src/index";
 import { balanceProjectionReader, balanceReadConfigured } from "./balances-v2";
 import { centralStoreCapabilities } from "./capabilities";
-import { schedulesServed } from "./schedule-tools";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
 import { proposalStore } from "./proposals";
 import type { OperationCall } from "../../../packages/application/src/audit/call.ts";
@@ -187,19 +186,18 @@ export async function callTool(
     case "kogane.capabilities": {
       if (body !== undefined && body !== null && Object.keys(body as object).length > 0)
         return failure("unsupported_semantics", "capabilities", ["body"]);
-      // The same helper /api/meta uses, so an agent and a page read one
-      // description of the deployment and neither is told about a route
-      // this store cannot serve. `commands` only states that the change
-      // lifecycle is served: no grant here reaches approve or commit.
-      const report = capabilitiesFor(
-        context.grant,
-        await centralStoreCapabilities(context.env),
-        MAX_REQUEST_BYTES,
-      );
-      // Nor about a maintenance write whose tools this deployment does not
-      // serve (ADR 0046): they exist only while the settings routes do.
-      if (!schedulesServed(context.env)) report.writes.maintenanceRules = false;
-      return { status: 200, body: report };
+      return {
+        status: 200,
+        // The same helper /api/meta uses, so an agent and a page read one
+        // description of the deployment and neither is told about a route
+        // this store cannot serve. `commands` only states that the change
+        // lifecycle is served: no grant here reaches approve or commit.
+        body: capabilitiesFor(
+          context.grant,
+          await centralStoreCapabilities(context.env),
+          MAX_REQUEST_BYTES,
+        ),
+      };
     }
     case "kogane.context.open": {
       const parsed = parseOpenBody(body);

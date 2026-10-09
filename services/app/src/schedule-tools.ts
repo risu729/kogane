@@ -1,41 +1,64 @@
-// Maintenance-window tools for agents (ADR 0046).
+// Maintenance-window tools for agents (ADR 0046 as amended by ADR 0063,
+// item 8; plan slice S4).
 //
-// Two MCP tools over the Processor's existing settings service: read the
-// maintenance settings of the sources a grant names, and append one revision
-// of one maintenance rule of one of them. They are graded by this API's grant
-// (`AGENT_API_GRANTS`): `schedules.read` and `schedules.maintenance.update`,
-// scoped by `scopes.scheduleSources`. No financial capability implies either,
-// and neither reaches a job edit, enable/disable, lease release, collection,
-// observation or evidence.
+// Two tools over the Processor's settings service, each recorded through the
+// common chokepoint (`executeOperation`, ADR 0064) by the dispatcher that
+// calls it:
 //
-// This module decides only what the grant decides — the capability, the
-// source scope and the caller's actor shape — and checks the arguments'
-// shape with the same Zod schema it publishes (as `ops-tools.ts` does), so
-// the advertised and the enforced contract cannot drift. What a maintenance
-// window means — its registered reference host, the expected revision, the
-// calendar validity of the period, the reason, the deferral bound and the
-// budget — is decided once, by the Processor's writer
-// (`writeMaintenanceRevision` in services/processor/src/schedule-store.ts),
-// which the operator page uses too. The operator HTTP routes in
-// `schedules-api.ts` are untouched: an agent grant still reaches none of them.
+// * `kogane.schedules.maintenance.read` (`schedules.maintenance.read`, R0):
+//   the maintenance settings of the sources a grant names. Graded by this
+//   API's grant (`AGENT_API_GRANTS`): `schedules.read`, scoped by
+//   `scopes.scheduleSources`. Served on `/mcp` and on
+//   `POST /api/agent/v1/schedules.maintenance.read`, one function for both, so
+//   the two answer the same object.
+// * `kogane.schedules.maintenance.update` (`schedules.maintenance.update`,
+//   R1; R3 beyond the seven-day bound): one maintenance revision. It is an
+//   operation the owner may delegate, never an agent-API capability: only an
+//   MCP client (`mcp-client:<sub>`, ADR 0047) holding a delegation that
+//   #628's resolver answers (`resolveDelegation`) with
+//   `schedules.maintenance.update` could reach it, and only on `/mcp`. No
+//   delegation executes yet: `delegationExecutionReadiness` answers
+//   `available: false` for every capability until plan slice S3 connects the
+//   delegated audit record, operation path and Processor guards. So the tool
+//   is published to nobody, every call is refused with a closed code before
+//   anything is relayed, and there is no code here that relays a delegated
+//   write. When S3 lands, the relay goes where the last refusal is, to the
+//   Processor's single writer (`writeMaintenanceRevision`).
 //
-// `referenceUrl` is stored provenance: it must be https on the source's
-// already registered maintenance host, and nothing here or in the Processor
-// fetches it.
+// This module decides only what the grant or the delegation decides — the
+// capability, the source scope and the caller's shape — and checks the
+// arguments with the same Zod schema it publishes (as `ops-tools.ts` does).
+// What a maintenance window means — its registered reference host, the
+// expected revision, the calendar validity of the period, the closed reason,
+// the deferral bound and the budget — is decided once, by the Processor's
+// writer, which the operator page uses too. The operator HTTP routes in
+// `schedules-api.ts` are untouched: neither tool reaches them.
 import { z } from "zod";
 import {
   ACTOR_PATTERN,
+  delegationExecutionReadiness,
+  type DelegationResolution,
   type Grant,
   grantAllows,
   grantAllowsScheduleSource,
+  parseGrants,
+  resolveDelegation,
 } from "../../../packages/application/src/index";
-import { TIME, ZONES } from "../../../packages/collection/src/schedule-model";
+import {
+  DELEGATED_MAINTENANCE_REASONS,
+  TIME,
+  ZONES,
+} from "../../../packages/collection/src/schedule-model";
 import type { ToolResult } from "./agent-service";
+import type { AgentCaller } from "./auth";
+import type { DelegationVars } from "./delegation";
 
 const SCHEDULE_READ_TOOL = "kogane.schedules.maintenance.read";
 const SCHEDULE_UPDATE_TOOL = "kogane.schedules.maintenance.update";
 export const SCHEDULE_TOOL_NAMES = [SCHEDULE_READ_TOOL, SCHEDULE_UPDATE_TOOL] as const;
 export type ScheduleToolName = (typeof SCHEDULE_TOOL_NAMES)[number];
+/** The capability a delegation must hold for the update tool (ADR 0063). */
+const UPDATE_CAPABILITY = "schedules.maintenance.update";
 
 export function isScheduleToolName(value: string): value is ScheduleToolName {
   return (SCHEDULE_TOOL_NAMES as readonly string[]).includes(value);
@@ -44,6 +67,11 @@ export function isScheduleToolName(value: string): value is ScheduleToolName {
 /** The tools exist exactly while the settings routes do (`SCHEDULES_ENABLED`). */
 export function schedulesServed(env: Pick<Env, "SCHEDULES_ENABLED">): boolean {
   return (env.SCHEDULES_ENABLED as string | undefined) === "true";
+}
+
+/** The schedule tool an `/api/agent/v1/*` path names: the read only. */
+export function scheduleReadPath(name: string): boolean {
+  return name === SCHEDULE_READ_TOOL;
 }
 
 const sourceId = z.string().regex(/^[a-z0-9-]{1,100}$/u);
@@ -86,7 +114,8 @@ export const scheduleUpdateSchema = z.strictObject({
     .regex(/^https:\/\//u)
     .max(1500),
   verifiedAt: instant,
-  reason: z.string().min(1).max(500),
+  /** Why, as a closed code; never free text. */
+  reason: z.enum(DELEGATED_MAINTENANCE_REASONS),
 });
 
 /** The published JSON Schema of one argument schema, without the meta key. */
@@ -101,55 +130,34 @@ export const SCHEDULE_MCP_TOOLS = [
     name: SCHEDULE_READ_TOOL,
     title: "Read maintenance settings of the granted sources",
     description:
-      "Public maintenance rules with their revision history, the registered maintenance reference, and per schedule the original next occurrence, the maintenance-adjusted due time, the actual alarm, whether the reservation is armed or pending, and the latest receipt's outcome. Only sources in this grant's scheduleSources; no financial data.",
+      "Public maintenance rules with their revision history (actor kind and closed reason), the registered maintenance reference, and per schedule the original next occurrence, the maintenance-adjusted due time, the actual alarm, whether the reservation is armed or pending, and the latest receipt's outcome. Only sources in this grant's scheduleSources; no financial data.",
     inputSchema: inputSchema(scheduleReadSchema),
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   },
-  {
-    name: SCHEDULE_UPDATE_TOOL,
-    title: "Append one maintenance-rule revision for a granted source",
-    description:
-      "Create a rule (omit ruleId, revision 0) or revise one (ruleId and its current revision). A stale revision is refused. Requires a reason, the announcement's https page on the source's registered maintenance site (stored, never fetched) and when it was checked. The joined deferral a revision creates is bounded. Answers with the saved revision and the source's next run and reservation state. Never edits a job, enables or disables one, releases a lease or starts collection.",
-    inputSchema: inputSchema(scheduleUpdateSchema),
-    annotations: {
-      readOnlyHint: false,
-      // Revisions are appended; nothing is deleted or overwritten.
-      destructiveHint: false,
-      // A create chooses a new rule id each time.
-      idempotentHint: false,
-      openWorldHint: false,
-    },
-  },
 ] as const;
 
-const REQUIRES: Record<ScheduleToolName, "schedules.read" | "schedules.maintenance.update"> = {
-  [SCHEDULE_READ_TOOL]: "schedules.read",
-  [SCHEDULE_UPDATE_TOOL]: "schedules.maintenance.update",
-};
-
-/** The tools this grant can use; a tool whose capability it lacks is not listed. */
+/** The tools this grant can use: the read, with `schedules.read`. The update is published to nobody yet. */
 export function scheduleToolsFor(grant: Grant): (typeof SCHEDULE_MCP_TOOLS)[number][] {
-  return SCHEDULE_MCP_TOOLS.filter((tool) => grantAllows(grant, REQUIRES[tool.name]));
+  return grantAllows(grant, "schedules.read") ? [...SCHEDULE_MCP_TOOLS] : [];
 }
 
 function refusal(status: number, error: string): ToolResult {
   return { status, body: { error } };
 }
 
-async function relay(
+async function relayRead(
   env: Pick<Env, "PIPELINE">,
-  suffix: "/agent/read" | "/agent/maintenance",
   principal: string,
   body: unknown,
 ): Promise<ToolResult> {
   let response: Response;
   try {
     response = await env.PIPELINE.fetch(
-      new Request(`https://observation-pipeline.internal/internal/schedules${suffix}`, {
+      new Request("https://observation-pipeline.internal/internal/schedules/agent/read", {
         method: "POST",
         headers: {
           "x-kogane-internal-caller": "kogane-evidence-browser",
-          // The agent travels in its own header; the operator header is never set.
+          // The reader travels in its own header; the operator header is never set.
           "x-kogane-agent": principal,
           "content-type": "application/json",
         },
@@ -167,35 +175,68 @@ async function relay(
 }
 
 /**
- * Runs one maintenance tool for a grant. The principal recorded as the
- * revision's actor is the grant's, which is the verified Access principal; no
- * argument names an actor.
+ * `kogane.schedules.maintenance.read` for a grant, on either agent path. The
+ * reader is the grant's principal, the caller the boundary verified; no
+ * argument names one.
  */
-export async function callScheduleTool(
-  name: ScheduleToolName,
+export async function readScheduleTool(
   body: unknown,
   env: Pick<Env, "PIPELINE">,
   grant: Grant,
 ): Promise<ToolResult> {
-  if (!grantAllows(grant, REQUIRES[name])) return refusal(403, "unauthorized");
+  if (!grantAllows(grant, "schedules.read")) return refusal(403, "unauthorized");
   if (!ACTOR_PATTERN.test(grant.principal)) return refusal(403, "actor_not_supported");
-  if (name === SCHEDULE_READ_TOOL) {
-    const parsed = scheduleReadSchema.safeParse(body ?? {});
-    if (!parsed.success) return refusal(400, "invalid_request");
-    const { source } = parsed.data;
-    if (source === undefined) {
-      const scope = grant.scopes.scheduleSources ?? [];
-      return relay(env, "/agent/read", grant.principal, {
-        sources: scope === "*" ? "*" : [...scope],
-      });
-    }
-    // Any source outside the grant is refused alike, whether or not it exists.
-    if (!grantAllowsScheduleSource(grant, source)) return refusal(403, "source_not_granted");
-    return relay(env, "/agent/read", grant.principal, { sources: [source] });
+  const parsed = scheduleReadSchema.safeParse(body ?? {});
+  if (!parsed.success) return refusal(400, "invalid_request");
+  const { source } = parsed.data;
+  if (source === undefined) {
+    const scope = grant.scopes.scheduleSources ?? [];
+    return relayRead(env, grant.principal, { sources: scope === "*" ? "*" : [...scope] });
   }
+  // Any source outside the grant is refused alike, whether or not it exists.
+  if (!grantAllowsScheduleSource(grant, source)) return refusal(403, "source_not_granted");
+  return relayRead(env, grant.principal, { sources: [source] });
+}
+
+/** The HTTP status of a delegation refusal: a table that cannot be read is the deployment's fault. */
+function delegationStatus(code: string): number {
+  return code === "delegation_misconfigured" ? 503 : 403;
+}
+
+/**
+ * `kogane.schedules.maintenance.update` for an MCP caller. Its gates, in
+ * order: the caller's delegation (#628's resolver; no bare subject, no
+ * browser session and no `AGENT_API_GRANTS` entry stands in for one), the
+ * delegated capability, the arguments, the delegation's schedule scope, and
+ * then whether delegated execution is connected at all — which it is not
+ * (`delegationExecutionReadiness` is `available: false` by type). Every call
+ * therefore ends in a closed refusal, and nothing is relayed or written.
+ */
+export async function updateScheduleTool(
+  body: unknown,
+  env: DelegationVars,
+  caller: AgentCaller,
+  now: string,
+): Promise<ToolResult> {
+  const resolution: DelegationResolution = await resolveDelegation({
+    configured: env.MCP_DELEGATIONS,
+    operatorSubjects: env.OPERATOR_SUBJECTS,
+    readGrants: parseGrants(env.AGENT_API_GRANTS),
+    caller,
+    now,
+  });
+  if (!resolution.ok) return refusal(delegationStatus(resolution.code), resolution.code);
+  const delegated = resolution.principal;
+  if (!delegated.capabilities.includes(UPDATE_CAPABILITY))
+    return refusal(403, "delegation_capability_denied");
   const parsed = scheduleUpdateSchema.safeParse(body ?? {});
   if (!parsed.success) return refusal(400, "invalid_request");
-  if (!grantAllowsScheduleSource(grant, parsed.data.source))
+  // Any source outside the delegation is refused alike, whether or not it exists.
+  const scope = delegated.scopes.scheduleSources;
+  if (scope !== "*" && !scope.includes(parsed.data.source))
     return refusal(403, "source_not_granted");
-  return relay(env, "/agent/maintenance", grant.principal, parsed.data);
+  // Plan slice S3 connects delegated execution here. Until it does, readiness
+  // is `available: false` for every capability, and this is the answer.
+  const readiness = delegationExecutionReadiness(resolution, UPDATE_CAPABILITY);
+  return refusal(delegationStatus(readiness.reason), readiness.reason);
 }

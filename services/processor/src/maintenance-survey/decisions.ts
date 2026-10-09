@@ -13,6 +13,7 @@ import {
   type SurveyFailureCode,
 } from "../../../../packages/collection/src/maintenance-survey-model.ts";
 import type {
+  MaintenanceChangeReason,
   MaintenancePattern,
   MaintenanceRule,
 } from "../../../../packages/collection/src/schedule-model.ts";
@@ -29,11 +30,11 @@ import type { SqlWrite } from "../../../../packages/storage-d1/src/core/operatio
  * The slice of a maintenance revision write an accepted proposal makes. It is
  * the narrowest form of `MaintenanceWrite` (#560, ADR 0046): an operator, a
  * named rule (new rules get an id derived from the proposal), the proposal's
- * page and fetch time as provenance, and the proposal as the decision
- * reference, which CORE 0067 stores. The proposal route passes
- * `writeMaintenanceRevision(env, MaintenanceWrite)` itself: it accepts this
- * write as it is, and answers a `MaintenanceWriteResult`, which
- * `RevisionResult` covers.
+ * page and fetch time as provenance, the proposal as the decision reference
+ * and the closed acceptance reason, which CORE 0076 stores. The proposal
+ * route passes `writeMaintenanceRevision(env, MaintenanceWrite, append)`
+ * itself: it accepts this write as it is, and answers a
+ * `MaintenanceWriteResult`, which `RevisionResult` covers.
  */
 export interface RevisionWrite {
   source: string;
@@ -47,7 +48,7 @@ export interface RevisionWrite {
   };
   provenance: { referenceUrl: string; verifiedAt: string; decisionRef: string };
   actor: { kind: "operator"; id: string };
-  reason: string;
+  reason: typeof ACCEPTED_REASON;
 }
 export type RevisionResult =
   | { ok: true; ruleId: string; revision: number; reconciled: boolean }
@@ -62,6 +63,8 @@ export interface SavedRevision {
   fields: RevisionField[];
   /** The canonical digest of the revision as validated; never the values themselves. */
   payloadDigest: string;
+  /** The revision's closed reason code. */
+  reason: MaintenanceChangeReason;
   /** A boolean SQL guard that holds exactly when the batch wrote this revision. */
   guard: SqlWrite;
 }
@@ -81,8 +84,12 @@ export type MaintenanceRevisionWriter = (
   append: (saved: SavedRevision) => RevisionAppend,
 ) => Promise<RevisionResult>;
 
-/** The reason an accepted proposal's revision carries: a closed code, never page text. */
-export const ACCEPTED_REASON = "maintenance-survey-proposal-accepted";
+/**
+ * The reason an accepted proposal's revision carries: a closed code of
+ * `MAINTENANCE_CHANGE_REASONS`, never page text.
+ */
+export const ACCEPTED_REASON =
+  "maintenance-survey-proposal-accepted" satisfies MaintenanceChangeReason;
 /** The reason code of a rejection's audit record. */
 export const REJECTED_REASON = "maintenance-survey-proposal-rejected";
 /** The decision reference of the revision a proposal's acceptance writes. */

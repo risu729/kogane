@@ -25,6 +25,36 @@ export interface MaintenanceRule {
   scope: "collection" | "session" | "feature-only";
   revision: number;
 }
+/**
+ * Why a maintenance revision was written, as a closed code (ADR 0046 as
+ * amended by ADR 0063, item 8). CORE 0076's CHECK on
+ * `provider_maintenance_rules.change_reason` holds the same list; a revision
+ * never carries free text. `operator-edit` is the operator page's own edit;
+ * `maintenance-survey-proposal-accepted` is an accepted re-survey proposal
+ * (ADR 0050); the others are what a delegated principal may choose
+ * (`DELEGATED_MAINTENANCE_REASONS`).
+ */
+export const MAINTENANCE_CHANGE_REASONS = [
+  "official-notice-added",
+  "official-notice-changed",
+  "official-notice-withdrawn",
+  "outage-observed",
+  "owner-instructed",
+  "correction",
+  "operator-edit",
+  "maintenance-survey-proposal-accepted",
+] as const;
+export type MaintenanceChangeReason = (typeof MAINTENANCE_CHANGE_REASONS)[number];
+/** The reasons a delegated maintenance revision may give: neither the operator's nor a survey's. */
+export const DELEGATED_MAINTENANCE_REASONS = [
+  "official-notice-added",
+  "official-notice-changed",
+  "official-notice-withdrawn",
+  "outage-observed",
+  "owner-instructed",
+  "correction",
+] as const satisfies readonly MaintenanceChangeReason[];
+export type DelegatedMaintenanceReason = (typeof DELEGATED_MAINTENANCE_REASONS)[number];
 export interface ScheduleView {
   id: string;
   source: string | null;

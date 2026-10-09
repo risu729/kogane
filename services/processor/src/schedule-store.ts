@@ -7,7 +7,9 @@ import {
   validPattern,
   validMaintenance,
   validInstant,
+  MAINTENANCE_CHANGE_REASONS,
   ZONES,
+  type MaintenanceChangeReason,
   type MaintenancePattern,
   type SchedulePattern,
   type ScheduleView,
@@ -23,6 +25,7 @@ import {
 } from "./maintenance-survey/decisions.ts";
 import {
   ACTOR_PATTERN,
+  AUDIT_HEADERS,
   AUDIT_RECORDED_HEADER,
   changedFields,
   type OperationCall,
@@ -262,13 +265,13 @@ export async function updateSchedule(
 // ── The maintenance writer ─────────────────────────────────────────────
 //
 // `writeMaintenanceRevision` is the one place a maintenance rule revision is
-// written (ADR 0046). The operator route (`updateMaintenance`), an accepted
-// re-survey proposal (ADR 0050) and the agent MCP tool
-// (`updateMaintenanceAsAgent`) are thin adapters over it. It never throws for
-// a refusal: it answers a closed `MaintenanceWriteCode`. What its caller
-// appends (its audit record, a survey decision) is sent in the revision's own
-// batch, so the revision, its provenance and what was appended exist together
-// or not at all (ADR 0064).
+// written (ADR 0046 as amended by ADR 0063, item 8). The operator route
+// (`updateMaintenance`) and an accepted re-survey proposal (ADR 0050) are its
+// adapters; a delegated principal reaches no route to it yet (ADR 0063 slice
+// S3 connects delegated execution). It never throws for a refusal: it answers
+// a closed `MaintenanceWriteCode`. What its caller appends (its audit record,
+// a survey decision) is sent in the revision's own batch, so the revision, its
+// provenance and what was appended exist together or not at all (ADR 0064).
 
 /** Every refusal the writer can answer, with the HTTP status the routes use. */
 export const MAINTENANCE_WRITE_CODES = {
@@ -276,18 +279,29 @@ export const MAINTENANCE_WRITE_CODES = {
   invalid_request: 400,
   /** The reference is not https on the source's already registered host. */
   invalid_reference: 400,
-  /** An agent revision without a one-line reason of 1-500 characters. */
-  reason_required: 400,
-  /** An agent named a rule that is not this source's (or does not exist). */
+  /** The reason is not a closed code this actor may give (`MAINTENANCE_CHANGE_REASONS`). */
+  invalid_reason: 400,
+  /** A delegated principal named a rule that is not this source's (or does not exist). */
   maintenance_rule_not_found: 404,
   /** `expectedRevision` is not the rule's current revision. */
   revision_conflict: 409,
-  /** An agent revision would leave a long joined deferral its source did not already have. */
+  /**
+   * A delegated revision would leave a joined deferral longer than seven days
+   * that its source did not already have. Beyond that bound the revision is
+   * the operator's (class R3 until the owner answers the plan's question 1).
+   */
   maintenance_deferral_too_long: 422,
-  /** The agent principal's rolling daily write budget is spent. */
+  /** The delegated principal's rolling daily write budget is spent. */
   maintenance_write_budget_exceeded: 429,
 } as const;
 export type MaintenanceWriteCode = keyof typeof MAINTENANCE_WRITE_CODES;
+
+/** The actors a revision may name: the operator, or a principal the owner delegated. */
+export type MaintenanceActor =
+  /** A subject the App graded as the operator; never an `mcp-client:` name. */
+  | { kind: "operator"; id: string }
+  /** `mcp-client:<sub>` resolved under MCP_DELEGATIONS (ADR 0063). */
+  | { kind: "delegated"; id: string };
 
 /** One requested revision. Values are validated, never trusted, whoever calls. */
 export interface MaintenanceWrite {
@@ -295,8 +309,8 @@ export interface MaintenanceWrite {
   source: string;
   /**
    * The rule to revise, or `null` to create one under an id the writer
-   * chooses. An operator may also create under its own id (expected 0); an
-   * agent may only name an existing rule of `source`.
+   * chooses. An operator may also create under its own id (expected 0); a
+   * delegated principal may only name an existing rule of `source`.
    */
   ruleId: string | null;
   /** The revision the change was made against; 0 for a new rule. */
@@ -312,13 +326,12 @@ export interface MaintenanceWrite {
     referenceUrl: string;
     /** When the announcement was checked; an ISO instant, not in the future. */
     verifiedAt: string;
-    /** Optional reference to the reviewed decision or proposal behind the change. */
+    /** The re-survey proposal behind the change (`maintenance-survey:proposal:<id>`), or none. */
     decisionRef?: string | null;
   };
-  /** The verified principal; an operator subject or an agent-API principal. */
-  actor: { kind: "operator" | "agent"; id: string };
-  /** Required for an agent; optional for an operator. One line, 1-500 characters. */
-  reason?: string | null;
+  actor: MaintenanceActor;
+  /** Why, as a closed code; never free text. */
+  reason: MaintenanceChangeReason;
 }
 export type MaintenanceWriteResult =
   | {
@@ -330,15 +343,30 @@ export type MaintenanceWriteResult =
     }
   | { ok: false; code: MaintenanceWriteCode; status: number };
 
-/** Agent revisions one principal may write per rolling day (ADR 0046). */
-const AGENT_MAINTENANCE_WRITES_PER_DAY = 30;
-/** Longest joined deferral an agent revision may create (ADR 0046). */
-const AGENT_MAX_DEFERRAL_MS = 7 * 86_400_000;
+/** Delegated revisions one principal may write per rolling day (ADR 0046, ADR 0063 item 8). */
+export const DELEGATED_MAINTENANCE_WRITES_PER_DAY = 30;
+/**
+ * Longest joined deferral a delegated revision may create: the direct (R1)
+ * envelope of ADR 0063 item 8. A longer one is refused; its target class is
+ * R2 up to a 31-day ceiling, which needs the owner's answer to the plan's
+ * question 1 and a confirmation step, so it is not built here.
+ */
+export const DELEGATED_MAX_DEFERRAL_MS = 7 * 86_400_000;
 /** Recurring windows are checked over this horizon; dated windows at any date. */
 const DEFERRAL_HORIZON_MS = 92 * 86_400_000;
 const RULE_ID = /^[a-z0-9-]{1,100}$/u;
 const OPERATOR_ACTOR = /^[A-Za-z0-9._:@-]{1,200}$/u;
-const DECISION_REF = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,199}$/u;
+const MCP_CLIENT_PREFIX = "mcp-client:";
+const SURVEY_DECISION_REF = /^maintenance-survey:proposal:[1-9][0-9]{0,15}$/u;
+const SURVEY_REASON: MaintenanceChangeReason = "maintenance-survey-proposal-accepted";
+/**
+ * The delegated revisions of one principal since an instant. It reads the
+ * partial index `maintenance_agent_writes` (CORE 0076); the writer runs it
+ * before writing and again inside its INSERT, so two concurrent writes cannot
+ * both pass a spent budget.
+ */
+export const DELEGATED_WRITES_SINCE_SQL =
+  "SELECT count(*) FROM provider_maintenance_rules WHERE actor_kind='delegated' AND actor=? AND created_at>?";
 
 interface MaintenanceInput {
   id: string;
@@ -351,7 +379,7 @@ interface MaintenanceInput {
   verifiedAt: string;
   scope: MaintenanceRule["scope"];
 }
-/** The field validation every revision passes, operator or agent. */
+/** The field validation every revision passes, whoever writes it. */
 async function validMaintenanceInput(
   db: D1Database,
   v: Record<string, unknown>,
@@ -405,39 +433,75 @@ async function validMaintenanceInput(
     scope: v.scope as MaintenanceRule["scope"],
   };
 }
-async function agentWritesToday(db: D1Database, agent: string): Promise<number> {
+/** The instant a rolling day of delegated writes starts from. */
+function budgetSince(now: number): string {
+  return new Date(now - 86_400_000).toISOString();
+}
+async function delegatedWritesToday(db: D1Database, principal: string): Promise<number> {
   const row = await db
-    .prepare(
-      "SELECT count(*) AS n FROM provider_maintenance_rules WHERE actor_kind='agent' AND actor=? AND created_at>?",
-    )
-    .bind(agent, new Date(Date.now() - 86_400_000).toISOString())
+    .prepare(DELEGATED_WRITES_SINCE_SQL.replace("count(*)", "count(*) AS n"))
+    .bind(principal, budgetSince(Date.now()))
     .first<{ n: number }>();
   return row?.n ?? 0;
 }
-/** A reason is the writer's own short account of the change: one line, 1-500 characters. */
-function validReason(value: unknown): string {
-  const reason = typeof value === "string" ? value.trim() : "";
-  if (reason.length < 1 || reason.length > 500 || /[\u0000-\u001f\u007f]/u.test(reason))
-    throw new ScheduleError("reason_required");
-  return reason;
+/** The actor, refused unless its id has its kind's shape; an operator is never an MCP client. */
+function validActor(value: unknown): MaintenanceActor {
+  const actor: Record<string, unknown> = isPlainObject(value) ? value : {};
+  const { kind, id } = actor;
+  if (typeof id !== "string") throw new ScheduleError("invalid_request");
+  if (kind === "operator" && OPERATOR_ACTOR.test(id) && !id.startsWith(MCP_CLIENT_PREFIX))
+    return { kind, id };
+  if (
+    kind === "delegated" &&
+    id.startsWith(MCP_CLIENT_PREFIX) &&
+    id.length > MCP_CLIENT_PREFIX.length &&
+    ACTOR_PATTERN.test(id)
+  )
+    return { kind, id };
+  throw new ScheduleError("invalid_request");
+}
+/**
+ * The reason and decision reference, refused unless both are closed values
+ * this actor may give: `operator-edit` is the operator's own edit, and the
+ * survey's acceptance reason comes with exactly its proposal reference.
+ */
+function validProvenance(
+  actor: MaintenanceActor,
+  reason: unknown,
+  decisionRef: unknown,
+): { reason: MaintenanceChangeReason; decisionRef: string | null } {
+  if (
+    typeof reason !== "string" ||
+    !(MAINTENANCE_CHANGE_REASONS as readonly string[]).includes(reason) ||
+    (reason === "operator-edit" && actor.kind !== "operator")
+  )
+    throw new ScheduleError("invalid_reason");
+  const ref = decisionRef ?? null;
+  if (ref !== null && (typeof ref !== "string" || !SURVEY_DECISION_REF.test(ref)))
+    throw new ScheduleError("invalid_request");
+  if ((reason === SURVEY_REASON) !== (ref !== null)) throw new ScheduleError("invalid_reason");
+  return { reason: reason as MaintenanceChangeReason, decisionRef: ref };
 }
 function deferringRules(rules: readonly MaintenanceRule[]): MaintenanceRule[] {
   return rules.filter((rule) => rule.enabled && rule.scope !== "feature-only");
 }
 /**
- * Refuses an agent revision that leaves a joined deferral longer than the
+ * Refuses a delegated revision that leaves a joined deferral longer than the
  * bound which the source's current rules do not already cause.
  */
-function checkAgentDeferral(current: readonly MaintenanceRule[], candidate: MaintenanceRule) {
+function checkDelegatedDeferral(current: readonly MaintenanceRule[], candidate: MaintenanceRule) {
   // Measured from up to the bound before now, so a running union counts the
-  // part already spent: an agent cannot keep a window going by extending it.
-  // A union that ended before now is at most the bound long, so it never counts.
-  const since = Date.now() - AGENT_MAX_DEFERRAL_MS,
-    horizon = AGENT_MAX_DEFERRAL_MS + DEFERRAL_HORIZON_MS;
+  // part already spent: a delegated principal cannot keep a window going by
+  // extending it. A union that ended before now is at most the bound long, so
+  // it never counts.
+  const since = Date.now() - DELEGATED_MAX_DEFERRAL_MS,
+    horizon = DELEGATED_MAX_DEFERRAL_MS + DEFERRAL_HORIZON_MS;
   const before = deferringRules(current),
     after = deferringRules([...current.filter((rule) => rule.id !== candidate.id), candidate]);
   try {
-    if (longestDeferral(after, since, horizon, AGENT_MAX_DEFERRAL_MS) <= AGENT_MAX_DEFERRAL_MS)
+    if (
+      longestDeferral(after, since, horizon, DELEGATED_MAX_DEFERRAL_MS) <= DELEGATED_MAX_DEFERRAL_MS
+    )
       return;
   } catch {
     /* An unmeasurable chain is judged below. */
@@ -461,7 +525,7 @@ function checkAgentDeferral(current: readonly MaintenanceRule[], candidate: Main
     revised === null ||
     revised.some(
       (union) =>
-        union.end - union.start > AGENT_MAX_DEFERRAL_MS &&
+        union.end - union.start > DELEGATED_MAX_DEFERRAL_MS &&
         !existing.some((known) => known.start <= union.start && union.end <= known.end),
     )
   )
@@ -470,8 +534,6 @@ function checkAgentDeferral(current: readonly MaintenanceRule[], candidate: Main
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
-/** What a revision's caller appends to its batch: nothing. */
-const APPEND_NOTHING = (): RevisionAppend => ({ statements: [], settle: () => undefined });
 async function writeRevision(
   env: Env,
   write: MaintenanceWrite,
@@ -479,29 +541,16 @@ async function writeRevision(
 ): Promise<Extract<MaintenanceWriteResult, { ok: true }>> {
   const raw: unknown = write;
   const w: Record<string, unknown> = isPlainObject(raw) ? raw : {};
-  const actor: Record<string, unknown> = isPlainObject(w.actor) ? w.actor : {};
   const change: Record<string, unknown> = isPlainObject(w.change) ? w.change : {};
   const provenance: Record<string, unknown> = isPlainObject(w.provenance) ? w.provenance : {};
-  const kind = actor.kind;
+  const actor = validActor(w.actor);
+  const delegated = actor.kind === "delegated";
   if (
-    (kind !== "operator" && kind !== "agent") ||
-    typeof actor.id !== "string" ||
-    !(kind === "agent" ? ACTOR_PATTERN : OPERATOR_ACTOR).test(actor.id)
-  )
-    throw new ScheduleError("invalid_request");
-  const actorId = actor.id;
-  if (
-    kind === "agent" &&
-    (await agentWritesToday(env.DB, actorId)) >= AGENT_MAINTENANCE_WRITES_PER_DAY
+    delegated &&
+    (await delegatedWritesToday(env.DB, actor.id)) >= DELEGATED_MAINTENANCE_WRITES_PER_DAY
   )
     throw new ScheduleError("maintenance_write_budget_exceeded", 429);
-  const reason =
-    kind === "agent" || (w.reason !== undefined && w.reason !== null)
-      ? validReason(w.reason)
-      : null;
-  const decisionRef = provenance.decisionRef ?? null;
-  if (decisionRef !== null && (typeof decisionRef !== "string" || !DECISION_REF.test(decisionRef)))
-    throw new ScheduleError("invalid_request");
+  const { reason, decisionRef } = validProvenance(actor, w.reason, provenance.decisionRef);
   let id: unknown = w.ruleId;
   if (id === null) {
     // A new rule's id is chosen here, so a create cannot probe which ids
@@ -536,7 +585,7 @@ async function writeRevision(
       verified_at: string;
       scope: string;
     }>();
-  if (kind === "agent" && w.ruleId !== null && (!previous || previous.source !== input.source))
+  if (delegated && w.ruleId !== null && (!previous || previous.source !== input.source))
     // Another source's rule answers exactly like a rule that does not exist.
     throw new ScheduleError("maintenance_rule_not_found", 404);
   if (
@@ -544,8 +593,8 @@ async function writeRevision(
     (previous && previous.source !== input.source)
   )
     throw new ScheduleError("revision_conflict", 409);
-  if (kind === "agent")
-    checkAgentDeferral(await maintenanceRules(env.DB, input.source), {
+  if (delegated)
+    checkDelegatedDeferral(await maintenanceRules(env.DB, input.source), {
       ...input,
       revision: input.revision + 1,
     });
@@ -553,7 +602,7 @@ async function writeRevision(
   const revision = input.revision + 1;
   const guard: SqlWrite = {
     sql: "EXISTS(SELECT 1 FROM provider_maintenance_rules WHERE id=? AND revision=? AND actor=? AND created_at=?)",
-    binds: [input.id, revision, actorId, now],
+    binds: [input.id, revision, actor.id, now],
   };
   const after = {
     source: input.source,
@@ -564,15 +613,13 @@ async function writeRevision(
     verified_at: input.verifiedAt,
     scope: input.scope,
   };
-  // The version check and an agent's budget are in the INSERT itself, so two
-  // writers that read the same revision cannot both succeed.
-  const budget =
-    kind === "agent"
-      ? " AND (SELECT count(*) FROM provider_maintenance_rules WHERE actor_kind='agent' AND actor=? AND created_at>?)<?"
-      : "";
+  // The version check and a delegated principal's budget are in the INSERT
+  // itself, so two writers that read the same revision cannot both succeed.
   const statements = [
     env.DB.prepare(`INSERT OR IGNORE INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason,decision_ref)
-    SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE COALESCE((SELECT MAX(revision) FROM provider_maintenance_rules WHERE id=?),0)=?${budget}`).bind(
+    SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE COALESCE((SELECT MAX(revision) FROM provider_maintenance_rules WHERE id=?),0)=?${
+      delegated ? ` AND (${DELEGATED_WRITES_SINCE_SQL})<?` : ""
+    }`).bind(
       input.id,
       revision,
       input.source,
@@ -582,19 +629,15 @@ async function writeRevision(
       input.referenceUrl,
       input.verifiedAt,
       input.scope,
-      actorId,
+      actor.id,
       now,
-      kind,
+      actor.kind,
       reason,
       decisionRef,
       input.id,
       input.revision,
-      ...(kind === "agent"
-        ? [
-            actorId,
-            new Date(Date.parse(now) - 86_400_000).toISOString(),
-            AGENT_MAINTENANCE_WRITES_PER_DAY,
-          ]
+      ...(delegated
+        ? [actor.id, budgetSince(Date.parse(now)), DELEGATED_MAINTENANCE_WRITES_PER_DAY]
         : []),
     ),
     // The provenance confirmation is guarded on the row the insert wrote, so
@@ -622,13 +665,14 @@ async function writeRevision(
       after,
     ),
     payloadDigest: await canonicalDigest({ id: input.id, revision: input.revision, ...after }),
+    reason,
     guard,
   });
   const results = await env.DB.batch([...statements, ...appended.statements]);
   if (results[0]?.meta.changes !== 1) {
     if (
-      kind === "agent" &&
-      (await agentWritesToday(env.DB, actorId)) >= AGENT_MAINTENANCE_WRITES_PER_DAY
+      delegated &&
+      (await delegatedWritesToday(env.DB, actor.id)) >= DELEGATED_MAINTENANCE_WRITES_PER_DAY
     )
       throw new ScheduleError("maintenance_write_budget_exceeded", 429);
     throw new ScheduleError("revision_conflict", 409);
@@ -640,12 +684,12 @@ async function writeRevision(
 /**
  * Append one maintenance-rule revision, then reconcile the source's
  * reservations. Validates fields, the registered reference host, the expected
- * revision and, for an agent, the reason, the rule's source, the deferral
- * bound and the daily budget. Sends the revision, its provenance and what
- * `append` returns as one batch. Never edits a job, enables or disables one,
- * releases a lease or starts collection. A refusal is a closed code; an
- * unexpected storage failure (a batch that raised) still throws, and then
- * nothing of the batch was written.
+ * revision, the actor and its closed reason and, for a delegated principal,
+ * the rule's source, the deferral bound and the daily budget. Sends the
+ * revision, its provenance and what `append` returns as one batch. Never
+ * edits a job, enables or disables one, releases a lease or starts
+ * collection. A refusal is a closed code; an unexpected storage failure (a
+ * batch that raised) still throws, and then nothing of the batch was written.
  */
 export async function writeMaintenanceRevision(
   env: Env,
@@ -674,16 +718,13 @@ async function reconcileSource(env: Env, source: string): Promise<number> {
   }
   return pending;
 }
-function refuseUnless(
-  result: MaintenanceWriteResult,
-): Extract<MaintenanceWriteResult, { ok: true }> {
-  if (!result.ok) throw new ScheduleError(result.code, result.status);
-  return result;
-}
+/** The reason the operator page's edit records: the page asks for none. */
+const OPERATOR_EDIT: MaintenanceChangeReason = "operator-edit";
 /**
  * The operator's maintenance edit: the revision, its provenance and its
  * `applied` audit record (ADR 0064) are one batch. Alarm reconciliation stays
- * outside it, as before. Its body, codes and answer are unchanged.
+ * outside it, as before. Its body, codes and answer are unchanged; the
+ * revision records `operator-edit` as its reason.
  */
 export async function updateMaintenance(
   env: Env,
@@ -705,109 +746,55 @@ export async function updateMaintenance(
   ]);
   // The operator names its own rule id; a missing one is invalid, not a create.
   if (typeof v.id !== "string") throw new ScheduleError("invalid_request");
-  const saved = refuseUnless(
-    await writeMaintenanceRevision(
-      env,
-      {
-        source: v.source as string,
-        ruleId: v.id,
-        expectedRevision: v.revision as number,
-        change: {
-          timezone: v.timezone as string,
-          pattern: v.pattern as MaintenancePattern,
-          enabled: v.enabled as boolean,
-          scope: v.scope as MaintenanceRule["scope"],
-        },
-        provenance: {
-          referenceUrl: v.referenceUrl as string,
-          verifiedAt: v.verifiedAt as string,
-        },
-        actor: { kind: "operator", id: actor },
+  const result = await writeMaintenanceRevision(
+    env,
+    {
+      source: v.source as string,
+      ruleId: v.id,
+      expectedRevision: v.revision as number,
+      change: {
+        timezone: v.timezone as string,
+        pattern: v.pattern as MaintenancePattern,
+        enabled: v.enabled as boolean,
+        scope: v.scope as MaintenanceRule["scope"],
       },
-      (revision) => {
-        const ref = `maintenance-rule:${revision.ruleId}@${revision.revision}`;
-        const record = audit.effect(
-          {
-            targetRef: `maintenance-rule:${revision.ruleId}`,
-            refs: [ref],
-            scope: { namespace: "schedule-source", source: v.source as string },
-            payloadDigest: revision.payloadDigest,
-            diff: {
-              kind: "revision",
-              from: revision.previous,
-              to: revision.revision,
-              fields: revision.fields,
-            },
+      provenance: {
+        referenceUrl: v.referenceUrl as string,
+        verifiedAt: v.verifiedAt as string,
+      },
+      actor: { kind: "operator", id: actor },
+      reason: OPERATOR_EDIT,
+    },
+    (revision) => {
+      const ref = `maintenance-rule:${revision.ruleId}@${revision.revision}`;
+      const record = audit.effect(
+        {
+          targetRef: `maintenance-rule:${revision.ruleId}`,
+          refs: [ref],
+          scope: { namespace: "schedule-source", source: v.source as string },
+          reasonCode: revision.reason,
+          payloadDigest: revision.payloadDigest,
+          diff: {
+            kind: "revision",
+            from: revision.previous,
+            to: revision.revision,
+            fields: revision.fields,
           },
-          revision.guard,
-          { kind: "target-ref", ref },
-        );
-        return {
-          statements: [statement(env.DB, record)],
-          settle: (results) => audit.settle(results[0]?.meta.changes),
-        };
-      },
-    ),
+        },
+        revision.guard,
+        { kind: "target-ref", ref },
+      );
+      return {
+        statements: [statement(env.DB, record)],
+        settle: (results) => audit.settle(results[0]?.meta.changes),
+      };
+    },
   );
+  if (!result.ok) throw new ScheduleError(result.code, result.status);
   return {
     saved: true,
-    revision: saved.revision,
-    reservation: saved.reconciled ? "armed" : "pending",
-  };
-}
-/**
- * The agent MCP tool's adapter (ADR 0046). The App has already checked
- * `schedules.maintenance.update` and that `source` is in the grant's
- * `scheduleSources`; the writer adds what only the store can check. The
- * answer carries the source's view after the save.
- */
-async function updateMaintenanceAsAgent(env: Env, value: unknown, agent: string) {
-  const v = bodyObject(value);
-  exactKeys(v, [
-    "source",
-    "ruleId",
-    "revision",
-    "timezone",
-    "pattern",
-    "enabled",
-    "scope",
-    "referenceUrl",
-    "verifiedAt",
-    "reason",
-  ]);
-  if (v.ruleId === null) throw new ScheduleError("invalid_request");
-  const saved = refuseUnless(
-    await writeMaintenanceRevision(
-      env,
-      {
-        source: v.source as string,
-        ruleId: v.ruleId === undefined ? null : (v.ruleId as string),
-        expectedRevision: v.revision as number,
-        change: {
-          timezone: v.timezone as string,
-          pattern: v.pattern as MaintenancePattern,
-          enabled: v.enabled as boolean,
-          scope: v.scope as MaintenanceRule["scope"],
-        },
-        provenance: {
-          referenceUrl: v.referenceUrl as string,
-          verifiedAt: v.verifiedAt as string,
-        },
-        actor: { kind: "agent", id: agent },
-        reason: v.reason as string,
-      },
-      APPEND_NOTHING,
-    ),
-  );
-  // Each schedule's original next occurrence, saved due time, actual alarm
-  // and armed/pending/disabled state after the save.
-  const [readback] = await agentSourceViews(env, [String(v.source)], agent);
-  return {
-    saved: true,
-    ruleId: saved.ruleId,
-    revision: saved.revision,
-    reconciled: saved.reconciled,
-    source: readback,
+    revision: result.revision,
+    reservation: result.reconciled ? "armed" : "pending",
   };
 }
 interface RevisionRow {
@@ -821,7 +808,7 @@ interface RevisionRow {
   verified_at: string;
   scope: MaintenanceRule["scope"];
   actor: string;
-  actor_kind: "operator" | "agent" | null;
+  actor_kind: "operator" | "delegated" | null;
   change_reason: string | null;
   created_at: string;
 }
@@ -942,10 +929,12 @@ function revisionView(row: RevisionRow, agent: string) {
     referenceUrl: row.reference_url,
     verifiedAt: row.verified_at,
     createdAt: row.created_at,
-    /** `null` for revisions written before CORE 0067 recorded it. */
+    /** `null` for revisions written before CORE 0076 recorded it. */
     actorKind: row.actor_kind,
+    /** A closed code (`MAINTENANCE_CHANGE_REASONS`), or `null` before CORE 0076. */
     changeReason: row.change_reason,
-    byCaller: row.actor_kind === "agent" && row.actor === agent,
+    /** Whether the reading principal wrote it as a delegated principal. */
+    byCaller: row.actor_kind === "delegated" && row.actor === agent,
   };
 }
 /** Maintenance settings of the requested sources the jobs configuration declares. */
@@ -967,10 +956,12 @@ async function agentMaintenanceRead(env: Env, value: unknown, agent: string) {
   } else throw new ScheduleError("invalid_request");
   return {
     sources: await agentSourceViews(env, sources, agent),
+    // The writer's limits on a delegated principal's revisions, and how many
+    // the reading principal wrote today (none unless it was delegated).
     limits: {
-      maxDeferralHours: AGENT_MAX_DEFERRAL_MS / 3_600_000,
-      writesPerDay: AGENT_MAINTENANCE_WRITES_PER_DAY,
-      writesUsedToday: await agentWritesToday(env.DB, agent),
+      maxDeferralHours: DELEGATED_MAX_DEFERRAL_MS / 3_600_000,
+      writesPerDay: DELEGATED_MAINTENANCE_WRITES_PER_DAY,
+      writesUsedToday: await delegatedWritesToday(env.DB, agent),
     },
   };
 }
@@ -1170,17 +1161,19 @@ function recorded(response: Response, audit: OperationCall): Response {
   return response;
 }
 /**
- * The two agent paths (ADR 0046): read the granted sources' maintenance
- * settings, and append one maintenance revision. The App has graded the
- * grant; the agent principal arrives in its own header, never as an operator,
- * and no other settings function is reachable from here.
+ * The agent path (ADR 0046): read the granted sources' maintenance settings.
+ * The App has graded the reader's `schedules.read` grant and its schedule
+ * scope; the reading principal arrives in its own header, never as an
+ * operator, and no other settings function — no write of any kind — is
+ * reachable from here. A delegated maintenance write has no route until ADR
+ * 0063's delegated execution is connected (plan slice S3).
  */
 async function agentRoute(request: Request, env: Env, path: string): Promise<unknown> {
-  if (request.headers.has("x-kogane-operator")) throw new ScheduleError("invalid_request");
+  if (request.headers.has("x-kogane-operator") || request.headers.has(AUDIT_HEADERS.delegationRef))
+    throw new ScheduleError("invalid_request");
   const agent = request.headers.get("x-kogane-agent");
   if (!agent || !ACTOR_PATTERN.test(agent)) throw new ScheduleError("agent_required", 403);
-  if (path !== "/agent/read" && path !== "/agent/maintenance")
-    throw new ScheduleError("not_found", 404);
+  if (path !== "/agent/read") throw new ScheduleError("not_found", 404);
   const text = await request.text();
   if (text.length > 16 * 1024) throw new ScheduleError("request_too_large", 413);
   let value: unknown;
@@ -1189,9 +1182,7 @@ async function agentRoute(request: Request, env: Env, path: string): Promise<unk
   } catch {
     throw new ScheduleError("invalid_request");
   }
-  return path === "/agent/read"
-    ? agentMaintenanceRead(env, value, agent)
-    : updateMaintenanceAsAgent(env, value, agent);
+  return agentMaintenanceRead(env, value, agent);
 }
 export async function scheduleRoute(
   request: Request,

@@ -240,7 +240,8 @@ test("an accepted window defers the next run through the alarm code, which then 
     reservation: "armed",
   });
   // The writer's revision: the page and fetch time as provenance, the operator
-  // as actor, and the proposal as its decision reference (CORE 0067).
+  // as actor, its closed reason and the proposal as its decision reference
+  // (CORE 0076).
   expect(
     await env.DB.prepare(
       "SELECT revision,source,pattern_json,enabled,reference_url,verified_at,scope,actor,actor_kind,change_reason,decision_ref FROM provider_maintenance_rules WHERE id=?",
@@ -462,6 +463,7 @@ test("acceptance hands the maintenance writer exactly the #560 write, and its re
       previous: 0,
       fields: ["enabled", "pattern", "scope", "source", "timezone"],
       payloadDigest: "0".repeat(64),
+      reason: ACCEPTED_REASON,
       guard: { sql: "1=1", binds: [] },
     });
     appended.settle(await env.DB.batch(appended.statements));

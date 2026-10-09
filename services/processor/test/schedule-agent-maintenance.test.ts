@@ -1,26 +1,50 @@
-// The agent maintenance path of the settings service (ADR 0046), through the
-// real Processor Worker under workerd: its `/internal/schedules` route, real
-// Durable Object alarms and named service RPC. The provider is a synthetic
-// stub that only counts calls; every source reference is a synthetic host.
-import { afterAll, beforeAll, expect, test } from "bun:test";
+// The maintenance writer for a delegated principal (ADR 0046 as amended by
+// ADR 0063, item 8) and the agent read route, through the real Processor
+// Worker under workerd: its `/internal/schedules` route, real Durable Object
+// alarms and named service RPC. The provider is a synthetic stub that only
+// counts calls; every source reference is a synthetic host and every
+// principal a synthetic name.
+//
+// No route reaches the writer as a delegated principal yet (ADR 0063's
+// delegated execution is plan slice S3), so the delegated cases call the
+// importable writer directly, as that slice's route will. They append no
+// audit record: the builder admits no `delegated` record until S3 (ADR 0064,
+// audit vocabulary). The record's batch is shown with the operator's edit,
+// which is reachable, at the end of this file.
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { readdirSync, readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import jobs from "../../../config/alarm-jobs.json";
+import {
+  DELEGATED_MAINTENANCE_REASONS,
+  MAINTENANCE_CHANGE_REASONS,
+} from "../../../packages/collection/src/schedule-model";
 import { LAYER_A_SQL, layerBMigrations, applyMigration } from "./harness";
 import { applyReadMigrations } from "../../../packages/storage-d1/src/migrations";
 import {
+  DELEGATED_MAX_DEFERRAL_MS,
+  DELEGATED_WRITES_SINCE_SQL,
   MAINTENANCE_WRITE_CODES,
   type MaintenanceWrite,
+  updateMaintenance,
   writeMaintenanceRevision,
 } from "../src/schedule-store";
+import { ACCEPTED_REASON, proposalRef } from "../src/maintenance-survey/decisions";
+import { envelopeHeaders, testCall } from "./audit-envelope";
 
-const AGENT = "maintenance-agent";
-const OTHER_AGENT = "other-maintenance-agent";
+const DELEGATE = "mcp-client:maintenance-owner-synthetic";
+const OTHER_DELEGATE = "mcp-client:other-owner-synthetic";
 const OPERATOR = "synthetic-operator";
 const REFERENCE = "https://maintenance.synthetic.test/notices";
 const DAY = 86_400_000;
-let mf: Miniflare, db: D1Database, namespace: unknown;
+/** A token-shaped value and an amount, placed where a caller can put text. */
+const TOKEN = "eyJhbGciOiJIUzI1NiJ9.c3ludGhldGlj.dG9rZW4";
+let mf: Miniflare, db: D1Database, namespace: unknown, processorEnv: Env;
 const alarms = () =>
   namespace as { getByName(name: string): { reconcile(id: string): Promise<string | null> } };
+/** What a delegated write appends here: nothing (see the header). */
+const NO_RECORD = () => ({ statements: [], settle: () => undefined });
 
 beforeAll(async () => {
   const bundle = await Bun.build({
@@ -67,6 +91,7 @@ beforeAll(async () => {
   for (const name of layerBMigrations()) await applyMigration(db, name);
   await applyReadMigrations((await mf.getD1Database("READ", "processor")) as unknown as D1Database);
   namespace = (await mf.getBindings("processor"))["SCHEDULE_ALARMS"];
+  processorEnv = { DB: db, SCHEDULE_ALARMS: namespace } as unknown as Env;
   // Independent of the seeded research: every job off and every seeded rule
   // disabled by a new revision, and every reference moved to a synthetic host.
   await db.prepare("UPDATE collection_schedules SET enabled=0").run();
@@ -88,7 +113,7 @@ afterAll(async () => {
 async function post(
   path: string,
   body: unknown,
-  headers: Record<string, string> = { "x-kogane-agent": AGENT },
+  headers: Record<string, string>,
 ): Promise<{ status: number; body: any }> {
   // A service-binding style call: `dispatchFetch` would add the edge's
   // cf-connecting-ip header, which this route refuses by design.
@@ -104,19 +129,14 @@ async function post(
   });
   return { status: response.status, body: await response.json() };
 }
-const write = (body: unknown, headers?: Record<string, string>) =>
-  post("/internal/schedules/agent/maintenance", body, headers);
-const read = (sources: unknown, headers?: Record<string, string>) =>
+const read = (sources: unknown, headers: Record<string, string> = { "x-kogane-agent": DELEGATE }) =>
   post("/internal/schedules/agent/read", { sources }, headers);
 /** The operator header with the audit envelope the App forwards (ADR 0064). */
-const operatorHeaders = () => ({
-  "x-kogane-operator": OPERATOR,
-  "x-kogane-correlation-id": crypto.randomUUID(),
-  "x-kogane-audit-path": "ui",
-});
+const operatorHeaders = () => ({ "x-kogane-operator": OPERATOR, ...envelopeHeaders() });
 const iso = (ms: number) => new Date(ms).toISOString();
 const verified = () => iso(Date.now() - 60_000);
 
+/** A delegated revision request in the tool's argument shape (`ruleId` omitted to create). */
 function rule(source: string, overrides: Record<string, unknown> = {}) {
   return {
     source,
@@ -127,23 +147,53 @@ function rule(source: string, overrides: Record<string, unknown> = {}) {
     scope: "collection",
     referenceUrl: `${REFERENCE}/announcement`,
     verifiedAt: verified(),
-    reason: "Synthetic announcement of a dated window",
+    reason: "official-notice-added",
     ...overrides,
   };
+}
+/** The writer's answer for a delegated principal, shaped like a route's. */
+async function write(
+  body: Record<string, unknown>,
+  principal = DELEGATE,
+): Promise<{ status: number; body: any }> {
+  const result = await writeMaintenanceRevision(
+    processorEnv,
+    {
+      source: body["source"],
+      ruleId: body["ruleId"] ?? null,
+      expectedRevision: body["revision"],
+      change: {
+        timezone: body["timezone"],
+        pattern: body["pattern"],
+        enabled: body["enabled"],
+        scope: body["scope"],
+      },
+      provenance: { referenceUrl: body["referenceUrl"], verifiedAt: body["verifiedAt"] },
+      actor: { kind: "delegated", id: principal },
+      reason: body["reason"],
+    } as MaintenanceWrite,
+    NO_RECORD,
+  );
+  return result.ok
+    ? {
+        status: 200,
+        body: {
+          saved: true,
+          ruleId: result.ruleId,
+          revision: result.revision,
+          reconciled: result.reconciled,
+        },
+      }
+    : { status: result.status, body: { error: result.code } };
 }
 async function revisions(id: string) {
   return (
     await db
       .prepare(
-        "SELECT revision,actor,actor_kind,change_reason FROM provider_maintenance_rules WHERE id=? ORDER BY revision",
+        "SELECT revision,actor,actor_kind,change_reason,decision_ref FROM provider_maintenance_rules WHERE id=? ORDER BY revision",
       )
       .bind(id)
-      .all<{
-        revision: number;
-        actor: string;
-        actor_kind: string | null;
-        change_reason: string | null;
-      }>()
+      .all<Record<string, unknown>>()
   ).results;
 }
 async function ruleCount(): Promise<number> {
@@ -160,7 +210,7 @@ async function providerCalls(): Promise<number> {
   ).calls;
 }
 
-test("an agent creates and revises a rule; each revision records the agent and its reason", async () => {
+test("a delegated principal creates and revises a rule; each revision records it, its kind and a closed reason", async () => {
   const created = await write(rule("sony-bank"));
   expect(created.status).toBe(200);
   expect(created.body).toMatchObject({ saved: true, revision: 1, reconciled: true });
@@ -172,38 +222,40 @@ test("an agent creates and revises a rule; each revision records the agent and i
       ruleId: id,
       revision: 1,
       enabled: false,
-      reason: "Synthetic: the provider withdrew the window",
+      reason: "official-notice-withdrawn",
     }),
   );
-  expect(revised.status).toBe(200);
-  expect(revised.body.revision).toBe(2);
+  expect(revised).toMatchObject({ status: 200, body: { revision: 2 } });
   expect(await revisions(id)).toEqual([
     {
       revision: 1,
-      actor: AGENT,
-      actor_kind: "agent",
-      change_reason: "Synthetic announcement of a dated window",
+      actor: DELEGATE,
+      actor_kind: "delegated",
+      change_reason: "official-notice-added",
+      decision_ref: null,
     },
     {
       revision: 2,
-      actor: AGENT,
-      actor_kind: "agent",
-      change_reason: "Synthetic: the provider withdrew the window",
+      actor: DELEGATE,
+      actor_kind: "delegated",
+      change_reason: "official-notice-withdrawn",
+      decision_ref: null,
     },
   ]);
-  // The readback is the source's own view, with the caller's revisions marked.
-  const view = revised.body.source;
-  expect(view.source).toBe("sony-bank");
+  // The read route shows the revisions with their kind and reason, marks the
+  // reader's own, and names no actor.
+  const view = (await read(["sony-bank"])).body.sources[0];
   const listed = view.rules.find((r: { id: string }) => r.id === id);
   expect(listed.revisions.map((r: { revision: number }) => r.revision)).toEqual([2, 1]);
   expect(listed.revisions[0]).toMatchObject({
     enabled: false,
-    actorKind: "agent",
-    changeReason: "Synthetic: the provider withdrew the window",
+    actorKind: "delegated",
+    changeReason: "official-notice-withdrawn",
     byCaller: true,
   });
-  // No revision's actor is returned, only its kind.
-  expect(JSON.stringify(revised.body)).not.toContain(`"${AGENT}"`);
+  const other = (await read(["sony-bank"], { "x-kogane-agent": OTHER_DELEGATE })).body.sources[0];
+  expect(other.rules.find((r: { id: string }) => r.id === id).revisions[0].byCaller).toBe(false);
+  expect(JSON.stringify(view)).not.toContain(`"${DELEGATE}"`);
 });
 
 test("a revision of a deferred schedule reads back the next run and an armed reservation", async () => {
@@ -220,18 +272,15 @@ test("a revision of a deferred schedule reads back the next run and an armed res
   );
   expect(saved.status).toBe(200);
   expect(saved.body.reconciled).toBe(true);
-  const schedule = saved.body.source.schedules.find((s: { id: string }) => s.id === "sony-bank");
-  expect(schedule).toMatchObject({
+  const after = await read(["sony-bank"]);
+  expect(
+    after.body.sources[0].schedules.find((s: { id: string }) => s.id === "sony-bank"),
+  ).toMatchObject({
     nextNominalAt: iso(nominal),
     nextRunAt: iso(end),
     actualAlarmAt: iso(end),
     reservation: "armed",
   });
-  // The same state is what a later read reports.
-  const again = await read(["sony-bank"]);
-  expect(
-    again.body.sources[0].schedules.find((s: { id: string }) => s.id === "sony-bank"),
-  ).toMatchObject({ nextRunAt: iso(end), actualAlarmAt: iso(end), reservation: "armed" });
   await db.prepare("UPDATE collection_schedules SET enabled=0 WHERE id='sony-bank'").run();
   await alarms().getByName("sony-bank").reconcile("sony-bank");
 });
@@ -251,7 +300,7 @@ test("a collection deferred across days runs once after the window and resumes i
   const saved = await write(
     rule("mizuho-bank", {
       pattern: { kind: "once", from: iso(from), to: iso(to) },
-      reason: "Synthetic multi-day migration window",
+      reason: "outage-observed",
     }),
   );
   expect(saved.status).toBe(200);
@@ -289,7 +338,7 @@ test("a collection deferred across days runs once after the window and resumes i
   await stub.getByName("mizuho-bank").reconcile("mizuho-bank");
 }, 15000);
 
-test("a stale revision, a bad window and missing provenance are refused and write nothing", async () => {
+test("a stale revision, a bad window, missing provenance and a reason outside the closed set write nothing", async () => {
   const created = await write(rule("vpass"));
   expect(created.status).toBe(200);
   const id = created.body.ruleId as string;
@@ -337,16 +386,17 @@ test("a stale revision, a bad window and missing provenance are refused and writ
     [{ referenceUrl: "https://elsewhere.synthetic.test/notices" }, 400, "invalid_reference"],
     [{ referenceUrl: "http://maintenance.synthetic.test/notices" }, 400, "invalid_reference"],
     [{ referenceUrl: "not a url" }, 400, "invalid_reference"],
-    [{ reason: undefined }, 400, "reason_required"],
-    [{ reason: "   " }, 400, "reason_required"],
-    [{ reason: "x".repeat(501) }, 400, "reason_required"],
-    [{ reason: "two\nlines" }, 400, "reason_required"],
-    [{ actor: "someone-else" }, 400, "invalid_request"],
-    [{ id: "chosen-id" }, 400, "invalid_request"],
+    // The reason is a closed code: no free text, nothing missing, never the
+    // operator's own edit, never a survey acceptance without its proposal.
+    [{ reason: undefined }, 400, "invalid_reason"],
+    [{ reason: "   " }, 400, "invalid_reason"],
+    [{ reason: `The provider said so ${TOKEN}` }, 400, "invalid_reason"],
+    [{ reason: "Official-Notice-Added" }, 400, "invalid_reason"],
+    [{ reason: "operator-edit" }, 400, "invalid_reason"],
+    [{ reason: ACCEPTED_REASON }, 400, "invalid_reason"],
   ];
   for (const [overrides, status, error] of cases) {
     const body: Record<string, unknown> = rule("vpass", overrides);
-    if ("reason" in overrides && overrides["reason"] === undefined) delete body["reason"];
     const result = await write(body);
     expect([JSON.stringify(overrides), result.status, result.body]).toEqual([
       JSON.stringify(overrides),
@@ -355,6 +405,23 @@ test("a stale revision, a bad window and missing provenance are refused and writ
     ]);
   }
   expect(await ruleCount()).toBe(count);
+  const stored = JSON.stringify(
+    (await db.prepare("SELECT * FROM provider_maintenance_rules").all()).results,
+  );
+  expect(stored).not.toContain("c3ludGhldGlj");
+});
+
+test("every reason a delegated principal may give is stored as itself", async () => {
+  for (const reason of DELEGATED_MAINTENANCE_REASONS) {
+    const saved = await write(
+      rule("sbi-securities", {
+        reason,
+        pattern: { kind: "weekly", weekdays: [4], start: "03:00", end: "04:00" },
+      }),
+    );
+    expect(saved.status).toBe(200);
+    expect((await revisions(saved.body.ruleId))[0]).toMatchObject({ change_reason: reason });
+  }
 });
 
 test("another source's rule answers exactly like a rule that does not exist", async () => {
@@ -366,190 +433,296 @@ test("another source's rule answers exactly like a rule that does not exist", as
   expect(missing).toEqual(owned);
 });
 
-test("an agent cannot turn a maintenance window into a disabled job", async () => {
-  const start = Date.now() + 2 * DAY;
-  const long = await write(
-    rule("st-george", { pattern: { kind: "once", from: iso(start), to: iso(start + 8 * DAY) } }),
-  );
-  expect(long).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
-  // Two adjacent windows of six days join to twelve: the second is refused.
-  const first = await write(
-    rule("st-george", { pattern: { kind: "once", from: iso(start), to: iso(start + 6 * DAY) } }),
-  );
-  expect(first.status).toBe(200);
-  const adjacent = await write(
-    rule("st-george", {
-      pattern: { kind: "once", from: iso(start + 6 * DAY), to: iso(start + 12 * DAY) },
-    }),
-  );
-  expect(adjacent.body).toEqual({ error: "maintenance_deferral_too_long" });
-  // Recurring windows that cover every minute never end: refused, not stored.
-  const morning = await write(
-    rule("vpoint", {
-      pattern: { kind: "weekly", weekdays: [0, 1, 2, 3, 4, 5, 6], start: "00:00", end: "12:00" },
-    }),
-  );
-  expect(morning.status).toBe(200);
-  const evening = await write(
-    rule("vpoint", {
-      pattern: { kind: "weekly", weekdays: [0, 1, 2, 3, 4, 5, 6], start: "12:00", end: "00:00" },
-    }),
-  );
-  expect(evening).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
-  // Withdrawing a window is always possible.
-  const withdrawn = await write(
-    rule("st-george", {
-      ruleId: first.body.ruleId,
-      revision: 1,
-      enabled: false,
-      pattern: { kind: "once", from: iso(start), to: iso(start + 6 * DAY) },
-    }),
-  );
-  expect(withdrawn.status).toBe(200);
+describe("the seven-day bound (the R1 envelope of ADR 0063 item 8)", () => {
+  test("exactly seven days is inside it; one millisecond more is refused and writes nothing", async () => {
+    expect(DELEGATED_MAX_DEFERRAL_MS).toBe(7 * DAY);
+    // Noon UTC, so no Wednesday 01:00-02:00 window can touch either end.
+    const start = Math.floor(Date.now() / DAY) * DAY + 3 * DAY + DAY / 2;
+    const count = await ruleCount();
+    const over = await write(
+      rule("sbi-vc-trade", {
+        pattern: { kind: "once", from: iso(start), to: iso(start + 7 * DAY + 1) },
+      }),
+    );
+    expect(over).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
+    expect(await ruleCount()).toBe(count);
+    const exact = await write(
+      rule("sbi-vc-trade", {
+        pattern: { kind: "once", from: iso(start), to: iso(start + 7 * DAY) },
+      }),
+    );
+    expect(exact.status).toBe(200);
+    // Lengthening that exact window by one millisecond is refused as well.
+    const lengthened = await write(
+      rule("sbi-vc-trade", {
+        ruleId: exact.body.ruleId,
+        revision: 1,
+        pattern: { kind: "once", from: iso(start), to: iso(start + 7 * DAY + 1) },
+      }),
+    );
+    expect(lengthened).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
+  });
+
+  test("a delegated principal cannot turn a maintenance window into a disabled job", async () => {
+    const start = Date.now() + 2 * DAY;
+    const long = await write(
+      rule("st-george", { pattern: { kind: "once", from: iso(start), to: iso(start + 8 * DAY) } }),
+    );
+    expect(long).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
+    // Two adjacent windows of six days join to twelve: the second is refused.
+    const first = await write(
+      rule("st-george", { pattern: { kind: "once", from: iso(start), to: iso(start + 6 * DAY) } }),
+    );
+    expect(first.status).toBe(200);
+    const adjacent = await write(
+      rule("st-george", {
+        pattern: { kind: "once", from: iso(start + 6 * DAY), to: iso(start + 12 * DAY) },
+      }),
+    );
+    expect(adjacent.body).toEqual({ error: "maintenance_deferral_too_long" });
+    // Recurring windows that cover every minute never end: refused, not stored.
+    const morning = await write(
+      rule("vpoint", {
+        pattern: { kind: "weekly", weekdays: [0, 1, 2, 3, 4, 5, 6], start: "00:00", end: "12:00" },
+      }),
+    );
+    expect(morning.status).toBe(200);
+    const evening = await write(
+      rule("vpoint", {
+        pattern: { kind: "weekly", weekdays: [0, 1, 2, 3, 4, 5, 6], start: "12:00", end: "00:00" },
+      }),
+    );
+    expect(evening).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
+    // Withdrawing a window is always possible.
+    const withdrawn = await write(
+      rule("st-george", {
+        ruleId: first.body.ruleId,
+        revision: 1,
+        enabled: false,
+        pattern: { kind: "once", from: iso(start), to: iso(start + 6 * DAY) },
+        reason: "official-notice-withdrawn",
+      }),
+    );
+    expect(withdrawn.status).toBe(200);
+  });
+
+  test("an operator's longer window does not block a delegated principal's unrelated revision", async () => {
+    // Noon UTC, so no Wednesday 01:00-02:00 window can touch either end.
+    const start = Math.floor(Date.now() / DAY) * DAY + 3 * DAY + DAY / 2;
+    const operator = await post(
+      "/internal/schedules/maintenance",
+      {
+        id: "synthetic-operator-window",
+        revision: 0,
+        source: "moneyforward-me",
+        timezone: "UTC",
+        pattern: { kind: "once", from: iso(start), to: iso(start + 10 * DAY) },
+        enabled: true,
+        referenceUrl: REFERENCE,
+        verifiedAt: verified(),
+        scope: "collection",
+      },
+      operatorHeaders(),
+    );
+    expect(operator.body).toEqual({ saved: true, revision: 1, reservation: "armed" });
+    // The operator's edit records its kind and its own closed reason.
+    expect(await revisions("synthetic-operator-window")).toEqual([
+      {
+        revision: 1,
+        actor: OPERATOR,
+        actor_kind: "operator",
+        change_reason: "operator-edit",
+        decision_ref: null,
+      },
+    ]);
+    const unrelated = await write(
+      rule("moneyforward-me", {
+        pattern: { kind: "weekly", weekdays: [3], start: "01:00", end: "02:00" },
+      }),
+    );
+    expect(unrelated.status).toBe(200);
+    const lengthening = await write(
+      rule("moneyforward-me", {
+        pattern: { kind: "once", from: iso(start + 10 * DAY), to: iso(start + 11 * DAY) },
+      }),
+    );
+    expect(lengthening.body).toEqual({ error: "maintenance_deferral_too_long" });
+  });
+
+  test("an operator's longer window does not admit a separate long delegated window", async () => {
+    // Noon UTC, so no seeded window can touch either end of the operator's.
+    const start = Math.floor(Date.now() / DAY) * DAY + 3 * DAY + DAY / 2;
+    const operator = await post(
+      "/internal/schedules/maintenance",
+      {
+        id: "synthetic-operator-long-window",
+        revision: 0,
+        source: "mobile-suica",
+        timezone: "UTC",
+        pattern: { kind: "once", from: iso(start), to: iso(start + 10 * DAY) },
+        enabled: true,
+        referenceUrl: REFERENCE,
+        verifiedAt: verified(),
+        scope: "collection",
+      },
+      operatorHeaders(),
+    );
+    expect(operator.body).toEqual({ saved: true, revision: 1, reservation: "armed" });
+    const count = await ruleCount();
+    // A separate eight-day window is a new long deferral, whatever else exists.
+    const separate = await write(
+      rule("mobile-suica", {
+        pattern: { kind: "once", from: iso(start + 30 * DAY), to: iso(start + 38 * DAY) },
+      }),
+    );
+    expect(separate).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
+    // Moving the operator's window is a long deferral where there was none.
+    const moved = await write(
+      rule("mobile-suica", {
+        ruleId: "synthetic-operator-long-window",
+        revision: 1,
+        timezone: "UTC",
+        pattern: { kind: "once", from: iso(start + DAY), to: iso(start + 11 * DAY) },
+        reason: "official-notice-changed",
+      }),
+    );
+    expect(moved).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
+    expect(await ruleCount()).toBe(count);
+    // Shortening it inside its old span is not.
+    const shortened = await write(
+      rule("mobile-suica", {
+        ruleId: "synthetic-operator-long-window",
+        revision: 1,
+        timezone: "UTC",
+        pattern: { kind: "once", from: iso(start + DAY), to: iso(start + 9 * DAY) },
+        reason: "correction",
+      }),
+    );
+    expect(shortened.status).toBe(200);
+  });
+
+  test("a running window counts its spent part, so extending it cannot outlast the bound", async () => {
+    const now = Date.now();
+    const running = await write(
+      rule("prestia-globalpass", {
+        pattern: { kind: "once", from: iso(now - 5 * DAY), to: iso(now + DAY) },
+      }),
+    );
+    expect(running.status).toBe(200);
+    const id = running.body.ruleId as string;
+    // Five days spent and three more is eight: refused, though only three remain.
+    const extended = await write(
+      rule("prestia-globalpass", {
+        ruleId: id,
+        revision: 1,
+        pattern: { kind: "once", from: iso(now - 5 * DAY), to: iso(now + 3 * DAY) },
+        reason: "official-notice-changed",
+      }),
+    );
+    expect(extended).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
+    // Ending it sooner is always possible.
+    const shortened = await write(
+      rule("prestia-globalpass", {
+        ruleId: id,
+        revision: 1,
+        pattern: { kind: "once", from: iso(now - 5 * DAY), to: iso(now + 3_600_000) },
+        reason: "official-notice-changed",
+      }),
+    );
+    expect(shortened.status).toBe(200);
+  });
 });
 
-test("an operator's longer window does not block an agent's unrelated revision", async () => {
-  // Noon UTC, so no Wednesday 01:00-02:00 window can touch either end.
-  const start = Math.floor(Date.now() / DAY) * DAY + 3 * DAY + DAY / 2;
-  const operator = await post(
-    "/internal/schedules/maintenance",
-    {
-      id: "synthetic-operator-window",
-      revision: 0,
-      source: "moneyforward-me",
-      timezone: "UTC",
-      pattern: { kind: "once", from: iso(start), to: iso(start + 10 * DAY) },
-      enabled: true,
-      referenceUrl: REFERENCE,
-      verifiedAt: verified(),
-      scope: "collection",
-    },
-    operatorHeaders(),
-  );
-  expect(operator.body).toEqual({ saved: true, revision: 1, reservation: "armed" });
-  // The operator path still records nothing it did not before but its kind.
-  expect(await revisions("synthetic-operator-window")).toEqual([
-    { revision: 1, actor: OPERATOR, actor_kind: "operator", change_reason: null },
-  ]);
-  const unrelated = await write(
-    rule("moneyforward-me", {
-      pattern: { kind: "weekly", weekdays: [3], start: "01:00", end: "02:00" },
-    }),
-  );
-  expect(unrelated.status).toBe(200);
-  const lengthening = await write(
-    rule("moneyforward-me", {
-      pattern: { kind: "once", from: iso(start + 10 * DAY), to: iso(start + 11 * DAY) },
-    }),
-  );
-  expect(lengthening.body).toEqual({ error: "maintenance_deferral_too_long" });
-});
-
-test("an operator's longer window does not admit a separate long agent window", async () => {
-  // Noon UTC, so no seeded window can touch either end of the operator's.
-  const start = Math.floor(Date.now() / DAY) * DAY + 3 * DAY + DAY / 2;
-  const operator = await post(
-    "/internal/schedules/maintenance",
-    {
-      id: "synthetic-operator-long-window",
-      revision: 0,
-      source: "mobile-suica",
-      timezone: "UTC",
-      pattern: { kind: "once", from: iso(start), to: iso(start + 10 * DAY) },
-      enabled: true,
-      referenceUrl: REFERENCE,
-      verifiedAt: verified(),
-      scope: "collection",
-    },
-    operatorHeaders(),
-  );
-  expect(operator.body).toEqual({ saved: true, revision: 1, reservation: "armed" });
-  const count = await ruleCount();
-  // A separate eight-day window is a new long deferral, whatever else exists.
-  const separate = await write(
-    rule("mobile-suica", {
-      pattern: { kind: "once", from: iso(start + 30 * DAY), to: iso(start + 38 * DAY) },
-    }),
-  );
-  expect(separate).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
-  // Moving the operator's window is a long deferral where there was none.
-  const moved = await write(
-    rule("mobile-suica", {
-      ruleId: "synthetic-operator-long-window",
-      revision: 1,
-      timezone: "UTC",
-      pattern: { kind: "once", from: iso(start + DAY), to: iso(start + 11 * DAY) },
-    }),
-  );
-  expect(moved).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
-  expect(await ruleCount()).toBe(count);
-  // Shortening it inside its old span is not.
-  const shortened = await write(
-    rule("mobile-suica", {
-      ruleId: "synthetic-operator-long-window",
-      revision: 1,
-      timezone: "UTC",
-      pattern: { kind: "once", from: iso(start + DAY), to: iso(start + 9 * DAY) },
-    }),
-  );
-  expect(shortened.status).toBe(200);
-});
-
-test("a running window counts its spent part, so extending it cannot outlast the bound", async () => {
-  const now = Date.now();
-  const running = await write(
-    rule("prestia-globalpass", {
-      pattern: { kind: "once", from: iso(now - 5 * DAY), to: iso(now + DAY) },
-    }),
-  );
-  expect(running.status).toBe(200);
-  const id = running.body.ruleId as string;
-  // Five days spent and three more is eight: refused, though only three remain.
-  const extended = await write(
-    rule("prestia-globalpass", {
-      ruleId: id,
-      revision: 1,
-      pattern: { kind: "once", from: iso(now - 5 * DAY), to: iso(now + 3 * DAY) },
-    }),
-  );
-  expect(extended).toEqual({ status: 422, body: { error: "maintenance_deferral_too_long" } });
-  // Ending it sooner is always possible.
-  const shortened = await write(
-    rule("prestia-globalpass", {
-      ruleId: id,
-      revision: 1,
-      pattern: { kind: "once", from: iso(now - 5 * DAY), to: iso(now + 3_600_000) },
-    }),
-  );
-  expect(shortened.status).toBe(200);
-});
-
-test("the daily write budget is per principal and refuses before writing", async () => {
+test("the daily write budget is per delegated principal and refuses before writing", async () => {
   const at = new Date().toISOString();
   const statements = Array.from({ length: 30 }, (_, i) =>
     db
       .prepare(
-        'INSERT INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason) VALUES(?,1,\'sbi-shinsei\',\'UTC\',\'{"kind":"weekly","weekdays":[1],"start":"01:00","end":"02:00"}\',0,?,?,\'collection\',?,?,\'agent\',\'synthetic budget fill\')',
+        'INSERT INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason) VALUES(?,1,\'sbi-shinsei\',\'UTC\',\'{"kind":"weekly","weekdays":[1],"start":"01:00","end":"02:00"}\',0,?,?,\'collection\',?,?,\'delegated\',\'correction\')',
       )
-      .bind(`synthetic-budget-${i}`, REFERENCE, at, OTHER_AGENT, at),
+      .bind(`synthetic-budget-${i}`, REFERENCE, at, OTHER_DELEGATE, at),
   );
   await db.batch(statements);
   const count = await ruleCount();
-  const spent = await write(rule("sbi-shinsei"), { "x-kogane-agent": OTHER_AGENT });
+  const spent = await write(rule("sbi-shinsei"), OTHER_DELEGATE);
   expect(spent).toEqual({ status: 429, body: { error: "maintenance_write_budget_exceeded" } });
   expect(await ruleCount()).toBe(count);
-  const limits = (await read([], { "x-kogane-agent": OTHER_AGENT })).body.limits;
+  const limits = (await read([], { "x-kogane-agent": OTHER_DELEGATE })).body.limits;
   expect(limits).toEqual({ maxDeferralHours: 168, writesPerDay: 30, writesUsedToday: 30 });
-  // Another principal's budget is its own.
+  // Another principal's budget is its own, and the operator has none.
   expect((await write(rule("sbi-shinsei"))).status).toBe(200);
 });
 
-test("a source without a registered maintenance reference takes no agent rule", async () => {
+test("the budget count reads the rewritten partial index, without table statistics", () => {
+  const sqlite = new Database(":memory:");
+  const dir = new URL("../../../packages/storage-d1/migrations/core/", import.meta.url);
+  try {
+    for (const file of readdirSync(dir)
+      .filter((f) => f.endsWith(".sql"))
+      .sort())
+      sqlite.exec(readFileSync(new URL(file, dir), "utf8"));
+    expect(
+      sqlite
+        .query<{ n: number }, []>(
+          "SELECT count(*) AS n FROM sqlite_master WHERE name='sqlite_stat1'",
+        )
+        .get()?.n,
+    ).toBe(0);
+    const plan = sqlite
+      .query<{ detail: string }, [string, string]>(
+        `EXPLAIN QUERY PLAN ${DELEGATED_WRITES_SINCE_SQL}`,
+      )
+      .all(DELEGATE, iso(Date.now() - DAY))
+      .map((row) => row.detail);
+    expect(plan).toEqual([
+      "SEARCH provider_maintenance_rules USING COVERING INDEX maintenance_agent_writes (actor=? AND created_at>?)",
+    ]);
+  } finally {
+    sqlite.close();
+  }
+});
+
+test("a source without a registered maintenance reference takes no delegated rule", async () => {
   // No reference was ever registered for this source (CORE 0066 invents none).
   expect(await write(rule("prestia-bank"))).toEqual({
     status: 400,
     body: { error: "invalid_reference" },
   });
+});
+
+test("the actor's kind and name are closed: no bare agent, no operator under an MCP name", async () => {
+  const base = rule("vpass");
+  const count = await ruleCount();
+  for (const actor of [
+    { kind: "agent", id: "maintenance-agent" },
+    { kind: "delegated", id: "maintenance-owner-synthetic" },
+    { kind: "delegated", id: "mcp-client:" },
+    { kind: "delegated", id: "mcp-client:has space" },
+    { kind: "operator", id: DELEGATE },
+    { kind: "operator", id: "" },
+    { kind: "service", id: OPERATOR },
+  ]) {
+    const result = await writeMaintenanceRevision(
+      processorEnv,
+      {
+        source: "vpass",
+        ruleId: null,
+        expectedRevision: 0,
+        change: {
+          timezone: "Asia/Tokyo",
+          pattern: base.pattern,
+          enabled: true,
+          scope: "collection",
+        },
+        provenance: { referenceUrl: base.referenceUrl, verifiedAt: base.verifiedAt },
+        actor: actor as MaintenanceWrite["actor"],
+        reason: "correction",
+      } as MaintenanceWrite,
+      NO_RECORD,
+    );
+    expect([actor, result]).toEqual([actor, { ok: false, code: "invalid_request", status: 400 }]);
+  }
+  expect(await ruleCount()).toBe(count);
 });
 
 test("a read names only the requested sources and no revision's actor", async () => {
@@ -560,6 +733,7 @@ test("a read names only the requested sources and no revision's actor", async ()
   for (const other of jobs.map((job) => job.source).filter((s) => s && s !== "vpass"))
     expect(text).not.toContain(`"${other}`);
   expect(text).not.toContain(OPERATOR);
+  expect(text).not.toContain(DELEGATE);
   expect(text).not.toContain("migration:synthetic");
   // Receipts carry their outcome, never run or evidence references.
   expect(text).not.toContain("runIds");
@@ -574,95 +748,324 @@ test("a read names only the requested sources and no revision's actor", async ()
     expect((await read(sources)).status).toBe(400);
 });
 
-test("the agent path refuses an operator identity, and the operator path an agent one", async () => {
-  expect(await write(rule("vpass"), {})).toEqual({
-    status: 403,
-    body: { error: "agent_required" },
-  });
-  expect(await write(rule("vpass"), { "x-kogane-agent": "bad agent" })).toEqual({
-    status: 403,
-    body: { error: "agent_required" },
-  });
+test("the agent path only reads: no write route, no operator or delegation header", async () => {
+  const count = await ruleCount();
+  // The bare-agent write route of the original change no longer exists.
   expect(
-    await write(rule("vpass"), { "x-kogane-agent": AGENT, "x-kogane-operator": OPERATOR }),
-  ).toEqual({ status: 400, body: { error: "invalid_request" } });
+    await post("/internal/schedules/agent/maintenance", rule("vpass"), {
+      "x-kogane-agent": DELEGATE,
+    }),
+  ).toEqual({ status: 404, body: { error: "not_found" } });
+  expect(await read(["vpass"], {})).toEqual({ status: 403, body: { error: "agent_required" } });
+  expect(await read(["vpass"], { "x-kogane-agent": "bad agent" })).toEqual({
+    status: 403,
+    body: { error: "agent_required" },
+  });
+  for (const extra of [
+    { "x-kogane-operator": OPERATOR },
+    { "x-kogane-delegation-ref": `dlg_${"0".repeat(64)}` },
+  ])
+    expect(await read(["vpass"], { "x-kogane-agent": DELEGATE, ...extra })).toEqual({
+      status: 400,
+      body: { error: "invalid_request" },
+    });
+  // The operator's write route refuses any request that also names an agent,
+  // and any that carries a delegation reference (ADR 0064's envelope).
   expect(
     (
       await post("/internal/schedules/maintenance", rule("vpass"), {
-        "x-kogane-agent": AGENT,
-        "x-kogane-operator": OPERATOR,
+        ...operatorHeaders(),
+        "x-kogane-agent": DELEGATE,
+      })
+    ).body,
+  ).toEqual({ error: "operator_required" });
+  expect(
+    (
+      await post("/internal/schedules/maintenance", rule("vpass"), {
+        ...operatorHeaders(),
+        "x-kogane-delegation-ref": `dlg_${"0".repeat(64)}`,
       })
     ).body,
   ).toEqual({ error: "operator_required" });
   // No other settings function is reachable from the agent prefix.
   for (const path of ["/agent/vpass", "/agent/leases/vpass", "/agent/bootstrap"])
-    expect((await post(`/internal/schedules${path}`, {})).status).toBe(404);
-  expect((await post("/internal/schedules/agent/maintenance", "{")).status).toBe(400);
+    expect(
+      (await post(`/internal/schedules${path}`, {}, { "x-kogane-agent": DELEGATE })).status,
+    ).toBe(404);
+  expect(
+    (await post("/internal/schedules/agent/read", "{", { "x-kogane-agent": DELEGATE })).status,
+  ).toBe(400);
+  expect(await ruleCount()).toBe(count);
 });
 
-test("the store refuses an agent revision without a reason and keeps revisions append-only", async () => {
-  await expect(
+describe("the store's own guards (CORE 0076)", () => {
+  const insert = (actorKind: string | null, reason: string | null) =>
     db
       .prepare(
-        "INSERT INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind) VALUES('synthetic-no-reason',1,'vpass','UTC','{}',0,?,?,'collection',?,?,'agent')",
+        "INSERT INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason) VALUES(?,1,'vpass','UTC','{}',0,?,?,'collection',?,?,?,?)",
       )
-      .bind(REFERENCE, verified(), AGENT, verified())
-      .run(),
-  ).rejects.toThrow("CHECK constraint failed");
-  await expect(
-    db.prepare("UPDATE provider_maintenance_rules SET change_reason='rewritten'").run(),
-  ).rejects.toThrow("append_only");
+      .bind(
+        `synthetic-check-${crypto.randomUUID()}`,
+        REFERENCE,
+        verified(),
+        DELEGATE,
+        verified(),
+        actorKind,
+        reason,
+      )
+      .run();
+
+  test("the reason is a closed code required with every actor kind; there is no bare agent", async () => {
+    for (const [kind, reason] of [
+      ["delegated", null],
+      ["operator", null],
+      ["agent", "correction"],
+      ["delegated", "Free text the caller wrote"],
+      ["delegated", "operator-edit"],
+      [null, "operator-edit"],
+      [null, "correction"],
+      ["delegated", "maintenance-survey-proposal-rejected"],
+    ] as const)
+      await expect(insert(kind, reason)).rejects.toThrow("CHECK constraint failed");
+    for (const reason of MAINTENANCE_CHANGE_REASONS)
+      await insert(reason === "operator-edit" ? "operator" : "delegated", reason);
+    // A revision written before the migration recorded neither.
+    await insert(null, null);
+  });
+
+  test("the CHECK's list is MAINTENANCE_CHANGE_REASONS, code for code", () => {
+    const sql = readFileSync(
+      new URL(
+        "../../../packages/storage-d1/migrations/core/0076_maintenance_change_provenance.sql",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    // Every quoted code of the change_reason statement, less the actor kinds it names.
+    const statement = sql.slice(sql.indexOf("ADD COLUMN change_reason"));
+    const named = [...statement.slice(0, statement.indexOf(";")).matchAll(/'([a-z-]+)'/gu)]
+      .map((match) => match[1])
+      .filter((code) => code !== "operator" && code !== "delegated");
+    expect([...new Set(named)].sort()).toEqual([...MAINTENANCE_CHANGE_REASONS].sort());
+  });
+
+  test("revisions stay append-only", async () => {
+    await expect(
+      db.prepare("UPDATE provider_maintenance_rules SET change_reason='correction'").run(),
+    ).rejects.toThrow("append_only");
+  });
 });
 
-test("the writer is importable and answers closed codes instead of throwing", async () => {
-  const processorEnv = { DB: db, SCHEDULE_ALARMS: namespace } as unknown as Env;
-  const base: MaintenanceWrite = {
-    source: "sbi-securities",
-    ruleId: null,
-    expectedRevision: 0,
-    change: {
-      timezone: "UTC",
-      pattern: { kind: "weekly", weekdays: [4], start: "03:00", end: "04:00" },
-      enabled: true,
-      scope: "collection",
-    },
-    provenance: {
-      referenceUrl: REFERENCE,
-      verifiedAt: verified(),
-      decisionRef: "proposal:synthetic-0001",
-    },
-    actor: { kind: "operator", id: OPERATOR },
-    reason: "Synthetic reviewed proposal accepted",
-  };
-  const nothing = () => ({ statements: [], settle: () => undefined });
-  const created = await writeMaintenanceRevision(processorEnv, base, nothing);
-  expect(created).toMatchObject({ ok: true, revision: 1, reconciled: true });
-  if (!created.ok) throw new Error("unreachable");
-  expect(created.ruleId).toMatch(/^sbi-securities-[0-9a-f]{12}$/u);
-  expect(
-    await db
-      .prepare(
-        "SELECT actor,actor_kind,change_reason,decision_ref FROM provider_maintenance_rules WHERE id=?",
-      )
-      .bind(created.ruleId)
-      .first<Record<string, unknown>>(),
-  ).toEqual({
-    actor: OPERATOR,
-    actor_kind: "operator",
-    change_reason: "Synthetic reviewed proposal accepted",
-    decision_ref: "proposal:synthetic-0001",
+describe("the writer's batch: the revision and what its caller appends are one write", () => {
+  const operatorWrite = (source: string, id: string, overrides: Partial<MaintenanceWrite> = {}) =>
+    ({
+      source,
+      ruleId: id,
+      expectedRevision: 0,
+      change: {
+        timezone: "UTC",
+        pattern: { kind: "weekly", weekdays: [4], start: "03:00", end: "04:00" },
+        enabled: true,
+        scope: "collection",
+      },
+      provenance: {
+        referenceUrl: `${REFERENCE}/batch?t=${TOKEN}&a=123456`,
+        verifiedAt: verified(),
+      },
+      actor: { kind: "operator", id: OPERATOR },
+      reason: "operator-edit",
+      ...overrides,
+    }) as MaintenanceWrite;
+  const auditRows = async (correlationId: string) =>
+    (
+      await db
+        .prepare("SELECT * FROM audit_records WHERE correlation_id=?")
+        .bind(correlationId)
+        .all<Record<string, unknown>>()
+    ).results;
+
+  test("the operator's edit writes its revision and its applied record, with the closed reason", async () => {
+    const correlationId = crypto.randomUUID();
+    const call = testCall("schedules.maintenance.update", OPERATOR, correlationId);
+    const saved = await updateMaintenance(
+      processorEnv,
+      {
+        id: "smbc-direct-batch",
+        revision: 0,
+        source: "smbc-direct",
+        timezone: "UTC",
+        pattern: { kind: "weekly", weekdays: [4], start: "03:00", end: "04:00" },
+        enabled: true,
+        referenceUrl: `${REFERENCE}/batch?t=${TOKEN}&a=123456`,
+        verifiedAt: verified(),
+        scope: "collection",
+      },
+      OPERATOR,
+      call,
+    );
+    expect(saved).toEqual({ saved: true, revision: 1, reservation: "armed" });
+    expect(call.recorded).toBe(true);
+    const [record, ...rest] = await auditRows(correlationId);
+    expect(rest).toEqual([]);
+    expect(record).toMatchObject({
+      operation: "schedules.maintenance.update",
+      result: "applied",
+      principal: OPERATOR,
+      principal_kind: "human",
+      target_ref: "maintenance-rule:smbc-direct-batch",
+      reason_code: "operator-edit",
+      scope_source: "smbc-direct",
+      refs_json: '["maintenance-rule:smbc-direct-batch@1"]',
+    });
+    expect(await revisions("smbc-direct-batch")).toEqual([
+      {
+        revision: 1,
+        actor: OPERATOR,
+        actor_kind: "operator",
+        change_reason: "operator-edit",
+        decision_ref: null,
+      },
+    ]);
+    // The reference URL is provenance of the rule, never part of the record.
+    for (const needle of ["c3ludGhldGlj", "123456", "batch?"])
+      expect(JSON.stringify(record)).not.toContain(needle);
   });
-  const refusals: [unknown, keyof typeof MAINTENANCE_WRITE_CODES][] = [
-    [{ ...base, ruleId: created.ruleId }, "revision_conflict"],
-    [{ ...base, provenance: { ...base.provenance, decisionRef: "has space" } }, "invalid_request"],
-    [{ ...base, actor: { kind: "service", id: OPERATOR } }, "invalid_request"],
-    [{ ...base, actor: { kind: "agent", id: AGENT }, reason: null }, "reason_required"],
-    [{ ...base, change: { ...base.change, timezone: "Asia/Nowhere" } }, "invalid_request"],
-    [{ ...base, provenance: { ...base.provenance, referenceUrl: "ftp://x" } }, "invalid_reference"],
-    [null, "invalid_request"],
-  ];
-  for (const [write, code] of refusals) {
-    const result = await writeMaintenanceRevision(processorEnv, write as MaintenanceWrite, nothing);
-    expect(result).toEqual({ ok: false, code, status: MAINTENANCE_WRITE_CODES[code] });
-  }
+
+  test("an appended record that fails leaves no revision and no provenance change", async () => {
+    const reference = () =>
+      db
+        .prepare(
+          "SELECT reference_url FROM provider_maintenance_references WHERE source='vpoint-pay'",
+        )
+        .first<string>("reference_url");
+    const before = await reference();
+    const correlationId = crypto.randomUUID();
+    await expect(
+      writeMaintenanceRevision(
+        processorEnv,
+        operatorWrite("vpoint-pay", "vpoint-pay-failing-record"),
+        (saved) => ({
+          // A record the table refuses raises, as a record that cannot be written would.
+          statements: [
+            db
+              .prepare(
+                `INSERT INTO audit_records(audit_id,correlation_id) SELECT 'not-an-audit-id',? WHERE ${saved.guard.sql}`,
+              )
+              .bind(correlationId, ...saved.guard.binds),
+          ],
+          settle: () => undefined,
+        }),
+      ),
+    ).rejects.toThrow();
+    expect(await revisions("vpoint-pay-failing-record")).toEqual([]);
+    expect(await reference()).toBe(before);
+    expect(await auditRows(correlationId)).toEqual([]);
+  });
+
+  test("a revision that loses its version check in the batch leaves no record", async () => {
+    // Another writer's revision lands between this writer's read and its
+    // batch: the version-checked insert writes nothing, and the record,
+    // guarded on the row the insert would have written, writes nothing either.
+    const racing = {
+      prepare: (sql: string) => db.prepare(sql),
+      batch: async (statements: D1PreparedStatement[]) => {
+        await db
+          .prepare(
+            "INSERT INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason) VALUES('vpoint-pay-raced',1,'vpoint-pay','UTC','{\"kind\":\"weekly\",\"weekdays\":[1],\"start\":\"01:00\",\"end\":\"02:00\"}',0,?,?,'collection','synthetic-other-operator',?,'operator','operator-edit')",
+          )
+          .bind(REFERENCE, verified(), verified())
+          .run();
+        return db.batch(statements);
+      },
+    } as unknown as D1Database;
+    const correlationId = crypto.randomUUID();
+    const call = testCall("schedules.maintenance.update", OPERATOR, correlationId);
+    await expect(
+      updateMaintenance(
+        { ...processorEnv, DB: racing } as Env,
+        {
+          id: "vpoint-pay-raced",
+          revision: 0,
+          source: "vpoint-pay",
+          timezone: "UTC",
+          pattern: { kind: "weekly", weekdays: [4], start: "03:00", end: "04:00" },
+          enabled: true,
+          referenceUrl: REFERENCE,
+          verifiedAt: verified(),
+          scope: "collection",
+        },
+        OPERATOR,
+        call,
+      ),
+    ).rejects.toMatchObject({ code: "revision_conflict", status: 409 });
+    expect(call.recorded).toBe(false);
+    expect(await auditRows(correlationId)).toEqual([]);
+    expect(await revisions("vpoint-pay-raced")).toEqual([
+      {
+        revision: 1,
+        actor: "synthetic-other-operator",
+        actor_kind: "operator",
+        change_reason: "operator-edit",
+        decision_ref: null,
+      },
+    ]);
+  });
+
+  test("the writer is importable and answers closed codes instead of throwing", async () => {
+    const base = operatorWrite("sbi-securities", "sbi-securities-importable", {
+      provenance: { referenceUrl: REFERENCE, verifiedAt: verified(), decisionRef: proposalRef(1) },
+      reason: ACCEPTED_REASON,
+    });
+    const created = await writeMaintenanceRevision(processorEnv, base, NO_RECORD);
+    expect(created).toEqual({
+      ok: true,
+      ruleId: "sbi-securities-importable",
+      revision: 1,
+      reconciled: true,
+    });
+    expect(await revisions("sbi-securities-importable")).toEqual([
+      {
+        revision: 1,
+        actor: OPERATOR,
+        actor_kind: "operator",
+        change_reason: ACCEPTED_REASON,
+        decision_ref: "maintenance-survey:proposal:1",
+      },
+    ]);
+    const refusals: [unknown, keyof typeof MAINTENANCE_WRITE_CODES][] = [
+      [base, "revision_conflict"],
+      [
+        { ...base, provenance: { ...base.provenance, decisionRef: "has space" } },
+        "invalid_request",
+      ],
+      [
+        { ...base, provenance: { ...base.provenance, decisionRef: "proposal:synthetic-0001" } },
+        "invalid_request",
+      ],
+      // The survey's reason and its proposal reference come together or not at all.
+      [{ ...base, reason: "operator-edit" }, "invalid_reason"],
+      [
+        { ...base, provenance: { referenceUrl: REFERENCE, verifiedAt: verified() } },
+        "invalid_reason",
+      ],
+      [{ ...base, reason: null }, "invalid_reason"],
+      [{ ...base, change: { ...base.change, timezone: "Asia/Nowhere" } }, "invalid_request"],
+      [
+        { ...base, provenance: { ...base.provenance, referenceUrl: "ftp://x" } },
+        "invalid_reference",
+      ],
+      [null, "invalid_request"],
+    ];
+    for (const [write, code] of refusals) {
+      const result = await writeMaintenanceRevision(
+        processorEnv,
+        write as MaintenanceWrite,
+        NO_RECORD,
+      );
+      expect([write, result]).toEqual([
+        write,
+        { ok: false, code, status: MAINTENANCE_WRITE_CODES[code] },
+      ]);
+    }
+  });
 });
