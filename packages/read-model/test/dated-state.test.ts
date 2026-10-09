@@ -6,10 +6,12 @@ import { describe, expect, test } from "bun:test";
 import { reportedStateCutoff } from "../../domain/src/reported-state";
 import {
   DATED_BALANCES_SQL,
+  DATED_POSITION_QUANTITIES_SQL,
   DATED_POSITIONS_SQL,
   DATED_SNAPSHOTS_SQL,
   DATED_STATEMENTS_SQL,
   type DatedBalanceRow,
+  type DatedPositionQuantityRow,
   type DatedPositionRow,
   type DatedSnapshotRow,
   type DatedStatementRow,
@@ -430,5 +432,56 @@ describe("statements as of the cutoff", () => {
         (row) => row.coefficient,
       ),
     ).toEqual(["2", "4"]);
+  });
+});
+
+describe("the quantities of dated positions", () => {
+  test("each named position with its parse run and decimal-v1 quantity, an unreadable one null-valued", () => {
+    const store = new DatedStore();
+    const capture = store.capture({
+      ...SBI,
+      fetchedAt: "2026-09-09T01:00:00Z",
+      positions: [
+        { account: "sbi-a", code: "1001", quantity: "12" },
+        { account: "sbi-a", code: "1002", quantity: "0.25" },
+        { account: "sbi-a", code: "1003", quantity: "unreadable" },
+      ],
+    });
+    const [twelve, quarter, unreadable] = capture.positions as [number, number, number];
+    const rows = all<DatedPositionQuantityRow>(
+      store,
+      DATED_POSITION_QUANTITIES_SQL,
+      JSON.stringify([...capture.positions].reverse()),
+    );
+    expect(
+      rows.map((row) => [row.id, row.parse_run_id, row.value_status, row.coefficient, row.scale]),
+    ).toEqual([
+      [twelve, capture.parse, "exact", "12", 0],
+      [quarter, capture.parse, "exact", "25", 2],
+      [unreadable, capture.parse, "unparsed", null, null],
+    ]);
+    // An id that is not a position is simply absent.
+    expect(all(store, DATED_POSITION_QUANTITIES_SQL, JSON.stringify([999_999]))).toEqual([]);
+  });
+
+  test("without table statistics it reaches positions and decimals by primary key only", () => {
+    const store = new DatedStore();
+    expect(
+      store.db
+        .query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'")
+        .get(),
+    ).toEqual({ n: 0 });
+    const plan = (
+      store.db.query(`EXPLAIN QUERY PLAN ${DATED_POSITION_QUANTITIES_SQL}`).all("[1,2]") as {
+        detail: string;
+      }[]
+    ).map((row) => row.detail);
+    expect(plan.some((line) => /^SEARCH po USING INTEGER PRIMARY KEY/u.test(line))).toBe(true);
+    expect(
+      plan.some((line) =>
+        /^SEARCH d USING INDEX sqlite_autoindex_observation_decimal_values_1/u.test(line),
+      ),
+    ).toBe(true);
+    expect(plan.filter((line) => /^SCAN (po|d)\b/u.test(line))).toEqual([]);
   });
 });

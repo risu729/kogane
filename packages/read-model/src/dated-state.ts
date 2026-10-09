@@ -302,3 +302,31 @@ SELECT s.id,s.parse_run_id,s.source_account,s.unit_ref,s.source_id,s.fetched_at,
 FROM dated_statements s LEFT JOIN ownership ON ownership.observation_id=s.id
 ORDER BY s.source_id,s.source_account,s.period,s.id
 LIMIT ${DATED_STATE_ROW_BOUND + 1}`;
+
+/** The decimal policy a dated position's quantity is read under. */
+export const DATED_POSITION_QUANTITY_POLICY = "decimal-v1";
+
+/** One position observation's parse run and stored decimal-v1 quantity. */
+export interface DatedPositionQuantityRow {
+  id: number;
+  parse_run_id: number;
+  value_status: string | null;
+  coefficient: string | null;
+  scale: number | null;
+}
+
+/**
+ * The parse run and decimal-v1 quantity of each named position observation
+ * (`?1`, a JSON array of ids): the two facts a valuation on the date needs
+ * that `DATED_POSITIONS_SQL` does not carry. Keyed: each id reaches its
+ * position by primary key and its decimal row by the decimal primary key.
+ * The caller bounds the id list; a missing decimal row is a null status,
+ * never a zero.
+ */
+export const DATED_POSITION_QUANTITIES_SQL = `SELECT po.id,po.parse_run_id,
+ d.status AS value_status,d.coefficient,d.scale
+FROM json_each(?1) w
+CROSS JOIN position_observations po ON po.id=w.value
+LEFT JOIN observation_decimal_values d ON d.kind='position' AND d.observation_id=po.id
+ AND d.policy_version='${DATED_POSITION_QUANTITY_POLICY}'
+ORDER BY po.id`;
