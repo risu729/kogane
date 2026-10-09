@@ -69,11 +69,36 @@ export function rawUrl(sha256: string): string {
 /** UI-safe errors contain fixed messages, never a response body or status text. */
 export class ApiError extends Error {
   readonly status: number;
+  /**
+   * The server's closed error code (`{"error": "<code>"}`), when it sent one
+   * in that form; never shown verbatim, only mapped to a fixed message.
+   */
+  readonly code: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(status: number, message: string, code: string | null = null) {
     super(message);
     this.name = "ApiError";
     this.status = status;
+    this.code = code;
+  }
+}
+
+/** A refusal's closed code from a JSON error body, or null. */
+async function errorCode(response: Response): Promise<string | null> {
+  if (
+    response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !==
+    "application/json"
+  )
+    return null;
+  try {
+    const body: unknown = await response.json();
+    const code =
+      body !== null && typeof body === "object" && !Array.isArray(body)
+        ? (body as Record<string, unknown>)["error"]
+        : null;
+    return typeof code === "string" && /^[a-z][a-z_]{0,63}$/u.test(code) ? code : null;
+  } catch {
+    return null;
   }
 }
 
@@ -141,7 +166,7 @@ async function readJson<T>(path: string, signal: AbortSignal): Promise<T> {
               : response.status === 429
                 ? "リクエストが集中しています。少し待ってから再試行してください。"
                 : "データを取得できませんでした。時間をおいて再試行してください。";
-    throw new ApiError(response.status, message);
+    throw new ApiError(response.status, message, await errorCode(response));
   }
   if (
     response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase() !==

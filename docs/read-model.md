@@ -407,7 +407,9 @@ every event the scope touches and everything that decides its revision in
 force at a cut, and `selectAdopted` (`packages/domain/src/knowledge-selector.ts`)
 resolves and filters. Like the dated reads it is composed by an application
 query over an executor (`queryReconstructedState`), not an `ObservationReader`
-method, and no route calls it yet.
+method; `GET /api/v2/reconstructed-state` and the agent tool
+`kogane.reconstructed-state.read` reach it through `readReconstructedState`
+([reconstructed state](reconstructed-state.md#http-agent-tool-and-page)).
 
 | Text                                                 | Reads                                                                                                                                 |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -442,7 +444,11 @@ history: the seed reads every leg ever written on the account, and
 key (no index orders `known_at`). Measured once on `bun:sqlite`, not
 asserted: 1,500 touched events with 4,500 revisions among 64,500 commits
 loaded in 63–76 ms, and an instant near the log's start resolved in 17–20 ms.
-Not measured on workerd or D1.
+The selector's load alone is not measured on workerd or D1. The route's whole answer, the dated reads and the fold
+included, is measured by `packages/application/test/reconstructed-state-scale.test.ts`,
+which also checks the plan of every statement the route runs, and on
+workerd over a local D1 by `services/app/scripts/reconstructed-state-workerd.ts`
+(ADR 0058, amendment of 2026-10-09).
 
 `LOT_INSTRUMENT_IDENTIFIERS_SQL`
 (`packages/application/src/query/lots-on-selection.ts`, ADR 0059) is, like

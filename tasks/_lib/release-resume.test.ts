@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import {
+  readFileSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+  symlinkSync,
+  statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { canonicalJson } from "./ci/release-manifest.mjs";
 import {
@@ -22,6 +31,7 @@ import {
   validatePreparedPaths,
   copyPrepared,
   positiveId,
+  streamArtifact,
 } from "./ci/release-resume.mjs";
 import { workflowSteps } from "./deploy-order.ts";
 import { REPO_ROOT } from "./repo-root.ts";
@@ -528,6 +538,8 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
         zip,
         resolve(temp, "prepared.tar"),
       ]);
+      rmSync(resolve(temp, "prepared"), { recursive: true });
+      rmSync(resolve(temp, "prepared.tar"));
       const bytes = readFileSync(zip),
         artifactDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
       const record = {
@@ -554,6 +566,7 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
       globalThis.fetch=async(url,options={})=>{
         const text=String(url);
         if(text==='https://artifact.invalid/archive'){
+          if(process.env.MOCK_FETCH_FAIL==='true')throw Error('https://secret.invalid/private-token');
           if(options.headers?.Authorization)throw Error('credential redirected');
           const bytes=readFileSync(${JSON.stringify(zip)});
           if(process.env.MOCK_TAMPER==='true')bytes[0]^=1;
@@ -579,6 +592,8 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
       const restored = run();
       expect(restored.stderr).toBe("");
       expect(restored.status).toBe(0);
+      expect(readdirSync(temp).filter((entry) => entry.startsWith("release-resume-"))).toEqual([]);
+      expect(readdirSync(temp)).not.toContain("docker-images.tar");
       expect(readFileSync(config, "utf8")).toContain("original stamped config");
       expect(readFileSync(resolve(root, "dist/test/entry.js"), "utf8")).toBe(
         "synthetic original bundle",
@@ -591,6 +606,8 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
         "CONTAINER_RESTORED_DAEMON=restored-daemon",
       );
       expect(run({ MOCK_TAMPER: "true" }).stderr.trim()).toBe("release_resume_artifact_digest");
+      expect(readdirSync(temp).filter((entry) => entry.startsWith("release-resume-"))).toEqual([]);
+      expect(run({ MOCK_FETCH_FAIL: "true" }).stderr.trim()).toBe("release_resume_artifact_fetch");
       expect(run({ MOCK_IMAGE_ID: `sha256:${"a".repeat(64)}` }).stderr.trim()).toBe(
         "release_resume_restored_image",
       );
@@ -600,4 +617,104 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
       rmSync(dir, { recursive: true, force: true });
     }
   }
+});
+
+test("streamed artifact stays private until complete checksum and never overwrites promotion", async () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "kogane-stream-"));
+  try {
+    const chunks = [Buffer.alloc(70001, 0x5a), Buffer.from("synthetic final bytes")];
+    const digest = `sha256:${createHash("sha256").update(chunks[0]!).update(chunks[1]!).digest("hex")}`;
+    async function* source() {
+      yield chunks[0]!;
+      const directory = readdirSync(temp).find((entry) =>
+        readdirSync(resolve(temp, entry)).includes("artifact.part"),
+      )!;
+      expect(readdirSync(resolve(temp, directory))).toEqual(["artifact.part"]);
+      expect(statSync(resolve(temp, directory)).mode & 0o777).toBe(0o700);
+      yield chunks[1]!;
+    }
+    const artifact = await streamArtifact(source(), digest, temp);
+    expect(readFileSync(artifact.zip)).toEqual(Buffer.concat(chunks));
+    expect(readdirSync(artifact.directory)).toEqual(["artifact.zip"]);
+    // Subsequent attempts get a new private path, leaving existing verified files intact.
+    const second = await streamArtifact(source(), digest, temp);
+    expect(second.directory).not.toBe(artifact.directory);
+    expect(readFileSync(artifact.zip)).toEqual(Buffer.concat(chunks));
+    const sentinel = resolve(temp, "sentinel");
+    writeFileSync(sentinel, "original");
+    await expect(
+      streamArtifact(
+        (async function* () {
+          yield chunks[0]!;
+          yield chunks[1]!;
+        })(),
+        digest,
+        temp,
+        {
+          beforePromote: (directory: string) =>
+            symlinkSync(sentinel, resolve(directory, "artifact.zip")),
+        },
+      ),
+    ).rejects.toThrow("release_resume_artifact_promote");
+    expect(readFileSync(sentinel, "utf8")).toBe("original");
+    expect(readdirSync(temp).length).toBe(3); // two verified directories + sentinel
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("tamper and interrupted streams remove quarantine without promotion or raw diagnostics", async () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "kogane-stream-"));
+  try {
+    const bytes = Buffer.from("synthetic bytes");
+    const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+    await expect(
+      streamArtifact(
+        (async function* () {
+          yield Buffer.from("tampered");
+        })(),
+        digest,
+        temp,
+      ),
+    ).rejects.toThrow("release_resume_artifact_digest");
+    expect(readdirSync(temp)).toEqual([]);
+    await expect(
+      streamArtifact(
+        (async function* () {
+          yield bytes;
+          throw Error("https://secret.invalid/private-token");
+        })(),
+        digest,
+        temp,
+      ),
+    ).rejects.toThrow("release_resume_artifact_body");
+    expect(readdirSync(temp)).toEqual([]);
+    await expect(
+      streamArtifact(
+        (async function* () {
+          yield "invalid chunk";
+        })(),
+        digest,
+        temp,
+      ),
+    ).rejects.toThrow("release_resume_artifact_chunk");
+    expect(readdirSync(temp)).toEqual([]);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("native Node refuses oversized incoming chunks without touching or materializing them", () => {
+  const { spawnSync } = require("node:child_process");
+  const code = `import {streamArtifact} from ${JSON.stringify(resolve(REPO_ROOT, "tasks/_lib/ci/release-resume.mjs"))};
+    import {mkdtempSync,readdirSync,rmSync} from 'node:fs'; import {tmpdir} from 'node:os';
+    const directory=mkdtempSync(tmpdir()+'/kogane-hash-limit-');
+    try {
+      try { await streamArtifact((async function*(){yield Buffer.allocUnsafe(2**31);})(),'sha256:'+'a'.repeat(64),directory); throw Error('unexpected acceptance'); }
+      catch(error){if(error.message!=='release_resume_artifact_chunk')throw error;}
+      if(readdirSync(directory).length || process.resourceUsage().maxRSS>256*1024)throw Error('resource boundary');
+    } finally {rmSync(directory,{recursive:true,force:true});}`;
+  const result = spawnSync("node", ["--input-type=module", "-e", code], { encoding: "utf8" });
+  expect(result.stderr).toBe("");
+  expect(result.status).toBe(0);
 });

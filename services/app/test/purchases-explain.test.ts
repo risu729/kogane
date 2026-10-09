@@ -508,11 +508,13 @@ describe("served only while card purchase recognition is", () => {
       expect((await mcp(message, { statements }))["result"], method).toBeDefined();
       expect(statements, method).toEqual([]);
     }
-    // A tool list asks once.
+    // A tool list asks once for each tool that depends on the store's schema:
+    // this one, and the reconstructed state (the reported state's views).
     const statements: string[] = [];
     await mcp({ method: "tools/list" }, { statements });
-    expect(statements).toHaveLength(1);
+    expect(statements).toHaveLength(2);
     expect(isSchemaProbe(statements[0]!)).toBe(true);
+    expect(statements[1]).toContain("card_statement_facts");
   });
 });
 

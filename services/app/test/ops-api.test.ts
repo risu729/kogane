@@ -26,7 +26,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import demo from "./snapshot-worker";
 import worker from "../src/worker";
 import { seedRegistry } from "./fixtures";
-import { MCP_TOOLS } from "../src/mcp";
+import { MCP_TOOLS, RECONSTRUCTED_STATE_MCP_TOOLS } from "../src/mcp";
 import { OPS_TOOL_NAMES } from "../src/ops-tools";
 import {
   claimCollectorStart,
@@ -686,12 +686,15 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
   it("publishes no operations tool to the operator's own MCP client, flag on or off", async () => {
     const six = MCP_TOOLS.map((tool) => tool.name);
     expect(six).toHaveLength(6);
+    // This store has the reported state's views, so the reconstructed state's
+    // read tool is published beside the six, whatever the operations flag.
+    const reads = [...six, ...RECONSTRUCTED_STATE_MCP_TOOLS.map((tool) => tool.name)];
     for (const flag of ["", "true"]) {
       const listed = await mcp("tools/list", {}, { ...THROUGH_MCP, OPS_API_ENABLED: flag });
       expect(
         listed.result.tools.map((tool: any) => tool.name),
         flag,
-      ).toEqual(six);
+      ).toEqual(reads);
     }
     // The definitions still exist, generated from the routes' schemas.
     expect(OPS_TOOL_NAMES).toEqual([

@@ -2,8 +2,9 @@
 //
 // One of the browser's two non-GET surfaces (the other is A09's change
 // lifecycle). It is an explicit allow-list: exactly six POST paths plus
-// `/mcp`, and a seventh path (`purchases.explain`) only while the deployment
-// serves card purchase recognition, each with a bounded JSON body, each behind
+// `/mcp`, a seventh path (`purchases.explain`) only while the deployment
+// serves card purchase recognition and an eighth (`reconstructed-state.read`)
+// only while it serves the reconstructed state, each with a bounded JSON body, each behind
 // the same Access gate as every read route, and each behind a grant looked up
 // by the verified principal. `AGENT_API_GRANTS` absent means no principal has
 // a grant, so every agent route answers 403 — that is the deployed default,
@@ -37,12 +38,20 @@ import {
   MAX_REQUEST_BYTES,
   PURCHASES_TOOL_NAME,
   queryResponse,
+  RECONSTRUCTED_STATE_TOOL_NAME,
   toolContext,
 } from "./agent-service";
 import type { AgentCaller } from "./auth";
 import { cardPurchasesAvailable } from "./card-purchases-api";
 import { grantsUsable } from "./grants";
-import { assertAgentTransport, handleMcp, MCP_TOOLS, PURCHASES_MCP_TOOLS } from "./mcp";
+import {
+  assertAgentTransport,
+  handleMcp,
+  MCP_TOOLS,
+  PURCHASES_MCP_TOOLS,
+  RECONSTRUCTED_STATE_MCP_TOOLS,
+} from "./mcp";
+import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { opsApiEnabled } from "./ops-api";
 import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
 import { HttpError, json } from "./http";
@@ -181,10 +190,15 @@ export async function agentApi(
     // that depends on it: `initialize`, `ping` and notifications touch no table.
     let served: Promise<boolean> | undefined;
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
+    // The reconstructed state likewise exists exactly while its GET route does.
+    let reconstructedServed: Promise<boolean> | undefined;
+    const reconstructed = (): Promise<boolean> =>
+      (reconstructedServed ??= reconstructedStateAvailable(env));
     const message = await handleMcp(
       request,
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
+        if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (isAgentToolName(name)) return callTool(name, body, context);
         if (ops && isOpsToolName(name)) return callOpsTool(name, body, env, caller);
         return null;
@@ -192,6 +206,7 @@ export async function agentApi(
       async () => [
         ...MCP_TOOLS,
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),
+        ...((await reconstructed()) ? RECONSTRUCTED_STATE_MCP_TOOLS : []),
         ...(listOps ? OPS_MCP_TOOLS : []),
       ],
     );
@@ -201,6 +216,8 @@ export async function agentApi(
   if (tool === null) throw new HttpError(404, "not_found");
   // Absent, not refused, while the deployment cannot serve it, like its route.
   if (tool === PURCHASES_TOOL_NAME && !(await cardPurchasesAvailable(env)))
+    throw new HttpError(404, "not_found");
+  if (tool === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructedStateAvailable(env)))
     throw new HttpError(404, "not_found");
   const outcome = await callTool(tool, await boundedJson(request), context);
   return json(outcome.body, outcome.status);
