@@ -206,10 +206,10 @@ stopped working. Two details of its semantics:
 
 ## Flags
 
-| Flag                             | Where          | Default | Effect                                                                         |
-| -------------------------------- | -------------- | ------- | ------------------------------------------------------------------------------ |
-| `BALANCE_PROJECTION_ENABLED`     | processor      | `0`     | The writer gate. Anything but `"1"` skips the balance READ build. The App does not read it. |
-| `REWARD_READ_PROJECTION_ENABLED` | processor      | `false` | The `reward_read_projection` lane runs and builds the reward snapshot (U16).   |
+| Flag                             | Where     | Default | Effect                                                                                      |
+| -------------------------------- | --------- | ------- | ------------------------------------------------------------------------------------------- |
+| `BALANCE_PROJECTION_ENABLED`     | processor | `0`     | The writer gate. Anything but `"1"` skips the balance READ build. The App does not read it. |
+| `REWARD_READ_PROJECTION_ENABLED` | processor | `false` | The `reward_read_projection` lane runs and builds the reward snapshot (U16).                |
 
 Production enables the remaining flags. Both writers and App readers use READ
 exclusively; there is no storage-target switch.

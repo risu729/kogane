@@ -8,7 +8,7 @@ explain down to the raw bytes.
 
 Nothing here rewrites Layer A or Layer B. No observation is updated or deleted,
 no parser version changes, and the existing visible result set is unchanged
-while both flags are off.
+while `RECONCILIATION_ENABLED` is off.
 
 ## Product delivery scope
 
@@ -1217,12 +1217,12 @@ Both return the `Page<T>` envelope (`items`, `nextCursor`, `dataCoverage`) plus
 `apiVersion: 2`, and activity also echoes the `basis` it was read on. Values are
 `Quantity`-shaped (`unitRef` plus a decimal-v1 value state).
 
-The routes are served only when the `eventsV2` capability is true, which needs
-**both** `EVENTS_V2_ENABLED=1` and the `economic_event_revisions` table present
-in the store the Worker reads. Otherwise the paths 404 like any unknown route
-and `/api/meta` reports `eventsV2: false`. `eventsV2` was added to
+The routes are served only when the `eventsV2` capability is true, which is
+true when `economic_event_revisions` is present (`present === 1`) in the store
+the Worker reads. Otherwise the paths 404 like any unknown route and
+`/api/meta` reports `eventsV2: false`. `eventsV2` was added to
 `ApiCapabilities`; both stored capability constants default it to `false` and
-the server replaces it with what it can actually serve.
+the server replaces it with what the store has. `EVENTS_V2_ENABLED` is not read.
 
 `services/app/src/card-purchases-api.ts` serves one more read, to an operator
 only:
@@ -1289,10 +1289,10 @@ each target's recognition key by primary-key lookups
 of the page's relation triples.
 
 The route needs a human principal with `interpretation.accept` (the card
-settlement review's guard), is GET-only, and answers 404 unless
-`EVENTS_V2_ENABLED` is on **and** the 0047 table and views exist. `/api/meta`
-advertises the same fact as `cardPurchaseRecognition`, which both stored
-capability constants default to `false`. It writes nothing.
+settlement review's guard), is GET-only, and answers 404 unless the 0047
+table and views exist (`present === 3`). `/api/meta` advertises the same fact
+as `cardPurchaseRecognition`, which both stored capability constants default
+to `false`. It writes nothing.
 
 An agent reads the same page through the agent API instead:
 `POST /api/agent/v1/purchases.explain`, or the MCP tool
@@ -1310,16 +1310,18 @@ either.
 
 ## Flags
 
-| Flag                     | Where                     | Default | Effect when on                                                                |
-| ------------------------ | ------------------------- | ------- | ----------------------------------------------------------------------------- |
-| `RECONCILIATION_ENABLED` | `services/processor` vars | `"0"`   | The scheduled `reconciliation_sweep` lane runs and writes stage A candidates. |
-| `EVENTS_V2_ENABLED`      | `services/app` vars       | `"0"`   | `/api/v2/*` is served if the projection exists.                               |
+| Flag                     | Where                     | Default | Effect when on                                                                  |
+| ------------------------ | ------------------------- | ------- | ------------------------------------------------------------------------------- |
+| `RECONCILIATION_ENABLED` | `services/processor` vars | `"0"`   | The scheduled reconciliation, card-debit-account and card-settlement lanes run. |
 
-With both off, the scheduled worker logs no new event, writes nothing but the
-`skipped-by-flag` tick records of `reconciliation_sweep` and
-`card_settlement_sweep` (`processor_lane_ticks`, one day kept;
-[processor.md §6.1](processor.md#61-tick-records)), and the browser serves no
-new route.
+With `RECONCILIATION_ENABLED` off, `reconciliation_sweep`,
+`card_debit_account_sweep` and `card_settlement_sweep` are not run. Each records
+a `skipped-by-flag` tick (`processor_lane_ticks`, one day kept;
+[processor.md §6.1](processor.md#61-tick-records)). The browser still serves the
+event routes when `economic_event_revisions` is present (`present === 1`), the
+card-purchase route when the CORE 0047 table and views are present
+(`present === 3`), and the card-settlement routes when the two settlement views
+are present (`present === 2`). `EVENTS_V2_ENABLED` is not read.
 
 ## Deploy order and rollback
 
@@ -1335,12 +1337,15 @@ production Worker rollback.
 2. Deploy `services/processor` with `RECONCILIATION_ENABLED="0"`;
    turn it on when the candidates should start being produced.
 3. Deploy `services/app` with `EVENTS_V2_ENABLED="0"`; turn it on
-   to expose the read routes.
+   to expose the read routes. That is what this activation did. The App
+   does not read `EVENTS_V2_ENABLED` now.
 
-Rollback: set the flags back to `"0"`. The lane stops and the routes disappear;
-the tables stay. A build that predates this change never reads or writes the new
-tables, so it rolls back cleanly with the schema in place. Rows are never
-deleted to undo a decision — a new revision is appended instead.
+Current rollback: set Processor `RECONCILIATION_ENABLED` to `"0"`. The
+`reconciliation_sweep`, `card_debit_account_sweep` and `card_settlement_sweep`
+lanes stop. The read routes stay while the tables exist. The tables stay.
+A build that predates this change never reads or writes the new tables, so
+it rolls back cleanly with the schema in place. Rows are never deleted to
+undo a decision — a new revision is appended instead.
 
 ## Bounds
 

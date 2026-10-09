@@ -154,9 +154,9 @@ export interface ApiCapabilities {
    */
   readonly commands: boolean;
   /**
-   * `/api/v2/activity` and `/api/v2/obligations` are served. False unless the
-   * A10 projection exists in the store the server reads and the reader flag is
-   * on, so this is a server-computed fact, not a static claim.
+   * `/api/v2/activity` and `/api/v2/obligations` are served. False unless
+   * `economic_event_revisions` is present in the store the server reads, so
+   * this is a server-computed fact, not a static claim. No reader flag.
    */
   readonly eventsV2: boolean;
   /** Human review of card statement/bank settlement candidates is available. */
@@ -165,8 +165,7 @@ export interface ApiCapabilities {
   /**
    * `GET /api/v2/card-purchases` is served: recognised card purchases
    * explained through their statement and bank debit, to an operator. False
-   * unless the event reader flag is on and the CORE 0047 tables exist in the
-   * store the server reads.
+   * unless the CORE 0047 table and views exist in the store the server reads.
    */
   readonly cardPurchaseRecognition?: boolean;
   /**
@@ -224,8 +223,8 @@ export const CENTRAL_STORE_CAPABILITIES = {
   measureViews: ["balances", "summaries"],
   identityReadModes: ["latest", "as-recorded"],
   paginationVersion: "offset-v1",
-  // Off until the balance projection is built and the reader flag is on; the
-  // Worker advertises the enabled variant through `withBalancesV2`.
+  // Off in this constant until a sealed snapshot is served. The Worker
+  // advertises that through `withBalancesV2`. There is no App reader flag.
   balancesV2: false,
   balancesV2Pagination: "none",
   balancesV2ReadModel: "none",
@@ -236,8 +235,10 @@ export const CENTRAL_STORE_CAPABILITIES = {
   evidenceHistory: true,
   sharedQuery: true,
   // `rewardsV2`, `commands`, `eventsV2` and `opsApi` are off in the shared
-  // constant: each deployment's own flag decides, and `/api/meta` overrides
-  // these fields with what the running Worker actually serves.
+  // constant. The Worker sets `rewardsV2` true and `eventsV2` from
+  // `economic_event_revisions`. `commands` follows `COMMANDS_ENABLED` and
+  // `opsApi` follows `OPS_API_ENABLED`. `/api/meta` overrides these fields
+  // with what the running Worker actually serves.
   rewardsV2: false,
   commands: false,
   eventsV2: false,
@@ -278,9 +279,9 @@ export function withRewardsV2(
 }
 
 /**
- * The v2 balance routes as this Worker advertises them when the flag is on.
- * `readModel` says which store answered; it is `none` while the routes are
- * off, so the three fields can never disagree.
+ * The v2 balance routes as this Worker advertises them when the caller
+ * reports those routes as served. `readModel` says which store answered; it
+ * is `none` while `enabled` is false, so the three fields can never disagree.
  */
 export function withBalancesV2(
   capabilities: ApiCapabilities,

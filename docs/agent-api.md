@@ -179,8 +179,8 @@ session state and no authorization of its own — including which tools exist:
 the adapter publishes the list it is handed and dispatches by name, so a tool
 set that is off is neither listed nor callable. `kogane.purchases.explain`
 follows the operator route it shares a query with: while `/api/meta` reports
-`cardPurchaseRecognition: true` (the event reader flag on and CORE 0047
-applied) it is appended to the six above, and otherwise its name is
+`cardPurchaseRecognition: true` (CORE 0047 applied) it is appended to the six
+above, and otherwise its name is
 `unknown_tool` and its HTTP path answers `404 not_found`, after the Access and
 grant checks every agent path makes. With `OPS_API_ENABLED` on **and
 this deployment's command grant lists readable**, the six `kogane.ops.*` tools
@@ -200,8 +200,8 @@ stay callable, so a client that asks anyway is told
 | `reported-state` | What the provider reported                              | `source`, `account`, `instrument`, `metric`, `view` | `records.read` |
 | `activity`       | Adopted events in a period                              | `source`, `account`, `from`, `to`, `q`              | `records.read` |
 
-`holdings` reads A07's adopted balance projection and nothing else. While the
-reader flag is off or no snapshot is sealed it answers
+`holdings` reads A07's adopted balance projection and nothing else. While READ
+is unbound or no snapshot is sealed it answers
 `completeness: "unavailable"` with the gap reason `projection_not_built` and a
 blocking warning — it never computes a holding from the raw observation rows
 behind the projection.
@@ -524,8 +524,9 @@ the real Worker: the same page as the query and as the operator route, one
 object over HTTP and MCP with provider text only under `data`, 401 before any
 grant and 403 for the operator without an agent grant (neither preparing a
 statement), each grant and `maxRows` refusal preparing only the schema check,
-404 and `unknown_tool` with the reader flag off or CORE 0047 absent while
-`kogane.capabilities` reports `cardPurchaseRecognition: false`, the refusal
+404 and `unknown_tool` when CORE 0047 is absent while
+`kogane.capabilities` reports `cardPurchaseRecognition: false`, a retired
+`EVENTS_V2_ENABLED` value that does not hide the tool, the refusal
 codes, and every table and the source revision unchanged.
 `test/agent-api.test.ts` pins the tool list and its schema with the capability
 on and off, and

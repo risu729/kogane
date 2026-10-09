@@ -85,7 +85,7 @@ a postcheck that only works once an unrelated flag is on is not a postcheck
 | `releaseSha`   | the commit the deploy stamped into `RELEASE_SHA`, or `""` outside a release                                                                                                                    |
 | `worker`       | `kogane-evidence-browser`                                                                                                                                                                      |
 | `core`         | `SELECT 1` against CORE, plus the applied migration file names in order                                                                                                                        |
-| `read`         | the same for READ, with `required: true`. This deployment always requires READ. The retired `READ_PROJECTION_ENABLED` name is not read. A binding that does not answer is `degraded` |
+| `read`         | the same for READ, with `required: true`. This deployment always requires READ. The retired `READ_PROJECTION_ENABLED` name is not read. A binding that does not answer is `degraded`           |
 | `data`         | one R2 `head` of the fixed key `health/release-marker`; `markerPresent` is reported, never required                                                                                            |
 | `capabilities` | this deployment's capability snapshot, the same object `/api/meta` serves                                                                                                                      |
 | `grants`       | `{ "usable": true }`, or `{ "usable": false, "problem": "<code>" }` when `OPERATOR_SUBJECTS`/`AGENT_GRANTS` cannot be read or overlap — a code, never a subject; `usable: false` is `degraded` |
