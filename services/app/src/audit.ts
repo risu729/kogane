@@ -56,17 +56,24 @@ export function auditLogCode(request: Request): typeof AUDIT_WRITE_FAILED | null
   return states.get(request)?.failed ? AUDIT_WRITE_FAILED : null;
 }
 
-/** The context of one audited call on `path` by the verified `subject`. */
+/**
+ * The context of one audited call on `path` by the verified `subject`. The
+ * principal is the subject unless the boundary already built another one (an
+ * MCP client is `mcp-client:<sub>`, ADR 0047); an operator route grades its
+ * subject inside the call instead.
+ */
 export function auditContext(
   request: Request,
   env: Env,
   path: SubjectPath,
   subject: string,
+  principal: string = subject,
 ): ExecuteContext {
   const state = stateOf(request);
   return {
     path,
     subject,
+    principal,
     correlationId: state.correlationId,
     sink: { append: (row) => appendAnswerRecord(d1CommandStore(env.DB), row) },
     onWriteFailure: () => {

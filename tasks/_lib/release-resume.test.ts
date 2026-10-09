@@ -1,6 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import {
+  readFileSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+  symlinkSync,
+  statSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { canonicalJson } from "./ci/release-manifest.mjs";
 import {
@@ -8,6 +17,7 @@ import {
   waitForApplicationRollout,
   verifyApplicationRollout,
   currentRegistryNamespace,
+  verifyApplicationBaseline,
 } from "./ci/cf-container-release.mjs";
 import {
   selectResumeDeployment,
@@ -22,6 +32,8 @@ import {
   validatePreparedPaths,
   copyPrepared,
   positiveId,
+  streamArtifact,
+  waitForPublicationCandidate,
 } from "./ci/release-resume.mjs";
 import { workflowSteps } from "./deploy-order.ts";
 import { REPO_ROOT } from "./repo-root.ts";
@@ -236,8 +248,6 @@ describe("exact publication readback and the unchanged convergence window", () =
       ).version,
     ).toBe(4);
     for (const versions of [
-      [],
-      [{ version: 3, percentage: 100, configuration: { image } }],
       [
         { version: 4, percentage: 50, configuration: { image } },
         { version: 5, percentage: 50, configuration: { image } },
@@ -245,6 +255,10 @@ describe("exact publication readback and the unchanged convergence window", () =
     ])
       expect(() => publicationCandidate(before, versions, "synthetic", target)).toThrow(
         "publication_ambiguous",
+      );
+    for (const versions of [[], [{ version: 3, percentage: 100, configuration: { image } }]])
+      expect(() => publicationCandidate(before, versions, "synthetic", target)).toThrow(
+        "publication_pending",
       );
     expect(() =>
       publicationCandidate(
@@ -258,6 +272,23 @@ describe("exact publication readback and the unchanged convergence window", () =
   test("unpublished future Container drift is refused before resumed mutations", () => {
     const versions = [{ version: 3, configuration: { image }, percentage: 100 }];
     verifyResumeContainerState(before, undefined, before, versions);
+    expect(() =>
+      verifyResumeContainerState(
+        before,
+        undefined,
+        { ...before, activeRolloutId: "synthetic-active" },
+        versions,
+      ),
+    ).toThrow("rollout_pending");
+    expect(() =>
+      verifyResumeContainerState(before, undefined, before, [{ ...versions[0]!, percentage: 50 }]),
+    ).toThrow("rollout_unverified");
+    verifyResumeContainerState(
+      before,
+      { ...before, version: 4 },
+      { ...before, activeRolloutId: "synthetic-active" },
+      [{ version: 4, configuration: { image }, percentage: 50 }],
+    );
     for (const patch of [
       { workerVersion: "ffffffff-ffff-4fff-afff-ffffffffffff" },
       { version: 4 },
@@ -528,6 +559,8 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
         zip,
         resolve(temp, "prepared.tar"),
       ]);
+      rmSync(resolve(temp, "prepared"), { recursive: true });
+      rmSync(resolve(temp, "prepared.tar"));
       const bytes = readFileSync(zip),
         artifactDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
       const record = {
@@ -554,6 +587,7 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
       globalThis.fetch=async(url,options={})=>{
         const text=String(url);
         if(text==='https://artifact.invalid/archive'){
+          if(process.env.MOCK_FETCH_FAIL==='true')throw Error('https://secret.invalid/private-token');
           if(options.headers?.Authorization)throw Error('credential redirected');
           const bytes=readFileSync(${JSON.stringify(zip)});
           if(process.env.MOCK_TAMPER==='true')bytes[0]^=1;
@@ -579,6 +613,8 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
       const restored = run();
       expect(restored.stderr).toBe("");
       expect(restored.status).toBe(0);
+      expect(readdirSync(temp).filter((entry) => entry.startsWith("release-resume-"))).toEqual([]);
+      expect(readdirSync(temp)).not.toContain("docker-images.tar");
       expect(readFileSync(config, "utf8")).toContain("original stamped config");
       expect(readFileSync(resolve(root, "dist/test/entry.js"), "utf8")).toBe(
         "synthetic original bundle",
@@ -591,6 +627,8 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
         "CONTAINER_RESTORED_DAEMON=restored-daemon",
       );
       expect(run({ MOCK_TAMPER: "true" }).stderr.trim()).toBe("release_resume_artifact_digest");
+      expect(readdirSync(temp).filter((entry) => entry.startsWith("release-resume-"))).toEqual([]);
+      expect(run({ MOCK_FETCH_FAIL: "true" }).stderr.trim()).toBe("release_resume_artifact_fetch");
       expect(run({ MOCK_IMAGE_ID: `sha256:${"a".repeat(64)}` }).stderr.trim()).toBe(
         "release_resume_restored_image",
       );
@@ -599,5 +637,362 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }
+});
+
+test("streamed artifact stays private until complete checksum and never overwrites promotion", async () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "kogane-stream-"));
+  try {
+    const chunks = [Buffer.alloc(70001, 0x5a), Buffer.from("synthetic final bytes")];
+    const digest = `sha256:${createHash("sha256").update(chunks[0]!).update(chunks[1]!).digest("hex")}`;
+    async function* source() {
+      yield chunks[0]!;
+      const directory = readdirSync(temp).find((entry) =>
+        readdirSync(resolve(temp, entry)).includes("artifact.part"),
+      )!;
+      expect(readdirSync(resolve(temp, directory))).toEqual(["artifact.part"]);
+      expect(statSync(resolve(temp, directory)).mode & 0o777).toBe(0o700);
+      yield chunks[1]!;
+    }
+    const artifact = await streamArtifact(source(), digest, temp);
+    expect(readFileSync(artifact.zip)).toEqual(Buffer.concat(chunks));
+    expect(readdirSync(artifact.directory)).toEqual(["artifact.zip"]);
+    // Subsequent attempts get a new private path, leaving existing verified files intact.
+    const second = await streamArtifact(source(), digest, temp);
+    expect(second.directory).not.toBe(artifact.directory);
+    expect(readFileSync(artifact.zip)).toEqual(Buffer.concat(chunks));
+    const sentinel = resolve(temp, "sentinel");
+    writeFileSync(sentinel, "original");
+    await expect(
+      streamArtifact(
+        (async function* () {
+          yield chunks[0]!;
+          yield chunks[1]!;
+        })(),
+        digest,
+        temp,
+        {
+          beforePromote: (directory: string) =>
+            symlinkSync(sentinel, resolve(directory, "artifact.zip")),
+        },
+      ),
+    ).rejects.toThrow("release_resume_artifact_promote");
+    expect(readFileSync(sentinel, "utf8")).toBe("original");
+    expect(readdirSync(temp).length).toBe(3); // two verified directories + sentinel
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("tamper and interrupted streams remove quarantine without promotion or raw diagnostics", async () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "kogane-stream-"));
+  try {
+    const bytes = Buffer.from("synthetic bytes");
+    const digest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+    await expect(
+      streamArtifact(
+        (async function* () {
+          yield Buffer.from("tampered");
+        })(),
+        digest,
+        temp,
+      ),
+    ).rejects.toThrow("release_resume_artifact_digest");
+    expect(readdirSync(temp)).toEqual([]);
+    await expect(
+      streamArtifact(
+        (async function* () {
+          yield bytes;
+          throw Error("https://secret.invalid/private-token");
+        })(),
+        digest,
+        temp,
+      ),
+    ).rejects.toThrow("release_resume_artifact_body");
+    expect(readdirSync(temp)).toEqual([]);
+    await expect(
+      streamArtifact(
+        (async function* () {
+          yield "invalid chunk";
+        })(),
+        digest,
+        temp,
+      ),
+    ).rejects.toThrow("release_resume_artifact_chunk");
+    expect(readdirSync(temp)).toEqual([]);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
+  }
+});
+
+test("native Node refuses oversized incoming chunks without touching or materializing them", () => {
+  const { spawnSync } = require("node:child_process");
+  const code = `import {streamArtifact} from ${JSON.stringify(resolve(REPO_ROOT, "tasks/_lib/ci/release-resume.mjs"))};
+    import {mkdtempSync,readdirSync,rmSync} from 'node:fs'; import {tmpdir} from 'node:os';
+    const directory=mkdtempSync(tmpdir()+'/kogane-hash-limit-');
+    try {
+      try { await streamArtifact((async function*(){yield Buffer.allocUnsafe(2**31);})(),'sha256:'+'a'.repeat(64),directory); throw Error('unexpected acceptance'); }
+      catch(error){if(error.message!=='release_resume_artifact_chunk')throw error;}
+      if(readdirSync(directory).length || process.resourceUsage().maxRSS>256*1024)throw Error('resource boundary');
+    } finally {rmSync(directory,{recursive:true,force:true});}`;
+  const result = spawnSync("node", ["--input-type=module", "-e", code], { encoding: "utf8" });
+  expect(result.stderr).toBe("");
+  expect(result.status).toBe(0);
+});
+
+describe("allocation capture waits only for zero within an absolute deadline", () => {
+  const unique = [{ version: 4, percentage: 0, configuration: { image } }];
+  const state = (versions = unique, snapshot = before) => ({
+    snapshot,
+    versions,
+    registryNamespace: "synthetic",
+  });
+  const options = (now: () => number, wait: (ms: number) => Promise<void>) => ({
+    before,
+    target,
+    publishedVersion: versionId,
+    deadline: 30000,
+    now,
+    wait,
+  });
+  test("zero becomes unique at 29 seconds but late 30 seconds cannot bind", async () => {
+    let clock = 0,
+      calls = 0;
+    const result = await waitForPublicationCandidate(
+      async (deadline: number) => {
+        expect(deadline).toBe(30000);
+        calls++;
+        if (calls === 2) {
+          clock = 29000;
+          return state();
+        }
+        return state([]);
+      },
+      options(
+        () => clock,
+        async (ms) => {
+          clock += ms;
+        },
+      ),
+    );
+    expect(result.candidate.version).toBe(4);
+    expect(calls).toBe(2);
+    clock = 0;
+    await expect(
+      waitForPublicationCandidate(
+        async () => {
+          clock = 30000;
+          return state();
+        },
+        options(
+          () => clock,
+          async (ms) => {
+            clock += ms;
+          },
+        ),
+      ),
+    ).rejects.toThrow("publication_pending");
+    clock = 0;
+    calls = 0;
+    await expect(
+      waitForPublicationCandidate(
+        async () => {
+          calls++;
+          return state([]);
+        },
+        options(
+          () => clock,
+          async (ms) => {
+            clock += ms;
+          },
+        ),
+      ),
+    ).rejects.toThrow("publication_pending");
+    expect(clock).toBe(30000);
+    expect(calls).toBe(6);
+  });
+  test("ambiguity/schema/read and exact identity drift are immediate refusals", async () => {
+    const failures = [
+      () => state([...unique, { ...unique[0]!, version: 5 }]),
+      () => state([{ ...unique[0]!, version: "4" }]),
+      () => state([{ version: 3, percentage: 100 }]),
+      () => state(unique, { ...before, image: "synthetic-other" }),
+      () => state(unique, { ...before, workerVersion: "ffffffff-ffff-4fff-afff-ffffffffffff" }),
+      () => state(unique, { ...before, namespaces: [] }),
+      () => state(unique, { ...before, version: 5 }),
+      () =>
+        state(unique, {
+          ...before,
+          version: 4,
+          image: image.replace("c".repeat(64), "d".repeat(64)),
+        }),
+      () => ({ ...state(), registryNamespace: "alien" }),
+      () => {
+        throw Error("synthetic read failure");
+      },
+    ];
+    for (const read of failures) {
+      let waits = 0;
+      await expect(
+        waitForPublicationCandidate(
+          async () => read(),
+          options(
+            () => 0,
+            async () => {
+              waits++;
+            },
+          ),
+        ),
+      ).rejects.toThrow();
+      expect(waits).toBe(0);
+    }
+  });
+  test("original prepublication baseline rejects every unstable or changed state", () => {
+    const stable = [{ version: 3, percentage: 100, configuration: { image } }];
+    verifyApplicationBaseline(before, before, stable);
+    for (const patch of [
+      { activeRolloutId: "synthetic-active" },
+      { workerVersion: "f".repeat(36) },
+      { version: 4 },
+      { image: "synthetic-other" },
+      { namespaces: [] },
+    ])
+      expect(() => verifyApplicationBaseline(before, { ...before, ...patch }, stable)).toThrow();
+    for (const versions of [
+      [],
+      [{ ...stable[0]!, percentage: 50 }],
+      [...stable, { ...stable[0]!, version: 4, percentage: 0 }],
+      [{ ...stable[0]!, version: "3" }],
+    ])
+      expect(() => verifyApplicationBaseline(before, before, versions)).toThrow();
+    const workflow = readFileSync(
+      resolve(REPO_ROOT, ".github/workflows/_deploy-workers.yml"),
+      "utf8",
+    );
+    for (const selected of CONTAINER_TARGETS) {
+      const guard = workflow.indexOf(`id: verify-publication-baseline-${selected.name}`);
+      expect(guard).toBeGreaterThan(0);
+      expect(guard).toBeLessThan(workflow.indexOf(`id: deploy-${selected.name}`));
+      expect(guard).toBeLessThan(workflow.indexOf(`id: cf-deploy-${selected.name}`));
+    }
+  });
+});
+
+test("real Node capture waits for allocation visibility and rechecks proof before writing", () => {
+  const { spawnSync } = require("node:child_process");
+  const temp = mkdtempSync(resolve(tmpdir(), "kogane-publication-cli-"));
+  try {
+    const imageId = `sha256:${"f".repeat(64)}`;
+    const registryBytes = JSON.stringify({ config: { digest: imageId } });
+    const newImage = `registry.cloudflare.com/synthetic/${target.appName}@sha256:${createHash("sha256").update(registryBytes).digest("hex")}`;
+    writeFileSync(
+      resolve(temp, "container-baseline.json"),
+      JSON.stringify({ registryNamespace: "synthetic", snapshots: [before] }),
+    );
+    writeFileSync(
+      resolve(temp, "container-manifest.json"),
+      JSON.stringify([{ name: target.name, imageId, legacy: false }]),
+    );
+    writeFileSync(resolve(temp, "release-record.json"), JSON.stringify(deployment().payload));
+    writeFileSync(resolve(temp, "release-plan.json"), JSON.stringify({ selected: [target.name] }));
+    const bootstrap = resolve(temp, "bootstrap.mjs");
+    writeFileSync(
+      bootstrap,
+      `
+      let clock=0,reads=0,versionReads=0; Date.now=()=>clock;
+      globalThis.setTimeout=(done,ms)=>{clock+=ms;queueMicrotask(done);return {unref(){}}};
+      const mode=process.env.MOCK_MODE;
+      globalThis.fetch=async(url,options={})=>{
+        const text=String(url);let value;
+        if(text.startsWith('https://registry.cloudflare.com/')){if(mode==='registry-late')clock=30000;return new Response(mode==='image'?'synthetic tampered manifest':${JSON.stringify(registryBytes)});}
+        if(text.endsWith('/containers/me'))value={external_account_id:mode==='namespace'||(mode==='final-namespace'&&reads===2)?'alien':'synthetic'};
+        else if(text.endsWith('/credentials'))value={account_id:'synthetic',registry_host:'registry.cloudflare.com',username:'synthetic',password:'synthetic'};
+        else if(text.endsWith('/deployments')){reads++;value={deployments:[{versions:[{version_id:mode==='worker'||(mode==='legacy-drift'&&reads>=2)||(mode==='final-worker'&&reads===2)?'ffffffff-ffff-4fff-afff-ffffffffffff':${JSON.stringify(versionId)},percentage:100}]}]};}
+        else if(text.includes('/workers/scripts/'))value={resources:{bindings:[{type:'durable_object_namespace',class_name:${JSON.stringify(target.className)},namespace_id:${JSON.stringify("e".repeat(32))}}]}};
+        else if(text.endsWith('/versions')){
+          versionReads++;
+          if(mode==='late')clock=30000;
+          const versions=[{version:3,percentage:100,configuration:{image:${JSON.stringify(image)}}}];
+          if(mode!=='zero' && mode!=='unstable' && !((mode==='delayed'||mode==='legacy-drift')&&versionReads===1))versions.push({version:4,percentage:0,configuration:{image:${JSON.stringify(newImage)}}});
+          if(mode==='ambiguous')versions.push({version:5,percentage:0,configuration:{image:${JSON.stringify(newImage)}}});
+          if(mode==='final-app'&&versionReads===2)versions[1].configuration.image=${JSON.stringify(image)};
+          value=versions;
+        } else if(text.includes('/containers/applications/'))value={id:${JSON.stringify(target.appId)},name:${JSON.stringify(target.appName)},account_id:${JSON.stringify("b".repeat(32))},scheduling_policy:'default',max_instances:2,configuration:{vcpu:0.25,memory_mib:1024,disk:{size_mb:4000},image:mode==='final-old-image'&&reads===2?${JSON.stringify(newImage)}:${JSON.stringify(image)}},constraints:{regions:['APAC']},durable_objects:{namespace_id:${JSON.stringify("e".repeat(32))}},version:mode==='final-newer'&&reads===2?5:mode==='final-older'&&reads===2?2:3,active_rollout_id:mode==='unstable'?'11111111-1111-4111-a111-111111111111':null};
+        else throw Error('unexpected request');
+        return Response.json({success:true,result:value});
+      };`,
+    );
+    const env = {
+      ...process.env,
+      RUNNER_TEMP: temp,
+      GITHUB_RUN_ID: "123",
+      GITHUB_RUN_ATTEMPT: "1",
+      SHA: sha,
+      TRUSTED_SHA: trustedSha,
+      CLOUDFLARE_ACCOUNT_ID: "b".repeat(32),
+      CLOUDFLARE_API_TOKEN: "synthetic",
+      PUBLISHED_WORKER_VERSION: versionId,
+      DEPLOYMENT_ID: "42",
+      STEPS_JSON: JSON.stringify(receipt().steps),
+    };
+    const resume = resolve(REPO_ROOT, "tasks/_lib/ci/release-resume.mjs");
+    const run = (mode: string, command = "capture", helper = resume) =>
+      spawnSync("node", ["--import", bootstrap, helper, command, target.name], {
+        cwd: REPO_ROOT,
+        env: {
+          ...env,
+          MOCK_MODE: mode,
+          ...(mode === "legacy-drift"
+            ? { PUBLISHED_WORKER_VERSION: "", LEGACY_PUBLICATION: "true" }
+            : {}),
+        },
+        encoding: "utf8",
+      });
+    const saved = resolve(temp, "resume-receipt.json");
+    const delayed = run("delayed");
+    expect(delayed.stderr).toBe("");
+    expect(delayed.status).toBe(0);
+    expect(JSON.parse(readFileSync(saved, "utf8")).targets[0]).toMatchObject({
+      version: 4,
+      image: newImage,
+      workerVersion: versionId,
+    });
+    for (const [mode, code] of [
+      ["final-older", "application_superseded"],
+      ["final-old-image", "application_superseded"],
+      ["registry-late", "publication_pending"],
+      ["image", "registry_digest_mismatch"],
+      ["final-newer", "application_superseded"],
+      ["final-namespace", "registry_namespace_changed"],
+      ["legacy-drift", "published_worker_mismatch"],
+      ["zero", "publication_pending"],
+      ["late", "publication_pending"],
+      ["ambiguous", "publication_ambiguous"],
+      ["worker", "published_worker_mismatch"],
+      ["namespace", "registry_namespace_changed"],
+      ["final-worker", "worker_superseded"],
+      ["final-app", "application_superseded"],
+    ]) {
+      rmSync(saved, { force: true });
+      const result = run(mode!);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain(code!);
+      expect(readdirSync(temp)).not.toContain("resume-receipt.json");
+    }
+    expect(run("unstable", "verify-publication-baseline").stderr).toContain("rollout_pending");
+    const original = readFileSync(resolve(temp, "container-baseline.json"));
+    writeFileSync(
+      resolve(temp, "container-manifest.json"),
+      JSON.stringify([
+        { name: target.name, imageId, legacy: true, localTag: "synthetic-original" },
+      ]),
+    );
+    expect(
+      run("unstable", "prepare", resolve(REPO_ROOT, "tasks/_lib/ci/cf-container-release.mjs"))
+        .stderr,
+    ).toContain("rollout_pending");
+    expect(readFileSync(resolve(temp, "container-baseline.json"))).toEqual(original);
+  } finally {
+    rmSync(temp, { recursive: true, force: true });
   }
 });

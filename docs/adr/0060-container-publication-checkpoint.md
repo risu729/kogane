@@ -140,3 +140,75 @@ failure-safe progress merging. The ordinary release, rollback schema, registry,
 DO and deployment-order guard suites remain applicable. Hosted CI exercises real
 Docker builds; a controlled same-run recovery is required before claiming live
 recovery verified.
+
+## Amendment: bounded archive restoration (2026-10-09)
+
+- Status: accepted (merged 2026-10-09 in #614)
+
+Node's hash backend rejects a single update larger than INT_MAX. Whole-buffer
+ZIP hashing therefore cannot verify a prepared archive above 2 GiB, independent
+of available memory. Keeping the ZIP, extracted tar and two copies of the Docker
+archive also unnecessarily multiplies runner disk usage.
+
+Download into a uniquely created private directory, with a mode-0600 quarantine
+file and at most 64 KiB per hash/write operation. Backpressure limits retained
+bytes; an unexpected incoming chunk above 64 MiB is refused. Recompute the same
+whole-ZIP SHA-256, then promote the closed file exclusively to `artifact.zip`.
+No extraction or prepared-byte use is permitted before that comparison. Digest
+failure or stream interruption removes this invocation's quarantine. A process
+kill can leave private partial bytes, but cannot promote an incomplete ZIP.
+Existing files and symlinks cannot be overwritten by promotion.
+
+After successful ZIP extraction, delete the ZIP. After validated tar listing and
+successful extraction, delete the tar. Move the extracted Docker archive within
+RUNNER_TEMP before copying the remaining small prepared files, with no fallback
+copy across filesystems. Delete that archive only after Docker load and the
+original exact image ID and input-digest checks succeed. This leaves at most two
+large archive representations during either extraction boundary. Identity,
+ledger, immutable-artifact, baseline and 180-second convergence checks retain
+their original contract.
+
+Unexpected restore errors report only closed stage codes; signed URLs, tokens,
+raw filesystem errors and command stderr are not printed. CI adds a mandatory
+native Node check that writes and hashes 2 GiB plus 64 KiB through the same
+streaming path, checks an independently calculated SHA-256 and file size, and
+requires peak RSS below 256 MiB. It has its own two-minute timeout and runs before
+resource-heavy repository checks; existing test deadlines are unchanged. Small
+synthetic tests cover quarantine lifecycle, interruption, tamper, exclusive
+promotion, staging reuse, oversized chunks, native/legacy restoration and the
+unchanged image proof. This does not establish live recovery success.
+
+## Proposed amendment: bounded publication target readback (2026-10-09)
+
+A single read of application allocations currently conflates no new version with
+multiple new versions. Allocation visibility can lag successful publication;
+the failed capture logs do not record the candidate count, so they cannot prove
+which condition occurred. A saved desired-version snapshot alone also does not
+prove the original application had completed its rollout.
+
+Require a stable original baseline for every selected Container before any
+legacy image push or migrations: exact desired version/image at 100%, all other
+versions at 0%, and no active rollout. Before each unpublished Container Action,
+recheck the original Worker UUID, application version/image, namespaces and
+resource policy plus full stability. Do not refresh the stored baseline. Restore
+preflight applies the same stability rule to still-unpublished targets before
+resumed migrations; receipt-bound targets may remain pending for their existing
+full verification guard.
+
+Capture uses one absolute 30-second budget covering allocation reads, registry
+proof and a final readback before writing the receipt. Only zero candidates may
+retry; multiple candidates, malformed responses, read failures and identity
+drift fail immediately. Every request uses the remaining budget, and late
+responses cannot bind a target. Existing registry callers retain their previous
+request limits. The native Action UUID stays exact throughout; legacy mode
+freezes its first changed UUID and rejects any later change. Candidate selection
+still requires exactly one new version and the original immutable image-config
+proof, never a latest or baseline-plus-one guess. Recheck the same candidate
+version/image, Worker UUID, namespace and application identity after registry
+verification. No receipt is written if that proof has changed or expired.
+
+The separate mandatory 180-second rollout guard, serial downstream gates,
+immutable artifact trust, supersession refusal and no historical receipt adoption
+remain unchanged. Synthetic clock and real Node CLI tests cover delayed visibility,
+expiry and late responses, ambiguous versions, identity/image drift, legacy UUID
+replacement and unstable original baselines. Live recovery remains unverified.

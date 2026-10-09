@@ -128,8 +128,8 @@ export type EconomicEventPlanner = (
 
 /**
  * The economic-event planners (ADR 0054, G2 vocabulary; CORE 0071). None is
- * registered: G2 is vocabulary only, and the own-transfer planners are G3's,
- * behind ADR 0054's production gate. An unregistered kind is refused with
+ * registered: the own-transfer planners (`own-transfer-plan.ts`, ADR 0057)
+ * exist but stay out of this map until ADR 0054's production gate is met. An unregistered kind is refused with
  * `unsupported_semantics` at plan, simulate, approve and commit, for every
  * principal, so no plan, approval or receipt of these kinds is ever written
  * through the lifecycle.

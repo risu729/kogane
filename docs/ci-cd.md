@@ -530,13 +530,31 @@ namespace identity in an immutable receipt. Its original deployment audit
 binds the receipt artifact ID/digest; the original payload binds prepared
 artifact ID/digest, run/original-attempt, target SHA and trusted workflow SHA.
 
+Original Container baselines must be fully stable before preparation can push
+legacy images or proceed to migrations. Each unpublished target is checked again
+against that same baseline immediately before its Action; unbound targets are
+also checked during restore before resumed migrations. Capture retries only an
+absent new allocation version within one absolute 30-second budget, including
+registry proof and final readback. Multiple candidates, malformed/read failures
+and identity changes are refused immediately. The native returned UUID, or the
+frozen first changed legacy UUID, stays exact. The final readback must retain the
+same candidate before any receipt is written.
+
 Rerunning the failed release job reacquires its own `production-deploy` lock,
 refuses any newer release record (including failed/pending releases), and verifies
-artifact metadata and actual downloaded checksums before restoring original
+artifact metadata and incrementally computed whole-ZIP checksums before restoring original
 stamped configs, bundles, cf output and Docker images. It skips only receipt-bound
 Container publication; their full 180-second guards run again against the exact
 original target. Ordinary Workers and idempotent migrations follow the original
 ordered path, and every health/lifecycle/schedule postcheck remains required.
+
+Downloads write unverified bytes only into a unique private quarantine. The helper
+promotes the closed ZIP only after its bound checksum matches, then extracts it.
+ZIP and tar files are removed after successful extraction. The Docker archive
+moves within runner temporary storage instead of being copied again, and is
+removed after the original image ID/input proof. Unexpected failures report closed
+stage codes. Required CI streams more than 2 GiB through this path with peak RSS
+below 256 MiB; it does not substitute for live recovery verification.
 
 No receipt means no safe adoption. Historical runs, publication failure before
 checkpoint binding, ordinary-only rollback runs, expired artifacts, ambiguous

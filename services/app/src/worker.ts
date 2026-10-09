@@ -3,8 +3,14 @@ import {
   EVIDENCE_API_VERSION,
   type EvidenceMeta,
 } from "../../../packages/observation-shared/src/evidence-contract";
-import { authenticate } from "./auth";
-import { auditedAgentApi, classifyAgentPath, sharedQueryApi } from "./agent-api";
+import { authenticate, browserCaller, mcpCaller } from "./auth";
+import {
+  auditedAgentApi,
+  classifyAgentPath,
+  isAgentPath,
+  MCP_PATH,
+  sharedQueryApi,
+} from "./agent-api";
 import { auditLogCode, beginAudit } from "./audit";
 import { AUDIT_PATH, auditApi } from "./audit-api";
 import { commandApi, isCommandPath } from "./command-api";
@@ -20,6 +26,7 @@ import {
 } from "./card-settlements-api";
 import { cardPurchasesApi, CARD_PURCHASES_PATH } from "./card-purchases-api";
 import { reportedStateApi, REPORTED_STATE_PATH } from "./reported-state-api";
+import { reconstructedStateApi, RECONSTRUCTED_STATE_PATH } from "./reconstructed-state-api";
 import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
@@ -39,6 +46,7 @@ function classify(path: string): string {
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
   if (path === REPORTED_STATE_PATH) return "reported_state";
+  if (path === RECONSTRUCTED_STATE_PATH) return "reconstructed_state";
   if (path === "/api/collection-quality" || path.startsWith("/api/collection-quality/"))
     return "collection_quality";
   if (path === `${PREFIX}/meta`) return "meta";
@@ -62,16 +70,28 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (healthResponse) return healthResponse;
   const bootstrapResponse = await scheduleBootstrapApi(request, env, url);
   if (bootstrapResponse) return bootstrapResponse;
+  // The agent API (docs/agent-api.md). `/mcp` accepts only an assertion for
+  // the MCP Access application and makes it the agent-only caller
+  // `mcp-client:<sub>`; `/api/agent/v1/*` takes the browser session's subject
+  // (ADR 0047). Every path below accepts only this Worker's own Access
+  // application and refuses a token minted for the MCP one, as `/mcp` refuses
+  // the browser's.
+  // Every agent call is recorded in the audit log (ADR 0064) under the caller
+  // resolved here: `mcp` for an MCP client, `agent-http` for a browser session.
+  const agentResponse = isAgentPath(url.pathname)
+    ? await auditedAgentApi(request, env, url, () =>
+        url.pathname === MCP_PATH ? mcpCaller(request, env) : browserCaller(request, env),
+      )
+    : null;
+  if (agentResponse) return agentResponse;
   const subject = await authenticate(request, env);
   const schedulesResponse = await schedulesApi(request, env, url, subject);
   if (schedulesResponse) return schedulesResponse;
   // The only non-GET boundary of this Worker: three explicit allow-lists of
   // authenticated POST paths, each checking its own grant — the agent API
-  // (docs/agent-api.md), the change lifecycle (A09) and the operations API
-  // (docs/ops-api.md). They own disjoint paths, all keep the closed 401/403
-  // answers, and everything outside them stays GET-only.
-  const agentResponse = await auditedAgentApi(request, env, url, subject);
-  if (agentResponse) return agentResponse;
+  // (above, docs/agent-api.md), the change lifecycle (A09) and the operations
+  // API (docs/ops-api.md). They own disjoint paths, all keep the closed
+  // 401/403 answers, and everything outside them stays GET-only.
   const commandResponse = await commandApi(request, env, url, subject);
   if (commandResponse) return commandResponse;
   // Off by default: with `OPS_API_ENABLED` unset this returns null and the
@@ -95,6 +115,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // joins (docs/reported-state.md).
   const reportedStateResponse = await catalogue(() => reportedStateApi(request, env, url, subject));
   if (reportedStateResponse) return reportedStateResponse;
+  const reconstructedResponse = await catalogue(() =>
+    reconstructedStateApi(request, env, url, subject),
+  );
+  if (reconstructedResponse) return reconstructedResponse;
   const collectionQualityResponse = await catalogue(() =>
     collectionQualityApi(request, env, url, subject),
   );

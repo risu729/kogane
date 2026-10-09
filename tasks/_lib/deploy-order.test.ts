@@ -411,6 +411,7 @@ describe("the deploy workflow follows the ledger", () => {
       "Capture Container identity and pin rollback images",
       "Apply the CORE migrations",
       "Apply the READ migrations",
+      "Verify the original GlobalPass baseline immediately before publication",
       "Deploy the GlobalPass collector",
       "Capture the exact GlobalPass publication before waiting",
       "Verify the GlobalPass Container application and image",
@@ -418,6 +419,7 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the Money Forward collector",
       "Deploy the MyJCB collector",
       "Deploy the SBI Securities collector",
+      "Verify the original SBI Shinsei baseline immediately before publication",
       "Deploy the SBI Shinsei collector",
       "Capture the exact SBI Shinsei publication before waiting",
       "Verify the SBI Shinsei Container application and image",
@@ -425,6 +427,7 @@ describe("the deploy workflow follows the ledger", () => {
       "Deploy the SMBC Direct collector",
       "Deploy the Mizuho collector",
       "Deploy the Sony Bank collector",
+      "Verify the original St.George baseline immediately before publication",
       "Deploy the St.George collector",
       "Capture the exact St.George publication before waiting",
       "Verify the St.George Container application and image",
@@ -525,7 +528,10 @@ describe("the deploy workflow follows the ledger", () => {
   test("the manifest is re-verified immediately before the first upload (G5-11)", () => {
     const names = workflowSteps(deployWorkflow).map((step) => step.name);
     expect(names.indexOf("Re-verify the release manifest")).toBe(
-      names.indexOf("Deploy the GlobalPass collector") - 1,
+      names.indexOf("Deploy the GlobalPass collector") - 2,
+    );
+    expect(names[names.indexOf("Deploy the GlobalPass collector") - 1]).toBe(
+      "Verify the original GlobalPass baseline immediately before publication",
     );
   });
 });

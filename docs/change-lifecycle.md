@@ -239,7 +239,10 @@ writer slot that would write (the processor's `economicEventMutation`
 returns null). The
 reserved `economic-event.resolve-identity` is not a kind here: CORE 0070
 refuses it outright, and whether it joins the vocabulary is an open owner
-question in the ADR. No screen offers or labels the four kinds.
+question in the ADR. No screen offers or labels the four kinds. Their
+own-transfer planners exist (`own-transfer-plan.ts`,
+[ADR 0057](adr/0057-own-transfer-proposals.md)) but are not registered while
+ADR 0054's production gate is not met.
 
 ## Tables (migration `0031_operations.sql`)
 
@@ -415,8 +418,10 @@ the committed configuration, and both allow-lists:
 One resolver reads them — `resolvePrincipal` in
 `packages/application/src/command/grants.ts`, through the Worker's adapter
 `services/app/src/grants.ts` — and it is the only grading on any command
-surface: the five command routes, the six `/api/ops/v1` routes and the six
-operations MCP tools all call it.
+surface: the five command routes and the six `/api/ops/v1` routes call it.
+The six operations MCP tools would too, but `/mcp` refuses them from its
+agent-only caller before they get that far
+([ADR 0047](adr/0047-mcp-client-connection.md)).
 
 - A subject in `OPERATOR_SUBJECTS` is the human operator.
 - A subject in `AGENT_GRANTS` is an agent. Its `approve`/`commit` is
@@ -426,6 +431,12 @@ operations MCP tools all call it.
   every command route, every operations route and every operations MCP tool.
   It never becomes a `Principal`, so no capability-less principal reaches the
   forwarded actor headers or a decision row.
+- **An MCP client is in neither role, whatever the lists say.** An identity
+  that reached `/mcp` through the MCP Access application is the agent-only
+  principal `mcp-client:<sub>` ([ADR 0047](adr/0047-mcp-client-connection.md)),
+  and the resolver's adapter answers it `403 actor_not_supported` before
+  either list is read — even when the bare `<sub>` is the operator. Listing it
+  in `AGENT_GRANTS` is neither needed nor effective.
 
 **Empty means nobody, and that is intended.** With both variables empty — the
 shipped default — no authenticated subject can plan, simulate, approve or

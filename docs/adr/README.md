@@ -54,7 +54,8 @@ for current behavior.
 - [ADR 0041: Separate maintained documentation from historical records](0041-documentation-scope.md)
 - [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — proposed; production verification pending
 - [ADR 0045: Collection quality is a per-request read of stored stage states, in closed codes](0045-collection-quality-read.md) — accepted
-- [ADR 0048: Run an accepted collection or session refresh once through the named collector RPC](0048-operation-collector-dispatch.md) — proposed; production dispatch unverified
+- [ADR 0047: Connect MCP clients through Cloudflare Access Managed OAuth, as an agent-only principal](0047-mcp-client-connection.md) — proposed; no client has connected to a deployment
+- [ADR 0048: Run an accepted collection or session refresh once through the named collector RPC](0048-operation-collector-dispatch.md) — accepted; production dispatch unverified
 - [ADR 0049: Keep the displayed and the computed reward expiry apart, each with its basis](0049-reward-expiry-basis.md) — accepted
 - [ADR 0050: Re-survey official maintenance pages as proposals an operator accepts](0050-maintenance-survey-proposals.md) — accepted; no page enabled until the owner confirms it
 - [ADR 0051: A pure lot engine over a provisional input contract](0051-provisional-lot-engine.md) — accepted; its adapter is ADR 0059
@@ -63,7 +64,8 @@ for current behavior.
 - [ADR 0054: One consumption guard for every economic writer: claims, seals and a commit log](0054-economic-consumption-guard.md) — accepted
 - [ADR 0055: Propose cross-identifier instrument candidates from stored identifier facts; adopt only through a person's mapping](0055-instrument-candidates.md) — accepted; route, page and agent read amended 2026-10-09 (proposed)
 - [ADR 0056: Price and FX selection at an as-of under an explicit, versioned policy](0056-as-of-price-fx-selection.md) — accepted; policy values are open questions
-- [ADR 0058: A knowledge selector reads adopted events at a commit-log cut, and a B adapter feeds the reconstruction fold](0058-knowledge-selector-and-reconstruction-adapter.md) — accepted; no route or page reads it yet
+- [ADR 0057: Own-transfer proposals under an explicit policy, and planners that stay unregistered behind the production gate](0057-own-transfer-proposals.md) — proposed; no policy, no lane, planners unregistered
+- [ADR 0058: A knowledge selector reads adopted events at a commit-log cut, and a B adapter feeds the reconstruction fold](0058-knowledge-selector-and-reconstruction-adapter.md) — accepted; served by `GET /api/v2/reconstructed-state`, `kogane.reconstructed-state.read` and `/reconstruction` (amendment 2026-10-09)
 - [ADR 0059: A C adapter maps selected revisions to lot inputs, and answers unsupported until a securities writer exists](0059-lot-adapter-from-selected-revisions.md) — accepted; no securities writer, no route
 - [ADR 0060: Resume verification of an exact published Container](0060-container-publication-checkpoint.md) — accepted (merged in #602)
 - [ADR 0063: The AI is a delegated operation path: a verified MCP principal the owner names may apply operations within capability, scope, confirmation and audit](0063-delegated-ai-operation-path.md) — proposed; nothing implemented, no delegation exists

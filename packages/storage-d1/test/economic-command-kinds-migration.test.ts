@@ -262,8 +262,8 @@ test("0071 drops and recreates no 0070 object: every 0070 index, trigger and vie
 
 test("a fresh store migrated through 0071 has the same 0070 objects as one stopped at 0070", () => {
   const names = guardObjectNames();
-  // Through 0071 exactly: a later migration (0075, the audit record) adds
-  // objects of its own that neither side of this comparison is about.
+  // A fresh store stopped at 0071: later migrations (0072, ADR 0057) add
+  // objects of their own, which their own tests pin.
   const fresh = new Database(":memory:");
   fresh.exec("PRAGMA foreign_keys=ON");
   const through0070 = new Database(":memory:");
@@ -272,15 +272,16 @@ test("a fresh store migrated through 0071 has the same 0070 objects as one stopp
       fresh.exec(migrationSql(CORE_MIGRATIONS_URL, file));
     for (const file of migrationFiles(CORE_MIGRATIONS_URL).filter((f) => f <= GUARD_MIGRATION))
       through0070.exec(migrationSql(CORE_MIGRATIONS_URL, file));
+    expect(migrationFiles(CORE_MIGRATIONS_URL)).toContain(MIGRATION);
     expect(objectsNamed(fresh, names)).toEqual(objectsNamed(through0070, names));
-    expect(untouched(fresh)).toEqual(untouched(through0070));
-    // And the whole chain, as a deployment applies it, leaves them as 0070 made them.
+    // Every later migration too: the full store keeps every 0070 object as 0070 made it.
     const full = fullCoreDatabase();
     try {
       expect(objectsNamed(full, names)).toEqual(objectsNamed(through0070, names));
     } finally {
       full.close();
     }
+    expect(untouched(fresh)).toEqual(untouched(through0070));
     expect(fresh.query("PRAGMA foreign_key_check").all()).toEqual([]);
     for (const [index, kind] of NEW_KINDS.entries()) {
       insertPlan(fresh, 500 + index, kind);

@@ -10,6 +10,12 @@ import {
   closeSync,
   constants,
   fstatSync,
+  mkdtempSync,
+  unlinkSync,
+  linkSync,
+  renameSync,
+  rmSync,
+  writeSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -23,6 +29,7 @@ import {
   cloudflareApi,
   readApplication,
   verifyApplicationIdentity,
+  verifyApplicationBaseline,
   verifyRegistryImage,
   registryImage,
   dockerImageId,
@@ -33,7 +40,86 @@ import {
 const fail = (code) => {
   throw new Error(`release_resume_${code}`);
 };
-const hash = (data) => createHash("sha256").update(data).digest("hex");
+const HASH_CHUNK_BYTES = 64 * 1024;
+const hash = (data) => {
+  const digest = createHash("sha256");
+  if (typeof data === "string") digest.update(data);
+  else
+    for (let offset = 0; offset < data.length; offset += HASH_CHUNK_BYTES)
+      digest.update(data.subarray(offset, offset + HASH_CHUNK_BYTES));
+  return digest.digest("hex");
+};
+// Preserve deliberate refusal codes; expose only a closed stage for unexpected failures.
+const stage = async (name, action) => {
+  try {
+    return await action();
+  } catch (error) {
+    if (/^release_resume_[a-z_]+$/u.test(error?.message)) throw error;
+    fail(name);
+  }
+};
+
+/** Untrusted bytes stay private until their complete bound SHA-256 matches. */
+export async function streamArtifact(body, digest, temp, { beforePromote = () => {} } = {}) {
+  if (!/^sha256:[a-f0-9]{64}$/u.test(digest)) fail("binding_invalid");
+  const directory = await stage("artifact_stage", () =>
+    mkdtempSync(resolve(temp, "release-resume-artifact-")),
+  );
+  const partial = resolve(directory, "artifact.part"),
+    zip = resolve(directory, "artifact.zip");
+  let fd;
+  try {
+    fd = await stage("artifact_write", () =>
+      openSync(
+        partial,
+        constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
+        0o600,
+      ),
+    );
+    const calculated = createHash("sha256");
+    await stage("artifact_body", async () => {
+      if (!body) fail("artifact_body");
+      for await (const chunk of body) {
+        // Bound even an unexpected custom producer; never pass >INT_MAX to Hash.update.
+        if (!(chunk instanceof Uint8Array) || chunk.byteLength > 64 * 1024 * 1024)
+          fail("artifact_chunk");
+        for (let offset = 0; offset < chunk.byteLength; offset += HASH_CHUNK_BYTES) {
+          const bytes = chunk.subarray(offset, offset + HASH_CHUNK_BYTES);
+          await stage("artifact_hash", () => calculated.update(bytes));
+          await stage("artifact_write", () => {
+            let written = 0;
+            while (written < bytes.byteLength) {
+              const count = writeSync(fd, bytes, written, bytes.byteLength - written);
+              if (!count) fail("artifact_write");
+              written += count;
+            }
+          });
+        }
+      }
+    });
+    await stage("artifact_write", () => closeSync(fd));
+    fd = undefined;
+    if (`sha256:${calculated.digest("hex")}` !== digest) fail("artifact_digest");
+    await stage("artifact_promote", () => {
+      beforePromote(directory);
+      // Exclusive promotion cannot replace a preexisting file or symlink.
+      linkSync(partial, zip);
+      unlinkSync(partial);
+    });
+    return { directory, zip };
+  } catch (error) {
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {}
+    }
+    // Only the directory just created by this invocation is eligible for cleanup.
+    try {
+      rmSync(directory, { recursive: true, force: true });
+    } catch {}
+    throw error;
+  }
+}
 const uuid = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u;
 const json = (file) => JSON.parse(readFileSync(file, "utf8"));
 const write = (file, value) => writeFileSync(file, canonicalJson(value));
@@ -44,7 +130,7 @@ const output = (values) =>
       .map(([k, v]) => `${k}=${v}\n`)
       .join(""),
   );
-const exec = (bin, args) => {
+const exec = (bin, args, failure = "local_command_failed") => {
   try {
     return execFileSync(bin, args, {
       encoding: "utf8",
@@ -52,7 +138,7 @@ const exec = (bin, args) => {
       maxBuffer: 32 * 1024 * 1024,
     });
   } catch {
-    fail("local_command_failed");
+    fail(failure);
   }
 };
 
@@ -182,6 +268,10 @@ export function publicationCandidate(before, versions, registryNamespace, target
     !Array.isArray(versions) ||
     versions.some(
       (entry) =>
+        !entry ||
+        typeof entry !== "object" ||
+        typeof entry.configuration?.image !== "string" ||
+        !entry.configuration.image ||
         !Number.isSafeInteger(entry.version) ||
         entry.version < 0 ||
         !Number.isFinite(entry.percentage) ||
@@ -191,10 +281,56 @@ export function publicationCandidate(before, versions, registryNamespace, target
   )
     fail("version_shape");
   const candidates = versions.filter((entry) => entry.version > before.version);
+  if (candidates.length === 0) fail("publication_pending");
   if (candidates.length !== 1) fail("publication_ambiguous");
   registryImage(target, candidates[0].configuration?.image, registryNamespace);
   return candidates[0];
 }
+/** Retry only an absent allocation target; all schema/identity/read errors are final. */
+export async function waitForPublicationCandidate(
+  readState,
+  {
+    before,
+    target,
+    publishedVersion,
+    deadline,
+    now = Date.now,
+    wait = (ms) => new Promise((done) => setTimeout(done, ms)),
+  },
+) {
+  while (now() < deadline) {
+    const state = await readState(deadline);
+    if (now() >= deadline) fail("publication_pending");
+    verifyApplicationIdentity(before, state.snapshot);
+    if (!uuid.test(publishedVersion) || state.snapshot.workerVersion !== publishedVersion)
+      fail("published_worker_mismatch");
+    if (
+      state.snapshot.version < before.version ||
+      (state.snapshot.version === before.version && state.snapshot.image !== before.image)
+    )
+      fail("application_superseded");
+    try {
+      const candidate = publicationCandidate(
+        before,
+        state.versions,
+        state.registryNamespace,
+        target,
+      );
+      verifyBoundPublication(
+        { ...state.snapshot, version: candidate.version, image: candidate.configuration.image },
+        state.snapshot,
+      );
+      return { ...state, candidate };
+    } catch (error) {
+      if (error.message !== "release_resume_publication_pending") throw error;
+    }
+    const remaining = deadline - now();
+    if (remaining <= 0) break;
+    await wait(Math.min(5000, remaining));
+  }
+  fail("publication_pending");
+}
+
 export function verifyBoundPublication(bound, snapshot) {
   verifyApplicationIdentity(bound, snapshot);
   if (snapshot.workerVersion !== bound.workerVersion) fail("worker_superseded");
@@ -224,6 +360,7 @@ export function verifyResumeContainerState(before, bound, current, versions) {
     current.image !== before.image
   )
     fail("unpublished_target_changed");
+  if (!bound) verifyApplicationBaseline(before, current, versions);
 }
 
 export function validatePreparedPaths(paths) {
@@ -241,34 +378,45 @@ async function apiContext() {
   const client = clientFromEnv(process.env);
   return { client, base: `${client.apiUrl}/repos/${client.owner}/${client.repo}` };
 }
-async function download(binding, directory, context) {
+async function download(binding, temp, context) {
   const artifactId = positiveId(binding.artifactId);
   if (!/^sha256:[a-f0-9]{64}$/u.test(binding.artifactDigest)) fail("binding_invalid");
   const { client, base } = await apiContext();
-  const metadata = (
-    await request(`${base}/actions/artifacts/${artifactId}`, { token: client.token })
-  ).data;
+  const metadata = await stage(
+    "artifact_metadata",
+    async () =>
+      (await request(`${base}/actions/artifacts/${artifactId}`, { token: client.token })).data,
+  );
   verifyArtifactMetadata(metadata, binding, context.runId);
-  const response = await fetch(`${base}/actions/artifacts/${artifactId}/zip`, {
-    redirect: "manual",
-    signal: AbortSignal.timeout(30000),
-    headers: { Authorization: `Bearer ${client.token}`, "X-GitHub-Api-Version": "2022-11-28" },
-  });
+  const response = await stage("artifact_redirect", () =>
+    fetch(`${base}/actions/artifacts/${artifactId}/zip`, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(30000),
+      headers: { Authorization: `Bearer ${client.token}`, "X-GitHub-Api-Version": "2022-11-28" },
+    }),
+  );
   if (response.status !== 302) fail("artifact_download");
-  const url = new URL(response.headers.get("location"));
+  const url = await stage("artifact_redirect", () => new URL(response.headers.get("location")));
   if (url.protocol !== "https:" || url.username || url.password) fail("artifact_download");
   // The signed download URL receives no GitHub or production credentials.
-  const archive = await fetch(url, { redirect: "error", signal: AbortSignal.timeout(300000) });
+  const archive = await stage("artifact_fetch", () =>
+    fetch(url, { redirect: "error", signal: AbortSignal.timeout(300000) }),
+  );
   if (archive.status !== 200) fail("artifact_download");
-  const bytes = Buffer.from(await archive.arrayBuffer());
-  verifyArtifactBytes(bytes, binding.artifactDigest);
-  mkdirSync(directory, { recursive: true });
-  const zip = resolve(directory, "artifact.zip");
-  writeFileSync(zip, bytes);
-  const paths = exec("unzip", ["-Z1", zip]).trim().split("\n");
-  if (paths.some((path) => !["prepared.tar", "resume-receipt.json"].includes(path)))
-    fail("archive_shape");
-  exec("unzip", ["-o", zip, "-d", directory]);
+  const { directory, zip } = await streamArtifact(archive.body, binding.artifactDigest, temp);
+  try {
+    const paths = exec("unzip", ["-Z1", zip], "artifact_list").trim().split("\n");
+    if (paths.some((path) => !["prepared.tar", "resume-receipt.json"].includes(path)))
+      fail("archive_shape");
+    exec("unzip", ["-o", zip, "-d", directory], "artifact_extract");
+    await stage("artifact_cleanup", () => unlinkSync(zip));
+    return directory;
+  } catch (error) {
+    try {
+      rmSync(directory, { recursive: true, force: true });
+    } catch {}
+    throw error;
+  }
 }
 
 async function main() {
@@ -283,6 +431,33 @@ async function main() {
   };
   const receiptPath = resolve(temp, "resume-receipt.json"),
     recordPath = resolve(temp, "release-record.json");
+  if (command === "resource-check") {
+    const chunk = Buffer.alloc(HASH_CHUNK_BYTES, 0x5a);
+    const bytes = 2 ** 31 + HASH_CHUNK_BYTES;
+    async function* chunks() {
+      for (let offset = 0; offset < bytes; offset += chunk.length) yield chunk;
+    }
+    const artifact = await streamArtifact(
+      chunks(),
+      "sha256:dd898751fdb6f848addfe85e5bb85fb070e31313a77654c1e664ab707e7de031",
+      temp,
+    );
+    try {
+      const fd = openSync(artifact.zip, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        if (fstatSync(fd).size !== bytes) fail("resource_size");
+      } finally {
+        closeSync(fd);
+      }
+      if (process.resourceUsage().maxRSS > 256 * 1024) fail("resource_memory");
+      console.log(
+        `Verified ${bytes} streamed bytes; peak RSS ${process.resourceUsage().maxRSS} KiB`,
+      );
+    } finally {
+      rmSync(artifact.directory, { recursive: true, force: true });
+    }
+    return;
+  }
   if (command === "discover") {
     const { client, base } = await apiContext();
     const listed = await paginate(`${base}/deployments?environment=production&per_page=100`, {
@@ -304,12 +479,12 @@ async function main() {
       .map((s) => parseCheckpointStatus(s.description))
       .find(Boolean);
     if (!bound) fail("checkpoint_missing");
-    const directory = resolve(temp, "checkpoint");
-    await download(bound, directory, context);
+    const directory = await download(bound, temp, context);
     const receipt = json(resolve(directory, "resume-receipt.json"));
     const published = verifyReceipt(receipt, deployment, context);
     write(receiptPath, receipt);
     write(recordPath, deployment.payload);
+    rmSync(directory, { recursive: true, force: true });
     output({
       resume: "true",
       published: JSON.stringify(published),
@@ -366,45 +541,77 @@ async function main() {
     return;
   }
   if (command === "restore") {
-    const record = json(recordPath),
-      receipt = json(receiptPath),
-      directory = resolve(temp, "prepared-download");
-    await download(record.resume, directory, context);
+    const { record, receipt } = await stage("restore_binding", () => ({
+      record: json(recordPath),
+      receipt: json(receiptPath),
+    }));
+    const directory = await download(record.resume, temp, context);
     const archive = resolve(directory, "prepared.tar");
-    const paths = exec("tar", ["-tf", archive])
+    const paths = exec("tar", ["-tf", archive], "prepared_list")
       .trim()
       .split("\n")
       .map((p) => p.replace(/\/$/u, ""));
     validatePreparedPaths(paths.filter((p) => !["checkout", "temp"].includes(p)));
-    const stage = resolve(temp, "restored");
-    mkdirSync(stage, { recursive: true });
-    exec("tar", ["-xf", archive, "-C", stage, "--no-same-owner"]);
-    exec("cp", ["-a", `${stage}/checkout/.`, root]);
-    exec("cp", ["-a", `${stage}/temp/.`, temp]);
-    if (
-      hash(readFileSync(resolve(temp, "container-manifest.json"))) !==
-        record.containerManifestSha256 ||
-      hash(readFileSync(resolve(temp, "container-baseline.json"))) !==
-        record.containerBaselineSha256
-    )
-      fail("prepared_binding");
-    const images = json(resolve(temp, "container-manifest.json"));
-    if (images.length)
-      exec("docker", ["image", "load", "--input", resolve(temp, "docker-images.tar")]);
-    for (const image of images) {
-      const target = CONTAINER_TARGETS.find((t) => t.name === image.name);
+    const restored = await stage("prepared_stage", () =>
+      mkdtempSync(resolve(temp, "release-resume-restored-")),
+    );
+    exec("tar", ["-xf", archive, "-C", restored, "--no-same-owner"], "prepared_extract");
+    await stage("prepared_cleanup", () => {
+      unlinkSync(archive);
+      rmSync(directory, { recursive: true, force: true });
+    });
+    const images = await stage("prepared_binding", () => {
       if (
-        !target ||
-        dockerImageId(image.localTag) !== image.imageId ||
-        containerInputDigest(root, target) !== image.inputs
+        hash(readFileSync(resolve(restored, "temp/container-manifest.json"))) !==
+          record.containerManifestSha256 ||
+        hash(readFileSync(resolve(restored, "temp/container-baseline.json"))) !==
+          record.containerBaselineSha256
       )
-        fail("restored_image");
-    }
-    if (images.length)
-      appendFileSync(
-        process.env.GITHUB_ENV,
-        `CONTAINER_RESTORED_DAEMON=${exec("docker", ["info", "--format", "{{.ID}}"]).trim()}\n`,
+        fail("prepared_binding");
+      return json(resolve(restored, "temp/container-manifest.json"));
+    });
+    let imageDirectory;
+    if (images.length) {
+      imageDirectory = await stage("image_stage", () =>
+        mkdtempSync(resolve(temp, "release-resume-images-")),
       );
+      // Both paths are within RUNNER_TEMP: rename fails closed rather than copying across filesystems.
+      await stage("image_move", () =>
+        renameSync(
+          resolve(restored, "temp/docker-images.tar"),
+          resolve(imageDirectory, "docker-images.tar"),
+        ),
+      );
+    }
+    exec("cp", ["-a", `${restored}/checkout/.`, root], "prepared_checkout");
+    exec("cp", ["-a", `${restored}/temp/.`, temp], "prepared_state");
+    await stage("prepared_cleanup", () => rmSync(restored, { recursive: true, force: true }));
+    if (images.length)
+      exec(
+        "docker",
+        ["image", "load", "--input", resolve(imageDirectory, "docker-images.tar")],
+        "image_load",
+      );
+    await stage("restored_image", () => {
+      for (const image of images) {
+        const target = CONTAINER_TARGETS.find((t) => t.name === image.name);
+        if (
+          !target ||
+          dockerImageId(image.localTag) !== image.imageId ||
+          containerInputDigest(root, target) !== image.inputs
+        )
+          fail("restored_image");
+      }
+    });
+    if (images.length) {
+      await stage("image_cleanup", () => rmSync(imageDirectory, { recursive: true, force: true }));
+      await stage("image_daemon", () =>
+        appendFileSync(
+          process.env.GITHUB_ENV,
+          `CONTAINER_RESTORED_DAEMON=${exec("docker", ["info", "--format", "{{.ID}}"], "image_daemon").trim()}\n`,
+        ),
+      );
+    }
     const api = cloudflareApi({
       accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
       token: process.env.CLOUDFLARE_API_TOKEN,
@@ -413,8 +620,12 @@ async function main() {
     for (const baseline of original.snapshots) {
       const target = CONTAINER_TARGETS.find((entry) => entry.name === baseline.name);
       if (!target) fail("prepared_binding");
-      const current = await readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID);
-      const versions = await api(`containers/applications/${target.appId}/versions`);
+      const current = await stage("restore_application", () =>
+        readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID),
+      );
+      const versions = await stage("restore_versions", () =>
+        api(`containers/applications/${target.appId}/versions`),
+      );
       verifyResumeContainerState(
         baseline,
         receipt.targets.find((entry) => entry.name === baseline.name),
@@ -424,11 +635,27 @@ async function main() {
     }
     const doBaseline = resolve(temp, "cf-do-identity.json");
     if (existsSync(doBaseline))
-      exec(process.execPath, [
-        fileURLToPath(new URL("./cf-do-identity.mjs", import.meta.url)),
-        "verify",
-        doBaseline,
-      ]);
+      exec(
+        process.execPath,
+        [fileURLToPath(new URL("./cf-do-identity.mjs", import.meta.url)), "verify", doBaseline],
+        "restore_do_identity",
+      );
+    return;
+  }
+  if (command === "verify-publication-baseline") {
+    const before = json(resolve(temp, "container-baseline.json"));
+    const target = CONTAINER_TARGETS.find((entry) => entry.name === argument);
+    const baseline = before.snapshots.find((entry) => entry.name === argument);
+    if (!target || !baseline) fail("prepared_binding");
+    const api = cloudflareApi({
+      accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+      token: process.env.CLOUDFLARE_API_TOKEN,
+      deadline: Date.now() + 30000,
+    });
+    const current = await readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID);
+    const versions = await api(`containers/applications/${target.appId}/versions`);
+    await currentRegistryNamespace(api, before.registryNamespace);
+    verifyApplicationBaseline(baseline, current, versions);
     return;
   }
   if (command === "capture") {
@@ -437,24 +664,35 @@ async function main() {
     const saved = existsSync(receiptPath) ? json(receiptPath) : null;
     const target = CONTAINER_TARGETS.find((t) => t.name === argument);
     const image = json(resolve(temp, "container-manifest.json")).find((i) => i.name === argument);
+    if (!target || !image || !before.snapshots.some((entry) => entry.name === argument))
+      fail("prepared_binding");
+    const deadline = Date.now() + 30000;
     const api = cloudflareApi({
       accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
       token: process.env.CLOUDFLARE_API_TOKEN,
+      deadline,
     });
-    const snapshot = await readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID);
     const baseline = before.snapshots.find((s) => s.name === argument);
-    verifyApplicationIdentity(baseline, snapshot);
-    const publishedVersion =
-      process.env.PUBLISHED_WORKER_VERSION ||
-      (process.env.LEGACY_PUBLICATION === "true" &&
-      snapshot.workerVersion !== baseline.workerVersion
-        ? snapshot.workerVersion
-        : "");
-    if (!uuid.test(publishedVersion) || snapshot.workerVersion !== publishedVersion)
-      fail("published_worker_mismatch");
-    const versions = await api(`containers/applications/${target.appId}/versions`);
-    const registryNamespace = await currentRegistryNamespace(api, before.registryNamespace);
-    const candidate = publicationCandidate(baseline, versions, registryNamespace, target);
+    let publishedVersion = process.env.PUBLISHED_WORKER_VERSION;
+    if (!publishedVersion && process.env.LEGACY_PUBLICATION === "true") {
+      const first = await readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID);
+      if (first.workerVersion !== baseline.workerVersion) publishedVersion = first.workerVersion;
+    }
+    if (!uuid.test(publishedVersion ?? "")) fail("published_worker_mismatch");
+    const readState = async () => ({
+      snapshot: await readApplication(target, api, process.env.CLOUDFLARE_ACCOUNT_ID),
+      versions: await api(`containers/applications/${target.appId}/versions`),
+      registryNamespace: await currentRegistryNamespace(api, before.registryNamespace),
+    });
+    const { snapshot, candidate, registryNamespace } = await waitForPublicationCandidate(
+      readState,
+      {
+        before: baseline,
+        target,
+        publishedVersion,
+        deadline,
+      },
+    );
     const credentials = await api("containers/registries/registry.cloudflare.com/credentials", {
       expiration_minutes: 5,
       permissions: ["pull"],
@@ -465,10 +703,31 @@ async function main() {
       imageId: image.imageId,
       registryNamespace,
       ...credentials,
+      deadline,
     });
     if (image.legacy && image.registryImage !== candidate.configuration.image)
       fail("rollback_image_changed");
+    // Reconfirm the complete exact target after registry proof, before any receipt can be written.
+    const final = await readState();
+    if (Date.now() >= deadline) fail("publication_pending");
+    if (
+      final.snapshot.version < baseline.version ||
+      (final.snapshot.version === baseline.version && final.snapshot.image !== baseline.image)
+    )
+      fail("application_superseded");
+    const finalCandidate = publicationCandidate(
+      baseline,
+      final.versions,
+      final.registryNamespace,
+      target,
+    );
+    if (
+      finalCandidate.version !== candidate.version ||
+      finalCandidate.configuration.image !== candidate.configuration.image
+    )
+      fail("application_superseded");
     const bound = { ...snapshot, version: candidate.version, image: candidate.configuration.image };
+    verifyBoundPublication(bound, final.snapshot);
     const steps = mergePublicationSteps(saved?.steps, JSON.parse(process.env.STEPS_JSON));
     write(receiptPath, {
       version: "release-resume-v1",
@@ -507,7 +766,11 @@ if (fileURLToPath(import.meta.url) === resolve(process.argv[1] ?? "")) {
     await main();
   } catch (error) {
     console.error(
-      /^release_resume_[a-z_]+$/u.test(error.message) ? error.message : "release_resume_failed",
+      process.argv[2] === "capture" && error.message === "cf_container_rollout_pending"
+        ? "release_resume_publication_pending"
+        : /^(?:release_resume|cf_container)_[a-z_]+$/u.test(error.message)
+          ? error.message
+          : `release_resume_${process.argv[2] === "restore" ? "restore_failed" : "failed"}`,
     );
     process.exitCode = 1;
   }

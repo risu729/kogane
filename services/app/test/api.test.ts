@@ -244,7 +244,11 @@ describe("production observation API", () => {
     expect(body).toMatchObject({
       source: { kind: "central-store", classification: "financial" },
       // Served wherever the store has the views it reads (docs/reported-state.md).
-      capabilities: { ...CENTRAL_STORE_CAPABILITIES, reportedStateOnDate: true },
+      capabilities: {
+        ...CENTRAL_STORE_CAPABILITIES,
+        reportedStateOnDate: true,
+        reconstructedStateOnDate: true,
+      },
     });
   });
   it("clears repaired historical failures but keeps newer failures and replacement work visible", async () => {
