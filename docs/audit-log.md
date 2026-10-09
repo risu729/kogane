@@ -181,8 +181,10 @@ and by the caps above.
   `406 not_acceptable`, `413 request_too_large`, `415 unsupported_media_type`).
   A tool that throws is recorded `failed` by its own call and not again by the
   transport.
-- A subject outside the actor shape (`actor_not_supported`): the record could
-  not hold it, so the request log carries `audit_write_failed` instead. The
+- A subject outside the actor shape (`actor_not_supported` for a subject
+  `ACTOR_PATTERN` refuses; an agent-only `mcp-client:` subject fits the shape
+  and its refusal is recorded, above): the record could not hold it, so the
+  request log carries `audit_write_failed` instead. The
   same holds for any read, replay, refusal or failure record that cannot be
   written: the answer never changes. An effect record is different: it is in
   its writer's batch, so an effect whose record cannot be built or written is

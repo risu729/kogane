@@ -359,4 +359,49 @@ describe("kogane.instruments.candidates", () => {
     expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
     expect(await tables()).toEqual(before);
   });
+
+  it("records each served call as one read of the page's candidates, and a refusal under its tool (ADR 0064)", async () => {
+    const last = (await env.DB.prepare(
+      "SELECT coalesce(max(rowid),0) AS n FROM audit_records",
+    ).first<number>("n"))!;
+    const records = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT path,principal,subject,principal_kind,risk_class,result,result_code,diff_json FROM audit_records WHERE operation='instruments.candidates' AND rowid>? ORDER BY rowid",
+        )
+          .bind(last)
+          .all()
+      ).results;
+    const page = (await (await call(PATH)).json()) as { items: unknown[]; total: number };
+    expect((await call(AGENT_PATH, { subject: "synthetic-agent", body: {} })).status).toBe(200);
+    await mcp({
+      method: "tools/call",
+      params: { name: "kogane.instruments.candidates", arguments: {} },
+    });
+    const refused = await call(AGENT_PATH, { subject: "synthetic-agent", body: { source: "x" } });
+    expect(refused.status).toBe(400);
+    const read = {
+      principal_kind: "agent",
+      risk_class: "R0",
+      result: "read",
+      result_code: null,
+      diff_json: JSON.stringify({
+        kind: "read",
+        rows: page.items.length,
+        truncated: page.total > page.items.length,
+      }),
+    };
+    // The browser route is not an agent call and records nothing.
+    expect(await records()).toEqual([
+      { path: "agent-http", principal: "synthetic-agent", subject: "synthetic-agent", ...read },
+      { path: "mcp", principal: "mcp-client:synthetic-agent", subject: "synthetic-agent", ...read },
+      expect.objectContaining({
+        path: "agent-http",
+        principal: "synthetic-agent",
+        risk_class: "R0",
+        result: "refused",
+        result_code: "unsupported_semantics",
+      }),
+    ]);
+  });
 });
