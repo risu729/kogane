@@ -8,7 +8,6 @@ import {
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
-import type { SqlExecutor } from "../../../packages/read-model/src/reader.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -32,7 +31,7 @@ describe.if(runnable)("collection quality browser", () => {
       },
       artifacts: [],
     });
-    const executor: SqlExecutor = {
+    const executor: Parameters<typeof queryCollectionQualityCells>[0] = {
       all: async <T>(sql: string, args: readonly unknown[]) =>
         store.db.query(sql).all(...(args as SQLQueryBindings[])) as T[],
       first: async <T>(sql: string, args: readonly unknown[]) =>
