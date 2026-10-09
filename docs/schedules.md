@@ -282,5 +282,6 @@ Beyond the seven-day bound a delegated revision is class R3 until the owner
 answers the plan's question 1, and stays the operator's in the UI; its target
 class is R2 (prepare/confirm) up to the 31-day ceiling, for which the writer's
 prepare and option above exist and the confirm does not. Not verified in
-production: no grant or delegation names a maintenance principal, CORE 0076 is
-not applied, and no MCP client has called these tools.
+production: no grant or delegation holds a schedule capability (the committed
+MCP reader's grant names none), CORE 0076 is not applied, and no MCP client has
+called these tools.

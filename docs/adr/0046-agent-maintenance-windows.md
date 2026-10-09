@@ -287,7 +287,9 @@ statement that this path "is not an exception to the agent invariants" is
 replaced by ADR 0063 item 12; Provenance's CORE 0067, its `agent` kind and
 free-text reason; the Revocation paragraph (a delegated write is revoked by
 the ways ADR 0063 item 11 lists); and the Consequences' agent grant and
-`writes.maintenanceRules`. ADR 0039's amendment already states that settings
+`writes.maintenanceRules`, and their "`AGENT_API_GRANTS` ships `""`": since
+#640 the committed configuration holds one entry, the owner's MCP reader,
+which names no schedule capability. ADR 0039's amendment already states that settings
 are edited by the operator, or by the owner's own MCP principal holding the
 setting's capability once delegation exists.
 
@@ -347,4 +349,6 @@ delegation, in and out of scope, with nothing relayed, no revision, no
 reference change and one record each; an agent grant naming the write refused
 whole; the operator's edit recorded with its reason; and a deep scan of the
 records and revisions for a token-shaped value and an amount. Not verified:
-anything in production; no delegation, grant or Access setting exists.
+anything in production. No delegation exists; the committed configuration's
+one agent-API grant (#640, the owner's MCP reader) names no schedule
+capability, and no MCP client has called these tools.
