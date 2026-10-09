@@ -6,8 +6,11 @@ What the code records today about who did what, through which path
 The log covers the operations that exist today on three paths — the
 operator's routes (`ui`), the agent HTTP routes (`agent-http`) and MCP tool
 calls (`mcp`). It does not record the Processor's own `alarm` and `lane` work
-yet (plan S7), there is no delegated principal, prepare or confirm (ADR 0063,
-plan S3), and agents cannot read it (plan S5/S8). The limits are listed at the
+yet (plan S7); no call runs as a delegated principal and nothing prepares or
+confirms (ADR 0063, plan S3: the merged declaration core only parses
+`MCP_DELEGATIONS` and reports an inert status in an MCP client's
+`kogane.capabilities`, which is recorded as that tool's read); and agents
+cannot read it (plan S5/S8). The limits are listed at the
 end.
 
 ## The record
@@ -209,8 +212,10 @@ and by the caps above.
 - With one principal on several paths (the owner's subject on `ui` and on the
   browser-audience agent routes), the overflow aggregate is one record per
   path and capped result per day.
-- No delegated principal, prepare, confirm, idempotent replay of schedule
-  writes, rollback reference or agent read exists yet (ADR 0063, plan S3–S6).
+- No delegated execution, prepare, confirm, idempotent replay of schedule
+  writes, rollback reference or agent read exists yet (ADR 0063, plan S3–S6);
+  the delegation declaration core resolves a declaration but nothing executes
+  under it, so no record is `delegated`.
 
 Tests: `packages/storage-d1/test/audit-records-migration.test.ts` (the table's
 guards), `packages/application/test/audit.test.ts` (builder, effect statement,

@@ -631,6 +631,18 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
         resultCode: null,
       },
     ]);
+    // The MCP client's capabilities carry the inert delegation status (#628);
+    // its record is the same read of one row and names nothing of it.
+    const answered = (await tool.response.json()) as {
+      result: { structuredContent: { delegation?: unknown } };
+    };
+    expect(answered.result.structuredContent.delegation).toMatchObject({
+      available: false,
+      reason: "delegation_not_configured",
+    });
+    const [capabilities] = await recordsOf(tool.requestId);
+    expect(capabilities!["diff_json"]).toBe('{"kind":"read","rows":1,"truncated":false}');
+    expect(JSON.stringify(capabilities)).not.toContain("delegation_not_configured");
     const unknown = await mcp({
       method: "tools/call",
       params: { name: "kogane.nothing", arguments: {} },

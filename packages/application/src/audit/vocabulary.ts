@@ -23,9 +23,10 @@ export type SubjectPath = (typeof SUBJECT_PATHS)[number];
 
 /**
  * How the principal was graded. The table also admits `delegated` (with a
- * `delegation_ref`) for the delegated MCP principal of ADR 0063; no resolver
- * for it exists yet, so this builder refuses it, and `automatic` is the
- * Processor's own principal on its `alarm` and `lane` paths.
+ * `delegation_ref`) for the delegated MCP principal of ADR 0063; the
+ * declaration core resolves one, but nothing executes under it yet, so this
+ * builder refuses it, and `automatic` is the Processor's own principal on its
+ * `alarm` and `lane` paths.
  */
 export const AUDIT_PRINCIPAL_KINDS = ["human", "agent", "automatic"] as const;
 export type AuditPrincipalKind = (typeof AUDIT_PRINCIPAL_KINDS)[number];
