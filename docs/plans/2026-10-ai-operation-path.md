@@ -1031,10 +1031,18 @@ contradicts it, so #564 lands as this slice, not before it.
   arguments and scope, and is refused by `delegationExecutionReadiness`
   (`available: false`), so it relays nothing and is published to nobody; the
   read is served on both agent paths with one function. The writer takes
-  `append` and the operator's edit records `operator-edit`. Left to S3: the
-  delegated audit record (`principal_kind` `delegated`, `delegation_ref`),
-  Processor family/ref forwarding, `budget.writesPerDay`, the delegated
-  revision's `decision_ref`, prepare/confirm and therefore the R2 path; the
+  `append` and the operator's edit records `operator-edit`. The writer's
+  contract for S3 (owner-approved): a delegated revision must carry
+  `delegated-audit:<audit_id>` as its decision reference;
+  `prepareMaintenanceRevision` and `currentMaintenanceRevision` reuse the
+  write's validation and current-revision read without writing; a trusted
+  `deferralBound` option (`"delegated-7d"` default, `"confirmed-31d"` up to 31
+  days) that no request sets and nothing passes yet
+  ([schedules](../schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3)).
+  Left to S3: the delegated audit record (`principal_kind` `delegated`,
+  `delegation_ref`) and the reservation of its id, Processor family/ref
+  forwarding, `budget.writesPerDay` at the App chokepoint, and the confirm
+  that may pass `"confirmed-31d"`, and therefore the R2 path; the
   missing-capability code is #628's `delegation_capability_denied` (section
   8's matrix item 4 calls it `capability_not_delegated`).
 

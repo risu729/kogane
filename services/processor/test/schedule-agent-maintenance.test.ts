@@ -11,8 +11,8 @@
 // audit record: the builder admits no `delegated` record until S3 (ADR 0064,
 // audit vocabulary). The record's batch is shown with the operator's edit,
 // which is reachable, at the end of this file.
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
+import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
+import { Database, type Database as SqliteDatabase } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import jobs from "../../../config/alarm-jobs.json";
@@ -23,15 +23,21 @@ import {
 import { LAYER_A_SQL, layerBMigrations, applyMigration } from "./harness";
 import { applyReadMigrations } from "../../../packages/storage-d1/src/migrations";
 import {
+  CONFIRMED_MAX_DEFERRAL_MS,
+  currentMaintenanceRevision,
   DELEGATED_MAX_DEFERRAL_MS,
   DELEGATED_WRITES_SINCE_SQL,
   MAINTENANCE_WRITE_CODES,
   type MaintenanceWrite,
+  type MaintenanceWriteOptions,
+  prepareMaintenanceRevision,
   updateMaintenance,
   writeMaintenanceRevision,
 } from "../src/schedule-store";
+import { fullCoreDatabase, sqliteD1 } from "../../../packages/storage-d1/test/sqlite";
 import { ACCEPTED_REASON, proposalRef } from "../src/maintenance-survey/decisions";
 import { envelopeHeaders, testCall } from "./audit-envelope";
+import { newAuditId } from "../../../packages/application/src/audit/record";
 
 const DELEGATE = "mcp-client:maintenance-owner-synthetic";
 const OTHER_DELEGATE = "mcp-client:other-owner-synthetic";
@@ -151,28 +157,43 @@ function rule(source: string, overrides: Record<string, unknown> = {}) {
     ...overrides,
   };
 }
+/**
+ * A synthetic delegated decision reference: the audit record plan slice S3
+ * reserves before it calls the writer (`delegated-audit:` + ADR 0064's id).
+ */
+const delegatedRef = () => `delegated-audit:aud_${crypto.randomUUID()}`;
+/** The tool-shaped arguments as the writer's delegated write, with a fresh decision reference unless given. */
+function delegatedWrite(body: Record<string, unknown>, principal = DELEGATE): MaintenanceWrite {
+  return {
+    source: body["source"],
+    ruleId: body["ruleId"] ?? null,
+    expectedRevision: body["revision"],
+    change: {
+      timezone: body["timezone"],
+      pattern: body["pattern"],
+      enabled: body["enabled"],
+      scope: body["scope"],
+    },
+    provenance: {
+      referenceUrl: body["referenceUrl"],
+      verifiedAt: body["verifiedAt"],
+      decisionRef: "decisionRef" in body ? body["decisionRef"] : delegatedRef(),
+    },
+    actor: { kind: "delegated", id: principal },
+    reason: body["reason"],
+  } as MaintenanceWrite;
+}
 /** The writer's answer for a delegated principal, shaped like a route's. */
 async function write(
   body: Record<string, unknown>,
   principal = DELEGATE,
+  options?: MaintenanceWriteOptions,
 ): Promise<{ status: number; body: any }> {
   const result = await writeMaintenanceRevision(
     processorEnv,
-    {
-      source: body["source"],
-      ruleId: body["ruleId"] ?? null,
-      expectedRevision: body["revision"],
-      change: {
-        timezone: body["timezone"],
-        pattern: body["pattern"],
-        enabled: body["enabled"],
-        scope: body["scope"],
-      },
-      provenance: { referenceUrl: body["referenceUrl"], verifiedAt: body["verifiedAt"] },
-      actor: { kind: "delegated", id: principal },
-      reason: body["reason"],
-    } as MaintenanceWrite,
+    delegatedWrite(body, principal),
     NO_RECORD,
+    options,
   );
   return result.ok
     ? {
@@ -210,8 +231,9 @@ async function providerCalls(): Promise<number> {
   ).calls;
 }
 
-test("a delegated principal creates and revises a rule; each revision records it, its kind and a closed reason", async () => {
-  const created = await write(rule("sony-bank"));
+test("a delegated principal creates and revises a rule; each revision records it, its kind, a closed reason and its audit reference", async () => {
+  const [first, second] = [delegatedRef(), delegatedRef()];
+  const created = await write(rule("sony-bank", { decisionRef: first }));
   expect(created.status).toBe(200);
   expect(created.body).toMatchObject({ saved: true, revision: 1, reconciled: true });
   const id = created.body.ruleId as string;
@@ -223,23 +245,25 @@ test("a delegated principal creates and revises a rule; each revision records it
       revision: 1,
       enabled: false,
       reason: "official-notice-withdrawn",
+      decisionRef: second,
     }),
   );
   expect(revised).toMatchObject({ status: 200, body: { revision: 2 } });
+  // The whole reference is stored as given.
   expect(await revisions(id)).toEqual([
     {
       revision: 1,
       actor: DELEGATE,
       actor_kind: "delegated",
       change_reason: "official-notice-added",
-      decision_ref: null,
+      decision_ref: first,
     },
     {
       revision: 2,
       actor: DELEGATE,
       actor_kind: "delegated",
       change_reason: "official-notice-withdrawn",
-      decision_ref: null,
+      decision_ref: second,
     },
   ]);
   // The read route shows the revisions with their kind and reason, marks the
@@ -694,7 +718,11 @@ test("the budget is counted again inside the INSERT: a spent budget that lands a
         enabled: true,
         scope: "collection",
       },
-      provenance: { referenceUrl: `${REFERENCE}/raced`, verifiedAt: verified() },
+      provenance: {
+        referenceUrl: `${REFERENCE}/raced`,
+        verifiedAt: verified(),
+        decisionRef: delegatedRef(),
+      },
       actor: { kind: "delegated", id: principal },
       reason: "official-notice-added",
     },
@@ -778,36 +806,116 @@ test("the actor's kind and name are closed: no bare agent, no operator under an 
   expect(await ruleCount()).toBe(count);
 });
 
-test("a delegated principal gives only its own closed reasons, and no decision reference", async () => {
-  const base = rule("vpass");
-  const count = await ruleCount();
-  for (const [reason, decisionRef] of [
-    // A survey acceptance is the operator's (ADR 0050), even with its proposal reference.
-    [ACCEPTED_REASON, proposalRef(1)],
-    // A delegated revision's own decision reference is plan slice S3's.
-    ["correction", proposalRef(1)],
-  ] as const) {
-    const result = await writeMaintenanceRevision(
-      processorEnv,
-      {
-        source: "vpass",
-        ruleId: null,
-        expectedRevision: 0,
-        change: {
-          timezone: "Asia/Tokyo",
-          pattern: base.pattern,
-          enabled: true,
-          scope: "collection",
-        },
-        provenance: { referenceUrl: base.referenceUrl, verifiedAt: base.verifiedAt, decisionRef },
-        actor: { kind: "delegated", id: DELEGATE },
+describe("the reason and decision reference are closed per actor", () => {
+  const provenanceWrite = (
+    kind: "operator" | "delegated",
+    reason: unknown,
+    decisionRef: unknown,
+    source = "vpass",
+  ): MaintenanceWrite => {
+    const base = rule(source);
+    return {
+      source,
+      ruleId: null,
+      expectedRevision: 0,
+      change: { timezone: "Asia/Tokyo", pattern: base.pattern, enabled: true, scope: "collection" },
+      provenance: { referenceUrl: base.referenceUrl, verifiedAt: base.verifiedAt, decisionRef },
+      actor: { kind, id: kind === "delegated" ? DELEGATE : OPERATOR },
+      reason,
+    } as MaintenanceWrite;
+  };
+  const uuid = "0a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d";
+
+  test("a delegated write without its audit reference, or with any other, is refused and writes nothing", async () => {
+    const count = await ruleCount();
+    const cases: [string, unknown, keyof typeof MAINTENANCE_WRITE_CODES][] = [
+      // A delegated principal never gives the survey's or the operator's reason.
+      [ACCEPTED_REASON, proposalRef(1), "invalid_reason"],
+      ["operator-edit", delegatedRef(), "invalid_reason"],
+      ["correction", null, "invalid_request"],
+      ["correction", undefined, "invalid_request"],
+      ["correction", proposalRef(1), "invalid_request"],
+      ["correction", `audit:aud_${uuid}`, "invalid_request"],
+      ["correction", `delegated-audit:${uuid}`, "invalid_request"],
+      ["correction", `delegated-audit:aud_${uuid.toUpperCase()}`, "invalid_request"],
+      ["correction", `delegated-audit:aud_${uuid.slice(1)}`, "invalid_request"],
+      ["correction", `delegated-audit:aud_${uuid}0`, "invalid_request"],
+      ["correction", ` delegated-audit:aud_${uuid}`, "invalid_request"],
+      ["correction", `delegated-audit:aud_${uuid.replaceAll("-", "")}`, "invalid_request"],
+      ["correction", 42, "invalid_request"],
+    ];
+    for (const [reason, decisionRef, code] of cases) {
+      const result = await writeMaintenanceRevision(
+        processorEnv,
+        provenanceWrite("delegated", reason, decisionRef),
+        NO_RECORD,
+      );
+      expect([reason, decisionRef, result]).toEqual([
         reason,
-      } as MaintenanceWrite,
+        decisionRef,
+        { ok: false, code, status: MAINTENANCE_WRITE_CODES[code] },
+      ]);
+    }
+    expect(await ruleCount()).toBe(count);
+  });
+
+  test("a delegated write with a well-formed audit reference is written and keeps it whole", async () => {
+    // The shape is ADR 0064's audit id, as S1's builder makes one.
+    const ref = `delegated-audit:${newAuditId()}`;
+    expect(ref).toHaveLength(56);
+    const saved = await writeMaintenanceRevision(
+      processorEnv,
+      provenanceWrite("delegated", "owner-instructed", ref, "smbc-direct"),
       NO_RECORD,
     );
-    expect([reason, result]).toEqual([reason, { ok: false, code: "invalid_reason", status: 400 }]);
-  }
-  expect(await ruleCount()).toBe(count);
+    expect(saved).toMatchObject({ ok: true, revision: 1 });
+    if (!saved.ok) throw new Error("unreachable");
+    expect(await revisions(saved.ruleId)).toEqual([
+      {
+        revision: 1,
+        actor: DELEGATE,
+        actor_kind: "delegated",
+        change_reason: "owner-instructed",
+        decision_ref: ref,
+      },
+    ]);
+  });
+
+  test("the operator's rules are unchanged: no audit reference, and the survey's reason only with its proposal", async () => {
+    const count = await ruleCount();
+    const cases: [string, unknown, keyof typeof MAINTENANCE_WRITE_CODES][] = [
+      ["operator-edit", delegatedRef(), "invalid_request"],
+      ["correction", delegatedRef(), "invalid_request"],
+      [ACCEPTED_REASON, delegatedRef(), "invalid_request"],
+      [ACCEPTED_REASON, null, "invalid_reason"],
+      ["operator-edit", proposalRef(1), "invalid_reason"],
+    ];
+    for (const [reason, decisionRef, code] of cases) {
+      const result = await writeMaintenanceRevision(
+        processorEnv,
+        provenanceWrite("operator", reason, decisionRef),
+        NO_RECORD,
+      );
+      expect([reason, decisionRef, result]).toEqual([
+        reason,
+        decisionRef,
+        { ok: false, code, status: MAINTENANCE_WRITE_CODES[code] },
+      ]);
+    }
+    expect(await ruleCount()).toBe(count);
+    for (const [reason, decisionRef] of [
+      ["operator-edit", null],
+      ["correction", undefined],
+      [ACCEPTED_REASON, proposalRef(2)],
+    ] as const)
+      expect(
+        await writeMaintenanceRevision(
+          processorEnv,
+          provenanceWrite("operator", reason, decisionRef, "vpoint-pay"),
+          NO_RECORD,
+        ),
+      ).toMatchObject({ ok: true, revision: 1 });
+  });
 });
 
 test("a read names only the requested sources and no revision's actor", async () => {
@@ -1152,5 +1260,355 @@ describe("the writer's batch: the revision and what its caller appends are one w
         { ok: false, code, status: MAINTENANCE_WRITE_CODES[code] },
       ]);
     }
+  });
+});
+
+describe("prepare and write share one validation (the contract plan slice S3 builds on)", () => {
+  /**
+   * A fresh CORE store per case, on the real schema: the seeded rules
+   * disabled and every reference moved to the synthetic host, as above.
+   */
+  function freshStore(): { sqlite: SqliteDatabase; env: Env } {
+    const sqlite = fullCoreDatabase();
+    sqlite
+      .query(
+        "INSERT INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at) SELECT id,revision+1,source,timezone,pattern_json,0,?,verified_at,scope,'migration:synthetic','2026-01-01T00:00:00.000Z' FROM provider_maintenance_rules",
+      )
+      .run(REFERENCE);
+    sqlite.query("UPDATE provider_maintenance_references SET reference_url=?").run(REFERENCE);
+    const env = {
+      DB: sqliteD1(sqlite),
+      SCHEDULE_ALARMS: { getByName: () => ({ reconcile: async () => null }) },
+    } as unknown as Env;
+    return { sqlite, env };
+  }
+  const totalChanges = (sqlite: SqliteDatabase) =>
+    (sqlite.query("SELECT total_changes() AS n").get() as { n: number }).n;
+  /** One existing revision of a rule, written as the given actor. */
+  const existing =
+    (id: string, source: string, kind: "operator" | "delegated", actor: string) =>
+    (sqlite: SqliteDatabase) =>
+      sqlite
+        .query(
+          'INSERT INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason) VALUES(?,1,?,\'UTC\',\'{"kind":"weekly","weekdays":[1],"start":"01:00","end":"02:00"}\',1,?,?,\'collection\',?,?,?,?)',
+        )
+        .run(
+          id,
+          source,
+          REFERENCE,
+          verified(),
+          actor,
+          verified(),
+          kind,
+          kind === "operator" ? "operator-edit" : "correction",
+        );
+  const spentBudget = (principal: string) => (sqlite: SqliteDatabase) => {
+    for (let i = 0; i < 30; i++)
+      sqlite
+        .query(
+          'INSERT INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason) VALUES(?,1,\'sbi-shinsei\',\'UTC\',\'{"kind":"weekly","weekdays":[1],"start":"01:00","end":"02:00"}\',0,?,?,\'collection\',?,?,\'delegated\',\'correction\')',
+        )
+        .run(`synthetic-spent-${i}`, REFERENCE, verified(), principal, new Date().toISOString());
+  };
+  // Noon UTC three days ahead, so no seeded window can touch either end.
+  const start = Math.floor(Date.now() / DAY) * DAY + 3 * DAY + DAY / 2;
+  const span = (ms: number) => ({ kind: "once", from: iso(start), to: iso(start + ms) });
+  const make = (
+    kind: "operator" | "delegated",
+    overrides: Partial<Record<keyof MaintenanceWrite, unknown>> & {
+      decisionRef?: unknown;
+      pattern?: unknown;
+      referenceUrl?: string;
+      timezone?: string;
+    } = {},
+  ): MaintenanceWrite => {
+    const { decisionRef, pattern, referenceUrl, timezone, ...rest } = overrides;
+    return {
+      source: "vpass",
+      ruleId: kind === "operator" ? "vpass-prepared" : null,
+      expectedRevision: 0,
+      change: {
+        timezone: timezone ?? "UTC",
+        pattern: pattern ?? span(3_600_000),
+        enabled: true,
+        scope: "collection",
+      },
+      provenance: {
+        referenceUrl: referenceUrl ?? `${REFERENCE}/prepared`,
+        verifiedAt: verified(),
+        decisionRef:
+          "decisionRef" in overrides ? decisionRef : kind === "delegated" ? delegatedRef() : null,
+      },
+      actor: { kind, id: kind === "operator" ? OPERATOR : DELEGATE },
+      reason: kind === "operator" ? "operator-edit" : "official-notice-added",
+      ...rest,
+    } as MaintenanceWrite;
+  };
+  type Case = [name: string, write: unknown, setup?: (sqlite: SqliteDatabase) => void];
+  const cases: Case[] = [
+    // The operator, accepted under either bound: no bound applies to it.
+    ["operator create, named", make("operator")],
+    ["operator create, writer-chosen id", make("operator", { ruleId: null })],
+    [
+      "operator revision",
+      make("operator", { ruleId: "vpass-existing", expectedRevision: 1 }),
+      existing("vpass-existing", "vpass", "operator", OPERATOR),
+    ],
+    [
+      "operator survey acceptance",
+      make("operator", { reason: ACCEPTED_REASON, decisionRef: proposalRef(7) }),
+    ],
+    ["operator ten-day window", make("operator", { pattern: span(10 * DAY) })],
+    ["operator forty-day window", make("operator", { pattern: span(40 * DAY) })],
+    ["operator kind 'agent'", make("operator", { actor: { kind: "agent", id: OPERATOR } })],
+    ["operator under an MCP name", make("operator", { actor: { kind: "operator", id: DELEGATE } })],
+    ["operator bad timezone", make("operator", { timezone: "Asia/Nowhere" })],
+    ["operator create at revision 1", make("operator", { ruleId: null, expectedRevision: 1 })],
+    ["operator malformed reference", make("operator", { decisionRef: "has space" })],
+    ["operator audit reference", make("operator", { decisionRef: delegatedRef() })],
+    [
+      "operator wrong host",
+      make("operator", { referenceUrl: "https://elsewhere.synthetic.test/x" }),
+    ],
+    [
+      "operator unregistered source",
+      make("operator", { source: "prestia-bank", ruleId: "prestia-bank-x" }),
+    ],
+    ["operator free text", make("operator", { reason: "the provider said so" })],
+    ["operator survey reason, no proposal", make("operator", { reason: ACCEPTED_REASON })],
+    [
+      "operator stale revision",
+      make("operator", { ruleId: "vpass-existing", expectedRevision: 0 }),
+      existing("vpass-existing", "vpass", "operator", OPERATOR),
+    ],
+    [
+      "operator names another source's rule",
+      make("operator", { ruleId: "myjcb-existing", expectedRevision: 1 }),
+      existing("myjcb-existing", "myjcb", "operator", OPERATOR),
+    ],
+    ["no write at all", null],
+    // A delegated principal.
+    ["delegated create", make("delegated")],
+    [
+      "delegated revision of its source's rule",
+      make("delegated", { ruleId: "vpass-own", expectedRevision: 1 }),
+      existing("vpass-own", "vpass", "delegated", DELEGATE),
+    ],
+    ["delegated without a reference", make("delegated", { decisionRef: null })],
+    ["delegated with a survey reference", make("delegated", { decisionRef: proposalRef(1) })],
+    [
+      "delegated with a malformed reference",
+      make("delegated", { decisionRef: "delegated-audit:aud_x" }),
+    ],
+    [
+      "delegated survey reason",
+      make("delegated", { reason: ACCEPTED_REASON, decisionRef: proposalRef(1) }),
+    ],
+    ["delegated operator-edit", make("delegated", { reason: "operator-edit" })],
+    [
+      "delegated names another source's rule",
+      make("delegated", { ruleId: "myjcb-other", expectedRevision: 1 }),
+      existing("myjcb-other", "myjcb", "operator", OPERATOR),
+    ],
+    ["delegated names no rule", make("delegated", { ruleId: "no-such-rule", expectedRevision: 1 })],
+    [
+      "delegated stale revision",
+      make("delegated", { ruleId: "vpass-own", expectedRevision: 2 }),
+      existing("vpass-own", "vpass", "delegated", DELEGATE),
+    ],
+    ["delegated seven days", make("delegated", { pattern: span(7 * DAY) })],
+    ["delegated seven days and a millisecond", make("delegated", { pattern: span(7 * DAY + 1) })],
+    ["delegated 31 days", make("delegated", { pattern: span(31 * DAY) })],
+    ["delegated 31 days and a millisecond", make("delegated", { pattern: span(31 * DAY + 1) })],
+    ["delegated spent budget", make("delegated", { source: "sbi-shinsei" }), spentBudget(DELEGATE)],
+    [
+      "delegated wrong host",
+      make("delegated", { referenceUrl: "https://elsewhere.synthetic.test/x" }),
+    ],
+  ];
+  const BOUNDS = ["delegated-7d", "confirmed-31d"] as const;
+
+  test("for every case and either bound, prepare answers what the write answers, and writes and draws nothing", async () => {
+    const random = spyOn(crypto, "getRandomValues");
+    const codes = new Set<string>();
+    try {
+      for (const deferralBound of BOUNDS)
+        for (const [name, write, setup] of cases) {
+          const { sqlite, env } = freshStore();
+          setup?.(sqlite);
+          const changes = totalChanges(sqlite);
+          const draws = random.mock.calls.length;
+          const prepared = await prepareMaintenanceRevision(env, write as MaintenanceWrite, {
+            deferralBound,
+          });
+          // Prepare wrote nothing and drew no random value.
+          expect([name, deferralBound, totalChanges(sqlite), random.mock.calls.length]).toEqual([
+            name,
+            deferralBound,
+            changes,
+            draws,
+          ]);
+          const written = await writeMaintenanceRevision(
+            env,
+            write as MaintenanceWrite,
+            NO_RECORD,
+            {
+              deferralBound,
+            },
+          );
+          expect([name, deferralBound, prepared.ok]).toEqual([name, deferralBound, written.ok]);
+          if (!prepared.ok || !written.ok) {
+            expect([name, deferralBound, prepared] as unknown[]).toEqual([
+              name,
+              deferralBound,
+              written,
+            ]);
+            if (!written.ok) codes.add(written.code);
+          } else {
+            const request = write as MaintenanceWrite;
+            expect(prepared).toMatchObject({
+              source: request.source,
+              ruleId: request.ruleId,
+              expectedRevision: request.expectedRevision,
+              currentRevision: written.revision - 1,
+            });
+            if (request.ruleId !== null) expect(written.ruleId).toBe(request.ruleId);
+          }
+          sqlite.close();
+        }
+    } finally {
+      random.mockRestore();
+    }
+    // Every refusal the writer can answer was compared.
+    expect([...codes].sort()).toEqual(Object.keys(MAINTENANCE_WRITE_CODES).sort());
+  });
+
+  test("the deferral edges, 7d / 7d+1ms / 31d / 31d+1ms, under each bound", async () => {
+    const outcome = async (
+      kind: "operator" | "delegated",
+      ms: number,
+      deferralBound: (typeof BOUNDS)[number],
+    ) => {
+      const write = make(kind, { pattern: span(ms) });
+      const prepared = freshStore();
+      const prepare = await prepareMaintenanceRevision(prepared.env, write, { deferralBound });
+      prepared.sqlite.close();
+      const written = freshStore();
+      const result = await writeMaintenanceRevision(written.env, write, NO_RECORD, {
+        deferralBound,
+      });
+      written.sqlite.close();
+      return [
+        prepare.ok ? prepare.deferralClass : prepare.code,
+        result.ok ? "written" : result.code,
+      ];
+    };
+    const TOO_LONG = "maintenance_deferral_too_long";
+    const expected: [number, string, unknown[], unknown[], unknown[]][] = [
+      // [span, label, delegated-7d, confirmed-31d, operator under either]
+      [7 * DAY, "7d", ["within-7d", "written"], ["within-7d", "written"], ["within-7d", "written"]],
+      [
+        7 * DAY + 1,
+        "7d+1ms",
+        [TOO_LONG, TOO_LONG],
+        ["within-31d", "written"],
+        ["within-31d", "written"],
+      ],
+      [31 * DAY, "31d", [TOO_LONG, TOO_LONG], ["within-31d", "written"], ["within-31d", "written"]],
+      [
+        31 * DAY + 1,
+        "31d+1ms",
+        [TOO_LONG, TOO_LONG],
+        [TOO_LONG, TOO_LONG],
+        ["beyond-31d", "written"],
+      ],
+    ];
+    expect(CONFIRMED_MAX_DEFERRAL_MS).toBe(31 * DAY);
+    for (const [ms, label, sevenDays, confirmed, operator] of expected) {
+      expect([label, await outcome("delegated", ms, "delegated-7d")] as unknown[]).toEqual([
+        label,
+        sevenDays,
+      ]);
+      expect([label, await outcome("delegated", ms, "confirmed-31d")] as unknown[]).toEqual([
+        label,
+        confirmed,
+      ]);
+      for (const deferralBound of BOUNDS)
+        expect([label, await outcome("operator", ms, deferralBound)] as unknown[]).toEqual([
+          label,
+          operator,
+        ]);
+    }
+  });
+
+  test("the default bound is seven days, and the option is the writer's own: no route or request sets it", async () => {
+    // The default, without the option, is the seven-day bound.
+    const { sqlite, env } = freshStore();
+    expect(
+      await prepareMaintenanceRevision(env, make("delegated", { pattern: span(7 * DAY + 1) })),
+    ).toEqual({ ok: false, code: "maintenance_deferral_too_long", status: 422 });
+    sqlite.close();
+    // Only the writer's own code names the 31-day bound or the option's key:
+    // no route, tool, grant reader or relay of either Worker does.
+    const writerFile = new URL("../src/schedule-store.ts", import.meta.url).pathname;
+    const roots = ["../src/", "../../app/src/"].map(
+      (dir) => new URL(dir, import.meta.url).pathname,
+    );
+    for (const root of roots)
+      for (const name of readdirSync(root, { recursive: true }) as string[]) {
+        if (!/\.tsx?$/u.test(name)) continue;
+        const file = `${root}${name}`;
+        const text = readFileSync(file, "utf8");
+        if (file === writerFile) continue;
+        expect([name, text.includes("confirmed-31d"), text.includes("deferralBound")]).toEqual([
+          name,
+          false,
+          false,
+        ]);
+      }
+    const writer = readFileSync(writerFile, "utf8");
+    const region = [
+      writer.indexOf("// ── The maintenance writer"),
+      writer.indexOf("export async function updateMaintenance("),
+    ];
+    expect(region[0]).toBeGreaterThan(0);
+    for (const needle of ["confirmed-31d", "deferralBound"])
+      for (const match of writer.matchAll(new RegExp(needle, "gu")))
+        expect([needle, match.index! > region[0]! && match.index! < region[1]!]).toEqual([
+          needle,
+          true,
+        ]);
+    // The operator route refuses a body that tries to name it.
+    const refused = await post(
+      "/internal/schedules/maintenance",
+      {
+        id: "vpass-bound-probe",
+        revision: 0,
+        source: "vpass",
+        timezone: "UTC",
+        pattern: span(3_600_000),
+        enabled: true,
+        referenceUrl: REFERENCE,
+        verifiedAt: verified(),
+        scope: "collection",
+        deferralBound: "confirmed-31d",
+      },
+      { ...operatorHeaders(), "x-kogane-deferral-bound": "confirmed-31d" },
+    );
+    expect(refused).toEqual({ status: 400, body: { error: "invalid_request" } });
+    expect(await revisions("vpass-bound-probe")).toEqual([]);
+  });
+
+  test("the current-revision read is the writer's own, and reads nothing else", async () => {
+    const { sqlite, env } = freshStore();
+    existing("vpass-current", "vpass", "operator", OPERATOR)(sqlite);
+    const changes = totalChanges(sqlite);
+    expect(await currentMaintenanceRevision(env.DB, "vpass-current")).toEqual({
+      revision: 1,
+      source: "vpass",
+    });
+    expect(await currentMaintenanceRevision(env.DB, "no-such-rule")).toBeNull();
+    expect(totalChanges(sqlite)).toBe(changes);
+    sqlite.close();
   });
 });

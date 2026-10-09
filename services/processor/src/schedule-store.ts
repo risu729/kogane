@@ -273,6 +273,9 @@ export async function updateSchedule(
 // a closed `MaintenanceWriteCode`. What its caller appends (its audit record,
 // a survey decision) is sent in the revision's own batch, so the revision, its
 // provenance and what was appended exist together or not at all (ADR 0064).
+// `prepareMaintenanceRevision` runs the same validation chain and writes
+// nothing; `currentMaintenanceRevision` is the current-revision read both use.
+// They are the contract plan slice S3 builds its confirmation on.
 
 /** Every refusal the writer can answer, with the HTTP status the routes use. */
 export const MAINTENANCE_WRITE_CODES = {
@@ -287,9 +290,10 @@ export const MAINTENANCE_WRITE_CODES = {
   /** `expectedRevision` is not the rule's current revision. */
   revision_conflict: 409,
   /**
-   * A delegated revision would leave a joined deferral longer than seven days
-   * that its source did not already have. Beyond that bound the revision is
-   * the operator's (class R3 until the owner answers the plan's question 1).
+   * A delegated revision would leave a joined deferral its source did not
+   * already have that is longer than its bound: seven days by default (beyond
+   * them the revision is class R3 until the owner answers the plan's question
+   * 1), 31 days under the trusted `"confirmed-31d"` option, and never longer.
    */
   maintenance_deferral_too_long: 422,
   /** The delegated principal's rolling daily write budget is spent. */
@@ -327,7 +331,12 @@ export interface MaintenanceWrite {
     referenceUrl: string;
     /** When the announcement was checked; an ISO instant, not in the future. */
     verifiedAt: string;
-    /** The re-survey proposal behind the change (`maintenance-survey:proposal:<id>`), or none. */
+    /**
+     * The reviewed decision behind the change: for an operator, the accepted
+     * re-survey proposal (`maintenance-survey:proposal:<id>`) or none; for a
+     * delegated principal, always the audit record that authorizes it
+     * (`delegated-audit:aud_<uuid>`).
+     */
     decisionRef?: string | null;
   };
   actor: MaintenanceActor;
@@ -347,12 +356,49 @@ export type MaintenanceWriteResult =
 /** Delegated revisions one principal may write per rolling day (ADR 0046, ADR 0063 item 8). */
 export const DELEGATED_MAINTENANCE_WRITES_PER_DAY = 30;
 /**
- * Longest joined deferral a delegated revision may create: the direct (R1)
- * envelope of ADR 0063 item 8. A longer one is refused; its target class is
- * R2 up to a 31-day ceiling, which needs the owner's answer to the plan's
- * question 1 and a confirmation step, so it is not built here.
+ * Longest joined deferral a delegated revision may create under the default
+ * bound: the direct (R1) envelope of ADR 0063 item 8.
  */
 export const DELEGATED_MAX_DEFERRAL_MS = 7 * 86_400_000;
+/**
+ * Longest joined deferral a delegated revision may create under the
+ * `"confirmed-31d"` bound (the plan's R2 ceiling), and never beyond.
+ */
+export const CONFIRMED_MAX_DEFERRAL_MS = 31 * 86_400_000;
+/**
+ * Which deferral bound the writer holds a delegated revision to. Trusted and
+ * in-process only: no request field, header, tool argument or grant sets it.
+ * The default is `"delegated-7d"`; only Processor-side code may pass
+ * `"confirmed-31d"`, and today nothing does (plan slice S3's R2 confirm will,
+ * after verifying the confirm). The operator is held to no bound under either.
+ */
+export type MaintenanceDeferralBound = "delegated-7d" | "confirmed-31d";
+export interface MaintenanceWriteOptions {
+  deferralBound?: MaintenanceDeferralBound;
+}
+/**
+ * How long a joined deferral the revision leaves that its source did not
+ * already have: within seven days, within 31, or beyond. A delegated revision
+ * is never prepared or written `beyond-31d`, nor `within-31d` under the
+ * default bound; the operator's is only classified.
+ */
+export type MaintenanceDeferralClass = "within-7d" | "within-31d" | "beyond-31d";
+/** What `prepareMaintenanceRevision` answers for a revision the write would accept. */
+export interface MaintenancePrepared {
+  ok: true;
+  source: string;
+  /** As requested: `null` for a create, whose id is chosen only when it is written. */
+  ruleId: string | null;
+  expectedRevision: number;
+  /** The rule's current revision; 0 for a create. */
+  currentRevision: number;
+  deferralClass: MaintenanceDeferralClass;
+  /** Delegated revisions this principal may still write in the rolling day; `null` for the operator, who has no budget. */
+  budgetRemaining: number | null;
+}
+export type MaintenancePrepareResult =
+  | MaintenancePrepared
+  | { ok: false; code: MaintenanceWriteCode; status: number };
 /** Recurring windows are checked over this horizon; dated windows at any date. */
 const DEFERRAL_HORIZON_MS = 92 * 86_400_000;
 const RULE_ID = /^[a-z0-9-]{1,100}$/u;
@@ -360,6 +406,16 @@ const OPERATOR_ACTOR = /^[A-Za-z0-9._:@-]{1,200}$/u;
 const MCP_CLIENT_PREFIX = "mcp-client:";
 const SURVEY_DECISION_REF = /^maintenance-survey:proposal:[1-9][0-9]{0,15}$/u;
 const SURVEY_REASON: MaintenanceChangeReason = "maintenance-survey-proposal-accepted";
+/**
+ * A delegated revision's decision reference: the audit record that authorizes
+ * it (`aud_` + UUID, ADR 0064's `audit_id`), which plan slice S3 reserves
+ * before it calls the writer — the prepare record for an R2 confirm, the
+ * apply record for an R1 call.
+ */
+const DELEGATED_AUDIT_REF =
+  /^delegated-audit:aud_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+/** The id a create gets is `<source>-` and twelve hex digits, chosen only when it is written. */
+const CREATED_ID_SUFFIX = "-000000000000";
 /**
  * The delegated revisions of one principal since an instant. It reads the
  * partial index `maintenance_agent_writes` (CORE 0076); the writer runs it
@@ -369,8 +425,9 @@ const SURVEY_REASON: MaintenanceChangeReason = "maintenance-survey-proposal-acce
 export const DELEGATED_WRITES_SINCE_SQL =
   "SELECT count(*) FROM provider_maintenance_rules WHERE actor_kind='delegated' AND actor=? AND created_at>?";
 
+/** The validated fields of a revision; `id` is null for a create until it is written. */
 interface MaintenanceInput {
-  id: string;
+  id: string | null;
   revision: number;
   source: string;
   timezone: string;
@@ -386,8 +443,7 @@ async function validMaintenanceInput(
   v: Record<string, unknown>,
 ): Promise<MaintenanceInput> {
   if (
-    typeof v.id !== "string" ||
-    !RULE_ID.test(v.id) ||
+    (v.id !== null && (typeof v.id !== "string" || !RULE_ID.test(v.id))) ||
     typeof v.source !== "string" ||
     !jobs.some((j) => j.source === v.source) ||
     typeof v.timezone !== "string" ||
@@ -423,7 +479,7 @@ async function validMaintenanceInput(
   )
     throw new ScheduleError("invalid_reference");
   return {
-    id: v.id,
+    id: v.id as string | null,
     revision: Number(v.revision),
     source: v.source,
     timezone: v.timezone,
@@ -463,10 +519,17 @@ function validActor(value: unknown): MaintenanceActor {
 }
 /**
  * The reason and decision reference, refused unless both are closed values
- * this actor may give: `operator-edit` is the operator's own edit, a delegated
- * principal gives only `DELEGATED_MAINTENANCE_REASONS` (so no decision
- * reference until plan slice S3 defines its own), and the survey's acceptance
- * reason comes with exactly its proposal reference.
+ * this actor may give:
+ *
+ * - a delegated principal gives only `DELEGATED_MAINTENANCE_REASONS` and always
+ *   a `delegated-audit:aud_<uuid>` reference (`invalid_reason`, then
+ *   `invalid_request` for a missing or other reference), so no delegated
+ *   revision is ever written without the audit record behind it;
+ * - the operator's `maintenance-survey-proposal-accepted` comes with exactly
+ *   its `maintenance-survey:proposal:<id>`, and every other operator reason
+ *   with none (`invalid_request` for a malformed reference, `invalid_reason`
+ *   for a reason and reference that do not belong together);
+ * - `operator-edit` is the operator's alone.
  */
 function validProvenance(
   actor: MaintenanceActor,
@@ -482,6 +545,11 @@ function validProvenance(
   )
     throw new ScheduleError("invalid_reason");
   const ref = decisionRef ?? null;
+  if (actor.kind === "delegated") {
+    if (typeof ref !== "string" || !DELEGATED_AUDIT_REF.test(ref))
+      throw new ScheduleError("invalid_request");
+    return { reason: reason as MaintenanceChangeReason, decisionRef: ref };
+  }
   if (ref !== null && (typeof ref !== "string" || !SURVEY_DECISION_REF.test(ref)))
     throw new ScheduleError("invalid_request");
   if ((reason === SURVEY_REASON) !== (ref !== null)) throw new ScheduleError("invalid_reason");
@@ -491,32 +559,34 @@ function deferringRules(rules: readonly MaintenanceRule[]): MaintenanceRule[] {
   return rules.filter((rule) => rule.enabled && rule.scope !== "feature-only");
 }
 /**
- * Refuses a delegated revision that leaves a joined deferral longer than the
- * bound which the source's current rules do not already cause.
+ * Whether the revision leaves a joined deferral longer than `bound` which the
+ * source's current rules do not already cause. One measure for both bounds:
+ * with `bound` of seven days it is exactly the delegated check of before.
  */
-function checkDelegatedDeferral(current: readonly MaintenanceRule[], candidate: MaintenanceRule) {
+function exceedsDeferralBound(
+  current: readonly MaintenanceRule[],
+  candidate: MaintenanceRule,
+  bound: number,
+): boolean {
   // Measured from up to the bound before now, so a running union counts the
   // part already spent: a delegated principal cannot keep a window going by
   // extending it. A union that ended before now is at most the bound long, so
   // it never counts.
-  const since = Date.now() - DELEGATED_MAX_DEFERRAL_MS,
-    horizon = DELEGATED_MAX_DEFERRAL_MS + DEFERRAL_HORIZON_MS;
+  const since = Date.now() - bound,
+    horizon = bound + DEFERRAL_HORIZON_MS;
   const before = deferringRules(current),
     after = deferringRules([...current.filter((rule) => rule.id !== candidate.id), candidate]);
   try {
-    if (
-      longestDeferral(after, since, horizon, DELEGATED_MAX_DEFERRAL_MS) <= DELEGATED_MAX_DEFERRAL_MS
-    )
-      return;
+    if (longestDeferral(after, since, horizon, bound) <= bound) return false;
   } catch {
     /* An unmeasurable chain is judged below. */
   }
   // A long union after the revision must lie within one the source already
   // had: a revision that leaves an operator's longer window as it was, or
   // shortens it, passes; one that creates, moves or lengthens a long union
-  // anywhere — even while a longer one exists elsewhere — is refused. Unions
-  // are followed to the horizon, so beyond it an unchanged chain compares
-  // equal.
+  // anywhere — even while a longer one exists elsewhere — exceeds the bound.
+  // Unions are followed to the horizon, so beyond it an unchanged chain
+  // compares equal.
   const unions = (rules: MaintenanceRule[]) => {
     try {
       return deferralUnions(rules, since, horizon, horizon);
@@ -526,47 +596,114 @@ function checkDelegatedDeferral(current: readonly MaintenanceRule[], candidate: 
   };
   const existing = unions(before) ?? [],
     revised = unions(after);
-  if (
+  return (
     revised === null ||
     revised.some(
       (union) =>
-        union.end - union.start > DELEGATED_MAX_DEFERRAL_MS &&
+        union.end - union.start > bound &&
         !existing.some((known) => known.start <= union.start && union.end <= known.end),
     )
-  )
-    throw new ScheduleError("maintenance_deferral_too_long", 422);
+  );
+}
+/** The revision's deferral class: the seven-day measure first, the 31-day one only past it. */
+function deferralClassOf(
+  current: readonly MaintenanceRule[],
+  candidate: MaintenanceRule,
+): MaintenanceDeferralClass {
+  if (!exceedsDeferralBound(current, candidate, DELEGATED_MAX_DEFERRAL_MS)) return "within-7d";
+  return exceedsDeferralBound(current, candidate, CONFIRMED_MAX_DEFERRAL_MS)
+    ? "beyond-31d"
+    : "within-31d";
 }
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value);
 }
-async function writeRevision(
+/** The rule's newest revision, as the writer reads it before writing. */
+interface PreviousRevision {
+  revision: number;
+  source: string;
+  timezone: string;
+  pattern_json: string;
+  enabled: number;
+  reference_url: string;
+  verified_at: string;
+  scope: string;
+}
+async function previousRevision(db: D1Database, ruleId: string): Promise<PreviousRevision | null> {
+  return db
+    .prepare(
+      "SELECT revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope FROM provider_maintenance_rules WHERE id=? ORDER BY revision DESC LIMIT 1",
+    )
+    .bind(ruleId)
+    .first<PreviousRevision>();
+}
+/**
+ * A rule's current revision and source, exactly as the writer reads them
+ * before it checks the expected revision; `null` when the rule does not
+ * exist. Reads, never writes.
+ */
+export async function currentMaintenanceRevision(
+  db: D1Database,
+  ruleId: string,
+): Promise<{ revision: number; source: string } | null> {
+  const row = await previousRevision(db, ruleId);
+  return row ? { revision: row.revision, source: row.source } : null;
+}
+/** The deferral bound of a call, refused (thrown, not answered) when it is not one of the two. */
+function deferralBoundOf(options: MaintenanceWriteOptions | undefined): MaintenanceDeferralBound {
+  const bound = options?.deferralBound ?? "delegated-7d";
+  if (bound !== "delegated-7d" && bound !== "confirmed-31d")
+    throw new Error("maintenance_deferral_bound_invalid");
+  return bound;
+}
+/** What the shared validation found: everything the write needs but the new rule's id. */
+interface ValidatedRevision {
+  actor: MaintenanceActor;
+  reason: MaintenanceChangeReason;
+  decisionRef: string | null;
+  input: MaintenanceInput;
+  previous: PreviousRevision | null;
+  /** The principal's delegated revisions in the rolling day; null for the operator. */
+  budgetUsed: number | null;
+  /** Set for a delegated revision, and for the operator's when asked; never randomised. */
+  deferralClass: MaintenanceDeferralClass | null;
+}
+/**
+ * The one validation chain of a maintenance revision, run by
+ * `prepareMaintenanceRevision` and again by `writeMaintenanceRevision` at
+ * write time: the actor, a delegated principal's budget, the closed reason and
+ * reference, the fields and registered reference host, the current revision,
+ * the rule's source, the expected revision and a delegated principal's
+ * deferral bound. It reads and never writes, and chooses no id.
+ */
+async function validateRevision(
   env: Env,
   write: MaintenanceWrite,
-  append: (saved: SavedRevision) => RevisionAppend,
-): Promise<Extract<MaintenanceWriteResult, { ok: true }>> {
+  bound: MaintenanceDeferralBound,
+  classifyOperator: boolean,
+): Promise<ValidatedRevision> {
   const raw: unknown = write;
   const w: Record<string, unknown> = isPlainObject(raw) ? raw : {};
   const change: Record<string, unknown> = isPlainObject(w.change) ? w.change : {};
   const provenance: Record<string, unknown> = isPlainObject(w.provenance) ? w.provenance : {};
   const actor = validActor(w.actor);
   const delegated = actor.kind === "delegated";
-  if (
-    delegated &&
-    (await delegatedWritesToday(env.DB, actor.id)) >= DELEGATED_MAINTENANCE_WRITES_PER_DAY
-  )
+  const budgetUsed = delegated ? await delegatedWritesToday(env.DB, actor.id) : null;
+  if (budgetUsed !== null && budgetUsed >= DELEGATED_MAINTENANCE_WRITES_PER_DAY)
     throw new ScheduleError("maintenance_write_budget_exceeded", 429);
   const { reason, decisionRef } = validProvenance(actor, w.reason, provenance.decisionRef);
-  let id: unknown = w.ruleId;
-  if (id === null) {
-    // A new rule's id is chosen here, so a create cannot probe which ids
-    // another source's rules use.
-    if (w.expectedRevision !== 0 || typeof w.source !== "string" || !RULE_ID.test(w.source))
-      throw new ScheduleError("invalid_request");
-    const bytes = crypto.getRandomValues(new Uint8Array(6));
-    id = `${w.source}-${[...bytes].map((b) => b.toString(16).padStart(2, "0")).join("")}`;
-  }
+  // A create is validated as the id it will get, `<source>-<12 hex>`, without
+  // choosing one, so a create cannot probe which ids another source's rules use.
+  const ruleId = w.ruleId;
+  if (
+    ruleId === null &&
+    (w.expectedRevision !== 0 ||
+      typeof w.source !== "string" ||
+      !RULE_ID.test(`${w.source}${CREATED_ID_SUFFIX}`))
+  )
+    throw new ScheduleError("invalid_request");
   const input = await validMaintenanceInput(env.DB, {
-    id,
+    id: ruleId,
     revision: w.expectedRevision,
     source: w.source,
     timezone: change.timezone,
@@ -576,21 +713,8 @@ async function writeRevision(
     referenceUrl: provenance.referenceUrl,
     verifiedAt: provenance.verifiedAt,
   });
-  const previous = await env.DB.prepare(
-    "SELECT revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope FROM provider_maintenance_rules WHERE id=? ORDER BY revision DESC LIMIT 1",
-  )
-    .bind(input.id)
-    .first<{
-      revision: number;
-      source: string;
-      timezone: string;
-      pattern_json: string;
-      enabled: number;
-      reference_url: string;
-      verified_at: string;
-      scope: string;
-    }>();
-  if (delegated && w.ruleId !== null && (!previous || previous.source !== input.source))
+  const previous = input.id === null ? null : await previousRevision(env.DB, input.id);
+  if (delegated && input.id !== null && (!previous || previous.source !== input.source))
     // Another source's rule answers exactly like a rule that does not exist.
     throw new ScheduleError("maintenance_rule_not_found", 404);
   if (
@@ -598,16 +722,91 @@ async function writeRevision(
     (previous && previous.source !== input.source)
   )
     throw new ScheduleError("revision_conflict", 409);
-  if (delegated)
-    checkDelegatedDeferral(await maintenanceRules(env.DB, input.source), {
-      ...input,
-      revision: input.revision + 1,
-    });
+  let deferralClass: MaintenanceDeferralClass | null = null;
+  if (delegated || classifyOperator) {
+    const rules = await maintenanceRules(env.DB, input.source);
+    // A create has no id yet; `""` is no rule's id, so no current rule is replaced.
+    const candidate = { ...input, id: input.id ?? "", revision: input.revision + 1 };
+    if (delegated && bound === "delegated-7d") {
+      // The default bound measures seven days only, exactly as before the option.
+      if (exceedsDeferralBound(rules, candidate, DELEGATED_MAX_DEFERRAL_MS))
+        throw new ScheduleError("maintenance_deferral_too_long", 422);
+      deferralClass = "within-7d";
+    } else {
+      deferralClass = deferralClassOf(rules, candidate);
+      // Never beyond 31 days for a delegated principal, under either bound.
+      if (delegated && deferralClass === "beyond-31d")
+        throw new ScheduleError("maintenance_deferral_too_long", 422);
+    }
+  }
+  return { actor, reason, decisionRef, input, previous, budgetUsed, deferralClass };
+}
+/** A closed refusal as the writer answers it; any other error is rethrown. */
+function refusalOf(error: unknown): { ok: false; code: MaintenanceWriteCode; status: number } {
+  if (error instanceof ScheduleError && Object.hasOwn(MAINTENANCE_WRITE_CODES, error.code)) {
+    const code = error.code as MaintenanceWriteCode;
+    return { ok: false, code, status: MAINTENANCE_WRITE_CODES[code] };
+  }
+  throw error;
+}
+/**
+ * Validates one revision exactly as `writeMaintenanceRevision` does — the
+ * same chain, the same closed codes — and writes nothing, chooses no id and
+ * draws no random value. It answers the rule's current revision, the
+ * revision's deferral class and a delegated principal's remaining budget:
+ * the contract a confirmation step (plan slice S3) builds on. The write runs
+ * the same chain again, so a prepare is never an authorization by itself.
+ */
+export async function prepareMaintenanceRevision(
+  env: Env,
+  write: MaintenanceWrite,
+  options?: MaintenanceWriteOptions,
+): Promise<MaintenancePrepareResult> {
+  const bound = deferralBoundOf(options);
+  let checked: ValidatedRevision;
+  try {
+    checked = await validateRevision(env, write, bound, true);
+  } catch (error) {
+    return refusalOf(error);
+  }
+  return {
+    ok: true,
+    source: checked.input.source,
+    ruleId: checked.input.id,
+    expectedRevision: checked.input.revision,
+    currentRevision: checked.previous?.revision ?? 0,
+    // Always set when the operator is classified too, as a prepare asks.
+    deferralClass: checked.deferralClass as MaintenanceDeferralClass,
+    budgetRemaining:
+      checked.budgetUsed === null
+        ? null
+        : DELEGATED_MAINTENANCE_WRITES_PER_DAY - checked.budgetUsed,
+  };
+}
+async function writeRevision(
+  env: Env,
+  write: MaintenanceWrite,
+  append: (saved: SavedRevision) => RevisionAppend,
+  bound: MaintenanceDeferralBound,
+): Promise<Extract<MaintenanceWriteResult, { ok: true }>> {
+  const { actor, reason, decisionRef, input, previous } = await validateRevision(
+    env,
+    write,
+    bound,
+    false,
+  );
+  const delegated = actor.kind === "delegated";
+  // A new rule's id is chosen only now, after the whole chain has passed.
+  const id =
+    input.id ??
+    `${input.source}-${[...crypto.getRandomValues(new Uint8Array(6))]
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")}`;
   const now = new Date().toISOString();
   const revision = input.revision + 1;
   const guard: SqlWrite = {
     sql: "EXISTS(SELECT 1 FROM provider_maintenance_rules WHERE id=? AND revision=? AND actor=? AND created_at=?)",
-    binds: [input.id, revision, actor.id, now],
+    binds: [id, revision, actor.id, now],
   };
   const after = {
     source: input.source,
@@ -625,7 +824,7 @@ async function writeRevision(
     SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE COALESCE((SELECT MAX(revision) FROM provider_maintenance_rules WHERE id=?),0)=?${
       delegated ? ` AND (${DELEGATED_WRITES_SINCE_SQL})<?` : ""
     }`).bind(
-      input.id,
+      id,
       revision,
       input.source,
       input.timezone,
@@ -639,7 +838,7 @@ async function writeRevision(
       actor.kind,
       reason,
       decisionRef,
-      input.id,
+      id,
       input.revision,
       ...(delegated
         ? [actor.id, budgetSince(Date.parse(now)), DELEGATED_MAINTENANCE_WRITES_PER_DAY]
@@ -652,7 +851,7 @@ async function writeRevision(
     ).bind(input.referenceUrl, input.verifiedAt, input.source, ...guard.binds),
   ];
   const appended = append({
-    ruleId: input.id,
+    ruleId: id,
     revision,
     previous: input.revision,
     fields: changedFields(
@@ -669,7 +868,7 @@ async function writeRevision(
         : null,
       after,
     ),
-    payloadDigest: await canonicalDigest({ id: input.id, revision: input.revision, ...after }),
+    payloadDigest: await canonicalDigest({ id, revision: input.revision, ...after }),
     reason,
     guard,
   });
@@ -684,15 +883,18 @@ async function writeRevision(
   }
   appended.settle(results.slice(statements.length));
   const pending = await reconcileSource(env, input.source);
-  return { ok: true, ruleId: input.id, revision, reconciled: pending === 0 };
+  return { ok: true, ruleId: id, revision, reconciled: pending === 0 };
 }
 /**
  * Append one maintenance-rule revision, then reconcile the source's
- * reservations. Validates fields, the registered reference host, the expected
- * revision, the actor and its closed reason and, for a delegated principal,
- * the rule's source, the deferral bound and the daily budget. Sends the
- * revision, its provenance and what `append` returns as one batch. Never
- * edits a job, enables or disables one, releases a lease or starts
+ * reservations. Runs the same validation chain as `prepareMaintenanceRevision`
+ * at write time — fields, the registered reference host, the expected
+ * revision, the actor and its closed reason and reference and, for a
+ * delegated principal, the rule's source, the deferral bound of `options`
+ * (seven days unless trusted Processor code passes `"confirmed-31d"`) and the
+ * daily budget — then sends the revision, its provenance and what `append`
+ * returns as one batch, whose INSERT checks the revision and the budget again.
+ * Never edits a job, enables or disables one, releases a lease or starts
  * collection. A refusal is a closed code; an unexpected storage failure (a
  * batch that raised) still throws, and then nothing of the batch was written.
  */
@@ -700,15 +902,13 @@ export async function writeMaintenanceRevision(
   env: Env,
   write: MaintenanceWrite,
   append: (saved: SavedRevision) => RevisionAppend,
+  options?: MaintenanceWriteOptions,
 ): Promise<MaintenanceWriteResult> {
+  const bound = deferralBoundOf(options);
   try {
-    return await writeRevision(env, write, append);
+    return await writeRevision(env, write, append, bound);
   } catch (error) {
-    if (error instanceof ScheduleError && Object.hasOwn(MAINTENANCE_WRITE_CODES, error.code)) {
-      const code = error.code as MaintenanceWriteCode;
-      return { ok: false, code, status: MAINTENANCE_WRITE_CODES[code] };
-    }
-    throw error;
+    return refusalOf(error);
   }
 }
 /** Re-arms the source's reservations after a saved revision; answers how many are pending. */

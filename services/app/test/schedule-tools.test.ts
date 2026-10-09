@@ -484,6 +484,16 @@ describe("the maintenance revision: a delegated operation nothing can execute ye
       expect((await refusedUpdate(OWNER, window("vpass", { reason }), environment)).status).toBe(
         "invalid_request",
       );
+    // Neither the writer's deferral bound nor a decision reference is an
+    // argument: the writer's trusted option and the audit reference are set
+    // by Processor code alone (ADR 0046's amendment), never by a caller.
+    for (const extra of [
+      { deferralBound: "confirmed-31d" },
+      { decisionRef: "delegated-audit:aud_0a1b2c3d-4e5f-4a6b-8c7d-0e1f2a3b4c5d" },
+    ])
+      expect((await refusedUpdate(OWNER, window("vpass", extra), environment)).status).toBe(
+        "invalid_request",
+      );
     // Inside the envelope and inside the bound: the delegation, its capability,
     // the arguments and the scope all hold, and nothing executes it.
     const inside = await refusedUpdate(OWNER, window("vpass"), environment);

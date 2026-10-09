@@ -1134,7 +1134,7 @@
       "file": "0076_maintenance_change_provenance.sql",
       "statementCount": 4,
       "insertStatements": [],
-      "sha256": "0b374b9e0c9434e8789eb8485760648cfd1cc0a46794e9d4aada51bf37265348"
+      "sha256": "786ec712f3e9118c9dc5afc9fac258f197dc11c187bde2d7cacb1ee8de2a8d2e"
     },
     {
       "file": "0077_reward_bucket_claims_v2.sql",

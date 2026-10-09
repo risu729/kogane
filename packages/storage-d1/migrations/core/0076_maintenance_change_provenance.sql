@@ -18,7 +18,10 @@ ALTER TABLE provider_maintenance_rules ADD COLUMN change_reason TEXT
   ELSE actor_kind IS NOT NULL AND change_reason IN('official-notice-added',
    'official-notice-changed','official-notice-withdrawn','outage-observed',
    'owner-instructed','correction','maintenance-survey-proposal-accepted') END);
--- An optional reference to the reviewed proposal or decision behind a revision.
+-- The reviewed decision behind a revision: an operator's accepted re-survey
+-- proposal (`maintenance-survey:proposal:<id>`), or, always for a delegated
+-- revision, the audit record that authorizes it (`delegated-audit:aud_<uuid>`).
+-- The writer checks both closed shapes; this column bounds the length.
 ALTER TABLE provider_maintenance_rules ADD COLUMN decision_ref TEXT
  CHECK(decision_ref IS NULL OR length(decision_ref) BETWEEN 1 AND 200);
 -- Bounds the per-principal daily budget check of delegated revisions, which

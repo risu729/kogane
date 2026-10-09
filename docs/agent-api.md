@@ -541,8 +541,11 @@ writer itself already holds the direct envelope for one: R1 within the
 seven-day joined-deferral bound and 30 revisions per principal per rolling
 day; beyond the bound it refuses (`maintenance_deferral_too_long`, R3 until
 the owner answers the plan's question 1), and the operator makes such a
-revision in the UI ([schedules](schedules.md#agent-maintenance-tools)). No
-prepare/confirm step exists (S3), so no revision of a class that needs one is
+revision in the UI ([schedules](schedules.md#agent-maintenance-tools)). The
+writer's side of a confirmation exists — a prepare that writes nothing and a
+trusted 31-day bound no request can set
+([contract](schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3))
+— but no confirm step does (S3), so no revision of a class that needs one is
 offered.
 
 ## Contexts, cursors and hand-off

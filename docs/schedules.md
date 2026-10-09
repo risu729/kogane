@@ -190,41 +190,97 @@ caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows
   fetched) and `verifiedAt`.
 
 **The writer.** Every maintenance revision goes through the Processor's single
-writer, `writeMaintenanceRevision(env, write, append)`
+writer, `writeMaintenanceRevision(env, write, append, options?)`
 (`services/processor/src/schedule-store.ts`): the operator's edit and an
 accepted re-survey proposal call it, and no route calls it as a delegated
-principal yet. It sends
-the revision, its provenance update and what its caller appends — the audit
-record ([audit log](audit-log.md)), an acceptance row — as one batch, so they
-exist together or not at all. Its actors are the operator and a delegated
-principal (`mcp-client:<sub>`); there is no other kind. Its reason is a closed
-code (`MAINTENANCE_CHANGE_REASONS` in `packages/collection/src/schedule-model.ts`):
-the operator's edit records `operator-edit`, an accepted proposal
-`maintenance-survey-proposal-accepted` with the proposal as its decision
-reference, and a delegated principal chooses `official-notice-added`,
-`official-notice-changed`, `official-notice-withdrawn`, `outage-observed`,
-`owner-instructed` or `correction`. It answers a closed code:
-`invalid_request`, `invalid_reference`, `invalid_reason`,
+principal yet. It sends the revision, its provenance update and what its
+caller appends — the audit record ([audit log](audit-log.md)), an acceptance
+row — as one batch, so they exist together or not at all. Its actors are the
+operator and a delegated principal (`mcp-client:<sub>`); there is no other
+kind. Its reason is a closed code (`MAINTENANCE_CHANGE_REASONS` in
+`packages/collection/src/schedule-model.ts`), and its decision reference is
+closed per actor:
+
+| Actor     | Reason                                                                                                                                 | Decision reference                                                     | Otherwise                                                                                                                   |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| operator  | `operator-edit` (the page's edit) or any other code except the survey's                                                                | none                                                                   | any other shape (a `delegated-audit:` one included) is `invalid_request`; a survey proposal's reference is `invalid_reason` |
+| operator  | `maintenance-survey-proposal-accepted`                                                                                                 | exactly `maintenance-survey:proposal:<id>`                             | none is `invalid_reason`; any other shape is `invalid_request`                                                              |
+| delegated | `official-notice-added`, `official-notice-changed`, `official-notice-withdrawn`, `outage-observed`, `owner-instructed` or `correction` | exactly `delegated-audit:aud_<uuid>` (ADR 0064's `audit_id`), required | none, a survey reference or any other shape is `invalid_request`                                                            |
+| delegated | `operator-edit` or `maintenance-survey-proposal-accepted`                                                                              | —                                                                      | `invalid_reason`, whatever the reference                                                                                    |
+
+The reference is stored whole in `decision_ref`, so no delegated revision is
+ever written without the audit record behind it. The writer answers a closed
+code: `invalid_request`, `invalid_reference`, `invalid_reason`,
 `maintenance_rule_not_found` (a delegated principal naming another source's
 rule is answered like a missing one), `revision_conflict`,
 `maintenance_deferral_too_long` or `maintenance_write_budget_exceeded`. For a
 delegated principal only, it also requires the rule to be the named source's
 or new, refuses a revision after which the source has a joined deferral
-longer than seven days that its rules did not already cause (every such union
+longer than its bound that its rules did not already cause (every such union
 must lie within one the source already had; a running one counts its part
-before the revision, up to seven days back), and caps each principal at 30
-revisions per rolling day, counted through the partial index
-`maintenance_agent_writes` inside the INSERT. CORE 0076 records each revision's
-actor kind, closed reason and decision reference, and its CHECK refuses free
-text, a missing reason, a bare agent kind and `operator-edit` from anyone but
-the operator; revisions written before it show them as unknown. A source with
-no registered reference (PRESTIA bank) takes no rule. A collection deferred by
-any window still runs once after it and resumes its nominal schedule. The
-`/schedules` page shows each rule's current revision but not who wrote it or
-why: the actor kind and reason are on the read tool and in the table.
+before the revision, up to the bound back), and caps each principal at 30
+revisions per rolling day, counted before writing and again through the
+partial index `maintenance_agent_writes` inside the INSERT. The bound is seven
+days; only the trusted option below raises it to 31. CORE 0076 records each
+revision's actor kind, closed reason and decision reference, and its CHECK
+refuses free text, a missing reason, a bare agent kind and `operator-edit`
+from anyone but the operator; revisions written before it show them as
+unknown. A source with no registered reference (PRESTIA bank) takes no rule. A
+collection deferred by any window still runs once after it and resumes its
+nominal schedule. The `/schedules` page shows each rule's current revision but
+not who wrote it or why: the actor kind and reason are on the read tool and in
+the table.
+
+### The writer's contract for delegated execution (plan slice S3)
+
+Three exports of `services/processor/src/schedule-store.ts` are what slice S3
+builds its delegated execution and confirmation on. Nothing calls the first two
+as a delegated principal yet.
+
+- `prepareMaintenanceRevision(env, write, options?)` →
+  `{ok: true, source, ruleId, expectedRevision, currentRevision, deferralClass, budgetRemaining}`
+  or the closed refusal `{ok: false, code, status}`. It runs exactly the
+  write's validation chain (actor, a delegated principal's budget, reason and
+  reference, fields and reference host, current revision, source match,
+  expected revision, a delegated principal's deferral bound) and answers what
+  the write would, code for code, under the same option. It writes nothing,
+  chooses no id (`ruleId` stays `null` for a create; the id is drawn only when
+  the revision is written) and draws no random value. `deferralClass` is
+  `within-7d` or `within-31d` for a revision the write would accept from a
+  delegated principal, and also `beyond-31d` for the operator, whom no bound
+  limits and whom it only classifies. `budgetRemaining` is what is left of the
+  principal's 30 revisions in the rolling day, `null` for the operator.
+- `currentMaintenanceRevision(db, ruleId)` → `{revision, source}` or `null`:
+  the read the writer makes before it checks the expected revision.
+- `writeMaintenanceRevision(env, write, append, options?)` runs the same chain
+  again at write time, then the atomic batch whose INSERT checks the revision
+  and the budget once more. A prepare is never an authorization by itself.
+
+`options.deferralBound` is `"delegated-7d"` (the default) or `"confirmed-31d"`.
+Under `"confirmed-31d"` a delegated revision may leave a joined deferral of up
+to 31 days (`CONFIRMED_MAX_DEFERRAL_MS`) and never longer;
+`maintenance_deferral_too_long` past 31 days holds under either bound, and the
+audit reference, the named-source rule, the 30-a-day budget and the batch are
+the same under both. The option is trusted and in-process: no request field,
+header, tool argument or grant sets it. No route, tool or relay of either
+Worker names it (a test scans both Workers' sources), the operator's route
+refuses a body that tries, and the MCP tool's closed arguments refuse it.
+Nothing passes `"confirmed-31d"` today. Slice S3 owns who may: its R2 confirm
+handler, after verifying a confirm that references the prepare's audit record.
+
+Also S3's, and not built:
+
+- the delegated audit record itself. S3 reserves the effect's audit id before
+  it calls the writer and passes it as `delegated-audit:<audit_id>`: the
+  prepare record's for an R2 confirm, the apply record's for an R1 call;
+- the delegation's `budget.writesPerDay`, counted over the common audit
+  records at the App chokepoint. It and the writer's own 30-a-day cap inside
+  its INSERT are two separate atomic guards, not one transaction;
+- the confirmation step itself.
 
 Beyond the seven-day bound a delegated revision is class R3 until the owner
 answers the plan's question 1, and stays the operator's in the UI; its target
-class is R2 (prepare/confirm) up to a 31-day ceiling, which does not exist
-yet. Not verified in production: no grant or delegation names a maintenance
-principal, CORE 0076 is not applied, and no MCP client has called these tools.
+class is R2 (prepare/confirm) up to the 31-day ceiling, for which the writer's
+prepare and option above exist and the confirm does not. Not verified in
+production: no grant or delegation names a maintenance principal, CORE 0076 is
+not applied, and no MCP client has called these tools.

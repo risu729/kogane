@@ -117,7 +117,12 @@ delegation executes yet every call is one `refused` record (`failed` for
 `delegated` record until slice S3, and nothing is relayed to the Processor.
 Its catalogue classes are R1 and, beyond the seven-day bound, R3; no record
 carries R3 today. A refused argument is not echoed: the record holds the code,
-never the reason text, URL or window the caller sent.
+never the reason text, URL or window the caller sent. The maintenance writer
+requires a delegated revision's decision reference to be
+`delegated-audit:<audit_id>`, naming the audit record that authorizes it, which
+slice S3 is to reserve before it calls the writer (the prepare record for an
+R2 confirm, the apply record for an R1 call); no such record or revision is
+written today ([schedules](schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3)).
 
 ### The envelope to the Processor
 

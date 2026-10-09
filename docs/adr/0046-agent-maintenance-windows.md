@@ -263,7 +263,8 @@ write, append)` stays the only code that writes a maintenance revision; it
   seven-day bound the writer refuses it (`maintenance_deferral_too_long`):
   it is R3 until the owner answers the plan's question 1, and the operator
   makes it in the UI. Its target class, R2 (prepare/confirm) up to a 31-day
-  ceiling, is not built: no prepare/confirm step exists (slice S3), and a
+  ceiling, is not usable: the writer's prepare and its trusted 31-day option
+  exist (the contract below), but no confirm step does (slice S3), and a
   deferral longer than 31 days stays the operator's in every case.
 - **Migration.** CORE 0067 never merged; it is renumbered CORE 0076 (the
   number this pull request took after main's 0075; #632 then took 0077, and
@@ -290,12 +291,38 @@ the ways ADR 0063 item 11 lists); and the Consequences' agent grant and
 are edited by the operator, or by the owner's own MCP principal holding the
 setting's capability once delegation exists.
 
+**The writer's contract for S3** (owner-approved, the same day). Three
+writer-side decisions give slice S3 a contract without executing anything:
+
+- A delegated revision must carry `decisionRef`
+  `delegated-audit:aud_<uuid>` — the audit record that authorizes it (ADR
+  0064's `audit_id`), which S3 reserves before it calls the writer: the prepare
+  record for an R2 confirm, the apply record for an R1 call. None, a survey
+  reference or any other shape is `invalid_request`, so a delegated revision
+  is never written without it; the column stores it whole. The operator's
+  rules are unchanged.
+- `prepareMaintenanceRevision(env, write, options?)` runs the write's
+  validation chain and answers its codes, the rule's current revision, a
+  deferral class (`within-7d`, `within-31d`, and for the operator only
+  `beyond-31d`) and the remaining budget, writing nothing and drawing no
+  random value; `currentMaintenanceRevision(db, ruleId)` is its
+  current-revision read. The write runs the same chain again.
+- `writeMaintenanceRevision` and `prepareMaintenanceRevision` take a trusted,
+  in-process `options.deferralBound`: `"delegated-7d"` (default) or
+  `"confirmed-31d"`, under which a delegated revision may leave a joined
+  deferral up to 31 days and never longer. No request field, header, tool
+  argument or grant sets it, and nothing passes `"confirmed-31d"` today; S3's
+  R2 confirm handler is to, after verifying a confirm that references the
+  prepare's audit record. The seven-day default, the operator (no bound), the
+  budget inside the INSERT and the batch are unchanged.
+
 Not done here, and why: delegated execution, the delegated audit record
-(`principal_kind` `delegated` with a `delegation_ref`), the delegation's
-`budget.writesPerDay` count and a delegated revision's `decision_ref`
-(`audit:<audit_id>`) are slice S3's; prepare/confirm and the R2 path up to 31
-days wait for S3 and the owner's answer to question 1. Until then no
-delegated revision can be written outside a test.
+(`principal_kind` `delegated` with a `delegation_ref`) and the reservation of
+its id, the delegation's `budget.writesPerDay` count at the App chokepoint (a
+separate atomic guard from the writer's own 30-a-day cap inside its INSERT,
+not one transaction with it), and the confirm step are slice S3's; when the R2
+path may first be used waits for the owner's answer to question 1. Until then
+no delegated revision can be written outside a test.
 
 Verification: synthetic only.
 `services/processor/test/schedule-agent-maintenance.test.ts` exercises the
@@ -305,7 +332,11 @@ reservation, a three-day window followed by exactly one collection under
 native alarms, the seven-day bound at its boundary (exactly seven days
 accepted, one millisecond more refused), the existing deferral cases, the
 budget and its query plan on the partial index without table statistics,
-closed reasons and actor shapes, the CHECK and its list against the code, the
+closed reasons and actor shapes, the closed decision reference per actor,
+prepare ≡ write for every refusal code and both bounds on a fresh store per
+case (prepare writes nothing and draws no random value), the deferral edges
+7d, 7d+1ms, 31d and 31d+1ms under each bound, the option set by no request,
+the CHECK and its list against the code, the
 read route's refusals, and the batch both ways (an appended record that fails
 leaves no revision; a revision that loses its version check inside the batch
 leaves no record). `services/app/test/schedule-tools.test.ts`, through the
