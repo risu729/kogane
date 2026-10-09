@@ -213,10 +213,10 @@ export function grantsHealth(env: Env): { usable: true } | { usable: false; prob
 /**
  * Builds the body. `status` is `ok` only when everything this deployment
  * actually depends on answered: CORE and its migrations, the DATA bucket, the
- * Processor, the grant configuration, and READ when the deployment reads it.
- * READ that is bound but not yet initialised is reported, and is not a failure
- * while the flag is off (docs/rollout.md §4). Unreadable grant lists are a
- * deployment that grades nobody, and a release must not certify one.
+ * Processor, the grant configuration, and READ. READ is required: a binding
+ * that does not answer fails this check. The retired `READ_PROJECTION_ENABLED`
+ * name is not read. Unreadable grant lists are a deployment that grades
+ * nobody, and a release must not certify one.
  */
 export async function healthBody(env: Env): Promise<{ status: number; body: unknown }> {
   const grants = grantsHealth(env);
@@ -224,7 +224,6 @@ export async function healthBody(env: Env): Promise<{ status: number; body: unkn
   const read = await d1Health(env.READ);
   const data = await bucketHealth(env.EVIDENCE);
   const processor = await processorHealth(env);
-  const readRequired = true;
   let capabilities: unknown = null;
   try {
     capabilities = await centralStoreCapabilities(env);
@@ -242,7 +241,7 @@ export async function healthBody(env: Env): Promise<{ status: number; body: unkn
     capabilities !== null &&
     processor["ok"] === true &&
     grants.usable &&
-    (!readRequired || read.ok);
+    read.ok;
   return {
     status: healthy ? 200 : 503,
     body: {
@@ -250,7 +249,7 @@ export async function healthBody(env: Env): Promise<{ status: number; body: unkn
       worker: "kogane-evidence-browser",
       releaseSha: releaseSha(env),
       core,
-      read: { ...read, required: readRequired },
+      read: { ...read, required: true },
       data,
       capabilities,
       grants,

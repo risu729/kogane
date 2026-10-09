@@ -7,11 +7,9 @@ export default defineConfig({
     cloudflareTest(async () => ({
       wrangler: { configPath: "./wrangler.jsonc" },
       miniflare: {
-        // U09: the runtime suite exercises the shared path, so the var the
-        // deployed config ships as "legacy" is overridden here. The legacy
-        // path is covered by the `test/` suite and by the unchanged code.
+        // The Worker does not read a collection-target var. Shared DATA is the
+        // only persist path, including this runtime suite.
         bindings: {
-          COLLECTION_TARGET: "shared",
           // Apply the actual operational schema used by all provider leases.
           SCHEDULE_TEST_MIGRATIONS: (
             await readD1Migrations(
