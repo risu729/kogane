@@ -1,6 +1,7 @@
 import { Container } from "@cloudflare/containers";
 import { storageState, worker, type HarnessEnv } from "./common";
 import { checkBackpressure } from "./backpressure-check";
+import { checkReaderLifetime } from "./reader-lifetime-check";
 import { compareBackpressure } from "./backpressure-compare";
 
 export class VerificationContainer extends Container<HarnessEnv> {
@@ -44,6 +45,15 @@ export class VerificationContainer extends Container<HarnessEnv> {
           rawFetch: (inner) => this.ctx.container!.getTcpPort(8080).fetch(inner),
           running: () => Boolean(this.ctx.container?.running),
           renewActivityTimeout: () => this.renewActivityTimeout(),
+          outerSignal: request.signal,
+        }),
+      );
+    if (path === "/reader-resume-check" || path === "/reader-cancel-check")
+      return Response.json(
+        await checkReaderLifetime({
+          arm: path === "/reader-resume-check" ? "resume" : "cancel",
+          fetchBoundary: (inner) => this.containerFetch(inner),
+          running: () => Boolean(this.ctx.container?.running),
           outerSignal: request.signal,
         }),
       );

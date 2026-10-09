@@ -1,6 +1,8 @@
 // Synthetic only: there is no outbound fetch, bank hostname, credential or dependency.
 export const BACKPRESSURE_CHUNK_BYTES = 64 * 1024;
 export const BACKPRESSURE_MAX_CHUNKS = 4096;
+export const READER_LIFETIME_FRAMES = 64;
+export const READER_LIFETIME_FRAME_BYTES = 64 * 1024;
 // Keep the synthetic HTTP socket alive through the deliberate 35s quiet window.
 // This does not change the Container's 30s idle policy or the driver's 120s request deadline.
 export const SYNTHETIC_IDLE_TIMEOUT_SECONDS = 60;
@@ -29,6 +31,39 @@ export function syntheticServer() {
     if (path === "/delay") {
       await new Promise((done) => setTimeout(done, 35_000));
       return Response.json({ completed: 1 });
+    }
+    if (path === "/reader-lifetime") {
+      streams++;
+      let frame = 0,
+        finished = false;
+      const finish = () => {
+        if (!finished) {
+          finished = true;
+          streams--;
+        }
+      };
+      return new Response(
+        new ReadableStream({
+          pull(controller) {
+            if (finished) return;
+            if (frame === READER_LIFETIME_FRAMES) {
+              finish();
+              controller.close();
+              return;
+            }
+            const bytes = new Uint8Array(READER_LIFETIME_FRAME_BYTES);
+            new DataView(bytes.buffer).setUint32(0, frame, true);
+            for (let offset = 4; offset < bytes.length; offset++)
+              bytes[offset] = (frame * 37 + offset * 13) & 255;
+            frame++;
+            controller.enqueue(bytes);
+          },
+          cancel: finish,
+        }),
+        {
+          headers: { "content-type": "application/octet-stream", "cache-control": "no-transform" },
+        },
+      );
     }
     if (path === "/backpressure") {
       streams++;

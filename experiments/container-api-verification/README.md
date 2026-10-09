@@ -101,10 +101,9 @@ credentials, workflow/job permissions and cleanup are outside this driver.
 
 Every phase verifies identity and persistent synthetic KV/SQL sentinels. All
 phases except `native_recovered` also verify concurrent startup and POST counts,
-a 35-second delayed response, a 40-second stream, and a 35-second paused consumer
-at the SDK/native controller response boundary with a bounded 256 MiB upstream
-cap and observed backpressure plateau,
-cancellation, stream failure, eventual idle stop, destroy/reallocation, SIGTERM,
+a 35-second delayed response, a 40-second stream, and separate 36-second paused
+reader resumption/cancellation checks at the SDK/native response boundary,
+subsequent idle stop and explicit restart, stream failure, destroy/reallocation, SIGTERM,
 nonzero exit and SDK alarm recreation where applicable. `native_recovered`
 verifies the same still-running process after a revision switch. The harness
 responses and driver reports contain closed codes, revisions,
@@ -113,41 +112,44 @@ The original SDK may still write its own internal runtime error messages;
 observability is disabled and no bank data, bearer key or API token reaches
 that SDK/container request. No global SDK logging override changes the baseline.
 
-The backpressure source emits fresh random 64 KiB chunks and sets
-`Cache-Control: no-transform` to avoid a zero-filled compression confounder.
-The required `/backpressure-check` request pauses the response body returned by
-the actual SDK `containerFetch` or native `ContainerController.fetch` inside the
-synthetic DO. It preserves the 4096-chunk cap, one-second initial sample,
-35-second plateau interval and lifetime/POST/process assertions. The process is
-checked before every restart-capable stats request. A bounded internal deadline
-and cancellation cleanup fit within the driver's existing 120-second request
-ceiling. The public response contains only a strictly validated finite report;
-no UUID, payload bytes or arbitrary diagnostic text is returned.
+The reader-lifetime gate uses an unpaced finite deterministic framed source
+through `GET /reader-resume-check` and `GET /reader-cancel-check`. The internal
+`/reader-lifetime` source contains 64 frames of 64 KiB each.
+It reads the first returned bytes from the actual SDK/native Response inside the
+DO, requires unread payload to remain, pauses for 36 seconds (at least 35
+measured) without an activity lease, and checks running state before
+any restart-capable Container request. One arm resumes, validates ordered bytes
+and EOF, and releases the reader. A separate arm cancels after the pause. Both
+must permit the normal idle stop under DO-only state observation and explicit
+restart. Bounded per-request observation and cleanup stay within the 120-second
+request ceiling. Public reports contain closed codes and finite counts, never
+UUIDs, payload bytes or arbitrary diagnostic text.
 
-The earlier public-client pause requested identity encoding and rejected an
-explicitly encoded response, but the SDK baseline still reached the 256 MiB cap
-in run 37882808848. This remains an unresolved public-path observation, not a
-passed gate. It does not identify which transport layer buffered the bytes.
-The in-DO check removes outer Worker, edge and client buffers from the measured
-boundary; it proves no end-to-end public backpressure, eviction or billing
-claim. Its active DO invocation may itself keep the DO resident, which is why
-separate Container running-state, idle, cancellation and recovery checks remain
-required. Run 37884921868 also exhausted the cap with the SDK response reader
-paused inside the DO. The controller-boundary gate therefore remains failed;
-this does not identify a buffering layer or establish unbounded buffering.
-Further diagnostic comparisons remain separate from acceptance results.
-After exactly this SDK baseline failure, the runner attempts one authenticated
-`/backpressure-compare` request. It repeats the unchanged SDK pause and compares
-it with direct `ctx.container.getTcpPort(8080).fetch()` using the same source,
-cap and timing. Both diagnostic observations receive an explicit SDK activity
-lease renewed every ten seconds, without Container traffic, so the raw port is
-not stopped merely because it bypasses SDK request tracking. The lease is
-cleared on exit and is never used by the acceptance check. Therefore this
-comparison can narrow transport behavior but cannot establish idle shutdown or
-wrapped-response lifetime. The closed report exposes bounded first-read bytes,
-source counts and boolean identity comparisons, never the process UUID or body.
-The original verification failure remains authoritative even if this separate
-diagnostic succeeds or fails; native/recovery/rollback do not proceed.
+The separate backpressure source still emits random 64 KiB chunks with a
+4096-chunk cap, identity encoding and origin `no-transform`. The earlier public
+pause reached that cap in run 37882808848, and the in-DO SDK pause reached it in
+run 37884921868. Run 37888089319 reproduced the SDK failure, then its separate
+comparison observed both SDK and direct `ctx.container.getTcpPort(8080).fetch()`
+reaching the cap on the same process: early counts 421 and 336, late counts 4096,
+first reads 1888 bytes, elapsed pauses 35000 ms, POST count 2 unchanged and
+cancellation complete in both arms. Both source streams finished.
+
+That comparison renewed SDK activity every ten seconds without Container
+traffic, preventing raw transport from stopping solely because it bypasses SDK
+request tracking. Its report was conclusive for the bounded comparison, but
+provides no idle or reader-lifetime proof. The plateau is not an observed
+baseline property and is replaced as the acceptance criterion by the direct
+reader-lifecycle checks above. Failed runs remain failures and did not advance
+native/recovery/rollback. A finite upstream producer may finish before its body
+is consumed, so a baseline `reader_process` failure would not by itself prove
+that the buffered body cannot resume; that result requires separate
+characterization. The original backpressure helpers and diagnostic route
+remain available; they are not relabelled as passed tests.
+
+Neither the replacement gate nor the comparison establishes upstream write
+blocking, memory bounds, public-path backpressure, eviction or billing. Its
+active DO invocation may itself keep the DO resident. Separate recovery and
+exact-version rollback checks remain required.
 
 Idle observations are bounded process-state checks. They do not establish
 billable runtime or DO eviction. Compare independently read aggregate billing

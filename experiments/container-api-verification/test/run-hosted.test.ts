@@ -173,7 +173,8 @@ test("driver output permits closed phase/counts only", () => {
         code: "verification_phase_complete",
         phase: "native",
         ...phaseCounts("native"),
-        idleObservedMs: 1,
+        idleObservedMs: 30_000,
+        cancelIdleObservedMs: 30_000,
       }),
       "native",
     ).phases,
@@ -463,7 +464,9 @@ test("orchestration builds once, pushes one exact tag, secret via stdin, all pha
             code: "verification_phase_complete",
             phase,
             ...phaseCounts(phase),
-            ...(phase === "native_recovered" ? {} : { idleObservedMs: 1 }),
+            ...(phase === "native_recovered"
+              ? {}
+              : { idleObservedMs: 30_000, cancelIdleObservedMs: 30_000 }),
           });
         }
         return "";
@@ -563,8 +566,16 @@ test("missing or zeroed phase checks cannot produce runtime success", () => {
     code: "verification_phase_complete",
     phase: "native",
     ...phaseCounts("native"),
-    idleObservedMs: 0,
+    idleObservedMs: 30_000,
+    cancelIdleObservedMs: 30_000,
   };
+  for (const field of ["idleObservedMs", "cancelIdleObservedMs"]) {
+    for (const invalid of [0, 19_999, 90_001, 1.5, "30_000"]) {
+      expect(() => driverReport(JSON.stringify({ ...good, [field]: invalid }), "native")).toThrow(
+        "verification_runner_driver_output",
+      );
+    }
+  }
   for (const name of Object.keys(phaseCounts("native"))) {
     const bad = { ...good, [name]: 7 };
     expect(() => driverReport(JSON.stringify(bad), "native")).toThrow(

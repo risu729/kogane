@@ -12,7 +12,11 @@ import {
 } from "node:fs";
 import { canonicalHex, canonicalUuid, canonicalImageRef } from "./identifiers.mjs";
 import { resolve } from "node:path";
-import { BACKPRESSURE_MAX_CHUNKS } from "./container/server.mjs";
+import {
+  BACKPRESSURE_MAX_CHUNKS,
+  READER_LIFETIME_FRAMES,
+  READER_LIFETIME_FRAME_BYTES,
+} from "./container/server.mjs";
 import { createSyntheticRequest } from "./http-diagnostics.mjs";
 import { waitHttpReady } from "./http-readiness.mjs";
 
@@ -333,6 +337,117 @@ export async function verifyBackpressureCheck({ request }) {
   if (keys !== "code" || !backpressureReasons.has(report.code)) closed("backpressure_report");
   closed(`backpressure_${report.code}`);
 }
+const readerReasons = new Set([
+  "timing",
+  "process",
+  "identity",
+  "posts",
+  "payload",
+  "stream",
+  "cancel",
+  "timeout",
+]);
+/** One 120s public GET; the DO validates the actual controller-returned reader. */
+export async function verifyReaderLifetimeCheck({ request, arm }) {
+  if (arm !== "resume" && arm !== "cancel") closed("reader_report");
+  const response = await request(
+    arm === "resume" ? "/reader-resume-check" : "/reader-cancel-check",
+  );
+  const reader = response.body?.getReader();
+  if (!reader) closed("reader_report");
+  let report,
+    complete = false;
+  try {
+    const parts = [];
+    let size = 0;
+    while (true) {
+      const part = await reader.read();
+      if (part.done) {
+        complete = true;
+        break;
+      }
+      size += part.value?.byteLength ?? 0;
+      if (size > 1024) closed("reader_report");
+      parts.push(part.value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    report = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    closed("reader_report");
+  } finally {
+    if (!complete) {
+      let timer;
+      try {
+        await Promise.race([
+          reader.cancel(),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error("cancel_timeout")), 1000);
+          }),
+        ]);
+      } catch {
+        /* Preserve the owned report failure. */
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+  }
+  if (
+    !report ||
+    typeof report !== "object" ||
+    Array.isArray(report) ||
+    typeof report.code !== "string"
+  )
+    closed("reader_report");
+  const keys = Object.keys(report).sort().join(",");
+  if (report.code === "pass") {
+    const total = READER_LIFETIME_FRAMES * READER_LIFETIME_FRAME_BYTES;
+    if (
+      keys !== "bytes,code,elapsedMs" ||
+      !Number.isSafeInteger(report.elapsedMs) ||
+      report.elapsedMs < 35_000 ||
+      report.elapsedMs > 110_000 ||
+      !Number.isSafeInteger(report.bytes) ||
+      report.bytes < 1 ||
+      (arm === "resume" ? report.bytes !== total : report.bytes >= total)
+    )
+      closed("reader_report");
+    return report;
+  }
+  if (keys !== "code" || !readerReasons.has(report.code)) closed("reader_report");
+  closed(`reader_${report.code}`);
+}
+/** Keep Container traffic before the reader gate, then observe only DO state until idle. */
+export async function verifyReaderIdleCycle({ arm, request, json, waitState, now = Date.now }) {
+  if ((await json("/state")).running !== 1) closed("reader_process");
+  let before;
+  try {
+    before = canonicalUuid((await json("/stats")).processIdentity);
+  } catch {
+    closed("reader_identity");
+  }
+  await verifyReaderLifetimeCheck({ request, arm });
+  const started = now();
+  await waitState((value) => value.running === 0);
+  const observed = now() - started;
+  if (!Number.isSafeInteger(observed) || observed < 20_000 || observed > 90_000)
+    closed("reader_idle");
+  const restarted = await json(
+    "/once",
+    "POST",
+    arm === "resume" ? "idle_restart" : "reader_cancel_restart",
+  );
+  try {
+    if (canonicalUuid(restarted?.processIdentity) === before) closed("reader_restart");
+  } catch {
+    closed("reader_restart");
+  }
+  return observed;
+}
 export async function verifyPhase({
   phase,
   temp,
@@ -372,7 +487,7 @@ export async function verifyPhase({
     concurrencyChecks: 0,
     longDelayChecks: 0,
     longStreamChecks: 0,
-    backpressureChecks: 0,
+    readerLifetimeChecks: 0,
     cancelChecks: 0,
     streamFailureChecks: 0,
     idleChecks: 0,
@@ -530,8 +645,6 @@ export async function verifyPhase({
   if (bytes !== 40 || Date.now() - streamStart < 30_000 || (await json("/stats")).posts !== 2)
     closed("stream");
   counts.longStreamChecks++;
-  await verifyBackpressureCheck({ request });
-  counts.backpressureChecks++;
   const canceled = (await request("/stream")).body?.getReader();
   if (!canceled) closed("cancel");
   await canceled.read();
@@ -549,12 +662,15 @@ export async function verifyPhase({
   }
   if (!failed) closed("stream_failure");
   counts.streamFailureChecks++;
-  // State polling never sends container traffic, starts a process or resets its idle timer.
-  const idleStarted = Date.now();
-  await waitState((value) => value.running === 0);
-  counts.idleChecks++;
-  counts.idleObservedMs = Date.now() - idleStarted;
-  await json("/once", "POST", "idle_restart");
+  counts.idleObservedMs = await verifyReaderIdleCycle({ arm: "resume", request, json, waitState });
+  counts.cancelIdleObservedMs = await verifyReaderIdleCycle({
+    arm: "cancel",
+    request,
+    json,
+    waitState,
+  });
+  counts.readerLifetimeChecks += 2;
+  counts.idleChecks += 2;
   await json("/destroy", "POST");
   if ((await json("/state")).running !== 0) closed("destroy");
   await json("/once", "POST", "destroy_restart");

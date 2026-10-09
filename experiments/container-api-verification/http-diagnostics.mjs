@@ -8,6 +8,8 @@ const routes = Object.freeze({
   "/stream": ["stream", "GET"],
   "/backpressure": ["backpressure", "GET"],
   "/backpressure-check": ["backpressure_check", "GET"],
+  "/reader-resume-check": ["reader_resume_check", "GET"],
+  "/reader-cancel-check": ["reader_cancel_check", "GET"],
   "/backpressure-compare": ["backpressure_compare", "GET"],
   "/stream-error": ["stream_error", "GET"],
   "/hold": ["hold", "GET"],
@@ -18,6 +20,7 @@ const routes = Object.freeze({
 const onceStages = Object.freeze([
   "concurrency",
   "idle_restart",
+  "reader_cancel_restart",
   "destroy_restart",
   "signal_restart",
   "exit_restart",

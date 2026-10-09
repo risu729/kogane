@@ -3,7 +3,7 @@
 - Owner: risu729
 - Started: 2026-10-05
 - Expires: 2026-10-12
-- Status: hosted SDK paused-reader gate failed; native and rollback gates pending.
+- Status: bounded SDK/raw comparison complete; reader-lifecycle parity, native and rollback gates pending.
 
 ## Question
 
@@ -17,12 +17,15 @@ Use only the fixed temporary Worker `kogane-container-api-verification`, its
 `VerificationContainer` class and one default/basic/APAC Container. Both source
 variants deny outbound Internet access. The synthetic image has no bank code,
 credentials or VPC binding. Every endpoint authenticates before DO lookup.
-The paused-consumer gate observes the actual SDK/native response boundary inside
-the DO with the same capacity and timing limits. The earlier SDK public-client
-pause exhausted 256 MiB, and the in-DO SDK pause subsequently exhausted the same
-cap in run 37884921868. Both observations remain unresolved; neither is a pass.
-Separate diagnostic comparisons may narrow the cause but cannot satisfy the
-existing acceptance gate.
+The reader-lifetime gate observes the actual SDK/native response boundary inside
+the DO with unpaced finite frames and no activity lease. Separate pause/resume
+and pause/cancel checks must preserve the running process and permit normal
+idle stop and restart after release. The earlier public and in-DO SDK pauses
+exhausted 256 MiB. A conclusive SDK/raw comparison in run 37888089319 also
+exhausted that cap on both paths under a diagnostic activity lease. Those
+failed plateau observations remain recorded; they do not identify a buffering
+layer or prove lifetime, idle behavior or memory bounds. The revised criterion
+must pass on the actual hosted SDK and native implementations before merge.
 A separate GitHub environment and a dedicated scoped token isolate this check
 from production credentials. The normal CI and production release never deploy
 this experiment. The manual verification job requires explicit selection.

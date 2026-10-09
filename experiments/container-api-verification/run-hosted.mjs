@@ -48,6 +48,17 @@ const DRIVER_CODES = new Set(
     "backpressure_progress",
     "backpressure_timeout",
     "backpressure_report",
+    "reader_report",
+    "reader_timing",
+    "reader_process",
+    "reader_identity",
+    "reader_posts",
+    "reader_payload",
+    "reader_stream",
+    "reader_cancel",
+    "reader_timeout",
+    "reader_idle",
+    "reader_restart",
     "baseline",
     "cancel",
     "concurrency",
@@ -432,7 +443,7 @@ export function phaseCounts(phase) {
     "concurrencyChecks",
     "longDelayChecks",
     "longStreamChecks",
-    "backpressureChecks",
+    "readerLifetimeChecks",
     "cancelChecks",
     "streamFailureChecks",
     "idleChecks",
@@ -440,7 +451,7 @@ export function phaseCounts(phase) {
     "signalChecks",
     "nonzeroExitChecks",
   ])
-    counts[key] = recovered ? 0 : 1;
+    counts[key] = recovered ? 0 : ["readerLifetimeChecks", "idleChecks"].includes(key) ? 2 : 1;
   counts.recoveryChecks = recovered ? 1 : 0;
   counts.sdkAlarmChecks = ["baseline_sdk", "rollback_sdk"].includes(phase) ? 1 : 0;
   return counts;
@@ -457,7 +468,7 @@ export function driverReport(text, phase) {
     "code",
     "phase",
     ...Object.keys(expected),
-    ...(phase === "native_recovered" ? [] : ["idleObservedMs"]),
+    ...(phase === "native_recovered" ? [] : ["idleObservedMs", "cancelIdleObservedMs"]),
   ];
   if (
     !["baseline_sdk", "native", "native_unmonitored", "native_recovered", "rollback_sdk"].includes(
@@ -468,7 +479,12 @@ export function driverReport(text, phase) {
     Object.keys(item).sort().join(",") !== keys.sort().join(",") ||
     Object.entries(expected).some(([name, value]) => item[name] !== value) ||
     (phase !== "native_recovered" &&
-      (!Number.isSafeInteger(item.idleObservedMs) || item.idleObservedMs < 0))
+      (!Number.isSafeInteger(item.idleObservedMs) ||
+        item.idleObservedMs < 20_000 ||
+        item.idleObservedMs > 90_000 ||
+        !Number.isSafeInteger(item.cancelIdleObservedMs) ||
+        item.cancelIdleObservedMs < 20_000 ||
+        item.cancelIdleObservedMs > 90_000))
   )
     fail("driver_output");
   return item;

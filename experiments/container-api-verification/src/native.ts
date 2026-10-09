@@ -5,6 +5,7 @@ import {
 } from "../../../packages/collection/src/container-controller";
 import { storageState, worker, type HarnessEnv } from "./common";
 import { checkBackpressure } from "./backpressure-check";
+import { checkReaderLifetime } from "./reader-lifetime-check";
 
 export class VerificationContainer extends DurableObject<HarnessEnv> {
   private controller: ContainerController;
@@ -70,6 +71,15 @@ export class VerificationContainer extends DurableObject<HarnessEnv> {
         signaled: this.signaled,
         exitSeven: this.exitSeven,
       });
+    if (path === "/reader-resume-check" || path === "/reader-cancel-check")
+      return Response.json(
+        await checkReaderLifetime({
+          arm: path === "/reader-resume-check" ? "resume" : "cancel",
+          fetchBoundary: (inner) => this.controller.fetch(inner),
+          running: () => Boolean(this.ctx.container?.running),
+          outerSignal: request.signal,
+        }),
+      );
     if (path === "/backpressure-check")
       return Response.json(
         await checkBackpressure({

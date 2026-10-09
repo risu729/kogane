@@ -76,27 +76,38 @@ released on EOF/cancel/error. The long native monitor is not put in waitUntil.
 The explicit idle alarm avoids relying on DO eviction to stop the process;
 actual Container timing and resource usage still require hosted verification.
 
-### Boundary of the hosted backpressure check
+### Boundary of the hosted reader-lifetime check
 
-The gating paused-consumer check observes the response returned by the actual
-SDK `containerFetch` or native `ContainerController.fetch` inside the synthetic
-Durable Object. It reads one chunk, samples after one second, then pauses for
-35 seconds. Both implementations use the same random 64 KiB source, 4096-chunk
-cap, process identity, stream/POST counts and unchanged producer-count check.
-The process must already be running before each stats read, because a stats
-request could restart a stopped process. The reader is cancelled on every exit.
-The check does not hold `blockConcurrencyWhile` across the pause.
+The migration gate observes the response returned by the actual SDK
+`containerFetch` or native `ContainerController.fetch` inside the synthetic
+Durable Object. It uses an unpaced finite sequence of deterministic frames,
+reads the first returned bytes and pauses for 36 seconds (at least 35 measured). There is no activity-renewal
+lease and no producer delay intended to keep the request alive. The process
+must still be running before any subsequent Container request can restart it.
+Resuming must deliver all remaining frames in order and reach EOF. A separate
+arm cancels after the pause. Both operations have bounded cleanup, followed by
+DO-only observations of normal idle shutdown and explicit restart checks.
 
-This replaces the public-client pause as the controller migration gate. The
-public SDK baseline exhausted the 256 MiB cap even after random chunks, identity
-encoding and `no-transform` were added. That is an unresolved observation of the
-public path; it is not a passed test and does not identify the buffering layer.
-Pausing at the controller boundary removes outer Worker, edge and client buffers
-from this specific measurement. A pass establishes wrapped-response lifetime
-and upstream producer blocking at that boundary only. The in-DO invocation also
-keeps the DO resident, so it does not establish eviction, billing or end-to-end
-public slow-consumer equivalence. Independent idle, cancellation and recovery
-checks remain required; bank/browser/VPC compatibility is a separate limit.
+The earlier no-progress backpressure plateau was a proposed proxy for this
+lifecycle contract, not an established property of the SDK baseline. Hosted
+run 37888089319 observed both SDK and raw port readers exhausting the same
+256 MiB source during a pause, even at the in-DO boundary. Its explicit
+activity lease makes that comparison unsuitable as lifetime or idle evidence.
+We retain the source, diagnostic and failed observations, and replace the
+plateau acceptance condition with direct reader-lifecycle parity checks.
+A changed test is not itself a pass: SDK, native, recovery and exact SDK-version
+rollback must execute successfully under the new criterion before merge. A finite
+producer may complete before its returned body is consumed; that body could
+remain resumable after the process stops. Therefore a baseline `reader_process`
+failure establishes only that the required process-lifetime condition was not
+met. It is not evidence that the buffered reader is broken and requires separate
+characterization before changing the criterion.
+
+A successful check establishes only response lifetime, ordered resumption,
+cancellation and subsequent idle behavior at this boundary. It does not prove
+upstream write blocking, memory bounds, end-to-end public slow-consumer behavior,
+DO eviction or billing equivalence. The invocation itself can keep the DO
+resident. Bank/browser/VPC compatibility remains a separate limit.
 
 ## Consequences
 
@@ -181,13 +192,25 @@ SDK activity lease. Renewing the existing SDK idle deadline without Container
 traffic makes raw transport observation possible across the 35-second pause;
 this lease is absent from acceptance checks and provides no idle or lifetime
 proof. Both comparisons retain the source, cap and timing limits.
+The comparison at `7b97d481`
+([run 37888089319](https://github.com/risu729/kogane/actions/runs/37888089319))
+reproduced the original SDK gate failure and then completed both diagnostic
+arms. Each read 1888 bytes first and paused for 35 seconds. The SDK source count
+advanced from 421 to 4096 chunks; the raw port source count advanced from 336 to 4096. Both retained the same running process and unchanged POST count of 2,
+finished their source streams and completed reader cancellation. The report
+was conclusive for this bounded comparison under its explicit activity lease.
+Thus the no-progress plateau is not an available baseline property of either
+observed path. This does not identify which layer buffers, prove unbounded
+memory, or provide reader-lifetime/idle evidence. The original gate still failed
+and this run did not execute native, recovery or rollback verification.
 All four cleanup checks passed for these attempts; separate API reads confirmed
 Worker, application and namespace absence. The runner uses canonical OCI manifest HEAD for registry
 ownership and absence, and shares the existing rollout deadline with public
 HTTP readiness checks. Normal CI and CodeQL passed on the earlier reviewed
 head `1f393a205`; current-head checks remain required.
-The diagnostic follow-up preserves the existing backpressure gates and observes
-DO-only process state before a stats request can auto-restart a stopped process.
+The diagnostic follow-up preserved the original backpressure gate. The subsequent
+reader-lifetime criterion observes DO-only process state before a request can
+auto-restart a stopped process and retains the failed diagnostic evidence.
 These attempts do not establish runtime equivalence. Final CI and the following
 runtime gates are still pending:
 
