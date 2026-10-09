@@ -1,6 +1,6 @@
 # ADR 0049: Keep the displayed and the computed reward expiry apart, each with its basis
 
-- Status: proposed until this PR merges; accepted upon merge
+- Status: accepted
 - Date: 2026-10-08
 - Issue: part of #554 (roadmap Phase 10)
 

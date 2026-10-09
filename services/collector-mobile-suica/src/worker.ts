@@ -1,5 +1,6 @@
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
+  scheduledFailure,
   scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
@@ -391,7 +392,7 @@ export async function alarmCollection(
   try {
     const outcome = await runCollection(env, tokyoDate(new Date()));
     return scheduledResult({ ...outcomeManifest(outcome), terminal: outcome.terminal });
-  } catch {
-    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  } catch (error) {
+    return scheduledFailure(error);
   }
 }

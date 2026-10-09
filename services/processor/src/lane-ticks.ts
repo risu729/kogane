@@ -152,6 +152,12 @@ export const LANE_TICK_COUNTS = {
     "retried",
     "failed",
     "awaiting",
+    "started",
+    "declined",
+    "tracked",
+    "published",
+    "unpublished",
+    "abandoned",
   ]),
   decision_outbox: countsOf<OutboxDispatchResult>([
     "claimed",
