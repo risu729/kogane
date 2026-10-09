@@ -612,3 +612,16 @@ describe("no preview lane and no collector secret in automation (G5-10, G5-17)",
     expect(automationViolations([{ file: "x.yml", text }], [])).toHaveLength(1);
   });
 });
+
+test("Container total postcheck step caps retain serial gates and the 60-minute job cap", () => {
+  expect(deployWorkflow).toContain("timeout-minutes: 60");
+  const steps = workflowSteps(deployWorkflow);
+  for (const name of ["globalpass-worker", "sbi-shinsei-worker", "st-george-worker"]) {
+    const step = steps.find((entry) => entry.body.includes(`id: verify-container-${name}`))!;
+    expect(step).toBeDefined();
+    expect(step.body).toContain("timeout-minutes: 11");
+    expect(step.body).toContain(`post ${name}`);
+    expect(step.body).not.toContain("continue-on-error");
+  }
+  expect(deployWorkflow).not.toContain("actions: write");
+});
