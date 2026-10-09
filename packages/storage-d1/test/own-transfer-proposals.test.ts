@@ -234,6 +234,19 @@ describe("own_transfer_proposals", () => {
     const proposal = run.proposals[0]!;
     expect(() =>
       ownTransferProposalWrite({
+        proposal: {
+          ...proposal,
+          debit: {
+            ...proposal.debit,
+            evidenceRef: { ...proposal.debit.evidenceRef, id: "transaction:9" },
+          },
+        },
+        manifest: run.manifest,
+        now: NOW,
+      }),
+    ).toThrow(RangeError);
+    expect(() =>
+      ownTransferProposalWrite({
         proposal: { ...proposal, status: "needs_review" },
         manifest: run.manifest,
         now: NOW,

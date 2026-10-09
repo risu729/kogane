@@ -32,7 +32,7 @@ import {
   type IdentityRefusal,
 } from "./economic-contract.ts";
 import { TRANSACTION_FAMILY_REGISTRY_VERSION, transactionFamilyEntry } from "./event-families.ts";
-import type { SourceFactRef } from "./events.ts";
+import { validSourceFactRef, type SourceFactRef } from "./events.ts";
 import { hasExactKeys, isArrayOf, isOneOf, isRecord, isSafeInt, isText } from "./guards.ts";
 import { humanAdoptedRowIdentity } from "./row-identity.ts";
 import { daysBetween, parseLocalDate } from "./time.ts";
@@ -611,6 +611,8 @@ export function validOwnTransferProposal(value: unknown): value is OwnTransferPr
     ]) &&
     isSafeInt(leg.observationId, 1) &&
     isSafeInt(leg.parseRunId, 1) &&
+    validSourceFactRef(leg.evidenceRef) &&
+    sameRef(leg.evidenceRef, transactionRowRef(leg.observationId, leg.parseRunId)) &&
     validConsumptionKey(leg.key) &&
     validAliasClass(leg.aliasClass) &&
     isText(leg.accountId, 256) &&
@@ -651,6 +653,10 @@ export function validOwnTransferProposal(value: unknown): value is OwnTransferPr
   )
     return false;
   return true;
+}
+
+function sameRef(a: SourceFactRef, b: SourceFactRef): boolean {
+  return a.kind === b.kind && a.id === b.id && a.revision === b.revision;
 }
 
 function compareText(a: string, b: string): number {
