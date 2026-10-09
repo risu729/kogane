@@ -25,7 +25,7 @@ env:
 jobs:
   checks:
     name: Checks
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
       contents: read # for checkout
@@ -71,7 +71,7 @@ jobs:
           retention-days: 14
   processor:
     name: Processor (${{ matrix.shard }}/2)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
       contents: read # for checkout
@@ -117,7 +117,7 @@ jobs:
       - checks
       - processor
     if: ${{ always() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}
     steps:
@@ -133,7 +133,7 @@ jobs:
     needs:
       - ci-check
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       actions: read # Required by actions-timeline to read this workflow run's jobs.
