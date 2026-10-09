@@ -22,7 +22,7 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { AGENT_TOOL_NAMES } from "../src/agent-service";
+import { AGENT_TOOL_NAMES, RECONSTRUCTED_STATE_TOOL_NAME } from "../src/agent-service";
 import { principalFor } from "../src/grants";
 import { HttpError } from "../src/http";
 import { opsContext } from "../src/ops-api";
@@ -59,6 +59,15 @@ function grant(
 function grants(table: Record<string, unknown>): Record<string, string> {
   return { AGENT_API_GRANTS: JSON.stringify(table) };
 }
+/**
+ * What this deployment publishes on `/mcp` to every grant: the agent tools
+ * and, because this store has the reported state's views, the reconstructed
+ * state's read. The purchase explanation joins them only with the event
+ * reader flag on.
+ */
+const PUBLISHED = [...AGENT_TOOL_NAMES, RECONSTRUCTED_STATE_TOOL_NAME];
+/** A valid reconstructed-state request for an account the store does not hold. */
+const RECONSTRUCTED = { account: "acct-mcp-synthetic", from: "2026-03-01", to: "2026-03-31" };
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let strangerKeys: Awaited<ReturnType<typeof generateKeyPair>>;
@@ -319,7 +328,7 @@ describe("a client connects through the MCP application, in either protocol era"
     expect(acknowledged.status).toBe(202);
     expect(await acknowledged.text()).toBe("");
 
-    expect(await listTools({ environment })).toEqual([...AGENT_TOOL_NAMES]);
+    expect(await listTools({ environment })).toEqual(PUBLISHED);
     const capabilities = await callTool("kogane.capabilities", {}, { environment });
     expect(capabilities.isError).toBe(false);
     expect(capabilities.structuredContent).toMatchObject({
@@ -359,9 +368,7 @@ describe("a client connects through the MCP application, in either protocol era"
     expect(discovered["supportedVersions"]).toContain(MODERN);
     expect(discovered["capabilities"]).toMatchObject({ tools: {} });
     const listed = await result(await modern("tools/list", {}, { environment }));
-    expect((listed["tools"] as { name: string }[]).map((tool) => tool.name)).toEqual([
-      ...AGENT_TOOL_NAMES,
-    ]);
+    expect((listed["tools"] as { name: string }[]).map((tool) => tool.name)).toEqual(PUBLISHED);
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date());
     const current = (await result(
@@ -485,7 +492,7 @@ describe("a client connects through the MCP application, in either protocol era"
       description: string;
       inputSchema: Record<string, any>;
     }[];
-    expect(tools.length).toBe(AGENT_TOOL_NAMES.length + 1);
+    expect(tools.length).toBe(PUBLISHED.length + 1);
     for (const tool of tools) {
       expect(tool.name).toMatch(/^[A-Za-z0-9_.-]{1,128}$/u);
       expect(tool.description.length).toBeLessThanOrEqual(2048);
@@ -530,6 +537,16 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
       code: "unauthorized",
       refs: ["capability:records.read"],
     });
+    // The whole-store read tools need records.read, which only the operator's
+    // bare-subject entry holds.
+    for (const [name, args] of [
+      [RECONSTRUCTED_STATE_TOOL_NAME, RECONSTRUCTED],
+      ["kogane.instruments.candidates", {}],
+    ] as const) {
+      const refused = await callTool(name, args, { environment: HOSTILE });
+      expect(refused.isError, name).toBe(true);
+      expect(refused.structuredContent, name).toMatchObject({ code: "unauthorized" });
+    }
     const before = await relationCount();
     const proposed = await callTool("kogane.reconcile.propose", proposal(), {
       environment: HOSTILE,
@@ -568,7 +585,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
   });
 
   it("never offers an operations tool on /mcp, and refuses one from the caller object", async () => {
-    expect(await listTools({ environment: HOSTILE })).toEqual([...AGENT_TOOL_NAMES]);
+    expect(await listTools({ environment: HOSTILE })).toEqual(PUBLISHED);
     const before = await opsRowCount();
     for (const [name, args] of [
       ["kogane.ops.collection.request", COLLECTION],
@@ -693,6 +710,11 @@ describe("a token minted for MCP reaches no other route, and /mcp takes no other
       ["GET", "/api/meta", undefined],
       ["GET", "/api/identity/accounts?offset=0", undefined],
       ["GET", "/api/identity/instrument-candidates", undefined],
+      [
+        "GET",
+        "/api/v2/reconstructed-state?account=acct-x&from=2026-03-01&to=2026-03-31",
+        undefined,
+      ],
       ["GET", "/api/v2/query?intent=coverage", undefined],
       ["GET", `/api/evidence/v1/runs/r_1/artifacts/a_${String(artifactId)}/raw`, undefined],
       ["POST", "/api/agent/v1/capabilities", {}],
@@ -858,7 +880,7 @@ describe("tools under each grant shape", () => {
       const environment = grants({ [AGENT]: grant(capabilities) });
       // The list describes this deployment; the grant is enforced on the call
       // and described by kogane.capabilities.
-      expect(await listTools({ environment })).toEqual([...AGENT_TOOL_NAMES]);
+      expect(await listTools({ environment })).toEqual(PUBLISHED);
       const report = await callTool("kogane.capabilities", {}, { environment });
       expect(report.structuredContent["capabilities"]).toEqual(capabilities);
       const expected: [string, unknown, string][] = [
@@ -877,6 +899,23 @@ describe("tools under each grant shape", () => {
             refs: [`capability:${requires}`],
           });
         }
+      }
+      // The reconstructed state's read needs records.read over the whole store.
+      const reconstructed = await callTool(RECONSTRUCTED_STATE_TOOL_NAME, RECONSTRUCTED, {
+        environment,
+      });
+      if (capabilities.includes("records.read")) {
+        // Past the grant: the request is read, and the account is unknown here.
+        expect(reconstructed.structuredContent).toMatchObject({
+          code: "evidence_restricted",
+          refs: ["refusal:unknown_account", "account"],
+        });
+      } else {
+        expect(reconstructed.isError).toBe(true);
+        expect(reconstructed.structuredContent).toMatchObject({
+          code: "unauthorized",
+          refs: ["refusal:capability_missing", "capability:records.read"],
+        });
       }
       const before = await relationCount();
       const proposed = await callTool(
@@ -1205,6 +1244,7 @@ describe("scope covers every byte of every answer (matrix 5, 6)", () => {
       ["kogane.purchases.explain", {}],
       ["kogane.instruments.candidates", {}],
       ["kogane.instruments.candidates", { view: "separated" }],
+      [RECONSTRUCTED_STATE_TOOL_NAME, RECONSTRUCTED],
     ];
     for (const [name, args] of calls) {
       const outcome = await callTool(name, args, { environment });
