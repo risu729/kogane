@@ -564,6 +564,39 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
       ]),
     ).toEqual([["mcp", "mcp.request", "agent_api_not_configured"]]);
   });
+
+  it("a proposal whose audit record cannot be written is not stored either", async () => {
+    const rows = async () =>
+      (await env.DB.prepare(
+        "SELECT (SELECT count(*) FROM decision_revisions) AS decisions,(SELECT count(*) FROM audit_records) AS records",
+      ).first<{ decisions: number; records: number }>())!;
+    const before = await rows();
+    // A synthetic trigger makes every audit insert raise, as a record the
+    // table refused would: the proposal's batch must be rolled back with it.
+    await env.DB.prepare(
+      "CREATE TRIGGER review_audit_write_fails BEFORE INSERT ON audit_records BEGIN SELECT RAISE(ABORT,'synthetic_audit_failure'); END",
+    ).run();
+    let answer: { status: number; body: unknown };
+    try {
+      const proposed = await call("/api/agent/v1/reconcile.propose", {
+        subject: AGENT,
+        body: {
+          kind: "same_account",
+          from: `source_account:${sourceAccounts[0]}`,
+          to: `source_account:${sourceAccounts[1]}`,
+          evidenceRefs: [`fetch_artifact:${artifactId}`],
+          reason: "synthetic proposal whose record fails",
+          method: "ai",
+        },
+      });
+      answer = { status: proposed.response.status, body: await proposed.response.json() };
+    } finally {
+      await env.DB.prepare("DROP TRIGGER review_audit_write_fails").run();
+    }
+    // The proposal tool answers any failed append with its existing code.
+    expect(answer).toMatchObject({ status: 409, body: { code: "idempotency_conflict" } });
+    expect(await rows()).toEqual(before);
+  });
 });
 
 describe("the operations MCP tools (mcp)", () => {

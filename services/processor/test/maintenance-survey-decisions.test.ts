@@ -544,3 +544,106 @@ test("an acceptance whose decision row fails writes neither the revision nor the
     expect(await records()).toBe(1);
   }
 }, 60000);
+
+/** Rows of one rule, the source's provenance, the proposal's decision and its audit records. */
+async function decisionState(env: Env, ruleId: string, proposalId: number) {
+  return {
+    revisions: await env.DB.prepare(
+      "SELECT count(*) AS n FROM provider_maintenance_rules WHERE id=?",
+    )
+      .bind(ruleId)
+      .first<number>("n"),
+    reference: await env.DB.prepare(
+      "SELECT status,reference_url,verified_at FROM provider_maintenance_references WHERE source='mizuho-bank'",
+    ).first(),
+    decision: await env.DB.prepare(
+      "SELECT decision,actor FROM maintenance_survey_decisions WHERE proposal_id=?",
+    )
+      .bind(proposalId)
+      .first(),
+    records: await env.DB.prepare(
+      "SELECT count(*) AS n FROM audit_records WHERE target_ref=? AND result='applied'",
+    )
+      .bind(`maintenance-survey-proposal:${proposalId}`)
+      .first<number>("n"),
+  };
+}
+
+test("an acceptance raced by another decision rolls its revision back with it", async () => {
+  const { env } = world();
+  const now = Date.parse("2026-10-08T00:00:00.000Z");
+  await survey(env, "毎週木曜日 1:00～2:00", now);
+  const proposal = (await newestProposal(env))!;
+  const ruleId = proposal.rule_id ?? proposedRuleId("mizuho-bank", proposal.id);
+  const before = await decisionState(env, ruleId, proposal.id);
+  expect(before).toMatchObject({ decision: null, records: 0 });
+  // Another operator's decision lands after this acceptance read the proposal
+  // as undecided and before its batch runs.
+  const racing = {
+    ...env,
+    DB: new Proxy(env.DB, {
+      get(target, key) {
+        if (key === "batch")
+          return async (statements: D1PreparedStatement[]) => {
+            await target
+              .prepare(
+                "INSERT INTO maintenance_survey_decisions(proposal_id,decision,actor,decided_at) VALUES(?,'rejected','other-operator@example.test','2026-10-08T00:00:01.000Z')",
+              )
+              .bind(proposal.id)
+              .run();
+            return target.batch(statements);
+          };
+        const value = Reflect.get(target, key, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }),
+  } as Env;
+  const response = await decide(racing, proposal.id, "accept");
+  expect([response.status, ((await response.json()) as { error: string }).error]).toEqual([
+    409,
+    "proposal_already_decided",
+  ]);
+  // The revision and its provenance were rolled back with the refused
+  // decision row; the other operator's decision stands, and nothing recorded
+  // this acceptance.
+  expect(await decisionState(env, ruleId, proposal.id)).toEqual({
+    ...before,
+    decision: { decision: "rejected", actor: "other-operator@example.test" },
+  });
+}, 60000);
+
+test("a survey decision whose audit record cannot be written writes neither decision nor revision", async () => {
+  const { env } = world();
+  const now = Date.parse("2026-10-08T00:00:00.000Z");
+  await survey(env, "毎週金曜日 1:00～2:00", now);
+  const proposal = (await newestProposal(env))!;
+  const ruleId = proposal.rule_id ?? proposedRuleId("mizuho-bank", proposal.id);
+  const before = await decisionState(env, ruleId, proposal.id);
+  // A synthetic trigger makes every audit insert raise, as a record the table
+  // refused would.
+  await env.DB.prepare(
+    "CREATE TRIGGER review_audit_write_fails BEFORE INSERT ON audit_records BEGIN SELECT RAISE(ABORT,'synthetic_audit_failure'); END",
+  ).run();
+  try {
+    const rejected = await decide(env, proposal.id, "reject");
+    expect([rejected.status, ((await rejected.json()) as { error: string }).error]).toEqual([
+      503,
+      "scheduling_unavailable",
+    ]);
+    const accepted = await decide(env, proposal.id, "accept");
+    expect([accepted.status, ((await accepted.json()) as { error: string }).error]).toEqual([
+      503,
+      "decision_record_failed",
+    ]);
+  } finally {
+    await env.DB.prepare("DROP TRIGGER review_audit_write_fails").run();
+  }
+  expect(await decisionState(env, ruleId, proposal.id)).toEqual(before);
+  // Once the record can be written, the acceptance applies once, with it.
+  expect((await decide(env, proposal.id, "accept")).status).toBe(200);
+  expect(await decisionState(env, ruleId, proposal.id)).toMatchObject({
+    revisions: before.revisions! + 1,
+    decision: { decision: "accepted", actor: OPERATOR },
+    records: 1,
+  });
+}, 60000);

@@ -25,6 +25,7 @@ import {
   type ChangePlan,
   type CommandStore,
   type MutationInput,
+  type OperationCall,
   type Principal,
 } from "../../../packages/application/src/index.ts";
 import { balanceProjectionOutboxProcessor } from "../src/balance-projection-job.ts";
@@ -1332,3 +1333,85 @@ test("a commit whose guard fails writes neither the effect nor its record; a rac
   expect(twins.filter((call) => call.recorded)).toHaveLength(1);
   expect(await auditRows("idempotency_key='op-audit-resend'")).toHaveLength(1);
 });
+
+test("an audit record that cannot be written rolls back the plan, approval or commit it records", async () => {
+  const mapping = await seedParse(245, "smbc-bank:audit-refused");
+  const targetId = await target("target-audit-refused");
+  // A synthetic trigger makes every audit insert raise, as a record the table
+  // refused would: the writer's whole batch must go with it.
+  const failing = async <T>(work: () => Promise<T>): Promise<T> => {
+    await db
+      .prepare(
+        "CREATE TRIGGER review_audit_write_fails BEFORE INSERT ON audit_records BEGIN SELECT RAISE(ABORT,'synthetic_audit_failure'); END",
+      )
+      .run();
+    try {
+      return await work();
+    } finally {
+      await db.prepare("DROP TRIGGER review_audit_write_fails").run();
+    }
+  };
+  const records = (await auditRows()).length;
+  const before = await counts();
+  const payload = {
+    subject: "account",
+    referenceId: mapping.ref,
+    targetId,
+    reason: "operator corrected the mapping",
+  };
+  await expect(
+    failing(() =>
+      createPlan(
+        "identity.assign",
+        payload,
+        {
+          actor: operator,
+          baseContextId: "identity-current-v1",
+          now: NOW,
+          ttlSeconds: 900,
+          audit: testCall("command.plan", operator.id),
+        },
+        store,
+      ),
+    ),
+  ).rejects.toThrow();
+  expect(await counts()).toEqual(before);
+  const plan = await planFor(mapping.ref, targetId);
+  const planned = await counts();
+  await expect(
+    failing(() =>
+      approve(store, {
+        planId: plan.planId,
+        planDigest: plan.planDigest,
+        actor: operator,
+        scope: [],
+        ttlSeconds: 600,
+        now: NOW,
+        audit: testCall("command.approve", operator.id),
+      }),
+    ),
+  ).rejects.toThrow();
+  expect(await counts()).toEqual(planned);
+  const approval = await approveFor(plan);
+  const approved = await counts();
+  const commitOnce = (audit: OperationCall) =>
+    commit(store, {
+      operationId: "op-audit-refused",
+      principal: operator,
+      planId: plan.planId,
+      approvalId: approval.approvalId,
+      planners: changeMutationPlanners(db),
+      now: NOW,
+      audit,
+    });
+  await expect(
+    failing(() => commitOnce(testCall("command.commit", operator.id))),
+  ).rejects.toThrow();
+  expect(await counts()).toEqual(approved);
+  expect((await auditRows()).length).toBe(records);
+  // Once the record can be written, the same commit applies with its record.
+  const audit = testCall("command.commit", operator.id);
+  expect((await commitOnce(audit)).ok).toBe(true);
+  expect(audit.recorded).toBe(true);
+  expect(await auditRows("idempotency_key='op-audit-refused'")).toHaveLength(1);
+}, 60_000);

@@ -252,3 +252,78 @@ test("the overflow lane runs on D1: one aggregate per ended day's counter, then 
     diff_json: '{"kind":"overflow","of":"read","count":12,"cap":2000}',
   });
 }, 60_000);
+
+test("a record that cannot be written leaves no job revision, maintenance revision or release", async () => {
+  const count = async (sql: string, ...binds: unknown[]) =>
+    (await env.DB.prepare(sql)
+      .bind(...binds)
+      .first<number>("n"))!;
+  const lease = "4e1a2b3c-0000-4000-8000-000000000009";
+  await env.DB.prepare(
+    "INSERT OR REPLACE INTO collection_execution_leases(source,lease_ref,started_at) VALUES('mizuho-bank',?,'2026-03-03T00:00:00.000Z')",
+  )
+    .bind(lease)
+    .run();
+  const revision = await scheduleRevision("vpass");
+  const revisionRows = await count(
+    "SELECT count(*) AS n FROM collection_schedule_revisions WHERE schedule_id='vpass'",
+  );
+  const reference = await env.DB.prepare(
+    "SELECT reference_url FROM provider_maintenance_references WHERE source='vpass'",
+  ).first<string>("reference_url");
+  const stored = (await records()).length;
+  // A synthetic trigger makes every audit insert raise, as a record the table
+  // refused would: each writer's batch must be rolled back with it.
+  await env.DB.prepare(
+    "CREATE TRIGGER review_audit_write_fails BEFORE INSERT ON audit_records BEGIN SELECT RAISE(ABORT,'synthetic_audit_failure'); END",
+  ).run();
+  try {
+    const job = await post("/vpass", {
+      revision,
+      enabled: true,
+      timezone: "Asia/Tokyo",
+      pattern: { kind: "daily", time: "07:00", weekdays: [0, 1, 2, 3, 4, 5, 6] },
+    });
+    const maintenance = await post("/maintenance", {
+      id: "vpass-audit-refused",
+      revision: 0,
+      source: "vpass",
+      timezone: "Asia/Tokyo",
+      pattern: { kind: "weekly", weekdays: [4], start: "02:00", end: "03:00" },
+      enabled: true,
+      referenceUrl: "https://www.smbc-card.com/mem/refused.html",
+      verifiedAt: "2026-10-01T00:00:00.000Z",
+      scope: "collection",
+    });
+    const release = await post("/leases/mizuho-bank", { leaseRef: lease, confirmedStopped: true });
+    for (const response of [job, maintenance, release]) {
+      expect(response.status).toBe(503);
+      expect((await response.json()) as unknown).toEqual({ error: "scheduling_unavailable" });
+      expect(response.headers.get("x-kogane-audit-recorded")).toBeNull();
+    }
+  } finally {
+    await env.DB.prepare("DROP TRIGGER review_audit_write_fails").run();
+  }
+  expect(await scheduleRevision("vpass")).toBe(revision);
+  expect(
+    await count(
+      "SELECT count(*) AS n FROM collection_schedule_revisions WHERE schedule_id='vpass'",
+    ),
+  ).toBe(revisionRows);
+  expect(
+    await count(
+      "SELECT count(*) AS n FROM provider_maintenance_rules WHERE id='vpass-audit-refused'",
+    ),
+  ).toBe(0);
+  expect(
+    await env.DB.prepare(
+      "SELECT reference_url FROM provider_maintenance_references WHERE source='vpass'",
+    ).first<string>("reference_url"),
+  ).toBe(reference);
+  expect(
+    await env.DB.prepare(
+      "SELECT lease_ref FROM collection_execution_leases WHERE source='mizuho-bank'",
+    ).first<string>("lease_ref"),
+  ).toBe(lease);
+  expect((await records()).length).toBe(stored);
+}, 60_000);
