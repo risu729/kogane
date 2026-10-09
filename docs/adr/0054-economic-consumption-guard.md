@@ -839,7 +839,9 @@ tables carries 0071's kind list.
   plan refused at simulate, approve (human: `unsupported_semantics`; agents:
   `approval_required`) and, with a planted approval, at commit (with an empty
   slot, no slot, and a slot whose writer would write a valid row), every
-  command and economic table unchanged and the approval unspent.
+  table of the store (command, economic, decision and outbox tables
+  included) compared row for row after each refused step, and the approval
+  unspent.
   `packages/application/test/command.test.ts`: the closed kind list and the
   dispatch to the vocabulary's validator.
 - `services/processor/test/change-lifecycle.test.ts`: every kind through the

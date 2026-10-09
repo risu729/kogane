@@ -2,7 +2,8 @@
 // payload contract, but no planner is registered (ADR 0054, G2: vocabulary
 // only). No principal, human or agent, can plan, simulate, approve or commit
 // one: each step answers `unsupported_semantics` (or `approval_required` for
-// an agent at approve and commit) and writes no row. Real migrations,
+// an agent at approve and commit) and leaves every table of the store as it
+// was, even when a writer slot would write. Real migrations,
 // synthetic ids and keys, no amount.
 import { beforeAll, describe, expect, test } from "bun:test";
 import { IDENTITY_RESOLUTION_KIND } from "../../domain/src/economic-contract.ts";
@@ -98,23 +99,20 @@ const overGrantedAgent: Principal = {
 const PRINCIPALS = [human, agent, overGrantedAgent];
 const now = "2026-10-09T00:00:00.000Z";
 const later = "2026-10-09T01:00:00.000Z";
-const COUNTED = [
-  "change_plans",
-  "approvals",
-  "operation_receipts",
-  "decision_outbox",
-  "decision_revisions",
-  "economic_event_revisions",
-  "economic_claims",
-  "economic_revision_seals",
-  "economic_commit_log",
-];
-function counts(db: ReturnType<typeof migratedDatabase>) {
+/**
+ * Every row of every table of the store: the command, economic, decision and
+ * outbox tables and everything else. A refused step changes none of them.
+ */
+function snapshot(db: ReturnType<typeof migratedDatabase>) {
+  const tables = (
+    db
+      .query(
+        "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+      )
+      .all() as { name: string }[]
+  ).map((row) => row.name);
   return Object.fromEntries(
-    COUNTED.map((table) => [
-      table,
-      (db.query(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n,
-    ]),
+    tables.map((table) => [table, db.query(`SELECT * FROM "${table}" ORDER BY 1`).all()]),
   );
 }
 /**
@@ -167,7 +165,7 @@ describe("the economic-event kinds are vocabulary only", () => {
   test("planning the reserved resolution kind is refused as an unknown kind", async () => {
     const db = migratedDatabase();
     try {
-      const before = counts(db);
+      const before = snapshot(db);
       for (const actor of PRINCIPALS)
         expect(
           await createPlan(
@@ -177,7 +175,7 @@ describe("the economic-event kinds are vocabulary only", () => {
             sqliteCommandStore(db),
           ),
         ).toEqual({ ok: false, error: "unsupported_semantics" });
-      expect(counts(db)).toEqual(before);
+      expect(snapshot(db)).toEqual(before);
     } finally {
       db.close();
     }
@@ -188,7 +186,7 @@ describe("the economic-event kinds are vocabulary only", () => {
       const db = migratedDatabase();
       try {
         const store = sqliteCommandStore(db);
-        const before = counts(db);
+        const before = snapshot(db);
         for (const actor of PRINCIPALS) {
           expect(
             await createPlan(
@@ -198,6 +196,7 @@ describe("the economic-event kinds are vocabulary only", () => {
               store,
             ),
           ).toEqual(unsupported(kind));
+          expect(snapshot(db)).toEqual(before);
           // A malformed payload is refused as such, before the missing planner.
           expect(
             await createPlan(
@@ -207,11 +206,12 @@ describe("the economic-event kinds are vocabulary only", () => {
               store,
             ),
           ).toMatchObject({ ok: false, error: "invalid_command" });
+          expect(snapshot(db)).toEqual(before);
         }
         expect(await resolveAndSimulate(store, kind, PAYLOADS[kind] as never)).toEqual(
           unsupported(kind),
         );
-        expect(counts(db)).toEqual(before);
+        expect(snapshot(db)).toEqual(before);
       } finally {
         db.close();
       }
@@ -234,27 +234,30 @@ describe("the economic-event kinds are vocabulary only", () => {
         ]);
         const plan = await loadPlan(store, planId);
         if (!plan) throw new Error("plan not stored");
-        const before = counts(db);
+        const before = snapshot(db);
         expect(await simulate(plan, store)).toEqual(unsupported(kind));
+        expect(snapshot(db)).toEqual(before);
         const approvalOf = (actor: Principal) =>
           approve(store, { planId, planDigest: planId, actor, scope: [], ttlSeconds: 600, now });
         expect(await approvalOf(human)).toEqual(unsupported(kind));
-        for (const actor of [agent, overGrantedAgent])
+        expect(snapshot(db)).toEqual(before);
+        for (const actor of [agent, overGrantedAgent]) {
           expect(await approvalOf(actor)).toEqual({ ok: false, error: "approval_required" });
-        expect(counts(db)).toEqual(before);
+          expect(snapshot(db)).toEqual(before);
+        }
         // Even with an approval row planted beside it, nothing commits.
         db.run(
           "INSERT INTO approvals VALUES('approval-planted',?,?,'operator','server','[]',?,1,?)",
           [planId, planId, later, now],
         );
-        const planted = counts(db);
+        const planted = snapshot(db);
         // An empty slot, no slot, and a slot whose writer would write: the
         // commit checks the planner before any writer runs.
         for (const planners of [
           { [kind]: async () => null },
           {},
           { [kind]: writingMutation(`decision-probe-${index}`) },
-        ])
+        ]) {
           expect(
             await commit(store, {
               operationId: `op-${index}`,
@@ -265,7 +268,9 @@ describe("the economic-event kinds are vocabulary only", () => {
               now,
             }),
           ).toEqual(unsupported(kind));
-        for (const actor of [agent, overGrantedAgent])
+          expect(snapshot(db)).toEqual(planted);
+        }
+        for (const actor of [agent, overGrantedAgent]) {
           expect(
             await commit(store, {
               operationId: `op-${index}-agent`,
@@ -276,7 +281,8 @@ describe("the economic-event kinds are vocabulary only", () => {
               now,
             }),
           ).toEqual({ ok: false, error: "approval_required" });
-        expect(counts(db)).toEqual(planted);
+          expect(snapshot(db)).toEqual(planted);
+        }
         expect(
           (
             db.query("SELECT status FROM change_plans WHERE plan_id=?").get(planId) as {

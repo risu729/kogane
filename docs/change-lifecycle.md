@@ -608,8 +608,9 @@ already recorded is never undone by a DELETE — an undo is a new revision
   and an agent carrying the accepting capability, with no row written; a plan
   row inserted directly is refused at simulate, at approve
   (`unsupported_semantics` for the human, `approval_required` for agents) and,
-  with an approval inserted beside it, at commit, every command table
-  unchanged. `services/processor/test/change-lifecycle.test.ts` checks the
+  with an approval inserted beside it, at commit (also when a writer slot
+  would write), every table of the store compared row for row after each
+  refused step. `services/processor/test/change-lifecycle.test.ts` checks the
   same through the processor's four routes and each kind's writer slot.
   `packages/domain/test/economic-event-commands.test.ts` checks the payload
   shapes.
