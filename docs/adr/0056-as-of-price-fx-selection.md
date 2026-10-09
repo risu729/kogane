@@ -12,6 +12,10 @@
   [domain contracts](../domain-contracts.md#market-datats--as-of-price-and-fx-selection)
 - Amends: [ADR 0020](0020-price-promotion-by-rule.md) (its Selection
   decision; a dated note there points here)
+- Amended: 2026-10-09, [valuation on a date as implemented](#amendment-2026-10-09-valuation-on-a-date-as-implemented)
+  (`packages/domain/src/valuation-on-date.ts`,
+  `packages/application/src/query/valuation-on-date.ts`; proposed until its
+  pull request merges)
 - Related: [ADR 0019](0019-dated-reported-state.md) (the exclusive bound of a
   date), [ADR 0004](0004-payment-type-shapes-from-evidence.md) (unobserved
   semantics stay unsupported), [ADR 0031](0031-sbi-shinsei-stage-category-fx-tier.md)
@@ -302,3 +306,161 @@ held only in a `PROPOSED_*` constant where it is a value.
 14. **External price and FX sources.** Recommendation: the owner verifies
     terms, cost and permission before any source is added; #552 stays open for
     acquisition.
+
+## Amendment (2026-10-09): valuation on a date as implemented
+
+- Status: proposed (accepted when its pull request merges)
+- Issue: #552 (its second slice; acquisition, the route and the page stay open)
+
+### Context
+
+The selection above answers which price and which rate hold for an as-of; it
+values nothing. Issue #552 asks for the reported holdings on a date to be
+valued in a base unit, reproducibly, with the unvalued part named. The report
+job values a holding only at a price claimed from the holding's own snapshot
+and has no FX step ([ADR 0020](0020-price-promotion-by-rule.md),
+`SNAPSHOT_PRICE_SQL`). The reported state on a date
+([ADR 0019](0019-dated-reported-state.md)) lists positions with their
+quantity as provider text, their instrument mapping and their snapshot, but
+not their parse run or their decimal-v1 quantity, and applies no adoption
+across sources.
+
+### Options considered
+
+1. **Extend the report job.** Rejected: it writes fixed report artifacts whose
+   context and body must not move (AT36, AT60); a policy-selected price and an
+   FX step there would change what an existing context means.
+2. **Add the parse run and the decimal quantity to `DATED_POSITIONS_SQL`.**
+   Rejected: that text serves the reported-state route and its cost is
+   documented; a second, keyed read by position id carries the two facts
+   without moving it.
+3. **A partial subtotal over the valued holdings.** Rejected: a sum that
+   leaves holdings out is silently partial (INV05), and `summarizeValuation`'s
+   subtotal is not used here.
+4. **Write valuation cells to `calculation_results`.** Rejected for now:
+   nothing stores a run of this query, and its outcome codes would be mapped
+   onto the seven-reason CHECK by a writer that does not exist yet.
+5. **A pure domain function over the reported state and `selectMarketData`'s
+   selections, composed by an application query with no route.** Chosen.
+
+### Decision
+
+- **Domain.** `valueHoldingsOnDate` (`packages/domain/src/valuation-on-date.ts`)
+  takes the holdings, the policy (`price`, `fx`, `calendars`), the base unit,
+  the bound and the selections, and decides each holding in the valuation
+  order, ending in exactly one of `instrument_unresolved` (the reported state
+  has no instrument mapping with status `identified` or `provider-local`),
+  `quantity_unknown` (the decimal-v1 quantity is not exact; its status and
+  reason are kept), `policy_mismatch` (`price_selection_policy`,
+  `price_selection_scope`, `fx_selection_policy`, `fx_selection_key`: a
+  selection handed in under another policy, from another snapshot, or of
+  another key), `unpriced` (the price selection's refusal code with its
+  candidate ids and age, `unsupported_pair` for a position whose currency is
+  not a currency code, `price_not_positive`, or `rounding_policy_missing` for
+  a price basis that does not divide the quantity exactly), `unconverted`
+  (the FX leg's refusal code, with the exact value in the price's unit and
+  the price leg kept) or `valued` (exactly, in the price's unit and in the base
+  unit, with every leg's price id, effective time and age). A price key is the
+  provider-scoped instrument reference, the position's currency and the
+  policy's one price kind (a price policy must name exactly one); a
+  `same-snapshot` policy narrows it to the position's own parse run.
+- **Totals.** A total is stated only when every holding is valued and all
+  holdings come from one source; otherwise it is `absent` with
+  `holding_not_valued`, `adoption_not_applied` (two sources could list one
+  holding, and adoption across sources is not applied, INV06) or
+  `no_holdings`, beside the counts per outcome. Values are added with
+  `sumQuantities`. There is no partial subtotal, no gain, no cost basis and no
+  tax; a provider's own valuation of a holding is never its value.
+- **The gate.** A null policy answers `needs-policy` with `policy_missing`,
+  the shape `costBasis()` has; a policy whose id starts with `proposal:`
+  answers `policy_proposal`. No function has a default policy.
+- **Manifest.** `valuation-on-date-v1`: the engine version
+  (`valuation-on-date-engine-v1`), the as-of (date, `effectiveBefore`,
+  knowledge mode), the base unit, the three policies by id and digest, the
+  reported state's date, cutoff, filters and quantity policy (`decimal-v1`),
+  every snapshot with its parse run, every holding by ref with its outcome,
+  reason, price id and FX price ids, and the selection manifest with its
+  digest, recomputed from the selections handed in. It holds ids and codes,
+  never an amount. Its `canonicalDigest` is the context id: equal inputs give
+  one id in any order, and a corrected price, a changed policy or a changed
+  outcome gives another.
+- **Application.** `queryValuationOnDate`
+  (`packages/application/src/query/valuation-on-date.ts`) refuses
+  `policy_missing` before any read, then `invalid_policy` (invalid parts, two
+  price kinds, a proposal, an ambiguous id, or a zone in which the Tokyo date
+  does not end at `reportedStateCutoff(D)`), `invalid_request`,
+  `date_in_future` (after the caller's stated today; the query has no clock)
+  and `unknown_account` (`ACCOUNT_EXISTS_SQL`, by primary key). It then reads
+  the reported state on D under the requested source and account
+  (`queryDatedState`), each position's parse run and decimal-v1 quantity
+  (`DATED_POSITION_QUANTITIES_SQL`, by primary keys), and selects one price per
+  distinct want and one rate per currency on a wanted price's path to the base
+  unit with `selectMarketData` at the end of D. More than 500 holdings
+  (`holding_limit_exceeded`), more than 500 price keys and currencies
+  (`selection_limit_exceeded`), more than 2,000 candidate rows
+  (`candidate_limit_exceeded`) or more than 5,000 reported-state rows
+  (`dated_state_limit_exceeded`) is refused, never cut. The answer carries the
+  reported state's context id and its containers without a snapshot and stale
+  snapshots beside the valuation.
+- **Relation to ADR 0020 and the report job.** The report job, its
+  `SNAPSHOT_PRICE_SQL` and its fixed reports are unchanged: they value a
+  holding only at a price claimed from its own snapshot, with no freshness
+  rule and no FX. This query values at a policy-selected as-of price (a
+  `same-snapshot` policy reproduces the report job's narrowing, a
+  `latest-in-window` one does not) and names the policies in its manifest.
+  Neither replaces the other today, and nothing here decides which one a
+  surface uses.
+- **No open question is decided.** The fourteen questions above stay the
+  owner's; the tests construct explicit synthetic policies, and no production
+  source names a proposal.
+
+### Consequences
+
+- No migration, no route, no service wiring and no page: nothing outside the
+  tests calls `queryValuationOnDate`. The route, the page and external price
+  and FX acquisition stay open in #552.
+- **Limits.** The knowledge mode bounds prices and rates only: positions,
+  identities and account mappings are read as they are now (the reported
+  state's own limits), so a `known-at` answer is not the holdings as known at
+  K. The total covers the holdings the reported state lists; a perimeter
+  container without a snapshot is reported beside it, not counted as a reason
+  for its absence, and cash balances are not valued. A holding is valued at
+  its position's currency only; another source's price for the same
+  instrument is not used. Values rounded out of the pivot are rounded per
+  holding before the total adds them. The query as a whole was not measured
+  at scale: its parts are the reported-state reads (about 400 ms on the
+  statement-scale store, [reported state: cost](../reported-state.md#cost)),
+  the keyed quantity read and the candidate read (above).
+
+### Verification
+
+With synthetic data only:
+
+- `packages/domain/test/valuation-on-date.test.ts`: every outcome code, a
+  provider-local mapping valued, a stale price `unpriced` with its id and age
+  and the same price valued at the limit, zero and negative prices excluded
+  from selection and refused when handed in selected, an inexact basis
+  `unpriced`, a missing, stale or unquotable rate `unconverted` with the price
+  leg kept, each policy mismatch, the total absent for one unpriced holding,
+  for two sources and for none, USD into AUD rounded once with three legs,
+  `rounding_policy_missing` without an inverse, the gate (`policy_missing`,
+  `policy_proposal`), caller errors, a context id equal across permuted equal
+  inputs with no amount in the manifest, and a new one for a corrected price
+  or a changed policy.
+- `packages/read-model/test/dated-state.test.ts`: `DATED_POSITION_QUANTITIES_SQL`
+  returns each position's parse run and decimal-v1 quantity (an unreadable one
+  `unparsed`) and, without table statistics, searches positions and decimals
+  by primary key only.
+- `packages/application/test/valuation-on-date-query.test.ts`: on migrated
+  CORE with synthetic snapshots, identities, snapshot prices and an
+  exchange-rate board: two holdings valued (one in two exact hops) with an
+  exact total; the same context on the same store, a new one after a
+  corrected rate, and the first rate under `known-at` before the correction
+  was recorded; a stale snapshot price `unpriced` though another snapshot's
+  price is fresh; unresolved instruments and unreadable quantities select no
+  price; no holdings, no total; the account filter and `unknown_account`;
+  `policy_missing` with no read; invalid policies and requests;
+  `date_in_future`; 501 holdings and 501 selections refused, 500 answered;
+  the account check's plan without statistics.
+- `mise run //packages/domain:ci`, `//packages/read-model:ci`,
+  `//packages/application:ci`, `//packages/parsers:test` and `mise run ci:root`.
