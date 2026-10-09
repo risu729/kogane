@@ -3,10 +3,15 @@
 // Deny by default. A principal with no grant has no capability and no scope,
 // and every entry point refuses before it reads anything. Capabilities are the
 // minimal set of addendum 10 section 2 that the MVP gate allows: three read
-// capabilities and one proposal capability. `interpretation.accept`,
-// `calculation.run`, `collection.request`, `report.export`, the admin
-// capabilities and every external money action are deliberately absent from
-// this type, so no configuration can name them.
+// capabilities and one proposal capability, plus one maintenance-settings read
+// (ADR 0046) that reaches public maintenance windows and nothing else.
+// `interpretation.accept`, `calculation.run`, `collection.request`,
+// `report.export`, the admin capabilities, every settings write (a maintenance
+// revision, a job edit, enable/disable, lease release) and every external
+// money action are deliberately absent from this type, so no configuration can
+// name them. A maintenance revision is an operation the owner may delegate
+// (`schedules.maintenance.update` in MCP_DELEGATIONS, ADR 0063), never a grant
+// here.
 //
 // A grant is not an authentication decision. The transport authenticates the
 // principal (Cloudflare Access) and then looks its grant up here; a valid
@@ -22,6 +27,13 @@ export const AGENT_CAPABILITIES = [
   "evidence.read",
   /** Immutable relation proposals; never adoption. */
   "interpretation.propose",
+  /**
+   * Public maintenance windows, schedule timing and reservation state of the
+   * sources in `scopes.scheduleSources`. Not a financial read: it never
+   * reaches observations, evidence or run links, and no financial capability
+   * implies it.
+   */
+  "schedules.read",
 ] as const;
 export type AgentCapability = (typeof AGENT_CAPABILITIES)[number];
 
@@ -44,7 +56,17 @@ export interface GrantBudget {
 export interface Grant {
   /** Server-verified principal (Access JWT subject or service-token id). */
   principal: string;
-  scopes: { sources: ScopeSet; accounts: ScopeSet };
+  scopes: {
+    sources: ScopeSet;
+    accounts: ScopeSet;
+    /**
+     * Source ids of `config/alarm-jobs.json` whose maintenance settings
+     * `schedules.read` reaches, and the outer bound of a delegation's schedule
+     * scope (ADR 0063). Separate from `sources`, which scopes financial reads;
+     * absent means none.
+     */
+    scheduleSources?: ScopeSet;
+  };
   capabilities: readonly AgentCapability[];
   budget: GrantBudget;
 }
@@ -70,6 +92,12 @@ function scopeHas(scope: ScopeSet, value: string): boolean {
 
 export function grantAllowsSource(grant: Grant, sourceId: string): boolean {
   return scopeHas(grant.scopes.sources, sourceId);
+}
+
+/** Whether `schedules.read` reaches this source; an absent scope reaches none. */
+export function grantAllowsScheduleSource(grant: Grant, source: string): boolean {
+  const scope = grant.scopes.scheduleSources;
+  return scope !== undefined && scopeHas(scope, source);
 }
 
 export function grantAllowsAccount(grant: Grant, account: string): boolean {
@@ -119,9 +147,10 @@ export function validGrant(value: unknown): value is Grant {
     !hasExactKeys(value, ["principal", "scopes", "capabilities", "budget"]) ||
     !isText(value.principal, 256) ||
     !isRecord(value.scopes) ||
-    !hasExactKeys(value.scopes, ["sources", "accounts"]) ||
+    !hasExactKeys(value.scopes, ["sources", "accounts"], ["scheduleSources"]) ||
     !validScopeSet(value.scopes.sources) ||
     !validScopeSet(value.scopes.accounts) ||
+    (value.scopes.scheduleSources !== undefined && !validScopeSet(value.scopes.scheduleSources)) ||
     !Array.isArray(value.capabilities) ||
     value.capabilities.length > AGENT_CAPABILITIES.length ||
     new Set(value.capabilities).size !== value.capabilities.length ||

@@ -13,6 +13,7 @@
 //
 // The operation name of an agent tool is the tool name without `kogane.`.
 import type { RiskClass, SubjectPath } from "../audit/vocabulary.ts";
+import type { DelegationCapability } from "../delegation/contract.ts";
 
 export interface CatalogueEntry {
   /** The risk classes this operation may be recorded under; the first is the default. */
@@ -23,6 +24,12 @@ export interface CatalogueEntry {
   quiet: "read" | "replayed";
   /** The capability that grades the operation today (the change lifecycle's or the agent API's). */
   capability: string;
+  /**
+   * The capability an owner's delegation must hold for this operation on
+   * `mcp` (ADR 0063). Nothing executes under a delegation yet (plan slice
+   * S3): a call on `mcp` is refused at the delegation gate and recorded.
+   */
+  delegation?: DelegationCapability;
   /** The paths the operation exists on today. */
   paths: readonly SubjectPath[];
 }
@@ -124,12 +131,19 @@ export const OPERATION_CATALOGUE = {
     capability: "interpretation.accept",
     paths: UI,
   },
+  // A maintenance revision (W3): R1 inside the direct envelope of ADR 0063
+  // item 8 — a delegated revision that leaves no new joined deferral over
+  // seven days. Beyond that bound it is R3 until the owner answers the plan's
+  // question 1, and the writer refuses it (`maintenance_deferral_too_long`).
+  // On `ui` the operator's edit; on `mcp` the delegated tool, which no
+  // delegation can execute yet, so every call there is a recorded refusal.
   "schedules.maintenance.update": {
-    risk: ["R1"],
+    risk: ["R1", "R3"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    delegation: "schedules.maintenance.update",
+    paths: ["ui", "mcp"],
   },
   // Accepting a proposal changes a rule (R2); rejecting records a decision
   // only (R1). One route, so one operation recorded under either class.
@@ -192,6 +206,15 @@ export const OPERATION_CATALOGUE = {
     effect: null,
     quiet: "read",
     capability: "records.read",
+    paths: AGENT,
+  },
+  // The maintenance settings of the granted schedule sources (ADR 0046, plan
+  // D15), served while the settings routes are.
+  "schedules.maintenance.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "schedules.read",
     paths: AGENT,
   },
   // An inert proposal (H8); acceptance is the operator's.

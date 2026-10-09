@@ -227,6 +227,7 @@ export {
   grantAllows,
   grantAllowsAccount,
   grantAllowsRow,
+  grantAllowsScheduleSource,
   grantAllowsSource,
   grantedSources,
   grantFor,

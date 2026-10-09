@@ -60,6 +60,14 @@ import {
 import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { opsApiEnabled } from "./ops-api";
 import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
+import {
+  readScheduleTool,
+  SCHEDULE_READ_TOOL,
+  SCHEDULE_UPDATE_TOOL,
+  scheduleToolsFor,
+  schedulesServed,
+  updateScheduleTool,
+} from "./schedule-tools";
 import { HttpError, json } from "./http";
 import { mcpDelegationCapabilities } from "./delegation";
 
@@ -200,6 +208,10 @@ export async function agentApi(
     // that depends on it: `initialize`, `ping` and notifications touch no table.
     let served: Promise<boolean> | undefined;
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
+    // The maintenance tools (ADR 0046) exist while the settings routes do. The
+    // read is listed to a grant holding `schedules.read`; the revision is
+    // listed to nobody, since no delegation executes yet (ADR 0063).
+    const schedules = schedulesServed(env);
     // The reconstructed state likewise exists exactly while its GET route does.
     let reconstructedServed: Promise<boolean> | undefined;
     const reconstructed = (): Promise<boolean> =>
@@ -231,6 +243,15 @@ export async function agentApi(
           return toolCall(request, env, caller, name, (audit) =>
             callOpsTool(name, body, env, caller, audit),
           );
+        // The maintenance read is graded by this API's grant, as on its HTTP
+        // route; the maintenance revision only by the caller's delegation,
+        // which nothing executes under yet (ADR 0063, plan S3/S4).
+        if (schedules && name === SCHEDULE_READ_TOOL)
+          return toolCall(request, env, caller, name, () => readScheduleTool(body, env, grant));
+        if (schedules && name === SCHEDULE_UPDATE_TOOL)
+          return toolCall(request, env, caller, name, () =>
+            updateScheduleTool(body, env, caller, delegationNow),
+          );
         return null;
       },
       async () => [
@@ -238,9 +259,20 @@ export async function agentApi(
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),
         ...((await reconstructed()) ? RECONSTRUCTED_STATE_MCP_TOOLS : []),
         ...(listOps ? OPS_MCP_TOOLS : []),
+        ...(schedules ? scheduleToolsFor(grant) : []),
       ],
     );
     return message;
+  }
+  // The maintenance read is the one schedule tool on this route: a browser
+  // session yields no delegation, so the revision has no HTTP agent route.
+  if (path === `${AGENT_PREFIX}${SCHEDULE_READ_TOOL.slice("kogane.".length)}`) {
+    if (!schedulesServed(env)) throw new HttpError(404, "not_found");
+    const body = await boundedJson(request);
+    const outcome = (await toolCall(request, env, caller, SCHEDULE_READ_TOOL, () =>
+      readScheduleTool(body, env, grant),
+    ))!;
+    return json(outcome.body, outcome.status);
   }
   const tool = toolForPath(path);
   if (tool === null) throw new HttpError(404, "not_found");

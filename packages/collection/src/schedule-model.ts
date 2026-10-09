@@ -25,6 +25,36 @@ export interface MaintenanceRule {
   scope: "collection" | "session" | "feature-only";
   revision: number;
 }
+/**
+ * Why a maintenance revision was written, as a closed code (ADR 0046 as
+ * amended by ADR 0063, item 8). CORE 0078's CHECK on
+ * `provider_maintenance_rules.change_reason` holds the same list; a revision
+ * never carries free text. `operator-edit` is the operator page's own edit;
+ * `maintenance-survey-proposal-accepted` is an accepted re-survey proposal
+ * (ADR 0050); the others are what a delegated principal may choose
+ * (`DELEGATED_MAINTENANCE_REASONS`).
+ */
+export const MAINTENANCE_CHANGE_REASONS = [
+  "official-notice-added",
+  "official-notice-changed",
+  "official-notice-withdrawn",
+  "outage-observed",
+  "owner-instructed",
+  "correction",
+  "operator-edit",
+  "maintenance-survey-proposal-accepted",
+] as const;
+export type MaintenanceChangeReason = (typeof MAINTENANCE_CHANGE_REASONS)[number];
+/** The reasons a delegated maintenance revision may give: neither the operator's nor a survey's. */
+export const DELEGATED_MAINTENANCE_REASONS = [
+  "official-notice-added",
+  "official-notice-changed",
+  "official-notice-withdrawn",
+  "outage-observed",
+  "owner-instructed",
+  "correction",
+] as const satisfies readonly MaintenanceChangeReason[];
+export type DelegatedMaintenanceReason = (typeof DELEGATED_MAINTENANCE_REASONS)[number];
 export interface ScheduleView {
   id: string;
   source: string | null;
@@ -136,16 +166,23 @@ export function validInstant(v: string): boolean {
     new Date(v).toISOString() === v
   );
 }
+// One formatter per zone: constructing one costs far more than formatting with it.
+const formatters = new Map<string, Intl.DateTimeFormat>();
 function parts(ms: number, timezone: string): number[] {
-  const p = new Intl.DateTimeFormat("en-CA", {
-    timeZone: timezone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(ms);
+  let format = formatters.get(timezone);
+  if (!format) {
+    format = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timezone,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    formatters.set(timezone, format);
+  }
+  const p = format.formatToParts(ms);
   return ["year", "month", "day", "hour", "minute"].map((k) =>
     Number(p.find((v) => v.type === k)?.value),
   );
@@ -206,6 +243,12 @@ export function nextNominal(pattern: SchedulePattern, timezone: string, after: n
   }
   throw new Error("schedule_unavailable");
 }
+/** Whether a recurring window starts on this local date (UTC midnight of it). */
+function startsOn(p: Exclude<MaintenancePattern, { kind: "once" }>, startDate: number): boolean {
+  if (p.kind === "weekly") return p.weekdays.includes(new Date(startDate).getUTCDay());
+  const base = new Date(startDate - p.offsetDays * DAY);
+  return base.getUTCDay() === p.weekday && Math.ceil(base.getUTCDate() / 7) === p.nth;
+}
 function windowEnd(t: number, rule: MaintenanceRule): number | null {
   if (!rule.enabled || rule.scope === "feature-only") return null;
   const p = rule.pattern;
@@ -214,13 +257,7 @@ function windowEnd(t: number, rule: MaintenanceRule): number | null {
   const date = localDate(t, rule.timezone);
   for (let back = 0; back <= 7; back++) {
     const startDate = date - back * DAY;
-    let matches = false;
-    if (p.kind === "weekly") matches = p.weekdays.includes(new Date(startDate).getUTCDay());
-    else {
-      const base = new Date(startDate - p.offsetDays * DAY);
-      matches = base.getUTCDay() === p.weekday && Math.ceil(base.getUTCDate() / 7) === p.nth;
-    }
-    if (!matches) continue;
+    if (!startsOn(p, startDate)) continue;
     const start = at(startDate, p.start, rule.timezone),
       end = at(startDate + (p.end < p.start ? DAY : 0), p.end, rule.timezone);
     if (start !== null && end !== null && t >= start && t < end) return end;
@@ -238,4 +275,85 @@ export function afterMaintenance(t: number, rules: readonly MaintenanceRule[]): 
     result = end;
   }
   throw new Error("maintenance_unavailable");
+}
+
+/** One joined deferral: the union's start, and where collection may run again. */
+export interface DeferralUnion {
+  start: number;
+  end: number;
+}
+
+/**
+ * The joined deferrals these rules cause from `from` onward, in order, each
+ * measured from the start of its union: the remaining deferral at `from`,
+ * every dated window starting after it, and every recurring window starting
+ * within `horizon` milliseconds. A chain is followed for at most `cap`
+ * milliseconds, so a union's end is exact up to `cap` past its start and
+ * otherwise only "more than `cap`" — windows that chain without end are just
+ * that, not an error.
+ */
+function* joinedDeferrals(
+  rules: readonly MaintenanceRule[],
+  from: number,
+  horizon: number,
+  cap: number,
+): Generator<DeferralUnion> {
+  const starts = new Set<number>([from]);
+  for (const rule of rules) {
+    if (!rule.enabled || rule.scope === "feature-only") continue;
+    const p = rule.pattern;
+    if (p.kind === "once") {
+      if (Date.parse(p.from) > from) starts.add(Date.parse(p.from));
+      continue;
+    }
+    // One day before `from` covers a window that starts on the previous local date.
+    for (let date = localDate(from, rule.timezone) - DAY; date <= from + horizon; date += DAY) {
+      if (!startsOn(p, date)) continue;
+      const start = at(date, p.start, rule.timezone);
+      if (start !== null && start > from && start < from + horizon) starts.add(start);
+    }
+  }
+  let reach = Number.NEGATIVE_INFINITY;
+  for (const start of [...starts].sort((a, b) => a - b)) {
+    // A start inside a union already followed defers less than the union's own start.
+    if (start < reach) continue;
+    let t = start;
+    while (t - start <= cap) {
+      const ends = rules.map((r) => windowEnd(t, r)).filter((e): e is number => e !== null);
+      if (!ends.length) break;
+      const end = Math.max(...ends);
+      if (end <= t) throw new Error("maintenance_unavailable");
+      t = end;
+    }
+    reach = t;
+    if (t > start) yield { start, end: t };
+  }
+}
+
+/** Every joined deferral these rules cause (see `joinedDeferrals`). */
+export function deferralUnions(
+  rules: readonly MaintenanceRule[],
+  from: number,
+  horizon: number,
+  cap: number,
+): DeferralUnion[] {
+  return [...joinedDeferrals(rules, from, horizon, cap)];
+}
+
+/**
+ * The longest joined deferral these rules cause from `from` onward (see
+ * `joinedDeferrals`): exact up to `cap`, otherwise only "more than `cap`".
+ */
+export function longestDeferral(
+  rules: readonly MaintenanceRule[],
+  from: number,
+  horizon: number,
+  cap: number,
+): number {
+  let longest = 0;
+  for (const union of joinedDeferrals(rules, from, horizon, cap)) {
+    longest = Math.max(longest, union.end - union.start);
+    if (longest > cap) break;
+  }
+  return longest;
 }
