@@ -6,7 +6,11 @@
 - Carried by: [economic events](../economic-events.md#common-consumption-guard-migration-0070),
   `packages/domain/src/economic-contract.ts`,
   `packages/storage-d1/migrations/core/0070_economic_commit_guard.sql`,
-  `packages/storage-d1/src/atomic/economic-commit.ts`
+  `packages/storage-d1/src/atomic/economic-commit.ts`; since G1b also
+  `packages/domain/src/row-identity.ts`,
+  `packages/storage-d1/src/atomic/card-purchase-recognition.ts`,
+  `services/processor/src/card-settlement-commands.ts` and
+  `packages/read-model/src/card-settlement-readiness.ts`
 
 ## Context
 
@@ -460,3 +464,206 @@ Synthetic data only. This PR tests:
   the whole processor suite runs against the new triggers.
 
 Not tested here: W1, W4–W9 and W11 need a writer (G1b and G3); remote D1.
+G1b tests W1–W4 and W6–W9 and W5 for a two-member purchase split
+([amendment](#amendment-g1b-as-implemented-2026-10-08)); W5 for `move`, W6's
+re-adoption and W11 wait for G3 and #550.
+
+## Amendment: G1b as implemented (2026-10-08)
+
+Status: proposed until the G1b pull request merges; accepted upon merge. Both
+card writers join the guard. No migration: 0070 is unchanged and the schema
+ledger does not move.
+
+### What each writer writes
+
+- **Card purchase lane** (rule writer, retire-before-recognise;
+  `packages/storage-d1/src/atomic/card-purchase-recognition.ts`). Every batch
+  (recognize, revise, reanchor, retire, merge, split; rule or reviewed) appends,
+  after its keys, one revision seal per member revision and the commit row,
+  through `economicFinalizationWrites` under `decisionEntry` of the batch's
+  first decision. The keys are the claims (book `card-usage`, through
+  `economic_revision_claims`); no `economic_claims` row repeats them. Nothing is
+  released: a revision restates its prior's keys, a merge's one member holds
+  both events' keys and supersedes both, a split's two members (the retired
+  merged event and the restored posted event) divide them; statement 1 checks
+  each, and a draft that dropped a key is refused at the commit row
+  (`economic_commit_released_mismatch`). Seal: writer release
+  `card-purchase-recognition-v1:economic-guard-v1`
+  (`CARD_PURCHASE_WRITER_RELEASE`), leg and key counts, the draft's content
+  digest, no identity pin, the identity epoch the tick read
+  (`CURRENT_IDENTITY_EPOCH_SQL`, once per tick; a reviewed merge or split reads
+  it with the review). Commit row: kind `card-purchase.<action>`, principal the
+  rule's actor (or the reviewer, with the operation), `payload_digest` the
+  hex of the decision id, `known_at` the canonical instant of the lane's clock
+  (`canonicalKnownAt`).
+- **The decisionEntry decision.** The decision digest includes the writer
+  release (`cardPurchaseDecisionId`), so no batch of this release reuses a
+  pre-guard decision id. A pre-guard id replayed with the new tail while its
+  revision is still live is sealed and logged then, with the replay's later
+  `known_at` (test P9); one whose revision was superseded since is refused
+  (`economic_seal_invalid`) and writes nothing. A guard-era revision that
+  supersedes a pre-guard one is logged; its prior stays in
+  `unlogged_economic_revisions`, never backdated.
+- **Card settlement acceptance** (human-adopted writer;
+  `services/processor/src/card-settlement-commands.ts`). After its decisions,
+  event revision, legs and allocation: an `economic_claims` row (book
+  `cash-movement`, the candidate's `bank_key`, re-derived by the 0070 trigger
+  from the cited bank observation and parse run, the alias class below, the
+  current identity epoch), then the accepted `card_settlement_decisions` row,
+  then the seal (two legs, one claim, writer release
+  `card-statement-settlement-v1:economic-guard-v1`, a content digest of the
+  revision, its legs and claim, no identity pin), then the commit row (kind
+  `card-settlement.accept`, the operation, the principal, the receipt's
+  payload digest). The economic statements are entered on `receiptEntry` (the
+  receipt for this operation, principal, payload digest and plan): the
+  mutation planner receives the payload digest (`MutationInput.payloadDigest`).
+- **Card settlement withdrawal.** Its `unknown` revision is sealed (no legs, no
+  claims) and the commit row supersedes the accepted revision and releases its
+  claim; the writer still writes `card_settlement_allocation_withdrawals` (its
+  own legacy record). A release whose key another live holder also holds is
+  refused (`economic_claim_conflict_unresolved`): the withdrawal plan reads the
+  key half of `claim_available` (`CARD_SETTLEMENT_KEY_AVAILABLE_SQL`, by the
+  candidate's id and the key index) and refuses with `needs_scope_resolution`
+  and that code; a plan made before the second holder appeared is refused by
+  the commit row and answered `commit_failed` with the code.
+- **Ordering.** The commit row is the last _economic_ statement. The change
+  lifecycle's approval, plan and outbox statements follow it in a reviewed
+  batch, and the provider-linked merge's proposal, relation and resolution
+  rows follow it in the lane; none of them is an economic row.
+- **Evidence.** The settlement's event revisions cite the statement and bank
+  rows as `SourceFactRef` objects; its decisions keep their id lists.
+
+### Identity: the provider identity functions
+
+`PROVIDER_IDENTITY_FUNCTIONS` in the transaction-family registry
+(`packages/domain/src/event-families.ts`, registry version
+`transaction-family-registry-v2`):
+
+| Family (source, parser)                                     | Components (row `extra`) | Rule version                      | Scope                     |
+| ----------------------------------------------------------- | ------------------------ | --------------------------------- | ------------------------- |
+| `smbc-bank`, `smbc-direct-transactions`                     | `id` (the `meisaiId`)    | `smbc-meisai-id-v1`               | unique within one account |
+| `sbi-shinsei-bank`, `sbi-shinsei-top-balances-and-activity` | `txnReferenceNo`         | `sbi-shinsei-txn-reference-no-v1` | unique within one account |
+
+The alias class is `[source, components, resolved account id, rule version]`;
+"within one account" is carried by the resolved account. Admission is
+`humanAdoptedRowIdentity` (`packages/domain/src/row-identity.ts`): the
+registry's external id basis, plus, for a provider id, the row's own
+`_kogane.identityOrigin` (`provider-id` or the id counts as unrecorded). The
+plan refuses with `unsupported_semantics` and the closed code as the second
+ref; the commit's planner returns nothing for a refused row. Consequence:
+**SBI Shinsei debits can no longer be accepted** (`identity_origin_unrecorded`,
+rule 2): their parser records no origin, and no parser was changed here. Their
+function is declared, so a parser release that records the origin admits them.
+The only other route, treating ADR 0018's reviewed adapter evidence as the
+declared origin, would need an owner-approved amendment of rule 2; it is not
+taken.
+The registry lists SBI Shinsei's card-settlement membership as unsupported.
+
+### Readiness, heads and refusals
+
+- `card_settlement_readiness`'s keyed CTEs gain `claim_available`: no live
+  holder, other than the candidate's own accepted event, of its `bank_key` in
+  `economic_claims` or among accepted settlements, nor of its debit's alias
+  class (`providerAliasClassSql`, the SQL form of `declaredAliasClass`). The
+  plan read and the acceptance guard require it; on 0 the plan answers
+  `stale_context` with `economic_claim_held` (the key is held) or
+  `alias_conflict`. The four existing columns keep the text frozen at 4a64ba0
+  (`packages/read-model/test/card-settlement-readiness-ctes-legacy-sql.ts`,
+  digest-pinned), compared on the random and scaled stores.
+- `REVISION_OF` answers `economic-event:<id>` as the highest revision while it
+  is live, its negation once it is superseded without a newer revision of its
+  own (merged away), and 0 when there is none: one integer carrying head and
+  liveness. The settlement plans pin it (0 for an acceptance, the accepted
+  revision for a withdrawal); `card-purchase:` keeps its meaning.
+- A batch a 0070 trigger refuses is answered by the commit with the code as
+  the second ref: `stale_context` for `economic_claim_held`, `alias_conflict`,
+  `identity_epoch_changed`, `economic_commit_prior_not_superseded`,
+  `economic_event_live_conflict`, `economic_revision_sealed`; `commit_failed`
+  for the others. Other batch errors propagate as before. The lane counts a
+  refused batch as `failed`.
+
+### Limits kept
+
+- Leg subjects stay bare account ids for the settlement (read through 0044's
+  tolerance); `account:` stays the canonical form for new writers, and
+  changing the settlement needs a reader audit (not done).
+- The settlement withdrawals table stays the settlement writer's own record.
+- Settlements accepted before G1b carry no alias class: the same debit under
+  another key is not seen as their alias.
+- The alias class carries the resolved account, so one debit collected under
+  two producers or namespaces is caught only when both source accounts resolve
+  to one account (as after an operator's identity assignment for a producer
+  switch); while they are two accounts they are two classes. Whether production
+  holds such a debit is not verified.
+- Neither writer pins an identity revision in its seals (only the identity
+  epoch), and neither writes event times or leg effects.
+- The `カード照合` list does not show `claim_available` (its review contract has
+  no field for it); a review it shows as ready can be refused at plan time.
+- Two concurrent batches of one operation: the second is refused by the 0029
+  operation ledger (a raise, nothing kept) or replays; a resend then returns the
+  receipt. Unchanged by G1b.
+- When a held key and a held alias class both refuse a claim, which code is
+  raised is the order in which SQLite fires the two triggers; on workerd and
+  bun:sqlite it is `alias_conflict`, and nothing relies on it.
+- Not verified: remote D1 (rollback, CPU and statement limits of the triggers,
+  as before); SMBC `meisaiId` and SBI Shinsei `txnReferenceNo` stability and
+  uniqueness; the cost of the new trigger and readiness work on remote D1.
+
+### Deviations recorded in this amendment
+
+- The decision called SMBC "one account". It is declared for every SMBC source
+  account and made unique within one resolved account through the alias class,
+  because the class already carries the account; a narrower source-account
+  list would only make a future SMBC account unsupported, never stop a double
+  count.
+- The lane's commit `payload_digest` is the decision digest (a rule writer has
+  no receipt).
+- `economic-event:` carries liveness as a sign, since an expected revision is
+  one integer.
+- The commit row is the last economic statement, not the last statement of a
+  reviewed batch (above).
+
+### Verification of the amendment (synthetic data only)
+
+- W1 PROC (`services/processor/test/economic-card-settlement.test.ts`): the
+  real settlement writer and a synthetic own-transfer-shaped writer on one
+  `bank_key`, in both orders, through plan, approve and commit: the second is
+  refused with `economic_claim_held` (by the writer's trigger, by the plan, by
+  the reservation guard of an earlier plan, and by the claim trigger when that
+  guard is dropped), every table unchanged. W1 SD1 stays the G1a statement-shape
+  tests: a storage test cannot run the processor's planner.
+- T1 PROC: one SMBC debit under two producers and namespaces, resolved to one
+  account: settled on A, B is `alias_conflict` (plan, earlier plan, trigger),
+  every table unchanged, while the 0044 view still calls B ready.
+- W2 PROC (a withdrawal pointer matching no row) and SD1 (G1a); W3 PROC
+  (settlement) and SD1 (purchase merge); W4 PROC (a synthetic correction onto a
+  debit a settlement holds: refused, every table unchanged, the old claim
+  held); W5 SD1 (`packages/storage-d1/test/economic-card-purchase-lane.test.ts`:
+  the two-member split fails whole at any statement, its second half
+  included); W6 PROC (a withdrawal planned before another withdrawal:
+  `stale_context`, no commit row); W7 and W8 PROC; W9 PROC (a failure at every
+  statement of an acceptance) and SD1 (the split). W10 SD1 (G1a).
+- A withdrawal that would wash a pre-existing double holder (two settlements
+  accepted on one debit the pre-G1b way): refused at plan time and, for a plan
+  made before the second holder, at commit, every table unchanged (PROC; the
+  plan's refusal also in `packages/application/test/card-settlement-plan.test.ts`,
+  its SQL against the CTEs and its plan in the readiness test). An SBI Shinsei
+  acceptance made before G1b still reserves every candidate of its provider id
+  in the view and in `claim_available`, and the G1b withdrawal releases it
+  (`services/processor/test/card-settlement-sbi-shinsei.test.ts`).
+- Deferred, with the reason: W5 for `move` and W6's re-adoption need the own
+  transfer writer (G3); W11 needs the knowledge selector (#550, ADR 0058).
+- Purchase lane: sealed and logged batches, replays, released-key refusal,
+  pre-guard replays, merge and split commits, stale epochs and the
+  `economic-event:` head (SD1); the job sealing under the epoch its tick read
+  (`services/processor/test/card-purchase.test.ts`).
+- Identity: `packages/domain/test/row-identity.test.ts` (every refusal, the
+  scope, classes free of producer, namespace and id text) and the plan's
+  refusals (`packages/application/test/card-settlement-plan.test.ts`). T3's
+  human side is the Vpass fingerprint refusal there; its rule side is the
+  lane's existing ordinal and producer-switch tests, which now also seal.
+- Readiness: `packages/read-model/test/card-settlement-readiness.test.ts`
+  (frozen columns, `claim_available` against its definition, six mutations,
+  plan without statistics) and
+  `packages/application/test/card-settlement-review-scale.test.ts` (scaled
+  store).

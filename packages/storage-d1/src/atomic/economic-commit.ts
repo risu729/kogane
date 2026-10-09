@@ -1,6 +1,7 @@
 // The common economic-event consumption guard as statements (CORE 0070,
-// ADR 0054). Pure builders: no writer calls them yet (G1b joins the card
-// purchase lane and the card settlement commands).
+// ADR 0054). Pure builders, called by the card purchase lane
+// (`card-purchase-recognition.ts`) and the card settlement commands
+// (`services/processor/src/card-settlement-commands.ts`) since G1b.
 //
 // One economic batch is
 //
@@ -51,6 +52,17 @@ import {
   type RevisionRef,
 } from "../../../domain/src/economic-contract.ts";
 import type { SqlWrite } from "../core/operations.ts";
+
+/**
+ * A worker clock reading as the commit row's one known_at form
+ * (`YYYY-MM-DDTHH:MM:SS.sssZ`, `validKnownAt`). Throws on a value that is not
+ * an instant: a programming error, never a runtime race.
+ */
+export function canonicalKnownAt(now: string): string {
+  const time = Date.parse(now);
+  if (!Number.isFinite(time)) throw new RangeError("now is not an instant");
+  return new Date(time).toISOString();
+}
 
 /** A condition, true exactly when this batch's entry row exists. */
 export type EconomicEntry = SqlWrite;

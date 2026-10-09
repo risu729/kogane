@@ -32,6 +32,11 @@ export interface SqlWrite {
  * it has none (it was merged into another event). A live revision only ever
  * grows, and a merge takes it to 0, so equality means the event is exactly
  * the revision the plan read, holding exactly the keys it held.
+ * `economic-event:<event id>` (ADR 0054: an event's head) answers the event's
+ * highest revision while that revision is live, its negation once it is
+ * superseded without a newer revision of its own (merged into another event),
+ * and 0 when the event has no revision, so a plan that read a live head
+ * conflicts with a successor, a merge and a first adoption alike.
  * A subject with no history answers 0, so a first-ever assignment plans
  * against revision 0 and conflicts if someone else got there first.
  */
@@ -49,6 +54,10 @@ const REVISION_OF = `coalesce(
  CASE WHEN e.key LIKE 'card-purchase:%' THEN
   (SELECT r.revision FROM economic_event_revisions r
    WHERE r.event_id=substr(e.key,15) AND r.superseded_by IS NULL) END,
+ CASE WHEN e.key LIKE 'economic-event:%' THEN
+  (SELECT CASE WHEN r.superseded_by IS NULL THEN r.revision ELSE -r.revision END
+   FROM economic_event_revisions r WHERE r.event_id=substr(e.key,16)
+   ORDER BY r.revision DESC LIMIT 1) END,
  0)`;
 
 /**

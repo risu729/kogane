@@ -10,7 +10,9 @@
 // and print the timings docs/card-settlements.md quotes. Synthetic values only.
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
+import { cardSettlementReadinessCtes } from "../../read-model/src/card-settlement-readiness.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
+import { LEGACY_CARD_SETTLEMENT_READINESS_CTES } from "../../read-model/test/card-settlement-readiness-ctes-legacy-sql.ts";
 import { statementPlanProblems } from "../../read-model/test/card-statement-plan.ts";
 import { explain } from "../../read-model/test/card-usage-plan.ts";
 import {
@@ -99,6 +101,20 @@ async function timed(run: () => unknown, runs = 3): Promise<number> {
 
 const guard = (sql: string): string => `SELECT ${sql} AS ok`;
 
+/**
+ * The columns the shipped reads had: the plan read adds `claim_available` and
+ * the review's `event_id` (ADR 0054, G1b), compared on their own below.
+ */
+function shippedColumns(found: unknown[]): unknown[] {
+  return found.map((row) =>
+    Object.fromEntries(
+      Object.entries(row as Record<string, unknown>).filter(
+        ([name]) => name !== "claim_available" && name !== "event_id",
+      ),
+    ),
+  );
+}
+
 describe("card settlement readiness reads on a scaled store without statistics", () => {
   test(
     "the list pages equal the ones the shipped read produced, ready and blocked",
@@ -137,7 +153,7 @@ describe("card settlement readiness reads on a scaled store without statistics",
           [CARD_SETTLEMENT_PLAN_SQL, LEGACY_CARD_SETTLEMENT_PLAN_SQL],
           [OWNERSHIP_REVIEW_CANDIDATE_SQL, LEGACY_OWNERSHIP_REVIEW_CANDIDATE_SQL],
         ] as const)
-          expect(rows(sql, [id])).toEqual(rows(legacy, [id]));
+          expect(shippedColumns(rows(sql, [id]))).toEqual(rows(legacy, [id]));
         expect(rows(guard(OWNERSHIP_REVIEW_CANDIDATE_GUARD_SQL), [id, revision])).toEqual(
           rows(guard(LEGACY_OWNERSHIP_REVIEW_CANDIDATE_GUARD_SQL), [id, revision]),
         );
@@ -145,6 +161,42 @@ describe("card settlement readiness reads on a scaled store without statistics",
         expect(page.items).toHaveLength(1);
         expect(page).toEqual(await queryCardSettlements(executor(true), { proposalId: id }));
       }
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "the readiness CTEs keep their frozen text's columns, and claim_available its definition",
+    () => {
+      // ADR 0054 G1b: the frozen text is the CTEs before claim_available
+      // (packages/read-model/test/card-settlement-readiness-ctes-legacy-sql.ts).
+      const ids = JSON.stringify(
+        (
+          db.query("SELECT id FROM card_settlement_candidates ORDER BY id").values() as string[][]
+        ).map(([id]) => id!),
+      );
+      const select = (ctes: string, columns: string) =>
+        `WITH chosen AS (SELECT value AS id FROM json_each(?1)), ${ctes} SELECT ${columns} FROM readiness ORDER BY id`;
+      const old = "id,statement_current,bank_current,ownership_current,allocation_available";
+      expect(rows(select(cardSettlementReadinessCtes(), old), [ids])).toEqual(
+        rows(select(LEGACY_CARD_SETTLEMENT_READINESS_CTES, old), [ids]),
+      );
+      // No economic claim and no alias class on this store: a claim is
+      // unavailable exactly when another live accepted settlement holds the key.
+      const claims = rows(select(cardSettlementReadinessCtes(), "id,claim_available"), [ids]);
+      const reference = rows(
+        `SELECT c.id,NOT EXISTS(SELECT 1 FROM live_consumption_claims l WHERE l.book='cash-movement'
+          AND l.consumption_key=c.bank_key
+          AND l.event_id IS NOT (SELECT r.event_id FROM card_settlement_reviews r WHERE r.id=c.id AND r.status='accepted')) AS claim_available
+         FROM card_settlement_candidates c ORDER BY c.id`,
+        [],
+      );
+      expect(claims).toEqual(reference);
+      expect(
+        statementPlanProblems(
+          explain(db, select(cardSettlementReadinessCtes(), "id,claim_available"), [ids]),
+        ),
+      ).toEqual([]);
     },
     TIMEOUT,
   );

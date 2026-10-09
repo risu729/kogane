@@ -22,6 +22,7 @@ export * from "./event-families.ts";
 export * from "./reconstruction.ts";
 export * from "./market-data.ts";
 export * from "./economic-contract.ts";
+export * from "./row-identity.ts";
 export {
   hasExactKeys,
   isRecord,

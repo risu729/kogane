@@ -5,7 +5,6 @@
 import { Database } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
 import {
-  CARD_PURCHASE_ACTOR,
   cardPurchaseEventId,
   cardPurchaseRevision,
   classifyCardUsage,
@@ -35,6 +34,7 @@ import {
 import type { SqlWrite } from "../src/core/operations.ts";
 import { CORE_MIGRATIONS_URL, migrationFiles, migrationSql } from "../src/migrations.ts";
 import { applyMigration, factOf, seedCardRows } from "./card-purchase-fixture.ts";
+import { preGuardDraft, preGuardRecognitionWrites } from "./card-purchase-pre-guard.ts";
 import { fullCoreDatabase, sqliteD1 } from "./sqlite.ts";
 
 const MIGRATION = "0070_economic_commit_guard.sql";
@@ -553,52 +553,13 @@ async function draftOf(fact: CardUsageFact): Promise<CardPurchaseDraft> {
   return draft;
 }
 
-/** The card purchase lane's recognition, as it writes today. */
+/** The card purchase lane's recognition, as it writes since G1b (seal and commit row included). */
 const purchaseWrites = (draft: CardPurchaseDraft) =>
   cardPurchaseRecognitionWrites({ draft, expectedRevision: null, now: NOW });
 
-/** The same batch with the seal and commit row G1b appends (keys are the claims). */
-function purchaseWithCommitWrites(draft: CardPurchaseDraft): SqlWrite[] {
-  const entry = decisionEntry(draft.decisionRevisionId);
-  const ref = { eventId: draft.revision.eventId, revision: draft.revision.revision };
-  return [
-    ...purchaseWrites(draft),
-    ...economicFinalizationWrites({
-      entry,
-      claims: [],
-      times: [],
-      effects: [],
-      seals: [
-        {
-          ...ref,
-          writerRelease: "card-purchase-recognition-v1",
-          legCount: draft.revision.legs.length,
-          claimCount: draft.keys.length,
-          timeCount: 0,
-          effectCount: 0,
-          contentDigest: draft.contentDigest,
-          identityPins: {},
-          identityEpoch: EPOCH_1,
-          now: NOW,
-        },
-      ],
-      commit: {
-        decisionRevisionId: draft.decisionRevisionId,
-        operationId: null,
-        principal: CARD_PURCHASE_ACTOR,
-        payloadDigest: draft.contentDigest,
-        kind: "card-purchase.recognize",
-        members: [{ ...ref, supersedes: [] }],
-        claims: draft.keys.map((key) => ({
-          book: "card-usage" as const,
-          key: parseConsumptionKey(key.key)!,
-        })),
-        released: [],
-        now: NOW,
-      },
-    }),
-  ];
-}
+/** The lane's recognition as a pre-guard build wrote it: its own decision id, no seal, no commit row. */
+const legacyPurchaseWrites = (draft: CardPurchaseDraft) =>
+  preGuardRecognitionWrites(draft, null, NOW);
 
 const liveHolders = (db: Database) =>
   db
@@ -623,9 +584,9 @@ describe("migration 0070", () => {
     const db = beforeGuard();
     seedCardRows(db);
     seedBank(db);
-    // A recognised card purchase (the lane's own batch) ...
-    const draft = await draftOf(factOf(1));
-    await run(db, purchaseWrites(draft));
+    // A recognised card purchase (the lane's own batch, as a pre-guard build wrote it) ...
+    const draft = await preGuardDraft(await draftOf(factOf(1)));
+    await run(db, legacyPurchaseWrites(draft));
     // ... an accepted settlement, and a second one on the same debit: an
     // inconsistency the old readiness would refuse but nothing stores against.
     proposeSettlement(db, "proposal-1", 101);
@@ -710,10 +671,10 @@ describe("migration 0070", () => {
     db.close();
   });
 
-  test("the current writers keep working unchanged after it", async () => {
+  test("a pre-guard build's writers keep working unchanged after it", async () => {
     const db = database();
-    const draft = await draftOf(factOf(1));
-    expect((await run(db, purchaseWrites(draft))).every((changes) => changes > 0)).toBe(true);
+    const draft = await preGuardDraft(await draftOf(factOf(1)));
+    expect((await run(db, legacyPurchaseWrites(draft))).every((changes) => changes > 0)).toBe(true);
     proposeSettlement(db, "proposal-1", 101);
     await run(db, acceptSettlementWrites(db, "proposal-1", 101));
     expect(liveHolders(db)).toHaveLength(2);
@@ -1216,14 +1177,28 @@ describe("G1b decision: a rule entry means the entry exists", () => {
     // where an old draft id is replayed anyway, its revision is logged with
     // an honest later known_at, never backdated.
     const db = database();
-    const draft = await draftOf(factOf(1));
-    await run(db, purchaseWrites(draft));
-    const changes = await run(db, purchaseWithCommitWrites(draft));
+    const current = await draftOf(factOf(1));
+    const draft = await preGuardDraft(current);
+    // The writer release is part of the digest: a guard-era draft never has
+    // the pre-guard id.
+    expect(current.decisionRevisionId).not.toBe(draft.decisionRevisionId);
+    await run(db, legacyPurchaseWrites(draft));
+    // The current writer's batch for the pre-guard draft id.
+    const changes = await run(
+      db,
+      cardPurchaseRecognitionWrites({ draft, expectedRevision: null, now: LATER }),
+    );
     expect(changes.slice(0, -2).every((n) => n === 0)).toBe(true);
     expect(changes.slice(-2)).toEqual([1, 1]);
+    // Logged now, with the later clock: never backdated to the revision's created_at.
     expect(db.query("SELECT commit_seq,kind,known_at FROM economic_commit_log").all()).toEqual([
-      { commit_seq: 1, kind: "card-purchase.recognize", known_at: NOW },
+      { commit_seq: 1, kind: "card-purchase.recognize", known_at: LATER },
     ]);
+    expect(
+      db
+        .query("SELECT created_at FROM economic_event_revisions WHERE event_id=?")
+        .all(draft.revision.eventId),
+    ).toEqual([{ created_at: NOW }]);
     db.close();
   });
 });
@@ -1270,9 +1245,7 @@ describe("W3: a sealed revision takes no more children", () => {
   test("no card purchase key is added to a sealed purchase revision", async () => {
     const db = database();
     const draft = await draftOf(factOf(1));
-    expect((await run(db, purchaseWithCommitWrites(draft))).every((changes) => changes > 0)).toBe(
-      true,
-    );
+    expect((await run(db, purchaseWrites(draft))).every((changes) => changes > 0)).toBe(true);
     const before = snapshot(db);
     // Observation 7 is a Vpass pending row the 0047 key guard itself admits.
     await expect(
