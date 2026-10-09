@@ -151,10 +151,19 @@ policy, bounds and closed codes; the summary counts of the whole read.
   confirmation screen; approval and commit happen there. A held candidate
   offers keeping apart only.
 
-Each request walks every current identity observation once: about 0.65 s per
-100,000 of them on `bun:sqlite` on the synthetic scaled store, growing
-linearly with history; not measured on D1 (the amendment has the figures).
-A reader pages to offset 950 of a view; `identifierId` narrows a larger one.
+Each request walks every current identity observation once, so its cost is
+linear in captured history (about 0.8 to 0.95 s per 100,000 on workerd and
+0.65 to 0.7 s on `bun:sqlite` on the synthetic scaled store; the amendment has
+the figures). Before the walk the service counts them from the identity run
+seals, in milliseconds, and refuses above 500,000 (`budget_exceeded`,
+`budget:identityObservations=500000`). That is acceptable today for one owner
+reading the page behind Access; routine agent polling needs a written bound
+first. A reader pages to offset 950 of a view (no `nextOffset` past it);
+`identifierId` narrows a larger one. The page re-reads a candidate before it
+plans and plans nothing if the candidate, its commands or either
+identifier's mapping revision changed; the server pins only the subject's
+mapping revision, so an agent's or a direct API adoption plan does not pin
+the anchor.
 
 Limits today: no route serves `queryInstrumentHistory`. Only SBI
 Securities and SBI VC Trade store security, crypto or product identifiers, so
@@ -163,8 +172,10 @@ code and country, an ISIN or a RIC. No rule records ISIN, share class or
 product class. Valuation and the report job still key holdings by the
 provider-local `instrument:<source>:<market>:<code>`, so no candidate moves a
 price, quantity or cost. The facts read walks every current identity
-observation once, like the instrument catalogue; its D1 cost is not measured
-(the `bun:sqlite` figures are above). An equal country and code is
+observation once, like the instrument catalogue. Its D1 cost had to be
+measured before a route served it; as amended on 2026-10-09 that is replaced
+by the plan check without statistics, `bun:sqlite` and workerd measurements
+and the observation bound above, and remote D1 remains unmeasured. An equal country and code is
 proposed with no period comparison, so a code reassigned after a delisting
 still pairs, and nothing names that as a gap. The status read ignores a
 `listed_as` relation's `valid_from` and `valid_to`, so a rejection limited to

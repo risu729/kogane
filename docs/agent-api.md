@@ -341,15 +341,24 @@ Input, a closed object (every key optional): `view` (`open`, `held`,
 `identifierId` (only the items naming that identifier). Output:
 `kogane-instrument-candidates-v1` with the manifest (policy, bounds, every
 closed code), the summary counts, `decisions: "change-lifecycle"`, `total`,
-at most 50 `items` with their `evidenceRefs`, `nextOffset` and the
+at most 50 `items` with their `evidenceRefs`, `nextOffset` (null past the
+last page and where the next page would exceed the grant's `maxRows`) and the
 identifiers the items name.
+
+Each call walks every current identity observation, linear in captured
+history (ADR 0055 amendment, Cost). Routine polling of this tool needs a
+written bound (a rate, or a cached or projected candidate set) before it is
+configured.
 
 Authorization, in order, after the Access check and the grant lookup:
 `records.read`, else `403 unauthorized`; sources and accounts both `"*"`, else
 `403 evidence_restricted` (`scope:source`, `scope:account`), because pairs
 span sources; `offset + 50` within `maxRows`, else `413 budget_exceeded`.
-All three are decided before the store is read. A store past the read's own
-bounds is `413 budget_exceeded` (`budget:instrumentResolution`); an
+All three are decided before the store is read. A store holding more than
+500,000 current identity observations (counted from the identity run seals
+before the walk) is `413 budget_exceeded` (`budget:identityObservations=500000`);
+a store past the read's own bounds is `413 budget_exceeded`
+(`budget:instrumentResolution`); an
 `identifierId` the read does not hold is `403 evidence_restricted`; an
 unknown key is `400 unsupported_semantics` and a malformed value
 `400 invalid_query`.
@@ -360,7 +369,9 @@ It reads and never writes. A proposed candidate carries `commands`: the
 Deciding is a plan of that payload, with a reason, through the change
 lifecycle's command API, graded there by its own grant lists exactly as a
 plan from the page is; under today's lists an agent can plan and cannot
-approve or commit.
+approve or commit. The server pins only the subject's mapping revision of an
+adoption plan, not the anchor's: read the candidate again right before
+planning, as the page does.
 
 ## Contexts, cursors and hand-off
 

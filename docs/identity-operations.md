@@ -89,6 +89,19 @@ offers keeping apart only; moving that subject is a correction of the
 earlier decision, made as above. An agent reads the same list through
 `kogane.instruments.candidates` and plans through the same command API.
 
+Staleness: the page reads the candidate again before it plans, and plans
+nothing unless the same candidate, with the same commands and the same
+mapping revisions of both identifiers, is still listed. The server pins only
+the subject's mapping revision of an `identity.assign` plan; the anchor is
+not pinned. So an agent's or a direct API adoption plan made from an older
+read can adopt the subject into an instrument the anchor has since left;
+check the anchor's current mapping on the confirmation screen's targets, or
+read the candidate again, before approving such a plan.
+
+The read is refused with `budget:identityObservations=500000` once the
+store holds more current identity observations than that; raising the bound
+needs a remote D1 measurement first (ADR 0055 amendment, Cost).
+
 ## Verification and rollback
 
 - `/api/identity/coverage` compares all eligible current B observations against
