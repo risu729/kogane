@@ -1170,5 +1170,5 @@ earlier one's holder rather than count twice (ADR 0018 note).
 **Deploying is the re-parse.** The release is deployed by the CD release of
 the commit that merges it (`deploy.yml` releases every green CI run on main);
 the repair lane then re-parses the stored captures, as it did for 0.1.2
-above, and rows of 0.1.2 runs stay refused until it has. Production was not
+above, and rows of 0.1.2 runs stay refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead. Production was not
 read for this release.

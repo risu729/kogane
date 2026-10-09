@@ -213,7 +213,6 @@ leaves its bank-movement and fx-exchange memberships, which stay unsupported
 for `counterpart_not_stated` (and `semantics_unobserved` for fx-exchange), and
 its card-settlement membership is `supported` (ADR 0054). The registry states
 the code: rows 0.1.2 runs stored carry no origin, and the human-adopted
-writer reads the origin per row, so those rows stay refused until the repair
-lane has re-parsed them under 0.1.3. The other provider-id
+writer reads the origin per row, so those rows stay refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead. The other provider-id
 parsers (yen detail, SBI VC cash flows and executions, PayPay) are unchanged.
 Verified by both `event-families.test.ts` files on the synthetic fixtures.

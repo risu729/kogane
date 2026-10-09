@@ -146,8 +146,7 @@ and the provider's civil date.
   (`transaction-family-registry-v3`)
 - Deployed: by the CD release of the commit that merges this PR (`deploy.yml`
   releases every green CI run on main); the owner's merge is the deploy
-  decision, and with it the repair-lane re-parse. Rows of 0.1.2 runs stay
-  refused until the repair lane has re-parsed their captures under 0.1.3.
+  decision, and with it the repair-lane re-parse. Rows of 0.1.2 runs stay refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead.
 
 ### Context
 

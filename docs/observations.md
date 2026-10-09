@@ -36,8 +36,7 @@ stored records none and stays refused (`identity_origin_unrecorded`).
 
 **Deploying is the re-parse.** The release is deployed by the CD release of
 the commit that merges it (`deploy.yml` releases every green CI run on main),
-so the owner's merge is the deploy decision. Rows of 0.1.2 runs stay refused
-until the repair lane has re-parsed them under 0.1.3: the repair lane's cyclic scan then creates a 0.1.3 job for every
+so the owner's merge is the deploy decision. Rows of 0.1.2 runs stay refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead. The repair lane's cyclic scan creates a 0.1.3 job for every
 stored activity capture, as for 0.1.2 [below](#sbi-shinsei-stored-capture-shapes-activity-parser-012-board-parser-101);
 each `ok` 0.1.3 run is published in place of the 0.1.2 run, which is marked
 superseded while its rows stay stored. No migration: the dataset's snapshot

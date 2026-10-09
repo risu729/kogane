@@ -598,8 +598,7 @@ such a row; rule 2 and the function are unchanged. The registry becomes
 `transaction-family-registry-v3`: the entry records its origin under
 `identityOrigin`, and SBI Shinsei's card-settlement membership is `supported`
 again. The admission still reads each stored row, so a row a 0.1.2 run stored
-is refused (`identity_origin_unrecorded`) until the repair lane has re-parsed
-its capture under 0.1.3. The release is deployed by the CD release of the
+is refused (`identity_origin_unrecorded`) and stays refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead. The release is deployed by the CD release of the
 commit that merges it (`deploy.yml` releases every green CI run on main), and
 the repair lane then re-parses the stored captures without an operator step:
 the owner's merge is the deploy and re-parse decision. The reference's stability and

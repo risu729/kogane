@@ -41,9 +41,7 @@ from parser 0.1.3 (2026-10-09,
 which records `_kogane.identityOrigin: provider-id` beside the unchanged
 `txnReferenceNo`; a row a 0.1.2 run stored has no recorded origin, so its
 acceptance is refused (`identity_origin_unrecorded`,
-[lifecycle](#candidate-and-decision-lifecycle)). Rows of 0.1.2 runs stay
-refused until the repair lane has re-parsed them under 0.1.3; the candidates
-the sweep then proposes cite the 0.1.3 rows, and the earlier candidates stay
+[lifecycle](#candidate-and-decision-lifecycle)). Rows of 0.1.2 runs stay refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead, and the candidates the sweep then proposes cite the 0.1.3 rows while the earlier candidates stay
 listed with the blocker `bank_debit_changed`. The rule-exception route, treating
 ADR 0018's reviewed adapter evidence as the declared origin, was not taken.
 
@@ -252,8 +250,7 @@ Since ADR 0054 G1b the acceptance and the withdrawal write the rows of the
   `["sbi-shinsei-bank",[<txnReferenceNo>],<resolved account>,"sbi-shinsei-txn-reference-no-v1"]`).
   An SBI Shinsei debit a 0.1.2 run stored records no origin, so its acceptance
   is refused with `unsupported_semantics` and the closed code
-  `identity_origin_unrecorded` until the repair lane has re-parsed it under
-  0.1.3. Fingerprint, digest and unrecorded ids are refused the same way,
+  `identity_origin_unrecorded`, and stays refused; once the repair lane has re-parsed a capture under 0.1.3, its 0.1.3 rows are admissible instead. Fingerprint, digest and unrecorded ids are refused the same way,
   with their own codes. Nothing is adopted automatically.
 - **The claim.** The acceptance writes, after its legs and allocation, an
   `economic_claims` row in book `cash-movement` for the debit: the candidate's
