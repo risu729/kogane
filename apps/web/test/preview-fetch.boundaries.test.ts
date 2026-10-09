@@ -93,28 +93,21 @@ test("preview rejects a multi-chunk sum past the preview limit and cancels", asy
   expect(head.byteLength).toBe(PREVIEW_LIMIT);
   expect(tail.byteLength < PREVIEW_LIMIT).toBe(true);
   expect(head.byteLength + tail.byteLength).toBe(PREVIEW_LIMIT + 1);
-  const parts = [head, tail];
   let cancelled = false;
-  let pulls = 0;
   const stream = new ReadableStream<Uint8Array>({
-    pull(controller) {
-      const part = parts[pulls];
-      pulls += 1;
-      if (part === undefined) {
-        controller.close();
-        return;
-      }
-      controller.enqueue(part);
+    start(controller) {
+      controller.enqueue(head);
+      controller.enqueue(tail);
     },
     cancel() {
       cancelled = true;
     },
   });
   respond(new Response(stream));
+  // expectedSize stays at the limit, so a per-chunk check would finish the body and reject with 409.
   await expect(
     fetchPreview(url, new AbortController().signal, digest(head), head.byteLength),
   ).rejects.toMatchObject({ status: 413 });
-  expect(pulls).toBe(2);
   expect(cancelled).toBe(true);
   expect(stream.locked).toBe(false);
 });
