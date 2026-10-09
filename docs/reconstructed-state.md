@@ -9,19 +9,26 @@ decided in [ADR 0052](adr/0052-reconstructed-state-fold.md). It sits beside
 reported figure and the reconstructed figure are two columns, and the
 difference between them is shown, never absorbed.
 
-**Today this is a pure engine only.** `packages/domain/src/reconstruction.ts`
-computes it from inputs a caller supplies; there is no adapter over the stored
-event rows, no query, no route and no page yet, so nothing in production
-computes a reconstructed state.
+**Today there is an engine and a query, but no route or page.**
+`packages/domain/src/reconstruction.ts` folds; the knowledge selector
+([ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md)) reads
+the stored event rows at a cut of the economic commit log, the B adapter turns
+its selection into the fold's input, and `queryReconstructedState` composes
+them for one account, one range, on the cash basis. No route, page or service
+calls the query yet, so nothing in production computes a reconstructed state.
 
-| Piece     | Where                                                                    |
-| --------- | ------------------------------------------------------------------------ |
-| Selector  | `selectKnowledge(set, { coreEpoch, commitSeq })`                         |
-| Fold      | `reconstructState({ request, policy, start, end, selection, baseline })` |
-| Late diff | `explainLate(baseline, now)`                                             |
-| Manifest  | `canonicalReconstructionManifest(manifest)`, digested by the caller      |
-| Policy    | `RECONSTRUCTION_FOLD_V1` (`reconstruction-fold-v1`), passed explicitly   |
-| Tests     | `packages/domain/test/reconstruction.test.ts` (synthetic only)           |
+| Piece             | Where                                                                                                                                                                                                                            |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Knowledge, SQL    | `packages/read-model/src/economic-selector.ts`: `loadSelectorRows`, `resolveSelectorCut`                                                                                                                                         |
+| Knowledge, pure   | `packages/domain/src/knowledge-selector.ts`: `selectAdopted(input)`                                                                                                                                                              |
+| B adapter         | `packages/domain/src/reconstruction-adapter.ts`: `adaptSelection`, `explainLateSelections`                                                                                                                                       |
+| Fold's own step 1 | `selectKnowledge(set, { coreEpoch, commitSeq })`                                                                                                                                                                                 |
+| Fold              | `reconstructState({ request, policy, start, end, selection, baseline })`                                                                                                                                                         |
+| Late diff         | `explainLate(baseline, now)`                                                                                                                                                                                                     |
+| Manifest          | `canonicalReconstructionManifest(manifest)`, digested by the caller                                                                                                                                                              |
+| Policy            | `RECONSTRUCTION_FOLD_V1` (`reconstruction-fold-v1`), passed explicitly                                                                                                                                                           |
+| Query             | `packages/application/src/query/reconstructed-state.ts`: `queryReconstructedState(sql, input)`                                                                                                                                   |
+| Tests             | `packages/domain/test/{reconstruction,knowledge-selector,reconstruction-adapter}.test.ts`, `packages/read-model/test/economic-selector*.test.ts`, `packages/application/test/reconstructed-state-query.test.ts` (synthetic only) |
 
 ## Inputs
 
@@ -51,9 +58,71 @@ legs is refused with `event_budget_exceeded`, a reported side over 5,000 rows
 over 1,000 family or history coverage rows with `coverage_budget_exceeded`;
 nothing is cut to fit.
 
+## Reading the stored rows: the knowledge selector and the B adapter
+
+[ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md) decides
+this; the summary:
+
+- **Cut.** `{coreEpoch, commitSeq}`, or `{coreEpoch, instant}` resolved in SQL
+  to the largest sequence whose `known_at` is at or before the instant
+  (floored to milliseconds; every commit of an equal instant included).
+  Sequence 0 is before the first commit. A sequence past the log's end and a
+  cut of another core epoch are refused. The query's default is the latest
+  commit of the current epoch.
+- **Load.** Every event whose legs name the account as `account:<id>` or as
+  the bare id, closed under supersession (both ways, across event ids) and
+  under claim holders (the same key or alias class), with all their legs,
+  claims (legacy purchase keys and accepted settlements through
+  `economic_revision_claims`), times, effects, seals and commits; bounded and
+  refused past its bounds, every statement by key.
+- **Resolution, before any filter.** A revision is known at the cut when its
+  seal's commit is at or before it, and superseded at the cut when such a
+  commit declares it in `supersedes`. An event is `active` (one revision in
+  force), `knowledge_unlogged` (an in-force revision without a commit, written
+  before the log or by an older build, or pointing at one), or
+  `chain_inconsistent`. Only then is the scope applied, through every leg a
+  revision reaches by its supersessions, so a corrected date or account never
+  revives the old revision.
+- **What it reports.** Holders at the cut from the selected claims, conflicts
+  of a key or alias class (never resolved), `identity_changed` (a seal under
+  another identity epoch or with a moved or unreadable pin; the holder kept),
+  unsupported shapes, unlogged entries, and the log's coverage of the cut
+  (`logged`, `partial`, `indeterminate`). Its set version digests every
+  selected row in its at-cut form, so a later commit leaves an earlier cut's
+  answer and version unchanged.
+- **B adapter.** A `resolved-at-cut` input: leg effects from
+  `economic_leg_effects` (a legacy fee or unresolved leg is a correspondence of
+  its revision's one movement on another basis, otherwise
+  `writer_unsupported`), times from `economic_event_times` only (the 0032
+  effective time is not read), claim keys digested, the selector's dispositions
+  as fold flags or revisions without a commit, and no coverage declared
+  (`coverage-producer-none-v1`).
+
+## The query
+
+`queryReconstructedState(sql, { account, from, to, basis, cut, now })`:
+one account, at most 366 days ending no later than the caller's date, `cash`
+only. It answers `unavailable` without CORE 0070 (`economic_guard_missing`)
+or for an account no reported container lists (`no_reported_container`), then
+by precedence `indeterminate` (`log_empty`, `cut_before_log_start`,
+`knowledge_unlogged`, `snapshot_boundary_unknown`), `needs_review`
+(`identity_changed`, `claim_conflict`, `alias_conflict`,
+`revision_chain_inconsistent`, `writer_unsupported`, `revision_left_out`),
+`incomplete` (every other cell gap, `nothing_to_reconstruct`,
+`positions_not_folded`) or `complete`, listing every reason. It returns the
+cut, the selector's diagnostics, both reported context ids, the fold's state,
+the late part (at the cut of the end capture, when the account's end balances
+share one capture), and an outer manifest pinning the releases, the cut, the
+set version, the identity epoch and pins, alias rule versions, the coverage
+producer, both snapshot contexts and the fold manifest's digest, with its
+`contextId`.
+
 ## Step 1: knowledge selection
 
-`selectKnowledge` takes the whole chains and a cut. It selects the revisions
+This is the fold's own step 1. Stored rows reach it already resolved
+(`resolved-at-cut`, above), so for them it only checks that no event has two
+committed revisions. With full chains, `selectKnowledge` takes the whole
+chains and a cut. It selects the revisions
 committed at or before the cut, resolves every event's active revision
 (committed by the cut, no successor committed by it; supersession across
 events included), and only then does the fold filter by range, account,
@@ -182,18 +251,26 @@ Any input order gives the same output and the same id.
 - Knowledge, chain and adapter-flag blocks apply whatever the date: a flagged
   chain dated outside the window still blocks the cell, and a flagged leg no
   account resolves blocks every requested cell of its unit.
-- No read path: no adapter, query, route or page. The provisional input is
-  not filled from the stored rows by anything yet.
-- The input is provisional and is replaced by the hand-off contract; the
-  questions it must answer are listed in ADR 0052.
-- No stored revision has a commit sequence yet; until the common guard
-  assigns one, the adapter cannot place today's rows at a cut.
+- No route, page or service calls the query; that is the next step.
+- The input is provisional; the questions ADR 0052 still holds are 3, 6, 9
+  and 11 (ADR 0058 answered the others).
+- Revisions written before the guard (G1b) have no commit: an account with
+  one in its history at the cut is `indeterminate` (`knowledge_unlogged`).
+- Neither writer writes event times, so a settlement's cash leg has no
+  `posting` time and is `event_time_unknown`: a bank account's cell has no
+  figure while a settlement touches it.
 - Card accounts have no reported container and their movements are on the
   purchase-recognition basis, so on the cash basis a card account produces no
-  cell at all: its purchases are listed as `other_basis` and its account row
-  shows no start or end container. Bank accounts' only events are reviewed
+  cell at all: the query answers `unavailable` (`no_reported_container`), its
+  purchases listed as `other_basis`. Bank accounts' only events are reviewed
   card settlements, so their families are not evented.
-- No parser emits transaction-history coverage, so every family's history
-  coverage is `unknown`: no real account can be `complete` today.
+- No producer states family or history coverage (`coverage-producer-none-v1`),
+  so no real account can be `complete` today.
+- Positions carry provider text only and are counted, never folded; only the
+  cash basis and one account are answered.
+- Selection cost: one load reads the whole history of every touched event;
+  measured once on `bun` locally (not asserted), 1,500 events with 4,500
+  revisions loaded in 63–76 ms and selected in 198–257 ms; not measured on
+  workerd or D1 (ADR 0058).
 - Own transfers are held, never applied; trade and settlement bases are never
   compared with a provider figure.

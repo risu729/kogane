@@ -378,6 +378,9 @@ None is tested here; each needs the selector or an engine adapter.
 | B12 history filled later gives a new cut and a new result               | #550 selector (ADR 0058) and #556 adapter (ADR 0059)                   |
 | B13 the manifest is deterministic under permutation                     | #550 (ADR 0058) and #556 (ADR 0059)                                    |
 
+Pointer (2026-10-09): B1, B2, B4–B6, the B side of B3, B12 and B13, and W11
+are tested by [ADR 0058](0058-knowledge-selector-and-reconstruction-adapter.md#verification).
+
 ### Not verified (owner items)
 
 - Remote D1: that a trigger `RAISE` inside `batch()` rolls the whole batch

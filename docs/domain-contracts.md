@@ -385,7 +385,36 @@ and the card settlement acceptance and withdrawal write through it since G1b
   replaced by the hand-off contract. The policy `reconstruction-fold-v1` is a
   required parameter and any other content under its id is refused. Absent
   stays absent, nothing is totalled across accounts, and an input over the
-  budget is refused, never cut. No read path uses it yet.
+  budget is refused, never cut. Stored rows reach it only through the
+  knowledge selector and the B adapter below, as a `resolved-at-cut` set.
+
+## `knowledge-selector.ts` — what was adopted as known at a cut
+
+- [ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md):
+  `selectAdopted(input)` takes the rows the SQL half
+  (`packages/read-model/src/economic-selector.ts`) loaded for a scope (every
+  revision of every touched event, legs, claims, times, effects, seals, the
+  commits the seals name, identity epochs and pinned identity meanings) and a
+  resolved cut, resolves each event's revision in force from the commit log's
+  `supersedes` before any filter, then applies the scope. It reports
+  `knowledge_unlogged` (`no_commit`, `other_core_epoch`,
+  `successor_unlogged`), `chain_inconsistent`, `identity_changed`, key and
+  alias conflicts (never resolved), unsupported shapes and the log's coverage
+  of the cut; `setVersion` is the digest of the selection's at-cut body.
+- `canonicalCutInstant` and `resolveInstantCut` are the pure form of the
+  instant resolution. Closed codes, exact-key validators, bounds
+  (`SELECTOR_BOUNDS`) refused never cut, no clock.
+
+## `reconstruction-adapter.ts` — the B adapter
+
+- `adaptSelection(selection)` hands the fold a `resolved-at-cut`
+  `provisional-adopted-events-v1` set: typed leg effects (a legacy fee or
+  unresolved leg is a correspondence of the revision's one movement on another
+  basis, otherwise `writer_unsupported`), times as stored with no fallback,
+  `sha256:` digests of claim keys, the selector's dispositions as fold flags
+  or revisions without a commit, and no coverage declared
+  (`coverage-producer-none-v1`). `explainLateSelections` diffs two selections.
+  `KNOWN_WRITER_RELEASES` names the seal releases each fold writer stamps.
 
 ## Fixtures
 

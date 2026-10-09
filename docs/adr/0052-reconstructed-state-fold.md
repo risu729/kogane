@@ -282,3 +282,32 @@ giving the same output and context id, the budget refusal, and refusals of
 unknown keys, another policy and a tampered selection.
 `mise run //packages/domain:ci` and `mise run ci:root` locally. No production
 data, D1 or Workers were involved.
+
+## Amendment: stored rows reach the fold through the knowledge selector (2026-10-09, ADR 0058)
+
+Status: proposed until the ADR 0058 pull request merges; accepted upon merge.
+
+- **Resolution.** For stored rows, which revision is in force at a cut is now
+  decided by the knowledge selector (`packages/domain/src/knowledge-selector.ts`
+  over `packages/read-model/src/economic-selector.ts`), from the 0070 commit
+  log: a revision's commit is the one its seal names, and supersession at a cut
+  is what a commit at or before it declares in `supersedes`, not the stored
+  pointer. The B adapter hands the fold a `resolved-at-cut` set, so the fold's
+  own chain resolution becomes input validation (two committed revisions of one
+  event are `revision_chain_inconsistent`). `recordedAt` was never used to
+  resolve and stays informational; the fold's full-chains path is unchanged
+  for its tests. `explainLate` is fed two selector selections.
+- **Held items answered** (ADR 0058): 1, what is handed over is the selection
+  at a cut, its set version the selector's digest of every selected row in its
+  at-cut form, minted per request, not stored; 2, times are read from
+  `economic_event_times` only, and this ADR's assumption that a settlement's
+  0032 effective time is its `posting` time is withdrawn (0070 forbids it), so
+  a settlement without a posting time row is `event_time_unknown`; 4, the
+  subject tolerance is the selector loader's (`account:<id>` or the bare id of
+  an existing account), still not a canonical-form decision; 5, a legacy fee or
+  unresolved leg is a correspondence of its revision's one movement on another
+  basis, otherwise undeclared (`writer_unsupported`); 7, no coverage producer
+  exists and the adapter declares none (`coverage-producer-none-v1`); 8, the
+  commit sequence is 0070's, and revisions before it stay
+  `knowledge_unlogged`; 10, a seal whose identity epoch or pins differ from
+  the current meaning is `identity_changed`. Items 3, 6, 9 and 11 stay held.

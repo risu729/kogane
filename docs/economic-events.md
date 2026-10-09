@@ -373,7 +373,8 @@ Limits:
   superseded is refused (`economic_seal_invalid`), never written.
 - 0070 refuses a new seal under a stale identity epoch, but does not refuse
   superseding a holder sealed under an older epoch: routing such holders to
-  needs-review is the planners' and the selector's job (ADR 0054).
+  needs-review is the planners' job (G3); the knowledge selector reports them
+  as `identity_changed`, holder kept ([ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md)).
 - Settlement leg subjects stay bare account ids (read through 0044's
   tolerance); neither writer writes event times or leg effects.
 - Trigger behaviour and cost on remote D1 are not verified.
@@ -1175,6 +1176,24 @@ event already retired keeps the period it had.
 
 All arithmetic is done in `@kogane/domain` with exact decimals. No sum is
 computed by casting a coefficient to a SQLite INTEGER.
+
+### Knowledge selector
+
+`packages/read-model/src/economic-selector.ts` (SQL) and
+`packages/domain/src/knowledge-selector.ts` (pure) read what was adopted as
+known at a cut of the commit log
+([ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md)). The
+loader seeds on legs naming an account in either stored subject form
+(`account:<id>` from the card purchase lane, the bare id from the settlement
+writer, tolerated as 0044 tolerates it), closes over supersession and claim
+holders (legacy purchase keys and accepted settlements through
+`economic_revision_claims`), and reads seals, commits, times, effects and
+pinned identity meanings by key. The selector decides supersession from the
+commit log's `supersedes`, never from `superseded_by` or `created_at` alone;
+revisions written before G1b, or by an older build without a commit, are
+`knowledge_unlogged`, reported and never applied. Its only consumer is the
+reconstructed-state query (`packages/application/src/query/reconstructed-state.ts`),
+which no route calls yet. `reconciliationSignals` above is unchanged.
 
 ### HTTP
 
