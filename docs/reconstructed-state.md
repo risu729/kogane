@@ -77,7 +77,9 @@ this; the summary:
   refused past its bounds, every statement by key.
 - **Resolution, before any filter.** A revision is known at the cut when its
   seal's commit is at or before it, and superseded at the cut when such a
-  commit declares it in `supersedes`. An event is `active` (one revision in
+  commit declares it in `supersedes`, or when its stored pointer names a
+  revision so superseded or replaced (a pre-log chain ends at the logged
+  correction of its last revision). An event is `active` (one revision in
   force), `knowledge_unlogged` (an in-force revision without a commit, written
   before the log or by an older build, or pointing at one), or
   `chain_inconsistent`. Only then is the scope applied, through every leg a
@@ -88,8 +90,9 @@ this; the summary:
   another identity epoch or with a moved or unreadable pin; the holder kept),
   unsupported shapes, unlogged entries, and the log's coverage of the cut
   (`logged`, `partial`, `indeterminate`). Its set version digests every
-  selected row in its at-cut form, so a later commit leaves an earlier cut's
-  answer and version unchanged.
+  selected row in its at-cut form (not how the cut was asked), so a later
+  commit leaves an earlier sequence's answer and version unchanged; an instant
+  at or after the log's last `known_at` is marked `provisional`.
 - **B adapter.** A `resolved-at-cut` input: leg effects from
   `economic_leg_effects` (a legacy fee or unresolved leg is a correspondence of
   its revision's one movement on another basis, otherwise
@@ -252,10 +255,18 @@ Any input order gives the same output and the same id.
   chain dated outside the window still blocks the cell, and a flagged leg no
   account resolves blocks every requested cell of its unit.
 - No route, page or service calls the query; that is the next step.
-- The input is provisional; the questions ADR 0052 still holds are 3, 6, 9
-  and 11 (ADR 0058 answered the others).
-- Revisions written before the guard (G1b) have no commit: an account with
-  one in its history at the cut is `indeterminate` (`knowledge_unlogged`).
+- The input is provisional. Of ADR 0052's held questions, 2 and 8 are
+  answered, 1 mostly and 5 partly; 4, 7 and 10 are narrowed but still held,
+  and 3, 6, 9 and 11 are held as written (ADR 0052, amendment).
+- Revisions written before the guard (G1b) have no commit. While one is in
+  force at the cut (no logged revision superseded it, directly or through a
+  pre-log chain), the account is `indeterminate` (`knowledge_unlogged`); one
+  a logged correction replaced is history.
+- An instant cut at or after the log's last `known_at` is `provisional`: a
+  later commit from a lagging worker clock can still resolve it to a later
+  sequence. The resolved sequence reproduces the answer.
+- The load is whole-history: an account touching more than 2,000 events is
+  refused at every range.
 - Neither writer writes event times, so a settlement's cash leg has no
   `posting` time and is `event_time_unknown`: a bank account's cell has no
   figure while a settlement touches it.

@@ -73,6 +73,14 @@ current core epoch, or, for an empty log, the caller's `now` as an instant;
 the requested and resolved cut and the resolved commit's `known_at` are
 always echoed in the manifest.
 
+An instant at or after the log's last `known_at` answers with
+`cutStanding: "provisional"`; every other cut is `final`. `known_at` is
+`max(worker now, previous known_at)`, so a later commit from a lagging worker
+clock can land at or before such an instant and resolve it to a later
+sequence (log `[1 at 00:00:00]`: the instant `00:00:05` resolves to 1; a
+commit at `00:00:02` makes it resolve to 2). The resolved sequence, pinned in
+the manifest, reproduces either answer.
+
 ### Loading (`economic-selector.ts`)
 
 For the scope's accounts the loader reads, each statement by key: the events
@@ -92,6 +100,8 @@ read). The load is cut-independent: one load answers any cut of the epoch.
 Bounds (`SELECTOR_BOUNDS`): 2,000 events, 5,000 revisions, 20,000 legs and
 claims, 25,000 times, 20,000 effects, 5,000 commits and subjects, 1,000 pins;
 past any of them the load is refused (`selector_bound_exceeded`), never cut.
+Each read stops one row past its bound, the pointed-by and holder reads
+included.
 
 ### Resolution (`knowledge-selector.ts`, `selectAdopted`)
 
@@ -103,8 +113,14 @@ past any of them the load is refused (`selector_bound_exceeded`), never cut.
    names it in `supersedes`. The stored pointer is checked against it
    (`supersession_pointer_mismatch`), as is the order of the two commits
    (`successor_committed_first`).
+   A revision known at the cut (unlogged, or committed by it) whose stored
+   pointer names a revision superseded at the cut, or one already replaced
+   this way, is replaced too, transitively: its pointer was written with its
+   successor, before that successor was superseded. So a pre-log chain of any
+   length (within one event or merged across events) ends where a logged
+   correction supersedes its last revision.
 3. Per event, over every loaded revision and before any filter: the in-force
-   revisions are those not superseded at the cut. The event is
+   revisions are those not superseded or replaced at the cut. The event is
    `chain_inconsistent` when the log and the stored rows disagree: a pointer
    or commit check of step 2 failed, a visible pointer names a visible
    revision no commit declared (`supersession_undeclared`), a seal's counts
@@ -148,11 +164,16 @@ past any of them the load is refused (`selector_bound_exceeded`), never cut.
    in-scope event is `knowledge_unlogged`; else `logged`. The log's first
    commit is reported; its last is not, because it moves with every later
    commit.
-10. **Set version** is `sha256` of the canonical selection body: the cut,
-    scope, current identity epoch and every selected row in its at-cut form.
-    A row recorded after the cut is read but does not enter it, so a later
-    commit leaves an earlier cut's set version and answer unchanged (B2); any
-    order of the loaded rows gives the same version (B13).
+10. **Set version** is `sha256` of the canonical selection body without the
+    requested cut: the resolved cut and its `known_at`, scope, current
+    identity epoch and every selected row in its at-cut form. One sequence
+    asked by number or by instant has one set version (the outer manifest
+    pins how it was asked), and `cutStanding` is not digested. A row recorded
+    after the cut is read but does not enter it, so a later commit leaves an
+    earlier sequence's set version and answer unchanged (B2). B2 holds for
+    sequence cuts and for instants strictly before the log's last `known_at`;
+    an instant at or after it is `provisional` (above). Any order of the
+    loaded rows gives the same version (B13).
 
 All codes are closed lists in the module; every validator rejects unknown
 keys; there is no clock.
@@ -174,7 +195,10 @@ no commit, so the fold holds their cells whatever their date), those of a
   `correspondence` of that movement (the settlement writer's obligation leg
   beside its cash debit); otherwise its effect is undeclared and the revision
   is `writer_unsupported`. So 101 out = 100 principal + 1 fee counts 101 once,
-  and a fee is never added a second time (B3).
+  and a fee is never added a second time (B3). A raw movement and its event
+  can never both count: B reads no raw movement at all, only adopted
+  revisions, so the "raw and event" B3 case is one provider row that two
+  events claim, which is a conflict applied by neither.
 - **Times.** `economic_event_times` roles as stored; the fold's basis reads
   exactly its own role (cash → `posting`), and a missing role is its
   `event_time_unknown`. The 0032 effective time is not read.
@@ -191,7 +215,10 @@ no commit, so the fold holds their cells whatever their date), those of a
   release is `coverage-producer-none-v1`, and the fold names every scope
   `family_not_evented` and `history_coverage_unknown` (B5).
 - **Late part.** `explainLateSelections(baseline, now)` diffs two selections
-  through the fold's `explainLate`; no timestamp is read.
+  through the fold's `explainLate`; no timestamp is read. The query diffs the
+  two selections twice: inside the fold (each cell's late total and legs) and
+  through `explainLate` (the revisions that entered or left the scope), since
+  the fold does not return the second; no row is read twice.
 
 ### The query (`reconstructed-state.ts`, `queryReconstructedState`)
 
@@ -218,7 +245,8 @@ selector, adapter and engine releases, the fold policy, account, range, basis,
 requested and resolved cut and its `known_at`, set version, baseline cut and
 set version, identity epoch and the selected seals' pins, alias rule versions,
 coverage producer, both snapshot context ids and the digest of the fold's own
-manifest; `contextId` is its digest (B12, B13).
+manifest; `contextId` is its digest (B12, B13). The cut's standing
+(`final` or `provisional`) is returned beside the cut, outside the manifest.
 
 Nothing here writes, adopts or approves anything, and nothing is totalled
 across accounts.
@@ -239,13 +267,20 @@ across accounts.
   writes event times, so every settlement leg is listed as `unknown_effect`
   with `event_time_unknown` and the bank cell has no figure; a settlement
   accepted before G1b makes the account `indeterminate`
-  (`knowledge_unlogged`). The settlement writer writing a `posting` time is a
-  writer change of its own, not done here.
+  (`knowledge_unlogged`) until a logged revision supersedes it. The
+  settlement writer writing a `posting` time is a writer change of its own,
+  not done here, and it fixes only future acceptances: a sealed revision
+  takes no time row after its seal (`economic_revision_sealed`), so a
+  settlement accepted before that change stays `event_time_unknown` until a
+  new revision restates it with a time. The 0032 effective time is not shown
+  on the listed leg either (not done: it would be a value of no declared
+  role).
 - **No route, page or service** calls the query yet; that is the next step.
 - **Knowledge.** Only cuts of the current core epoch are answered; commits of
   another epoch read as unlogged. A revision an older build writes later
   without a commit changes the answer at earlier cuts (B2 holds for logged
-  history only); such a revision is reported, never applied.
+  history only); such a revision is reported, never applied. An instant at
+  or after the log's last `known_at` is `provisional`.
 - **Identity.** Only `account_mapping:` and `instrument_mapping:` pins are
   read; any other pinned subject is `identity_pin_unreadable`. Neither writer
   pins a subject today, so only the epoch is compared. The card purchase lane
@@ -261,6 +296,9 @@ across accounts.
   Evidence ids are not handed to the fold.
 - **One account, cash basis, balances only**: trade and settlement bases,
   positions and several accounts are refused or not folded (ADR 0004).
+- **Whole history.** The closure is cut- and range-independent: an account
+  whose legs, supersessions and claim holders touch more than 2,000 events
+  (or 5,000 revisions, 20,000 legs) is refused at every range and every cut.
 - **Cost.** The load reads the whole history of every touched event, and the
   instant resolution walks the commits made after the instant along the
   primary key (no index orders `known_at`). Measured once on `bun:sqlite`
@@ -274,11 +312,14 @@ across accounts.
 
 Synthetic data only; no production data, D1 or Workers.
 
-- `packages/domain/test/knowledge-selector.test.ts` (20 tests): instant
+- `packages/domain/test/knowledge-selector.test.ts` (24 tests): instant
   resolution with equal instants and flooring; B1 (account correction at every
   later cut); the scope after resolution (a withdrawal without legs); B2 (a
   later commit leaves the earlier cut equal); B13 (reversed rows); the cut
-  before the log; unlogged, older-build and other-epoch revisions; two in
+  before the log; unlogged, older-build and other-epoch revisions; a pre-log
+  chain of two revisions ended by a logged correction, within one event and
+  merged across events; one set version for one sequence asked by number and
+  by instant; `provisional` instants at or after the last `known_at`; two in
   force, an undeclared pointer, a seal count mismatch, a pointer mismatch;
   key and alias conflicts; identity epoch and pins; unsupported shapes; an
   absent value; bounds, unknown keys and orphan rows refused.
@@ -288,28 +329,33 @@ Synthetic data only; no production data, D1 or Workers.
   only), B5, B6, unlogged revisions, identity and alias flags, unsupported
   writers, the handed-over shape, the late part, B13 on the fold's manifest,
   and the writer releases against the writers' constants.
-- `packages/read-model/test/economic-selector.test.ts` (39 tests) over a
+- `packages/read-model/test/economic-selector.test.ts` (41 tests) over a
   history written through 0070's triggers: sequence and instant cuts, refused
   cuts, an empty log, B1, B2 and B12, both subject forms, holders before and
   after a release, a legacy double holder and an out-of-scope holder found by
   key, legacy settlements through the view, pre-log and older-build
-  revisions, identity epochs and pins, a cross-event merge, scope dimensions,
+  revisions, a pre-log chain ended by a logged correction, a lagging clock's
+  commit resolving an earlier `provisional` instant to a later sequence, identity epochs and pins, a cross-event merge, scope dimensions,
   the event bound, availability, and every statement's plan on the complete
   CORE schema without table statistics (keyed, with the named indexes).
 - `packages/read-model/test/economic-selector-random.test.ts` (25 tests: 24
   seeds and a coverage check): on random histories written with the triggers
-  dropped, the loaded rows equal an independent closure, every sequence and
-  instant cut equals a replay oracle (revisions and statuses, claims,
-  conflicts, identity changes, unlogged entries), shuffled rows keep the set
-  version, and W11: at the last commit an active revision is the stored live
-  one and its claims are `live_consumption_claims`. By hand (not in CI),
-  dropping the commit-log supersession, shifting the cut by one, ignoring an
-  unlogged successor, not following predecessors, skipping the pointed-by
-  step, losing the purchase-key holder arm or using `<` for the instant each
-  failed seeds.
-- `packages/application/test/reconstructed-state-query.test.ts` (12 tests):
+  dropped, including pre-log chains of two or more revisions that a logged
+  revision ends, the loaded rows equal an independent closure; every sequence
+  cut, an instant before the log and instants strictly between commits equal
+  a replay oracle that walks stored pointer chains forward (revisions and
+  statuses, claims, conflicts, identity changes, unlogged entries); each
+  commit's own `known_at` resolves to the last commit sharing it; shuffled rows
+  keep the set version; and W11: at the last commit an active revision is the
+  stored live one and its claims are `live_consumption_claims`. By hand (not
+  in CI), each of these mutations failed seeds (failing of 25): commit-log
+  supersession ignored (25), the cut shifted by one (25), an unlogged
+  successor ignored (15), predecessors not followed (24), the pre-log chain
+  rule dropped (22), the pointed-by step skipped (11), the purchase-key holder
+  arm on the wrong book (5), `<` for the instant (25).
+- `packages/application/test/reconstructed-state-query.test.ts` (13 tests):
   without 0070, an empty log, a logged settlement, a settlement as written
-  today, a pre-log settlement, a card account, a declared identity epoch, B4,
+  today, a pre-log settlement, a pre-log chain then a logged correction, a card account, a declared identity epoch, B4,
   B12, B13, and the refused inputs and cuts.
 - `mise run //packages/domain:ci`, `//packages/read-model:ci`,
   `//packages/application:ci`, `//packages/parsers:test`, `mise run ci:root`

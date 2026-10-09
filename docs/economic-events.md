@@ -1191,7 +1191,8 @@ holders (legacy purchase keys and accepted settlements through
 pinned identity meanings by key. The selector decides supersession from the
 commit log's `supersedes`, never from `superseded_by` or `created_at` alone;
 revisions written before G1b, or by an older build without a commit, are
-`knowledge_unlogged`, reported and never applied. Its only consumer is the
+`knowledge_unlogged`, reported and never applied, until a logged revision
+supersedes them (directly or at the end of a pre-log chain). Its only consumer is the
 reconstructed-state query (`packages/application/src/query/reconstructed-state.ts`),
 which no route calls yet. `reconciliationSignals` above is unchanged.
 
