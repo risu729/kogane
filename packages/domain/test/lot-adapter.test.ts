@@ -1053,4 +1053,19 @@ describe("review fixes", () => {
     expect(fifo.manifest.policy).toEqual(policy({ purpose: "tax" }));
     expect(average.contextId).not.toBe(fifo.contextId);
   });
+
+  test("an identifier remapped away from the instrument answers needs_review, never a silent miss", async () => {
+    const specs = [buy("acq", "2030-01-06", "10", "1000")];
+    const result = await run(specs, request({ remappedIdentifiers: ["ii-test-old"] }));
+    expect(result.status).toBe("needs_review");
+    expect(result.reasons).toEqual(["instrument_identifier_remapped"]);
+    expect(result.manifest.remappedIdentifiers).toEqual(["ii-test-old"]);
+    // The book itself is still computed and shown.
+    expect(bookOf(result).remainingLots).toHaveLength(1);
+    expect((await run(specs)).status).toBe("complete");
+    const chosen = await selection(specs);
+    expect(
+      adaptSelectionToLots(chosen, request({ remappedIdentifiers: ["ii-x", "ii-x"] })).ok,
+    ).toBe(false);
+  });
 });

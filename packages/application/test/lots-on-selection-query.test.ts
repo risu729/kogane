@@ -415,6 +415,15 @@ describe("a book is the instrument's, whatever identifiers are asked", () => {
       ],
     ]);
     expect(result.adaptation!.books).toHaveLength(1);
+    // The identifier remapped away stays out of the scope, but is named: its
+    // revisions under the share are not read, so the answer needs review (the
+    // status is unsupported today only because that comes first).
+    expect(result.manifest!.lots.remappedIdentifiers).toEqual(["ii-share-old"]);
+    expect(result.reasons).toEqual([
+      "security_quantity_writer_missing",
+      "writer_unsupported",
+      "instrument_identifier_remapped",
+    ]);
     // Asking for the other identifier gives the same book and the same scope.
     const other = await queryLotsOnSelection(
       storeExecutor(h.db),
@@ -422,6 +431,14 @@ describe("a book is the instrument's, whatever identifiers are asked", () => {
     );
     expect(other.manifest!.scopeIdentifiers).toEqual(result.manifest!.scopeIdentifiers);
     expect(other.adaptation).toEqual(result.adaptation);
+  });
+
+  test("an instrument without a remapped identifier carries no remapping reason", async () => {
+    const h = world();
+    moveShares(h, "ev-1", "2026-04-01T00:00:00.000Z");
+    const result = await queryLotsOnSelection(storeExecutor(h.db), input({ instruments: [SHARE] }));
+    expect(result.manifest!.lots.remappedIdentifiers).toEqual([]);
+    expect(result.reasons).not.toContain("instrument_identifier_remapped");
   });
 
   test("more identifiers than the bound is refused, never cut", async () => {

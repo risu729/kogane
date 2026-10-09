@@ -41,7 +41,15 @@
 import { INSTRUMENT_CLASSES, type InstrumentClass } from "./calculation.ts";
 import { canonicalDigest } from "./context.ts";
 import type { KnowledgeCut } from "./economic-contract.ts";
-import { hasExactKeys, isArrayOf, isOneOf, isRecord, isSafeInt, isText } from "./guards.ts";
+import {
+  hasExactKeys,
+  isArrayOf,
+  isOneOf,
+  isRecord,
+  isRefList,
+  isSafeInt,
+  isText,
+} from "./guards.ts";
 import {
   KNOWLEDGE_SELECTOR_RELEASE,
   type AdoptedSelection,
@@ -189,6 +197,14 @@ export interface LotAdapterRequest {
   holders: LotAdapterHolder[];
   instruments: LotInstrumentMapping[];
   lotSelections: LotSelectionChoice[];
+  /**
+   * Identifiers whose earlier mapping revisions named an instrument of the
+   * request but whose current one does not. Their revisions under the old
+   * instrument are not in the selection, so a non-empty list answers
+   * `needs_review` (`instrument_identifier_remapped`) rather than a book that
+   * silently misses them.
+   */
+  remappedIdentifiers: string[];
   /** The caller's explicit policy; null is refused by the engine (`policy_missing`). */
   policy: LotPolicy | null;
 }
@@ -306,10 +322,17 @@ function validChoice(value: unknown): value is LotSelectionChoice {
 export function validLotAdapterRequest(value: unknown): value is LotAdapterRequest {
   if (
     !isRecord(value) ||
-    !hasExactKeys(value, ["holders", "instruments", "lotSelections", "policy"]) ||
+    !hasExactKeys(value, [
+      "holders",
+      "instruments",
+      "lotSelections",
+      "remappedIdentifiers",
+      "policy",
+    ]) ||
     !isArrayOf(validHolder, 64)(value.holders) ||
     !isArrayOf(validMapping, 1_000)(value.instruments) ||
     !isArrayOf(validChoice, 10_000)(value.lotSelections) ||
+    !isRefList(value.remappedIdentifiers, 1_000) ||
     !(value.policy === null || validLotPolicy(value.policy))
   )
     return false;
@@ -807,6 +830,7 @@ export const LOTS_ON_SELECTION_REASONS = [
   "instrument_unresolved",
   "holder_unresolved",
   "lot_selection_unused",
+  "instrument_identifier_remapped",
   "time_role_missing",
   "consideration_missing",
   "fee_unknown",
@@ -840,6 +864,7 @@ const REVIEW_REASONS: readonly LotsOnSelectionReason[] = [
   "instrument_unresolved",
   "holder_unresolved",
   "lot_selection_unused",
+  "instrument_identifier_remapped",
 ];
 
 /** Everything the answer depends on (ADR 0054, "Manifest pins"). Holds no amount but the lot choices'. */
@@ -866,6 +891,8 @@ export interface LotsOnSelectionManifest {
   holders: LotAdapterHolder[];
   instruments: LotInstrumentMapping[];
   lotSelections: LotSelectionChoice[];
+  /** Identifiers mapped to a requested instrument earlier but not now (`instrument_identifier_remapped`). */
+  remappedIdentifiers: string[];
   policyRef: string | null;
   /** A copy of the policy: its ref names it, but only its content says what was computed. */
   policy: LotPolicy | null;
@@ -923,6 +950,7 @@ export async function lotsOnSelection(
   for (const entry of adaptation.entries) for (const code of entry.codes) reasons.add(code);
   for (const book of adaptation.books) for (const code of book.codes) reasons.add(code);
   if (adaptation.unusedLotSelections.length > 0) reasons.add("lot_selection_unused");
+  if (request.remappedIdentifiers.length > 0) reasons.add("instrument_identifier_remapped");
   if (adaptation.entries.some((entry) => entry.codes.some(isNote))) limited = true;
   if (lots.status === "refused") reasons.add(lots.reasonCode);
   else {
@@ -992,6 +1020,7 @@ export async function lotsOnSelection(
     holders: plain(request.holders).sort((a, b) => cmp(a.accountId, b.accountId)),
     instruments: plain(request.instruments).sort((a, b) => cmp(a.unitRef, b.unitRef)),
     lotSelections: plain(request.lotSelections).sort((a, b) => cmp(a.disposalRef, b.disposalRef)),
+    remappedIdentifiers: [...request.remappedIdentifiers].sort(cmp),
     policyRef: policy === null ? null : lotPolicyRef(policy),
     policy: policy === null ? null : plain(policy),
     fx: { policyRef: policy?.fxPolicyRef ?? null, rateRefs: [] },

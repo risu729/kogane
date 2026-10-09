@@ -345,6 +345,7 @@ export function request(fields: Partial<LotAdapterRequest> = {}): LotAdapterRequ
     holders: [{ accountId: HOLDER, wrapperKey: WRAPPER }],
     instruments: [ALPHA_MAPPING],
     lotSelections: [],
+    remappedIdentifiers: [],
     policy: policy(),
     ...fields,
   };
