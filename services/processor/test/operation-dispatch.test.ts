@@ -222,7 +222,11 @@ test("a projection rebuild is handed over, never completed on the handover", asy
   expect(record.receipt.status).toBe("accepted");
 });
 
-test("a collection request waits for the collector binding instead of completing", async () => {
+test("a collection request whose connection is not enabled waits instead of completing", async () => {
+  // No connection is named in OPS_COLLECTOR_DISPATCH_CONNECTIONS (the
+  // committed default), so nothing is called: the request stays pending with
+  // a code that says why (ADR 0048; the full collector path is
+  // collector-dispatch.test.ts).
   const harness = withDispatch();
   const accepted = await requestCollection({
     store: harness.store,
@@ -231,16 +235,34 @@ test("a collection request waits for the collector binding instead of completing
     request: { source: SOURCE, requestedScope: { from: "2026-08-01", to: "2026-08-31" } },
   });
   if (!accepted.ok) throw new Error("acceptance failed");
-  expect(await dispatchOperations(harness.env)).toMatchObject({ claimed: 1, awaiting: 1 });
+  const connections = [
+    {
+      connectionId: "synthetic",
+      workspace: "collector-synthetic",
+      source: SOURCE,
+      terminalSource: SOURCE,
+      action: "collect" as const,
+      cron: "0 0 * * *",
+    },
+  ];
+  const at = () => new Date("2026-09-11T00:01:00Z");
+  expect(await dispatchOperations(harness.env, { now: at, connections })).toMatchObject({
+    claimed: 1,
+    awaiting: 1,
+    started: 0,
+  });
   const record = await receipt(harness, accepted.receipt.operationId);
   if (!record.ok) throw new Error("receipt missing");
   // Still pending, with a code that says why. Not completed, not dropped.
   expect(record.receipt.dispatch.state).toBe("dispatch_pending");
-  expect(record.receipt.failureCode).toBe("awaiting_collector_dispatch");
+  expect(record.receipt.failureCode).toBe("collector_dispatch_disabled");
   expect(record.receipt.status).toBe("accepted");
+  expect(record.receipt.execution).toMatchObject({ state: "waiting", startedAt: null });
   expect(stageStates(record.receipt.stages).every((entry) => entry.endsWith(":pending"))).toBe(
     true,
   );
   // It backs off rather than retrying every tick.
-  expect(await dispatchOperations(harness.env)).toMatchObject({ claimed: 0 });
+  expect(await dispatchOperations(harness.env, { now: at, connections })).toMatchObject({
+    claimed: 0,
+  });
 });

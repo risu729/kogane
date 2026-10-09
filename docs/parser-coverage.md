@@ -502,16 +502,18 @@ read-only without copying private values into fixtures.
 
 ## Card scheduled payments (MyJCB ショッピングスキップ払い)
 
-`myjcb-skip-payment-schedule` (0.1.1,
-[ADR 0005 amendments (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments)
-and [(f)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-28-f-ledger-labels-match-across-line-breaks))
+`myjcb-skip-payment-schedule` (0.1.2,
+[ADR 0005 amendments (e)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-27-e-the-skip-payment-schedule-page-is-read-as-scheduled-payments),
+[(f)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-09-28-f-ledger-labels-match-across-line-breaks)
+and [(k)](adr/0005-myjcb-statement-state-from-page.md#amendment-2026-10-08-k-the-skip-payment-empty-row-inside-one-more-div))
 reads the MyJCB `credit-schedule` page that the collector stores as
 `credit-skip-payment-NN.html`. It is a legacy-shape parser (no issues, no
 coverage claim) and has no snapshot policy row: nothing selects its rows as a
 container snapshot. It proves nothing about completeness beyond its own
 rule: a page is read whole or refused with one closed code
 (`SKIP_PAYMENT_SCHEDULE_PARSER_CODES`), and an empty ledger (its one row the
-provider's empty row) is zero rows, not a failure. Its rows are the fifth observation kind, `scheduled_payment`
+provider's empty row, directly or inside exactly one `div` that carries none
+of the reader's classes) is zero rows, not a failure. Its rows are the fifth observation kind, `scheduled_payment`
 (`scheduled_payment_observations`, migration 0061), declared outside
 `types.ts` so that no other parser's digest changes. They are future
 payments, not purchases, statement rows or balances; no read path reads them

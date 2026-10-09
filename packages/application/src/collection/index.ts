@@ -19,6 +19,7 @@ export {
 } from "./budget.ts";
 export {
   artifactRequest,
+  coreSourceId,
   createRunRequest,
   EXTERNAL_ID_NAMESPACE,
   instantMs,

@@ -1,6 +1,6 @@
 # ADR 0052: Reconstructed state is a pure fold over a provisional adopted-event input, compared with reported snapshots
 
-- Status: proposed until this PR merges; accepted upon merge
+- Status: accepted (merged 2026-10-08 in #579)
 - Date: 2026-10-08
 - Issue: #550 (指定日状態: 採用イベントから残高・保有数量を再構成する), first PR (engine only)
 - Carried by: [reconstructed state](../reconstructed-state.md),
@@ -282,3 +282,38 @@ giving the same output and context id, the budget refusal, and refusals of
 unknown keys, another policy and a tampered selection.
 `mise run //packages/domain:ci` and `mise run ci:root` locally. No production
 data, D1 or Workers were involved.
+
+## Amendment: stored rows reach the fold through the knowledge selector (2026-10-09, ADR 0058)
+
+Status: accepted (merged 2026-10-09 in #592).
+
+- **Resolution.** For stored rows, which revision is in force at a cut is now
+  decided by the knowledge selector (`packages/domain/src/knowledge-selector.ts`
+  over `packages/read-model/src/economic-selector.ts`), from the 0070 commit
+  log: a revision's commit is the one its seal names, and supersession at a cut
+  is what a commit at or before it declares in `supersedes`, not the stored
+  pointer. The B adapter hands the fold a `resolved-at-cut` set, so the fold's
+  own chain resolution becomes input validation (two committed revisions of one
+  event are `revision_chain_inconsistent`). `recordedAt` was never used to
+  resolve and stays informational; the fold's full-chains path is unchanged
+  for its tests. `explainLate` is fed two selector selections.
+- **Held items** after ADR 0058. Answered: 2, times are read from
+  `economic_event_times` only, and this ADR's assumption that a settlement's
+  0032 effective time is its `posting` time is withdrawn (0070 forbids it), so
+  a settlement without a posting time row is `event_time_unknown`; 8, the
+  commit sequence is 0070's, an instant resolves to a sequence in SQL, and
+  revisions before the log stay `knowledge_unlogged` until a logged revision
+  supersedes them. Mostly answered: 1, what is handed over is the selection at
+  a cut and its set version the selector's digest, minted per request and not
+  stored; whether the lot engine (#556) reads the same version is not decided.
+  Partly answered: 5, a legacy fee or unresolved leg is a correspondence of its
+  revision's one movement on another basis, otherwise undeclared
+  (`writer_unsupported`); whether a stored negative value can occur, and what
+  it means, is not. Narrowed but still held: 4, the subject tolerance is the
+  selector loader's (`account:<id>` or the bare id of an existing account),
+  still not a canonical-form decision, and how a unit or subject names an
+  instrument holding is untouched; 7, no coverage producer exists and the
+  adapter declares none (`coverage-producer-none-v1`), which does not say who
+  produces coverage; 10, seals are compared with the current identity epoch
+  and pins (`identity_changed`), but the start snapshot still uses today's
+  mappings. Still held as written: 3, 6, 9 and 11.

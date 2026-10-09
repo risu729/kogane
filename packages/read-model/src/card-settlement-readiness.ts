@@ -25,7 +25,12 @@
 //   debit_owned_runs ... debit_ownership
 //                        card-settlement-ownership.ts, `transaction`, over those;
 //   readiness            the view's own select over them: id, statement_current,
-//                        bank_current, ownership_current, allocation_available.
+//                        bank_current, ownership_current, allocation_available;
+//                        and claim_available (ADR 0054, G1b), which the view
+//                        does not have: no live holder of the candidate's
+//                        bank_key, or of its debit's alias class, in book
+//                        `cash-movement` other than the candidate's own
+//                        accepted event.
 //
 // They are exact, not an approximation. Each fact view ranks captures within a
 // partition (source, producer, namespace, source account and period or provider
@@ -44,7 +49,97 @@
 // three views swapped for these CTEs; the review and allocation checks are the
 // view's text. card-settlement-readiness.test.ts and every caller's
 // differential test compare it with the view on the scale and random stores.
+//
+// `claim_available` reads the holders `live_consumption_claims` (CORE 0070)
+// lists in book `cash-movement`, spelled out per source as the 0070 triggers
+// spell them, each through its own index: SQLite does not push a correlated
+// term into a UNION view. Its first term is the candidate's bank_key held by an
+// `economic_claims` row of a live revision, its second the same key held by an
+// accepted settlement decision of a live revision (a legacy holder, without an
+// alias class), its third the alias class the registry's provider identity
+// function computes for the candidate's debit row and resolved account
+// (`providerAliasClassSql`) held by a live `economic_claims` row. A holder is
+// the candidate's own when it is the event of the candidate's accepted review.
+// The other four columns are the text they were before it (frozen in
+// test/card-settlement-readiness-ctes-legacy-sql.ts and compared on the random
+// stores).
+import { PROVIDER_IDENTITY_FUNCTIONS } from "../../domain/src/event-families.ts";
 import { cardSettlementOwnershipCtes } from "./card-settlement-ownership.ts";
+
+const SQL_TEXT = /^[A-Za-z0-9$:._-]+$/u;
+const quoted = (text: string): string => {
+  // Registry constants only; a value outside this alphabet is a programming error.
+  if (!SQL_TEXT.test(text)) throw new RangeError("registry text is not a plain SQL literal");
+  return `'${text}'`;
+};
+
+/**
+ * The alias class a declared provider identity function computes for one
+ * stored transaction row (`declaredAliasClass` in
+ * packages/domain/src/row-identity.ts), as an SQL expression that is NULL
+ * where that function is null: no function for the row's source, parser and
+ * source account, a component that is missing, empty, not text or longer than
+ * 512 characters, an account that is not a text of 1 to 256 characters, or a
+ * class longer than 2,048 characters. The arguments are SQL expressions for
+ * the row's source id, parser name, source account and `extra_json`, and for
+ * the resolved account id.
+ */
+function providerAliasClassSql(input: {
+  sourceId: string;
+  parserName: string;
+  sourceAccount: string;
+  extraJson: string;
+  accountId: string;
+}): string {
+  const branches = PROVIDER_IDENTITY_FUNCTIONS.map((declared) => {
+    const fields = declared.componentFields.map((field) => quoted(`$.${field}`));
+    const scope =
+      declared.sourceAccounts === "any"
+        ? ""
+        : ` AND ${input.sourceAccount} IN (${declared.sourceAccounts.map(quoted).join(",")})`;
+    const components = fields
+      .map(
+        (path) =>
+          ` AND json_type(${input.extraJson},${path})='text' AND length(json_extract(${input.extraJson},${path})) BETWEEN 1 AND 512`,
+      )
+      .join("");
+    const value = `json_array(${input.sourceId},json_array(${fields
+      .map((path) => `json_extract(${input.extraJson},${path})`)
+      .join(",")}),${input.accountId},${quoted(declared.ruleVersion)})`;
+    return `WHEN ${input.sourceId}=${quoted(declared.sourceId)} AND ${input.parserName}=${quoted(declared.parserName)}${scope}${components}
+  AND typeof(${input.accountId})='text' AND length(${input.accountId}) BETWEEN 1 AND 256
+  AND length(${value})<=2048 THEN ${value}`;
+  });
+  // The JSON functions raise on malformed text, so they run only under json_valid.
+  return `CASE WHEN json_valid(${input.extraJson}) THEN CASE ${branches.join("\n  ")} END END`;
+}
+
+/** The event of the candidate's own accepted review, whose claims are not another holder. */
+const OWN_EVENT = `(SELECT self.event_id FROM card_settlement_reviews self WHERE self.id=ready_candidate.id AND self.status='accepted')`;
+
+/**
+ * The key half of `claim_available`, over a candidate row named
+ * `ready_candidate`: no live `economic_claims` row and no live accepted
+ * settlement of another event holds its bank_key.
+ */
+const KEY_AVAILABLE = ` NOT EXISTS(SELECT 1 FROM economic_claims held
+  JOIN economic_event_revisions held_revision ON held_revision.event_id=held.event_id AND held_revision.revision=held.revision
+  WHERE held.book='cash-movement' AND held.consumption_key=ready_candidate.bank_key AND held_revision.superseded_by IS NULL
+  AND held.event_id IS NOT ${OWN_EVENT})
+ AND NOT EXISTS(SELECT 1 FROM card_settlement_candidates holder_candidate
+  JOIN card_settlement_decisions holder ON holder.proposal_id=holder_candidate.id AND holder.status='accepted'
+  JOIN economic_event_revisions holder_revision ON holder_revision.event_id=holder.event_id AND holder_revision.revision=holder.revision
+  WHERE holder_candidate.bank_key=ready_candidate.bank_key AND holder_revision.superseded_by IS NULL
+  AND holder.event_id IS NOT ${OWN_EVENT})`;
+
+/**
+ * Whether one candidate's bank_key is free (?1 the candidate id): the key half
+ * of `claim_available`, the same text. A plan reads it to name why a claim is
+ * unavailable (`economic_claim_held` when the key is held, else
+ * `alias_conflict`).
+ */
+export const CARD_SETTLEMENT_KEY_AVAILABLE_SQL = `SELECT ${KEY_AVAILABLE} AS key_available
+FROM card_settlement_candidates ready_candidate WHERE ready_candidate.id=?1`;
 
 /** The 0044 period expression of a statement total, over `b.extra_json`. */
 const PERIOD = `coalesce(json_extract(b.extra_json,'$._kogane.period'),
@@ -164,6 +259,22 @@ SELECT ready_candidate.id,
   WHERE json_array(artifact.source_id,fr.producer_id,ses.external_id_namespace,t.source_account,t.external_id)=ready_candidate.bank_key
   AND t.source_account=CASE WHEN json_valid(ready_candidate.bank_key) THEN json_extract(ready_candidate.bank_key,'$[3]') END
   AND t.external_id IS CASE WHEN json_valid(ready_candidate.bank_key) THEN json_extract(ready_candidate.bank_key,'$[4]') END
-  AND a.id IS NOT (SELECT settlement_id FROM card_settlement_reviews self WHERE self.id=ready_candidate.id)) AS allocation_available
+  AND a.id IS NOT (SELECT settlement_id FROM card_settlement_reviews self WHERE self.id=ready_candidate.id)) AS allocation_available,
+${KEY_AVAILABLE}
+ AND NOT EXISTS(SELECT 1 FROM transaction_observations debit
+  JOIN parse_runs debit_run ON debit_run.id=debit.parse_run_id
+  JOIN fetch_artifacts debit_artifact ON debit_artifact.id=debit_run.fetch_artifact_id
+  JOIN economic_claims alias_held ON alias_held.book='cash-movement' AND alias_held.alias_class=${providerAliasClassSql(
+    {
+      sourceId: "debit_artifact.source_id",
+      parserName: "debit_run.parser_name",
+      sourceAccount: "debit.source_account",
+      extraJson: "debit.extra_json",
+      accountId: "json_extract(ready_candidate.facts_json,'$.bankDebit.accountId')",
+    },
+  )}
+  JOIN economic_event_revisions alias_revision ON alias_revision.event_id=alias_held.event_id AND alias_revision.revision=alias_held.revision
+  WHERE debit.id=ready_candidate.bank_observation_id AND alias_revision.superseded_by IS NULL
+  AND alias_held.event_id IS NOT ${OWN_EVENT}) AS claim_available
 FROM ready_candidates ready_candidate)`;
 }

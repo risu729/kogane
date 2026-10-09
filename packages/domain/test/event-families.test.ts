@@ -33,7 +33,7 @@ const clone = (entry: TransactionFamilyEntry) =>
 
 describe("closed codes", () => {
   test("the lists are exactly the reviewed codes", () => {
-    expect(TRANSACTION_FAMILY_REGISTRY_VERSION).toBe("transaction-family-registry-v1");
+    expect(TRANSACTION_FAMILY_REGISTRY_VERSION).toBe("transaction-family-registry-v2");
     expect(TRANSACTION_FAMILIES).toEqual([
       "bank-movement",
       "stored-value-movement",
@@ -140,7 +140,7 @@ describe("registry entries", () => {
     expect(memberships).toBe(36);
   });
 
-  test("only Vpass/MyJCB card purchases and SMBC/SBI Shinsei card settlement debits have writers", () => {
+  test("only Vpass/MyJCB card purchases and SMBC card settlement debits have writers", () => {
     const supported = TRANSACTION_FAMILY_REGISTRY.flatMap((entry) =>
       entry.families
         .filter((membership) => membership.writer === "supported")
@@ -148,7 +148,8 @@ describe("registry entries", () => {
     );
     expect(supported).toEqual([
       "myjcb/myjcb-credit-ledger:card-purchase",
-      "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity:card-settlement",
+      // SBI Shinsei debits are refused by the human-adopted settlement writer
+      // until their parser records the id's origin (ADR 0054, G1b).
       "smbc-bank/smbc-direct-transactions:card-settlement",
       "vpass/vpass-statement-page:card-purchase",
     ]);
@@ -333,7 +334,10 @@ describe("lookups", () => {
   });
 
   test("unsupported reasons per family", () => {
-    expect(familyUnsupportedReasons("card-settlement")).toEqual([]);
+    expect(familyUnsupportedReasons("card-settlement")).toEqual([
+      "no_event_writer",
+      "identity_origin_unrecorded",
+    ]);
     expect(familyUnsupportedReasons("securities-order")).toEqual([
       "no_event_writer",
       "not_collected",

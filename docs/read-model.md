@@ -398,3 +398,60 @@ dataset: measured once on `bun:sqlite`, a Sony Bank page took the same time
 with 0 or 2,000 GLOBAL PASS pages in the store (not asserted). On the test's
 scaled store (90 daily captures of four sources) one source's cells take
 roughly 10 to 50 ms on `bun:sqlite`; not measured on workerd or D1.
+
+## Knowledge selector
+
+`src/economic-selector.ts` ([ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md))
+is the SQL half of the knowledge selector: it loads, for a scope of accounts,
+every event the scope touches and everything that decides its revision in
+force at a cut, and `selectAdopted` (`packages/domain/src/knowledge-selector.ts`)
+resolves and filters. Like the dated reads it is composed by an application
+query over an executor (`queryReconstructedState`), not an `ObservationReader`
+method, and no route calls it yet.
+
+| Text                                                 | Reads                                                                                                                                 |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `SELECTOR_EPOCHS_SQL`, `LOG_EXTENT_SQL`              | the current core epoch, the current identity epoch, the epoch's first and last commit                                                 |
+| `INSTANT_CUT_SQL`, `COMMIT_AT_SQL`                   | the commit an instant resolves to (largest sequence with `known_at` at or before it), the `known_at` of a sequence                    |
+| `SEED_EVENTS_SQL`                                    | events whose legs name an account as `account:<id>` or as the bare id                                                                 |
+| `REVISIONS_SQL`, `POINTED_BY_SQL`                    | every revision of the given events; the events whose revisions point at given revisions                                               |
+| `CLAIMS_SQL`                                         | every claim of the given events through `economic_revision_claims` (legacy purchase keys and accepted settlements included)           |
+| `KEY_HOLDERS_SQL`, `ALIAS_HOLDERS_SQL`               | every event holding a given (book, key) in any of the view's three sources, or a given (book, alias class)                            |
+| `LEGS_SQL`, `TIMES_SQL`, `EFFECTS_SQL`, `SEALS_SQL`  | the children of the given events                                                                                                      |
+| `COMMITS_SQL`, `SUBJECTS_SQL`, `PINS_SQL`            | the commits seals name; the account each leg subject names; the current revision of `account_mapping:` and `instrument_mapping:` pins |
+| `ACCOUNT_SOURCES_SQL`                                | the sources an account's current mappings come from, for the query's reported-container check                                         |
+| `LOT_INSTRUMENT_IDENTIFIERS_SQL` (application, lots) | every identifier any of whose mapping revisions names a given instrument, with whether its current one does (ADR 0059)                |
+
+The closure (supersession both ways, claim holders) repeats until it adds
+nothing; one load answers any cut of the epoch. Every read stops one row past
+its bound (`SELECTOR_BOUNDS`) and the load is refused, never cut.
+
+### Cost
+
+`test/economic-selector.test.ts` checks every statement's plan on the complete
+CORE schema without table statistics: each reads by primary key or by
+`economic_legs_subject`, `economic_event_revisions_superseded_by`,
+`economic_claims_key`, `economic_claims_alias`,
+`card_purchase_recognition_keys_key`, `card_settlement_candidates_bank` and
+`card_settlement_decisions_event`; the view's arms are each searched by event
+id. The whole reads left are the JSON argument, the schema catalogue, the
+identity epochs read newest first (one row) and, in `ACCOUNT_SOURCES_SQL`, the
+operator-curated mapping table (no index by account). Two reads grow with
+history: the seed reads every leg ever written on the account, and
+`INSTANT_CUT_SQL` walks the commits made after the instant along the primary
+key (no index orders `known_at`). Measured once on `bun:sqlite`, not
+asserted: 1,500 touched events with 4,500 revisions among 64,500 commits
+loaded in 63–76 ms, and an instant near the log's start resolved in 17–20 ms.
+Not measured on workerd or D1.
+
+`LOT_INSTRUMENT_IDENTIFIERS_SQL`
+(`packages/application/src/query/lots-on-selection.ts`, ADR 0059) is, like
+`ACCOUNT_SOURCES_SQL`, one pass over a mapping table: no index orders
+`instrument_mappings` by instrument, and adding one would be a migration. Its
+currency check searches the `(identifier_id, revision)` key, and its plan
+without statistics is tested (one scan of the table, nothing else whole).
+Measured by the reviewer on `bun:sqlite`, not D1, not asserted, for the
+statement before it also returned remapped identifiers: about 0.3 ms at 1,000
+mapping rows, 2.3 ms at 10,000 and 11.5 ms at 100,000, linear. The same script
+on the current statement gave 0.2, 2.1–2.2 and 5.5–6.0 ms. D1 reads every
+mapping row on every query.

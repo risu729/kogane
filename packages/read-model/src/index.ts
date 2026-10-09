@@ -59,12 +59,22 @@ export {
 } from "./reader";
 export { createObservationReader } from "./observation-reader";
 export {
+  PRICE_CANDIDATE_ROW_BOUND,
+  PRICE_CANDIDATES_KNOWN_AT_SQL,
+  PRICE_CANDIDATES_SQL,
   PRICE_SELECTION_BOUND,
   PRICE_SELECTION_SQL,
+  PriceCandidateError,
   PriceSelectionError,
+  type CandidateReach,
+  type PriceCandidateQuery,
+  type PriceCandidateWant,
   type PriceSelectionQuery,
+  type ReadPriceCandidate,
   type SelectedPrice,
+  priceCandidateArgs,
   priceSelectionArgs,
+  selectPriceCandidates,
   selectPrices,
 } from "./price-selection";
 export { createD1ObservationReader, d1Executor, type D1Like } from "./d1";

@@ -426,4 +426,117 @@ describe.if(runnable)("operator schedule administration", () => {
     });
     await page.close();
   }, 30000);
+  test("the official-site re-survey shows freshness and failures, and changes nothing until a decision", async () => {
+    // Synthetic: invented pages, times and proposals; no provider page is read.
+    snapshot.survey = {
+      enabled: true,
+      attention: 2,
+      targets: [
+        {
+          id: "sony-bank",
+          source: "sony-bank",
+          url: "https://example.test/sony-maintenance",
+          scope: "collection",
+          cadenceHours: 24,
+          fetch: "enabled",
+          terms: "confirmed",
+          freshness: "fresh",
+          nextDueAt: "2026-10-06T00:00:00.000Z",
+          lastAttemptAt: "2026-10-05T00:00:00.000Z",
+          lastSuccessAt: "2026-10-05T00:00:00.000Z",
+          lastFailureAt: null,
+          lastFailureCode: null,
+          consecutiveFailures: 0,
+          lastChangedAt: "2026-10-05T00:00:00.000Z",
+        },
+        {
+          id: "mizuho-bank",
+          source: "mizuho-bank",
+          url: "https://example.test/mizuho-maintenance",
+          scope: "collection",
+          cadenceHours: 24,
+          fetch: "enabled",
+          terms: "confirmed",
+          freshness: "stale",
+          nextDueAt: "2026-10-05T02:00:00.000Z",
+          lastAttemptAt: "2026-10-05T00:00:00.000Z",
+          lastSuccessAt: "2026-10-01T00:00:00.000Z",
+          lastFailureAt: "2026-10-05T00:00:00.000Z",
+          lastFailureCode: "empty_body",
+          consecutiveFailures: 3,
+          lastChangedAt: null,
+        },
+      ],
+      proposals: [
+        {
+          id: 1,
+          targetId: "sony-bank",
+          source: "sony-bank",
+          kind: "changed",
+          ruleId: "synthetic-weekly",
+          baseRevision: 1,
+          current: true,
+          timezone: "Asia/Tokyo",
+          pattern: { kind: "weekly", weekdays: [0], start: "01:00", end: "04:00" },
+          enabled: true,
+          scope: "collection",
+          status: "proposed",
+          reasons: [],
+          referenceUrl: "https://example.test/sony-maintenance",
+          fetchedAt: "2026-10-05T00:00:00.000Z",
+          sha256: "a".repeat(64),
+          createdAt: "2026-10-05T00:00:00.000Z",
+        },
+        {
+          id: 2,
+          targetId: "sony-bank",
+          source: "sony-bank",
+          kind: "new",
+          ruleId: null,
+          baseRevision: 0,
+          current: false,
+          timezone: "Asia/Tokyo",
+          pattern: {
+            kind: "once",
+            from: "2026-10-10T12:00:00.000Z",
+            to: "2026-10-10T21:00:00.000Z",
+          },
+          enabled: true,
+          scope: "collection",
+          status: "review_pending",
+          reasons: ["year_inferred"],
+          referenceUrl: "https://example.test/sony-maintenance",
+          fetchedAt: "2026-10-05T00:00:00.000Z",
+          sha256: "b".repeat(64),
+          createdAt: "2026-10-05T00:00:00.000Z",
+        },
+      ],
+    };
+    const page = await browser.newPage();
+    page.on("dialog", (dialog) => void dialog.accept());
+    await page.goto(`${origin}/schedules`);
+    await page.getByRole("heading", { name: "公式サイトの再調査", exact: true }).waitFor();
+    await page.getByText("2件の提案を確認してください。", { exact: false }).waitFor();
+    const section = page.locator('section[aria-labelledby="maintenance-survey"]');
+    expect(await section.getByText("古い情報（再調査が成功していません）").count()).toBe(1);
+    expect(await section.getByText("ページが空でした", { exact: false }).count()).toBe(1);
+    expect(await section.getByText("年の記載がありません", { exact: false }).count()).toBe(1);
+    // Showing a proposal writes nothing.
+    expect(writes).toEqual([]);
+    const outdated = section.locator("li").filter({ hasText: "新しい停止時間" });
+    expect(await outdated.getByRole("button", { name: "採用", exact: true }).isDisabled()).toBe(
+      true,
+    );
+    await outdated.getByRole("button", { name: "却下", exact: true }).click();
+    for (let i = 0; i < 100 && writes.length < 1; i++) await page.waitForTimeout(50);
+    const current = section.locator("li").filter({ hasText: "停止時間の変更" });
+    await current.getByRole("button", { name: "採用", exact: true }).click();
+    // The server records each write as it arrives; wait for both decisions.
+    for (let i = 0; i < 100 && writes.length < 2; i++) await page.waitForTimeout(50);
+    expect(writes.map((w) => [w.path, w.body, w.marker])).toEqual([
+      ["/api/ops/v1/schedules/proposals/2", { decision: "reject" }, "1"],
+      ["/api/ops/v1/schedules/proposals/1", { decision: "accept" }, "1"],
+    ]);
+    await page.close();
+  }, 30000);
 });

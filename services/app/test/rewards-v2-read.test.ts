@@ -1,4 +1,8 @@
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
+import {
+  validRewardExpiryBasis,
+  type RewardExpiryBasis,
+} from "../../../packages/observation-shared/src/reward-contract.ts";
 // The reward routes served from the READ database (unified plan 04 §2, 05 §7;
 // U16), over HTTP, with both sets of migrations applied to local D1s.
 //
@@ -68,7 +72,12 @@ async function build(evaluatedAt = EVALUATED_AT) {
 }
 
 interface ExpiryPage {
-  rows: { bucketRef: string; expiresOn: string | null; ruleRef: string }[];
+  rows: {
+    bucketRef: string;
+    expiresOn: string | null;
+    ruleRef: string;
+    expiryBasis: RewardExpiryBasis | null;
+  }[];
   page: { hasMore: boolean; nextCursor: string | null; limit: number };
   snapshot: { snapshotId: string; evaluatedAt: string; evaluationCalendar: string };
 }
@@ -206,6 +215,31 @@ describe("the reward routes over the READ database", () => {
     const dated = first.rows.filter((row) => row.expiresOn !== null);
     expect(dated.some((row) => row.expiresOn === "2026-12-31")).toBe(true);
     expect(first.rows.some((row) => row.expiresOn === null)).toBe(true);
+
+    // ADR 0049: every row carries the displayed and the computed expiry
+    // apart. The dated lot's date is the provider's display only; the regular
+    // bucket has no classified activity, so nothing is computed and the
+    // reason says why.
+    for (const row of first.rows) expect(validRewardExpiryBasis(row.expiryBasis)).toBe(true);
+    const lot = first.rows.find(
+      (row) =>
+        row.bucketRef === "program:v-point:slot-a" &&
+        row.ruleRef === "rule:v-point:fixed-expiry-lot@v1",
+    )!;
+    expect(lot.expiryBasis?.displayed?.value).toMatchObject({ value: "2026-12-31" });
+    expect(lot.expiryBasis?.computed.reasonCode).toBe("fixed_deadline_not_derivable");
+    const regular = first.rows.find(
+      (row) =>
+        row.bucketRef === "program:v-point:slot-b" &&
+        row.ruleRef === "rule:v-point:regular-inactivity@v1",
+    )!;
+    expect(regular.expiresOn).toBeNull();
+    expect(regular.expiryBasis?.displayed).toBeNull();
+    expect(regular.expiryBasis?.computed).toMatchObject({
+      status: "unavailable",
+      reasonCode: "no_qualifying_activity_observed",
+      rule: { ruleRef: "rule:v-point:regular-inactivity@v1", verification: "verified" },
+    });
 
     // Read again: the same published snapshot, the same rows. Nothing was
     // recomputed from the wall clock between the two requests.

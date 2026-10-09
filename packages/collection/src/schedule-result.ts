@@ -33,3 +33,22 @@ export function scheduledResult(value: unknown): ScheduledResult {
     failureCode: failed ? "collection_failed" : null,
   };
 }
+
+/** What `withCollectionLease` throws when another execution holds the source. */
+const LEASE_REFUSAL = "collection_busy_or_uncertain";
+
+/**
+ * The closed result of a collection that threw. A lease refusal happens before
+ * the collector contacts anyone, so it is reported as `collection_busy` rather
+ * than as a failed collection: the alarm's receipt and an operation can then
+ * tell "another execution holds this source" from "the provider attempt
+ * failed". Every other error stays `collection_failed`. No error text leaves.
+ */
+export function scheduledFailure(error: unknown, runIds: readonly string[] = []): ScheduledResult {
+  const busy = error instanceof Error && error.message === LEASE_REFUSAL;
+  return {
+    status: "failed",
+    runIds: [...runIds],
+    failureCode: busy ? "collection_busy" : "collection_failed",
+  };
+}
