@@ -50,6 +50,8 @@ export interface ClientFeatures {
   readonly cardPurchaseRecognition: boolean;
   /** The reported state of every account on a chosen date is served. */
   readonly reportedStateOnDate: boolean;
+  /** One account's balances reconstructed from adopted events beside the reported ones. */
+  readonly reconstructedStateOnDate: boolean;
 }
 
 /** Every feature is off until capabilities are known. */
@@ -66,6 +68,7 @@ export const NO_FEATURES: ClientFeatures = {
   cardOwnershipReview: false,
   cardPurchaseRecognition: false,
   reportedStateOnDate: false,
+  reconstructedStateOnDate: false,
 };
 
 export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
@@ -87,5 +90,6 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     cardOwnershipReview: capabilities.cardOwnershipReview === true,
     cardPurchaseRecognition: capabilities.cardPurchaseRecognition === true,
     reportedStateOnDate: capabilities.reportedStateOnDate === true,
+    reconstructedStateOnDate: capabilities.reconstructedStateOnDate === true,
   };
 }

@@ -24,7 +24,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import demo from "./snapshot-worker";
 import worker from "../src/worker";
 import { seedRegistry } from "./fixtures";
-import { MCP_TOOLS } from "../src/mcp";
+import { MCP_TOOLS, RECONSTRUCTED_STATE_MCP_TOOLS } from "../src/mcp";
 import { OPS_TOOL_NAMES } from "../src/ops-tools";
 import {
   claimCollectorStart,
@@ -659,8 +659,11 @@ describe("HTTP and MCP are one API (G3-05)", () => {
   it("lists exactly the six tools with the flag off and exactly twelve with it on", async () => {
     const six = MCP_TOOLS.map((tool) => tool.name);
     expect(six).toHaveLength(6);
+    // This store has the reported state's views, so the reconstructed state's
+    // read tool is published beside the six, whatever the operations flag.
+    const reads = [...six, ...RECONSTRUCTED_STATE_MCP_TOOLS.map((tool) => tool.name)];
     const off = await mcp("tools/list", {}, { OPS_API_ENABLED: "" });
-    expect(off.result.tools.map((tool: any) => tool.name)).toEqual(six);
+    expect(off.result.tools.map((tool: any) => tool.name)).toEqual(reads);
     const called = await mcp(
       "tools/call",
       { name: "kogane.ops.collection.request", arguments: COLLECTION },
@@ -670,7 +673,7 @@ describe("HTTP and MCP are one API (G3-05)", () => {
 
     const on = await mcp("tools/list");
     const names = on.result.tools.map((tool: any) => tool.name);
-    expect(names).toEqual([...six, ...OPS_TOOL_NAMES]);
+    expect(names).toEqual([...reads, ...OPS_TOOL_NAMES]);
     expect(OPS_TOOL_NAMES).toEqual([
       "kogane.ops.collection.request",
       "kogane.ops.import.request",
@@ -788,7 +791,7 @@ describe("HTTP and MCP are one API (G3-05)", () => {
     const broken = { AGENT_GRANTS: JSON.stringify({ [AGENT]: 1 }) };
     const listed = await mcp("tools/list", {}, broken);
     expect((listed.result.tools as { name: string }[]).map((tool) => tool.name)).toEqual(
-      MCP_TOOLS.map((tool) => tool.name),
+      [...MCP_TOOLS, ...RECONSTRUCTED_STATE_MCP_TOOLS].map((tool) => tool.name),
     );
     const called = await mcp(
       "tools/call",
