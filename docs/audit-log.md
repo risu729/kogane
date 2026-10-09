@@ -62,7 +62,12 @@ authorization and service unchanged and records the outcome:
 - **Everything else** — a read, a replay, a refusal, a failure — is written by
   the App adapter (`services/app/src/audit.ts`), once, after the answer. The
   Processor never writes these for `ui`, `agent-http` or `mcp`: a refusal it
-  makes comes back to the App as its closed code and is recorded there.
+  makes comes back to the App as its closed code and is recorded there. The
+  instrument-candidate pin checks (ADR 0055) are such refusals: a candidate
+  plan whose anchor or subject mapping moved, or a candidate plan without
+  both pins, is `409 stale_context` at plan, simulate, approve or commit
+  before any batch, and the App records it once as `refused` under the
+  command's operation.
 
 | Path         | Route or tool                                                                                                                                                                  | Operation                                                                                                                                                                                      | Effect record written by                                                                               |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |

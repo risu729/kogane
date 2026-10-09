@@ -254,6 +254,48 @@ describe("the operator's command routes (ui)", () => {
     ]);
   });
 
+  it("records a stale candidate plan's refusal once per command, as the Processor answers it (#629)", async () => {
+    // The Processor refuses a candidate plan whose anchor or subject pin moved,
+    // or a legacy plan without both pins, before any batch: it writes no record
+    // and answers its closed code, which this Worker records once. The plan id
+    // the Processor names is not recorded with the refusal.
+    const planId = "c".repeat(64);
+    const bodies = {
+      plan: { kind: "identity.assign", payload: {} },
+      simulate: { planId },
+      approve: { planId, planDigest: planId },
+      commit: { operationId: "op-stale-candidate", planId, approvalId: "x" },
+    } as const;
+    for (const [command, body] of Object.entries(bodies)) {
+      const seen: Request[] = [];
+      const refused = await call(`/api/command/v1/${command}`, {
+        body,
+        environment: {
+          PIPELINE: pipeline(
+            () => Response.json({ error: "stale_context", refs: [planId] }, { status: 409 }),
+            seen,
+          ),
+        },
+      });
+      expect(refused.response.status).toBe(409);
+      expect(seen).toHaveLength(1);
+      const rows = await recordsOf(refused.requestId);
+      expect(rows.map(brief)).toEqual([
+        {
+          path: "ui",
+          subject: OPERATOR,
+          principal: OPERATOR,
+          principalKind: "human",
+          operation: `command.${command}`,
+          result: "refused",
+          resultCode: "stale_context",
+        },
+      ]);
+      expect(rows[0]!["target_ref"]).toBeNull();
+      expect(JSON.stringify(rows)).not.toContain(planId);
+    }
+  });
+
   it("writes nothing when the Processor recorded the effect; a replay and a read are recorded here", async () => {
     const planId = "a".repeat(64);
     const recorded = await call("/api/command/v1/plan", {
