@@ -1,5 +1,6 @@
 import { Container } from "@cloudflare/containers";
 import { storageState, worker, type HarnessEnv } from "./common";
+import { checkBackpressure } from "./backpressure-check";
 
 export class VerificationContainer extends Container<HarnessEnv> {
   defaultPort = 8080;
@@ -35,6 +36,14 @@ export class VerificationContainer extends Container<HarnessEnv> {
         signaled: 0,
         exitSeven: 0,
       });
+    if (path === "/backpressure-check")
+      return Response.json(
+        await checkBackpressure({
+          fetchBoundary: (inner) => this.containerFetch(inner),
+          running: () => Boolean(this.ctx.container?.running),
+          outerSignal: request.signal,
+        }),
+      );
     if (path === "/destroy") {
       await this.destroy();
       return Response.json({ destroyed: 1 });

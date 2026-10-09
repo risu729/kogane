@@ -7,6 +7,7 @@ const routes = Object.freeze({
   "/delay": ["delay", "GET"],
   "/stream": ["stream", "GET"],
   "/backpressure": ["backpressure", "GET"],
+  "/backpressure-check": ["backpressure_check", "GET"],
   "/stream-error": ["stream_error", "GET"],
   "/hold": ["hold", "GET"],
   "/destroy": ["destroy", "POST"],

@@ -15,6 +15,7 @@ const routes = [
   ["/delay", "delay", "GET"],
   ["/stream", "stream", "GET"],
   ["/backpressure", "backpressure", "GET"],
+  ["/backpressure-check", "backpressure_check", "GET"],
   ["/stream-error", "stream_error", "GET"],
   ["/hold", "hold", "GET"],
   ["/destroy", "destroy", "POST"],
@@ -161,9 +162,11 @@ test("only the backpressure GET requests identity encoding at the outer hop", as
     },
   });
   await request("/backpressure");
+  await request("/backpressure-check");
   await request("/stats");
   expect(seen.map(([path, init]) => [path, init.headers])).toEqual([
     ["/backpressure", { authorization: "Bearer private-key", "accept-encoding": "identity" }],
+    ["/backpressure-check", { authorization: "Bearer private-key" }],
     ["/stats", { authorization: "Bearer private-key" }],
   ]);
   expect(seen.every(([, init]) => init.method === "GET" && init.redirect === "manual")).toBe(true);

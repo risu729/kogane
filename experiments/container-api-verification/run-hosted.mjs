@@ -46,6 +46,8 @@ const DRIVER_CODES = new Set(
     "backpressure_exhausted_early",
     "backpressure_exhausted_late",
     "backpressure_progress",
+    "backpressure_timeout",
+    "backpressure_report",
     "baseline",
     "cancel",
     "concurrency",

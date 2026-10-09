@@ -76,6 +76,28 @@ released on EOF/cancel/error. The long native monitor is not put in waitUntil.
 The explicit idle alarm avoids relying on DO eviction to stop the process;
 actual Container timing and resource usage still require hosted verification.
 
+### Boundary of the hosted backpressure check
+
+The gating paused-consumer check observes the response returned by the actual
+SDK `containerFetch` or native `ContainerController.fetch` inside the synthetic
+Durable Object. It reads one chunk, samples after one second, then pauses for
+35 seconds. Both implementations use the same random 64 KiB source, 4096-chunk
+cap, process identity, stream/POST counts and unchanged producer-count check.
+The process must already be running before each stats read, because a stats
+request could restart a stopped process. The reader is cancelled on every exit.
+The check does not hold `blockConcurrencyWhile` across the pause.
+
+This replaces the public-client pause as the controller migration gate. The
+public SDK baseline exhausted the 256 MiB cap even after random chunks, identity
+encoding and `no-transform` were added. That is an unresolved observation of the
+public path; it is not a passed test and does not identify the buffering layer.
+Pausing at the controller boundary removes outer Worker, edge and client buffers
+from this specific measurement. A pass establishes wrapped-response lifetime
+and upstream producer blocking at that boundary only. The in-DO invocation also
+keeps the DO resident, so it does not establish eviction, billing or end-to-end
+public slow-consumer equivalence. Independent idle, cancellation and recovery
+checks remain required; bank/browser/VPC compatibility is a separate limit.
+
 ## Consequences
 
 This change does not adopt faster-start scheduling or snapshots. Production
@@ -137,7 +159,14 @@ unmarked status alone does not distinguish a public routing response from the
 Worker's own route rejection. The diagnostic follow-up assigns closed markers
 to Worker-owned authentication, revision and route errors; malformed error metadata
 fails closed, and marked errors are not retried as bootstrap propagation.
-All four cleanup checks passed for both attempts; separate API reads confirmed
+Attempt `a9cc3f6e`
+([run 37882808848](https://github.com/risu729/kogane/actions/runs/37882808848))
+passed initialization, concurrent startup, long delay and long stream, then
+failed `verification_backpressure_exhausted_late` in the public-client pause.
+The process remained running. This confirms the cap was reached despite the
+compression controls; it does not establish a buffering cause. The revised
+controller-boundary check described above still requires hosted validation.
+All four cleanup checks passed for these attempts; separate API reads confirmed
 Worker, application and namespace absence. The runner uses canonical OCI manifest HEAD for registry
 ownership and absence, and shares the existing rollout deadline with public
 HTTP readiness checks. Normal CI and CodeQL passed on the earlier reviewed
@@ -151,8 +180,8 @@ runtime gates are still pending:
    sentinels and record application, namespace and exact Worker version.
 2. Deploy the actual shared native controller on the same identity/image.
    Verify one startup for concurrent callers and one POST per caller.
-3. Verify responses longer than 30 seconds, slow consumers/backpressure, cancel
-   and stream failure. Observe idle stop with and without the native monitor.
+3. Verify responses longer than 30 seconds, a paused consumer at the controller
+   response boundary, cancellation and stream failure. Observe idle stop with and without the native monitor.
    Process-state timings are not billing evidence.
 4. Redeploy during a bounded synthetic stream and verify process recovery;
    destroy and allocate again; test SIGTERM and nonzero exit diagnostics.

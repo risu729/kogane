@@ -26,7 +26,7 @@ import {
   identity,
   sameIdentity,
   verifyPhase,
-  verifyBackpressure,
+  verifyPublicBackpressureDiagnostic,
   verifyConcurrency,
   recoveryHold,
   baselineRecord,
@@ -611,7 +611,7 @@ test("backpressure diagnostics preserve1s+35s gates and identify each closed pre
           : {}),
       },
     ];
-    const result = verifyBackpressure({
+    const result = verifyPublicBackpressureDiagnostic({
       request: async (path: string) => {
         expect(path).toBe("/backpressure");
         return new Response(
@@ -652,7 +652,7 @@ test("backpressure accepts absent or identity encoding and cancels every encoded
     let canceled = false,
       time = 0,
       snapshots = 0;
-    const result = verifyBackpressure({
+    const result = verifyPublicBackpressureDiagnostic({
       request: async () =>
         new Response(
           new ReadableStream({
@@ -690,13 +690,19 @@ test("backpressure accepts absent or identity encoding and cancels every encoded
 test("backpressure reader and malformed snapshots fail closed without erasing primary failure during cancel", async () => {
   const stable = { processIdentity, posts: 2, streams: 1, backpressureChunks: 32 };
   await expect(
-    verifyBackpressure({ json: async () => null, request: async () => new Response("unused") }),
+    verifyPublicBackpressureDiagnostic({
+      json: async () => null,
+      request: async () => new Response("unused"),
+    }),
   ).rejects.toThrow("verification_backpressure_process");
   await expect(
-    verifyBackpressure({ json: async () => stable, request: async () => new Response(null) }),
+    verifyPublicBackpressureDiagnostic({
+      json: async () => stable,
+      request: async () => new Response(null),
+    }),
   ).rejects.toThrow("verification_backpressure_chunks");
   await expect(
-    verifyBackpressure({
+    verifyPublicBackpressureDiagnostic({
       json: async () => stable,
       request: async () =>
         new Response(
@@ -711,7 +717,7 @@ test("backpressure reader and malformed snapshots fail closed without erasing pr
   for (const stopped of [true, false]) {
     let time = 0;
     await expect(
-      verifyBackpressure({
+      verifyPublicBackpressureDiagnostic({
         json: async (path: string) => (path === "/state" ? { running: stopped ? 0 : 1 } : stable),
         request: async () =>
           new Response(
@@ -1002,7 +1008,7 @@ test("Node driver pauses a real TCP consumer for 35s and observes a bounded plat
   const origin = `http://127.0.0.1:${server.port}`;
   try {
     const script = `
-      import { verifyBackpressure } from ${JSON.stringify(resolve(import.meta.dir, "../driver.mjs"))};
+      import { verifyPublicBackpressureDiagnostic } from ${JSON.stringify(resolve(import.meta.dir, "../driver.mjs"))};
       import { createSyntheticRequest } from ${JSON.stringify(resolve(import.meta.dir, "../http-diagnostics.mjs"))};
       const request = createSyntheticRequest({ origin: ${JSON.stringify(origin)}, key: "local" });
       const samples = [];
@@ -1012,7 +1018,7 @@ test("Node driver pauses a real TCP consumer for 35s and observes a bounded plat
         samples.push(value);
         return value;
       };
-      await verifyBackpressure({ request, json });
+      await verifyPublicBackpressureDiagnostic({ request, json });
       console.log(JSON.stringify({ samples, final: await json("/stats") }));
     `;
     const child = Bun.spawn(["node", "--input-type=module", "-e", script], {

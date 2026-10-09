@@ -101,8 +101,9 @@ credentials, workflow/job permissions and cleanup are outside this driver.
 
 Every phase verifies identity and persistent synthetic KV/SQL sentinels. All
 phases except `native_recovered` also verify concurrent startup and POST counts,
-a 35-second delayed response, a 40-second stream, a 35-second paused consumer
-with a bounded 256 MiB upstream cap and observed backpressure plateau,
+a 35-second delayed response, a 40-second stream, and a 35-second paused consumer
+at the SDK/native controller response boundary with a bounded 256 MiB upstream
+cap and observed backpressure plateau,
 cancellation, stream failure, eventual idle stop, destroy/reallocation, SIGTERM,
 nonzero exit and SDK alarm recreation where applicable. `native_recovered`
 verifies the same still-running process after a revision switch. The harness
@@ -114,14 +115,24 @@ that SDK/container request. No global SDK logging override changes the baseline.
 
 The backpressure source emits fresh random 64 KiB chunks and sets
 `Cache-Control: no-transform` to avoid a zero-filled compression confounder.
-The public client requests identity encoding and rejects an explicitly encoded
-response. That request header governs the client-to-Worker hop; the Worker
-still strips headers before DO lookup. A missing encoding header is not proof
-that no internal transformation occurred. These controls change the synthetic
-wire workload, while preserving the 4096-chunk cap, 1-second initial sample,
-35-second plateau interval, and existing lifetime/POST/process assertions.
-Exhaustion diagnostics distinguish the initial sample from the final sample.
-They do not identify which transport layer buffered the bytes.
+The required `/backpressure-check` request pauses the response body returned by
+the actual SDK `containerFetch` or native `ContainerController.fetch` inside the
+synthetic DO. It preserves the 4096-chunk cap, one-second initial sample,
+35-second plateau interval and lifetime/POST/process assertions. The process is
+checked before every restart-capable stats request. A bounded internal deadline
+and cancellation cleanup fit within the driver's existing 120-second request
+ceiling. The public response contains only a strictly validated finite report;
+no UUID, payload bytes or arbitrary diagnostic text is returned.
+
+The earlier public-client pause requested identity encoding and rejected an
+explicitly encoded response, but the SDK baseline still reached the 256 MiB cap
+in run 37882808848. This remains an unresolved public-path observation, not a
+passed gate. It does not identify which transport layer buffered the bytes.
+The in-DO check removes outer Worker, edge and client buffers from the measured
+boundary; it proves no end-to-end public backpressure, eviction or billing
+claim. Its active DO invocation may itself keep the DO resident, which is why
+separate Container running-state, idle, cancellation and recovery checks remain
+required.
 
 Idle observations are bounded process-state checks. They do not establish
 billable runtime or DO eviction. Compare independently read aggregate billing

@@ -174,7 +174,13 @@ export async function verifyConcurrency({ phase, json }) {
     closed("concurrency_start");
 }
 
-export async function verifyBackpressure({ request, json, wait = pause, now = Date.now }) {
+// Public-edge diagnostic only; phase acceptance uses the in-DO controller boundary below.
+export async function verifyPublicBackpressureDiagnostic({
+  request,
+  json,
+  wait = pause,
+  now = Date.now,
+}) {
   const baseline = await json("/stats");
   if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/u.test(baseline?.processIdentity ?? ""))
     closed("backpressure_process");
@@ -242,6 +248,90 @@ export async function verifyBackpressure({ request, json, wait = pause, now = Da
       if (!failed) closed("backpressure_stream");
     }
   }
+}
+const backpressureReasons = new Set([
+  "timing",
+  "process",
+  "stream",
+  "posts",
+  "chunks",
+  "encoding",
+  "exhausted_early",
+  "exhausted_late",
+  "progress",
+  "timeout",
+]);
+/** One bounded public GET; the DO reports its own SDK/native response-boundary observation. */
+export async function verifyBackpressureCheck({ request }) {
+  const response = await request("/backpressure-check");
+  const reader = response.body?.getReader();
+  if (!reader) closed("backpressure_report");
+  let report,
+    complete = false;
+  try {
+    const parts = [];
+    let size = 0;
+    while (true) {
+      const part = await reader.read();
+      if (part.done) {
+        complete = true;
+        break;
+      }
+      size += part.value?.byteLength ?? 0;
+      if (size > 1024) closed("backpressure_report");
+      parts.push(part.value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    report = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    closed("backpressure_report");
+  } finally {
+    if (!complete) {
+      let timer;
+      try {
+        await Promise.race([
+          reader.cancel(),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error("cancel_timeout")), 1000);
+          }),
+        ]);
+      } catch {
+        // Preserve the owned report failure when cancellation also fails.
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+  }
+  if (
+    !report ||
+    typeof report !== "object" ||
+    Array.isArray(report) ||
+    typeof report.code !== "string"
+  )
+    closed("backpressure_report");
+  const keys = Object.keys(report).sort().join(",");
+  if (report.code === "pass") {
+    if (
+      keys !== "code,earlyChunks,elapsedMs,lateChunks" ||
+      !Number.isSafeInteger(report.earlyChunks) ||
+      report.earlyChunks < 1 ||
+      report.earlyChunks >= BACKPRESSURE_MAX_CHUNKS ||
+      !Number.isSafeInteger(report.lateChunks) ||
+      report.lateChunks !== report.earlyChunks ||
+      !Number.isSafeInteger(report.elapsedMs) ||
+      report.elapsedMs < 30_000 ||
+      report.elapsedMs > 110_000
+    )
+      closed("backpressure_report");
+    return report;
+  }
+  if (keys !== "code" || !backpressureReasons.has(report.code)) closed("backpressure_report");
+  closed(`backpressure_${report.code}`);
 }
 export async function verifyPhase({
   phase,
@@ -440,7 +530,7 @@ export async function verifyPhase({
   if (bytes !== 40 || Date.now() - streamStart < 30_000 || (await json("/stats")).posts !== 2)
     closed("stream");
   counts.longStreamChecks++;
-  await verifyBackpressure({ request, json });
+  await verifyBackpressureCheck({ request });
   counts.backpressureChecks++;
   const canceled = (await request("/stream")).body?.getReader();
   if (!canceled) closed("cancel");

@@ -4,6 +4,7 @@ import {
   type ContainerContext,
 } from "../../../packages/collection/src/container-controller";
 import { storageState, worker, type HarnessEnv } from "./common";
+import { checkBackpressure } from "./backpressure-check";
 
 export class VerificationContainer extends DurableObject<HarnessEnv> {
   private controller: ContainerController;
@@ -69,6 +70,14 @@ export class VerificationContainer extends DurableObject<HarnessEnv> {
         signaled: this.signaled,
         exitSeven: this.exitSeven,
       });
+    if (path === "/backpressure-check")
+      return Response.json(
+        await checkBackpressure({
+          fetchBoundary: (inner) => this.controller.fetch(inner),
+          running: () => Boolean(this.ctx.container?.running),
+          outerSignal: request.signal,
+        }),
+      );
     if (path === "/destroy") {
       await this.controller.destroy();
       return Response.json({ destroyed: 1 });

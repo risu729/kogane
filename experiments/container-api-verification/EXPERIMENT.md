@@ -17,6 +17,10 @@ Use only the fixed temporary Worker `kogane-container-api-verification`, its
 `VerificationContainer` class and one default/basic/APAC Container. Both source
 variants deny outbound Internet access. The synthetic image has no bank code,
 credentials or VPC binding. Every endpoint authenticates before DO lookup.
+The paused-consumer gate observes the actual SDK/native response boundary inside
+the DO with the same capacity and timing limits. The earlier SDK public-client
+pause exhausted 256 MiB; public-path slow-consumer behavior remains unresolved
+and is not established by this narrower gate.
 A separate GitHub environment and a dedicated scoped token isolate this check
 from production credentials. The normal CI and production release never deploy
 this experiment. The manual verification job requires explicit selection.

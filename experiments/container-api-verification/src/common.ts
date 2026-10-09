@@ -56,6 +56,7 @@ export function worker() {
         "/delay": "GET",
         "/stream": "GET",
         "/backpressure": "GET",
+        "/backpressure-check": "GET",
         "/stream-error": "GET",
         "/hold": "GET",
         "/destroy": "POST",
