@@ -10,10 +10,12 @@ import type { FxConversionPolicy, PriceSelectionPolicy } from "../../domain/src/
 import { decimalToString, type Quantity } from "../../domain/src/values.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { DatedStore, type Capture } from "../../read-model/test/dated-state-fixture.ts";
+import { migratedDatabase } from "../../read-model/test/price-candidates-fixture.ts";
 import type { MarketDataPolicies } from "../src/query/market-data.ts";
 import {
   ACCOUNT_EXISTS_SQL,
   queryValuationOnDate,
+  SOURCE_EXISTS_SQL,
   VALUATION_HOLDING_BOUND,
   ValuationOnDateError,
   type ValuationOnDateRequest,
@@ -184,8 +186,20 @@ function ownPrices(
 }
 
 /** A yen holding and a dollar holding, each with its own snapshot's price, and a USD board. */
-function world(): DatedStore {
+/** The VC position container captured empty on the date: it holds nothing, and has a snapshot. */
+function emptyVc(store: DatedStore): void {
+  store.capture({
+    source: "sbi-vc-trade",
+    dataset: "position-summary",
+    parser: "sbi-vc-position-summary",
+    version: "0.2.0",
+    fetchedAt: "2026-09-10T00:30:00Z",
+  });
+}
+
+function world(options: { vc?: boolean } = {}): DatedStore {
   const store = new DatedStore();
+  if (options.vc ?? true) emptyVc(store);
   const domestic = store.capture({
     ...DOMESTIC,
     fetchedAt: "2026-09-10T01:00:00Z",
@@ -297,43 +311,108 @@ describe("queryValuationOnDate", () => {
     expect(before.total.status === "exact" && text(before.total.value)).toBe("379378.5");
   });
 
-  test("a stale snapshot price is unpriced and the total absent, though a fresher price of another snapshot exists", async () => {
+  test("a holding of a stale snapshot is snapshot_stale, never valued at the date's prices", async () => {
+    // The reviewer's shape: a domestic capture 40 days old under a
+    // latest-in-window price policy, beside a fresh foreign holding.
     const store = new DatedStore();
+    emptyVc(store);
     const old = store.capture({
       ...DOMESTIC,
-      fetchedAt: "2026-09-05T01:00:00Z",
+      fetchedAt: "2026-08-01T01:00:00Z",
       positions: [{ account: "sbi-a", code: "1001", quantity: "100" }],
     });
     store.identify(old, DOMESTIC.source, "acct-sbi", "identified", ["inst-1001"]);
-    ownPrices(store, old, "sbi-domestic-current-price-v1", "JPY", [
-      { code: "1001", amount: "1500", at: "2026-09-05T10:00:00+09:00" },
-    ]);
-    // Another account's snapshot of the same code, fresh, with its own price.
-    const other = store.capture({
+    const foreign = store.capture({
       ...FOREIGN,
       fetchedAt: "2026-09-10T02:00:00Z",
-      positions: [{ account: "sbi-b", code: "1001", quantity: "1", currency: "JPY" }],
+      positions: [{ account: "sbi-a", code: "ALPHA", quantity: "12", currency: "USD" }],
     });
-    store.identify(other, FOREIGN.source, "acct-other", "identified", ["inst-1001"]);
-    ownPrices(store, other, "sbi-domestic-current-price-v1", "JPY", [
-      { code: "1001", amount: "1600", at: "2026-09-10T10:00:00+09:00" },
+    store.identify(foreign, FOREIGN.source, "acct-sbi", "identified", ["inst-alpha"]);
+    ownPrices(store, foreign, "sbi-foreign-stock-price-last-v1", "USD", [
+      { code: "ALPHA", amount: "130.70", at: "2026-09-10T06:00:00+09:00" },
     ]);
-    const result = await queryValuationOnDate(counting(store), REQUEST, POLICIES);
+    // A fresh price of the same code, which a latest-in-window policy could take.
+    claimPrice(store, {
+      id: "px-1001-fresh",
+      parse: foreign.parse,
+      observation: foreign.positions[0]!,
+      claimKind: "position",
+      rule: "sbi-domestic-current-price-v1",
+      base: "instrument:sbi-securities:-:1001",
+      quote: "JPY",
+      amount: "1500",
+      at: "2026-09-10T10:00:00+09:00",
+    });
+    board(store, "2026-09-10T10:00:00+09:00", { USD: "146.25" });
+    const latest: MarketDataPolicies = {
+      ...POLICIES,
+      price: { ...EQUITY, policyId: "test:latest", candidateScope: "latest-in-window" },
+    };
+    const result = await queryValuationOnDate(counting(store), REQUEST, latest);
     expect(
       result.holdings.map((entry) => [
         entry.snapshotRef,
         entry.outcome,
-        entry.outcome === "unpriced" ? [entry.reason, entry.ageDays] : null,
+        entry.outcome === "snapshot_stale" ? entry.ageDays : null,
       ]),
     ).toEqual([
-      [`artifact:${old.artifact}`, "unpriced", ["stale", 5]],
-      [`artifact:${other.artifact}`, "valued", null],
+      [`artifact:${old.artifact}`, "snapshot_stale", 40],
+      [`artifact:${foreign.artifact}`, "valued", null],
     ]);
     expect(result.total).toEqual({ status: "absent", reason: "holding_not_valued" });
-    expect(result.counts).toMatchObject({ valued: 1, unpriced: 1 });
     expect(result.reportedState.coverage.staleSnapshots.map((entry) => entry.ref)).toEqual([
       `artifact:${old.artifact}`,
     ]);
+    // The stale holding selected no price.
+    expect(result.manifest.selection.selected).not.toContain("px-1001-fresh");
+  });
+
+  test("a recent snapshot whose own price is older than the policy allows is unpriced stale", async () => {
+    const store = new DatedStore();
+    emptyVc(store);
+    const recent = store.capture({
+      ...DOMESTIC,
+      fetchedAt: "2026-09-07T01:00:00Z",
+      positions: [{ account: "sbi-a", code: "1001", quantity: "100" }],
+    });
+    store.identify(recent, DOMESTIC.source, "acct-sbi", "identified", ["inst-1001"]);
+    ownPrices(store, recent, "sbi-domestic-current-price-v1", "JPY", [
+      { code: "1001", amount: "1500", at: "2026-09-07T10:00:00+09:00" },
+    ]);
+    const strict: MarketDataPolicies = {
+      ...POLICIES,
+      price: { ...EQUITY, freshness: { unit: "calendar-days", maxAgeDays: 2 } },
+    };
+    const result = await queryValuationOnDate(counting(store), REQUEST, strict);
+    expect(result.holdings[0]).toMatchObject({
+      outcome: "unpriced",
+      reason: "stale",
+      ageDays: 3,
+      candidateIds: [`px-${recent.parse}-1001`],
+    });
+    expect(result.total).toEqual({ status: "absent", reason: "holding_not_valued" });
+  });
+
+  test("a position container without a snapshot makes the total a partial verified scope", async () => {
+    const store = world();
+    const full = await queryValuationOnDate(counting(store), REQUEST, POLICIES);
+    expect(full.total.status).toBe("exact");
+    // The same holdings, but the VC position container has no snapshot on the date.
+    const lacking = world({ vc: false });
+    const partial = await queryValuationOnDate(counting(lacking), REQUEST, POLICIES);
+    expect(partial.total).toMatchObject({
+      status: "partial-verified-scope",
+      positionContainersWithoutSnapshot: 1,
+    });
+    expect(partial.total.status !== "absent" && text(partial.total.value)).toBe("379378.5");
+    expect(partial.manifest.reportedState.positionContainersWithoutSnapshot).toEqual([
+      {
+        sourceId: "sbi-vc-trade",
+        parserName: "sbi-vc-position-summary",
+        dataset: "position-summary",
+      },
+    ]);
+    expect(partial.contextId).not.toBe(full.contextId);
   });
 
   test("an unidentified holding and an unreadable quantity are named, and select no price", async () => {
@@ -385,6 +464,50 @@ describe("queryValuationOnDate", () => {
     expect(await refusal(counting(store), { ...REQUEST, account: "acct-nobody" }, POLICIES)).toBe(
       "unknown_account",
     );
+  });
+
+  test("a source filter narrows the holdings; a source that does not exist is refused", async () => {
+    const store = world();
+    // The synthetic Layer A stub seeds only three sources; CORE seeds the rest.
+    store.db.run("INSERT INTO sources(id,provider) VALUES('sbi-securities','synthetic')");
+    const narrowed = await queryValuationOnDate(
+      counting(store),
+      { ...REQUEST, source: "sbi-securities" },
+      POLICIES,
+    );
+    expect(narrowed.holdings).toHaveLength(2);
+    expect(narrowed.manifest.reportedState.filters).toEqual({
+      source: "sbi-securities",
+      account: null,
+    });
+    // A known source with no positions: no holdings, answered.
+    const none = await queryValuationOnDate(
+      counting(store),
+      { ...REQUEST, source: "smbc-bank" },
+      POLICIES,
+    );
+    expect(none.total).toEqual({ status: "absent", reason: "no_holdings" });
+    expect(await refusal(counting(store), { ...REQUEST, source: "no-such-source" }, POLICIES)).toBe(
+      "unknown_source",
+    );
+  });
+
+  test("a different reported state on the date is a different valuation context", async () => {
+    const store = world();
+    const first = await queryValuationOnDate(counting(store), REQUEST, POLICIES);
+    // A card statement changes the reported state's answer, not the holdings.
+    store.statement({
+      card: "card-a",
+      period: "2026-09",
+      paymentDate: "2026-09-26",
+      minor: 30_000,
+      fetchedAt: "2026-09-05T01:00:00Z",
+    });
+    const second = await queryValuationOnDate(counting(store), REQUEST, POLICIES);
+    expect(second.reportedState.contextId).not.toBe(first.reportedState.contextId);
+    expect(second.manifest.reportedState.contextId).toBe(second.reportedState.contextId);
+    expect(second.contextId).not.toBe(first.contextId);
+    expect(second.total).toEqual(first.total);
   });
 });
 
@@ -476,17 +599,25 @@ describe("bounds are refused, never cut", () => {
 });
 
 describe("plans without table statistics", () => {
-  test("the account check reaches accounts by primary key", () => {
-    const store = new DatedStore();
-    const plan = (
-      store.db.query(`EXPLAIN QUERY PLAN ${ACCOUNT_EXISTS_SQL}`).all("acct-x") as {
-        detail: string;
-      }[]
-    ).map((row) => row.detail);
-    expect(plan).toEqual([
+  test("the account and source checks reach their tables by primary key", () => {
+    const db = migratedDatabase();
+    expect(
+      db.query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'").get(),
+    ).toEqual({ n: 0 });
+    const plan = (text: string) =>
+      (db.query(`EXPLAIN QUERY PLAN ${text}`).all("x") as { detail: string }[]).map(
+        (row) => row.detail,
+      );
+    expect(plan(ACCOUNT_EXISTS_SQL)).toEqual([
       expect.stringMatching(
         /^SEARCH accounts USING (COVERING )?INDEX sqlite_autoindex_accounts_1 \(id=\?\)$/u,
       ),
     ]);
+    expect(plan(SOURCE_EXISTS_SQL)).toEqual([
+      expect.stringMatching(
+        /^SEARCH sources USING (COVERING )?INDEX sqlite_autoindex_sources_1 \(id=\?\)$/u,
+      ),
+    ]);
+    db.close();
   });
 });

@@ -3,14 +3,17 @@
 // It composes four reads and the domain, and nothing else:
 //
 //   1. `queryDatedState`: the positions the reported state lists on D under
-//      the requested perimeter, with each instrument's identity status;
+//      the requested source and account (each checked to exist by key), with
+//      each instrument's identity status and each snapshot's freshness;
 //   2. `DATED_POSITION_QUANTITIES_SQL`: each position's parse run and
 //      decimal-v1 quantity, by key;
 //   3. `selectMarketData`: one price per distinct (instrument, unit[, snapshot])
 //      and one rate per currency the path to the base unit crosses, at the
 //      end of D, under the caller's policy;
 //   4. `valueHoldingsOnDate`: one closed outcome per holding, a total only when
-//      every holding is valued, and the manifest whose digest is the context.
+//      every holding is valued and all come from one source (labelled
+//      `partial-verified-scope` when a position container of the perimeter
+//      has no snapshot), and the manifest whose digest is the context.
 //
 // It never writes, never fetches, has no clock (the caller states today's
 // date) and no default policy: a request without one is refused
@@ -46,6 +49,7 @@ import {
 } from "../../../domain/src/values.ts";
 import {
   DATED_POSITION_QUANTITIES_SQL,
+  DATED_POSITION_CONTAINER_PARSERS,
   DATED_POSITION_QUANTITY_POLICY,
   type DatedPositionQuantityRow,
 } from "../../../read-model/src/dated-state.ts";
@@ -63,17 +67,17 @@ import {
 
 /** More holdings than this on one date is refused, never cut. */
 export const VALUATION_HOLDING_BOUND = 500;
-/** More price keys and currencies than this is refused (the candidate read's own bound). */
-export const VALUATION_SELECTION_BOUND = PRICE_SELECTION_BOUND;
-
 /** Whether a resolved account exists; `?1` is its id. */
 export const ACCOUNT_EXISTS_SQL = "SELECT 1 AS found FROM accounts WHERE id=?1";
+/** Whether a provider source exists; `?1` is its id. */
+export const SOURCE_EXISTS_SQL = "SELECT 1 AS found FROM sources WHERE id=?1";
 
-export const VALUATION_ON_DATE_REFUSALS = [
+const VALUATION_ON_DATE_REFUSALS = [
   "policy_missing",
   "invalid_policy",
   "invalid_request",
   "date_in_future",
+  "unknown_source",
   "unknown_account",
   "holding_limit_exceeded",
   "selection_limit_exceeded",
@@ -101,7 +105,7 @@ export interface ValuationOnDateRequest {
   baseUnit: string;
   /** Which price and rate publications count: the current ones, or those known at an instant. */
   knowledge: KnowledgeMode;
-  /** Only this provider source. */
+  /** Only this provider source; one that does not exist is refused. */
   source?: string;
   /** Only this resolved account id; one that does not exist is refused. */
   account?: string;
@@ -182,6 +186,10 @@ export async function queryValuationOnDate(
     !validSelectionBound(bound, policies.fx.selection.zone)
   )
     refuse("invalid_policy");
+  if (request.source !== undefined) {
+    const found = await sql.first<{ found: number }>(SOURCE_EXISTS_SQL, [request.source]);
+    if (found === null) refuse("unknown_source");
+  }
   if (request.account !== undefined) {
     const found = await sql.first<{ found: number }>(ACCOUNT_EXISTS_SQL, [request.account]);
     if (found === null) refuse("unknown_account");
@@ -215,10 +223,14 @@ export async function queryValuationOnDate(
     const row = byId.get(ids[index]!);
     if (row === undefined) throw new Error("dated_position_not_found");
     const ref = instrumentRef(account.sourceId, position.market, position.securityCode);
+    const snapshot = account.snapshots.find((entry) => entry.ref === position.snapshotRef);
+    if (snapshot === undefined) throw new Error("dated_position_snapshot_not_found");
     return {
       ref: position.ref,
       sourceId: account.sourceId,
       snapshotRef: position.snapshotRef,
+      snapshotFreshness: snapshot.freshness,
+      snapshotAgeDays: snapshot.ageDays,
       parseRunId: row.parse_run_id,
       instrumentRef: ref,
       instrument: { ...position.instrument },
@@ -238,7 +250,8 @@ export async function queryValuationOnDate(
     for (const code of fxCurrenciesFor(want.key.quoteUnitRef, request.baseUnit, policies.fx))
       currencies.add(code);
   }
-  if (wants.size + currencies.size > VALUATION_SELECTION_BOUND) refuse("selection_limit_exceeded");
+  // The candidate read's own bound on keys.
+  if (wants.size + currencies.size > PRICE_SELECTION_BOUND) refuse("selection_limit_exceeded");
   const prices = [...wants.values()];
   const fxCurrencies = [...currencies].sort();
 
@@ -267,6 +280,16 @@ export async function queryValuationOnDate(
       cutoff: state.cutoff,
       filters: { ...state.filters },
       quantityPolicy: DATED_POSITION_QUANTITY_POLICY,
+      contextId: state.contextId,
+      positionContainersWithoutSnapshot: state.coverage.containersWithoutSnapshot
+        .filter((entry) =>
+          (DATED_POSITION_CONTAINER_PARSERS as readonly string[]).includes(entry.parserName),
+        )
+        .map((entry) => ({
+          sourceId: entry.sourceId,
+          parserName: entry.parserName,
+          dataset: entry.dataset,
+        })),
     },
     holdings,
     prices: prices.map((want, index) => ({
