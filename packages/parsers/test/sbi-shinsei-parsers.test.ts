@@ -1084,8 +1084,8 @@ describe("SBI Shinsei activity rows record the provider-id origin (0.1.3)", () =
     // so a holder under one is the other's alias, never a second fact.
     expect(declaredAliasClass(row({}, debit012))).toEqual(aliasClass);
     expect(declaredAliasClass(row({}, debit013))).toEqual(aliasClass);
-    // The origin is read off the row, not the parser name: a 0.1.3-shaped row
-    // under another parser name is not admitted through this function.
+    // The registry entry is found by parser name: the same row under an
+    // unregistered parser is refused (no entry → unrecorded).
     expect(humanAdoptedRowIdentity(row({ parserName: "synthetic-parser" }, debit013))).toEqual({
       admitted: false,
       refusal: "identity_origin_unrecorded",

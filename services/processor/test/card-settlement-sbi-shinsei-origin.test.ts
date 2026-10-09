@@ -354,9 +354,9 @@ test("an acceptance made before G1b holds the 0.1.2-cited candidate (no claim ro
 test("the repair lane re-parses the stored capture under 0.1.3 beside the 0.1.2 run; nothing is rewritten or adopted", async () => {
   const before = await adopted();
   const old = await db
-    .prepare("SELECT id,extra_json FROM transaction_observations WHERE parse_run_id=? ORDER BY id")
+    .prepare("SELECT * FROM transaction_observations WHERE parse_run_id=? ORDER BY id")
     .bind(BANK)
-    .all<{ id: number; extra_json: string }>();
+    .all<Record<string, unknown>>();
   expect(old.results).toHaveLength(2);
   for (
     let attempt = 0;
@@ -385,11 +385,9 @@ test("the repair lane re-parses the stored capture under 0.1.3 beside the 0.1.2 
   expect(
     (
       await db
-        .prepare(
-          "SELECT id,extra_json FROM transaction_observations WHERE parse_run_id=? ORDER BY id",
-        )
+        .prepare("SELECT * FROM transaction_observations WHERE parse_run_id=? ORDER BY id")
         .bind(BANK)
-        .all<{ id: number; extra_json: string }>()
+        .all<Record<string, unknown>>()
     ).results,
   ).toEqual(old.results);
   const rows = (
