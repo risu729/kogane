@@ -14,7 +14,6 @@ import {
   migrationSql,
   splitSqlStatements,
 } from "../src/migrations.ts";
-import { fullCoreDatabase } from "./sqlite.ts";
 
 const MIGRATION = "0071_economic_event_command_kinds.sql";
 const GUARD_MIGRATION = "0070_economic_commit_guard.sql";
@@ -262,12 +261,17 @@ test("0071 drops and recreates no 0070 object: every 0070 index, trigger and vie
 
 test("a fresh store migrated through 0071 has the same 0070 objects as one stopped at 0070", () => {
   const names = guardObjectNames();
-  const fresh = fullCoreDatabase();
+  // A fresh store stopped at 0071: later migrations (0072, ADR 0057) add
+  // objects of their own, which their own tests pin.
+  const fresh = new Database(":memory:");
+  fresh.exec("PRAGMA foreign_keys=ON");
   const through0070 = new Database(":memory:");
   try {
+    for (const file of migrationFiles(CORE_MIGRATIONS_URL).filter((f) => f <= MIGRATION))
+      fresh.exec(migrationSql(CORE_MIGRATIONS_URL, file));
     for (const file of migrationFiles(CORE_MIGRATIONS_URL).filter((f) => f <= GUARD_MIGRATION))
       through0070.exec(migrationSql(CORE_MIGRATIONS_URL, file));
-    expect(migrationFiles(CORE_MIGRATIONS_URL).at(-1)).toBe(MIGRATION);
+    expect(migrationFiles(CORE_MIGRATIONS_URL)).toContain(MIGRATION);
     expect(objectsNamed(fresh, names)).toEqual(objectsNamed(through0070, names));
     expect(untouched(fresh)).toEqual(untouched(through0070));
     expect(fresh.query("PRAGMA foreign_key_check").all()).toEqual([]);

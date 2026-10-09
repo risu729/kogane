@@ -169,6 +169,9 @@ row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
   and a reviewed correction or withdrawal is itself the explicit review.
   Routing old-epoch holders to needs-review (`identity_epoch_changed`, holder
   kept) is the planners' job (G3) and the selector's (#550, ADR 0058).
+  _Pointer (2026-10-09): ADR 0057's planners route a correction or move of a
+  holder sealed under an older epoch to review and refuse a withdrawal that
+  names another decision (`decision_epoch_mismatch`); they are not registered._
 - **Knowledge selector interface** (#550, ADR 0058): a cut is
   `{coreEpoch, commitSeq}` or `{coreEpoch, instant}` resolved to the largest
   sequence whose `known_at` is at or before the instant (equal instants all
@@ -220,6 +223,9 @@ For human-adopted writers nothing is adopted automatically, and:
 closed input; CORE 0070 enforces 4 and refuses a new seal under a stale
 epoch; 3, the rekey half of 7 and routing old-epoch holders to review are
 decided by planners against stored holders (G3) and by the selector (#550).
+_Pointer (2026-10-09): for own transfers, rule 3 is the proposal engine's
+(`duplicate_unresolved`) and the rekey half of 7 the planners'
+(`identity_rekeyed`), [ADR 0057](0057-own-transfer-proposals.md)._
 
 **Finding:** today's card settlement readiness is producer-sensitive. 0052
 partitions bank debits by producer and namespace (0052:31-32) and readiness
@@ -276,6 +282,10 @@ recording the alias class on every new settlement accept.
   ([amendment](#amendment-g2-as-implemented-2026-10-09))._
 - **G3:** its own ADR and migration 0072, own-transfer proposals (proposal-only)
   and their planners, behind the production gate below.
+  _Pointer (2026-10-09): G3-a is [ADR 0057](0057-own-transfer-proposals.md):
+  the proposal engine, migration 0072 and the four planners, written and
+  tested but not registered; the gate below is unchanged and not passed. The
+  writer is G3-b._
 - **Later:** widening the event kind CHECK (0032) for trades and FX, and the
   securities writer that admits `security-quantity`. The kind-CHECK widening
   rebuilds `economic_event_revisions`, which 0070 reads: that migration drops
@@ -483,7 +493,9 @@ Synthetic data only. This PR tests:
 Not tested here: W1, W4–W9 and W11 need a writer (G1b and G3); remote D1.
 G1b tests W1–W4 and W6–W9 and W5 for a two-member purchase split
 ([amendment](#amendment-g1b-as-implemented-2026-10-08)); W5 for `move`, W6's
-re-adoption and W11 wait for G3 and #550.
+re-adoption and W11 wait for G3 and #550. _Pointer (2026-10-09): see
+[ADR 0057](0057-own-transfer-proposals.md#verification) for W5 (`move`) and
+W6's re-adoption._
 
 ## Amendment: G1b as implemented (2026-10-08)
 
@@ -669,6 +681,9 @@ The registry lists SBI Shinsei's card-settlement membership as unsupported.
   (`services/processor/test/card-settlement-sbi-shinsei.test.ts`).
 - Deferred, with the reason: W5 for `move` and W6's re-adoption need the own
   transfer writer (G3); W11 needs the knowledge selector (#550, ADR 0058).
+  _Pointer (2026-10-09): W5 for `move` and W6's re-adoption are tested by
+  [ADR 0057](0057-own-transfer-proposals.md#verification) against its
+  planners and a synthetic writer (no own-transfer writer ships)._
 - Purchase lane: sealed and logged batches, replays, released-key refusal,
   pre-guard replays, merge and split commits, stale epochs and the
   `economic-event:` head (SD1); the job sealing under the epoch its tick read
@@ -808,6 +823,8 @@ tables carries 0071's kind list.
 - `economic_commit_log.kind` stays free text (0070). Nothing ties a commit
   row's kind to the command vocabulary; no writer writes these kinds, and
   binding them (through the receipt the commit is entered on) is G3's.
+  _Pointer (2026-10-09): still open; ADR 0057 (G3-a) adds no writer, so the
+  binding belongs to the writer (G3-b)._
 - The confirmation screen has no label for the four kinds; no plan of them
   can exist and no screen offers them.
 - A `correct` or `move` with many legs and claims can exceed the command API's
