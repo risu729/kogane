@@ -18,16 +18,18 @@ The operations API ([ops-api.md](ops-api.md)) is not served over `/mcp`:
 change lifecycle's operator capability, which no capability in the table
 below reaches.
 
-**Agent access is not configured in the committed deployment.**
-`AGENT_API_GRANTS` and `AGENT_GRANTS` are empty. With an absent or empty
-agent-API grant map, every agent route and the shared `/mcp` transport answers
-403 after authentication. An enabled operations flag does not bypass that
-transport gate. How a real MCP client connects — Cloudflare Access Managed
-OAuth on a dedicated MCP application, bound to an agent-only principal — and
-the owner's steps to get there are in
-[Connecting an MCP client](#connecting-an-mcp-client); none of them has been
-taken. Schedule/maintenance settings currently have an operator HTTP
-API but no MCP tool; see [schedules](schedules.md#settings-api).
+**The committed production configuration enables one MCP reader.**
+The owner's dedicated `mcp-client:<sub>` entry grants `summary.read` and
+`records.read` across sources and accounts, bounded to 100 rows per query.
+`AGENT_GRANTS` and `MCP_DELEGATIONS` remain empty: this configuration grants
+no proposals, raw evidence or delegated operations. The MCP audience is
+separate from the browser audience. The dedicated `kogane-mcp.takuk.me`
+hostname must be attached to the App Worker independently, because the
+current version deployment does not synchronize App triggers. Configuration
+and deployment are not evidence that a client connected; the ordered live
+checks in [Connecting an MCP client](#connecting-an-mcp-client) still apply.
+Schedule/maintenance settings currently have an operator HTTP API but no MCP
+tool; see [schedules](schedules.md#settings-api).
 
 ## Why the application service exists
 
@@ -727,10 +729,11 @@ kind of change it is. Steps 1–2 open nothing.
    `<app-host>/mcp`, the same identity provider as the browser application.
    Do not edit the browser application or its policies.
 4. _Production permission change_ — give it one Allow policy that includes
-   only the owner's identity. It cannot reuse the browser application's
-   device-posture requirement, because the clients call from their own
-   clouds; restricting it to the clients' published egress ranges is
-   optional.
+   only the owner's identity. Preserve its approved posture requirements:
+   current [portal policy documentation][cf-mcp-portal-policy] says Device
+   Posture Checks are enforced. Whether a particular client's upstream
+   Managed OAuth requests and refresh satisfy the configured checks remains
+   a live verification requirement, not a reason to remove them.
 5. _Production permission change_ — turn on Managed OAuth on that
    application (Advanced settings; API `oauth_configuration.enabled`). Allowed
    redirect URIs for dynamically registered clients:
@@ -966,7 +969,10 @@ writes; this change adds no migration.
    accounts. Granting that is a deliberate decision to show the agent every
    recognised card purchase, its statement and its bank debit.
 
-Rollback: set `AGENT_API_GRANTS` to `""` (immediate, no redeploy of code needed if
-it is a secret), or deploy a compatible build under the current rollback floor. Proposals already
+Rollback: set `AGENT_API_GRANTS` to `""` in both production configuration
+files and deploy, or deploy a compatible build under the current rollback
+floor. This deployment declares it as a text variable, not a secret. Proposals already
 written stay as `proposed` rows; they are inert, and removing the capability
 does not need to remove them.
+
+[cf-mcp-portal-policy]: https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/mcp-portals/#policy-limitations

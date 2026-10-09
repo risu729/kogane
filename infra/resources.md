@@ -284,8 +284,9 @@ No wrangler config.
 - VPC networks: —
 - Service bindings: PIPELINE → kogane-observation-pipeline
 - Crons: —
+- Declared custom domains (attachment not verified): kogane-mcp.takuk.me
 - Assets: `../../apps/web/dist-production` → ASSETS
-- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>COMMANDS_ENABLED<br>DEPLOYMENT_SCHEDULE_TOKENS<br>EVIDENCE_SOURCE_ID<br>HEALTH_PROBE_TOKENS<br>MCP_DELEGATIONS<br>OPERATOR_SUBJECTS<br>OPS_API_ENABLED<br>RELEASE_SHA<br>SCHEDULES_ENABLED<br>SESSION_REFRESH_POLICY
+- Vars (names only): ACCESS_AUDIENCE<br>ACCESS_ISSUER<br>ACCESS_MCP_AUDIENCE<br>AGENT_API_GRANTS<br>AGENT_GRANTS<br>COMMANDS_ENABLED<br>DEPLOYMENT_SCHEDULE_TOKENS<br>EVIDENCE_SOURCE_ID<br>HEALTH_PROBE_TOKENS<br>MCP_DELEGATIONS<br>OPERATOR_SUBJECTS<br>OPS_API_ENABLED<br>RELEASE_SHA<br>SCHEDULES_ENABLED<br>SESSION_REFRESH_POLICY
 - Required secrets (names only): —
 
 #### `kogane-evidence-browser-test` — `services/app/wrangler.test.jsonc`

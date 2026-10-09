@@ -101,7 +101,9 @@ Authentication and identity:
    documents no Access assertion or per-user identity forwarded upstream (only
    `X-Forwarded-User-Agent`, "not for authentication or authorization"), so
    the Worker could not grade the caller. It also needs an active Cloudflare
-   zone for the portal and does not support device authentication.
+   zone for the portal and per-user identity propagation must be verified independently. The current
+   portal policy documentation says Device Posture Checks are enforced; it
+   does not prove upstream identity propagation.
 3. **An Access service token in two custom headers.** Rejected as the client
    path: a service token carries no `sub` ([application token][cf-app-token]),
    claude.ai's static headers are a limited beta with an allow-listed set of
@@ -276,9 +278,10 @@ to `""`).
     Managed OAuth well-known endpoints, or a dedicated hostname is needed;
   - which claims the forwarded assertion carries — the Worker requires `sub`
     and refuses without it;
-  - that the MCP application's policy cannot require the browser
-    application's device posture, because the clients call from their own
-    clouds;
+  - whether a particular client's upstream Managed OAuth requests and
+    refresh satisfy the approved posture checks; current portal policy
+    documentation says Device Posture Checks are enforced, so no blanket
+    inability is assumed and no policy is weakened;
   - whether claude.ai and ChatGPT accept tool names with dots (the
     2025-11-25 naming guidance allows them).
 
@@ -382,3 +385,45 @@ counts as evidence are in
 [cc-mcp]: https://code.claude.com/docs/en/mcp
 [mcp-versioning]: https://modelcontextprotocol.io/specification/versioning
 [mcp-transport]: https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http
+
+## Amendment: enable the approved MCP reader configuration
+
+- Status: proposed
+- Date: 2026-10-10
+
+The owner authorized actual MCP setup and a connection trial in a fresh
+session. The initial deployment configuration now names the dedicated
+`kogane-mcp.takuk.me` hostname and its distinct Access audience in both
+canonical Wrangler and native cf configuration. Its one `mcp-client:<owner-sub>` grant permits `summary.read` and `records.read` across sources and
+accounts, with a 100-row query budget, three proposal targets and explain
+depth three. The proposal-target budget does not grant proposal permission.
+This explicitly replaces the earlier staged one-source, summary-only first
+grant. Raw evidence, proposals and delegated writes are not granted.
+
+Existing browser audience, operator subjects, agent command grants and empty
+MCP delegations remain unchanged. The request-origin rule needs no change:
+it compares an Origin header with the request's own origin.
+
+Options: enable App trigger synchronization in the shared workflow, or keep
+its existing version-publication behavior and attach the approved custom
+domain separately. The latter is selected: the App's `deploy-triggers: false` stays unchanged. Its declared hostname does not create DNS or a live
+custom-domain attachment during the normal version deployment. The operator
+must attach the domain once through the Cloudflare API and verify it points
+to this Worker. Cloudflare's [custom-domain configuration][cf-custom-domain]
+creates the DNS record and certificate as part of the attachment.
+
+Verification: configuration parity checks map Wrangler custom-domain routes
+to native `worker.domains`; the shared runtime grant parser accepts exactly
+the dedicated MCP identity and refuses bare owner and ungranted principals.
+The configured capabilities exclude evidence and proposals. Existing MCP
+boundary tests still prove audience separation, own-origin enforcement and
+read-only behavior. Hosted deployment, domain attachment, OAuth registration
+and actual fresh-session calls are separate live checks; none is asserted by
+this configuration PR. Preserve the approved Access policy throughout.
+
+The current [portal policy documentation][cf-portal-policy] says Device
+Posture Checks are enforced. This corrects the older blanket limitation;
+the particular client's upstream OAuth and refresh behavior is unverified.
+
+[cf-custom-domain]: https://developers.cloudflare.com/workers/configuration/routing/custom-domains/
+[cf-portal-policy]: https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/mcp-portals/#policy-limitations
