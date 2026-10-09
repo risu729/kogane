@@ -549,6 +549,14 @@ does not exist and a ref outside the grant get the same answer.
 Acceptance is a human-authenticated operator path (addendum 10 §5). It is not
 in this API, and no capability here reaches it.
 
+Every tool call, on `/api/agent/v1/*` (`agent-http`) and on `/mcp` (`mcp`),
+leaves one record in the common audit log ([audit log](audit-log.md), ADR
+0064): a read as its row count, a proposal as an `applied` record in the same
+batch as its two rows, a refusal with its closed code. A refusal before any
+tool is named on `/mcp` is recorded as `mcp.request`. Past a principal's daily
+caps (2,000 reads, 500 refusals) the call is answered as before and only
+counted. Agents cannot read the log yet.
+
 ## Untrusted content and leakage
 
 Provider descriptions, statement text, HTML and terms are untrusted content.

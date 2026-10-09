@@ -1123,6 +1123,12 @@
       "statementCount": 11,
       "insertStatements": [],
       "sha256": "73e7700feb07abd831c3e9ef0f65e34d471e719034629a947e1291f3e3cbfc30"
+    },
+    {
+      "file": "0075_audit_records.sql",
+      "statementCount": 14,
+      "insertStatements": [],
+      "sha256": "3e5a5c2ebce700b5914ca0dfefe2d55ddf49c75c2d2ec011677bff39b77e61ff"
     }
   ],
   "tables": [
@@ -2672,6 +2678,365 @@
       ],
       "appendOnly": true,
       "sqlSha256": "085bb9b55a635cfe"
+    },
+    {
+      "name": "audit_overflow_counters",
+      "classification": "operational-mutable",
+      "planRow": "daily audit overflow counters (ADR 0064)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "day",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "principal",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 3
+        },
+        {
+          "name": "result",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 4
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "principal_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "day",
+        "principal",
+        "path",
+        "result"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "1cb14d51f8dcb779"
+    },
+    {
+      "name": "audit_records",
+      "classification": "core-keep",
+      "planRow": "common audit records (ADR 0064)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "audit_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "recorded_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "principal",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "principal_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "delegation_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "operation",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "risk_class",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "step",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "scope_namespace",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "scope_source",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "target_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "result",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "result_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reason_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "correlation_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "idempotency_key",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "payload_digest",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "confirmation_digest",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "confirm_expires_at",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "confirms_audit_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reverts_audit_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "refs_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "pk": 0
+        },
+        {
+          "name": "diff_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "audit_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "confirms_audit_id",
+          "references": "audit_records(audit_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "reverts_audit_id",
+          "references": "audit_records(audit_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "audit_records_by_correlation",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "correlation_id"
+          ]
+        },
+        {
+          "name": "audit_records_by_operation",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "operation",
+            "recorded_at"
+          ]
+        },
+        {
+          "name": "audit_records_by_principal",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "principal",
+            "recorded_at"
+          ]
+        },
+        {
+          "name": "audit_records_by_scope",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "scope_namespace",
+            "scope_source",
+            "recorded_at"
+          ]
+        },
+        {
+          "name": "audit_records_by_target",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "target_ref"
+          ]
+        },
+        {
+          "name": "audit_records_by_time",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "recorded_at",
+            "audit_id"
+          ]
+        },
+        {
+          "name": "audit_records_confirm_once",
+          "unique": true,
+          "partial": true,
+          "columns": [
+            "confirms_audit_id"
+          ]
+        },
+        {
+          "name": "audit_records_idempotency",
+          "unique": true,
+          "partial": true,
+          "columns": [
+            "principal",
+            "operation",
+            "idempotency_key"
+          ]
+        }
+      ],
+      "triggers": [
+        "audit_records_closed_json",
+        "audit_records_no_delete",
+        "audit_records_no_replace",
+        "audit_records_no_update"
+      ],
+      "noUpdateTriggers": [
+        "audit_records_no_update"
+      ],
+      "noDeleteTriggers": [
+        "audit_records_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "8cb2c7d5b677d90e"
     },
     {
       "name": "balance_observations",
@@ -16955,6 +17320,34 @@
       "sqlSha256": "7948a88aeaad590e"
     },
     {
+      "name": "audit_records_closed_json",
+      "table": "audit_records",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "857f4c878c6ad894"
+    },
+    {
+      "name": "audit_records_no_delete",
+      "table": "audit_records",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "be729c78acd021be"
+    },
+    {
+      "name": "audit_records_no_replace",
+      "table": "audit_records",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "5502deffe25ac7cc"
+    },
+    {
+      "name": "audit_records_no_update",
+      "table": "audit_records",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "4a2fad82b3a1334e"
+    },
+    {
       "name": "balance_decimals_v1",
       "table": "balance_observations",
       "timing": "AFTER",
@@ -20078,6 +20471,46 @@
       "sqlSha256": "089100c983ade003"
     },
     {
+      "name": "audit_records_by_correlation",
+      "table": "audit_records",
+      "sqlSha256": "ca8ff0aba20481ef"
+    },
+    {
+      "name": "audit_records_by_operation",
+      "table": "audit_records",
+      "sqlSha256": "edce12b65dc4141e"
+    },
+    {
+      "name": "audit_records_by_principal",
+      "table": "audit_records",
+      "sqlSha256": "0ecb4a7dfe24afac"
+    },
+    {
+      "name": "audit_records_by_scope",
+      "table": "audit_records",
+      "sqlSha256": "01f00f31d541f360"
+    },
+    {
+      "name": "audit_records_by_target",
+      "table": "audit_records",
+      "sqlSha256": "46cccaf3d5a85e4b"
+    },
+    {
+      "name": "audit_records_by_time",
+      "table": "audit_records",
+      "sqlSha256": "87acbf1316f3368e"
+    },
+    {
+      "name": "audit_records_confirm_once",
+      "table": "audit_records",
+      "sqlSha256": "31ca412ce23ae4d0"
+    },
+    {
+      "name": "audit_records_idempotency",
+      "table": "audit_records",
+      "sqlSha256": "431bca47022f2627"
+    },
+    {
       "name": "calculation_policies_kind",
       "table": "calculation_policies",
       "sqlSha256": "e102a322423238e1"
@@ -20719,10 +21152,10 @@
     }
   ],
   "summary": {
-    "tableCount": 136,
+    "tableCount": 138,
     "viewCount": 44,
-    "triggerCount": 507,
-    "explicitIndexCount": 132,
+    "triggerCount": 511,
+    "explicitIndexCount": 140,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -20739,6 +21172,7 @@
         "artifact_relations",
         "artifact_storage_metadata",
         "artifact_transform_steps",
+        "audit_records",
         "balance_observations",
         "calculation_policies",
         "calculation_results",
@@ -20842,6 +21276,7 @@
       ],
       "read-candidate": [],
       "operational-mutable": [
+        "audit_overflow_counters",
         "card_purchase_retirement_check",
         "card_purchase_scan_cursor",
         "card_settlement_scan_cursor",
@@ -20872,6 +21307,7 @@
       "active_releases",
       "allocations",
       "approvals",
+      "audit_overflow_counters",
       "calculation_runs",
       "card_purchase_retirement_check",
       "card_purchase_scan_cursor",
@@ -20972,6 +21408,6 @@
       "0070_economic_commit_guard.sql",
       "0071_economic_event_command_kinds.sql"
     ],
-    "schemaSha256": "c5fa75fff962ce895d32b305eed5c4e66fa35540459e75e89f74f5a80a58238b"
+    "schemaSha256": "f7d1406cc26633a262e7af3e38e6fa77554d25e2dba2e7659e584d15d738cf32"
   }
 }

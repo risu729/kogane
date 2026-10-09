@@ -86,6 +86,7 @@ with real data; do not infer product completion from a schema or a pure function
 - [Agent API and the shared query service](agent-api.md)
 - [Operations API](ops-api.md)
 - [Schedule administration](schedules.md)
+- [Common audit log](audit-log.md)
 
 ## Development and operations
 

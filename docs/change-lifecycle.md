@@ -377,6 +377,15 @@ The identity mutation is not re-implemented. `prepareIdentityCommand` in
 commit, which puts them in its own batch under its own receipt guard. There is
 one definition of what an identity command writes.
 
+Every command is also recorded in the common audit log
+([audit log](audit-log.md), ADR 0064): the browser forwards its request id and
+path (`x-kogane-correlation-id`, `x-kogane-audit-path`) beside the actor
+headers, and the pipeline refuses a command without them as it refuses one
+without an actor. The plan, approval and commit batches each end with their
+`applied` audit record, joined to the row the batch wrote, so a guard that
+fails writes neither; a replay, a read (`simulate`, `operation`) and every
+refusal are recorded by the browser after the answer.
+
 ## HTTP contract
 
 ```
