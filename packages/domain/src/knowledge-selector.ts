@@ -744,14 +744,28 @@ export interface AdoptedSelectionBody {
   coverage: KnowledgeCoverage;
 }
 
+/**
+ * Whether a later commit can still change which sequence the requested cut
+ * resolves to. A sequence cut, and an instant strictly before the log's last
+ * known_at, are `final`. An instant at or after it is `provisional`: known_at
+ * is max(worker clock, previous known_at), so a commit from a lagging clock
+ * can still land at or before it. The resolved sequence (in every manifest)
+ * reproduces either answer.
+ */
+export const CUT_STANDINGS = ["final", "provisional"] as const;
+export type CutStanding = (typeof CUT_STANDINGS)[number];
+
 export interface AdoptedSelection extends AdoptedSelectionBody {
   /**
-   * `sha256` of the canonical body: every row the answer at the cut depends
-   * on, in its at-cut form. A row recorded after the cut is read (to place it
-   * after the cut) but does not enter it, so a later commit leaves an earlier
-   * cut's set version unchanged.
+   * `sha256` of the canonical body without `requestedCut`: every row the
+   * answer at the resolved cut depends on, in its at-cut form. A row recorded
+   * after the cut is read (to place it after the cut) but does not enter it,
+   * so a later commit leaves an earlier sequence's set version unchanged, and
+   * one sequence asked by number or by instant has one set version.
    */
   setVersion: string;
+  /** Not part of `setVersion`. */
+  cutStanding: CutStanding;
 }
 
 export type AdoptedSelectionResult =
@@ -1025,12 +1039,26 @@ export async function selectAdopted(input: SelectorInput): Promise<AdoptedSelect
   const problem = checkInput(input);
   if (problem !== null) return { ok: false, error: problem };
   const body = selectBody(input);
-  return { ok: true, selection: { ...body, setVersion: await adoptedSetVersion(body) } };
+  const requested = input.requestedCut;
+  const bound = "instant" in requested ? canonicalCutInstant(requested.instant) : null;
+  const cutStanding: CutStanding =
+    "instant" in requested &&
+    (input.log.lastKnownAt === null || bound === null || bound >= input.log.lastKnownAt)
+      ? "provisional"
+      : "final";
+  return {
+    ok: true,
+    selection: { ...body, setVersion: await adoptedSetVersion(body), cutStanding },
+  };
 }
 
-/** The set version of a selection body: `sha256` of its canonical JSON. */
+/**
+ * The set version of a selection body: `sha256` of its canonical JSON without
+ * `requestedCut` (the outer manifest pins how the cut was asked).
+ */
 export async function adoptedSetVersion(body: AdoptedSelectionBody): Promise<string> {
-  return sha256Hex(canonicalJson(body));
+  const { requestedCut: _asked, ...digested } = body;
+  return sha256Hex(canonicalJson(digested));
 }
 
 function selectBody(input: SelectorInput): AdoptedSelectionBody {

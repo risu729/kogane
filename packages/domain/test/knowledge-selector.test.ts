@@ -396,6 +396,34 @@ describe("resolution at the cut", () => {
   });
 });
 
+describe("set version and cut standing", () => {
+  test("one sequence asked by number or by instant has one set version", async () => {
+    const h = empty();
+    write(h, { eventId: "ev-1", revision: 1, seq: 1, claims: [{ key: KEY }] });
+    write(h, { eventId: "ev-2", revision: 1, seq: 2 });
+    const bySeq = await at(h, 1);
+    const byInstant = await at(h, 1, {
+      requestedCut: { coreEpoch: EPOCH, instant: "2026-03-01T12:00:00.000Z" },
+    });
+    expect(byInstant.requestedCut).toEqual({
+      coreEpoch: EPOCH,
+      instant: "2026-03-01T12:00:00.000Z",
+    });
+    expect(byInstant.setVersion).toBe(bySeq.setVersion);
+    expect([bySeq.cutStanding, byInstant.cutStanding]).toEqual(["final", "final"]);
+  });
+
+  test("an instant at or after the log's last known_at is provisional", async () => {
+    const h = empty();
+    write(h, { eventId: "ev-1", revision: 1, seq: 1 });
+    const at2 = (instant: string) => at(h, 1, { requestedCut: { coreEpoch: EPOCH, instant } });
+    expect((await at2(knownAt(1))).cutStanding).toBe("provisional");
+    expect((await at2("2026-03-05T00:00:00.000Z")).cutStanding).toBe("provisional");
+    const before = await selectAdopted(input(empty(), 0));
+    expect(before.ok && before.selection.cutStanding).toBe("provisional");
+  });
+});
+
 describe("holders, identity and shapes", () => {
   test("two holders of one key at the cut are listed and flagged, never resolved", async () => {
     const h = empty();

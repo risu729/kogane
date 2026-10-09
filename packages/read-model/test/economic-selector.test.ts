@@ -145,6 +145,37 @@ describe("cuts", () => {
     expect(before.revisions).toEqual([]);
   });
 
+  test("an instant at or after the last known_at is provisional: a lagging clock can still commit before it", async () => {
+    const h = history();
+    h.adopt({
+      eventId: "ev-1",
+      revision: 1,
+      legs: [debit(BANK, "100")],
+      knownAt: "2026-03-02T00:00:00.000Z",
+    });
+    const instant = { coreEpoch: EPOCH, instant: "2026-03-02T00:00:05.000Z" };
+    const first = await selectAt(h, instant);
+    expect([first.cut.commitSeq, first.cutStanding]).toEqual([1, "provisional"]);
+    // A worker whose clock lags commits with known_at 00:00:02, before the instant.
+    h.adopt({
+      eventId: "ev-2",
+      revision: 1,
+      legs: [debit(BANK, "200")],
+      knownAt: "2026-03-02T00:00:02.000Z",
+    });
+    const again = await selectAt(h, instant);
+    expect(again.cut.commitSeq).toBe(2);
+    // The resolved sequence reproduces the first answer, which is now final.
+    const bySeq = await selectAt(h, seq(1));
+    expect(bySeq.setVersion).toBe(first.setVersion);
+    const earlier = await selectAt(h, { coreEpoch: EPOCH, instant: "2026-03-02T00:00:01.000Z" });
+    expect([earlier.cut.commitSeq, earlier.cutStanding, earlier.setVersion]).toEqual([
+      1,
+      "final",
+      first.setVersion,
+    ]);
+  });
+
   test("a cut past the log's end, or of another core epoch, is refused", async () => {
     const h = history();
     h.adopt({ eventId: "ev-1", revision: 1, legs: [debit(BANK, "100")] });
