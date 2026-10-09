@@ -148,6 +148,83 @@ describe("direct Mizuho read transport", () => {
     expect(last.get("_SUBINDEX")).toBe("0");
     expect(last.get("_TOKEN")).toBe("rediscovery-token");
   });
+  test("retains the first account history when rediscovery drops a later account", async () => {
+    const q = queued([
+      html(accountHtml(card() + card("001", "002-7654321"))),
+      html(historyHtml()),
+      html(accountHtml(card(), "rediscovery-token")),
+    ]);
+    const result = await collectMizuho({ session: session(), fetcher: q.fetcher });
+    expect(q.calls.map((call) => call.init.method)).toEqual(["POST", "POST", "POST"]);
+    expect(q.calls.map((call) => new URL(call.url).pathname)).toEqual([ACCOUNT, HISTORY, ACCOUNT]);
+    const refresh = new URLSearchParams(String(q.calls[2]?.init.body));
+    expect(refresh.get("_FORMID")).toBe("ACCHST_04110B");
+    expect(refresh.get("_SUBINDEX")).toBe("");
+    expect(refresh.get("_TOKEN")).toBe("history-token");
+    expect(result.partial).toBe(true);
+    expect(result.issues).toEqual(["account-list-changed"]);
+    expect(
+      result.accounts.map((account) => `${account.branchCode}:${account.accountNumber}`),
+    ).toEqual(["001:1234567", "002:7654321"]);
+    expect(
+      result.histories.map((history) => `${history.branchCode}:${history.accountNumber}`),
+    ).toEqual(["001:1234567"]);
+    expect(result.histories[0]?.transactions).toHaveLength(1);
+    expect(result.histories[0]?.displayedRange).toEqual({ from: 1, to: 1, total: 1 });
+    expect(result.failedUnits).toEqual(["ordinary:002:7654321"]);
+    expect(result.artifacts.map((artifact) => artifact.artifactKey)).toEqual([
+      "account-list.html",
+      "ordinary/001-1234567/history/1-1.html",
+    ]);
+    expect(result.artifacts.map((artifact) => artifact.unitKey)).toEqual([
+      "account-list",
+      "ordinary:001:1234567:page:1:1",
+    ]);
+    expect(result.artifacts.every((artifact) => artifact.partial === false)).toBe(true);
+  });
+  test("retains the first account history when a later history authentication expires", async () => {
+    const q = queued([
+      html(accountHtml(card() + card("001", "002-7654321"))),
+      html(historyHtml()),
+      html(accountHtml(card("000", "002-7654321") + card("001"), "rediscovery-token")),
+      html('<form name="LOGBNK_00000B"><input name="txbCustNo"></form>'),
+    ]);
+    const result = await collectMizuho({ session: session(), fetcher: q.fetcher });
+    expect(q.calls.map((call) => call.init.method)).toEqual(["POST", "POST", "POST", "POST"]);
+    expect(q.calls.map((call) => new URL(call.url).pathname)).toEqual([
+      ACCOUNT,
+      HISTORY,
+      ACCOUNT,
+      HISTORY,
+    ]);
+    const refresh = new URLSearchParams(String(q.calls[2]?.init.body));
+    expect(refresh.get("_TOKEN")).toBe("history-token");
+    expect(refresh.get("_SUBINDEX")).toBe("");
+    const history = new URLSearchParams(String(q.calls[3]?.init.body));
+    expect(history.get("_FORMID")).toBe("BALINQ_03010B");
+    expect(history.get("_SUBINDEX")).toBe("0");
+    expect(history.get("_TOKEN")).toBe("rediscovery-token");
+    expect(result.partial).toBe(true);
+    expect(result.issues).toEqual(["authentication-required"]);
+    expect(
+      result.accounts.map((account) => `${account.branchCode}:${account.accountNumber}`),
+    ).toEqual(["001:1234567", "002:7654321"]);
+    expect(
+      result.histories.map((history) => `${history.branchCode}:${history.accountNumber}`),
+    ).toEqual(["001:1234567"]);
+    expect(result.histories[0]?.transactions).toHaveLength(1);
+    expect(result.histories[0]?.displayedRange).toEqual({ from: 1, to: 1, total: 1 });
+    expect(result.failedUnits).toEqual(["ordinary:002:7654321"]);
+    expect(result.artifacts.map((artifact) => artifact.artifactKey)).toEqual([
+      "account-list.html",
+      "ordinary/001-1234567/history/1-1.html",
+    ]);
+    expect(result.artifacts.map((artifact) => artifact.unitKey)).toEqual([
+      "account-list",
+      "ordinary:001:1234567:page:1:1",
+    ]);
+    expect(result.artifacts.every((artifact) => artifact.partial === false)).toBe(true);
+  });
   test("reports an account cap as partial and retains all discovery evidence", async () => {
     const q = queued([html(accountHtml(card() + card("001", "002-7654321"))), html(historyHtml())]);
     const result = await collectMizuho({ session: session(), fetcher: q.fetcher, maxAccounts: 1 });
