@@ -323,14 +323,29 @@ describe("the cells of a source", () => {
         entry.current?.capturedAt ?? null,
       ]),
     ).toEqual([
-      ["2099-01", "current", ["coverage_not_recorded"], "2099-02-02T00:00:00.000Z"],
+      [
+        "2099-01",
+        "current",
+        [
+          "identity_not_recorded",
+          "published_without_observations",
+          "retention_not_assessed",
+          "coverage_not_recorded",
+        ],
+        "2099-02-02T00:00:00.000Z",
+      ],
       [
         "2098-12",
         "older-current",
-        ["parse_pending", "newer_capture_not_current"],
+        ["retention_not_assessed", "parse_pending", "newer_capture_not_current"],
         "2099-02-01T00:00:00.000Z",
       ],
-      ["2098-11", "no-current", ["parser_rejected", "no_current_capture"], null],
+      [
+        "2098-11",
+        "no-current",
+        ["retention_not_assessed", "parser_rejected", "no_current_capture"],
+        null,
+      ],
     ]);
     expect(page!.cells[0]).toMatchObject({
       dataset: "globalpass-activity",
@@ -374,7 +389,7 @@ describe("the cells of a source", () => {
       parser: null,
       state: "no-current",
       newest: { parses: { notQueued: 1, notEligible: 0, published: 0 } },
-      reasons: ["parse_not_queued", "no_current_capture"],
+      reasons: ["retention_not_assessed", "parse_not_queued", "no_current_capture"],
     });
     expect(validApiResponse("/api/collection-quality/sony-bank", first)).toBe(true);
     const rest = await queryCollectionQualityCells(executor(s), {
@@ -401,6 +416,10 @@ function row(overrides: Partial<CellQualityRow> = {}): CellQualityRow {
     newest_run_succeeded: 1,
     latest_producer_run_id: 7,
     artifacts: 2,
+    observations: 2,
+    unresolved_identities: 0,
+    identity_missing: 0,
+    unit_outcome_unknown: 0,
     raw_stored: 2,
     not_queued: 0,
     not_eligible: 0,
@@ -423,16 +442,16 @@ function row(overrides: Partial<CellQualityRow> = {}): CellQualityRow {
 describe("one reason per stored state", () => {
   const valid = (entry: ReturnType<typeof cell>) =>
     validCollectionQualityCells({
-      apiVersion: 1,
+      apiVersion: 2,
       sourceId: "vpass",
       latestFetchRun: null,
       cells: [entry],
       coverage: { limit: 500, truncated: false, nextOffset: null },
     });
 
-  test("a cell with every stage done has no reason", () => {
+  test("stored stages never assert provider retention completeness", () => {
     const entry = cell(row());
-    expect(entry).toMatchObject({ state: "current", reasons: [] });
+    expect(entry).toMatchObject({ state: "current", reasons: ["retention_not_assessed"] });
     expect(valid(entry)).toBe(true);
   });
 
@@ -483,7 +502,9 @@ describe("one reason per stored state", () => {
     ],
   ] as const)("%o gives %o", (overrides, reasons) => {
     const entry = cell(row(overrides as Partial<CellQualityRow>));
-    expect(entry.reasons).toEqual([...reasons]);
+    expect(entry.reasons.filter((reason) => reason !== "retention_not_assessed")).toEqual([
+      ...reasons,
+    ]);
     expect(valid(entry)).toBe(true);
   });
 
