@@ -17,6 +17,37 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## SBI Shinsei activity rows record the provider-id origin (activity parser 0.1.3)
+
+2026-10-09, [ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin).
+`sbi-shinsei-top-balances-and-activity` 0.1.3 records
+`_kogane.identityOrigin: "provider-id"` on every activity row, right after
+`amountSignSource`, as `smbc-direct-transactions` does: the row's external id
+is the provider's `txnReferenceNo` exactly as received. Nothing else changed:
+the external id, the source account, the sign, the accepted shapes and every
+other field are 0.1.2's, and the other SBI Shinsei parsers keep their versions
+and digests (`sbi-shinsei-common.ts` is untouched). The coverage-contract
+files keep the frozen 0.1.2 outputs; `coverage-contract.test.ts` applies the
+declared 0.1.3 change (the origin key on transaction rows) before its byte
+comparison. The transaction-family registry (v3) records the origin for this
+parser, and ADR 0054's rule 2 then admits a row a 0.1.3 run stored under the
+already-declared function `sbi-shinsei-txn-reference-no-v1`; a row a 0.1.2 run
+stored records none and stays refused (`identity_origin_unrecorded`).
+
+**Not deployed.** Nothing in production changes until it is. Deploying is the
+re-parse: the repair lane's cyclic scan then creates a 0.1.3 job for every
+stored activity capture, as for 0.1.2 [below](#sbi-shinsei-stored-capture-shapes-activity-parser-012-board-parser-101);
+each `ok` 0.1.3 run is published in place of the 0.1.2 run, which is marked
+superseded while its rows stay stored. No migration: the dataset's snapshot
+policy row pins no parser version, and every reader pins this parser by name.
+What that would change for card settlement review (new candidates citing the
+0.1.3 rows under the same `bank_key`, pre-G1b acceptances still reserving
+them, no adoption by itself, and how a reused reference collides) is in the
+ADR note. Limits: the owner's read-only confirmation covers the captured range
+only; nothing shows the provider never reuses a reference later. Production
+was not read for this release. Tests: `packages/parsers/test/sbi-shinsei-parsers.test.ts`,
+`services/processor/test/card-settlement-sbi-shinsei-origin.test.ts`.
+
 ## MyJCB: the skip-payment empty row inside one more div (schedule parser 0.1.2)
 
 2026-10-08. The owner read one stored skip-payment capture from the nightly

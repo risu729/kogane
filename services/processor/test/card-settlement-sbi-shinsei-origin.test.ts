@@ -254,6 +254,12 @@ const candidates = async (): Promise<Candidate[]> =>
       .all<Candidate>()
   ).results;
 const facts = (candidate: Candidate) => JSON.parse(candidate.facts_json) as CardSettlementFacts;
+/** The resolved bank account the candidate's facts name (an owned candidate has one). */
+const bankAccount = (candidate: Candidate): string => {
+  const account = facts(candidate).bankDebit.accountId;
+  if (account === null) throw new Error("no resolved bank account");
+  return account;
+};
 
 const readiness = async (id: string) =>
   db
@@ -418,7 +424,7 @@ test("the repair lane re-parses the stored capture under 0.1.3 beside the 0.1.2 
         "SELECT previous_parse_run_id AS previous,new_parse_run_id AS next,kind FROM publication_events WHERE fetch_artifact_id=? ORDER BY id DESC LIMIT 1",
       )
       .bind(BANK)
-      .first(),
+      .first<Record<string, unknown>>(),
   ).toEqual({ previous: BANK, next: reparsed, kind: "normal" });
   // The adapter now names the 0.1.3 row; the 0.1.2-cited candidate is no longer current.
   expect(
@@ -449,7 +455,7 @@ test("the sweep proposes the 0.1.3 row under the same bank key; the pre-G1b acce
       aliasClass: {
         sourceId: "sbi-shinsei-bank",
         components: ["SYNTHETIC-TXN-001"],
-        accountId: facts(new013!).bankDebit.accountId,
+        accountId: bankAccount(new013!),
         ruleVersion: "sbi-shinsei-txn-reference-no-v1",
       },
     },
@@ -509,7 +515,7 @@ test("once the pre-G1b acceptance is withdrawn, a human accepts the 0.1.3 debit 
         alias_class: aliasClassText({
           sourceId: "sbi-shinsei-bank",
           components: ["SYNTHETIC-TXN-001"],
-          accountId: facts(new013!).bankDebit.accountId,
+          accountId: bankAccount(new013!),
           ruleVersion: "sbi-shinsei-txn-reference-no-v1",
         }),
         observation_id: observation,

@@ -197,3 +197,19 @@ Locally with synthetic data only:
 - `mise run //packages/domain:ci`, `mise run //packages/parsers:ci` (parser
   digests unchanged), `mise run ci:root`, and oxlint, oxfmt and typos on the
   changed files.
+
+## Amendment: SBI Shinsei records its origin (2026-10-09)
+
+`sbi-shinsei-top-balances-and-activity` 0.1.3 records
+`_kogane.identityOrigin: "provider-id"`, the first of the provider-id parsers
+listed under Consequences to do so
+([ADR 0018 note](0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin)).
+The registry becomes `transaction-family-registry-v3`: the entry's origin key
+is `identityOrigin` (stage A reads `provider`), `identity_origin_unrecorded`
+leaves its bank-movement and fx-exchange memberships, which stay unsupported
+for `counterpart_not_stated` (and `semantics_unobserved` for fx-exchange), and
+its card-settlement membership is `supported` (ADR 0054). The registry states
+the code: release 0.1.3 is not deployed, and rows 0.1.2 runs stored carry no
+origin, which the human-adopted writer reads per row. The other provider-id
+parsers (yen detail, SBI VC cash flows and executions, PayPay) are unchanged.
+Verified by both `event-families.test.ts` files on the synthetic fixtures.

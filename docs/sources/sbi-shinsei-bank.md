@@ -1147,3 +1147,26 @@ Until that is run for a remaining refusal, its cause stays unknown and the
 parser's rules stay as they are
 ([ADR 0004](../adr/0004-payment-type-shapes-from-evidence.md)). Production was
 not read for this release.
+
+## Activity parser 0.1.3: the provider-id origin (2026-10-09)
+
+`sbi-shinsei-top-balances-and-activity` 0.1.3 records
+`_kogane.identityOrigin: "provider-id"` on every activity row; the external id
+stays the provider's `txnReferenceNo` exactly as received, and nothing else
+changes ([ADR 0018 note](../adr/0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin),
+[observations](../observations.md#sbi-shinsei-activity-rows-record-the-provider-id-origin-activity-parser-013)).
+It lets ADR 0054's rule 2 admit an SBI Shinsei debit that a 0.1.3 run stored,
+so a person can accept it in card settlement review; debits a 0.1.2 run stored
+are still refused (`identity_origin_unrecorded`).
+
+The owner confirmed on 2026-10-09, from read-only aggregate queries of the
+stored captures, that in the captured range every reference was re-observed
+across many captures with none missing, the stored external id always equal
+to the reference, no reference twice in one capture and no reference with
+different provider fields in different captures. Nothing shows the provider
+never reuses a reference later; a reused reference would collide with the
+earlier one's holder rather than count twice (ADR 0018 note).
+
+**Not deployed.** Nothing in production changes until 0.1.3 is deployed;
+deploying it re-parses the stored captures through the repair lane, as it did
+for 0.1.2 above. Production was not read for this release.

@@ -425,7 +425,7 @@ test("ownership is still required; the SBI Shinsei debit's identity is admitted 
     aliasClass: {
       sourceId: "sbi-shinsei-bank",
       components: ["SYNTHETIC-TXN-001"],
-      accountId: bankDebit.accountId,
+      accountId: bankDebit.accountId!,
       ruleVersion: "sbi-shinsei-txn-reference-no-v1",
     },
   });

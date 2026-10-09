@@ -34,13 +34,18 @@ from a statement, or calculate net assets.
 | SMBC (`smbc-bank`, since 0044)         | any `smbc-bank` parse; non-empty provider id; newest capture `status='posted'`, `_kogane.direction='outflow'`, `_kogane.amountSignSource='direction'`, negative amount                                                              | the row's provider id | `as_of` of the form `YYYY-MM-DDT00:00:00+09:00`, its date; else none |
 | SBI Shinsei (`sbi-shinsei-bank`, 0052) | parser `sbi-shinsei-top-balances-and-activity`; non-empty `txnReferenceNo`; newest capture with no status, `JPY`, `_kogane.amountSignSource='debit'` (the provider's debit column), negative amount (a zero debit is stored as `0`) | `txnReferenceNo`      | the posting date, `YYYY-MM-DD`                                       |
 
-Both adapters propose candidates. Since ADR 0054 G1b only SMBC debits can be
-accepted: an SBI Shinsei debit's id has no recorded origin, so its acceptance
-is refused (`identity_origin_unrecorded`, [lifecycle](#candidate-and-decision-lifecycle))
-until a parser release records it. The only other route, treating
-[ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md)'s reviewed adapter
-evidence as the declared origin, would need an owner-approved amendment of
-ADR 0054's rule 2; it is not taken.
+Both adapters propose candidates. Since ADR 0054 G1b a debit can be accepted
+only when its row records the id's origin. SMBC rows do. SBI Shinsei rows do
+from parser 0.1.3 (2026-10-09,
+[ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin)),
+which records `_kogane.identityOrigin: provider-id` beside the unchanged
+`txnReferenceNo`; a row a 0.1.2 run stored has no recorded origin, so its
+acceptance is refused (`identity_origin_unrecorded`,
+[lifecycle](#candidate-and-decision-lifecycle)). 0.1.3 is not deployed, so
+every stored SBI Shinsei debit is still refused until it is deployed and the
+repair lane has re-parsed the stored captures under it; the candidates the
+sweep then proposes cite the 0.1.3 rows. The rule-exception route, treating
+ADR 0018's reviewed adapter evidence as the declared origin, was not taken.
 
 The currency, status, direction and sign are judged on the newest capture of a
 provider id, so a newer capture that fails them withdraws the row instead of
@@ -242,11 +247,14 @@ Since ADR 0054 G1b the acceptance and the withdrawal write the rows of the
   must carry an id the parser records as provider-issued
   (`_kogane.identityOrigin: provider-id`) under a provider identity function
   the transaction-family registry declares. SMBC debits qualify (`id`, from the
-  provider's `meisaiId`); SBI Shinsei debits do not: the parser records no
-  origin for `txnReferenceNo`, so their acceptance is refused with
-  `unsupported_semantics` and the closed code `identity_origin_unrecorded`.
-  Fingerprint, digest and unrecorded ids are refused the same way, with their
-  own codes. Nothing is adopted automatically.
+  provider's `meisaiId`); SBI Shinsei debits qualify when parser 0.1.3 or later
+  stored them (`txnReferenceNo`, alias class
+  `["sbi-shinsei-bank",[<txnReferenceNo>],<resolved account>,"sbi-shinsei-txn-reference-no-v1"]`).
+  An SBI Shinsei debit a 0.1.2 run stored records no origin, so its acceptance
+  is refused with `unsupported_semantics` and the closed code
+  `identity_origin_unrecorded`; 0.1.3 is not deployed, so that is every stored
+  one today. Fingerprint, digest and unrecorded ids are refused the same way,
+  with their own codes. Nothing is adopted automatically.
 - **The claim.** The acceptance writes, after its legs and allocation, an
   `economic_claims` row in book `cash-movement` for the debit: the candidate's
   `bank_key` (the 5-tuple, re-derived by the 0070 trigger from the cited
@@ -594,9 +602,17 @@ deployed parser on the synthetic parser-boundary fixture and variants of it
 (`services/processor/test/card-settlement-sbi-shinsei.test.ts`): an
 equal-amount statement yields a candidate; credit, zero and foreign-currency
 rows do not; a re-observed `txnReferenceNo` is one payment; unknown ownership
-blocks acceptance; an owned SBI Shinsei candidate's acceptance is refused with
-`identity_origin_unrecorded` and writes nothing, and an accepted SMBC debit
-reserves the statement against it until it is withdrawn.
+blocks acceptance; an owned SBI Shinsei candidate's debit, parsed by 0.1.3, is
+admitted under its declared alias class, and an accepted SMBC debit reserves
+the statement against it until it is withdrawn.
+`services/processor/test/card-settlement-sbi-shinsei-origin.test.ts` walks a
+capture a 0.1.2 run stored: its candidate's acceptance is refused with
+`identity_origin_unrecorded` and writes nothing; the repair lane re-parses the
+capture under 0.1.3 beside the 0.1.2 run (rows unchanged, pointer moved by an
+appended publication event, nothing adopted); the sweep proposes the 0.1.3 row
+under the same `bank_key`, which an acceptance made before G1b still reserves;
+after its withdrawal a human acceptance claims the debit under its alias class;
+and a later capture reusing the reference is refused against that holder.
 `services/processor/test/economic-card-settlement.test.ts` covers what an
 acceptance and a withdrawal write to the consumption guard, and its refusals
 ([economic events](economic-events.md#common-consumption-guard-migration-0070)). `packages/read-model/test/card-bank-debit-facts.test.ts`
