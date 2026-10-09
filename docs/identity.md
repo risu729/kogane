@@ -1,5 +1,14 @@
 # Account and instrument identity (Layers C, phases 4–5)
 
+The additive pure temporal selector in
+[`packages/domain/src/instrument-temporal.ts`](../packages/domain/src/instrument-temporal.ts)
+implements supplied-snapshot cut, interval, relation and manifest contracts
+([ADR 0055](adr/0055-instrument-candidates.md#amendment-2026-10-09-pure-temporal-selector)).
+It requires an explicit interval/reference policy and keeps unknown legacy
+validity unresolved. No persisted temporal journal, guarded temporal writer
+or consumer integration exists yet. The current review view described below
+still uses its existing current mappings and relation query.
+
 The identity layer organizes the observations already collected. It does not
 deduplicate purchases, turn debit-card activity into another deposit, add
 balances, calculate holdings, or invent an instrument's ISIN/network.
