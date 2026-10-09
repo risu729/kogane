@@ -105,16 +105,18 @@ past any of them the load is refused (`selector_bound_exceeded`), never cut.
    (`successor_committed_first`).
 3. Per event, over every loaded revision and before any filter: the in-force
    revisions are those not superseded at the cut. The event is
-   `knowledge_unlogged` when an in-force revision is unlogged, or a visible
-   one points at an unlogged successor (`successor_unlogged`); otherwise
-   `chain_inconsistent` when two visible revisions are in force
-   (`two_in_force_at_cut`), a visible pointer names a visible revision no
-   commit declared (`supersession_undeclared`), a seal's counts differ from
-   the stored rows (`seal_count_mismatch`), a seal names a commit that does
-   not list it (`seal_commit_mismatch`), or a pointer or a superseded revision
-   is missing; otherwise `active` with its one visible revision, or not in
-   force at all. A pre-log revision a visible commit superseded is history,
-   not unknown knowledge.
+   `chain_inconsistent` when the log and the stored rows disagree: a pointer
+   or commit check of step 2 failed, a visible pointer names a visible
+   revision no commit declared (`supersession_undeclared`), a seal's counts
+   differ from the stored rows (`seal_count_mismatch`), a seal names a commit
+   that does not list it (`seal_commit_mismatch`), a pointer or a superseded
+   revision is missing, or two visible revisions are in force
+   (`two_in_force_at_cut`, decided only when none of them is unlogged);
+   otherwise `knowledge_unlogged` when an in-force revision is unlogged, or a
+   visible one points at an unlogged successor (`successor_unlogged`);
+   otherwise `active` with its one visible revision, or not in force at all.
+   A pre-log revision a visible commit superseded is history, not unknown
+   knowledge.
 4. The selected revisions are fully loaded: legs with the resolved account,
    the subject form, the value (exact, or absent with the stored reason), role,
    basis and stored effect (`undeclared` without a row); times by role; claims;
