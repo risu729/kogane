@@ -31,6 +31,7 @@ function recordPath(temp, name) {
     ![
       "container-api-verification-baseline.json",
       "container-api-verification-recovery.json",
+      "container-api-verification-stream-failure.json",
     ].includes(name)
   )
     closed("record");
@@ -95,6 +96,46 @@ export function baselineRecord(value, account) {
     namespace: canonicalHex(value.namespace, 32),
     image: canonicalImageRef(value.image, account),
     workerVersion: canonicalUuid(value.workerVersion),
+  };
+}
+const streamEncodings = new Set(["absent", "identity", "gzip", "br", "deflate", "other"]);
+export function streamEncodingCategory(value) {
+  if (value === null) return "absent";
+  const normalized = value.trim().toLowerCase();
+  return streamEncodings.has(normalized) ? normalized : "other";
+}
+export function streamFailureRecord(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !== "body,bytes,code,elapsedMs,encoding,reads,terminal" ||
+    value.code !== "stream_failure_observation" ||
+    ![0, 1].includes(value.body) ||
+    !streamEncodings.has(value.encoding) ||
+    !Number.isSafeInteger(value.bytes) ||
+    value.bytes < 0 ||
+    value.bytes > 4096 ||
+    !Number.isSafeInteger(value.reads) ||
+    value.reads < 0 ||
+    value.reads > 4096 ||
+    !Number.isSafeInteger(value.elapsedMs) ||
+    value.elapsedMs < 0 ||
+    value.elapsedMs > 125_000 ||
+    !["missing_body", "clean_eof"].includes(value.terminal) ||
+    (value.terminal === "missing_body" &&
+      (value.body !== 0 || value.bytes !== 0 || value.reads !== 0)) ||
+    (value.terminal === "clean_eof" && value.body !== 1)
+  )
+    closed("stream_failure_record");
+  return {
+    code: "stream_failure_observation",
+    body: value.body,
+    encoding: value.encoding,
+    bytes: value.bytes,
+    reads: value.reads,
+    elapsedMs: value.elapsedMs,
+    terminal: value.terminal,
   };
 }
 export function recoveryRecord(value) {
@@ -448,6 +489,78 @@ export async function verifyReaderIdleCycle({ arm, request, json, waitState, now
   }
   return observed;
 }
+/** The public gate still requires a terminal read error; EOF and no body fail distinctly. */
+export async function verifyStreamErrorGate({ request, temp, now = Date.now }) {
+  const failureStarted = now();
+  const failureResponse = await request("/stream-error");
+  const failureElapsed = () => Math.min(125_000, Math.max(0, now() - failureStarted));
+  const encoding = streamEncodingCategory(failureResponse.headers.get("content-encoding"));
+  const failure = failureResponse.body?.getReader();
+  if (!failure) {
+    writeRecord(
+      temp,
+      "container-api-verification-stream-failure.json",
+      streamFailureRecord({
+        code: "stream_failure_observation",
+        body: 0,
+        encoding,
+        bytes: 0,
+        reads: 0,
+        elapsedMs: failureElapsed(),
+        terminal: "missing_body",
+      }),
+    );
+    closed("stream_failure_missing_body");
+  }
+  let failed = false,
+    failureBytes = 0,
+    failureReads = 0;
+  try {
+    while (true) {
+      const part = await failure.read();
+      if (part.done) break;
+      failureBytes += part.value.byteLength;
+      failureReads++;
+      if (failureBytes > 4096 || failureReads > 4096) {
+        let cancelTimer;
+        try {
+          await Promise.race([
+            failure.cancel(),
+            new Promise((_, reject) => {
+              cancelTimer = setTimeout(() => reject(new Error("cancel_timeout")), 1000);
+            }),
+          ]);
+        } catch {
+          /* Preserve the source limit failure. */
+        } finally {
+          if (cancelTimer) clearTimeout(cancelTimer);
+        }
+        closed("stream_failure_limit");
+      }
+    }
+  } catch (error) {
+    if (error?.message === "verification_stream_failure_limit") throw error;
+    // Preserve the existing gate: any terminal reader exception counts as the expected error.
+    failed = true;
+  }
+  if (!failed) {
+    writeRecord(
+      temp,
+      "container-api-verification-stream-failure.json",
+      streamFailureRecord({
+        code: "stream_failure_observation",
+        body: 1,
+        encoding,
+        bytes: failureBytes,
+        reads: failureReads,
+        elapsedMs: failureElapsed(),
+        terminal: "clean_eof",
+      }),
+    );
+    closed("stream_failure_clean_eof");
+  }
+  return { code: "pass" };
+}
 export async function verifyPhase({
   phase,
   temp,
@@ -650,17 +763,7 @@ export async function verifyPhase({
   await canceled.read();
   await canceled.cancel();
   counts.cancelChecks++;
-  const failure = (await request("/stream-error")).body?.getReader();
-  if (!failure) closed("stream_failure");
-  let failed = false;
-  try {
-    while (!(await failure.read()).done) {
-      /* Only synthetic bytes. */
-    }
-  } catch {
-    failed = true;
-  }
-  if (!failed) closed("stream_failure");
+  await verifyStreamErrorGate({ request, temp });
   counts.streamFailureChecks++;
   counts.idleObservedMs = await verifyReaderIdleCycle({ arm: "resume", request, json, waitState });
   counts.cancelIdleObservedMs = await verifyReaderIdleCycle({

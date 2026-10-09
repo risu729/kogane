@@ -211,6 +211,48 @@ head `1f393a205`; current-head checks remain required.
 The diagnostic follow-up preserved the original backpressure gate. The subsequent
 reader-lifetime criterion observes DO-only process state before a request can
 auto-restart a stopped process and retains the failed diagnostic evidence.
+The integrated head `2c9ed3b1`
+([run 37895813457](https://github.com/risu729/kogane/actions/runs/37895813457))
+failed `verification_stream_failure` during the SDK baseline at
+2026-10-09 06:55:13 UTC, before both reader-lifetime arms. The code at that
+revision could not distinguish a missing public response body from clean EOF
+without a reader exception. One Container instance was still running. Native,
+recovery and rollback were not executed. All four owned resource cleanup checks
+passed, separate API reads confirmed Worker/application/namespace absence, and
+the temporary GitHub environment and all three verification tokens were retired.
+Normal CI, CodeQL and the independent 117-test integration guard review passed;
+these do not replace the failed runtime result.
+
+A local loopback diagnostic with the unchanged synthetic source, Bun 1.4.2 server,
+and Bun 1.4.2 and Node 26.11.1 clients returned HTTP 200 with a body. Each client
+read 35 bytes in 35 reads and then received a reader exception at approximately
+36 seconds. This does not reproduce the hosted failure or identify its cause.
+In particular, it does not establish a Cloudflare defect from the public closed
+failure code alone.
+
+A separate local-only probe used Wrangler 4.146.0/workerd 1.20261001.1 with
+the experiment's compatibility date and flags, no bindings, and the same Bun
+source. Both a direct fetch response and an SDK-shaped IdentityTransformStream
+response produced a reader exception when consumed inside the Worker after
+35 bytes in 35 reads. Both public HTTP responses instead ended at clean EOF
+after the same 35 bytes, approximately 36.4-36.5 seconds from request start.
+The transformed path also logged the unhandled pipe rejection. This narrows
+the public gate's interpretation: a public EOF need not mean the Worker-side
+reader lost the source error. It is not a hosted Container API result, a
+confirmed Cloudflare defect, or permission to relabel the failed run. Hosted
+same-DO comparison is still needed before revising the measurement boundary.
+
+The diagnostic follow-up distinguishes the original public response outcome
+and separately compares SDK and raw port responses inside the same DO. It keeps
+the source and request semantics unchanged. A diagnostic-only SDK activity lease
+isolates the raw-port observation from SDK idle tracking; it provides no idle
+or reader-lifetime evidence. Reports expose bounded counts and closed categories,
+never process UUIDs, payloads or provider messages. Same-process and release
+checks are prerequisites to a conclusive comparison. Failure, timeout or
+incomplete cleanup makes the comparison inconclusive. Its result never replaces
+the original acceptance failure or advances later phases. An SDK/raw difference
+can narrow the next investigation, but is not by itself a vendor-confirmed bug.
+
 These attempts do not establish runtime equivalence. Final CI and the following
 runtime gates are still pending:
 

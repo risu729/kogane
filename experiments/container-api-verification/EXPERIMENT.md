@@ -3,7 +3,7 @@
 - Owner: risu729
 - Started: 2026-10-05
 - Expires: 2026-10-12
-- Status: bounded SDK/raw comparison complete; reader-lifecycle parity, native and rollback gates pending.
+- Status: SDK stream-error gate failed in run 37895813457; bounded diagnostic follow-up in progress. Reader-lifecycle parity, native and rollback remain unverified.
 
 ## Question
 
@@ -26,6 +26,15 @@ exhausted that cap on both paths under a diagnostic activity lease. Those
 failed plateau observations remain recorded; they do not identify a buffering
 layer or prove lifetime, idle behavior or memory bounds. The revised criterion
 must pass on the actual hosted SDK and native implementations before merge.
+Run 37895813457 stopped at the earlier public stream-error check. A local
+real-TCP reproduction raised the expected reader error, so that observation
+alone cannot locate the hosted failure. A local workerd comparison observed
+reader errors inside the Worker but clean EOF over its public HTTP response
+for both direct and SDK-shaped transformed streams. Hosted Container behavior
+remains unverified. The follow-up compares SDK and raw-port
+stream errors inside the same DO under a diagnostic-only activity lease, while
+preserving the original gate result. No diagnostic may promote failed or
+unreached reader/native/recovery/rollback stages to success.
 A separate GitHub environment and a dedicated scoped token isolate this check
 from production credentials. The normal CI and production release never deploy
 this experiment. The manual verification job requires explicit selection.

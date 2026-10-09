@@ -92,6 +92,10 @@ const DRIVER_CODES = new Set(
     "state_timeout",
     "stream",
     "stream_failure",
+    "stream_failure_missing_body",
+    "stream_failure_clean_eof",
+    "stream_failure_limit",
+    "stream_failure_record",
     "transport",
   ].map((code) => `verification_${code}`),
 );
@@ -662,6 +666,206 @@ export async function captureBackpressureComparison({
         ]);
       } catch {
         /* The primary diagnostic failure wins. */
+      } finally {
+        if (cancelTimer) clearTimeout(cancelTimer);
+      }
+    }
+  }
+}
+const streamErrorTerminals = new Set([
+  "read_error",
+  "eof",
+  "fetch_error",
+  "http_error",
+  "missing_body",
+  "limit",
+  "timeout",
+]);
+const streamErrorEncodings = new Set(["absent", "identity", "gzip", "br", "deflate", "other"]);
+function streamErrorSnapshot(value) {
+  return (
+    exactKeys(value, ["running", "streams", "posts"]) &&
+    (value.running === null || flag(value.running)) &&
+    optionalCount(value.streams, 4096) &&
+    optionalCount(value.posts, 4096)
+  );
+}
+function streamErrorArm(value) {
+  if (
+    !exactKeys(value, [
+      "status",
+      "body",
+      "encoding",
+      "bytes",
+      "reads",
+      "elapsedMs",
+      "terminal",
+      "baseline",
+      "after",
+      "cancelAttempted",
+      "cancelOk",
+    ]) ||
+    !(
+      value.status === null ||
+      (Number.isSafeInteger(value.status) && value.status >= 100 && value.status <= 599)
+    ) ||
+    !(value.body === null || flag(value.body)) ||
+    !(value.encoding === null || streamErrorEncodings.has(value.encoding)) ||
+    !Number.isSafeInteger(value.bytes) ||
+    value.bytes < 0 ||
+    value.bytes > 64 ||
+    !Number.isSafeInteger(value.reads) ||
+    value.reads < 0 ||
+    value.reads > 64 ||
+    !optionalCount(value.elapsedMs, 50_000) ||
+    !streamErrorTerminals.has(value.terminal) ||
+    !streamErrorSnapshot(value.baseline) ||
+    !streamErrorSnapshot(value.after) ||
+    !flag(value.cancelAttempted) ||
+    !flag(value.cancelOk) ||
+    value.cancelOk > value.cancelAttempted
+  )
+    return false;
+  if (value.status === null)
+    return (
+      value.body === null &&
+      value.encoding === null &&
+      ["fetch_error", "timeout"].includes(value.terminal) &&
+      value.bytes === 0 &&
+      value.reads === 0
+    );
+  if (value.encoding === null || value.body === null) return false;
+  if (value.body === 0 && (value.bytes !== 0 || value.reads !== 0 || value.cancelAttempted !== 0))
+    return false;
+  if (
+    ["eof", "read_error", "limit", "missing_body"].includes(value.terminal) &&
+    value.status !== 200
+  )
+    return false;
+  if (value.terminal === "missing_body") return value.body === 0;
+  if (value.terminal === "http_error") return value.status !== 200;
+  if (["eof", "read_error", "limit"].includes(value.terminal)) return value.body === 1;
+  return true;
+}
+function streamErrorFull(value) {
+  return (
+    value?.status === 200 &&
+    value.body === 1 &&
+    ["read_error", "eof"].includes(value.terminal) &&
+    value.bytes === 35 &&
+    value.reads >= 1 &&
+    value.elapsedMs !== null &&
+    value.elapsedMs >= 35_000 &&
+    value.baseline.running === 1 &&
+    value.after.running === 1 &&
+    value.baseline.streams === 0 &&
+    value.after.streams === 0 &&
+    value.baseline.posts !== null &&
+    value.after.posts === value.baseline.posts
+  );
+}
+export function streamErrorComparisonReport(value) {
+  if (
+    !exactKeys(value, ["code", "activityLease", "sdk", "raw", "sameProcess", "conclusive"]) ||
+    value.code !== "stream_error_compare" ||
+    !flag(value.activityLease) ||
+    !flag(value.conclusive) ||
+    !(value.sameProcess === null || flag(value.sameProcess)) ||
+    !(value.sdk === null || streamErrorArm(value.sdk)) ||
+    !(value.raw === null || streamErrorArm(value.raw)) ||
+    (value.raw !== null && value.sdk === null) ||
+    value.conclusive !==
+      Number(
+        value.activityLease === 1 &&
+          value.sameProcess === 1 &&
+          streamErrorFull(value.sdk) &&
+          streamErrorFull(value.raw) &&
+          value.sdk.after.posts === value.raw.baseline.posts,
+      )
+  )
+    throw new Error("stream_error_comparison_invalid");
+  return { ...value, code: "verification_stream_error_compare" };
+}
+/** Separate diagnostic GET; its failure never replaces the original stream gate failure. */
+export async function captureStreamErrorComparison({
+  subdomain,
+  key,
+  fetchImpl = fetch,
+  timeoutMs = 115_000,
+}) {
+  if (!/^[a-z0-9-]+$/u.test(subdomain ?? "") || !key)
+    throw new Error("stream_error_comparison_invalid");
+  const request = createSyntheticRequest({
+    origin: `https://${WORKER}.${subdomain}.workers.dev`,
+    key,
+    fetchImpl,
+  });
+  let timedOut = false,
+    rejectDeadline;
+  const deadline = new Promise((_, reject) => {
+    rejectDeadline = reject;
+  });
+  const timer = setTimeout(() => {
+    timedOut = true;
+    rejectDeadline(new Error("stream_error_comparison_timeout"));
+  }, timeoutMs);
+  const bounded = (operation) => Promise.race([operation, deadline]);
+  let reader,
+    complete = false;
+  try {
+    const operation = request("/stream-error-compare");
+    void operation.then(
+      async (late) => {
+        if (timedOut) {
+          try {
+            await late.body?.cancel();
+          } catch {
+            /* Late response owns no report. */
+          }
+        }
+      },
+      () => {},
+    );
+    const response = await bounded(operation);
+    reader = response.body?.getReader();
+    if (!reader) throw new Error("stream_error_comparison_invalid");
+    const parts = [];
+    let size = 0;
+    while (true) {
+      const part = await bounded(reader.read());
+      if (part.done) {
+        complete = true;
+        break;
+      }
+      size += part.value?.byteLength ?? 0;
+      if (size > 4096) throw new Error("stream_error_comparison_invalid");
+      parts.push(part.value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    streamErrorComparisonReport(value);
+    return value;
+  } finally {
+    clearTimeout(timer);
+    if (reader && !complete) {
+      let cancelTimer;
+      try {
+        await Promise.race([
+          reader.cancel(),
+          new Promise((_, reject) => {
+            cancelTimer = setTimeout(
+              () => reject(new Error("stream_error_comparison_cancel_timeout")),
+              1000,
+            );
+          }),
+        ]);
+      } catch {
+        /* Primary diagnostic failure wins. */
       } finally {
         if (cancelTimer) clearTimeout(cancelTimer);
       }
@@ -1346,6 +1550,7 @@ export async function execute(
     hold = recoveryHolder,
     httpReady = waitHttpReady,
     backpressureCompare = captureBackpressureComparison,
+    streamErrorCompare = captureStreamErrorComparison,
   } = {},
 ) {
   privateDirectory(input.temp);
@@ -1527,6 +1732,39 @@ export async function execute(
     const code = diagnosticCode(error);
     failure = new Error(code);
     report(JSON.stringify({ code: "verification_execution_failed", stage, error: code }));
+    if (
+      stage === "baseline_sdk_verify" &&
+      [
+        "verification_stream_failure_missing_body",
+        "verification_stream_failure_clean_eof",
+      ].includes(code)
+    ) {
+      try {
+        const { readRecord, streamFailureRecord } = await import("./driver.mjs");
+        const observation = streamFailureRecord(
+          readRecord(input.temp, "container-api-verification-stream-failure.json"),
+        );
+        if (
+          (code === "verification_stream_failure_missing_body") !==
+          (observation.terminal === "missing_body")
+        )
+          fail("stream_failure_record");
+        report(JSON.stringify({ ...observation, code: "verification_stream_failure_observation" }));
+      } catch {
+        report(JSON.stringify({ code: "verification_stream_failure_observation_unavailable" }));
+      }
+      try {
+        report(
+          JSON.stringify(
+            streamErrorComparisonReport(
+              await streamErrorCompare({ subdomain: input.subdomain, key }),
+            ),
+          ),
+        );
+      } catch {
+        report(JSON.stringify({ code: "verification_stream_error_compare_unavailable" }));
+      }
+    }
     if (stage === "baseline_sdk_verify" && code === "verification_backpressure_exhausted_late") {
       try {
         report(

@@ -11,6 +11,7 @@ const routes = Object.freeze({
   "/reader-resume-check": ["reader_resume_check", "GET"],
   "/reader-cancel-check": ["reader_cancel_check", "GET"],
   "/backpressure-compare": ["backpressure_compare", "GET"],
+  "/stream-error-compare": ["stream_error_compare", "GET"],
   "/stream-error": ["stream_error", "GET"],
   "/hold": ["hold", "GET"],
   "/destroy": ["destroy", "POST"],

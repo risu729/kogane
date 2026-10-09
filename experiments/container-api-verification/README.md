@@ -1,9 +1,11 @@
 # Container API synthetic verification
 
-Hosted SDK baseline attempts are in progress. Native and rollback phases have
-not completed, so runtime equivalence is still unverified. Cleanup runs after each
-attempt; failed or interrupted cleanup requires separate absence confirmation. The dedicated token and GitHub environment remain until
-the verification session closes.
+The latest completed SDK baseline attempt, run 37895813457 at `2c9ed3b1`,
+failed the stream-error check before reader-lifetime, native and rollback phases.
+Runtime equivalence remains unverified. Its owned resources, dedicated tokens
+and GitHub environment were removed and absence was verified. Any new hosted
+session requires its own reviewed temporary setup. Cleanup runs after each
+attempt; failed or interrupted cleanup requires separate absence confirmation.
 
 The SDK and native configs intentionally have the same Worker, exported class,
 SQLite migration, binding, explicit app name, basic/APAC/max1 configuration and
@@ -150,6 +152,21 @@ Neither the replacement gate nor the comparison establishes upstream write
 blocking, memory bounds, public-path backpressure, eviction or billing. Its
 active DO invocation may itself keep the DO resident. Separate recovery and
 exact-version rollback checks remain required.
+
+The stream-error diagnostic keeps the source that emits 35 bytes at one-second
+intervals and then errors. A local real-TCP check with Bun 1.4.2 and Node 26.11.1
+clients observed the expected reader exception; the public hosted failure did
+not distinguish an absent body from clean EOF at that revision. A separate
+local workerd 1.20261001.1 probe read the expected 35-byte error inside the
+Worker through both direct fetch and SDK-shaped IdentityTransformStream paths,
+while both public HTTP responses ended at clean EOF. This suggests a measurement
+boundary issue but does not establish hosted Container behavior. The follow-up
+records that distinction and compares SDK and raw-port readers inside one DO,
+under a diagnostic-only activity lease and bounded deadlines. It records closed
+response/encoding/outcome categories and finite counts with running, process
+identity, POST and stream-release checks. It changes neither the producer nor
+the required reader-exception condition. The runner retains the failed stage,
+attempts cleanup and never treats diagnostic success as phase success.
 
 Idle observations are bounded process-state checks. They do not establish
 billable runtime or DO eviction. Compare independently read aggregate billing

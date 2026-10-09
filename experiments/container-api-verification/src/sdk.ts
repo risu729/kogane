@@ -3,6 +3,7 @@ import { storageState, worker, type HarnessEnv } from "./common";
 import { checkBackpressure } from "./backpressure-check";
 import { checkReaderLifetime } from "./reader-lifetime-check";
 import { compareBackpressure } from "./backpressure-compare";
+import { compareStreamError } from "./stream-error-compare";
 
 export class VerificationContainer extends Container<HarnessEnv> {
   defaultPort = 8080;
@@ -38,6 +39,16 @@ export class VerificationContainer extends Container<HarnessEnv> {
         signaled: 0,
         exitSeven: 0,
       });
+    if (path === "/stream-error-compare")
+      return Response.json(
+        await compareStreamError({
+          sdkFetch: (inner) => this.containerFetch(inner),
+          rawFetch: (inner) => this.ctx.container!.getTcpPort(8080).fetch(inner),
+          running: () => Boolean(this.ctx.container?.running),
+          renewActivityTimeout: () => this.renewActivityTimeout(),
+          outerSignal: request.signal,
+        }),
+      );
     if (path === "/backpressure-compare")
       return Response.json(
         await compareBackpressure({

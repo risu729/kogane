@@ -31,6 +31,9 @@ import {
   recoveryHold,
   baselineRecord,
   recoveryRecord,
+  verifyStreamErrorGate,
+  streamFailureRecord,
+  streamEncodingCategory,
   readRecord,
   writeRecord,
 } from "../driver.mjs";
@@ -1113,3 +1116,115 @@ test("real TCP synthetic server survives 35s quiet delay and paused backpressure
     server.stop(true);
   }
 }, 65_000);
+
+test("public stream-error gate records only bounded missing-body and clean-EOF failures", async () => {
+  for (const scenario of ["missing_body", "clean_eof"] as const) {
+    const temp = mkdtempSync(resolve(tmpdir(), "verification-stream-failure-"));
+    chmodSync(temp, 0o700);
+    try {
+      let ticks = 0;
+      const response =
+        scenario === "missing_body"
+          ? new Response(null)
+          : new Response(new Uint8Array(35), { headers: { "content-encoding": "gzip" } });
+      await expect(
+        verifyStreamErrorGate({
+          temp,
+          request: async (path: string) => {
+            expect(path).toBe("/stream-error");
+            return response;
+          },
+          now: () => ticks++ * 36_000,
+        }),
+      ).rejects.toThrow(`verification_stream_failure_${scenario}`);
+      const record = streamFailureRecord(
+        readRecord(temp, "container-api-verification-stream-failure.json"),
+      );
+      expect(record).toEqual({
+        code: "stream_failure_observation",
+        body: scenario === "missing_body" ? 0 : 1,
+        encoding: scenario === "missing_body" ? "absent" : "gzip",
+        bytes: scenario === "missing_body" ? 0 : 35,
+        reads: scenario === "missing_body" ? 0 : 1,
+        elapsedMs: 36_000,
+        terminal: scenario,
+      });
+      const fd = openSync(resolve(temp, "container-api-verification-stream-failure.json"), "r");
+      try {
+        expect(fstatSync(fd).mode & 0o777).toBe(0o600);
+      } finally {
+        closeSync(fd);
+      }
+    } finally {
+      rmSync(temp, { recursive: true });
+    }
+  }
+  expect(streamEncodingCategory("Secret-Internal")).toBe("other");
+  expect(streamEncodingCategory(" GZIP ")).toBe("gzip");
+  for (const malformed of [
+    {
+      code: "stream_failure_observation",
+      body: 1,
+      encoding: "private",
+      bytes: 35,
+      reads: 35,
+      elapsedMs: 36_000,
+      terminal: "clean_eof",
+    },
+    {
+      code: "stream_failure_observation",
+      body: 0,
+      encoding: "absent",
+      bytes: 1,
+      reads: 0,
+      elapsedMs: 0,
+      terminal: "missing_body",
+    },
+  ])
+    expect(() => streamFailureRecord(malformed)).toThrow("verification_stream_failure_record");
+});
+test("public stream-error gate accepts terminal read error without creating a failure record", async () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "verification-stream-error-"));
+  chmodSync(temp, 0o700);
+  try {
+    let count = 0;
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (count++ === 35) controller.error(new Error("private_synthetic_error"));
+          else controller.enqueue(new Uint8Array([1]));
+        },
+      }),
+    );
+    expect(await verifyStreamErrorGate({ temp, request: async () => response })).toEqual({
+      code: "pass",
+    });
+    expect(() => readRecord(temp, "container-api-verification-stream-failure.json")).toThrow();
+  } finally {
+    rmSync(temp, { recursive: true });
+  }
+});
+
+test("public stream-error abnormal source cap cancels before failing closed", async () => {
+  const temp = mkdtempSync(resolve(tmpdir(), "verification-stream-cap-"));
+  chmodSync(temp, 0o700);
+  let canceled = 0;
+  try {
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array(4097));
+        },
+        cancel() {
+          canceled++;
+        },
+      }),
+    );
+    await expect(verifyStreamErrorGate({ temp, request: async () => response })).rejects.toThrow(
+      "verification_stream_failure_limit",
+    );
+    expect(canceled).toBe(1);
+  } finally {
+    rmSync(temp, { recursive: true });
+  }
+});

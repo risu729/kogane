@@ -43,6 +43,8 @@ import {
   observeBaselineInstances,
   comparisonReport,
   captureBackpressureComparison,
+  streamErrorComparisonReport,
+  captureStreamErrorComparison,
 } from "../run-hosted.mjs";
 
 const account = "a".repeat(32),
@@ -1374,20 +1376,27 @@ test("execution and cleanup errors are both reported without erasing the initial
     "baseline_sdk_verify",
     "baseline_sdk_verify_exhausted",
     "baseline_sdk_verify_exhausted_valid",
+    "baseline_sdk_verify_stream_clean",
+    "baseline_sdk_verify_stream_missing",
   ]) {
     const temp = mkdtempSync(resolve(tmpdir(), "verification-dual-"));
     let pushed = false,
       deployed = false,
       removed = false;
     const reports: string[] = [];
-    let comparisonCalls = 0;
-    const original = failing.startsWith("baseline_sdk_verify_exhausted")
-      ? "verification_backpressure_exhausted_late"
-      : failing === "baseline_sdk_verify"
-        ? "verification_sentinel"
-        : failing === "baseline_sdk_http_ready"
-          ? "verification_state_timeout"
-          : "verification_runner_child";
+    let comparisonCalls = 0,
+      streamComparisonCalls = 0;
+    const original = failing.startsWith("baseline_sdk_verify_stream")
+      ? failing.endsWith("missing")
+        ? "verification_stream_failure_missing_body"
+        : "verification_stream_failure_clean_eof"
+      : failing.startsWith("baseline_sdk_verify_exhausted")
+        ? "verification_backpressure_exhausted_late"
+        : failing === "baseline_sdk_verify"
+          ? "verification_sentinel"
+          : failing === "baseline_sdk_http_ready"
+            ? "verification_state_timeout"
+            : "verification_runner_child";
     const api = async (path: string, options: any = {}) => {
       if (options.method === "DELETE") {
         removed = true;
@@ -1429,6 +1438,11 @@ test("execution and cleanup errors are both reported without erasing the initial
             if (failing === "baseline_sdk_verify_exhausted_valid") return comparisonFixture();
             throw new Error(token);
           },
+          streamErrorCompare: async () => {
+            streamComparisonCalls++;
+            if (failing === "baseline_sdk_verify_stream_clean") return streamComparisonFixture();
+            throw new Error(token);
+          },
           registry: async () => {
             if (removed && !pushed)
               throw new Error("verification_runner_registry_http_lookup_forbidden");
@@ -1450,10 +1464,24 @@ test("execution and cleanup errors are both reported without erasing the initial
                       : "";
             if (
               current === failing ||
-              (failing.startsWith("baseline_sdk_verify_exhausted") &&
+              ((failing.startsWith("baseline_sdk_verify_exhausted") ||
+                failing.startsWith("baseline_sdk_verify_stream")) &&
                 current === "baseline_sdk_verify")
-            )
+            ) {
+              if (failing.startsWith("baseline_sdk_verify_stream")) {
+                const missing = failing.endsWith("missing");
+                protectedFile(resolve(temp, "container-api-verification-stream-failure.json"), {
+                  code: "stream_failure_observation",
+                  body: missing ? 0 : 1,
+                  encoding: "absent",
+                  bytes: missing ? 0 : 35,
+                  reads: missing ? 0 : 35,
+                  elapsedMs: missing ? 0 : 36_000,
+                  terminal: missing ? "missing_body" : "clean_eof",
+                });
+              }
               throw new Error(original);
+            }
             if (args.includes("push")) pushed = true;
             if (args.includes("deploy")) deployed = true;
             return "";
@@ -1464,11 +1492,32 @@ test("execution and cleanup errors are both reported without erasing the initial
       expect(diagnostics).toEqual([
         {
           code: "verification_execution_failed",
-          stage: failing.startsWith("baseline_sdk_verify_exhausted")
-            ? "baseline_sdk_verify"
-            : failing,
+          stage:
+            failing.startsWith("baseline_sdk_verify_exhausted") ||
+            failing.startsWith("baseline_sdk_verify_stream")
+              ? "baseline_sdk_verify"
+              : failing,
           error: original,
         },
+        ...(failing.startsWith("baseline_sdk_verify_stream")
+          ? [
+              {
+                code: "verification_stream_failure_observation",
+                body: failing.endsWith("missing") ? 0 : 1,
+                encoding: "absent",
+                bytes: failing.endsWith("missing") ? 0 : 35,
+                reads: failing.endsWith("missing") ? 0 : 35,
+                elapsedMs: failing.endsWith("missing") ? 0 : 36_000,
+                terminal: failing.endsWith("missing") ? "missing_body" : "clean_eof",
+              },
+            ]
+          : []),
+        ...(failing === "baseline_sdk_verify_stream_clean"
+          ? [streamErrorComparisonReport(streamComparisonFixture())]
+          : []),
+        ...(failing === "baseline_sdk_verify_stream_missing"
+          ? [{ code: "verification_stream_error_compare_unavailable" }]
+          : []),
         ...(failing === "baseline_sdk_verify_exhausted"
           ? [{ code: "verification_backpressure_compare_unavailable" }]
           : []),
@@ -1479,6 +1528,8 @@ test("execution and cleanup errors are both reported without erasing the initial
           "baseline_sdk_verify",
           "baseline_sdk_verify_exhausted",
           "baseline_sdk_verify_exhausted_valid",
+          "baseline_sdk_verify_stream_clean",
+          "baseline_sdk_verify_stream_missing",
         ].includes(failing)
           ? [
               {
@@ -1497,6 +1548,7 @@ test("execution and cleanup errors are both reported without erasing the initial
         },
       ]);
       expect(comparisonCalls).toBe(failing.startsWith("baseline_sdk_verify_exhausted") ? 1 : 0);
+      expect(streamComparisonCalls).toBe(failing.startsWith("baseline_sdk_verify_stream") ? 1 : 0);
       expect(reports.join("")).not.toContain(token);
       expect(reports.join("")).not.toContain(account);
       expect(reports.join("")).not.toContain(appId);
@@ -2394,4 +2446,105 @@ test("diagnostic cancels a response arriving after its deadline", async () => {
   );
   await new Promise((done) => setTimeout(done, 0));
   expect(canceled).toBe(1);
+});
+
+const streamSnapshot = () => ({ running: 1, streams: 0, posts: 2 });
+const streamArm = (terminal: "read_error" | "eof") => ({
+  status: 200,
+  body: 1,
+  encoding: "absent",
+  bytes: 35,
+  reads: 35,
+  elapsedMs: 36_000,
+  terminal,
+  baseline: streamSnapshot(),
+  after: streamSnapshot(),
+  cancelAttempted: terminal === "read_error" ? 1 : 0,
+  cancelOk: 0,
+});
+const streamComparisonFixture = () => ({
+  code: "stream_error_compare",
+  activityLease: 1,
+  sdk: streamArm("eof"),
+  raw: streamArm("read_error"),
+  sameProcess: 1,
+  conclusive: 1,
+});
+test("stream-error comparison admits only closed bounded schema and one authenticated GET", async () => {
+  const expected = streamComparisonFixture();
+  let calls = 0;
+  const actual = await captureStreamErrorComparison({
+    subdomain: "synthetic",
+    key: "private-key",
+    fetchImpl: async (url: string, init: RequestInit) => {
+      calls++;
+      expect(url).toBe(`https://${WORKER}.synthetic.workers.dev/stream-error-compare`);
+      expect(init.method).toBe("GET");
+      expect(init.headers).toEqual({ authorization: "Bearer private-key" });
+      expect(init.signal).toBeInstanceOf(AbortSignal);
+      return Response.json(expected);
+    },
+  });
+  expect(actual).toEqual(expected);
+  expect(calls).toBe(1);
+  expect(JSON.stringify(actual)).not.toContain("private-key");
+  for (const bad of [
+    { ...expected, processIdentity: privateProcessIdentity },
+    { ...expected, sameProcess: 2 },
+    { ...expected, conclusive: 1, raw: null },
+    { ...expected, sdk: { ...expected.sdk, bytes: 65 } },
+    { ...expected, sdk: { ...expected.sdk, elapsedMs: 50_001 } },
+    { ...expected, sdk: { ...expected.sdk, encoding: "secret" } },
+    { ...expected, sdk: { ...expected.sdk, after: { ...expected.sdk.after, posts: 3 } } },
+    {
+      ...expected,
+      raw: {
+        ...expected.raw,
+        baseline: { ...expected.raw.baseline, posts: 3 },
+        after: { ...expected.raw.after, posts: 3 },
+      },
+    },
+    { ...expected, sdk: { ...expected.sdk, bytes: 0, reads: 0 } },
+    { ...expected, sdk: { ...expected.sdk, elapsedMs: 34_999 } },
+    { ...expected, sdk: { ...expected.sdk, terminal: "timeout" } },
+    { ...expected, sdk: { ...expected.sdk, cancelled: 1 } },
+  ])
+    expect(() => streamErrorComparisonReport(bad)).toThrow("stream_error_comparison_invalid");
+});
+test("stream-error comparison caps response and cancels stalled body", async () => {
+  let cancelled = 0;
+  const oversized = new Response(
+    new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(4097));
+      },
+      cancel() {
+        cancelled++;
+      },
+    }),
+  );
+  await expect(
+    captureStreamErrorComparison({
+      subdomain: "synthetic",
+      key: "key",
+      fetchImpl: async () => oversized,
+    }),
+  ).rejects.toThrow("stream_error_comparison_invalid");
+  expect(cancelled).toBe(1);
+  const stalled = new Response(
+    new ReadableStream<Uint8Array>({
+      cancel() {
+        cancelled++;
+      },
+    }),
+  );
+  await expect(
+    captureStreamErrorComparison({
+      subdomain: "synthetic",
+      key: "key",
+      timeoutMs: 10,
+      fetchImpl: async () => stalled,
+    }),
+  ).rejects.toThrow("stream_error_comparison_timeout");
+  expect(cancelled).toBe(2);
 });
