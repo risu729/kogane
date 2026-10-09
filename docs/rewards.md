@@ -13,16 +13,16 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
 
 ## 1. 何を分けているか
 
-| 概念                 | 保持している場所                                             | 分けている理由                                             |
-| -------------------- | ------------------------------------------------------------ | ---------------------------------------------------------- |
-| ProgramUnit          | `reward_programs.unit_ref`                                   | 同じ「ポイント」表記でもプログラムを跨いで同じ単位にしない |
-| RewardHolding        | `reward_bucket_claims.holding_ref`                           | 会員の口座。providerの表示スロットとは別                   |
-| EligibilityBucket    | `reward_bucket_claims.bucket_kind` / `restriction_refs_json` | 用途・期限の違うbucketを混ぜて利用可能量を作らない         |
-| ExpiryObservation    | `reward_bucket_claims.observed_expiry_json`                  | providerが表示した期限。予測とは別列                       |
-| MembershipState      | `membership_state_claims`                                    | 自己申告と確認済を区別し、適用期間を持つ                   |
-| QualificationMeasure | `bucket_kind='qualification'`                                | 消費できない資格指標。保有量へ加えない                     |
-| ExpiryRule           | `expiry_rules`                                               | 計算方式のfamilyと、根拠・確認状態・適用範囲               |
-| ConversionOffer      | `conversion_offers`                                          | 倍率は整数比。キャンペーン・会員別は別offer                |
+| 概念                 | 保持している場所                                                | 分けている理由                                             |
+| -------------------- | --------------------------------------------------------------- | ---------------------------------------------------------- |
+| ProgramUnit          | `reward_programs.unit_ref`                                      | 同じ「ポイント」表記でもプログラムを跨いで同じ単位にしない |
+| RewardHolding        | `reward_bucket_claims_v2.holding_ref`                           | 会員の口座。providerの表示スロットとは別                   |
+| EligibilityBucket    | `reward_bucket_claims_v2.bucket_kind` / `restriction_refs_json` | 用途・期限の違うbucketを混ぜて利用可能量を作らない         |
+| ExpiryObservation    | `reward_bucket_claims_v2.observed_expiry_json`                  | providerが表示した期限。予測とは別列                       |
+| MembershipState      | `membership_state_claims`                                       | 自己申告と確認済を区別し、適用期間を持つ                   |
+| QualificationMeasure | `bucket_kind='qualification'`                                   | 消費できない資格指標。保有量へ加えない                     |
+| ExpiryRule           | `expiry_rules`                                                  | 計算方式のfamilyと、根拠・確認状態・適用範囲               |
+| ConversionOffer      | `conversion_offers`                                             | 倍率は整数比。キャンペーン・会員別は別offer                |
 
 計算は `packages/domain/src/rewards.ts` の純関数で行う。DB・時計・HTTPへ依存しない。
 
@@ -70,7 +70,7 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
 - `displayed` — providerが表示した期限そのもの（観測）。claimが昇格した値をそのまま持ち、
   読めない表記は `unknown`（`provider_expiry_unparsed` 等）のまま残す。claimの `observedAt` と
   source fact参照を伴う。表示がなければ `null`。
-- `computed` — 1つのrule版による算定（導出）。`EXPIRY_DERIVATION_RELEASE`（`reward-expiry-v1`）を持つ。
+- `computed` — 1つのrule版による算定（導出）。`EXPIRY_DERIVATION_RELEASE`（`reward-expiry-v2`）を持つ。
   - `status`: `date`（ruleの期限calendarでの暦日）、`no-expiry`（確認済みで期間の定めのない
     `family='none'` のときだけ。tier条件つきなら評価日をカバーする必要tierのclaimがあるときだけ）、
     `unavailable`（理由コードが必ず1つ）。
@@ -137,11 +137,11 @@ migration 0033 が投入するrule:
 できるまでruleを作らない [W09] [W10] [W11] [W12] [W14]。
 
 さらに、V Pointの履歴parserは `point_div`（獲得・利用・失効・訂正・取消等）と `point_type` を
-数値のまま `unmapped-provider-enum` として保存しており、どの値が規約上の「通常ポイントの変動」に
-当たるかは観測ラベルとオーナー確認のどちらも記録されていない。したがって観測した明細行を
+数値のまま `unmapped-provider-enum` として保存している。公開UIの一部表示ラベルは記録したが、
+どの値が規約上の「通常ポイントの変動」に当たるか、どの日付が起算日になるかは未確認である。したがって観測した明細行を
 「期限延長の対象活動」に分類できず、現状の実データに対する `rule:v-point:regular-inactivity` の
-判定は必ず `partial` で、通常bucketの算定期限は `unavailable` / `no_qualifying_activity_observed`
-（付随して `history_completeness_unknown`）になる。期限固定・ストア限定のbucketは
+common bucketは種類未確認のまま一覧に残り、算定期限は `unavailable` / `bucket_kind_unclassified`
+になる。合成の確認済みregular bucketでも履歴入力はunknownのままなので日付は算定しない。ストア限定のbucketは
 `rule:v-point:fixed-expiry-lot` の下で `fixed_deadline_not_derivable` であり、期日はproviderの
 表示だけに拠る。V Point PayとMobile Suica SFは `rule_not_verified` である。これは仕様どおりで、
 最終取引日から期限を作り出さないための帰結である。
@@ -175,7 +175,7 @@ migration 0033 が投入するrule:
 | `reward_programs`         | 追記のみ            | `docs/sources` に単位の記録があるプログラムだけ投入                                      |
 | `expiry_rules`            | 追記のみ            | 訂正は新versionで行う。CHECKが未確認ruleの計算方式を禁止                                 |
 | `conversion_offers`       | 追記のみ            | 倍率は整数比。同一区間の複数offerを許す                                                  |
-| `reward_bucket_claims`    | 追記のみ（trigger） | `claim_digest` UNIQUE。公開済みparse runのみ（trigger）                                  |
+| `reward_bucket_claims_v2` | 追記のみ（trigger） | `claim_digest` UNIQUE。公開済みparse runのみ（trigger）                                  |
 | `membership_state_claims` | 追記のみ（trigger） | `provider` の場合は parse run を要求                                                     |
 | `expiry_estimates`        | 再構築可能な投影    | 全削除して再計算しても内容が一致する。U16でREADへ移設（§12）                             |
 | `conversion_simulations`  | 再構築可能な投影    | 入力digest単位。書き込みはsimulation routeでは行わない。U16でREADへ再実行分を持つ（§12） |
@@ -191,8 +191,8 @@ A10のreconciliation laneと同じ扱いで、`"1"` か `"true"` のときだけ
   typed claim へ昇格させるだけである。
 - 対象は `docs/sources` に単位の記録がある3ソースのみ。
   - V Point `available_point_bucket`: `v-point:store-limited:` 接頭辞は `restricted`、
-    providerが期限を表示していれば `time-limited`、していなければ `regular`。
-    providerの `point_type` enumは実値を記録していないため写像しない。
+    common bucketは `unclassified`。通常ポイントにも表示期限があるので期限表示の有無から種類を推定しない。
+    公開UIに一部enumの表示ラベル対応があるが、このpromotionの確認済みkind写像にはしていない。
   - V Point `displayed_point_balance`（先月の獲得ポイント）: 保有ではないので `qualification`。
   - V Point Pay `prepaid_balance_after_event`、Mobile Suica `sf_balance_after_transaction`:
     それぞれ別プログラムの `regular`。単位はJPYだが、前払式であることは `holding_kind` が持つ。
@@ -253,7 +253,7 @@ rollback.
 - snapshotが無い expiry と simulations は 503 のままである。
 - 昇格を止める: processor の `REWARD_CLAIMS_ENABLED="false"`。laneごと飛ばされ、ログ行も消える。
 - writerを止める: processor の `REWARD_READ_PROJECTION_ENABLED=false`。
-- migrationは戻さない。`reward_bucket_claims` は追記のみで、他の表を参照するだけである。
+- migrationは戻さない。`reward_bucket_claims_v2` は追記のみで、他の表を参照するだけである。
 - `expiry_estimates` と `conversion_simulations` は再構築可能な投影なので、全削除して差し支えない。
 
 ## 11. ローカルで確認したこと・していないこと
@@ -287,7 +287,7 @@ providerが表示する期限の実際の表記ゆれ、V Point の `point_type`
 本番では有効。Appの期限・simulation投影は常にREADを使い、旧CORE投影は0042で削除する。
 
 CORE側の `reward_programs` / `expiry_rules` / `conversion_offers`（版管理された参照claim）と
-`reward_bucket_claims` / `membership_state_claims`（provider・自己申告のclaim）は**移さない**。
+`reward_bucket_claims_v2` / `membership_state_claims`（provider・自己申告のclaim）は**移さない**。
 04 §2のとおりCOREに残る。READが全損しても、これらのclaimとruleは1行も失われない。
 
 ### 固定する入力
@@ -324,22 +324,23 @@ COREの `projection_input_records` が参照する。表・prefix・記録の仕
 captureが読む各集合には上限があり、超えたら**切り詰めず拒否**する（`rule_set_too_large`、
 `claim_set_too_large`、`offer_set_too_large`、`simulation_set_too_large`）。
 
-CORE migration `0041_reward_revision_triggers.sql` が上記5表を0038の依存台帳へ追加する。これが
+CORE migration `0041_reward_revision_triggers.sql` が元の5表を0038の依存台帳へ追加し、
+`0077_reward_bucket_claims_v2.sql` が現在のclaim表とrevision triggerを追加する。これが
 ないと、ruleやclaimの変更をr0/r1 captureが検知できない。投影出力である `expiry_estimates` /
 `conversion_simulations` は台帳から**除外**したままである（自分の出力で自分を陳腐化させない）。
 副作用として、reward claimの昇格は残高投影のinputも「変わったかもしれない」側に倒す。これは
 過剰検知であって見落としではなく、残高側は再captureして同じcontent digestに落ち着く。
 
-### READの表（migration `0002_reward_read.sql`）
+### READの表（migration `0002_reward_read.sql`、現在の期限行は `0004_reward_unclassified_buckets.sql`）
 
-| 表                              | 内容                                                                                                                                                                                                         |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `reward_expiry_snapshots`       | 1回のbuild。content key＋attempt、固定した `evaluated_at`、評価calendar、rule集合digest、claim window、status、output digest、writer fence                                                                   |
-| `reward_expiry_estimates`       | bucket×rule版ごとの期限。`expires_on` は**日付のみ**、数量はプログラム自身の単位、`row_digest` 付き。READ migration `0003_reward_expiry_basis.sql` の `expiry_basis_json` に表示期限と算定期限の根拠（§2.1） |
-| `reward_conversion_simulations` | 保存済みsimulationの再実行結果と、再現できたかどうか                                                                                                                                                         |
-| `reward_snapshot_input_refs`    | 使ったrule・offer・claim集合・評価時刻・calendarのref＋digest（04 §3。COREへのFKは張らない）                                                                                                                 |
-| `reward_snapshot_pointer`       | 公開中のsnapshot。同一epochではrevisionが後退せず、同一revisionでは評価日時も後退しない                                                                                                                      |
-| `reward_build_checkpoints`      | 段階（estimates / simulations）ごとの再開位置。chunkと同一batchで書く                                                                                                                                        |
+| 表                              | 内容                                                                                                                                                                                                                 |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reward_expiry_snapshots`       | 1回のbuild。content key＋attempt、固定した `evaluated_at`、評価calendar、rule集合digest、claim window、status、output digest、writer fence                                                                           |
+| `reward_expiry_estimates_v2`    | bucket×rule版ごとの期限。`expires_on` は**日付のみ**、数量はプログラム自身の単位、`row_digest` 付き。READ migration `0004_reward_unclassified_buckets.sql` の `expiry_basis_json` に表示期限と算定期限の根拠（§2.1） |
+| `reward_conversion_simulations` | 保存済みsimulationの再実行結果と、再現できたかどうか                                                                                                                                                                 |
+| `reward_snapshot_input_refs`    | 使ったrule・offer・claim集合・評価時刻・calendarのref＋digest（04 §3。COREへのFKは張らない）                                                                                                                         |
+| `reward_snapshot_pointer`       | 公開中のsnapshot。同一epochではrevisionが後退せず、同一revisionでは評価日時も後退しない                                                                                                                              |
+| `reward_build_checkpoints`      | 段階（estimates / simulations）ごとの再開位置。chunkと同一batchで書く                                                                                                                                                |
 
 全てSTRICT、COREへのFKなし、`building` の行はpointer経由の読者からは見えない。
 
@@ -433,3 +434,37 @@ COREのclaim・rule・offer、保存済み入力と原本は維持する。
 [W12]: 同 W12（楽天ポイントのルール）
 [W13]: 同 W13（JRE POINTからSuicaへチャージ・検索抜粋のみ）
 [W14]: 同 W14（JAL Life Statusプログラム）
+
+### 2026-10-09: 現在の集合と種類未確認
+
+現在のclaimは `reward_bucket_claims_v2` / `reward-promotion-v2`。V Pointは
+共通の `ELIGIBLE_VPOINT_RUNS` が採択した同一capture内だけでslotをrankする。
+旧配列から消えたslotを補完しない。空配列でもhistory-page-0001が0件の成功parseとして
+公開されれば適格runになり得る。これは活動窓の完全性を証明しない。
+
+`unclassified` は数量・表示期限・source refsを残す。消費可能量は
+`missing / bucket_kind_unclassified`、変換は除外、算定期限も同じ理由でunavailable。
+READは `reward_expiry_estimates_v2` を使う。旧表・旧claimは履歴として残し、旧releaseの
+snapshot/continuationを新しい確定値として返さない。通常migration、v2再promotion、
+READ再構築が必要で、その間expiryは503になる。promotionが未完なら
+`reward_promotion_incomplete` としてinputをsealしない。活動分類/window/規約移行の
+実入力接続は未実装で、#554は完了していない。詳細はADR0049のamendment（#632のmergeでaccepted）。
+
+### v2への通常復旧の適用条件
+
+CORE `0077` とREAD `0004` をそれぞれのDBへ適用した後に、同じreleaseのProcessor/Appを
+通常のrelease経路で配布する。Processorの `REWARD_CLAIMS_ENABLED=true` と
+`REWARD_READ_PROJECTION_ENABLED=true`、DB/READ/DATA bindings、通常tickの稼働が必要。
+1 sweepは最大500候補を処理し、READは全候補のpromotion完了までpendingを返す。
+公開済み観測から新claimを作れるため、この修復だけのために新しい取得は要らない。
+
+正常な候補集合が有限で、COREのrevision/visibilityとwriter leaseが安定し、inputの集合上限内に
+収まる場合、次のtickで未完成の旧buildを退役し、その後のtickで現行inputをcapture・chunk書込・
+seal・pointer公開まで進める。途中の旧active snapshotは503で拒否する。
+現行snapshotの公開後、cursorを付けない新規取得で200へ復旧する。旧releaseを指すcursorは
+410のままなので、ページングは先頭からやり直す。旧rowの書換え・CORE消去・旧READ表へのfallbackは不要。
+
+flag停止、未適用migration、promoterがskipし続ける候補、未完のparse/publication、上限超過、
+繰返すrevision/visibility変更、writer lease競合がある場合には、この通常復旧の前提が成立しない。
+各closed codeとpromotion/pointerの状態で原因を調べる。pending/503の継続を成功扱いしない。
+本変更はsynthetic検証済みであり、本番DBのmigration適用・再promotion・READ公開・HTTP復旧は未検証。

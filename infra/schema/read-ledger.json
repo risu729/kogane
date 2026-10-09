@@ -20,6 +20,12 @@
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "0f863f9ba99081a8938bd21415abe3bfed332a9fb82dde27aaab73e0d8274bd4"
+    },
+    {
+      "file": "0004_reward_unclassified_buckets.sql",
+      "statementCount": 9,
+      "insertStatements": [],
+      "sha256": "d7c032073e081efcbc7802ef8599665708eeea58ed99596e783206934a4f2a9d"
     }
   ],
   "tables": [
@@ -1223,6 +1229,235 @@
       "sqlSha256": "ce6f6c40b61c3a6b"
     },
     {
+      "name": "reward_expiry_estimates_v2",
+      "classification": "read-projection",
+      "planRow": "READ: corrected bucket kinds and displayed expiry of a fixed snapshot (ADR 0049 amendment)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "row_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "row_seq",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "program_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "holding_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bucket_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "rule_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "rule_version",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bucket_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "state",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "deadline_basis",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "expires_on",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "amount_coefficient",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "amount_scale",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "amount_status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "unit_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "provider_observed_json",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "policy_estimated_json",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reason_codes_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "uncertainty_codes_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "basis_refs_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "expiry_basis_json",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "row_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id",
+        "row_key"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "reward_expiry_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "reward_expiry_estimates_v2_deadline",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "expires_on",
+            "row_seq"
+          ]
+        },
+        {
+          "name": "reward_expiry_estimates_v2_holding",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "program_id",
+            "holding_ref",
+            "row_seq"
+          ]
+        },
+        {
+          "name": "reward_expiry_estimates_v2_order",
+          "unique": true,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "row_seq"
+          ]
+        }
+      ],
+      "triggers": [
+        "reward_expiry_estimates_v2_building_only",
+        "reward_expiry_estimates_v2_chunk_conflict",
+        "reward_expiry_estimates_v2_rule_ref",
+        "reward_expiry_estimates_v2_sealed_no_delete",
+        "reward_expiry_estimates_v2_sealed_no_update"
+      ],
+      "noUpdateTriggers": [
+        "reward_expiry_estimates_v2_sealed_no_update"
+      ],
+      "noDeleteTriggers": [
+        "reward_expiry_estimates_v2_sealed_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "6be3c431e70dce58"
+    },
+    {
       "name": "reward_expiry_snapshots",
       "classification": "read-projection",
       "planRow": "READ: one reward build under one fixed evaluation input (04 §2, 05 §3)",
@@ -2012,6 +2247,41 @@
       "sqlSha256": "040aad3e0a32034f"
     },
     {
+      "name": "reward_expiry_estimates_v2_building_only",
+      "table": "reward_expiry_estimates_v2",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "5bfd5caa85f3df3a"
+    },
+    {
+      "name": "reward_expiry_estimates_v2_chunk_conflict",
+      "table": "reward_expiry_estimates_v2",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "07ed541663b8195a"
+    },
+    {
+      "name": "reward_expiry_estimates_v2_rule_ref",
+      "table": "reward_expiry_estimates_v2",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "a5ba031a28d89597"
+    },
+    {
+      "name": "reward_expiry_estimates_v2_sealed_no_delete",
+      "table": "reward_expiry_estimates_v2",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "08efc0792ef11081"
+    },
+    {
+      "name": "reward_expiry_estimates_v2_sealed_no_update",
+      "table": "reward_expiry_estimates_v2",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "850cf4d99ed60e24"
+    },
+    {
       "name": "reward_expiry_snapshots_instance",
       "table": "reward_expiry_snapshots",
       "timing": "BEFORE",
@@ -2169,6 +2439,21 @@
       "sqlSha256": "ae53a32eb2ee2e63"
     },
     {
+      "name": "reward_expiry_estimates_v2_deadline",
+      "table": "reward_expiry_estimates_v2",
+      "sqlSha256": "cbb19722506d9811"
+    },
+    {
+      "name": "reward_expiry_estimates_v2_holding",
+      "table": "reward_expiry_estimates_v2",
+      "sqlSha256": "8668d96f18e7da87"
+    },
+    {
+      "name": "reward_expiry_estimates_v2_order",
+      "table": "reward_expiry_estimates_v2",
+      "sqlSha256": "584aa3266164ea8d"
+    },
+    {
       "name": "reward_expiry_snapshots_content",
       "table": "reward_expiry_snapshots",
       "sqlSha256": "2245d2e17eda3477"
@@ -2195,16 +2480,17 @@
     }
   ],
   "summary": {
-    "tableCount": 13,
+    "tableCount": 14,
     "viewCount": 0,
-    "triggerCount": 41,
-    "explicitIndexCount": 15,
+    "triggerCount": 46,
+    "explicitIndexCount": 18,
     "byClassification": {
       "read-projection": [
         "balance_read_snapshots",
         "current_balance_projection",
         "reward_conversion_simulations",
         "reward_expiry_estimates",
+        "reward_expiry_estimates_v2",
         "reward_expiry_snapshots",
         "reward_snapshot_input_refs",
         "scope_relations",
@@ -2230,6 +2516,6 @@
     "nonStrictTables": [],
     "withoutRowidTables": [],
     "migrationsWithInserts": [],
-    "schemaSha256": "dbd72fae1db4e1fb4229b7b84c312ff63522e1581449c9a138d96b3c706b8574"
+    "schemaSha256": "c8611107f13960944fee4ae91b452a9d4acf166227f2de4be0c182cada249fdc"
   }
 }

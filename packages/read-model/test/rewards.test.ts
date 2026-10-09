@@ -319,3 +319,37 @@ describe("reward reader", () => {
     expect(result.rows[0]!.holding.buckets).toHaveLength(REWARD_PAGE_LIMIT);
   });
 });
+
+test("unsupported stored kinds become unclassified while preserving quantity, expiry and source refs", () => {
+  for (const kind of ["unclassified", "future-provider-enum", "", "status-like-unknown"]) {
+    const mapped = rewardBucket({ ...bucketRow, bucket_kind: kind });
+    expect(mapped.kind).toBe("unclassified");
+    expect(mapped.quantity).toEqual(rewardBucket(bucketRow).quantity);
+    expect(mapped.observedExpiry).toEqual(rewardBucket(bucketRow).observedExpiry);
+    expect(mapped.sourceFactRefs).toEqual(["balance:11"]);
+  }
+});
+
+test("the legacy reader preserves unknown kinds as holding buckets rather than qualification measures", async () => {
+  const reader = createRewardReader({
+    all: <T>() =>
+      Promise.resolve([
+        { ...bucketRow, bucket_kind: "future-provider-enum" },
+        {
+          ...bucketRow,
+          id: 2,
+          bucket_ref: "program:synthetic:undated",
+          bucket_kind: "unclassified",
+          observed_expiry_json: null,
+        },
+      ] as T[]),
+    first: <T>() => Promise.resolve(null as T | null),
+  });
+  const result = await reader.holdings({ offset: 0 });
+  expect(result.rows[0]!.holding.buckets).toHaveLength(2);
+  expect(result.rows[0]!.holding.buckets.map((bucket) => bucket.kind)).toEqual([
+    "unclassified",
+    "unclassified",
+  ]);
+  expect(result.rows[0]!.qualification).toEqual([]);
+});

@@ -329,6 +329,7 @@ test("G0-09/G3-12: dropping every READ table leaves CORE and DATA untouched, and
     // migrations.
     "reward_build_checkpoints",
     "reward_conversion_simulations",
+    "reward_expiry_estimates_v2",
     "reward_expiry_estimates",
     "reward_snapshot_input_refs",
     "reward_snapshot_pointer",

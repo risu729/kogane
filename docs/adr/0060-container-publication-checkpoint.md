@@ -232,7 +232,10 @@ completed successfully at 07:33:09 UTC. This same-run proof does not establish
 the unobserved candidate count in the earlier failed captures or remove the
 privileged manual mutation timing limitation described above.
 
-## Proposed amendment: 600-second total Container postcheck (2026-10-09)
+## Amendment: 600-second total Container postcheck (2026-10-09)
+
+- Status: accepted (merged 2026-10-09 in [#631](https://github.com/risu729/kogane/pull/631),
+  commit `5d46e1bd60e0d1b7ad65fcf3b018fa83146b4453`)
 
 The owner explicitly authorizes changing the original 180-second polling
 contract to a 600-second total postcheck budget. This is a deadline extension,
