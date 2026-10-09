@@ -656,7 +656,7 @@ describe("stage progress is evidence, not a guess", () => {
 });
 
 describe("HTTP and MCP are one API (G3-05)", () => {
-  it("lists exactly the six tools with the flag off and exactly twelve with it on", async () => {
+  it("lists the six tools and the reconstructed-state read with the flag off, and the operations tools after them with it on", async () => {
     const six = MCP_TOOLS.map((tool) => tool.name);
     expect(six).toHaveLength(6);
     // This store has the reported state's views, so the reconstructed state's

@@ -465,7 +465,7 @@ service, with the same bounds and codes.
 ### Consequences
 
 - The agent tool list grows by one wherever the reported state is served;
-  the tests that pinned the five tools now pin six there.
+  the tests that pinned the six tools now pin seven there.
 - `kogane.capabilities` reports `reconstructedStateOnDate` through the same
   capability object `/api/meta` returns.
 - No migration and no new index: the route adds only the `accounts` primary
