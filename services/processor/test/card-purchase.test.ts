@@ -1354,3 +1354,54 @@ test("cursor: an exactly full last page wraps on the next tick, a row below the 
   });
   expect(await w.cursor()).toBe(moved);
 }, 90_000);
+
+test("every batch the lane writes is sealed and logged, under the identity epoch current at its tick (ADR 0054)", async () => {
+  const w = await world();
+  await w.vpass({ family: "web", fetchedAt: "2026-06-10T00:00:00.000Z", rows: [POSTED] });
+  expect((await w.sweep()).recognized).toBe(1);
+  const [event] = await w.all<{ event_id: string; decision_revision_id: string }>(
+    "SELECT event_id,decision_revision_id FROM economic_event_revisions",
+  );
+  expect(
+    await w.all(
+      "SELECT commit_seq,decision_revision_id,operation_id,principal,kind,released_json,known_at FROM economic_commit_log",
+    ),
+  ).toEqual([
+    {
+      commit_seq: 1,
+      decision_revision_id: event!.decision_revision_id,
+      operation_id: null,
+      principal: CARD_PURCHASE_ACTOR,
+      kind: "card-purchase.recognize",
+      released_json: "[]",
+      known_at: NOW,
+    },
+  ]);
+  expect(
+    await w.all("SELECT event_id,revision,claim_count,identity_epoch FROM economic_revision_seals"),
+  ).toEqual([
+    { event_id: event!.event_id, revision: 1, claim_count: 1, identity_epoch: "identity-epoch-1" },
+  ]);
+  expect(await w.all("SELECT * FROM unlogged_economic_revisions")).toEqual([]);
+  // A declared identity rewrite: the next tick reads the new epoch and seals under it.
+  await w.all(
+    "INSERT INTO economic_identity_epochs(ordinal,identity_epoch,reason_code,declared_at) VALUES(2,'identity-epoch-2','synthetic-rewrite',?) RETURNING ordinal",
+    NOW,
+  );
+  await w.vpass({
+    family: "web",
+    fetchedAt: "2026-07-10T00:00:00.000Z",
+    rows: [{ date: "26/06/03", merchant: "架空店舗C", amount: "2,000", paymentType: "1" }],
+  });
+  const second = await w.sweep();
+  expect(second.failed).toBe(0);
+  expect(second.recognized + second.retired).toBeGreaterThan(0);
+  expect(
+    (
+      await w.all<{ identity_epoch: string; n: number }>(
+        "SELECT identity_epoch,count(*) AS n FROM economic_revision_seals GROUP BY identity_epoch ORDER BY 1",
+      )
+    ).map((row) => row.identity_epoch),
+  ).toEqual(["identity-epoch-1", "identity-epoch-2"]);
+  expect(await w.all("SELECT * FROM unlogged_economic_revisions")).toEqual([]);
+}, 60_000);

@@ -1,5 +1,6 @@
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
+  scheduledFailure,
   scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
@@ -617,7 +618,7 @@ export async function alarmCollection(
       return { ...scheduledResult(blocked), status: "failed", failureCode: "session_unavailable" };
     }
     return scheduledResult(await stub.runCollection());
-  } catch {
-    return { status: "failed", runIds: [], failureCode: "collection_failed" };
+  } catch (error) {
+    return scheduledFailure(error);
   }
 }

@@ -149,7 +149,7 @@ describe("pending-to-posted merge and split batches", () => {
       const b = posted.revision.eventId;
       expect(figures(db)).toEqual({ captured: "1234", authorized: "1200", unresolved: 0 });
       const writes = cardPurchaseMergeWrites({ merge, now: NOW });
-      // A@n+1 → legs → supersede A@n and B@m → sidecar → keys.
+      // A@n+1 → legs → supersede A@n and B@m → sidecar → keys → seal → commit row.
       expect(writes.map((entry) => /^(?:INSERT INTO|UPDATE) (\w+)/u.exec(entry.sql)?.[1])).toEqual([
         "decision_revisions",
         "economic_event_revisions",
@@ -159,6 +159,8 @@ describe("pending-to-posted merge and split batches", () => {
         "card_purchase_recognitions",
         "card_purchase_recognition_keys",
         "card_purchase_recognition_keys",
+        "economic_revision_seals",
+        "economic_commit_log",
       ]);
       expect((await run(db, writes)).every((changes) => changes > 0)).toBe(true);
       expect(

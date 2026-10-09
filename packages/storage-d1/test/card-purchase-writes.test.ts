@@ -126,13 +126,16 @@ describe("card purchase recognition batch", () => {
       const draft = await draftOf(factOf(1));
       const eventId = draft.revision.eventId;
       const writes = write(draft, null);
-      // decision → revision → leg → sidecar → keys (no supersede pointer for a first revision).
+      // decision → revision → leg → sidecar → keys → seal → commit row (no
+      // supersede pointer for a first revision).
       expect(writes.map((entry) => /^(?:INSERT INTO|UPDATE) (\w+)/u.exec(entry.sql)?.[1])).toEqual([
         "decision_revisions",
         "economic_event_revisions",
         "economic_legs",
         "card_purchase_recognitions",
         "card_purchase_recognition_keys",
+        "economic_revision_seals",
+        "economic_commit_log",
       ]);
       const before = counts(db);
       const changes = await run(db, writes);
@@ -434,6 +437,8 @@ describe("card purchase recognition batch", () => {
         "economic_event_revisions",
         "card_purchase_recognitions",
         "card_purchase_recognition_keys",
+        "economic_revision_seals",
+        "economic_commit_log",
       ]);
       await run(db, writes);
       const [old, current] = revisionRows(db, eventId);

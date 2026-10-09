@@ -102,6 +102,17 @@ export async function cardReviewMutation(_input: MutationInput): Promise<Mutatio
   return null;
 }
 
+/**
+ * The economic-event kinds (ADR 0054, G2; CORE 0071) are vocabulary only: no
+ * planner is registered in `ECONOMIC_EVENT_PLANNERS`, so no plan of them can
+ * be made or approved, and their slot answers null, so a plan row that
+ * reached the table any other way commits nothing (`unsupported_semantics`).
+ * The own-transfer writer (G3) fills these slots in.
+ */
+export async function economicEventMutation(_input: MutationInput): Promise<MutationWrites | null> {
+  return null;
+}
+
 export function changeMutationPlanners(db: D1Database): MutationPlanners {
   const identity = identityMutation(db);
   return {
@@ -118,6 +129,10 @@ export function changeMutationPlanners(db: D1Database): MutationPlanners {
     "card-refund.withdraw": cardReviewMutation,
     "card-installment.link": cardReviewMutation,
     "card-installment.unlink": cardReviewMutation,
+    "economic-event.adopt": economicEventMutation,
+    "economic-event.correct": economicEventMutation,
+    "economic-event.withdraw": economicEventMutation,
+    "economic-event.move": economicEventMutation,
   };
 }
 

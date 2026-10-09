@@ -9,6 +9,7 @@ import type {
   RewardExpiryPage,
 } from "../../../packages/observation-shared/src/reward-contract.ts";
 export type * from "../../../packages/observation-shared/src/reward-contract.ts";
+export { validRewardExpiryBasis } from "../../../packages/observation-shared/src/reward-contract.ts";
 
 export function useRewardHoldings(): UseQueryResult<RewardPage<RewardHoldingRow>, Error> {
   const { rewards } = useFeatures();

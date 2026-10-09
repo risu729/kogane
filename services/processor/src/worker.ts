@@ -20,6 +20,8 @@ import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
 import { scheduleRoute } from "./schedule-store";
+import { maintenanceSurveyLane } from "./maintenance-survey/lane.ts";
+import { maintenanceSurveyEnabled } from "./maintenance-survey/config.ts";
 import { internalHealthRoute } from "./internal-health.ts";
 import { runBatch } from "../../../packages/storage-d1/src/d1.ts";
 import { dispatchDecisionOutbox } from "./decision-outbox.ts";
@@ -64,11 +66,7 @@ import {
   rollbackRelease,
   type AdoptionRequest,
 } from "./release-adoption.ts";
-import {
-  collectionScan,
-  handleTerminalNotification,
-  type CollectionEnv,
-} from "./collection/index.ts";
+import { collectionScan, handleTerminalNotification } from "./collection/index.ts";
 import {
   invocationContext,
   invocationProbe,
@@ -78,7 +76,8 @@ import {
   type InvocationContext,
 } from "./invocation-probe.ts";
 import { OperationMeter } from "../../../packages/application/src/collection/index.ts";
-import { dispatchOperations } from "./operations/dispatch.ts";
+import { collectorBinding } from "./collector-binding.ts";
+import { dispatchOperations, type CollectorRpc, type DispatchEnv } from "./operations/dispatch.ts";
 import { rewardClaimsEnabled, rewardClaimsStage } from "./reward-claims-job.ts";
 import {
   rewardReadProjectionEnabled,
@@ -1775,6 +1774,12 @@ export interface ScheduledStages {
    * `import` spends the same registration budget as the scan.
    */
   operations?: (env: Env, context: InvocationContext) => Promise<object>;
+  /**
+   * The official-site maintenance re-survey (ADR 0050). Absent stage, or
+   * MAINTENANCE_SURVEY_ENABLED off, means the lane never runs. It only ever
+   * proposes: no rule changes until an operator accepts.
+   */
+  maintenanceSurvey?: (env: Env) => Promise<object>;
 }
 const defaultStages: ScheduledStages = {
   parse: (env) => sweep(env),
@@ -1816,8 +1821,16 @@ const defaultStages: ScheduledStages = {
     dispatchDecisionOutbox(env.DB, {
       processors: { "balance-projection": balanceProjectionOutboxProcessor(env) },
     }),
+  // ADR 0048: a collector request reaches the same named RPC binding the
+  // alarm calls, and only for connections OPS_COLLECTOR_DISPATCH_CONNECTIONS
+  // names.
   operations: (env, context) =>
-    dispatchOperations(collectionEnv(env), { budget: context.registration }),
+    dispatchOperations(collectionEnv(env), {
+      budget: context.registration,
+      collectors: (connection) => collectorBinding<CollectorRpc>(env, connection.workspace),
+    }),
+  maintenanceSurvey: (env) =>
+    maintenanceSurveyLane(env, { transport: (url, init) => fetch(url, init) }),
 };
 
 /**
@@ -1825,8 +1838,8 @@ const defaultStages: ScheduledStages = {
  * optional there, so a deployment that has not been given them behaves as if
  * the flags were off rather than failing to start.
  */
-function collectionEnv(env: Env): CollectionEnv & { OPS_DISPATCH_ENABLED?: string } {
-  return env as unknown as CollectionEnv & { OPS_DISPATCH_ENABLED?: string };
+function collectionEnv(env: Env): DispatchEnv {
+  return env as unknown as DispatchEnv;
 }
 
 /** Each stage is isolated: a parse-sweep failure is logged as its own event
@@ -1902,6 +1915,10 @@ export async function runScheduled(
     // Off unless REPORTS_ENABLED is set, for the same reason
     // (docs/calculation-and-reports.md).
     ["report_job", stages.reports, reportsEnabled(env.REPORTS_ENABLED)],
+    // Off unless MAINTENANCE_SURVEY_ENABLED is set: then it re-reads the
+    // allowlisted official maintenance pages on their cadence and proposes
+    // changed windows, never adopting one (ADR 0050, docs/schedules.md).
+    ["maintenance_survey", stages.maintenanceSurvey, maintenanceSurveyEnabled(env)],
     // U06/U08: accepted operations are handed to their executor before the
     // outbox, so work this tick accepted can still reach it. Reports
     // `skipped` unless OPS_DISPATCH_ENABLED is set.

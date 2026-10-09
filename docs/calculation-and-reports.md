@@ -20,7 +20,16 @@ portfolio, cost-basis or tax product. In
 `costBasis()` returns `needs-policy` on every path, including when a caller
 supplies a verified-policy marker. It does not allocate lots or calculate cost.
 Likewise, `pnlDecomposition()` does not reconstruct a transaction history or
-supply missing acquisition costs.
+supply missing acquisition costs. A separate pure lot engine,
+`computeLots()` in [`lots.ts`](../packages/domain/src/lots.ts), allocates
+disposals to lots for investment analysis over a provisional input contract
+([lots](#lots-over-a-provisional-input-contract),
+[ADR 0051](adr/0051-provisional-lot-engine.md)). An adapter from the
+knowledge selector's adopted revisions exists
+([ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md)), but no writer
+adopts a security-quantity movement, so it answers `unsupported` and nothing
+real reaches the engine: there is no transfer handling, no persistence, no
+realized or unrealized P&L and no tax output.
 
 The [roadmap](roadmap.md) separates the remaining work: price/FX acquisition and
 as-of valuation can start from reported holdings; lots and disposal allocation
@@ -108,7 +117,43 @@ text; ties go to the later `recorded_at`, then the higher id. A re-parse moves
 selection to its own prices once it is published, and the old rows stay for
 the contexts that used them. A price with a date-only effective time is never
 selected against an instant cutoff, and an instrument without a selectable
-price is absent from the result, never zero.
+price is absent from the result, never zero. `selectPrices` has no production
+caller; its text is frozen by a digest test.
+
+**As-of selection under a policy**
+([ADR 0056](adr/0056-as-of-price-fx-selection.md)). `selectMarketData`
+(`packages/application/src/query/market-data.ts`) takes a bound, the price and
+FX policies and any calendars, with no defaults, and refuses a proposed
+policy (`proposal:` id), two policies sharing an id with different content, a
+malformed key or more than 500 keys. The bound is `effectiveBefore`, an
+exclusive instant that must be exactly the end of the as-of date in the
+policies' zone (for a date D in Asia/Tokyo, `(D + 1) 00:00 +09:00`, as the
+dated state's capture bound), the as-of date that ages are counted to, and a
+knowledge mode: `current` reads the parses `published_parse_runs` names now;
+`known-at` K reads prices recorded at or before K, of the parse run the newest
+`publication_events` row of the claim's artifact and parser at or before K
+adopted, so a later re-parse or a rollback is seen as it stood at K. K may
+carry at most three fractional digits, the precision SQLite compares at, and
+the domain re-checks each price's `recorded_at` against K exactly. One read
+(`selectPriceCandidates`, two SQL texts `PRICE_CANDIDATES_SQL` and
+`PRICE_CANDIDATES_KNOWN_AT_SQL`) returns per key every row in a coarse window
+around the freshness span, the rows of the newest instant before it and every
+row SQL cannot place, and refuses more than 500 keys or 2,000 rows rather than
+cutting. A key may be narrowed to one parse run (`same-snapshot`). The
+domain's `selectPrice` (`packages/domain/src/market-data.ts`) then filters,
+counting each removed row by a closed code (`recorded_after_known_at`,
+`rule_not_admitted`, `kind_not_admitted`, `price_not_positive`,
+`invalid_effective_time`, `basis_not_admitted`, `date_only_excluded`,
+`effective_at_or_after_bound`), and selects one price or refuses with
+`missing`, `sources_overlap` (two admitted rules with prices that could still
+be fresh), `time_incomparable`, `calendar_missing`, `stale` (ids and age
+reported, the price never used) or `disagree` (two prices at the top instant
+that differ per unit of base). Agreeing prices at one instant corroborate the
+later recorded one. A currency the FX policy cannot quote is
+`unsupported_pair` without a read. The result carries a manifest (policies and
+calendars by digest, the bound, the knowledge mode, the newest `recorded_at`
+used, the selected ids and each refusal) whose digest is the context id; it
+identifies the outcome, not the request.
 
 **What the report job reads.** The report job (§4) values a holding only with
 a price claimed from the holding's own snapshot: a price whose claim names an
@@ -123,9 +168,25 @@ price row with no claim values nothing. Foreign holdings are quoted in their
 own currency, so a JPY report still leaves them `missing-price`: nothing is
 converted 1:1.
 
-**Limits.** Valuation on a date through `selectPrices`, with a freshness rule
-and FX under `fx-sbi-shinsei-mid-v1`, is the next step (the plan's P2-3). SBI Shinsei's
-board is a customer rate tiered by `customerCategory` (5 tiers for most
+**Limits.** No selection policy is adopted: the freshness windows, accepted
+bases, overlap rule and FX pivot in `PROPOSED_*` constants are
+recommendations, and ADR 0056 lists the fourteen questions the owner has not
+decided. Nothing in a service calls `selectMarketData` or the valuation on a
+date built on it (§2), so no valuation cell, route or page uses them yet. No market calendar is
+shipped, so a business-day rule refuses with `calendar_missing`. A price is
+keyed by the provider-scoped base reference, so another source's price for the
+same instrument is never used. Exclusion counts cover only the rows the read
+returns. The row that explains `stale` is the newest before the window
+whatever its rule, kind, basis or effective-time shape (a date-only row, or
+one the domain cannot read), so such a key reads `missing` rather than
+`stale`. In `known-at` mode a row whose `recorded_at` SQLite cannot read as a
+time is not read. Nothing fetches a price or rate from an external source.
+The candidate read reaches each key by index but reads that key's whole
+history (the window bounds what it returns, not what it reads): 13 currencies
+four times a day took about 90 ms over 1,000 boards and 360–500 ms over 4,380
+boards (three years), against 70–300 ms for `selectPrices` (ADR 0056;
+`price-candidates-scale.test.ts`).
+SBI Shinsei's board is a customer rate tiered by `customerCategory` (5 tiers for most
 currencies on the stored boards, [ADR 0028](adr/0028-sbi-shinsei-observed-capture-shapes.md)),
 not a market reference. The rule reads the tier the same run's balance
 summary names as the owner's stage (ADR 0031); the two were observed on
@@ -159,11 +220,111 @@ coefficient and no reason, and an `unvalued` row has a reason and no
 coefficient. A missing FX price never becomes a 1:1 conversion and never
 becomes zero (AT24, INV05).
 
+**FX path** (`fxPath`, `convertToBase`, `valueInBase` in
+`packages/domain/src/market-data.ts`). Every rate is selected against one
+pivot, the quote of the FX rule (JPY). The same unit needs no rate. A currency
+into the pivot is one exact hop through `valueAtPrice`, so 12 shares at
+130.70 USD at a 146.25 mid is exactly 229,378.5 JPY, both legs reported with
+price ids, effective times and ages. Out of the pivot, or between two other
+currencies, is one exact ratio rounded once under the conversion policy's
+inverse rounding at the target unit's scale, with the operands and the exact
+value kept as `RoundingInputs`; a policy without one refuses with
+`rounding_policy_missing`, before any rate is read. A pair outside the
+policy's currencies (CHF, an instrument code) is `unsupported_pair`, and a
+missing, stale or disagreeing rate is that refusal for the FX leg. A holding
+of another instrument than the price's is `instrument_mismatch`, a quantity
+that is not exact is `quantity_not_exact`, and a selection holding a zero or
+negative price (the table's CHECK allows one; selection never picks it)
+converts nothing (`price_not_positive`). An FX selection of another key, or
+made under another selection policy than the conversion policy's, throws
+(`fx_selection_policy_mismatch`).
+
+**Refusal mapping.** ADR 0056 maps these codes onto the seven reasons above
+for the change that writes valuation cells: `stale` → `stale-price`,
+`instrument_mismatch` → `unresolved-identity`, `quantity_not_exact` →
+`missing-quantity`, every other selection or conversion refusal →
+`missing-price` with the closed code beside it. No code writes that mapping
+yet, and the `calculation_results` CHECK is not widened.
+
 Results are partitioned into `complete`, `partial-verified-scope` and
 `not-computable`. A partial result is never labelled as a whole-portfolio
 total, and it is not a lower bound either. `netWorth` returns a net worth only
 when liability coverage is `complete`; otherwise it returns a
 `known-assets-subtotal` with the reason `incomplete-liabilities`.
+
+### Valuation on a date
+
+`queryValuationOnDate` (`packages/application/src/query/valuation-on-date.ts`)
+values the positions the [reported state](reported-state.md) lists on a date
+D, in a base unit, at prices and rates selected for the end of D under the
+caller's policies ([ADR 0056, amendment of 2026-10-09](adr/0056-as-of-price-fx-selection.md#amendment-2026-10-09-valuation-on-a-date-as-implemented)).
+It has no route, page or service caller yet, no default policy, and no clock:
+the caller states today's date, and D after it is `date_in_future`.
+
+What is computed, per holding (`valueHoldingsOnDate` in
+`packages/domain/src/valuation-on-date.ts`): the decimal-v1 quantity × the
+selected price, exactly, in the price's unit; that amount in the base unit
+through the FX path above; and every leg's price id, effective time, age and
+policy. The price key is the provider-scoped instrument reference, the
+position's currency and the policy's one price kind, narrowed to the
+position's own parse run under `same-snapshot`. With the synthetic store of
+the tests, 100 shares at 1,500 JPY and 12 shares at 130.70 USD at a 146.25
+mid are 150,000 and 229,378.5 JPY, total 379,378.5 JPY.
+
+What is absent, and why: each holding that is not valued names one closed
+outcome in the valuation order, never a zero. The order's first step, claim
+adoption, is not applied (see below):
+
+| Outcome                 | When                                                                                                                                                              |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `instrument_unresolved` | no current instrument mapping with status `identified` or `provider-local` (the status is kept)                                                                   |
+| `snapshot_stale`        | the reported state classifies its snapshot `stale` (`dated-state-freshness-v1`, more than 3 days before D): its quantity on D is not known; ref and age are kept  |
+| `quantity_unknown`      | the decimal-v1 quantity is not exact (its status and reason are kept)                                                                                             |
+| `policy_mismatch`       | a selection handed in under another policy, from another snapshot or of another key                                                                               |
+| `unpriced`              | the price selection's refusal (`missing`, `stale` with ids and age, `disagree`, …), `unsupported_pair` without a currency, `price_not_positive`, an inexact basis |
+| `unconverted`           | the FX leg's refusal (`missing`, `stale`, `unsupported_pair`, `rounding_policy_missing`, …); the value in the price's unit is kept                                |
+
+The total is stated only when every holding is valued and all come from one
+source; otherwise it is absent with `holding_not_valued`,
+`adoption_not_applied` or `no_holdings`, beside the counts per outcome. When
+every listed holding is valued but a container that holds positions
+(`DATED_POSITION_CONTAINER_PARSERS`) has no snapshot on D, the total is
+`partial-verified-scope` with the number of such containers, never `exact`:
+as above, a partial result is never a whole total and not a lower bound. A
+position container whose snapshot the reported state lists as `stale` and
+that listed no holding makes the total `partial-verified-scope` too, counted
+as `stalePositionContainersWithoutHoldings`: what it holds on D is unknown.
+There is no subtotal over some valued holdings, no gain, cost basis or tax,
+and a provider's own valuation is never the value.
+
+Claim adoption is not applied: no relation claims exist for positions and
+the adoption rule is the owner's to decide (ADR 0056 amendment, open items).
+A holding two sources report is therefore valued once per listing, and only
+the total is withheld (`adoption_not_applied`) whenever the holdings come
+from more than one source. Today only SBI Securities and SBI VC Trade report
+positions, which cannot list one holding, but without a source filter the
+total is withheld whenever both report positions. A null policy is refused
+`policy_missing` before anything is read (the domain function answers
+`needs-policy`, as `costBasis()` does), a proposal or a policy with two price
+kinds `invalid_policy`, a source or an account that does not exist
+`unknown_source` or `unknown_account`, and
+more than 500 holdings or 500 price keys and currencies is refused, never cut.
+The manifest (engine, as-of, base unit, policies by digest, the reported
+state's date, cutoff, filters, quantity policy, context id and position
+containers without a snapshot, snapshots and holdings by id with outcomes,
+and the selection manifest) holds no amount; its digest is the context id, so
+a corrected price, or a different reported-state answer on D, gives a new
+context.
+
+This is not the report job: the report job values only at a price claimed
+from the holding's own snapshot, without FX, and writes fixed reports; this
+query values at a policy-selected as-of price and says so in its manifest.
+Neither replaces the other today. Limits: the knowledge mode bounds prices and
+rates, not the positions and identities, which are read as they are now; the
+total covers the listed holdings and values no cash balance; a holding of a
+`recent` snapshot (1–3 days old) is valued at prices for D; values rounded
+out of the pivot are rounded per holding before they are added; the whole
+query is not measured at scale.
 
 ## 3. Rounding and P&L attribution are versioned inputs
 
@@ -195,6 +356,87 @@ no verified JP or AU rule package, so every request returns `needs-policy` with
 `taxConclusion: null` and the list of inputs it does not have (AT59). The
 provider's reported cost is stored beside our own numbers as
 `provider.<metric>` rows and is never promoted to the single truth (UC30/AT30).
+
+### Lots over a provisional input contract
+
+`computeLots(inputs, policy)` in
+[`packages/domain/src/lots.ts`](../packages/domain/src/lots.ts) is a pure,
+synchronous allocation engine ([ADR 0051](adr/0051-provisional-lot-engine.md)).
+What it does today:
+
+- Inputs carry `contract: "provisional-lot-input-v0"` and a pinned ref
+  (`event:<id>@<revision>`, `<factKind>:<observation id>@parse_run:<n>`). Kinds
+  are `acquisition`, `disposal`, `split`, `snapshot` and `transfer`; a book is
+  holder × instrument × a caller-supplied, opaque wrapper key.
+- The policy pins the method (FIFO, moving average, specific
+  identification), the time basis (trade or settlement date), the only
+  ordering rule (`temporal-then-indeterminate`), fee treatment on acquisition
+  (`capitalize | exclude`) and disposal (`reduce-proceeds | separate`), FX
+  (`lot-currency`, or `convert-at-input-rate` into `costUnitRef` with the
+  input's own rate and its ref) with an FX policy ref, and rounding. None of
+  them has a default; no policy is `policy_missing`, a rounding policy other
+  than `leg` with `carry` is `policy_unsupported` (checked before the tax
+  gate), and a `tax` purpose is refused `tax_rules_unverified` through
+  `costBasis()`.
+- Partial allocation takes `cost × q / Q` exactly; without rounding an
+  inexact share is `inexact_allocation`, with a `leg`/`carry` rounding policy
+  each share keeps its rounding inputs and the last consumption takes the
+  exact remainder; a rounded share that would exceed what is left is
+  `inexact_allocation`. Moving average keeps exact totals, never a unit
+  price.
+- Inputs the economic time does not order are `order_tie` (same-time
+  acquisitions, and same-time unrounded disposals, commute under moving
+  average); an unknown time is `unknown_time`. Ids and recorded-at times
+  never order anything. Beside dates, an instant is placed by its own
+  calendar day, as `compareTemporal` places it against a date.
+- A snapshot with no history seeds a lot of unknown cost (`snapshot_only`);
+  a later snapshot is a check (`snapshot_mismatch`). A provider-stated
+  acquisition cost never becomes a lot cost. A disposal beyond the holding is
+  `negative_holding`, never a short; a stale specific-identification
+  selection is `lot_selection_mismatch`, never reassigned.
+- Transfers refuse their book (`transfer_contract_pending`); classes other
+  than listed equity, fund units and crypto assets refuse theirs
+  (`unsupported_instrument`).
+- Results carry allocations, allocated cost, proceeds and disposal fees side
+  by side with closed reason codes, moving-average pools listed once, remaining
+  lots with a reserved `lineage`, and a manifest holding the policy and the
+  validated inputs, which the caller digests with `canonicalDigest`. A
+  `limited` disposal's reasons are only `unknown_cost`,
+  `unknown_acquisition_fee`, `unknown_proceeds`, `unknown_disposal_fee`,
+  `fx_rate_missing` and `unit_mismatch`. The manifest holds amounts, so a
+  future writer stores it only as a report body, never in a log or tick
+  record. `LOT_ENGINE_VERSION` is bumped on every allocation-rule change.
+  There is no gain and no tax conclusion.
+
+The C adapter (`packages/domain/src/lot-adapter.ts`,
+[ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md)) maps the
+knowledge selector's selected revisions to these inputs: a `trade` (a
+reserved kind no migration admits yet) whose one security movement is the
+acquisition or disposal, its cash movement's fee breakdowns as fees (101 out
+= 100 + 1 fee; 100 in = 101 gross − 1 fee), trade and settlement times from
+their own role rows with no fallback, the book from the resolved account, a
+caller-supplied wrapper key and the caller's instrument mapping pinned by the
+seal. A book any held revision touches (a selector disposition, a shape it
+cannot place, an unresolved or aggregate instrument, a transfer, a corporate
+action) is not fed. `lotsOnSelection` runs the engine under the caller's
+policy and pins an outer manifest (cut and its standing, set version,
+identity pins, alias rules, coverage producer, policy, FX policy, engine
+manifest digest); a provisional cut is never `complete`.
+`queryLotsOnSelection` answers one holder at one cut without a route, over
+every identifier currently mapped to the asked instruments, so a book is its
+instrument's whole history. Since
+CORE 0070 refuses the `security-quantity` book and no securities writer
+exists, every real answer is `unsupported`
+(`security_quantity_writer_missing`), with the manifest produced.
+
+Limits: no writer produces security-quantity movements, so the engine
+computes real lots nowhere; no FX rate, corporate-action or transfer evidence
+reaches it; the wrapper key's source is not decided; a security instrument's
+class is not recorded; the input contract is provisional; own-account
+transfers, other corporate actions and short or margin positions are not
+handled; a re-parse that pins the same row under a different JSON path is
+not detected as a duplicate; results are not stored (`calculation_results` cannot hold the lot
+reason codes); P&L and tax outputs are absent.
 
 ## 4. Reports are not projections
 
@@ -298,6 +540,49 @@ would discard later collection and later decisions (docs/operations.md).
   unvalued reason and their order, unsupported instruments, result partitions,
   net worth versus known-assets subtotal, rounding points and residual rules,
   both P&L policies (SYN23), the cost-basis gate (AT59), SYN11-SYN15.
+- `packages/domain/test/lots.test.ts` — the lot engine on synthetic inputs:
+  each method with exact conservation, inexact allocation refused or
+  carried, fee and FX modes, splits, snapshots, ordering ties, the gates and
+  determinism under input permutation.
+- `packages/domain/test/lot-adapter.test.ts` — the C adapter on hand-built
+  selections and on today's selector: typed effects (101 = 100 + 1), no
+  time-role fallback, B7–B11, the C side of B3, B12 and B13, every adapter
+  code and dispositions holding only the touched book;
+  `packages/application/test/lots-on-selection-query.test.ts` — the query on a
+  migrated CORE store, answering `unsupported`.
+- `packages/domain/test/market-data.test.ts` — each exclusion code, the six
+  checks in order, date-only and zone rules, freshness at and past the limit,
+  business days over a synthetic calendar (a century counted exactly and
+  quickly), disagreement and corroboration, overlap among possibly fresh
+  candidates and priority, FX paths, exact two-hop values, inverse rounding
+  once with its inputs, policy mismatches, non-positive prices, validators,
+  digests, the manifest, and a guard that no production source, script or task
+  names a proposal; `civil-date.test.ts` — `civilDateOfInstant`, `canonicalZone`.
+- `packages/read-model/test/price-candidates.test.ts` — both candidate texts
+  on migrated CORE: re-parse and rollback in current and known-at modes, ties
+  and sub-millisecond times at the knowledge instant, same-snapshot scope,
+  overlap independent of the read margin, stale told from missing, unreadable
+  effective times counted, bounds refused, plans without statistics, a
+  differential against `selectPrices` on random tie-free stores (unbounded and
+  0–4 day freshness), a known-at differential against an oracle over random
+  publication histories, and the frozen digest of the shipped selection text;
+  `price-candidates-scale.test.ts` — the plans and answers on a scaled store.
+- `packages/application/test/market-data-query.test.ts` — `selectMarketData`
+  end to end; the same inputs give the same context id, a new price a new one;
+  unquotable currencies, malformed requests, misaligned bounds, ambiguous ids
+  and proposals.
+- `packages/domain/test/valuation-on-date.test.ts` — every holding outcome
+  (a stale snapshot's holding `snapshot_stale`), stale and non-positive prices, inexact bases, missing and unquotable rates,
+  policy mismatches, totals absent for an unvalued holding, two sources or
+  none and `partial-verified-scope` for a lacking position container or a
+  stale one that listed no holding, a USD holding into AUD rounded once, the `needs-policy` gate, and a
+  context id stable across equal inputs and new for a corrected price;
+  `packages/application/test/valuation-on-date-query.test.ts` — the query on
+  migrated CORE with synthetic snapshots, prices and a board, known-at
+  before a correction, a 40-day-old snapshot under `latest-in-window`, a
+  lacking VC container, `unknown_source`, refusals, the 500-holding and 500-selection bounds, and
+  plans without statistics for its account and source checks
+  (`packages/read-model/test/dated-state.test.ts` for its quantity read).
 - `packages/domain/test/reports.test.ts` — body validation and digest
   stability, storage key, event shapes, replayability and capabilities (AT66).
 - `services/processor/test/reports.test.ts` — migration 0034 on

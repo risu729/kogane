@@ -225,10 +225,17 @@ Rules that hold for every collector below:
   real `*RunPlan` function through registration against the whole CORE schema
   and the operator bootstrap, and fails when any of these is broken.
 
-- `operationId`/`attemptId` are carried when an operation requested the run.
-  Generic collection/session-refresh operations currently stop at
-  `awaiting_collector_dispatch`; acceptance is not execution. Alarm scheduling
-  uses the private named RPC path. See [current status](current-status.md) and
+- The terminal contract has optional `operationId`/`attemptId` fields. An
+  operations-API collection reaches a collector through the same private named
+  RPC the alarm uses (`ScheduledCollection.runOperation`, which runs the
+  connection's own `runScheduled` job under the same lease) and is linked to
+  its runs by the run ids the collector reports, stored on the operation
+  ([ADR 0048](adr/0048-operation-collector-dispatch.md),
+  [ops-api.md](ops-api.md#collector-execution-adr-0048)); no collector writes
+  `operationId` into the terminal on that path. Acceptance is not execution:
+  a request is started only for a connection the Processor's
+  `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names, and it collects the job's daily
+  scope, not the requested window. See [current status](current-status.md) and
   [schedules](schedules.md).
 - **One copy** (plan 00: the original is stored once; no standing
   collector-side → central double copy). A run is written only into `DATA`.

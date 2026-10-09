@@ -16,6 +16,7 @@ import {
   CARD_REVIEW_KINDS,
   CHANGE_KINDS,
   commit,
+  ECONOMIC_EVENT_COMMAND_KINDS,
   createPlan,
   d1CommandStore,
   getReceipt,
@@ -27,7 +28,11 @@ import {
   type Principal,
 } from "../../../packages/application/src/index.ts";
 import { balanceProjectionOutboxProcessor } from "../src/balance-projection-job.ts";
-import { cardReviewMutation, changeMutationPlanners } from "../src/change-commands.ts";
+import {
+  cardReviewMutation,
+  changeMutationPlanners,
+  economicEventMutation,
+} from "../src/change-commands.ts";
 import { dispatchDecisionOutbox } from "../src/decision-outbox.ts";
 import { executeIdentityCommand } from "../src/identity-commands.ts";
 import {
@@ -812,6 +817,150 @@ test("the card purchase review kinds have a writer slot but are refused at plan 
     refs: ["card-purchase.exclude"],
   });
   expect(await count()).toBe(before);
+});
+
+test("the economic-event kinds are refused at every command route for every principal, writing nothing", async () => {
+  // ADR 0054, G2 (CORE 0071): vocabulary only. Each kind has a writer slot
+  // that answers null and no planner, so the processor's command API refuses
+  // it at plan, simulate, approve and commit for a human and for an agent.
+  for (const kind of ECONOMIC_EVENT_COMMAND_KINDS)
+    expect(changeMutationPlanners(db)[kind]).toBe(economicEventMutation);
+  expect(await economicEventMutation({} as MutationInput)).toBeNull();
+  const reason = "route test";
+  const key = (row: string) => [
+    "synthetic-bank",
+    "synthetic-producer",
+    null,
+    "synthetic-account",
+    row,
+  ];
+  const claim = (row: string) => ({ book: "cash-movement", key: key(row) });
+  const revision = (row: string) => ({
+    kind: "transfer",
+    state: "debited",
+    unknownReason: null,
+    legs: [
+      {
+        legIndex: 0,
+        subjectRef: "account:acct_synthetic",
+        role: "decrease",
+        basis: "cash-movement",
+        source: { kind: "transaction", id: "1", revision: "parse_run:1" },
+      },
+    ],
+    claims: [claim(row)],
+  });
+  const payloads: Record<(typeof ECONOMIC_EVENT_COMMAND_KINDS)[number], Record<string, unknown>> = {
+    "economic-event.adopt": { family: "bank-movement", proposalId: "proposal-synthetic", reason },
+    "economic-event.correct": {
+      family: "bank-movement",
+      eventId: "transfer-synthetic-1",
+      priorRevision: 1,
+      revision: revision("row-1"),
+      releasedClaims: [],
+      reason,
+    },
+    "economic-event.withdraw": {
+      family: "bank-movement",
+      eventId: "transfer-synthetic-1",
+      revision: 1,
+      decisionRevisionId: "decision-synthetic",
+      reason,
+    },
+    "economic-event.move": {
+      family: "bank-movement",
+      claim: claim("row-2"),
+      from: { eventId: "transfer-synthetic-1", priorRevision: 1, revision: revision("row-1") },
+      to: { eventId: "transfer-synthetic-2", priorRevision: 1, revision: revision("row-2") },
+      reason,
+    },
+  };
+  const human = { "x-kogane-verified-actor": operator.id, "x-kogane-actor-kind": "human" };
+  const asAgent = { "x-kogane-verified-actor": agent.id, "x-kogane-actor-kind": "agent" };
+  const post = async (path: string, body: unknown, headers: Record<string, string>) => {
+    const response = await mf.dispatchFetch(`https://pipeline.internal${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", ...headers },
+      body: JSON.stringify(body),
+    });
+    return { status: response.status, json: (await response.json()) as Record<string, unknown> };
+  };
+  const counts = async () =>
+    Object.fromEntries(
+      await Promise.all(
+        [
+          "change_plans",
+          "approvals",
+          "operation_receipts",
+          "decision_outbox",
+          "decision_revisions",
+          "economic_commit_log",
+        ].map(async (table) => [
+          table,
+          (await db.prepare(`SELECT count(*) AS n FROM ${table}`).first<{ n: number }>())!.n,
+        ]),
+      ),
+    );
+  for (const [index, kind] of ECONOMIC_EVENT_COMMAND_KINDS.entries()) {
+    const refused = { status: 400, json: { error: "unsupported_semantics", refs: [kind] } };
+    const before = await counts();
+    for (const headers of [human, asAgent])
+      expect(await post("/command/v1/plan", { kind, payload: payloads[kind] }, headers)).toEqual(
+        refused,
+      );
+    expect(await counts()).toEqual(before);
+    // A plan row of the kind, and an approval beside it, planted by hand: the
+    // schema admits the kind, the lifecycle still refuses every step.
+    const planId = `${index + 1}`.padStart(64, "e");
+    await db
+      .prepare(
+        "INSERT INTO change_plans VALUES(?,?,?,'context','{}',?,'operator',?,'2099-01-01T00:00:00.000Z','planned')",
+      )
+      .bind(
+        planId,
+        kind,
+        JSON.stringify(payloads[kind]),
+        JSON.stringify({ kind, targets: [] }),
+        NOW,
+      )
+      .run();
+    const planted = await counts();
+    for (const headers of [human, asAgent])
+      expect(await post("/command/v1/simulate", { planId }, headers)).toEqual(refused);
+    expect(await post("/command/v1/approve", { planId, planDigest: planId }, human)).toEqual(
+      refused,
+    );
+    expect(
+      await post("/command/v1/approve", { planId, planDigest: planId }, asAgent),
+    ).toMatchObject({ status: 403, json: { error: "approval_required" } });
+    expect(await counts()).toEqual(planted);
+    const approvalId = `approval-economic-${index}`;
+    await db
+      .prepare("INSERT INTO approvals VALUES(?,?,?,?,'server','[]','2099-01-01T00:00:00.000Z',1,?)")
+      .bind(approvalId, planId, planId, operator.id, NOW)
+      .run();
+    const approved = await counts();
+    expect(
+      await post(
+        "/command/v1/commit",
+        { operationId: `op-economic-${index}`, planId, approvalId },
+        human,
+      ),
+    ).toEqual(refused);
+    expect(
+      await post(
+        "/command/v1/commit",
+        { operationId: `op-economic-${index}-agent`, planId, approvalId },
+        asAgent,
+      ),
+    ).toMatchObject({ status: 403, json: { error: "approval_required" } });
+    expect(await counts()).toEqual(approved);
+    const uses = await db
+      .prepare("SELECT uses_remaining FROM approvals WHERE approval_id=?")
+      .bind(approvalId)
+      .first<{ uses_remaining: number }>();
+    expect(uses?.uses_remaining).toBe(1);
+  }
 });
 
 test("plans, approvals, receipts and outbox rows are append-only except their own state columns", async () => {

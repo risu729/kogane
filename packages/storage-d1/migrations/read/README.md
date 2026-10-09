@@ -17,6 +17,13 @@ expiry estimates and the replay of saved conversion simulations, built from an
 input that fixes the evaluation instant. Same rules, same database, its own
 flag (`docs/rewards.md` §12).
 
+`0003_reward_expiry_basis.sql` adds one nullable column,
+`reward_expiry_estimates.expiry_basis_json`: the provider's displayed expiry
+and the computed expiry of each estimate, apart, with the rule version,
+activity and membership facts the computed side used or its closed reason
+(ADR 0049, `docs/rewards.md` §2.1). Rows of builds before
+`reward-projection-v2` keep NULL.
+
 Rules that already hold:
 
 - CORE migrations live in `../core/` and are immutable once applied. READ

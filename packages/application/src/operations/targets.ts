@@ -9,7 +9,9 @@ import {
   type ChangeKind,
   type ChangePayload,
   type CommandStore,
+  type EconomicEventCommandKind,
   isCardReviewKind,
+  isEconomicEventKind,
   type ExpectedRevisions,
   type OutboxTarget,
   type PlanTarget,
@@ -117,6 +119,25 @@ export type ReviewPlanner = (
  */
 export const REVIEW_PLANNERS: Readonly<Partial<Record<CardReviewKind, ReviewPlanner>>> = {};
 
+/** Resolves one economic-event kind's targets and simulates it. */
+export type EconomicEventPlanner = (
+  store: CommandStore,
+  kind: EconomicEventCommandKind,
+  payload: ChangePayload,
+) => Promise<CommandResult<{ resolved: ResolvedPlan }>>;
+
+/**
+ * The economic-event planners (ADR 0054, G2 vocabulary; CORE 0071). None is
+ * registered: G2 is vocabulary only, and the own-transfer planners are G3's,
+ * behind ADR 0054's production gate. An unregistered kind is refused with
+ * `unsupported_semantics` at plan, simulate, approve and commit, for every
+ * principal, so no plan, approval or receipt of these kinds is ever written
+ * through the lifecycle.
+ */
+export const ECONOMIC_EVENT_PLANNERS: Readonly<
+  Partial<Record<EconomicEventCommandKind, EconomicEventPlanner>>
+> = {};
+
 export async function resolveAndSimulate(
   store: CommandStore,
   kind: ChangeKind,
@@ -124,6 +145,10 @@ export async function resolveAndSimulate(
 ): Promise<CommandResult<{ resolved: ResolvedPlan }>> {
   if (isCardReviewKind(kind)) {
     const planner = REVIEW_PLANNERS[kind];
+    return planner ? planner(store, kind, payload) : commandError("unsupported_semantics", [kind]);
+  }
+  if (isEconomicEventKind(kind)) {
+    const planner = ECONOMIC_EVENT_PLANNERS[kind];
     return planner ? planner(store, kind, payload) : commandError("unsupported_semantics", [kind]);
   }
   if (kind.startsWith("card-settlement.")) return cardSettlementPlan(store, kind, payload);

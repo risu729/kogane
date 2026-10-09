@@ -16,6 +16,12 @@ import {
   type ScheduleOccurrence,
   type ScheduleSnapshot,
 } from "../../../packages/collection/src/schedule-model";
+import {
+  decideSurveyProposal,
+  maintenanceSurveyView,
+  type RevisionResult,
+  type RevisionWrite,
+} from "./maintenance-survey/decisions.ts";
 export { jobs };
 export interface ScheduleRow {
   id: string;
@@ -972,7 +978,10 @@ export async function scheduleSnapshot(env: Env): Promise<ScheduleSnapshot> {
       latest: latest.find((o) => o.scheduleId === row.id) ?? null,
     });
   }
-  return { schedules, maintenance, occurrences, leases };
+  // The re-survey's freshness and proposals (ADR 0050); a read failure hides
+  // only that part of the page.
+  const survey = await maintenanceSurveyView(env, Date.now()).catch(() => undefined);
+  return { schedules, maintenance, occurrences, leases, ...(survey ? { survey } : {}) };
 }
 /**
  * The two agent paths (ADR 0046): read the granted sources' maintenance
@@ -1027,6 +1036,15 @@ export async function scheduleRoute(
     if (path === "/maintenance") return Response.json(await updateMaintenance(env, value, actor));
     const leaseMatch = /^\/leases\/([a-z0-9-]{1,100})$/u.exec(path);
     if (leaseMatch) return Response.json(await releaseCollectionLease(env, leaseMatch[1]!, value));
+    const proposalMatch = /^\/proposals\/([1-9][0-9]{0,15})$/u.exec(path);
+    if (proposalMatch)
+      return await decideSurveyProposal(
+        env,
+        Number(proposalMatch[1]),
+        value,
+        actor,
+        surveyRevisionWriter,
+      );
     const match = /^\/([a-z0-9-]{1,100})$/u.exec(path);
     if (match) return Response.json(await updateSchedule(env, match[1]!, value, actor));
     throw new ScheduleError("not_found", 404);
@@ -1035,5 +1053,41 @@ export async function scheduleRoute(
       { error: error instanceof ScheduleError ? error.code : "scheduling_unavailable" },
       { status: error instanceof ScheduleError ? error.status : 503 },
     );
+  }
+}
+/**
+ * The writer an accepted maintenance-survey proposal goes through (ADR 0050):
+ * the operator route's own version-checked revision, so a proposal is adopted
+ * exactly as an operator's edit is. #560's `writeMaintenanceRevision` takes
+ * this write as it is; when it merges it replaces this adapter, and the
+ * revision then also carries the proposal as its decision reference.
+ */
+async function surveyRevisionWriter(env: Env, write: RevisionWrite): Promise<RevisionResult> {
+  try {
+    const saved = await updateMaintenance(
+      env,
+      {
+        id: write.ruleId,
+        revision: write.expectedRevision,
+        source: write.source,
+        timezone: write.change.timezone,
+        pattern: write.change.pattern,
+        enabled: write.change.enabled,
+        scope: write.change.scope,
+        referenceUrl: write.provenance.referenceUrl,
+        verifiedAt: write.provenance.verifiedAt,
+      },
+      write.actor.id,
+    );
+    return {
+      ok: true,
+      ruleId: write.ruleId,
+      revision: saved.revision,
+      reconciled: saved.reservation === "armed",
+    };
+  } catch (error) {
+    if (error instanceof ScheduleError)
+      return { ok: false, code: error.code, status: error.status };
+    throw error;
   }
 }

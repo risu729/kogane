@@ -30,6 +30,11 @@ original observation fields, identifier code, acquisition provenance, raw
 evidence, mapping label, and revision are preserved. This projection changes
 neither account identity nor transaction/holding arithmetic.
 
+Names are never evidence that two identifiers denote one instrument. The
+cross-identifier candidate read compares identifier values only; equal names
+without a shared ISIN, RIC or security code are at most a hint
+([identity](identity.md#cross-identifier-instrument-candidates)).
+
 Tests cover the late Japanese name, transaction/position/valuation origins,
 market separation, manual decisions, superseded parses, deterministic choice,
 and bounded requests. The existing 35,000-observation/6,000-parse fixture also

@@ -8,7 +8,7 @@ provider figures, never a total: nothing is added, converted or netted, and a
 container without a capture is named, never shown as zero.
 
 What adopted events imply from a start snapshot, compared with these figures,
-is [reconstructed state](reconstructed-state.md) (a pure engine; no read path yet).
+is [reconstructed state](reconstructed-state.md) (an engine and an application query; no route or page yet).
 
 | Layer        | Where                                                                                                   |
 | ------------ | ------------------------------------------------------------------------------------------------------- |
@@ -181,6 +181,10 @@ run or identity table whole, and requires each answer under one second.
   installment remainders and loans are not shown (`liabilitiesMissing`).
 - Adoption and overlap across sources (`selectAdoptedSet`) are not applied:
   rows are listed per provider account, which is why nothing is added.
-  Valuation in a base currency is P2-3.
+  Valuation of the listed positions in a base unit, under an explicit price
+  and FX policy, is `queryValuationOnDate`
+  ([calculation and reports §2](calculation-and-reports.md#valuation-on-a-date));
+  it has no route yet, refuses holdings of `stale` snapshots, and states no
+  total across sources.
 - Nothing is stored: a reported state has no fixed report or
   `calculation_runs` row yet.

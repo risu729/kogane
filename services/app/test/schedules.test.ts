@@ -163,6 +163,27 @@ it("stopped lease release retains operator, user-session and same-origin boundar
   ]);
 });
 
+it("a survey proposal decision is an operator settings write, relayed as sent (ADR 0050)", async () => {
+  const decided = await call({
+    suffix: "/proposals/12",
+    method: "POST",
+    body: '{"decision":"accept"}',
+  });
+  expect(decided.response.status).toBe(200);
+  expect(decided.seen).toEqual([
+    { path: "/internal/schedules/proposals/12", actor: OPERATOR, body: '{"decision":"accept"}' },
+  ]);
+  for (const suffix of ["/proposals/0", "/proposals/x", "/proposals/12/accept", "/proposals/"]) {
+    const result = await call({ suffix, method: "POST", body: "{}" });
+    expect(result.response.status).toBe(404);
+    expect(result.seen).toEqual([]);
+  }
+  for (const options of [{ subject: AGENT }, { origin: "https://other.test" }, { marker: "" }]) {
+    const result = await call({ suffix: "/proposals/12", method: "POST", body: "{}", ...options });
+    expect(result.response.status).toBe(403);
+    expect(result.seen).toEqual([]);
+  }
+});
 it("a deployment token has only bodyless future bootstrap authority", async () => {
   const boot = await call({ suffix: "/bootstrap", method: "POST", serviceToken: TOKEN });
   expect(boot.response.status).toBe(200);
