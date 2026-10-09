@@ -660,7 +660,21 @@ export async function scheduleRoute(
     const path = url.pathname.slice("/internal/schedules".length);
     if (request.method === "GET" && path === "") return Response.json(await scheduleSnapshot(env));
     if (request.method !== "POST") throw new ScheduleError("method_not_allowed", 405);
-    if (path === "/bootstrap") return Response.json(await bootstrapSchedules(env));
+    if (path === "/bootstrap") {
+      // This closed refusal is exclusively prewrite, after binding auth. Capture
+      // the serving Processor identity before any reservation/bookkeeping write.
+      const releaseSha = env.RELEASE_SHA;
+      const expectedSha = request.headers.get("x-kogane-release-sha");
+      if (
+        typeof releaseSha !== "string" ||
+        !/^[0-9a-f]{40}$/u.test(releaseSha) ||
+        expectedSha === null ||
+        !/^[0-9a-f]{40}$/u.test(expectedSha)
+      )
+        throw new ScheduleError("scheduling_unavailable", 503);
+      if (expectedSha !== releaseSha) throw new ScheduleError("release_mismatch", 503);
+      return Response.json({ ...(await bootstrapSchedules(env)), releaseSha });
+    }
     const actor = request.headers.get("x-kogane-operator");
     if (!actor || !/^[A-Za-z0-9._:@-]{1,200}$/u.test(actor))
       throw new ScheduleError("operator_required", 403);
