@@ -1135,6 +1135,12 @@
       "statementCount": 4,
       "insertStatements": [],
       "sha256": "0b374b9e0c9434e8789eb8485760648cfd1cc0a46794e9d4aada51bf37265348"
+    },
+    {
+      "file": "0077_reward_bucket_claims_v2.sql",
+      "statementCount": 10,
+      "insertStatements": [],
+      "sha256": "2f77d555e0f64215837e4f6e70addcfe018a17a184986aea5a3272500f7a5980"
     }
   ],
   "tables": [
@@ -15168,6 +15174,203 @@
       "sqlSha256": "7bad495cf9b32816"
     },
     {
+      "name": "reward_bucket_claims_v2",
+      "classification": "core-keep",
+      "planRow": "append-only canonical reward source claims with unclassified provider semantics",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "claim_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_fact_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_fact_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "program_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "holding_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bucket_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bucket_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "restriction_refs_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "unit_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "quantity_coefficient",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "quantity_scale",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "quantity_status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "observed_expiry_json",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "observed_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "promotion_release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "recorded_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "parse_run_id",
+          "references": "parse_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "program_id",
+          "references": "reward_programs(program_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "reward_bucket_claims_v2_fact",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "source_fact_kind",
+            "source_fact_id"
+          ]
+        },
+        {
+          "name": "reward_bucket_claims_v2_holding",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "program_id",
+            "holding_ref",
+            "id"
+          ]
+        },
+        {
+          "name": "reward_bucket_claims_v2_parse_run",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "parse_run_id"
+          ]
+        }
+      ],
+      "triggers": [
+        "reward_bucket_claims_v2_bump_revision_delete",
+        "reward_bucket_claims_v2_bump_revision_insert",
+        "reward_bucket_claims_v2_bump_revision_update",
+        "reward_bucket_claims_v2_no_delete",
+        "reward_bucket_claims_v2_no_update",
+        "reward_bucket_claims_v2_requires_published"
+      ],
+      "noUpdateTriggers": [
+        "reward_bucket_claims_v2_no_update"
+      ],
+      "noDeleteTriggers": [
+        "reward_bucket_claims_v2_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "552f36bcd627627b"
+    },
+    {
       "name": "reward_programs",
       "classification": "core-keep",
       "planRow": "reward reference claims",
@@ -20240,6 +20443,48 @@
       "sqlSha256": "14d19757f349438e"
     },
     {
+      "name": "reward_bucket_claims_v2_bump_revision_delete",
+      "table": "reward_bucket_claims_v2",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "4d1d8548b5fa1692"
+    },
+    {
+      "name": "reward_bucket_claims_v2_bump_revision_insert",
+      "table": "reward_bucket_claims_v2",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "7739d3d9f91edcaa"
+    },
+    {
+      "name": "reward_bucket_claims_v2_bump_revision_update",
+      "table": "reward_bucket_claims_v2",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "771c4cf4e8e7c4e9"
+    },
+    {
+      "name": "reward_bucket_claims_v2_no_delete",
+      "table": "reward_bucket_claims_v2",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "dd3e0563120d2c8f"
+    },
+    {
+      "name": "reward_bucket_claims_v2_no_update",
+      "table": "reward_bucket_claims_v2",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "f78de2bffcd9ce0f"
+    },
+    {
+      "name": "reward_bucket_claims_v2_requires_published",
+      "table": "reward_bucket_claims_v2",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "41e9721aed0abdc1"
+    },
+    {
       "name": "reward_programs_bump_revision_delete",
       "table": "reward_programs",
       "timing": "AFTER",
@@ -21162,6 +21407,21 @@
       "sqlSha256": "21d60bd4a871f0cc"
     },
     {
+      "name": "reward_bucket_claims_v2_fact",
+      "table": "reward_bucket_claims_v2",
+      "sqlSha256": "963ebe41dd8d1ab3"
+    },
+    {
+      "name": "reward_bucket_claims_v2_holding",
+      "table": "reward_bucket_claims_v2",
+      "sqlSha256": "436dd9e2916ce383"
+    },
+    {
+      "name": "reward_bucket_claims_v2_parse_run",
+      "table": "reward_bucket_claims_v2",
+      "sqlSha256": "ffb6ded37b7774ff"
+    },
+    {
       "name": "reward_programs_source",
       "table": "reward_programs",
       "sqlSha256": "2fe5e243ea0a9dff"
@@ -21193,10 +21453,10 @@
     }
   ],
   "summary": {
-    "tableCount": 138,
+    "tableCount": 139,
     "viewCount": 44,
-    "triggerCount": 511,
-    "explicitIndexCount": 141,
+    "triggerCount": 517,
+    "explicitIndexCount": 144,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -21304,6 +21564,7 @@
         "report_events",
         "retention_classes",
         "reward_bucket_claims",
+        "reward_bucket_claims_v2",
         "reward_programs",
         "run_inventories",
         "run_inventory_items",
@@ -21449,6 +21710,6 @@
       "0070_economic_commit_guard.sql",
       "0071_economic_event_command_kinds.sql"
     ],
-    "schemaSha256": "e1820c1efb22a4f15187d923d05dfa0d1ec812a3c94077c1fb247e20a9181b9e"
+    "schemaSha256": "339280b496419e8e5088994123ae86ee7c18b341ac7ed245c570823d34efb7cb"
   }
 }

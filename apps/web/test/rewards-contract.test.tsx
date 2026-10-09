@@ -252,3 +252,54 @@ test("a row without a recorded basis, or with a malformed one, says so instead o
   expect(html).toContain("2027-03-01");
   expect(html).toContain("取得元の表示期限と規約からの算定が異なります。両方を表示しています");
 });
+
+test("READ expiry displays unclassified dated and undated quantities with the computation block", () => {
+  const computed = {
+    ...basisRow.expiryBasis.computed,
+    reasonCode: "bucket_kind_unclassified",
+    activity: null,
+    membership: null,
+    uncertaintyCodes: [],
+  };
+  const data: RewardReadExpiryPage = {
+    ...page,
+    rows: page.rows.map((row) => ({
+      ...row,
+      bucketKind: "unclassified",
+      state: "partial",
+      quantity: page.rows[1]!.quantity,
+      reasonCodes: ["bucket_kind_unclassified"],
+      expiryBasis: {
+        ...basisRow.expiryBasis,
+        displayed:
+          row.providerObserved === null
+            ? null
+            : {
+                ...basisRow.expiryBasis.displayed,
+                value: row.providerObserved,
+              },
+        computed,
+      } as RewardReadExpiryPage["rows"][number]["expiryBasis"],
+    })),
+  };
+  expect(validApiResponse("/api/v2/rewards/expiry", data)).toBe(true);
+  const html = renderToStaticMarkup(<RewardExpiryResults data={data} />);
+  for (const text of [
+    "種類未確認",
+    "123.45",
+    "points:synthetic",
+    "2026-12-31",
+    "期限未確認",
+    "ポイントの種類が未確認",
+    "算定できません",
+    "balance:41",
+  ])
+    expect(html).toContain(text);
+  expect(html).not.toContain("資格指標");
+  expect(
+    validApiResponse("/api/v2/rewards/expiry", {
+      ...data,
+      rows: [{ ...data.rows[0], bucketKind: "future-provider-enum" }],
+    }),
+  ).toBe(false);
+});

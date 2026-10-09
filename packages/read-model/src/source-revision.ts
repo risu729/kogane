@@ -62,6 +62,7 @@ export const SOURCE_REVISION_LEDGER = [
   "expiry_rules",
   "conversion_offers",
   "reward_bucket_claims",
+  "reward_bucket_claims_v2",
   "membership_state_claims",
 ] as const;
 

@@ -30,6 +30,7 @@ const BUCKET_LABELS: Record<string, string> = {
   "time-limited": "期間限定",
   "pending-award": "付与予定",
   qualification: "資格指標",
+  unclassified: "種類未確認",
 };
 const STATE_LABELS: Record<string, string> = {
   computed: "規約から算定",
@@ -73,6 +74,7 @@ const REASON_LABELS: Record<string, string> = {
   rule_not_verified: "この制度の規約を確認できていません",
   rule_family_unsupported: "規約の内容を計算方法へ落とし込めていません",
   rule_out_of_force: "この規約版の有効期間外です",
+  bucket_kind_unclassified: "ポイントの種類が未確認のため、利用可能量や期限を算定できません",
   rule_bucket_kind_not_covered: "この規約はこの種類のポイントを対象にしていません",
   membership_required: "会員資格が条件に含まれます",
   membership_self_reported: "会員資格が自己申告で、取得元で確認できていません",

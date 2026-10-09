@@ -184,6 +184,7 @@ describe("G0-09 READ schema ledger", () => {
       "0002_reward_read.sql",
       // ADR 0049: the displayed and computed expiry basis of each estimate.
       "0003_reward_expiry_basis.sql",
+      "0004_reward_unclassified_buckets.sql",
     ]);
     const core = new Set(ledger.tables.map((table) => table.name));
     expect(
@@ -213,6 +214,7 @@ describe("G0-09 READ schema ledger", () => {
       "current_balance_projection",
       "reward_conversion_simulations",
       "reward_expiry_estimates",
+      "reward_expiry_estimates_v2",
       "reward_expiry_snapshots",
       "reward_snapshot_input_refs",
       "scope_relations",

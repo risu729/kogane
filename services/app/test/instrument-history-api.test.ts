@@ -72,11 +72,12 @@ describe("authenticated instrument history route", () => {
     });
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect((await call("?identifierId=history-identifier", "HEAD")).status).toBe(200);
-    expect(
-      await env.DB.prepare(
-        "SELECT * FROM instrument_mappings WHERE identifier_id='history-identifier'",
-      ).all(),
-    ).toEqual(before);
+    const after = await env.DB.prepare(
+      "SELECT * FROM instrument_mappings WHERE identifier_id='history-identifier'",
+    ).all();
+    expect(after.results).toEqual(before.results);
+    expect(before.success).toBe(true);
+    expect(after.success).toBe(true);
   });
   it("requires Access, refuses non-GET, unknown ids and malformed or repeated queries", async () => {
     expect((await call("?identifierId=history-identifier", "GET", false)).status).toBe(401);
@@ -90,5 +91,42 @@ describe("authenticated instrument history route", () => {
       "?identifierId=history-identifier&extra=1",
     ])
       expect((await call(query)).status).toBe(400);
+  });
+});
+describe("mapping snapshot equality", () => {
+  function snapshot(duration: number, revision = 1) {
+    return {
+      success: true,
+      results: [
+        {
+          id: "history-mapping",
+          identifier_id: "history-identifier",
+          revision,
+          instrument_id: "history-instrument",
+        },
+      ],
+      meta: {
+        duration,
+        size_after: 0,
+        rows_read: 1,
+        rows_written: 0,
+        last_row_id: 0,
+        changed_db: false,
+        changes: 0,
+      },
+    };
+  }
+  it("fails a whole-result comparison when only execution metadata differs", () => {
+    const before = snapshot(1);
+    const durationOnly = snapshot(0);
+    expect(durationOnly.results).toEqual(before.results);
+    expect(durationOnly).not.toEqual(before);
+    const sized = snapshot(1);
+    sized.meta.size_after = 9;
+    expect(sized.results).toEqual(before.results);
+    expect(sized).not.toEqual(before);
+  });
+  it("fails a row comparison when a mapping column changes", () => {
+    expect(snapshot(0, 2).results).not.toEqual(snapshot(0).results);
   });
 });
