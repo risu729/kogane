@@ -147,11 +147,11 @@ check — and a conformance test asserts it.
 
 Three variables, two vocabularies, deliberately not merged:
 
-| Variable            | Shape                              | Means                                                                                                             |
-| ------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `AGENT_API_GRANTS`  | JSON **object**, principal → grant | what this API lets a principal _read_, whether it may propose, and whether it may revise maintenance windows      |
-| `AGENT_GRANTS`      | JSON **array** of subjects         | which subjects the change lifecycle treats as _agents_, so they may plan and simulate but never approve or commit |
-| `OPERATOR_SUBJECTS` | JSON **array** of subjects         | which subjects the change lifecycle treats as the _human operator_, so they may approve and commit                |
+| Variable            | Shape                              | Means                                                                                                              |
+| ------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `AGENT_API_GRANTS`  | JSON **object**, principal → grant | what this API lets a principal _read_ (maintenance windows included) and whether it may propose; it names no write |
+| `AGENT_GRANTS`      | JSON **array** of subjects         | which subjects the change lifecycle treats as _agents_, so they may plan and simulate but never approve or commit  |
+| `OPERATOR_SUBJECTS` | JSON **array** of subjects         | which subjects the change lifecycle treats as the _human operator_, so they may approve and commit                 |
 
 All three are allow-lists, so all three deny by default, and each parser
 rejects the others' shape. That used to be dangerous: putting the grant object
@@ -176,7 +176,10 @@ and it belongs in its own change.
 
 Six tools, plus a seventh while the deployment serves card purchase
 recognition and an eighth while it serves the reconstructed state, one
-implementation each (`src/agent-service.ts`), reachable two ways.
+implementation each (`src/agent-service.ts`), reachable two ways. The two
+maintenance tools (`src/schedule-tools.ts`) exist while `SCHEDULES_ENABLED` is
+on: the read is reachable both ways, the revision on `/mcp` only and listed to
+nobody ([below](#maintenance-windows)).
 
 | Tool                                  | HTTP                                            | MCP `tools/call`                      | Requires                                                                                                                                                       |
 | ------------------------------------- | ----------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
