@@ -1128,7 +1128,7 @@
       "file": "0075_audit_records.sql",
       "statementCount": 14,
       "insertStatements": [],
-      "sha256": "fe993d26a5c5de613d7882f62036e5e5058918a742aa0c6645424e1cccdf577f"
+      "sha256": "3e5a5c2ebce700b5914ca0dfefe2d55ddf49c75c2d2ec011677bff39b77e61ff"
     }
   ],
   "tables": [
@@ -3036,7 +3036,7 @@
         "audit_records_no_delete"
       ],
       "appendOnly": true,
-      "sqlSha256": "b697cfa85ada11b9"
+      "sqlSha256": "8cb2c7d5b677d90e"
     },
     {
       "name": "balance_observations",
@@ -21408,6 +21408,6 @@
       "0070_economic_commit_guard.sql",
       "0071_economic_event_command_kinds.sql"
     ],
-    "schemaSha256": "540f2dfb67adde540a99a42d8d7f6d7e07769228fb52e3d26fae4cd2c6dbae22"
+    "schemaSha256": "f7d1406cc26633a262e7af3e38e6fa77554d25e2dba2e7659e584d15d738cf32"
   }
 }

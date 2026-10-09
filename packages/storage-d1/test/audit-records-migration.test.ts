@@ -150,7 +150,10 @@ describe("CORE 0075", () => {
       row({ scope_namespace: "core-source" }),
       row({ scope_source: "sony-bank" }),
       row({ confirmation_digest: `cfm_${"a".repeat(64)}` }),
-      row({ step: "confirm" }),
+      // An applied confirm without the prepare it confirms; a citation off a confirm.
+      row({ step: "confirm", result: "applied", diff_json: '{"kind":"none"}' }),
+      row({ step: "confirm", result: "accepted", diff_json: '{"kind":"none"}' }),
+      row({ confirms_audit_id: refused["audit_id"] }),
       row({ result: "overflow" }),
       row({ diff_json: '{"kind":"overflow","of":"read","count":1,"cap":2000}' }),
       // Shapes: time, id, correlation id, digest, key.
@@ -165,7 +168,8 @@ describe("CORE 0075", () => {
     ];
     for (const values of invalid) expect(() => insert(db, values)).toThrow();
     // What the ADR allows does insert: a delegated principal with its reference,
-    // a scoped record, an alarm record, an overflow record.
+    // a scoped record, an alarm record, an overflow record, and a refused
+    // confirm with no matching prepare to cite (ADR 0064 amendment).
     insert(
       db,
       row({ principal_kind: "delegated", delegation_ref: `dlg_${"a".repeat(64)}`, path: "mcp" }),
@@ -183,7 +187,18 @@ describe("CORE 0075", () => {
         diff_json: '{"kind":"overflow","of":"read","count":3,"cap":2000}',
       }),
     );
-    expect(db.query("SELECT count(*) AS n FROM audit_records").get()).toEqual({ n: 5 });
+    insert(
+      db,
+      row({
+        operation: "schedules.job.update",
+        risk_class: "R2",
+        step: "confirm",
+        result: "refused",
+        result_code: "confirmation_invalid",
+        diff_json: '{"kind":"none"}',
+      }),
+    );
+    expect(db.query("SELECT count(*) AS n FROM audit_records").get()).toEqual({ n: 6 });
   });
 
   test("one applied record per caller key, and one per confirmed prepare", () => {

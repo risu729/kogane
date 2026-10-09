@@ -230,8 +230,8 @@ production.
 
 ## Amendment: implementation details fixed by slice S1 (2026-10-09)
 
-The implementation slice settled three details this decision left open; none
-changes what is recorded or who may read it.
+The implementation slice settled four details this decision left open or
+stated too tightly; none changes what is recorded or who may read it.
 
 - **A time index.** Besides the indexes listed above, `audit_records_by_time`
   on `(recorded_at, audit_id)` serves the operator's whole-store page newest
@@ -242,6 +242,12 @@ changes what is recorded or who may read it.
   principal on one path — the case the decision describes — gets at most one
   overflow record per capped result per day; a principal on several paths gets
   one per path.
+- **A confirm cites its prepare when it applies.** `confirms_audit_id` is
+  required on an `applied` or `accepted` confirm and allowed only on a
+  confirm, instead of being set exactly on every confirm: a confirm refused
+  because no matching prepare exists (`confirmation_invalid`) has nothing to
+  cite and is still recorded with `step = 'confirm'`. The unique index still
+  allows one applied confirm per prepare.
 - **One effect record per effect.** The effect statement also refuses a second
   `applied`/`accepted` record for the same effect (same target and operation,
   and the same revision, approval or operation id), so a batch that lost a race

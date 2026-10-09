@@ -88,7 +88,11 @@ CREATE TABLE audit_records (
  CHECK((confirmation_digest IS NOT NULL)=(result='prepared')),
  CHECK((confirm_expires_at IS NOT NULL)=(result='prepared')),
  CHECK(result<>'prepared' OR step='prepare'),
- CHECK((confirms_audit_id IS NOT NULL)=(step='confirm')),
+ -- A confirm that applied cites the prepare it confirms; a refused or failed
+ -- confirm may have none to cite (no matching prepare), and nothing else
+ -- cites one.
+ CHECK(confirms_audit_id IS NULL OR step='confirm'),
+ CHECK(step<>'confirm' OR result NOT IN ('applied','accepted') OR confirms_audit_id IS NOT NULL),
  CHECK(json_extract(diff_json,'$.kind')<>'overflow' OR result='overflow'),
  CHECK(result<>'overflow' OR json_extract(diff_json,'$.kind')='overflow')
 ) STRICT;

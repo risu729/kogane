@@ -190,7 +190,9 @@ export function buildAuditRecord(
   check((RISK_CLASSES as readonly string[]).includes(facts.riskClass), "risk_class");
   const step = facts.step ?? "call";
   // Two-step confirmation (ADR 0063) is not built yet: no record of this
-  // slice is a prepare or a confirm, so none carries their digests.
+  // slice is a prepare or a confirm, so none carries their digests. When it
+  // is, an applied confirm cites its prepare (`confirms_audit_id`); a refused
+  // confirm may have none to cite, which the table admits.
   check(step === "call", "step");
   check((AUDIT_RESULTS as readonly string[]).includes(facts.result), "result");
   check(facts.result !== "prepared", "result");
