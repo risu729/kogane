@@ -656,11 +656,11 @@ describe("stage progress is evidence, not a guess", () => {
 });
 
 describe("HTTP and MCP are one API (G3-05)", () => {
-  it("lists exactly the five tools with the flag off and exactly eleven with it on", async () => {
-    const five = MCP_TOOLS.map((tool) => tool.name);
-    expect(five).toHaveLength(5);
+  it("lists exactly the six tools with the flag off and exactly twelve with it on", async () => {
+    const six = MCP_TOOLS.map((tool) => tool.name);
+    expect(six).toHaveLength(6);
     const off = await mcp("tools/list", {}, { OPS_API_ENABLED: "" });
-    expect(off.result.tools.map((tool: any) => tool.name)).toEqual(five);
+    expect(off.result.tools.map((tool: any) => tool.name)).toEqual(six);
     const called = await mcp(
       "tools/call",
       { name: "kogane.ops.collection.request", arguments: COLLECTION },
@@ -670,7 +670,7 @@ describe("HTTP and MCP are one API (G3-05)", () => {
 
     const on = await mcp("tools/list");
     const names = on.result.tools.map((tool: any) => tool.name);
-    expect(names).toEqual([...five, ...OPS_TOOL_NAMES]);
+    expect(names).toEqual([...six, ...OPS_TOOL_NAMES]);
     expect(OPS_TOOL_NAMES).toEqual([
       "kogane.ops.collection.request",
       "kogane.ops.import.request",

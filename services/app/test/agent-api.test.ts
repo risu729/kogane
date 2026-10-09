@@ -489,6 +489,13 @@ describe("untrusted provider content (AT71)", () => {
           openWorldHint: false,
         },
       },
+      {
+        name: "kogane.instruments.candidates",
+        required: [],
+        closed: false,
+        properties: ["identifierId", "offset", "view"],
+        annotations: readOnly,
+      },
     ]);
     const query = listed.result.tools[2]!.inputSchema;
     expect(query["properties"].intent.enum).toEqual([
@@ -571,7 +578,7 @@ describe("untrusted provider content (AT71)", () => {
     expect((await call(path, { environment: served })).status).toBe(405);
   });
 
-  it("lists exactly the five tools, with the same names the HTTP routes serve", async () => {
+  it("lists exactly the six tools, with the same names the HTTP routes serve", async () => {
     const listed = (await mcp({ jsonrpc: "2.0", id: 1, method: "tools/list" })) as {
       result: { tools: { name: string }[] };
     };
@@ -581,6 +588,7 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.financial.query",
       "kogane.explain",
       "kogane.reconcile.propose",
+      "kogane.instruments.candidates",
     ]);
     expect(MCP_TOOLS.map((tool) => tool.name)).toEqual([...AGENT_TOOL_NAMES]);
     expect(
