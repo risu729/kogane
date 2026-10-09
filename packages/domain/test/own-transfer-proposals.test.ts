@@ -550,6 +550,16 @@ describe("review round 1: closed ownership, ids and competing counterparts", () 
   });
 });
 
+describe("review round 2: a dateless recapture of a usable row", () => {
+  test("fails closed: the row's own pair needs review", async () => {
+    // Observation 3 is debit 1's provider row captured again without a posting day.
+    const recapture = { ...debitA(1), observationId: 3, postingDate: null };
+    const result = await ok([debitA(1), creditB(2), recapture]);
+    expect(result.rowRefusals).toEqual([{ observationId: 3, code: "posting_date_missing" }]);
+    expect(result.proposals.map((p) => p.status)).toEqual(["needs_review"]);
+  });
+});
+
 describe("mutation-style: the pairing rule against an independent oracle", () => {
   // The oracle: integer minor units (scale 2) as bigint, the window and the
   // fee bound restated here, independent of the engine's decimal helpers.

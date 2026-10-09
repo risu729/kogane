@@ -138,7 +138,11 @@ competes: a usable row that would also pair with a row of a
 `duplicate_unresolved` group, or with a row refused `posting_date_missing`
 (checked without the window, which cannot exclude it), counts that as another
 candidate, so its proposals are `needs_review` too; the refusal never picks
-the pair. Heuristics only propose (INV07).
+the pair. A dateless recapture of a usable row (same alias class, no posting
+day) is not routed under rule 3, since only dated rows are grouped there; it
+is refused `posting_date_missing` and competes like any dateless row, so it
+fits that row's counterpart and makes the row's own pair `needs_review`
+(fails closed, tested). Heuristics only propose (INV07).
 
 A proposal names its rows (observation, parse run, `SourceFactRef`, key,
 alias class, account) and never an amount. `proposalId` is `otp_` +
@@ -275,7 +279,10 @@ Rollback). 0072 stays; an older build never reads or writes its tables.
   with the same digest) instead of leaving the old status silently in force,
   and adopt treats any other unretired proposal citing either row as not
   unique. Retiring superseded proposals is the job of a lane that does not
-  exist yet.
+  exist yet: a lane must retire the stored proposal before writing its
+  restatement, and a batch carrying a conflicting id writes none of its
+  proposals (the no-replace trigger aborts the whole batch, competitors
+  included).
 - Whether a cited row is still published or current is not checked; the
   planner checks that the row exists under its parse run with the same key.
 - A retired proposal id never returns; the same pair under the same policy,
@@ -309,9 +316,12 @@ Rollback). 0072 stays; an older build never reads or writes its tables.
 - **Audit context.** The lifecycle's types carry the principal, operation id,
   plan id, payload digest and receipt; they have no place for a channel
   (UI, MCP, API), a correlation id or an idempotency key distinct from the
-  operation id. This ADR designs none: the shared audit contract for human and
-  delegated operations (another session; ADR numbers 0063 and 0064 are
-  reserved for it) will supply them.
+  operation id. This ADR designs none and implements nothing from the shared
+  path and audit contract for human and delegated operations, proposed in
+  `docs/adr/0063-delegated-ai-operation-path.md` and
+  `docs/adr/0064-common-audit-log.md`
+  ([0063](0063-delegated-ai-operation-path.md),
+  [0064](0064-common-audit-log.md)), which will supply them.
 
 ## External advice: adopted / adopted with change / deferred
 
@@ -336,7 +346,7 @@ update (2026-10-09), compared with the code:
 
 Synthetic data only; nothing read from production.
 
-- `packages/domain/test/own-transfer-proposals.test.ts` (24 tests): no policy
+- `packages/domain/test/own-transfer-proposals.test.ts` (25 tests): no policy
   and every malformed or unversioned policy refused; the bound, epoch and
   ownership-version refusals; an SMBC-shaped row with `identityOrigin:
 provider-id` admitted with its alias class; an SBI-Shinsei-shaped row
@@ -358,7 +368,8 @@ provider-id` admitted with its alias class; an SBI-Shinsei-shaped row
   an unknown ownership state and a `self` without an account unresolved, an
   observation id given twice `row_invalid`, the identity epoch changing the
   proposal id, and a competing `duplicate_unresolved` group or dateless credit
-  making the pair `needs_review` (and not when it does not fit).
+  making the pair `needs_review` (and not when it does not fit); review round
+  2: a dateless recapture of the debit making its own pair `needs_review`.
 - `packages/storage-d1/test/own-transfer-proposals.test.ts` (7 tests): 0072
   leaves every earlier object's `sqlite_master` row unchanged and its objects
   name no table but their own and `economic_identity_epochs`; a proposal
@@ -368,7 +379,7 @@ provider-id` admitted with its alias class; an SBI-Shinsei-shaped row
   `candidate_not_unique`; the current epoch only; one account, key or class on
   both sides refused; the builders' contract; retirements once, closed,
   append-only, and only of an existing proposal.
-- `packages/application/test/own-transfer-plan.test.ts` (24 tests), on the
+- `packages/application/test/own-transfer-plan.test.ts` (26 tests), on the
   migrated CORE schema with an engine run over stored synthetic rows and a
   synthetic writer standing in for G3-b: nothing registered, and the lifecycle
   refusing an in-force proposal's adoption with nothing written; each kind's
@@ -388,7 +399,10 @@ provider-id` admitted with its alias class; an SBI-Shinsei-shaped row
   they are retired; a correction citing a new row, or a known row under
   another account (the reviewer's probe), refused; a move whose `to` member
   cites an unrecorded-origin row, claims a row no leg cites, or moves the row
-  to another account, refused.
+  to another account, refused; review round 2: a row the event released
+  earlier restated while free (resolves) and refused once another event holds
+  it (`alias_conflict`), and a competing proposal sharing only the credit row
+  making adopt `proposal_needs_review`.
 - `packages/storage-d1/test/economic-command-kinds-migration.test.ts` compares
   a store stopped at 0071 (not the newest migration) with one stopped at 0070,
   and keeps comparing the full store's 0070 objects with 0070's, so every

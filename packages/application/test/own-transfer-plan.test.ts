@@ -324,6 +324,35 @@ describe("economic-event.adopt", () => {
     expect((await plan(w, "economic-event.adopt", adoptPayload(first!.proposalId))).ok).toBe(true);
   });
 
+  test("another unretired proposal sharing only the credit row makes adopt need review", async () => {
+    const w = world();
+    const [first] = await propose(w, [101, 102]);
+    const [other] = await propose(w, [103, 104]);
+    // A competitor with another debit and the same credit alias class.
+    const competitor = { ...first!, proposalId: `otp_${"9".repeat(64)}`, debit: other!.debit };
+    const run = await proposeOwnTransfers({
+      rows: engineRows(w.db, [101, 102]),
+      ownership,
+      policy: POLICY,
+      identityEpoch: INITIAL_IDENTITY_EPOCH,
+      held: { keys: [], aliasClasses: [] },
+    });
+    if (!run.ok) throw new Error(run.refusal);
+    await write(w.store, [
+      ownTransferProposalWrite({
+        proposal: competitor,
+        manifest: run.manifest,
+        now: "2030-01-10T00:00:00.000Z",
+      }),
+    ]);
+    expect(
+      refusalOf(await plan(w, "economic-event.adopt", adoptPayload(first!.proposalId))),
+    ).toEqual({
+      error: "needs_scope_resolution",
+      code: "proposal_needs_review",
+    });
+  });
+
   test("evidence that moved, a rekeyed identity and an unrecorded origin are refused", async () => {
     const w = world();
     const [proposal] = await propose(w, [101, 102]);
@@ -731,6 +760,41 @@ describe("economic-event.correct", () => {
     expect(
       refusalOf(await plan(w, "economic-event.correct", payload([101, 201], [101, 201], [102]))),
     ).toEqual({ error: "needs_scope_resolution", code: "identity_origin_unrecorded" });
+  });
+
+  test("a proposal row the event released earlier comes back only while free", async () => {
+    const w = world();
+    const [proposal] = await propose(w, [101, 102]);
+    const eventId = await adopt(w, proposal!);
+    await write(
+      w.store,
+      memberWrites(w.db, [{ eventId, revision: 2, legs: [101], claims: [101] }], [102]),
+    );
+    const back = {
+      family: "bank-movement",
+      eventId,
+      priorRevision: 2,
+      revision: payloadClaims(w, restated([101, 102]), [101, 102]),
+      releasedClaims: [],
+      reason,
+    };
+    // 102 is known to the event through the adopted proposal, and free.
+    expect((await plan(w, "economic-event.correct", back)).ok).toBe(true);
+    await write(
+      w.store,
+      memberWrites(w.db, [
+        {
+          eventId: "other-synthetic",
+          revision: 1,
+          legs: [102],
+          writerRelease: "synthetic-writer-v1",
+        },
+      ]),
+    );
+    expect(refusalOf(await plan(w, "economic-event.correct", back))).toEqual({
+      error: "stale_context",
+      code: "alias_conflict",
+    });
   });
 
   test("a holder sealed under an older identity epoch goes to review; a withdrawal stays plannable", async () => {
