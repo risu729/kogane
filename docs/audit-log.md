@@ -14,21 +14,21 @@ end.
 
 CORE `audit_records` (migration 0075), one row per operation call:
 
-| Column                                                                               | Holds                                                                                                                                                             |
-| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `audit_id`, `recorded_at`                                                            | `aud_` + UUID; canonical UTC milliseconds                                                                                                                         |
-| `path`                                                                               | `ui`, `agent-http`, `mcp` (the table also admits `alarm` and `lane`, which nothing writes yet)                                                                    |
-| `subject`, `principal`, `principal_kind`                                             | the verified Access subject; what it was graded as; `human` (the operator) or `agent` (the table also admits `delegated` and `automatic`)                         |
-| `delegation_ref`                                                                     | always NULL today                                                                                                                                                 |
-| `operation`, `risk_class`, `step`                                                    | a name from `OPERATION_CATALOGUE` (`packages/application/src/operation-path/catalogue.ts`), its ADR 0063 risk class, and `call`                                   |
-| `scope_namespace`, `scope_source`                                                    | the one server-resolved source the target belongs to, or both NULL                                                                                                |
-| `target_ref`                                                                         | the target, as an id the existing logs hold (`plan:<id>`, `op_<id>`, `schedule:<id>`, …); NULL on a refusal                                                       |
-| `result`, `result_code`, `reason_code`                                               | `applied` / `accepted` / `read` / `replayed` / `refused` / `failed` / `overflow`; the closed code of a refusal or failure; a closed reason                        |
-| `correlation_id`                                                                     | the App's request id (`x-request-id` of the answer), forwarded to the Processor                                                                                   |
-| `idempotency_key`, `payload_digest`                                                  | the caller's key (a commit's `operationId`, an operations request's key); the digest of the validated payload, never the payload                                  |
-| `confirmation_digest`, `confirm_expires_at`, `confirms_audit_id`, `reverts_audit_id` | always NULL today (two-step confirmation and reverting operations are ADR 0063's later slices)                                                                    |
-| `refs_json`                                                                          | at most 16 references into the existing logs (`approval:<id>`, `operation:<id>`, `decision:<id>`, `schedule:<id>@<rev>`, `field:<path>`)                          |
-| `diff_json`                                                                          | one closed shape per kind: `revision` (from, to, changed field names), `decision` (counts), `request` (status), `read` (row count), `release`, `overflow`, `none` |
+| Column                                                                               | Holds                                                                                                                                                                                                                                        |
+| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audit_id`, `recorded_at`                                                            | `aud_` + UUID; canonical UTC milliseconds                                                                                                                                                                                                    |
+| `path`                                                                               | `ui`, `agent-http`, `mcp` (the table also admits `alarm` and `lane`, which nothing writes yet)                                                                                                                                               |
+| `subject`, `principal`, `principal_kind`                                             | the verified Access subject; what it was graded as; `human` (the operator) or `agent` (the table also admits `delegated` and `automatic`)                                                                                                    |
+| `delegation_ref`                                                                     | always NULL today                                                                                                                                                                                                                            |
+| `operation`, `risk_class`, `step`                                                    | a name from `OPERATION_CATALOGUE` (`packages/application/src/operation-path/catalogue.ts`), its ADR 0063 risk class, and `call`                                                                                                              |
+| `scope_namespace`, `scope_source`                                                    | the one server-resolved source the target belongs to, or both NULL                                                                                                                                                                           |
+| `target_ref`                                                                         | the target, as an id the existing logs hold (`plan:<id>`, `op_<id>`, `schedule:<id>`, …); NULL on a refusal                                                                                                                                  |
+| `result`, `result_code`, `reason_code`                                               | `applied` / `accepted` / `read` / `replayed` / `refused` / `failed` / `overflow`; the closed code of a refusal or failure; a closed reason                                                                                                   |
+| `correlation_id`                                                                     | the App's request id (`x-request-id` of the answer), forwarded to the Processor                                                                                                                                                              |
+| `idempotency_key`, `payload_digest`                                                  | the caller's key (a commit's `operationId`, an operations request's key); the digest of the validated payload, never the payload                                                                                                             |
+| `confirmation_digest`, `confirm_expires_at`, `confirms_audit_id`, `reverts_audit_id` | always NULL today (two-step confirmation and reverting operations are ADR 0063's later slices); the table requires `confirms_audit_id` only on an applied or accepted confirm, so a refused confirm with no matching prepare can be recorded |
+| `refs_json`                                                                          | at most 16 references into the existing logs (`approval:<id>`, `operation:<id>`, `decision:<id>`, `schedule:<id>@<rev>`, `field:<path>`)                                                                                                     |
+| `diff_json`                                                                          | one closed shape per kind: `revision` (from, to, changed field names), `decision` (counts), `request` (status), `read` (row count), `release`, `overflow`, `none`                                                                            |
 
 The table is append-only (no update, delete or replace), `STRICT`,
 `core-keep`, never pruned, and listed in `REVISION_EXCLUDED_TABLES`, so an
@@ -64,13 +64,13 @@ authorization and service unchanged and records the outcome:
   Processor never writes these for `ui`, `agent-http` or `mcp`: a refusal it
   makes comes back to the App as its closed code and is recorded there.
 
-| Path         | Route or tool                                                                                                        | Operation                                                                                                                                                          | Effect record written by                                                                               |
-| ------------ | -------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| `ui`         | `POST /api/command/v1/{plan,simulate,approve,commit,operation}`                                                      | `command.plan`, `command.simulate`, `command.approve`, `command.commit`, `command.operation.get`                                                                   | the Processor: `createPlan`, `approve` and `commit` batches                                            |
-| `ui`         | `POST /api/ops/v1/{collections,imports,replays,projections}`, `…/sessions/{source}/refresh`, `GET …/operations/{id}` | `ops.collection.request`, `ops.import.request`, `ops.replay.request`, `ops.projection.request`, `ops.session.refresh`, `ops.operation.get`                         | the App: the acceptance batch of `packages/application/src/operations/requests.ts`                     |
-| `ui`         | `POST /api/ops/v1/schedules/{job}`, `/maintenance`, `/proposals/{id}`, `/leases/{source}`                            | `schedules.job.update`, `schedules.maintenance.update`, `schedules.survey.decide`, `schedules.lease.release`                                                       | the Processor: `updateSchedule`, `updateMaintenance`, `decideSurveyProposal`, `releaseCollectionLease` |
-| `agent-http` | `POST /api/agent/v1/<tool>`                                                                                          | the tool name without `kogane.` (`capabilities`, `context.open`, `financial.query`, `explain`, `purchases.explain`, `instruments.candidates`, `reconcile.propose`) | the App: the proposal batch of `services/app/src/proposals.ts`                                         |
-| `mcp`        | `tools/call` on `/mcp`, the agent tools and the operations tools                                                     | the same names; a refusal before any tool is named is `mcp.request`                                                                                                | as above                                                                                               |
+| Path         | Route or tool                                                                                                                                                                  | Operation                                                                                                                                                          | Effect record written by                                                                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `ui`         | `POST /api/command/v1/{plan,simulate,approve,commit,operation}`                                                                                                                | `command.plan`, `command.simulate`, `command.approve`, `command.commit`, `command.operation.get`                                                                   | the Processor: `createPlan`, `approve` and `commit` batches                                            |
+| `ui`         | `POST /api/ops/v1/{collections,imports,replays,projections}`, `…/sessions/{source}/refresh`, `GET …/operations/{id}`                                                           | `ops.collection.request`, `ops.import.request`, `ops.replay.request`, `ops.projection.request`, `ops.session.refresh`, `ops.operation.get`                         | the App: the acceptance batch of `packages/application/src/operations/requests.ts`                     |
+| `ui`         | `POST /api/ops/v1/schedules/{job}`, `/maintenance`, `/proposals/{id}`, `/leases/{source}`                                                                                      | `schedules.job.update`, `schedules.maintenance.update`, `schedules.survey.decide`, `schedules.lease.release`                                                       | the Processor: `updateSchedule`, `updateMaintenance`, `decideSurveyProposal`, `releaseCollectionLease` |
+| `agent-http` | `POST /api/agent/v1/<tool>`                                                                                                                                                    | the tool name without `kogane.` (`capabilities`, `context.open`, `financial.query`, `explain`, `purchases.explain`, `instruments.candidates`, `reconcile.propose`) | the App: the proposal batch of `services/app/src/proposals.ts`                                         |
+| `mcp`        | `tools/call` on `/mcp` by an MCP client (`mcp-client:<sub>`, ADR 0047): the agent tools; the operations tools are refused (`actor_not_supported`) and that refusal is recorded | the same names; a refusal before any tool is named is `mcp.request`                                                                                                | as above                                                                                               |
 
 The three schedule writers that were not one batch before are one now:
 a maintenance revision, its provenance update and its record; an accepted
@@ -81,7 +81,12 @@ reconciliation after a settings write stays outside the batch, as before.
 
 A record's principal is the subject until the adapter grades it: a subject the
 grant lists do not name is recorded as itself, `human` on `ui` and `agent` on
-the agent paths. A read records its row count (`financial.query`: the result's
+the agent paths. On the agent paths the principal is the caller the boundary
+built: the browser session's subject on `/api/agent/v1/*` (`agent-http`), and
+`mcp-client:<sub>` on `/mcp` (`mcp`), whose record also names `<sub>` as its
+subject. A browser session whose verified subject claims the agent-only
+namespace (`403 actor_not_supported`, before any tool) is recorded on
+`agent-http` under that subject. A read records its row count (`financial.query`: the result's
 rows and whether more exist; `explain`: nodes; `purchases.explain`: purchases;
 `instruments.candidates`: candidates on the page; the others one). Whole-store and multi-source reads carry no scope. A replay
 names the earlier effect by the id the service answered with.
@@ -166,11 +171,16 @@ and by the caps above.
 - A request refused before authentication (401), the deployment's
   service-token bootstrap (no subject), a path or tool this deployment does
   not serve (`404 not_found`, MCP `unknown_tool`), and the MCP protocol's own
-  messages (`initialize`, `tools/list`, `ping`, notifications) — including a
-  body that is JSON but not a JSON-RPC request (`-32600`) or names an unknown
-  method (`-32601`), which `/mcp` answers in the JSON-RPC envelope. A body that
-  is not JSON at all, or too large, is refused before any message is read and
-  is recorded as `mcp.request`.
+  messages (`initialize`, `tools/list`, `ping`, an accepted notification) —
+  including a JSON-RPC error `/mcp` answers inside a `200` (an unknown method,
+  `-32601`). Everything `/mcp` refuses with an HTTP status before a message
+  reaches a tool is recorded once as `mcp.request`: the App's own refusals (a
+  method other than POST, a query string, a cross-origin request, no grant)
+  and the MCP SDK's (`400 invalid_body` for a body that is not JSON, not a
+  JSON-RPC message or carries an unsupported protocol header,
+  `406 not_acceptable`, `413 request_too_large`, `415 unsupported_media_type`).
+  A tool that throws is recorded `failed` by its own call and not again by the
+  transport.
 - A subject outside the actor shape (`actor_not_supported`): the record could
   not hold it, so the request log carries `audit_write_failed` instead. The
   same holds for any read, replay, refusal or failure record that cannot be

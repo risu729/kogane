@@ -29,8 +29,11 @@ export interface CatalogueEntry {
 
 const UI: readonly SubjectPath[] = ["ui"];
 const AGENT: readonly SubjectPath[] = ["agent-http", "mcp"];
-// The operations MCP tools of docs/ops-api.md are served on `/mcp` to the same
-// graded principal as the operator routes.
+// The operations tools of docs/ops-api.md are never served on `/mcp` now: its
+// only caller is an MCP client, which is agent-only (ADR 0047), so the tools
+// are not published to it and every call is refused `actor_not_supported`
+// before any grader runs. That refusal is recorded under the tool's operation
+// on `mcp`, which is why the path stays listed.
 const OPS: readonly SubjectPath[] = ["ui", "mcp"];
 
 export const OPERATION_CATALOGUE = {
@@ -175,6 +178,15 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // The reconstructed state of one account (#610), served while its GET
+  // route is; an unserved tool is not an operation and is not recorded.
+  "reconstructed-state.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "purchases.explain": {
     risk: ["R0"],
     effect: null,
@@ -190,11 +202,13 @@ export const OPERATION_CATALOGUE = {
     capability: "interpretation.propose",
     paths: AGENT,
   },
-  // A refusal on `/mcp` before any tool is named (no grant, a method other
-  // than POST, a query string, a body that is too large or not JSON): the
-  // transport itself, recorded so such a refusal after authentication is
-  // never silent. A JSON body that is not a JSON-RPC request is answered in
-  // the JSON-RPC envelope and, like the protocol's own messages, not recorded.
+  // A refusal on `/mcp` before any tool is named: the App's own (a method
+  // other than POST, a query string, a cross-origin request, no grant) and
+  // the MCP SDK's HTTP refusals (a body that is not JSON, too large, of the
+  // wrong media type, a client that does not accept JSON, an unsupported
+  // protocol header). Recorded so such a refusal after authentication is
+  // never silent. JSON-RPC errors inside a 200 (an unknown method or tool) and
+  // accepted notifications are the protocol's own and not recorded.
   "mcp.request": {
     risk: ["R0"],
     effect: null,

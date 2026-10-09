@@ -203,6 +203,9 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       truncated: value["truncated"] === true,
     };
   if (operation === "purchases.explain") return { rows: countOf(value["data"]), truncated: false };
+  // One account's reconstructed state, when there is one to show.
+  if (operation === "reconstructed-state.read")
+    return { rows: value["reconstruction"] ? 1 : 0, truncated: false };
   if (operation === "instruments.candidates") {
     const items = Array.isArray(value["items"]) ? value["items"].length : 0;
     return {
@@ -287,6 +290,40 @@ export async function recordThrown(
   if (alreadyRecorded(error)) return;
   await executeOperation(context, operation, () => Promise.reject(error), {
     value: () => ({ result: "skip" }),
+    error: recordedError,
+  }).catch(() => undefined);
+}
+
+/**
+ * The closed code of an HTTP refusal the MCP transport answers itself, before
+ * any message reaches a tool: a body that is not JSON or a bad protocol
+ * header (400), a method it does not serve (405), a client that does not
+ * accept JSON (406), a body over the bound (413), a body that is not JSON by
+ * its media type (415).
+ */
+const MCP_TRANSPORT_CODES: Readonly<Record<number, string>> = {
+  400: "invalid_body",
+  405: "method_not_allowed",
+  406: "not_acceptable",
+  413: "request_too_large",
+  415: "unsupported_media_type",
+};
+
+/**
+ * Records a refusal the MCP transport answered with an HTTP status rather
+ * than a JSON-RPC message, once, as `mcp.request`; never throws. JSON-RPC
+ * answers (`200`, an unknown method or tool inside the envelope) and an
+ * accepted notification (`202`) are the protocol's own and not recorded.
+ */
+export async function recordTransportStatus(
+  context: ExecuteContext,
+  status: number,
+): Promise<void> {
+  if (status < 400) return;
+  const failed = status >= 500;
+  const code = MCP_TRANSPORT_CODES[status] ?? (failed ? "internal_error" : "request_refused");
+  await executeOperation(context, "mcp.request", () => Promise.resolve(null), {
+    value: () => ({ result: failed ? "failed" : "refused", code }),
     error: recordedError,
   }).catch(() => undefined);
 }

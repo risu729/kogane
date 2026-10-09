@@ -46,7 +46,7 @@ import {
   toolContext,
   type ToolResult,
 } from "./agent-service";
-import { auditContext, auditedTool, recordThrown } from "./audit";
+import { auditContext, auditedTool, recordThrown, recordTransportStatus } from "./audit";
 import { type AgentCaller, authenticate } from "./auth";
 import { cardPurchasesAvailable } from "./card-purchases-api";
 import { grantsUsable } from "./grants";
@@ -363,7 +363,12 @@ export async function auditedAgentApi(
     throw error;
   }
   try {
-    return await agentApi(request, env, url, caller);
+    const response = await agentApi(request, env, url, caller);
+    // The MCP SDK answers a transport refusal (a body that is not JSON, too
+    // large, the wrong media type) itself, with an HTTP status: recorded here.
+    if (response !== null && path === MCP_PATH)
+      await recordTransportStatus(agentAudit(request, env, caller), response.status);
+    return response;
   } catch (error) {
     const operation = transportOperation(path);
     if (operation !== null) await recordThrown(agentAudit(request, env, caller), operation, error);

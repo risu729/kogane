@@ -20,7 +20,12 @@ import {
   processorCall,
   toolOperation,
 } from "../../../packages/application/src/index";
-import { AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME } from "../src/agent-service";
+import {
+  AGENT_TOOL_NAMES,
+  PURCHASES_TOOL_NAME,
+  RECONSTRUCTED_STATE_TOOL_NAME,
+} from "../src/agent-service";
+import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { OPS_MCP_TOOLS } from "../src/ops-tools";
 
 /** A provider line with a token-shaped value and an amount in it. */
@@ -82,11 +87,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-async function token(subject: string) {
+/** The browser application's audience, and the MCP application's (ADR 0047). */
+const APP_AUD = "fixture-audience";
+const MCP_AUD = "fixture-mcp-audience";
+/** What the MCP boundary makes of the agent's subject. */
+const MCP_AGENT = `mcp-client:${AGENT}`;
+/** The headers an MCP client of the 2025-11-25 transport sends. */
+const MCP_HEADERS = { ...MCP_CLIENT_HEADERS, "mcp-protocol-version": "2025-11-25" };
+
+async function token(subject: string, audience = APP_AUD) {
   return new SignJWT({ type: "app" })
     .setProtectedHeader({ alg: "RS256", kid: "fixture" })
     .setIssuer(issuer)
-    .setAudience("fixture-audience")
+    .setAudience(audience)
     .setSubject(subject)
     .setIssuedAt()
     .setExpirationTime("5m")
@@ -96,28 +109,38 @@ async function token(subject: string) {
 interface Call {
   method?: string;
   body?: unknown;
+  /** A body sent as it is, not serialized. */
+  rawBody?: string;
   subject?: string;
+  /** `mcp`: an assertion for the MCP Access application, as `/mcp` requires. */
+  via?: "app" | "mcp";
   headers?: Record<string, string>;
   environment?: Record<string, unknown>;
 }
 
 async function call(path: string, options: Call = {}) {
+  const hasBody = options.body !== undefined || options.rawBody !== undefined;
   const init: RequestInit = {
-    method: options.method ?? (options.body === undefined ? "GET" : "POST"),
+    method: options.method ?? (hasBody ? "POST" : "GET"),
     headers: {
-      "cf-access-jwt-assertion": await token(options.subject ?? OPERATOR),
-      ...(options.body === undefined ? {} : { "content-type": "application/json" }),
+      "cf-access-jwt-assertion": await token(
+        options.subject ?? OPERATOR,
+        options.via === "mcp" ? MCP_AUD : APP_AUD,
+      ),
+      ...(hasBody ? { "content-type": "application/json" } : {}),
       ...options.headers,
     },
   };
-  if (options.body !== undefined) init.body = JSON.stringify(options.body);
+  if (options.rawBody !== undefined) init.body = options.rawBody;
+  else if (options.body !== undefined) init.body = JSON.stringify(options.body);
   const response = await worker.fetch(new Request(`https://fixture.test${path}`, init), {
     ...env,
     ACCESS_ISSUER: issuer,
-    ACCESS_AUDIENCE: "fixture-audience",
+    ACCESS_AUDIENCE: APP_AUD,
+    ACCESS_MCP_AUDIENCE: MCP_AUD,
     OPERATOR_SUBJECTS: JSON.stringify([OPERATOR]),
     AGENT_GRANTS: JSON.stringify([AGENT]),
-    AGENT_API_GRANTS: JSON.stringify({ [AGENT]: GRANT }),
+    AGENT_API_GRANTS: JSON.stringify({ [AGENT]: GRANT, [MCP_AGENT]: GRANT }),
     COMMANDS_ENABLED: "true",
     OPS_API_ENABLED: "true",
     ...options.environment,
@@ -455,7 +478,7 @@ describe("the schedule settings routes (ui)", () => {
 
 describe("the agent routes (agent-http) and MCP (mcp)", () => {
   it("every tool this Worker serves names a catalogued operation, so none goes unrecorded", () => {
-    for (const tool of [...AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME]) {
+    for (const tool of [...AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME, RECONSTRUCTED_STATE_TOOL_NAME]) {
       expect(toolOperation(tool, "agent-http"), tool).not.toBeNull();
       expect(toolOperation(tool, "mcp"), tool).not.toBeNull();
     }
@@ -527,13 +550,30 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
     expect(await recordsOf(unknown.requestId)).toEqual([]);
   });
 
-  it("records each MCP tool call, and nothing for the protocol's own messages", async () => {
-    const mcp = (message: Record<string, unknown>, subject = AGENT) =>
-      call("/mcp", { subject, body: { jsonrpc: "2.0", id: 1, ...message } });
-    for (const method of ["initialize", "tools/list", "ping"]) {
+  it("records each MCP tool call under the MCP client, and nothing for the protocol's own messages", async () => {
+    let id = 0;
+    const mcp = (message: Record<string, unknown>, options: Call = {}) =>
+      call("/mcp", {
+        via: "mcp",
+        subject: AGENT,
+        body: { jsonrpc: "2.0", id: ++id, ...message },
+        headers: MCP_HEADERS,
+        ...options,
+      });
+    for (const method of ["tools/list", "ping", "resources/list"]) {
       const quiet = await mcp({ method });
+      expect(quiet.response.status).toBe(200);
       expect(await recordsOf(quiet.requestId)).toEqual([]);
     }
+    // A notification (no id) is accepted and runs nothing.
+    const notification = await call("/mcp", {
+      via: "mcp",
+      subject: AGENT,
+      body: { jsonrpc: "2.0", method: "notifications/initialized" },
+      headers: MCP_HEADERS,
+    });
+    expect(notification.response.status).toBe(202);
+    expect(await recordsOf(notification.requestId)).toEqual([]);
     const tool = await mcp({
       method: "tools/call",
       params: { name: "kogane.capabilities", arguments: {} },
@@ -542,7 +582,7 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
       {
         path: "mcp",
         subject: AGENT,
-        principal: AGENT,
+        principal: MCP_AGENT,
         principalKind: "agent",
         operation: "capabilities",
         result: "read",
@@ -554,15 +594,117 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
       params: { name: "kogane.nothing", arguments: {} },
     });
     expect(await recordsOf(unknown.requestId)).toEqual([]);
-    const ungranted = await mcp({ method: "tools/list" }, "stranger@synthetic.test");
+    // An MCP client is never an operator: an operations tool is refused before
+    // any grader, and the refusal is recorded under the tool; nothing is stored.
+    const ops = await mcp({
+      method: "tools/call",
+      params: {
+        name: "kogane.ops.import.request",
+        arguments: { source: "sony-bank", runId: "run-audit-mcp", idempotencyKey: "audit-mcp-1" },
+      },
+    });
+    expect(ops.response.status).toBe(200);
+    expect((await recordsOf(ops.requestId)).map(brief)).toEqual([
+      {
+        path: "mcp",
+        subject: AGENT,
+        principal: MCP_AGENT,
+        principalKind: "agent",
+        operation: "ops.import.request",
+        result: "refused",
+        resultCode: "actor_not_supported",
+      },
+    ]);
+    expect(
+      await env.DB.prepare("SELECT count(*) AS n FROM ops_requests WHERE principal=?")
+        .bind(MCP_AGENT)
+        .first<number>("n"),
+    ).toBe(0);
+    // No grant: refused on the transport, before any tool is named.
+    const ungranted = await mcp({ method: "tools/list" }, { subject: "stranger@synthetic.test" });
     expect(ungranted.response.status).toBe(403);
     expect(
       (await recordsOf(ungranted.requestId)).map((row) => [
         row["path"],
+        row["principal"],
         row["operation"],
         row["result_code"],
       ]),
-    ).toEqual([["mcp", "mcp.request", "agent_api_not_configured"]]);
+    ).toEqual([
+      ["mcp", "mcp-client:stranger@synthetic.test", "mcp.request", "agent_api_not_configured"],
+    ]);
+  });
+
+  it("records the MCP transport's own HTTP refusals once, as mcp.request", async () => {
+    const send = (options: Call) =>
+      call("/mcp", { via: "mcp", subject: AGENT, headers: MCP_HEADERS, ...options });
+    const message = { jsonrpc: "2.0", id: 1, method: "tools/list" };
+    const oversized = JSON.stringify({ ...message, params: { pad: "x".repeat(70_000) } });
+    for (const [options, status, code] of [
+      [{ rawBody: "{" }, 400, "invalid_body"],
+      [{ body: { hello: 1 } }, 400, "invalid_body"],
+      [
+        { body: message, headers: { ...MCP_HEADERS, "mcp-protocol-version": "1900-01-01" } },
+        400,
+        "invalid_body",
+      ],
+      [{ rawBody: oversized }, 413, "request_too_large"],
+      [
+        { body: message, headers: { ...MCP_HEADERS, "content-type": "text/plain" } },
+        415,
+        "unsupported_media_type",
+      ],
+      [
+        { body: message, headers: { ...MCP_HEADERS, accept: "application/json" } },
+        406,
+        "not_acceptable",
+      ],
+      [{ method: "GET", headers: { accept: "text/event-stream" } }, 405, "method_not_allowed"],
+      [
+        { body: message, headers: { ...MCP_HEADERS, origin: "https://elsewhere.invalid" } },
+        403,
+        "origin_not_allowed",
+      ],
+    ] as const) {
+      const refused = await send(options as Call);
+      expect(refused.response.status, code).toBe(status);
+      expect(
+        (await recordsOf(refused.requestId)).map((row) => [
+          row["path"],
+          row["principal"],
+          row["operation"],
+          row["result"],
+          row["result_code"],
+        ]),
+        code,
+      ).toEqual([["mcp", MCP_AGENT, "mcp.request", "refused", code]]);
+    }
+  });
+
+  it("records a browser session whose subject claims the agent-only namespace, under that subject", async () => {
+    const claimed = await call("/api/agent/v1/capabilities", {
+      subject: "mcp-client:someone@synthetic.test",
+      body: {},
+    });
+    expect(claimed.response.status).toBe(403);
+    expect((await recordsOf(claimed.requestId)).map(brief)).toEqual([
+      {
+        path: "agent-http",
+        subject: "mcp-client:someone@synthetic.test",
+        principal: "mcp-client:someone@synthetic.test",
+        principalKind: "agent",
+        operation: "capabilities",
+        result: "refused",
+        resultCode: "actor_not_supported",
+      },
+    ]);
+    // A request without a verified subject is not recorded at all.
+    const anonymous = await worker.fetch(
+      new Request("https://fixture.test/api/agent/v1/capabilities", { method: "POST", body: "{}" }),
+      { ...env, ACCESS_ISSUER: issuer, ACCESS_AUDIENCE: APP_AUD } as Env,
+    );
+    expect(anonymous.status).toBe(401);
+    expect(await recordsOf(anonymous.headers.get("x-request-id")!)).toEqual([]);
   });
 
   it("a proposal whose audit record cannot be written is not stored either", async () => {
@@ -596,46 +738,6 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
     // The proposal tool answers any failed append with its existing code.
     expect(answer).toMatchObject({ status: 409, body: { code: "idempotency_conflict" } });
     expect(await rows()).toEqual(before);
-  });
-});
-
-describe("the operations MCP tools (mcp)", () => {
-  it("records an acceptance in its batch and a re-send as a replay of the same operation", async () => {
-    const environment = { AGENT_API_GRANTS: JSON.stringify({ [OPERATOR]: GRANT }) };
-    const request = (id: number) =>
-      call("/mcp", {
-        body: {
-          jsonrpc: "2.0",
-          id,
-          method: "tools/call",
-          params: {
-            name: "kogane.ops.import.request",
-            arguments: {
-              source: "sony-bank",
-              runId: "run-audit-mcp",
-              idempotencyKey: "audit-mcp-1",
-            },
-          },
-        },
-        environment,
-      });
-    const first = await request(1);
-    const [accepted] = await recordsOf(first.requestId);
-    expect(brief(accepted!)).toEqual({
-      path: "mcp",
-      subject: OPERATOR,
-      principal: OPERATOR,
-      principalKind: "human",
-      operation: "ops.import.request",
-      result: "accepted",
-      resultCode: null,
-    });
-    const second = await request(2);
-    const [replayed] = await recordsOf(second.requestId);
-    expect([replayed!["result"], replayed!["target_ref"]]).toEqual([
-      "replayed",
-      accepted!["target_ref"],
-    ]);
   });
 });
 
