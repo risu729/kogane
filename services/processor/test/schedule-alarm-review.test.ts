@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, expect, spyOn, test } from "bun:test";
 import type { Miniflare } from "miniflare";
+import { loadBundleFixture } from "./bundle-module-fixture.ts";
 import { startPipeline } from "./harness";
 interface Storage {
   get<T>(key: string): Promise<T | undefined>;
@@ -16,6 +17,7 @@ interface Alarm {
   alarm(): Promise<void>;
 }
 let mf: Miniflare, env: Env, AlarmClass: new (state: State, env: Env) => Alarm;
+let bundleFixture: { dispose(): Promise<void> } | undefined;
 beforeAll(async () => {
   const started = await startPipeline();
   mf = started.mf;
@@ -49,13 +51,18 @@ beforeAll(async () => {
     ],
   });
   if (!bundle.success) throw new Error("review_alarm_bundle_failed");
-  const module = (await import(
-    `data:text/javascript;base64,${Buffer.from(await bundle.outputs[0]!.text()).toString("base64")}`
-  )) as { ScheduleAlarm: new (state: State, env: Env) => Alarm };
-  AlarmClass = module.ScheduleAlarm;
+  const loaded = await loadBundleFixture<{ ScheduleAlarm: new (state: State, env: Env) => Alarm }>(
+    await bundle.outputs[0]!.text(),
+  );
+  bundleFixture = loaded;
+  AlarmClass = loaded.module.ScheduleAlarm;
 }, 30000);
 afterAll(async () => {
-  await mf?.dispose();
+  try {
+    await mf?.dispose();
+  } finally {
+    await bundleFixture?.dispose();
+  }
 });
 function state(job = "mizuho-bank") {
   const values = new Map<string, unknown>([["job", job]]);

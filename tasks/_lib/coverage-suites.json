@@ -1,0 +1,182 @@
+[
+  {
+    "workspace": "apps/web",
+    "suite": "bun"
+  },
+  {
+    "workspace": "experiments/mizuho-direct",
+    "suite": "bun"
+  },
+  {
+    "workspace": "experiments/observation-pipeline-local",
+    "suite": "bun"
+  },
+  {
+    "workspace": "experiments/st-george-automation",
+    "suite": "bun"
+  },
+  {
+    "workspace": ".",
+    "suite": "bun"
+  },
+  {
+    "workspace": "packages/application",
+    "suite": "bun"
+  },
+  {
+    "workspace": "packages/collection",
+    "suite": "bun"
+  },
+  {
+    "workspace": "packages/collection",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "packages/collector-diagnostics",
+    "suite": "bun"
+  },
+  {
+    "workspace": "packages/domain",
+    "suite": "bun"
+  },
+  {
+    "workspace": "packages/evidence-contract",
+    "suite": "bun"
+  },
+  {
+    "workspace": "packages/identity",
+    "suite": "bun"
+  },
+  {
+    "workspace": "packages/observation-shared",
+    "suite": "bun"
+  },
+  {
+    "workspace": "packages/parsers",
+    "suite": "bun"
+  },
+  {
+    "workspace": "packages/read-model",
+    "suite": "bun"
+  },
+  {
+    "workspace": "packages/sbi-vc-trade-client",
+    "suite": "bun"
+  },
+  {
+    "workspace": "packages/storage-d1",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/app",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/collector-globalpass",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-globalpass",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/collector-mizuho",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-mizuho",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/collector-mobile-suica",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-mobile-suica",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/collector-moneyforward",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-myjcb",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-prestia-bank",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-prestia-bank",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/collector-sbi-securities",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-sbi-securities",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/collector-sbi-shinsei",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-sbi-shinsei",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/collector-sbi-vc-trade",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-sbi-vc-trade",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/collector-smbc-direct",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-smbc-direct",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/collector-sony-bank",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-st-george",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-st-george",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/collector-vpass",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-vpoint-pay",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-vpoint-pay",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/collector-vpoint",
+    "suite": "bun"
+  },
+  {
+    "workspace": "services/collector-vpoint",
+    "suite": "vitest"
+  },
+  {
+    "workspace": "services/processor",
+    "suite": "bun"
+  }
+]

@@ -7,7 +7,7 @@ run = "bun src/cli.mjs"
 
 [tasks.test]
 description = "Test the public-entry probe and offline parsers with synthetic data."
-run = "bun test"
+run = "node ../../tasks/_lib/coverage-run.mjs bun test"
 
 [tasks.ci]
 description = "Check the local Mizuho experiment without contacting the bank."
