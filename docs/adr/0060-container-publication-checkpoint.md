@@ -141,7 +141,9 @@ DO and deployment-order guard suites remain applicable. Hosted CI exercises real
 Docker builds; a controlled same-run recovery is required before claiming live
 recovery verified.
 
-## Proposed amendment: bounded archive restoration (2026-10-09)
+## Amendment: bounded archive restoration (2026-10-09)
+
+- Status: accepted (merged 2026-10-09 in #614)
 
 Node's hash backend rejects a single update larger than INT_MAX. Whole-buffer
 ZIP hashing therefore cannot verify a prepared archive above 2 GiB, independent
