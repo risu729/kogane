@@ -140,3 +140,38 @@ failure-safe progress merging. The ordinary release, rollback schema, registry,
 DO and deployment-order guard suites remain applicable. Hosted CI exercises real
 Docker builds; a controlled same-run recovery is required before claiming live
 recovery verified.
+
+## Proposed amendment: bounded archive restoration (2026-10-09)
+
+Node's hash backend rejects a single update larger than INT_MAX. Whole-buffer
+ZIP hashing therefore cannot verify a prepared archive above 2 GiB, independent
+of available memory. Keeping the ZIP, extracted tar and two copies of the Docker
+archive also unnecessarily multiplies runner disk usage.
+
+Download into a uniquely created private directory, with a mode-0600 quarantine
+file and at most 64 KiB per hash/write operation. Backpressure limits retained
+bytes; an unexpected incoming chunk above 64 MiB is refused. Recompute the same
+whole-ZIP SHA-256, then promote the closed file exclusively to `artifact.zip`.
+No extraction or prepared-byte use is permitted before that comparison. Digest
+failure or stream interruption removes this invocation's quarantine. A process
+kill can leave private partial bytes, but cannot promote an incomplete ZIP.
+Existing files and symlinks cannot be overwritten by promotion.
+
+After successful ZIP extraction, delete the ZIP. After validated tar listing and
+successful extraction, delete the tar. Move the extracted Docker archive within
+RUNNER_TEMP before copying the remaining small prepared files, with no fallback
+copy across filesystems. Delete that archive only after Docker load and the
+original exact image ID and input-digest checks succeed. This leaves at most two
+large archive representations during either extraction boundary. Identity,
+ledger, immutable-artifact, baseline and 180-second convergence checks retain
+their original contract.
+
+Unexpected restore errors report only closed stage codes; signed URLs, tokens,
+raw filesystem errors and command stderr are not printed. CI adds a mandatory
+native Node check that writes and hashes 2 GiB plus 64 KiB through the same
+streaming path, checks an independently calculated SHA-256 and file size, and
+requires peak RSS below 256 MiB. It has its own two-minute timeout and runs before
+resource-heavy repository checks; existing test deadlines are unchanged. Small
+synthetic tests cover quarantine lifecycle, interruption, tamper, exclusive
+promotion, staging reuse, oversized chunks, native/legacy restoration and the
+unchanged image proof. This does not establish live recovery success.
