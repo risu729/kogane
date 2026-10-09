@@ -87,7 +87,7 @@ describe("only the three admitted Container configurations change deployment bac
       )!;
       expect(deploy.body).toContain("production-strategy: deploy");
       expect(deploy.body).toContain("deploy-triggers: 'true'");
-      expect(deploy.body).toContain("@251e42de418f3f5aece2789cc1c0f76d3f8264f5");
+      expect(deploy.body).toContain("@6a93154ef1c550b760d8582bcf59d8d4a0710788");
       const between = steps.slice(steps.indexOf(deploy) + 1, steps.indexOf(verify));
       expect(
         between.map(
