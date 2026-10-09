@@ -489,7 +489,89 @@ export async function verifyReaderIdleCycle({ arm, request, json, waitState, now
   }
   return observed;
 }
-/** The public gate still requires a terminal read error; EOF and no body fail distinctly. */
+const streamCheckReasons = new Set([
+  "timeout",
+  "process",
+  "stats",
+  "identity",
+  "posts",
+  "streams",
+  "fetch",
+  "http",
+  "body",
+  "encoding",
+  "payload",
+  "limit",
+  "eof",
+  "partial",
+  "timing",
+]);
+/** Read a finite report from the actual controller response boundary. */
+export async function verifyStreamErrorCheck({ request }) {
+  const response = await request("/stream-error-check");
+  const reader = response.body?.getReader();
+  if (!reader) closed("stream_check_report");
+  let report,
+    complete = false;
+  try {
+    const parts = [];
+    let size = 0;
+    while (true) {
+      const part = await reader.read();
+      if (part.done) {
+        complete = true;
+        break;
+      }
+      size += part.value?.byteLength ?? 0;
+      if (size > 1024) closed("stream_check_report");
+      parts.push(part.value);
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const part of parts) {
+      bytes.set(part, offset);
+      offset += part.byteLength;
+    }
+    report = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    closed("stream_check_report");
+  } finally {
+    if (!complete) {
+      let timer;
+      try {
+        await Promise.race([
+          reader.cancel(),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error("cancel_timeout")), 1000);
+          }),
+        ]);
+      } catch {
+        // Preserve the report failure.
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+  }
+  if (!report || typeof report !== "object" || Array.isArray(report)) closed("stream_check_report");
+  const keys = Object.keys(report).sort().join(",");
+  if (report.code === "pass") {
+    if (
+      keys !== "bytes,code,elapsedMs,reads" ||
+      report.bytes !== 35 ||
+      !Number.isSafeInteger(report.reads) ||
+      report.reads < 1 ||
+      report.reads > 35 ||
+      !Number.isSafeInteger(report.elapsedMs) ||
+      report.elapsedMs < 35_000 ||
+      report.elapsedMs > 46_000
+    )
+      closed("stream_check_report");
+    return report;
+  }
+  if (keys !== "code" || !streamCheckReasons.has(report.code)) closed("stream_check_report");
+  closed(`stream_check_${report.code}`);
+}
+/** Retained public-edge diagnostic; phase acceptance uses the in-DO check above. */
 export async function verifyStreamErrorGate({ request, temp, now = Date.now }) {
   const failureStarted = now();
   const failureResponse = await request("/stream-error");
@@ -763,7 +845,7 @@ export async function verifyPhase({
   await canceled.read();
   await canceled.cancel();
   counts.cancelChecks++;
-  await verifyStreamErrorGate({ request, temp });
+  await verifyStreamErrorCheck({ request });
   counts.streamFailureChecks++;
   counts.idleObservedMs = await verifyReaderIdleCycle({ arm: "resume", request, json, waitState });
   counts.cancelIdleObservedMs = await verifyReaderIdleCycle({

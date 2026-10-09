@@ -239,8 +239,8 @@ after the same 35 bytes, approximately 36.4-36.5 seconds from request start.
 The transformed path also logged the unhandled pipe rejection. This narrows
 the public gate's interpretation: a public EOF need not mean the Worker-side
 reader lost the source error. It is not a hosted Container API result, a
-confirmed Cloudflare defect, or permission to relabel the failed run. Hosted
-same-DO comparison is still needed before revising the measurement boundary.
+confirmed Cloudflare defect, or permission to relabel the failed run. The hosted
+same-DO comparison below subsequently reproduced this boundary distinction.
 
 The diagnostic follow-up distinguishes the original public response outcome
 and separately compares SDK and raw port responses inside the same DO. It keeps
@@ -252,6 +252,37 @@ checks are prerequisites to a conclusive comparison. Failure, timeout or
 incomplete cleanup makes the comparison inconclusive. Its result never replaces
 the original acceptance failure or advances later phases. An SDK/raw difference
 can narrow the next investigation, but is not by itself a vendor-confirmed bug.
+
+The hosted comparison at `7d0e8bc6`
+([run 37915871908](https://github.com/risu729/kogane/actions/runs/37915871908))
+failed the original public gate with `verification_stream_failure_clean_eof`.
+The public response had HTTP 200, a body, absent content encoding, 35 bytes in
+35 reads and clean EOF after 36403 ms. Inside the same DO, both SDK and raw-port
+responses had HTTP 200, a body, absent encoding and 35 bytes in 35 reads, then
+raised reader errors after 36835 ms and 36663 ms respectively. Both arms retained
+the same running process, POST count 2 and zero source streams after release.
+The comparison was conclusive under its diagnostic activity lease. Cancellation
+after the terminal error rejected in both arms; independent source statistics
+confirmed release. All four cleanup checks passed, the separate cleanup step
+found no remaining owned resources, and API reads confirmed Worker, application
+and namespace absence. Native, recovery, rollback and the reader-lifetime arms
+were not reached. The temporary authorization remains limited to the reviewed
+continuation session and must be retired after completion.
+
+This evidence justifies measuring stream-error propagation at the response
+returned by actual SDK `containerFetch` or native `ContainerController.fetch`
+inside the DO. It does not establish a Cloudflare defect or turn the earlier
+public failure into success. The replacement acceptance check has no diagnostic
+activity lease and leaves the producer unchanged. It requires HTTP 200, a body,
+unencoded content, exactly 35 bytes, at least one read and a genuine reader error
+at least 35 seconds after the stream request began. A deadline, outer abort,
+early error, partial body, missing body or clean EOF fails. Running-state checks
+before Container statistics prevent a restart from masking process loss;
+same-process, unchanged POST count and released-stream checks remain required.
+Observation and cancellation are bounded within the existing request deadline.
+The driver runs this check once per applicable phase and validates its closed
+report. It does not add another public 36-second probe. The public route and
+diagnostic remain available for characterization, outside phase acceptance.
 
 These attempts do not establish runtime equivalence. Final CI and the following
 runtime gates are still pending:

@@ -61,6 +61,7 @@ export function worker() {
         "/reader-cancel-check": "GET",
         "/backpressure-compare": "GET",
         "/stream-error-compare": "GET",
+        "/stream-error-check": "GET",
         "/stream-error": "GET",
         "/hold": "GET",
         "/destroy": "POST",

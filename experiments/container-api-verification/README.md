@@ -1,11 +1,15 @@
 # Container API synthetic verification
 
-The latest completed SDK baseline attempt, run 37895813457 at `2c9ed3b1`,
-failed the stream-error check before reader-lifetime, native and rollback phases.
-Runtime equivalence remains unverified. Its owned resources, dedicated tokens
-and GitHub environment were removed and absence was verified. Any new hosted
-session requires its own reviewed temporary setup. Cleanup runs after each
-attempt; failed or interrupted cleanup requires separate absence confirmation.
+The latest completed SDK baseline attempt, run 37915871908 at `7d0e8bc6`,
+failed the public stream-error gate with clean EOF. Its same-DO diagnostic
+observed the expected reader error in both SDK and raw-port responses after
+35 bytes and more than 35 seconds. This establishes a measurement-boundary
+distinction, not a Cloudflare defect or runtime equivalence. Reader-lifetime,
+native, recovery and rollback phases remain unverified. All four owned-resource
+cleanup checks and independent Worker/application/namespace absence reads passed.
+The revised acceptance check below still requires successful hosted execution.
+Cleanup runs after each attempt; failed or interrupted cleanup requires separate
+absence confirmation. Temporary authorization must be retired after the session.
 
 The SDK and native configs intentionally have the same Worker, exported class,
 SQLite migration, binding, explicit app name, basic/APAC/max1 configuration and
@@ -153,20 +157,29 @@ blocking, memory bounds, public-path backpressure, eviction or billing. Its
 active DO invocation may itself keep the DO resident. Separate recovery and
 exact-version rollback checks remain required.
 
-The stream-error diagnostic keeps the source that emits 35 bytes at one-second
-intervals and then errors. A local real-TCP check with Bun 1.4.2 and Node 26.11.1
-clients observed the expected reader exception; the public hosted failure did
-not distinguish an absent body from clean EOF at that revision. A separate
-local workerd 1.20261001.1 probe read the expected 35-byte error inside the
-Worker through both direct fetch and SDK-shaped IdentityTransformStream paths,
-while both public HTTP responses ended at clean EOF. This suggests a measurement
-boundary issue but does not establish hosted Container behavior. The follow-up
-records that distinction and compares SDK and raw-port readers inside one DO,
-under a diagnostic-only activity lease and bounded deadlines. It records closed
-response/encoding/outcome categories and finite counts with running, process
-identity, POST and stream-release checks. It changes neither the producer nor
-the required reader-exception condition. The runner retains the failed stage,
-attempts cleanup and never treats diagnostic success as phase success.
+The stream-error source emits 35 bytes at one-second intervals and then errors.
+Run 37915871908 observed HTTP 200, body present, absent encoding and 35 bytes in
+35 reads on all three paths. The public response reached clean EOF at 36403 ms;
+SDK and raw-port readers inside the same DO raised errors at 36835 ms and
+36663 ms. The diagnostic retained one running process, POST count 2 and released
+source streams. Its explicit SDK activity lease makes it diagnostic evidence,
+not an acceptance or idle-lifetime check. The original public gate remained
+failed and later phases did not run. Local real-TCP and workerd probes are
+consistent with this distinction but are not substitutes for hosted evidence.
+
+The replacement `GET /stream-error-check` consumes the actual SDK/native
+response inside the DO without an activity lease. It requires HTTP 200, a body,
+absent or identity content encoding, exactly 35 bytes and at least one read,
+followed by a genuine reader exception at least 35 seconds after stream fetch
+begins. Clean EOF, missing or partial body, early error, timeout and outer abort
+fail. Running checks precede restart-capable statistics requests; process
+identity and POST count must stay unchanged and the source stream must release.
+Observation and cancellation use finite deadlines within the public request
+ceiling. The driver validates the closed report and runs one stream-error check
+per applicable phase. The unchanged public source route and diagnostic remain
+available separately; phase acceptance adds no second public stream probe.
+Reports expose closed categories and counts, never UUIDs, payloads or provider
+messages. The source, production controller and collector behavior are unchanged.
 
 Idle observations are bounded process-state checks. They do not establish
 billable runtime or DO eviction. Compare independently read aggregate billing

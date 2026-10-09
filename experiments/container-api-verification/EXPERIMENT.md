@@ -3,7 +3,7 @@
 - Owner: risu729
 - Started: 2026-10-05
 - Expires: 2026-10-12
-- Status: SDK stream-error gate failed in run 37895813457; bounded diagnostic follow-up in progress. Reader-lifecycle parity, native and rollback remain unverified.
+- Status: Run 37915871908 reproduced public clean EOF while SDK/raw readers inside the DO both raised the expected error. Revised stream-error boundary awaits hosted verification; reader-lifecycle parity, native and rollback remain unverified.
 
 ## Question
 
@@ -26,14 +26,18 @@ exhausted that cap on both paths under a diagnostic activity lease. Those
 failed plateau observations remain recorded; they do not identify a buffering
 layer or prove lifetime, idle behavior or memory bounds. The revised criterion
 must pass on the actual hosted SDK and native implementations before merge.
-Run 37895813457 stopped at the earlier public stream-error check. A local
-real-TCP reproduction raised the expected reader error, so that observation
-alone cannot locate the hosted failure. A local workerd comparison observed
-reader errors inside the Worker but clean EOF over its public HTTP response
-for both direct and SDK-shaped transformed streams. Hosted Container behavior
-remains unverified. The follow-up compares SDK and raw-port
-stream errors inside the same DO under a diagnostic-only activity lease, while
-preserving the original gate result. No diagnostic may promote failed or
+Run 37895813457 stopped at the earlier public stream-error check. Local TCP
+and workerd probes distinguished internal reader errors from public clean EOF.
+Run 37915871908 reproduced that distinction in hosted Containers: public clean
+EOF after 35 bytes, SDK and raw-port reader errors inside the same DO after
+35 bytes and more than 35 seconds. The diagnostic retained process identity,
+POST count and released source streams under its explicit activity lease.
+The original acceptance stage remained failed and all owned resources were
+cleaned up. This supports a measurement-boundary correction, not a Cloudflare
+defect claim. The revised acceptance check reads the actual SDK/native response
+inside the DO without a lease, requires the complete delayed error sequence,
+rejects timeouts and aborts, and verifies process and stream release. It still
+requires successful hosted execution. No diagnostic may promote failed or
 unreached reader/native/recovery/rollback stages to success.
 A separate GitHub environment and a dedicated scoped token isolate this check
 from production credentials. The normal CI and production release never deploy

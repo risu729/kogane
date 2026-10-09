@@ -4,6 +4,7 @@ import { checkBackpressure } from "./backpressure-check";
 import { checkReaderLifetime } from "./reader-lifetime-check";
 import { compareBackpressure } from "./backpressure-compare";
 import { compareStreamError } from "./stream-error-compare";
+import { checkStreamError } from "./stream-error-check";
 
 export class VerificationContainer extends Container<HarnessEnv> {
   defaultPort = 8080;
@@ -39,6 +40,14 @@ export class VerificationContainer extends Container<HarnessEnv> {
         signaled: 0,
         exitSeven: 0,
       });
+    if (path === "/stream-error-check")
+      return Response.json(
+        await checkStreamError({
+          fetchBoundary: (inner) => this.containerFetch(inner),
+          running: () => Boolean(this.ctx.container?.running),
+          outerSignal: request.signal,
+        }),
+      );
     if (path === "/stream-error-compare")
       return Response.json(
         await compareStreamError({
