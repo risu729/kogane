@@ -372,6 +372,12 @@ describe("every unavailable computed expiry carries exactly one closed reason", 
     state: ExpiryEstimateState;
   }[] = [
     {
+      reason: "bucket_kind_unclassified",
+      rule: inactivity,
+      kind: "unclassified",
+      state: "partial",
+    },
+    {
       reason: "rule_not_verified",
       rule: { ...inactivity, verification: "needs-rule-verification" },
       state: "needs-rule-verification",
@@ -759,4 +765,46 @@ describe("the stored basis shape refuses contradictions", () => {
       }),
     ).toBe(false);
   });
+});
+
+test("unclassified dated and undated quantities remain visible but cannot yield a computed expiry", () => {
+  for (const rule of [inactivity, noExpiry, fixedLot]) {
+    const explicit = {
+      ...rule,
+      applicability: { ...rule.applicability, bucketKinds: ["unclassified"] as BucketKind[] },
+    };
+    const dated = bucket("bucket:unclassified:dated", "unclassified", {
+      quantity: q("points:a", "123.45"),
+      observedExpiry: day("2026-12-31"),
+    });
+    const undated = bucket("bucket:unclassified:undated", "unclassified");
+    const result = estimateExpiry(explicit, holding(dated, undated), history, [], CLOCK);
+    expect(result.state).toBe("partial");
+    expect(result.expiringBuckets).toHaveLength(2);
+    for (const row of result.expiringBuckets) {
+      expect(row.expiryBasis.computed).toMatchObject({
+        status: "unavailable",
+        value: null,
+        reasonCode: "bucket_kind_unclassified",
+        activity: null,
+        membership: null,
+        uncertaintyCodes: [],
+      });
+      expect(row.expiryBasis.agreement).toBe("not-comparable");
+      expect(row.policyEstimated).toBeNull();
+      expect(validBucketExpiryBasis(row.expiryBasis)).toBe(true);
+    }
+    const datedRow = result.expiringBuckets.find((row) => row.bucketRef === dated.bucketRef)!;
+    expect(datedRow.quantity).toEqual(dated.quantity);
+    expect(datedRow.deadline).toEqual(dated.observedExpiry!);
+    expect(datedRow.expiryBasis.displayed!.sourceFactRefs).toEqual(dated.sourceFactRefs);
+    const undatedRow = result.expiringBuckets.find((row) => row.bucketRef === undated.bucketRef)!;
+    expect(undatedRow.quantity).toEqual(undated.quantity);
+    expect(undatedRow.deadline).toEqual({
+      kind: "unknown",
+      reasonCode: "bucket_kind_unclassified",
+    });
+    expect(undatedRow.basis).toBe("unknown");
+    expect(result.sourceExpiryRefs).toEqual(dated.sourceFactRefs);
+  }
 });

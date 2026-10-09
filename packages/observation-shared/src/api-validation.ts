@@ -12,7 +12,7 @@ import type {
   RewardPage,
   RewardReadExpiryPage,
 } from "./reward-contract.ts";
-import { validRewardExpiryBasis } from "./reward-contract.ts";
+import { validRewardExpiryBasis, validRewardBucketKind } from "./reward-contract.ts";
 // Runtime checks for the shared HTTP contract; no database or UI dependencies.
 // Shape<T> requires a validator for every declared field when contracts evolve.
 import { isDecimalMinorUnit } from "../../parsers/src/money.ts";
@@ -574,7 +574,7 @@ const balanceHistoryPage: Check<BalanceHistoryPage> = (value): value is BalanceH
 
 const rewardBucket = object<RewardBucketRow>({
   bucketRef: text,
-  kind: text,
+  kind: validRewardBucketKind,
   restrictionRefs: array(text),
   unitRef: text,
   quantity: validQuantity,
@@ -594,13 +594,17 @@ const rewardHolding = object<RewardHoldingRow>({
   consumable: validQuantity,
   byKind: array(
     object<RewardHoldingRow["byKind"][number]>({
-      kind: text,
+      kind: validRewardBucketKind,
       quantity: validQuantity,
       bucketRefs: array(text),
     }),
   ),
   excluded: array(
-    object<RewardHoldingRow["excluded"][number]>({ bucketRef: text, kind: text, reasonCode: text }),
+    object<RewardHoldingRow["excluded"][number]>({
+      bucketRef: text,
+      kind: validRewardBucketKind,
+      reasonCode: text,
+    }),
   ),
   buckets: array(rewardBucket),
   qualificationMeasures: array(
@@ -665,7 +669,7 @@ const rewardReadExpiry = object<RewardReadExpiryRow>({
   holdingRef: text,
   programId: text,
   bucketRef: text,
-  bucketKind: text,
+  bucketKind: validRewardBucketKind,
   ruleRef: text,
   state: rewardState,
   basis: rewardBasis,

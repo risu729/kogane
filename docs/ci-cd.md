@@ -296,7 +296,7 @@ is introduced.
    file of an unconfirmed commit — not `mise.toml`, not a script — is ever
    read or run. An API error fails the step. The current workflow then checks
    that the target includes the production compatibility floor before checkout:
-   it must equal or descend from `87da571c7aa35dd76f9b00737a886ac41e6d3491`
+   it must equal or descend from `87da571c7aa35dd76f9b00767a886ac41e6d3491`
    ([#207](https://github.com/risu729/kogane/pull/207)). The comparison must
    return `identical` or `ahead`; any other status or API error fails closed.
    This applies to manual releases as well as every rollback subset.
@@ -656,7 +656,7 @@ all refuses the run, because that would be a roll forward and a roll forward
 goes through `deploy.yml`.
 
 Before any target code is checked out, the current trusted workflow also requires
-that the target equal or descend from `87da571c7aa35dd76f9b00737a886ac41e6d3491`
+that the target equal or descend from `87da571c7aa35dd76f9b00767a886ac41e6d3491`
 ([#207](https://github.com/risu729/kogane/pull/207)). This is the oldest supported
 production code, including for a one-Worker rollback:
 

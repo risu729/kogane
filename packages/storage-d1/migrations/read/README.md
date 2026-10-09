@@ -32,3 +32,9 @@ Rules that already hold:
   these directories, never from a checked-in schema dump.
 - A destructive READ change rebuilds an empty READ from the latest schema; it
   never edits an applied file.
+
+`0004_reward_unclassified_buckets.sql` adds the current
+`reward_expiry_estimates_v2` projection with an explicit unclassified kind.
+The original estimate table and sealed rows remain historical. New App/Processor
+releases require v2 promotion and a rebuilt snapshot; they do not serve a legacy
+release as the corrected interpretation (ADR 0049 amendment).

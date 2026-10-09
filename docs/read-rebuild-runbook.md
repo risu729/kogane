@@ -75,7 +75,7 @@ in the ledger, and the order matters because of the foreign keys:
 read_build_checkpoints, scope_relations, snapshot_input_refs,
 current_balance_projection, balance_snapshot_pointer, balance_read_snapshots,
 reward_build_checkpoints, reward_conversion_simulations,
-reward_expiry_estimates, reward_snapshot_input_refs, reward_snapshot_pointer,
+reward_expiry_estimates_v2, reward_expiry_estimates, reward_snapshot_input_refs, reward_snapshot_pointer,
 reward_expiry_snapshots,
 read_instance
 ```

@@ -116,9 +116,9 @@ and risk class in its own pull request, and until then no delegation names it.
   not the final capability limit.
 
 **Numbers.** CORE migrations on main reach 0071. CORE 0067 is #564's; 0072 is
-the financial G3 migration; 0073 and 0074 are UI candidates. This plan's audit
+the financial G3 migration; 0076 and 0074 are UI candidates. This plan's audit
 migration is **"0075 or later (candidate; fixed after root coordination: CORE
-0072 is the financial G3 migration, 0073/0074 are UI candidates, 0067 is #564's;
+0072 is the financial G3 migration, 0076/0074 are UI candidates, 0067 is #564's;
 re-check latest main and every open PR before the implementation PR)"**.
 ADR numbers: 0057–0059 are reserved by another session, 0060 is the Container
 PR's (#436), and 0061 and 0062 are the financial transfer session's (#550,
@@ -650,7 +650,7 @@ page contents. The record holds their ids and revision numbers.
 ### 6.2 The record
 
 CORE table `audit_records`, migration **0075 or later (candidate; fixed after
-root coordination: CORE 0072 is the financial G3 migration, 0073/0074 are UI
+root coordination: CORE 0072 is the financial G3 migration, 0076/0074 are UI
 candidates, 0067 is #564's; re-check latest main and every open PR before the
 implementation PR)**. `STRICT`, classified `core-keep`, listed in
 `REVISION_EXCLUDED_TABLES` (`packages/read-model/src/source-revision.ts`: an
