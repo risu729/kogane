@@ -963,6 +963,30 @@ need S3; S5 needs S2 (and S1 for its read records); S7 and S8 need S1.
 
 **S3 — delegation** (after S1 and S2).
 
+S3 is split into **declaration core** and **execution integration**. The
+core can be reviewed independently of unmerged S1 (#619): strict configuration
+validation, role bundles, owner/read-grant scope attenuation, expiry,
+canonical delegation reference, and a safe MCP capabilities status. It adds
+only the empty `MCP_DELEGATIONS` variable. It connects no writer, adds no tool,
+changes no read grant, and does not complete S3 or owner-equivalent delegation.
+Even a valid declaration reports `available: false`; closed reasons distinguish
+missing audit, operation path, Processor guards and confirmation. Inactive
+reports disclose no other entry, identity, scope, expiry, budget or digest.
+Existing legal read/proposal capabilities and browser/UI authority are unchanged.
+
+**Required follow-up after #619 merges:** connect the resolver to S1's existing
+`OPERATION_CATALOGUE`/`executeOperation` and common audit builders; add the
+delegated principal kind and validated Processor family/ref forwarding;
+prepare/confirm with atomic single-use audit/idempotency and budget checks;
+scope-before-write guards and per-operation risk gates; then publish only the
+actually executable delegated operations. Reconcile #564's schedule scope and
+single maintenance writer as S4. Do not copy either unmerged implementation.
+Until this integration is independently reviewed and ships, no delegated
+operation is executable and the S3 matrix remains incomplete.
+The parallel #546 instrument-resolution history service/read route also needs
+a later S3/S6 agent/MCP parity adapter through this common audited path; the
+declaration core does not expose or duplicate that history reader.
+
 - What: `MCP_DELEGATIONS` (added as `""` in a reviewed configuration change),
   its parser and resolver (`packages/application/src/delegation/`), the roles,
   `PRINCIPAL_KINDS` gaining `delegated`, the Processor's `principalOf`, the

@@ -61,6 +61,7 @@ import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { opsApiEnabled } from "./ops-api";
 import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
 import { HttpError, json } from "./http";
+import { mcpDelegationCapabilities } from "./delegation";
 
 const AGENT_PREFIX = "/api/agent/v1/";
 export const MCP_PATH = "/mcp";
@@ -171,7 +172,10 @@ export async function agentApi(
   assertAgentTransport(request, url);
   const grant = agentGrant(env, caller.principal);
   if (grant === null) throw new HttpError(403, "agent_api_not_configured");
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/u, "Z");
+  // Query/proposal clocks keep their existing whole-second contract. Authority
+  // validity must not round backwards across a subsecond issuedAt/notAfter.
+  const delegationNow = new Date().toISOString();
+  const now = delegationNow.replace(/\.\d{3}Z$/u, "Z");
   const context = toolContext(env, grant, now);
 
   if (path === MCP_PATH) {
@@ -205,6 +209,20 @@ export async function agentApi(
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
+        // An MCP client's capabilities also carry its delegation declaration
+        // (#628, inert: nothing executes under it); recorded like any call.
+        if (name === "kogane.capabilities" && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async (audit) => {
+            const result = await callTool(name, body, { ...context, audit });
+            if (result.status !== 200) return result;
+            return {
+              ...result,
+              body: {
+                ...(result.body as Record<string, unknown>),
+                delegation: await mcpDelegationCapabilities(env, caller, delegationNow),
+              },
+            };
+          });
         if (isAgentToolName(name))
           return toolCall(request, env, caller, name, (audit) =>
             callTool(name, body, { ...context, audit }),
