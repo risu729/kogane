@@ -49,7 +49,7 @@ export const AGENT: Principal = {
   capabilities: ["interpretation.propose"],
 };
 // After the identity writer's own clock, so a decision is later than the rule revision it corrects.
-export const T0 = "2099-01-01T00:00:00.000Z";
+const T0 = "2099-01-01T00:00:00.000Z";
 
 /** The Processor's identity planner (services/processor/src/change-commands.ts), over bun:sqlite. */
 function identityMutation(db: Database) {

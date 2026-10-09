@@ -53,7 +53,7 @@ import {
 } from "./instrument-resolution.ts";
 
 /** The capability the review needs. */
-export const INSTRUMENT_CANDIDATES_CAPABILITY: AgentCapability = "records.read";
+const INSTRUMENT_CANDIDATES_CAPABILITY: AgentCapability = "records.read";
 /**
  * Which list a page holds:
  * - `open`: proposed candidates a command may decide now (no hold);

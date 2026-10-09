@@ -54,7 +54,7 @@ const STATUS: Readonly<Record<string, { label: string; tone: Tone }>> = {
   rejected: { label: "別の銘柄と判断済み", tone: "neutral" },
 };
 
-export const IDENTIFIER_STATE_LABELS: Readonly<Record<string, string>> = {
+const IDENTIFIER_STATE_LABELS: Readonly<Record<string, string>> = {
   "unresolved-candidates": "未判断の候補あり",
   "resolved-by-decision": "判断により同じ銘柄",
   "shared-without-decision": "判断の記録なしで同じ銘柄（要確認）",

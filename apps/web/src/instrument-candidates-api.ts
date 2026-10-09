@@ -11,7 +11,6 @@ import type {
   InstrumentCandidateReview,
   InstrumentCandidateView,
   ReviewCandidate,
-  ReviewHint,
   ReviewItem,
   ReviewSeparated,
 } from "../../../packages/application/src/query/instrument-candidates-review.ts";
@@ -23,7 +22,6 @@ export type {
   InstrumentCandidateView,
   ResolutionIdentifier,
   ReviewCandidate,
-  ReviewHint,
   ReviewItem,
   ReviewSeparated,
 };
