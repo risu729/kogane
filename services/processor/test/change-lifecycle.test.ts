@@ -759,6 +759,24 @@ test("the internal command routes require a verified actor and refuse an agent's
     reason: "route test",
   };
   expect((await post("/command/v1/plan", { kind: "identity.assign", payload })).status).toBe(400);
+  const countBefore = (await db
+    .prepare("SELECT count(*) AS n FROM change_plans")
+    .first<number>("n"))!;
+  for (const baseContextId of [null, 1, {}, "", `instrument-temporal:${"a".repeat(300)}`])
+    expect(
+      await post("/command/v1/plan", { kind: "identity.assign", payload, baseContextId }, asAgent),
+    ).toMatchObject({ json: { error: "invalid_command" } });
+  for (const baseContextId of [
+    "instrument-temporal:",
+    "instrument-temporal:unknown",
+    `instrument-temporal:${"a".repeat(64)}`,
+  ])
+    expect(
+      await post("/command/v1/plan", { kind: "identity.assign", payload, baseContextId }, asAgent),
+    ).toMatchObject({ json: { error: "unsupported_semantics" } });
+  expect((await db.prepare("SELECT count(*) AS n FROM change_plans").first<number>("n"))!).toBe(
+    countBefore,
+  );
   const planned = await post("/command/v1/plan", { kind: "identity.assign", payload }, asAgent);
   expect(planned.status).toBe(200);
   const plan = planned.json.plan as ChangePlan;

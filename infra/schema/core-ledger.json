@@ -1141,6 +1141,12 @@
       "statementCount": 4,
       "insertStatements": [],
       "sha256": "786ec712f3e9118c9dc5afc9fac258f197dc11c187bde2d7cacb1ee8de2a8d2e"
+    },
+    {
+      "file": "0079_instrument_temporal_journal.sql",
+      "statementCount": 11,
+      "insertStatements": [],
+      "sha256": "c8fae1df7c374ec7873d0b033271b7d483f18a7f3036e8fde7eeed909e0c79d8"
     }
   ],
   "tables": [
@@ -9891,6 +9897,190 @@
       ],
       "appendOnly": true,
       "sqlSha256": "9dbacf597f665706"
+    },
+    {
+      "name": "instrument_temporal_acceptances",
+      "classification": "core-keep",
+      "planRow": "append-only temporal identity acceptance journal (ADR 0055)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "commit_seq",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "known_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "operation_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "decision_revision_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "member_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "core_epoch",
+        "commit_seq"
+      ],
+      "foreignKeys": [
+        {
+          "column": "decision_revision_id",
+          "references": "decision_revisions(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "operation_id",
+          "references": "operation_receipts(operation_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "instrument_temporal_acceptances_guard",
+        "instrument_temporal_acceptances_no_delete",
+        "instrument_temporal_acceptances_no_replace",
+        "instrument_temporal_acceptances_no_update"
+      ],
+      "noUpdateTriggers": [
+        "instrument_temporal_acceptances_no_update"
+      ],
+      "noDeleteTriggers": [
+        "instrument_temporal_acceptances_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "80871a5e0bc999ee"
+    },
+    {
+      "name": "instrument_temporal_versions",
+      "classification": "core-keep",
+      "planRow": "sealed append-only temporal identity version members (ADR 0055)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "version_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "core_epoch",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "commit_seq",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "series_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "supersedes",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "version_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "version_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "commit_seq",
+          "references": "instrument_temporal_acceptances(commit_seq)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "core_epoch",
+          "references": "instrument_temporal_acceptances(core_epoch)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "supersedes",
+          "references": "instrument_temporal_versions(version_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "instrument_temporal_series",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "core_epoch",
+            "series_key",
+            "commit_seq"
+          ]
+        }
+      ],
+      "triggers": [
+        "instrument_temporal_versions_guard",
+        "instrument_temporal_versions_no_delete",
+        "instrument_temporal_versions_no_replace",
+        "instrument_temporal_versions_no_update"
+      ],
+      "noUpdateTriggers": [
+        "instrument_temporal_versions_no_update"
+      ],
+      "noDeleteTriggers": [
+        "instrument_temporal_versions_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "85dd131154d55c61"
     },
     {
       "name": "instruments",
@@ -19288,6 +19478,62 @@
       "sqlSha256": "46669a681790937b"
     },
     {
+      "name": "instrument_temporal_acceptances_guard",
+      "table": "instrument_temporal_acceptances",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "53a2e4a2004a2b94"
+    },
+    {
+      "name": "instrument_temporal_acceptances_no_delete",
+      "table": "instrument_temporal_acceptances",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "6a1f32420fc6272e"
+    },
+    {
+      "name": "instrument_temporal_acceptances_no_replace",
+      "table": "instrument_temporal_acceptances",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "39151d8c359e21e9"
+    },
+    {
+      "name": "instrument_temporal_acceptances_no_update",
+      "table": "instrument_temporal_acceptances",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "5046e8384f8411b6"
+    },
+    {
+      "name": "instrument_temporal_versions_guard",
+      "table": "instrument_temporal_versions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "a93beef15e0f79d9"
+    },
+    {
+      "name": "instrument_temporal_versions_no_delete",
+      "table": "instrument_temporal_versions",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "e267b0060a3e418e"
+    },
+    {
+      "name": "instrument_temporal_versions_no_replace",
+      "table": "instrument_temporal_versions",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "e1215ec9f2e477d5"
+    },
+    {
+      "name": "instrument_temporal_versions_no_update",
+      "table": "instrument_temporal_versions",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "9e3df294a85469fe"
+    },
+    {
       "name": "instruments_bump_revision_delete",
       "table": "instruments",
       "timing": "AFTER",
@@ -21167,6 +21413,11 @@
       "sqlSha256": "621bbd1c45936b0d"
     },
     {
+      "name": "instrument_temporal_series",
+      "table": "instrument_temporal_versions",
+      "sqlSha256": "654098af9e013628"
+    },
+    {
       "name": "maintenance_agent_writes",
       "table": "provider_maintenance_rules",
       "sqlSha256": "cab3c1e216c7a262"
@@ -21453,10 +21704,10 @@
     }
   ],
   "summary": {
-    "tableCount": 139,
+    "tableCount": 141,
     "viewCount": 44,
-    "triggerCount": 517,
-    "explicitIndexCount": 144,
+    "triggerCount": 525,
+    "explicitIndexCount": 145,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -21526,6 +21777,8 @@
         "ingestion_attempts",
         "instrument_identifiers",
         "instrument_mappings",
+        "instrument_temporal_acceptances",
+        "instrument_temporal_versions",
         "instruments",
         "maintenance_survey_decisions",
         "maintenance_survey_fetches",
@@ -21710,6 +21963,6 @@
       "0070_economic_commit_guard.sql",
       "0071_economic_event_command_kinds.sql"
     ],
-    "schemaSha256": "339280b496419e8e5088994123ae86ee7c18b341ac7ed245c570823d34efb7cb"
+    "schemaSha256": "91cf2b56e847ae6ae155844b0ea00d09ba71bc9e3ff57a4e4c7b41c6ce792e71"
   }
 }

@@ -1021,7 +1021,7 @@ reproduces its set, and becoming final alone leaves `setVersion` unchanged.
 
 ### Consequences, limits and verification
 
-No schema, SQL, loader, command, transport, migration or production consumer
+No schema, SQL, loader, temporal mutation, migration or financial consumer
 uses this module yet. Complete supplied membership is not proof of database
 atomicity or loader completeness. Synthetic B14/B15/B16/B20 checks cover only
 malformed-snapshot refusal and input preservation, not writer races,
@@ -1030,3 +1030,102 @@ prove those separately. Price/quantity/unit/currency/cost conversion and real
 second-provider evidence remain pending. Domain CI and synthetic selector
 tests verify the implemented cut, interval, relation, legacy and manifest
 semantics; production was not accessed.
+
+## Amendment 2026-10-10: local temporal journal storage primitives
+
+- Status: proposed; no temporal command or route is enabled.
+- Issue: partial B15/B16/B17/B20 evidence for #546, not product completion.
+
+### Context, options and decision
+
+A supplied-array selector cannot establish database atomicity. Reusing the
+current mapping tables would assert historical periods that existing rows
+never proved. CORE 0079 instead adds an append-only acceptance journal and
+normalized version members. No old table, view or row is rewritten.
+
+Members precede their seal in one existing command batch. Deferred foreign
+keys prohibit committed unsealed rows; the seal checks exact member count,
+global dense sequence, nondecreasing canonical time, current epoch and an
+existing receipt/decision belonging to the same operation. The builder binds
+the receipt and decision to the same principal. No new trigger reads command
+tables, preserving their existing rebuild protocol; receipt existence is a
+foreign key, and the seal-write principal guard plus deferred membership FK
+make a mismatched decision roll back the complete batch.
+One version per series per acceptance and exact latest predecessor checks
+refuse forks. A sealed acceptance admits no later member. Update, delete and
+replacement are forbidden. The builder validates the whole candidate snapshot
+with the reviewed selector, copies input before asynchronous reads, and emits
+only typed SQL statements plus a trusted expected-head/source-revision
+precondition for the existing `receiptReservationWrite` mechanism. It does
+not execute a batch, authenticate a caller, approve or create a decision.
+The server clock argument is trusted internal context, not payload authority.
+
+The bounded loader captures epoch/sequence/source revision, constrains all
+journal/member reads to that cut, checks completeness and rechecks revision.
+A concurrent legacy or decision change refuses the entire read. A later
+journal-only append can leave the captured immutable cut unchanged. Legacy
+mappings and listed-as rows retain explicit unlogged references, without
+invented dates or targets. Budgets refuse, never truncate. D1 session ordering
+is not treated as a transaction snapshot; no session API is added.
+
+### Verification and remaining boundary
+
+Synthetic SQLite and native D1 tests compose the real common receipt,
+approval-consumption, plan-state and outbox writes with this primitive.
+Competing reservations, missing members/seals/decisions, lagging clocks,
+historical pins, bounded/concurrent reads and preservation of old schema and
+legacy rows are tested. These are local synthetic proofs, not production.
+The fixture's synthetic decision is not a registered temporal command.
+A reviewed closed temporal payload/planner, immutable command provenance,
+authorization/audit integration and shared HTTP/MCP/UI service remain required.
+No prefix exception, grant, transport registration, financial consumer,
+price/quantity/cost adapter or second-provider observation is introduced.
+
+## Amendment 2026-10-10: refuse temporal-to-current command fallback
+
+- Status: proposed (until this PR merges).
+- Issue: bounded refusal part of B14 / #546, not a temporal writer.
+
+### Context and options considered
+
+The pure selector's `contextId` is an unlabelled digest. Current identity and
+relation commands do not accept or validate an interval bundle. Treating a
+selector result as a current manual assignment would give it semantics the
+server did not validate. Opening a temporal writer together with this guard
+would conflate journal atomicity, authorization and interval policy proofs.
+The selected option is to reserve explicit temporal provenance now, without
+enabling a new kind or adopting a temporal decision.
+
+### Decision
+
+A selected result adds `contextRef = instrument-temporal:<contextId>`; the
+existing digest, selection body and manifest remain unchanged. Callers naming
+this result at a command boundary use `contextRef`, not the bare digest.
+The shared plan, simulate and approve paths refuse that namespace with
+`unsupported_semantics`, including empty and malformed suffixes. Commit
+refuses a new effect before loading an approval or invoking a writer, but
+returns a matching completed receipt first; an idempotency mismatch still
+refuses. This applies to every currently supported command kind, not just
+assignment, so changing the kind cannot turn temporal provenance into a
+current mutation. Ordinary current/manual/candidate contexts keep their
+existing authorization, revision, approval and audit requirements.
+
+At the Processor plan boundary only an omitted `baseContextId` receives the
+legacy current default. Explicit null, non-string, empty or overlong values
+refuse instead of being relabelled as current. No Access, grant, delegation,
+schema, stored evidence or financial policy changes.
+
+### Limits and verification
+
+This is a namespace refusal, not validation of an accepted temporal bundle.
+A bare digest or an entirely omitted provenance field is not distinguishable
+from an ordinary manual request. No temporal consumer may use that ambiguity
+as an adoption path. The future temporal command must require a closed,
+server-verified bundle and cannot be enabled by removing this guard alone.
+Synthetic tests cover current assignment/release/relation plan refusals,
+stored-plan simulate/approve/commit refusals, unchanged approval uses and
+store snapshots, completed receipt replay, and the real Processor HTTP plan
+boundary. B14's positive temporal provenance and B15/B16/B17/B20 database
+integration proofs remain pending in the companion plan. The local storage
+primitive amendment above supplies partial database proofs without enabling
+a temporal command; #546 remains open.

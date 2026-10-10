@@ -5,6 +5,7 @@
 //
 // Creating a plan changes no economic state.
 import { canonicalDigest } from "../../../domain/src/context.ts";
+import { instrumentTemporalContextRequested } from "../../../domain/src/instrument-temporal.ts";
 import {
   type ChangeKind,
   type ChangePayload,
@@ -93,6 +94,8 @@ export async function createPlan(
     ctx.ttlSeconds > PLAN_TTL_SECONDS_MAX
   )
     return commandError("invalid_command");
+  if (instrumentTemporalContextRequested(ctx.baseContextId))
+    return commandError("unsupported_semantics");
   const resolution = await resolveAndSimulate(store, kind, payload);
   if (!resolution.ok) return resolution;
   const candidate = await verifyInstrumentCandidateContext(store, kind, payload, ctx.baseContextId);

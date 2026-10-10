@@ -17,6 +17,7 @@ import { loadPlan } from "./plan.ts";
 import { currentRevisions, markStale } from "./simulate.ts";
 import type { OperationCall } from "../audit/call.ts";
 import { instrumentCandidatePlanIsPinned } from "../operations/instrument-candidate-context.ts";
+import { instrumentTemporalContextRequested } from "../../../domain/src/instrument-temporal.ts";
 
 export const APPROVAL_TTL_SECONDS_DEFAULT = 10 * 60;
 const APPROVAL_TTL_SECONDS_MAX = 60 * 60;
@@ -61,6 +62,8 @@ export async function approve(
   const plan = await loadPlan(store, input.planId);
   if (!plan) return commandError("plan_not_found");
   if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
+  if (instrumentTemporalContextRequested(plan.baseContextId))
+    return commandError("unsupported_semantics");
   if (typeof input.planDigest !== "string" || input.planDigest !== plan.planDigest)
     return commandError("stale_context", [plan.planId]);
   if (Date.parse(plan.expiresAt) <= Date.parse(input.now))
