@@ -780,7 +780,6 @@
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [
-            "ADMIN_TRIGGER_TOKEN",
             "MIZUHO_CUSTOMER_NUMBER",
             "MIZUHO_LOGIN_PASSWORD"
           ],
@@ -838,7 +837,6 @@
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [
-            "ADMIN_TRIGGER_TOKEN",
             "JRE_ID_CREDENTIAL_JSON"
           ],
           "unextractedKeys": []
@@ -1003,7 +1001,6 @@
             "RELEASE_SHA"
           ],
           "requiredSecretNames": [
-            "ADMIN_TRIGGER_TOKEN",
             "PRESTIA_BANK_PASSWORD",
             "PRESTIA_BANK_USER_ID"
           ],
@@ -1525,7 +1522,6 @@
             "VPOINT_PAY_EMAIL_RECIPIENT"
           ],
           "requiredSecretNames": [
-            "ADMIN_TRIGGER_TOKEN",
             "VPOINT_EMAIL_FORWARD_TO",
             "VPOINT_EMAIL_RECIPIENT",
             "VPOINT_MEMBER_NUMBER"
@@ -1586,7 +1582,6 @@
             "COLLECTOR_SCHEMA_VERSION"
           ],
           "requiredSecretNames": [
-            "ADMIN_TRIGGER_TOKEN",
             "VPOINT_PAY_DEVICE_UUID",
             "VPOINT_PAY_REFRESH_TOKEN"
           ],

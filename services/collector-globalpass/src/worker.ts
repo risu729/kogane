@@ -12,7 +12,6 @@ import {
   createDiagnostics,
   safeErrorDetails,
 } from "../../../packages/collector-diagnostics/src/index";
-import { runGlobalPassBrowserProbe } from "./browser-probe";
 import { logEvent, relayRunId, withRunId } from "./log-context";
 import {
   artifactFilename,
@@ -21,8 +20,6 @@ import {
   GLOBALPASS_MEDIA_TYPE,
   GLOBALPASS_PAGINATION_STATUS,
   GLOBALPASS_SCHEMA_VERSION,
-  parseContainerProbeVariant,
-  parseMode,
   runPrefix,
   safeMonth,
   selectedMonthsForMode,
@@ -30,7 +27,6 @@ import {
   type CollectionFailure,
   type CollectionManifest,
   type CollectionMode,
-  type ContainerProbeVariant,
   type ContainerRecord,
   type StoredArtifact,
 } from "./model";
@@ -66,22 +62,6 @@ const RELAY_HOSTS = new Set([
 ]);
 const MAX_NDJSON_LINE_BYTES = 3 * 1024 * 1024;
 const CONTAINER_ID = "prestia-globalpass-read-only-v20";
-const CHROMIUM_TIMEZONE_PROBE_ID = "prestia-globalpass-chromium-timezone-probe-v1";
-const STOPPABLE_CONTAINER_IDS = new Map([
-  ["v9", "prestia-globalpass-read-only-v9"],
-  ["v10", "prestia-globalpass-read-only-v10"],
-  ["v11", "prestia-globalpass-read-only-v11"],
-  ["v12", "prestia-globalpass-read-only-v12"],
-  ["v13", "prestia-globalpass-read-only-v13"],
-  ["v14", "prestia-globalpass-read-only-v14"],
-  ["v15", "prestia-globalpass-read-only-v15"],
-  ["v16", "prestia-globalpass-read-only-v16"],
-  ["v17", "prestia-globalpass-read-only-v17"],
-  ["v18", "prestia-globalpass-read-only-v18"],
-  ["v19", "prestia-globalpass-read-only-v19"],
-  ["v20", CONTAINER_ID],
-  ["chromium-timezone", CHROMIUM_TIMEZONE_PROBE_ID],
-]);
 export class GlobalPassCollectorContainer extends DurableObject<Env> {
   private readonly controller: ContainerController;
   constructor(ctx: DurableObjectState, env: Env) {
@@ -152,67 +132,7 @@ export default {
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket" && url.pathname === "/tcp") {
       return relayTcp(request, env, ctx, url);
     }
-    if (request.method === "POST" && url.pathname === "/browser-probe") {
-      if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      return Response.json(await runGlobalPassBrowserProbe(env), {
-        headers: { "cache-control": "no-store" },
-      });
-    }
-    if (request.method === "POST" && url.pathname === "/container-probe") {
-      if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      try {
-        const variant = parseContainerProbeVariant(url.searchParams.get("variant"));
-        return await runContainerProbe(env, variant);
-      } catch (error) {
-        return Response.json({ error: redactError(error).slice(0, 300) }, { status: 400 });
-      }
-    }
-    if (request.method === "POST" && url.pathname === "/container-stop") {
-      if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      const instance = url.searchParams.get("instance") ?? "";
-      const containerId = STOPPABLE_CONTAINER_IDS.get(instance);
-      if (!containerId) {
-        return Response.json({ error: "Unknown container instance" }, { status: 400 });
-      }
-      const action = url.searchParams.get("action") ?? "stop";
-      const container = getContainer(env.COLLECTOR_CONTAINER, containerId);
-      if (action === "destroy") {
-        await container.destroy();
-        return Response.json({ destroyed: instance });
-      }
-      if (action !== "stop") {
-        return Response.json({ error: "Unknown cleanup action" }, { status: 400 });
-      }
-      await container.stop();
-      return Response.json({ stopped: instance });
-    }
-    if (request.method !== "POST" || url.pathname !== "/trigger") {
-      return Response.json({ error: "Not found" }, { status: 404 });
-    }
-    if (!(await validBearer(request, env.ADMIN_TRIGGER_TOKEN))) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    let mode: CollectionMode;
-    try {
-      mode = parseMode(url.searchParams.get("mode"));
-    } catch (error) {
-      return Response.json({ error: redactError(error).slice(0, 300) }, { status: 400 });
-    }
-    try {
-      const result = await runCollection(env, mode);
-      return Response.json(publicCollectionResult(result), {
-        status: result.status === "success" ? 200 : 502,
-        headers: { "cache-control": "no-store" },
-      });
-    } catch {
-      return Response.json({ error: "globalpass_collection_failed" }, { status: 502 });
-    }
+    return Response.json({ error: "Not found" }, { status: 404 });
   },
   async scheduled(_controller, env): Promise<void> {
     const result = await runCollection(env, "daily");
@@ -221,39 +141,13 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
-async function runContainerProbe(env: Env, variant: ContainerProbeVariant): Promise<Response> {
-  const containerId =
-    variant === "chromium-native-all-tamia" ? CHROMIUM_TIMEZONE_PROBE_ID : CONTAINER_ID;
-  const container = getContainer(env.COLLECTOR_CONTAINER, containerId);
-  await container.startAndWaitForPorts();
-  const response = await container.fetch(
-    new Request("http://container/probe", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        variant,
-        relayToken: requiredSecret(env.RELAY_TOKEN, "RELAY_TOKEN"),
-        relayUrl:
-          variant === "chrome-stable-no-ua-all-cloudflare-gateway"
-            ? `${env.RELAY_PUBLIC_URL}?network=cf-gateway`
-            : env.RELAY_PUBLIC_URL,
-      }),
-    }),
-  );
-  return new Response(response.body, {
-    status: response.status,
-    headers: {
-      "content-type": "application/json; charset=utf-8",
-      "cache-control": "no-store",
-    },
-  });
-}
 type CollectionResult = CollectionManifest & {
   manifestKey: string;
   /** What `persistRun` did in the DATA bucket. */
   shared?: SharedRunSummary;
 };
-async function runCollection(
+/** Module-only executor; the entrypoint exposes it solely through validated private RPC. */
+export async function runCollection(
   env: Env,
   mode: CollectionMode,
   // The hook U06's operations API fills in when it dispatches a run: the
@@ -892,31 +786,6 @@ function exactKeys(
   );
 }
 
-function publicCollectionResult(result: CollectionResult): object {
-  return {
-    runId: result.runId,
-    mode: result.mode,
-    status: result.status,
-    captureComplete: result.captureComplete,
-    paginationStatus: result.paginationStatus,
-    availableMonthCount: result.availableMonths.length,
-    selectedMonthCount: result.selectedMonths.length,
-    artifactCount: result.artifacts.length,
-    failureCount: result.failures.length,
-    manifestKey: result.manifestKey,
-    ...(result.shared
-      ? {
-          shared: {
-            outcome: result.shared.outcome,
-            terminalKey: result.shared.terminalKey,
-            terminalDigest: result.shared.terminalDigest,
-            objectCount: result.shared.objectCount,
-            waitingForHuman: result.shared.waitingForHuman,
-          },
-        }
-      : {}),
-  };
-}
 class CollectionContractError extends Error {
   constructor() {
     super("GLOBAL PASS container contract invalid");
@@ -926,16 +795,8 @@ class CollectionContractError extends Error {
 function hex(value: ArrayBuffer): string {
   return [...new Uint8Array(value)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
-function redactError(error: unknown): string {
-  return redactText(error instanceof Error ? error.message : "Unknown error");
-}
-function redactText(value: string): string {
-  return value
-    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/giu, "Bearer [redacted]")
-    .replace(/(token|cookie|password|usrId)=?[^\s,;]+/giu, "$1=[redacted]");
-}
 
-/** Private service-binding collection; public token/Access routes keep their checks. */
+/** Private service-binding collection; public HTTP cannot invoke collection. */
 export async function alarmCollection(
   env: Env,
   _cron: string,

@@ -17,7 +17,6 @@ import type { CollectionFailure, CollectionManifest } from "./types";
 type MyJcbEnv = Env & {
   readonly MYJCB_CONNECTIONS_JSON?: string;
   readonly MYJCB_CONNECTION_SECRET_NAMES?: string;
-  readonly ADMIN_TRIGGER_TOKEN?: string;
 };
 export default {
   async fetch(request, env): Promise<Response> {
@@ -29,16 +28,7 @@ export default {
         schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       });
     }
-    if (request.method !== "POST" || url.pathname !== "/trigger") {
-      return Response.json({ error: "Not found" }, { status: 404 });
-    }
-    if (!(await authorized(request, env.ADMIN_TRIGGER_TOKEN))) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    {
-      const shared = await runSharedCollection(env, "manual");
-      return Response.json(shared, { status: sharedRunFailed(shared) ? 502 : 200 });
-    }
+    return Response.json({ error: "Not found" }, { status: 404 });
   },
   async scheduled(_controller, env): Promise<void> {
     {
@@ -78,7 +68,8 @@ function sharedRunFailed(result: SharedResult): boolean {
  * human stays a reported state on its own unit and is never retried here
  * (G3-10, G3-11).
  */
-async function runSharedCollection(
+/** Module-only executor; the entrypoint exposes it solely through validated private RPC. */
+export async function runSharedCollection(
   env: MyJcbEnv,
   trigger: CollectionManifest["trigger"],
 ): Promise<SharedResult> {
@@ -186,24 +177,6 @@ async function runSharedCollection(
     }
   });
 }
-async function authorized(request: Request, expected: string | undefined): Promise<boolean> {
-  const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
-  if (!provided || !expected) return false;
-  const encoder = new TextEncoder();
-  const [left, right] = await Promise.all([
-    crypto.subtle.digest("SHA-256", encoder.encode(provided)),
-    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
-  ]);
-  if (!hasTimingSafeEqual(crypto.subtle)) {
-    throw new Error("Worker runtime omitted crypto.subtle.timingSafeEqual");
-  }
-  return crypto.subtle.timingSafeEqual(left, right);
-}
-function hasTimingSafeEqual(subtle: SubtleCrypto): subtle is SubtleCrypto & {
-  timingSafeEqual(left: ArrayBuffer, right: ArrayBuffer): boolean;
-} {
-  return typeof Reflect.get(subtle, "timingSafeEqual") === "function";
-}
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
@@ -231,7 +204,7 @@ function connectionSecretValues(env: MyJcbEnv): string[] {
   });
 }
 
-/** Private service-binding collection; public token/Access routes keep their checks. */
+/** Private service-binding collection; public HTTP cannot invoke collection. */
 export async function alarmCollection(
   env: Env,
   _cron: string,

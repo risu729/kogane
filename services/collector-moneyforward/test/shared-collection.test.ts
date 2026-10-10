@@ -21,7 +21,7 @@ import {
   sharedRunDiagnostic,
   type SharedRunInput,
 } from "../src/shared-collection";
-import worker from "../src/worker";
+import { runSharedCollection } from "../src/worker";
 
 const runId = "3f2504e0-4f89-41d3-9a0c-0305e82c3301";
 const schemaVersion = "moneyforward-worker-poc-v1";
@@ -258,33 +258,26 @@ describe("G1-15 shared mode writes once", () => {
       ),
     ];
     try {
-      const response = await worker.fetch(
-        new Request("https://worker.invalid/trigger", {
-          method: "POST",
-          headers: { authorization: "Bearer synthetic-admin" },
-        }) as Request<unknown, IncomingRequestCfProperties>,
-        {
-          ADMIN_TRIGGER_TOKEN: "synthetic-admin",
-          COLLECTOR_SCHEMA_VERSION: schemaVersion,
-          COLLECTION_TARGET: "shared",
-          // Missing credential deliberately fails before any provider request.
-          DATA: data,
-          SNAPSHOTS: {
-            put: async () => {
-              legacyWrites += 1;
-              throw new Error("the legacy bucket must not be written in shared mode");
-            },
+      const response = await runSharedCollection({
+        COLLECTOR_SCHEMA_VERSION: schemaVersion,
+        COLLECTION_TARGET: "shared",
+        // Missing credential deliberately fails before any provider request.
+        DATA: data,
+        SNAPSHOTS: {
+          put: async () => {
+            legacyWrites += 1;
+            throw new Error("the legacy bucket must not be written in shared mode");
           },
-          RAW_EVIDENCE_IMPORTER: {
-            fetch: async () => {
-              imports += 1;
-              return Response.json({ status: "sealed" });
-            },
+        },
+        RAW_EVIDENCE_IMPORTER: {
+          fetch: async () => {
+            imports += 1;
+            return Response.json({ status: "sealed" });
           },
-        } as unknown as Env,
-      );
-      const body = (await response.json()) as { status: string; persistence: string };
-      expect(response.status).toBe(502);
+        },
+      } as unknown as Env);
+      const body = response as { status: string; persistence: string };
+      expect(response.status).not.toBe("success");
       expect(body.status).toBe("failed");
       expect(body.persistence).toBe("persisted");
       expect(legacyWrites).toBe(0);

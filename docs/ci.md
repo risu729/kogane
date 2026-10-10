@@ -134,6 +134,17 @@ deployment ledger and existing operational instructions working. Workspace
 checks use native names; `ci:<short>` aliases are not retained. New code and docs
 should use `//<workspace>:<task>`.
 
+Test schema setup batches the statements of each migration file through D1
+using `services/processor/test/migration-setup.ts`, preserving order and file
+boundaries. Sending the growing CORE schema statement by statement took about
+26–28 seconds before worker bundling and fixture work, breaching existing
+30-second hooks; per-file batches reduced the measured setup to about 7–9
+seconds. Native differential tests compare complete schema and seeded data,
+foreign keys, append-only trigger refusal and a failed file's rollback.
+Explicit upgrade tests still choose the migration subset and apply later files
+at their own boundary. Production migrations, statement text and existing hook deadlines are not
+changed.
+
 `ci:root` owns manifest/task coverage, repository tests, import-boundary checks
 and Knip, including hosted partition coverage. Root `bundle` and `dry-run` compose workspace tasks. Deployable
 Workers' bundle locations stay aligned with `infra/deploy-order.json`.

@@ -22,7 +22,7 @@ mock.module("../../../packages/collection/src/container-stub", () => ({
     },
   }),
 }));
-const { default: worker } = await import("../src/worker");
+const { runCollection } = await import("../src/worker");
 afterEach(() => {
   destroyFails = false;
   fetchFails = false;
@@ -43,27 +43,19 @@ async function trigger(loggingFails = false) {
   ];
   const data = new FakeR2Bucket();
   try {
-    const response = await worker.fetch(
-      new Request("https://worker.invalid/trigger", {
-        method: "POST",
-        headers: { authorization: "Bearer synthetic-admin" },
-      }) as Request<unknown, IncomingRequestCfProperties>,
-      {
-        ADMIN_TRIGGER_TOKEN: "synthetic-admin",
-        SBI_SHINSEI_CREDENTIAL_JSON: JSON.stringify({
-          branchNumber: "012",
-          accountNumber: "0345678",
-          powerDirectPassword: "synthetic-secret",
-        }),
-        RELAY_TOKEN: "synthetic-relay",
-        RELAY_PUBLIC_URL: "wss://worker.invalid/tcp",
-        COLLECTOR_SCHEMA_VERSION: "sbi-shinsei-worker-poc-v1",
-        COLLECTOR_CONTAINER: {},
-        DATA: data,
-      } as unknown as Env,
-      {} as ExecutionContext,
-    );
-    const result = (await response.json()) as {
+    const response = await runCollection({
+      SBI_SHINSEI_CREDENTIAL_JSON: JSON.stringify({
+        branchNumber: "012",
+        accountNumber: "0345678",
+        powerDirectPassword: "synthetic-secret",
+      }),
+      RELAY_TOKEN: "synthetic-relay",
+      RELAY_PUBLIC_URL: "wss://worker.invalid/tcp",
+      COLLECTOR_SCHEMA_VERSION: "sbi-shinsei-worker-poc-v1",
+      COLLECTOR_CONTAINER: {},
+      DATA: data,
+    } as unknown as Env);
+    const result = response as {
       runId: string;
       status: string;
       manifestKey: string;
@@ -93,7 +85,7 @@ describe("Shinsei Worker failure logging", () => {
       authenticationAttempted: true,
     });
     const { response, result, logs, stored } = await trigger();
-    expect(response.status).toBe(503);
+    expect(response.status).toBe("failed");
     const failed = logs.findIndex((entry) => entry.event === "sbi-shinsei-collection-failure");
     const teardown = logs.findIndex(
       (entry) => entry.event === "sbi-shinsei-container-teardown-start",
@@ -124,7 +116,7 @@ describe("Shinsei Worker failure logging", () => {
   test("a rejected container HTTP response is not logged as a successful request", async () => {
     responseStatus = 503;
     const { response, logs } = await trigger();
-    expect(response.status).toBe(503);
+    expect(response.status).toBe("failed");
     expect(logs).toContainEqual(
       expect.objectContaining({
         event: "sbi-shinsei-stage",
@@ -151,7 +143,7 @@ describe("Shinsei Worker failure logging", () => {
     responseStatus = 500;
     handoff = "Failed to start container: synthetic-secret";
     const { response, logs, stored } = await trigger();
-    expect(response.status).toBe(503);
+    expect(response.status).toBe("failed");
     expect(logs).toContainEqual(
       expect.objectContaining({
         event: "sbi-shinsei-container-response-failure",
@@ -178,7 +170,7 @@ describe("Shinsei Worker failure logging", () => {
       failure: { dataset: "exchange-rate", stage: "exchange-rate-http-503" },
     });
     const { response, result, logs } = await trigger();
-    expect(response.status).toBe(200);
+    expect(response.status).not.toBe("failed");
     expect(result.status).toBe("partial");
     expect(logs).toContainEqual(
       expect.objectContaining({
@@ -216,7 +208,7 @@ describe("Shinsei Worker failure logging", () => {
     });
     destroyFails = true;
     const { response, result, logs } = await trigger();
-    expect(response.status).toBe(200);
+    expect(response.status).not.toBe("failed");
     expect(result.status).toBe("success");
     expect(logs.some((entry) => entry.event === "sbi-shinsei-collection-failure")).toBe(false);
     expect(
@@ -234,7 +226,7 @@ describe("Shinsei logging remains best effort", () => {
       authenticationAttempted: true,
     });
     const { response, result, stored } = await trigger(true);
-    expect(response.status).toBe(503);
+    expect(response.status).toBe("failed");
     expect(result.status).toBe("failed");
     expect(destroyCalls).toBe(1);
     const manifest = JSON.parse(new TextDecoder().decode(stored.at(-1)!.body));
@@ -255,7 +247,7 @@ describe("Shinsei logging remains best effort", () => {
     });
     destroyFails = true;
     const { response, result, stored } = await trigger(true);
-    expect(response.status).toBe(200);
+    expect(response.status).not.toBe("failed");
     expect(result.status).toBe("success");
     expect(destroyCalls).toBe(1);
     expect(stored).toHaveLength(6);

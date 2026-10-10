@@ -15,6 +15,9 @@ import { type AuditDiff, auditDiffJson } from "./diff.ts";
 import {
   AUDIT_CORRELATION_ID,
   AUDIT_DIGEST,
+  AUDIT_DELEGATION_REF,
+  AUDIT_CONFIRMATION_DIGEST,
+  AUDIT_STEPS,
   AUDIT_ID,
   AUDIT_IDEMPOTENCY_KEY,
   AUDIT_INSTANT,
@@ -47,6 +50,7 @@ export interface AuditActor {
   /** What the subject was graded as: `<sub>`, `mcp-client:<sub>`, or the Processor's own. */
   principal: string;
   principalKind: AuditPrincipalKind;
+  delegationRef?: string;
   /** The App's request id, forwarded to the Processor, or the Processor's own. */
   correlationId: string;
 }
@@ -62,6 +66,10 @@ export interface AuditFacts {
   operation: string;
   riskClass: RiskClass;
   step?: AuditStep;
+  confirmationDigest?: string;
+  confirmExpiresAt?: string;
+  confirmsAuditId?: string;
+  revertsAuditId?: string;
   scope?: AuditScope | null;
   targetRef?: string | null;
   result: AuditResult;
@@ -87,7 +95,7 @@ export interface AuditRow {
   subject: string | null;
   principal: string;
   principal_kind: AuditPrincipalKind;
-  delegation_ref: null;
+  delegation_ref: string | null;
   operation: string;
   risk_class: RiskClass;
   step: AuditStep;
@@ -100,10 +108,10 @@ export interface AuditRow {
   correlation_id: string;
   idempotency_key: string | null;
   payload_digest: string | null;
-  confirmation_digest: null;
-  confirm_expires_at: null;
-  confirms_audit_id: null;
-  reverts_audit_id: null;
+  confirmation_digest: string | null;
+  confirm_expires_at: string | null;
+  confirms_audit_id: string | null;
+  reverts_audit_id: string | null;
   refs_json: string;
   diff_json: string;
 }
@@ -189,13 +197,54 @@ export function buildAuditRecord(
   check(AUDIT_OPERATION.test(facts.operation), "operation");
   check((RISK_CLASSES as readonly string[]).includes(facts.riskClass), "risk_class");
   const step = facts.step ?? "call";
-  // Two-step confirmation (ADR 0063) is not built yet: no record of this
-  // slice is a prepare or a confirm, so none carries their digests. When it
-  // is, an applied confirm cites its prepare (`confirms_audit_id`); a refused
-  // confirm may have none to cite, which the table admits.
-  check(step === "call", "step");
+  // A two-step preparation (ADR 0063) carries its digest and expiry. An applied confirm cites its
+  // prepare; a refused confirm may have none to cite, which the table admits.
+  check((AUDIT_STEPS as readonly string[]).includes(step), "step");
+  const delegationRef = actor.delegationRef ?? null;
+  check(
+    actor.principalKind === "delegated"
+      ? actor.path === "mcp" &&
+          actor.principal === `mcp-client:${actor.subject}` &&
+          delegationRef !== null &&
+          AUDIT_DELEGATION_REF.test(delegationRef)
+      : delegationRef === null,
+    "delegation_ref",
+  );
   check((AUDIT_RESULTS as readonly string[]).includes(facts.result), "result");
-  check(facts.result !== "prepared", "result");
+  check(step !== "prepare" || ["prepared", "refused", "failed"].includes(facts.result), "step");
+  check(
+    step !== "confirm" ||
+      ["applied", "accepted", "refused", "failed", "replayed"].includes(facts.result),
+    "step",
+  );
+  const prepared = facts.result === "prepared";
+  const confirmationDigest = facts.confirmationDigest ?? null;
+  const confirmExpiresAt = facts.confirmExpiresAt ?? null;
+  const confirmsAuditId = facts.confirmsAuditId ?? null;
+  const revertsAuditId = facts.revertsAuditId ?? null;
+  check(
+    prepared
+      ? step === "prepare" &&
+          confirmationDigest !== null &&
+          AUDIT_CONFIRMATION_DIGEST.test(confirmationDigest) &&
+          confirmExpiresAt !== null &&
+          AUDIT_INSTANT.test(confirmExpiresAt) &&
+          Date.parse(confirmExpiresAt) > Date.parse(recordedAt) &&
+          Date.parse(confirmExpiresAt) - Date.parse(recordedAt) <= 600_000
+      : confirmationDigest === null && confirmExpiresAt === null,
+    "confirmation_digest",
+  );
+  check(
+    confirmsAuditId === null || (step === "confirm" && AUDIT_ID.test(confirmsAuditId)),
+    "confirms_audit_id",
+  );
+  check(
+    step !== "confirm" ||
+      !["applied", "accepted"].includes(facts.result) ||
+      confirmsAuditId !== null,
+    "confirms_audit_id",
+  );
+  check(revertsAuditId === null || AUDIT_ID.test(revertsAuditId), "reverts_audit_id");
   const scope = facts.scope ?? null;
   check(
     scope === null ||
@@ -232,7 +281,7 @@ export function buildAuditRecord(
     subject: actor.subject,
     principal: actor.principal,
     principal_kind: actor.principalKind,
-    delegation_ref: null,
+    delegation_ref: delegationRef,
     operation: facts.operation,
     risk_class: facts.riskClass,
     step,
@@ -245,10 +294,10 @@ export function buildAuditRecord(
     correlation_id: actor.correlationId,
     idempotency_key: idempotencyKey,
     payload_digest: payloadDigest,
-    confirmation_digest: null,
-    confirm_expires_at: null,
-    confirms_audit_id: null,
-    reverts_audit_id: null,
+    confirmation_digest: confirmationDigest,
+    confirm_expires_at: confirmExpiresAt,
+    confirms_audit_id: confirmsAuditId,
+    reverts_audit_id: revertsAuditId,
     refs_json: JSON.stringify(refs),
     diff_json: diff,
   };

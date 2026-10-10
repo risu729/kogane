@@ -40,12 +40,7 @@
     "VPOINT_PAY_EMAIL_RECIPIENT": "vpointpay@takuk.me"
   },
   "secrets": {
-    "required": [
-      "VPOINT_MEMBER_NUMBER",
-      "VPOINT_EMAIL_RECIPIENT",
-      "VPOINT_EMAIL_FORWARD_TO",
-      "ADMIN_TRIGGER_TOKEN"
-    ]
+    "required": ["VPOINT_MEMBER_NUMBER", "VPOINT_EMAIL_RECIPIENT", "VPOINT_EMAIL_FORWARD_TO"]
   },
   "triggers": {
     "crons": []

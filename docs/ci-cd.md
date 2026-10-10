@@ -881,9 +881,11 @@ cannot be proven offline and is verified on the first live pull request.
 
 ## Renovate
 
-`.github/renovate.json5` extends `github>risu729/renovate-config#3.19.0`, which
+`.github/renovate.json5` extends `github>risu729/renovate-config#3.19.1`, which
 already pins versions, automerges minor and digest updates, and keeps
-`compatibility_date` in `wrangler.jsonc` in step with Miniflare. Kogane adds
+`compatibility_date` in `wrangler.jsonc` in step with Miniflare. The shared preset
+also excludes independent updates to mise-generated dependency graphs, whose
+digests belong to `mise.lock`. Kogane adds
 only a Cloudflare Workers group (wrangler, Miniflare, `@cloudflare/*`) and keeps
 the type packages in the shared `typescript` group. Renovate pull requests use
 `CI Check` and native auto-merge, subject to the same configured branch rules.

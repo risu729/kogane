@@ -24,7 +24,7 @@ import { promoteRewardClaims } from "../src/reward-claims-job.ts";
 import { runScheduled } from "../src/worker.ts";
 import { currentCoreRevision } from "../src/balance-projection-job.ts";
 import { readInputRecord } from "../src/projection-input.ts";
-import { applyReadMigrations } from "../../../packages/storage-d1/src/migrations.ts";
+import { applyTestReadMigrations } from "./migration-setup.ts";
 import { CURRENT_REWARD_CONTEXT_SQL } from "../../../packages/storage-d1/src/read/rewards.ts";
 import type { D1Like, D1StatementLike } from "../../../packages/storage-d1/src/d1.ts";
 import { checkReadCursor } from "../../../packages/storage-d1/src/read/index.ts";
@@ -490,7 +490,7 @@ test("G0-09: dropping the reward READ tables leaves every CORE claim intact and 
     "read_instance",
   ])
     await env.READ.prepare(`DROP TABLE IF EXISTS ${table}`).run();
-  await applyReadMigrations(env.READ);
+  await applyTestReadMigrations(env.READ);
   expect(await readCount("SELECT count(*) AS n FROM reward_expiry_snapshots")).toBe(0);
 
   // G2-19: rebuilt from the same fixed input — the same rules, claims, offers

@@ -6,7 +6,7 @@ import {
   parsePrestiaBankBalancePage,
   sanitizePrestiaBankPage,
 } from "../../../packages/parsers/src/parsers/prestia-bank-html";
-import { createHandler } from "../src/worker";
+import { createHandler, createCollection } from "../src/worker";
 import { persistPrestiaBankRun } from "../src/storage";
 import { PrestiaBankError } from "../src/client";
 const request = (body = "{}", token = "local-test-only") =>
@@ -28,10 +28,10 @@ function collection() {
   };
 }
 describe("PRESTIA bank Worker shared DATA acquisition", () => {
-  it("requires admin authorization and the exact empty-object trigger before bank access", async () => {
+  it("rejects retired triggers before bank access", async () => {
     const collect = vi.fn(async () => collection()),
       handler = createHandler({ collect });
-    expect((await handler.fetch(request("private-invalid", "wrong"), env)).status).toBe(401);
+    expect((await handler.fetch(request("private-invalid", "wrong"), env)).status).toBe(404);
     for (const invalid of [
       "null",
       "[]",
@@ -39,7 +39,7 @@ describe("PRESTIA bank Worker shared DATA acquisition", () => {
       '{"password":"private-password"}',
       "x".repeat(1025),
     ])
-      expect((await handler.fetch(request(invalid), env)).status).toBe(400);
+      expect((await handler.fetch(request(invalid), env)).status).toBe(404);
     expect(collect).not.toHaveBeenCalled();
     const health = await handler.fetch(new Request("https://collector.test/health"), env);
     expect(await health.json()).toMatchObject({
@@ -50,11 +50,11 @@ describe("PRESTIA bank Worker shared DATA acquisition", () => {
   });
   it("collects once and persists a terminal-last sanitized bank snapshot, not credentials", async () => {
     const collect = vi.fn(async () => collection()),
-      handler = createHandler({ collect, persist: persistPrestiaBankRun });
-    const response = await handler.fetch(request(), env);
-    expect(response.status).toBe(200);
+      handler = createCollection({ collect, persist: persistPrestiaBankRun });
+    const response = await handler(env);
+    expect(response.httpStatus).toBe(200);
     expect(collect).toHaveBeenCalledTimes(1);
-    const result = (await response.json()) as {
+    const result = response.body as {
       runId: string;
       artifactCount: number;
       foreignCurrencyCount: number;
@@ -91,10 +91,10 @@ describe("PRESTIA bank Worker shared DATA acquisition", () => {
     const collect = vi.fn(async () => {
         throw new PrestiaBankError("login-rejected");
       }),
-      handler = createHandler({ collect });
-    const response = await handler.fetch(request(), env);
-    expect(response.status).toBe(502);
-    const result = (await response.json()) as { runId: string };
+      handler = createCollection({ collect });
+    const response = await handler(env);
+    expect(response.httpStatus).toBe(502);
+    const result = response.body as { runId: string };
     expect(result).toMatchObject({ status: "failed", artifactCount: 0, error: "login-rejected" });
     const terminal = await readTerminal(env.DATA, "prestia-bank", result.runId);
     if (terminal.outcome !== "found") throw Error("missing-terminal");
@@ -110,23 +110,23 @@ describe("PRESTIA bank Worker shared DATA acquisition", () => {
         '<input name="password" value="private-password"></form>',
       ),
     }));
-    const response = await createHandler({ collect }).fetch(request(), env);
-    expect(response.status).toBe(502);
-    expect(await response.json()).toMatchObject({
+    const response = await createCollection({ collect })(env);
+    expect(response.httpStatus).toBe(502);
+    expect(response.body).toMatchObject({
       persistence: "failed",
       error: "persistence-failed",
     });
   });
   it("does not acknowledge a failed persistence as successful acquisition", async () => {
-    const handler = createHandler({
+    const handler = createCollection({
       collect: async () => collection(),
       persist: async () => {
         throw Error("private-r2-error");
       },
     });
-    const response = await handler.fetch(request(), env);
-    expect(response.status).toBe(502);
-    expect(await response.json()).toMatchObject({
+    const response = await handler(env);
+    expect(response.httpStatus).toBe(502);
+    expect(response.body).toMatchObject({
       persistence: "failed",
       error: "persistence-failed",
     });

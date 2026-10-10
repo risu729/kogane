@@ -18,7 +18,7 @@ let container: {
 mock.module("../../../packages/collection/src/container-stub", () => ({
   getContainer: () => container,
 }));
-const { default: worker } = await import("../src/worker");
+const { runCollection } = await import("../src/worker");
 
 function fixtureHtml(): string {
   return (
@@ -65,7 +65,6 @@ async function trigger(target: string | undefined) {
   ];
   try {
     const env = {
-      ADMIN_TRIGGER_TOKEN: "synthetic-admin-token-".repeat(3),
       GLOBALPASS_ID: "private-user",
       GLOBALPASS_PASSWORD: "private-password",
       RELAY_TOKEN: "private-relay-token",
@@ -95,17 +94,10 @@ async function trigger(target: string | undefined) {
         },
       },
     };
-    const response = await worker.fetch(
-      new Request("https://collector.test/trigger", {
-        method: "POST",
-        headers: { authorization: `Bearer ${env.ADMIN_TRIGGER_TOKEN}` },
-      }) as Request<unknown, IncomingRequestCfProperties>,
-      env as unknown as Env,
-      {} as ExecutionContext,
-    );
+    const response = await runCollection(env as unknown as Env, "daily");
     return {
       response,
-      result: (await response.json()) as Record<string, unknown>,
+      result: response,
       data,
       importerCalls,
       staged,
@@ -118,7 +110,7 @@ async function trigger(target: string | undefined) {
 describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () => {
   test("an unset retired target variable still writes only to DATA", async () => {
     const { response, result, data, importerCalls, staged } = await trigger(undefined);
-    expect(response.status).toBe(200);
+    expect(response.status).toBe("success");
     expect(result.status).toBe("success");
     expect(importerCalls).toEqual([]);
     expect(staged).toEqual([]);
@@ -127,7 +119,7 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
 
   test("shared mode writes one copy: DATA only, no staging, no central upload", async () => {
     const { response, result, data, importerCalls, staged } = await trigger("shared");
-    expect(response.status).toBe(200);
+    expect(response.status).toBe("success");
     expect(result.status).toBe("success");
     expect(importerCalls).toEqual([]);
     // Plan 00: the original is stored once. Nothing structural depends on a

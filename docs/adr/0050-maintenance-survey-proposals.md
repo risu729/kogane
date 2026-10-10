@@ -4,7 +4,7 @@
   page, see Consequences)
 - Date: 2026-10-08
 - Issue: #561; builds on [ADR 0039](0039-alarm-schedule-management.md) and
-  consumes the maintenance writer of #560 (ADR 0046, open in PR #564)
+  consumes the maintenance writer of #560 (ADR 0046, merged in PR #564)
 
 ## Context
 

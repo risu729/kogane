@@ -74,3 +74,4 @@ for current behavior.
 - [ADR 0065: Collect native coverage by runtime, without a fabricated repository total](0065-native-test-coverage.md) — proposed; native measurements, no numerical threshold
 - [ADR 0066: Use the direct Container API with existing applications](0066-container-direct-api.md) — proposed; native runtime verification pending
 - [ADR 0067: Current economic-row evidence readiness before event writers](0067-economic-row-readiness.md) — proposed; internal read-only diagnostic, no writer activation
+- [ADR 0069: Retire collector-local public admin bearer entrypoints in bounded slices](0069-collector-admin-retirement.md)

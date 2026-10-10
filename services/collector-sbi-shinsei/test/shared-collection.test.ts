@@ -256,7 +256,7 @@ mock.module("../../../packages/collection/src/container-stub", () => ({
     destroy: async () => {},
   }),
 }));
-const { default: worker } = await import("../src/worker");
+const { runCollection } = await import("../src/worker");
 
 async function trigger(target: string | undefined) {
   const fixtures = (await Bun.file(`${import.meta.dir}/fixtures/core-responses.json`).json()) as {
@@ -294,52 +294,44 @@ async function trigger(target: string | undefined) {
     spyOn(console, "log").mockImplementation((...args: unknown[]) => void logged.push(args)),
   ];
   try {
-    const response = await worker.fetch(
-      new Request("https://worker.invalid/trigger", {
-        method: "POST",
-        headers: { authorization: "Bearer synthetic-admin" },
-      }) as Request<unknown, IncomingRequestCfProperties>,
-      {
-        ADMIN_TRIGGER_TOKEN: "synthetic-admin",
-        SBI_SHINSEI_CREDENTIAL_JSON: JSON.stringify({
-          branchNumber: "012",
-          accountNumber: "0345678",
-          powerDirectPassword: "synthetic-secret",
-        }),
-        RELAY_TOKEN: "synthetic-relay",
-        RELAY_PUBLIC_URL: "wss://worker.invalid/tcp",
-        COLLECTOR_SCHEMA_VERSION: "sbi-shinsei-worker-poc-v1",
-        ...(target === undefined ? {} : { COLLECTION_TARGET: target }),
-        COLLECTOR_CONTAINER: {},
-        DATA: data,
-        SNAPSHOTS: {
-          put: async (key: string, value: string | Uint8Array, options: R2PutOptions) => {
-            const body = typeof value === "string" ? new TextEncoder().encode(value) : value;
-            staged.push(key);
-            return {
-              key,
-              size: body.byteLength,
-              checksums: { sha256: (options.sha256 as Uint8Array).slice().buffer },
-            };
-          },
+    const response = await runCollection({
+      SBI_SHINSEI_CREDENTIAL_JSON: JSON.stringify({
+        branchNumber: "012",
+        accountNumber: "0345678",
+        powerDirectPassword: "synthetic-secret",
+      }),
+      RELAY_TOKEN: "synthetic-relay",
+      RELAY_PUBLIC_URL: "wss://worker.invalid/tcp",
+      COLLECTOR_SCHEMA_VERSION: "sbi-shinsei-worker-poc-v1",
+      ...(target === undefined ? {} : { COLLECTION_TARGET: target }),
+      COLLECTOR_CONTAINER: {},
+      DATA: data,
+      SNAPSHOTS: {
+        put: async (key: string, value: string | Uint8Array, options: R2PutOptions) => {
+          const body = typeof value === "string" ? new TextEncoder().encode(value) : value;
+          staged.push(key);
+          return {
+            key,
+            size: body.byteLength,
+            checksums: { sha256: (options.sha256 as Uint8Array).slice().buffer },
+          };
         },
-        RAW_EVIDENCE_IMPORTER: {
-          fetch: async (request: Request) => {
-            const body = (await request.json()) as { manifestKey: string };
-            importerCalls.push(body.manifestKey);
-            return Response.json({
-              source: "sbi-shinsei",
-              manifestKey: body.manifestKey,
-              sealed: true,
-            });
-          },
+      },
+      RAW_EVIDENCE_IMPORTER: {
+        fetch: async (request: Request) => {
+          const body = (await request.json()) as { manifestKey: string };
+          importerCalls.push(body.manifestKey);
+          return Response.json({
+            source: "sbi-shinsei",
+            manifestKey: body.manifestKey,
+            sealed: true,
+          });
         },
-      } as unknown as Env,
-      {} as ExecutionContext,
-    );
+      },
+    } as unknown as Env);
     return {
       response,
-      result: (await response.json()) as { runId: string; status: string; manifestKey: string },
+      result: response as { runId: string; status: string; manifestKey: string },
       data,
       importerCalls,
       staged,
@@ -353,7 +345,7 @@ async function trigger(target: string | undefined) {
 describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () => {
   test("an unset retired target variable still writes only to DATA", async () => {
     const { response, result, data, importerCalls, staged } = await trigger(undefined);
-    expect(response.status).toBe(200);
+    expect(response.status).not.toBe("failed");
     expect(result.status).toBe("success");
     expect(importerCalls).toEqual([]);
     expect(staged).toEqual([]);
@@ -362,7 +354,7 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
 
   test("shared mode writes one copy: DATA only, no staging, no central upload", async () => {
     const { response, result, data, importerCalls, staged } = await trigger("shared");
-    expect(response.status).toBe(200);
+    expect(response.status).not.toBe("failed");
     expect(result.status).toBe("success");
     expect(importerCalls).toEqual([]);
     // Plan 00: the original is stored once. Nothing structural depends on a

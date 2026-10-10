@@ -34,12 +34,15 @@ import {
   type OperationName,
   parseAuditEnvelope,
   processorCall,
+  delegatedBatchFailure,
 } from "../../../packages/application/src/index.ts";
 import { IDENTITY_POLICY_VERSION } from "./identity-store.ts";
 import { identitySubjectRef } from "../../../packages/application/src/operations/sql.ts";
 import { prepareIdentityCommand } from "./identity-commands.ts";
 
 import { cardSettlementMutation } from "./card-settlement-commands.ts";
+
+import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 
 const BODY_LIMIT = 16 * 1024;
 const ACTOR = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u;
@@ -167,10 +170,32 @@ async function body(request: Request): Promise<CommandBody | null> {
  * those headers at the same level as `/sweep` and `/identity-revise`, and
  * still refuses an agent's approval itself rather than assuming the caller did.
  */
-function principalOf(request: Request): Principal | null {
+function principalOf(request: Request, envelope: AuditEnvelope): Principal | null {
   const id = request.headers.get("x-kogane-verified-actor");
   const kind = request.headers.get("x-kogane-actor-kind");
-  if (id === null || !ACTOR.test(id)) return null;
+  if (id === null) return null;
+  if (kind === "delegated") {
+    const auth = envelope.delegatedExecution;
+    if (
+      envelope.path !== "mcp" ||
+      !auth ||
+      !id.startsWith("mcp-client:") ||
+      !ACTOR.test(id.slice(11))
+    )
+      return null;
+    return {
+      id,
+      kind,
+      verification: "server",
+      capabilities: [
+        ...(auth.commandFamilies.includes("plan") ? ["interpretation.propose" as const] : []),
+        ...(auth.commandFamilies.some((family) => family !== "plan")
+          ? ["interpretation.accept" as const]
+          : []),
+      ],
+    };
+  }
+  if (!ACTOR.test(id) || envelope.delegatedExecution || id.startsWith("mcp-client:")) return null;
   if (kind !== "human" && kind !== "agent") return null;
   return {
     id,
@@ -218,15 +243,56 @@ export async function changeCommandRoute(
   const match = COMMAND_PATH.exec(path);
   if (!match) return undefined;
   if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
-  const principal = principalOf(request);
-  if (!principal) return fail("invalid_command");
+
   // The audit envelope (ADR 0064) is required like the actor headers: the
   // App forwards it on every command, and a request without it is refused
   // exactly as one without a verified actor is.
   const envelope = parseAuditEnvelope(request.headers);
   if (!envelope) return fail("invalid_command");
+  const principal = principalOf(request, envelope);
+  if (!principal) return fail("invalid_command");
   const input = await body(request);
   if (!input) return fail("invalid_command");
+  if (principal.kind === "delegated") {
+    const auth = envelope.delegatedExecution!;
+    if (auth.notAfter <= new Date().toISOString())
+      return Response.json({ error: "delegation_expired" }, { status: 403 });
+    const decision = match[1] === "approve" || match[1] === "commit";
+    if (decision) {
+      if (!auth.confirmsAuditId || !auth.confirmationDigest)
+        return Response.json({ error: "confirmation_required" }, { status: 403 });
+      const plan = await loadPlan(d1CommandStore(env.DB), input.planId);
+      if (!plan) return fail("plan_not_found");
+      if (auth.revertsAuditId !== input.revertsAuditId) return fail("invalid_command");
+      const family = plan.kind.split(".")[0];
+      if (
+        (family !== "identity" && family !== "relation" && family !== "card-settlement") ||
+        !auth.commandFamilies.includes(family)
+      )
+        return Response.json({ error: "capability_not_delegated" }, { status: 403 });
+    } else if (!auth.commandFamilies.includes("plan"))
+      return Response.json({ error: "capability_not_delegated" }, { status: 403 });
+    if (match[1] === "plan" || decision) {
+      if (
+        match[1] === "plan" &&
+        (typeof input.kind !== "string" ||
+          !["identity", "relation", "card-settlement"].includes(input.kind.split(".")[0]!))
+      )
+        return fail("unsupported_semantics");
+      if (
+        auth.idempotencyKey !==
+          (match[1] === "commit" ? input.operationId : input.idempotencyKey) ||
+        !auth.payloadDigest ||
+        auth.payloadDigest !==
+          (await canonicalDigest({
+            v: "kogane-delegated-payload-v1",
+            operation: `command.${match[1]}`,
+            payload: input,
+          }))
+      )
+        return Response.json({ error: "idempotency_conflict" }, { status: 409 });
+    } else if (auth.idempotencyKey || auth.confirmsAuditId) return fail("invalid_command");
+  }
   const store = d1CommandStore(env.DB);
   const now = new Date().toISOString();
   switch (match[1]) {
@@ -243,23 +309,34 @@ export async function changeCommandRoute(
       )
         return fail("invalid_command");
       const audit = writerCall(envelope, "command.plan", principal);
-      const result = await createPlan(
-        input.kind,
-        input.payload,
-        {
-          actor: principal,
-          baseContextId:
-            typeof baseContextId === "string" &&
-            baseContextId.length > 0 &&
-            baseContextId.length <= 256
-              ? baseContextId
-              : "identity-current-v1",
-          now,
-          ttlSeconds: PLAN_TTL_SECONDS_DEFAULT,
-          audit,
-        },
-        store,
-      );
+      let result;
+      try {
+        result = await createPlan(
+          input.kind,
+          input.payload,
+          {
+            actor: principal,
+            baseContextId:
+              typeof baseContextId === "string" &&
+              baseContextId.length > 0 &&
+              baseContextId.length <= 256
+                ? baseContextId
+                : "identity-current-v1",
+            now,
+            ttlSeconds: PLAN_TTL_SECONDS_DEFAULT,
+            audit,
+          },
+          store,
+        );
+      } catch (error) {
+        const guard = await delegatedBatchFailure(store, audit);
+        if (guard)
+          return Response.json(
+            { error: guard.code },
+            { status: guard.code === "delegation_budget_exceeded" ? 429 : 403 },
+          );
+        throw error;
+      }
       return result.ok
         ? answered({ plan: result.plan, created: result.created }, audit)
         : fail(result.error, result.refs);
@@ -273,33 +350,55 @@ export async function changeCommandRoute(
     case "approve": {
       const scope = Array.isArray(input.scope) ? (input.scope as string[]) : [];
       const audit = writerCall(envelope, "command.approve", principal);
-      const result = await approve(store, {
-        planId: input.planId,
-        planDigest: input.planDigest,
-        actor: principal,
-        scope,
-        ttlSeconds: APPROVAL_TTL_SECONDS_DEFAULT,
-        now,
-        audit,
-      });
+      let result;
+      try {
+        result = await approve(store, {
+          planId: input.planId,
+          planDigest: input.planDigest,
+          actor: principal,
+          scope,
+          ttlSeconds: APPROVAL_TTL_SECONDS_DEFAULT,
+          now,
+          audit,
+        });
+      } catch (error) {
+        const refusal = await delegatedBatchFailure(store, audit);
+        if (refusal)
+          return Response.json(
+            { error: refusal.code },
+            { status: refusal.code === "delegation_budget_exceeded" ? 429 : 403 },
+          );
+        throw error;
+      }
       return result.ok
         ? answered({ approval: result.approval, plan: result.plan }, audit)
         : fail(result.error, result.refs);
     }
     case "commit": {
       const audit = writerCall(envelope, "command.commit", principal);
-      const result = await commit(store, {
-        operationId: input.operationId,
-        principal,
-        planId: input.planId,
-        approvalId: input.approvalId,
-        ...(input.idempotencyPayloadDigest === undefined
-          ? {}
-          : { idempotencyPayloadDigest: input.idempotencyPayloadDigest }),
-        planners: changeMutationPlanners(env.DB),
-        now,
-        audit,
-      });
+      let result;
+      try {
+        result = await commit(store, {
+          operationId: input.operationId,
+          principal,
+          planId: input.planId,
+          approvalId: input.approvalId,
+          ...(input.idempotencyPayloadDigest === undefined
+            ? {}
+            : { idempotencyPayloadDigest: input.idempotencyPayloadDigest }),
+          planners: changeMutationPlanners(env.DB),
+          now,
+          audit,
+        });
+      } catch (error) {
+        const refusal = await delegatedBatchFailure(store, audit);
+        if (refusal)
+          return Response.json(
+            { error: refusal.code },
+            { status: refusal.code === "delegation_budget_exceeded" ? 429 : 403 },
+          );
+        throw error;
+      }
       return result.ok
         ? answered({ receipt: result.receipt, replayed: result.replayed }, audit)
         : fail(result.error, result.refs);

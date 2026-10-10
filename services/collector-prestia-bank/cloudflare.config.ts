@@ -22,7 +22,6 @@ export default defineConfig({
       RELEASE_SHA: bindings.text(legacyConfig.vars.RELEASE_SHA),
       COLLECTOR_SCHEMA_VERSION: bindings.text("prestia-bank-collector-v1"),
       PRESTIA_BANK_USER_AGENT: bindings.text(legacyConfig.vars.PRESTIA_BANK_USER_AGENT),
-      ADMIN_TRIGGER_TOKEN: bindings.secret(),
       PRESTIA_BANK_USER_ID: bindings.secret(),
       PRESTIA_BANK_PASSWORD: bindings.secret(),
       DATA: bindings.r2({ name: "kogane-raw-evidence" }),

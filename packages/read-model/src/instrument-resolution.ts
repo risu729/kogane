@@ -31,6 +31,8 @@
 // identity observations (`IDENTITY_OBSERVATION_COUNT_SQL`; ADR 0055
 // amendment 2026-10-09, Cost).
 import type { SqlExecutor } from "./reader";
+import type { DecisionOrigin } from "../../domain/src/decision-origin.ts";
+import { decisionOriginSql, mappingDecisionOriginSql } from "./decision-origin.ts";
 
 /** Rows of `INSTRUMENT_FACTS_SQL` one read may return; more is refused, never cut. */
 export const INSTRUMENT_FACTS_ROW_BOUND = 10_000;
@@ -138,16 +140,17 @@ export const INSTRUMENT_HISTORY_SQL = `WITH wanted AS (SELECT DISTINCT value AS 
 SELECT 'mapping' AS entry,m.identifier_id AS identifierId,m.revision,m.created_at AS createdAt,
  m.method,NULL AS decisionKind,m.reason,m.instrument_id AS instrumentId,m.status,m.label,
  m.policy_version AS policyVersion,m.id AS recordId,NULL AS supersededBy,NULL AS relationStatus,
- NULL AS fromRef
+ NULL AS fromRef,
+ ${mappingDecisionOriginSql("instrument_mapping", "m.identifier_id", "m.revision", "m.method")} AS decisionOrigin
 FROM wanted w CROSS JOIN instrument_mappings m ON m.identifier_id=w.identifier_id
 UNION ALL
 SELECT 'decision',d.subject_ref,d.revision,d.created_at,d.method,d.decision_kind,d.reason,NULL,NULL,
- NULL,NULL,d.id,d.superseded_by,NULL,NULL
+ NULL,NULL,d.id,d.superseded_by,NULL,NULL,${decisionOriginSql("d")}
 FROM wanted w CROSS JOIN decision_revisions d
  ON d.subject_kind='instrument_mapping' AND d.subject_ref=w.identifier_id
 UNION ALL
 SELECT 'relation',substr(r.to_ref,12),d.revision,r.created_at,d.method,d.decision_kind,d.reason,NULL,
- NULL,NULL,NULL,r.id,NULL,r.status,r.from_ref
+ NULL,NULL,NULL,r.id,NULL,r.status,r.from_ref,${decisionOriginSql("d")}
 FROM wanted w CROSS JOIN entity_relations r
  ON r.kind='listed_as' AND r.to_ref='identifier:'||w.identifier_id
 JOIN decision_revisions d ON d.id=r.decision_revision_id
@@ -159,6 +162,7 @@ export interface InstrumentHistoryRow {
   revision: number;
   createdAt: string;
   method: string;
+  decisionOrigin: DecisionOrigin;
   decisionKind: string | null;
   reason: string;
   instrumentId: string | null;

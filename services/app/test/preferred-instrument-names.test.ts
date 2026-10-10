@@ -120,6 +120,7 @@ it("prefers an observed Japanese name for the exact listing and keeps B and mapp
   expect(names.get(other.id)).toEqual({
     label: "Different Corp",
     reason: "provider-current",
+    decisionOrigin: "automatic",
     origin: null,
   });
   const han = data.identifiers.find((row) => row.value === "NAME2" && row.scope === "XNGO")!;
@@ -152,6 +153,7 @@ it("protects manual labels and ignores names from a superseded parse", async () 
   expect((await preferredInstrumentNames(env.DB, [id])).get(id)).toEqual({
     label: "User chosen",
     reason: "manual",
+    decisionOrigin: "unknown",
     origin: null,
   });
   // An older parse of the same artifact, published first and then replaced
@@ -168,6 +170,7 @@ it("protects manual labels and ignores names from a superseded parse", async () 
   expect((await preferredInstrumentNames(env.DB, [staleId])).get(staleId)).toEqual({
     label: "Example",
     reason: "provider-current",
+    decisionOrigin: "automatic",
     origin: null,
   });
 });

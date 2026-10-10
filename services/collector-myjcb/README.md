@@ -72,7 +72,7 @@ Browserless化は明細clientを書き換える作業ではなく、`loginWithBi
 ]
 ```
 
-各array要素は独立したMyJCB ID/session/R2 namespaceである。最初のIDや一つのおまとめloginが他IDを網羅すると仮定しない。`connectionId`はR2 key用の利用者定義pseudonymであり、MyJCB ID、カード番号、氏名を使わない。`ADMIN_TRIGGER_TOKEN`は手動`POST /trigger`のBearer secretである。
+各array要素は独立したMyJCB ID/session/R2 namespaceである。最初のIDや一つのおまとめloginが他IDを網羅すると仮定しない。`connectionId`はR2 key用の利用者定義pseudonymであり、MyJCB ID、カード番号、氏名を使わない。公開 `POST /trigger` は廃止（404）した。
 
 `bootstrapMode=password`は公式password formとlogin protection scriptをBrowser Runで実行する。`bootstrapMode=passkey`はBitwarden JSONの単一`fido2Credentials`からP-256 PKCS#8鍵、credential ID、user handleを一接続一secretへ同期し、Browser RunのCDP virtual authenticatorへ一時注入して公式「パスキーでログイン」を実行する。Browserを閉じるとvirtual authenticatorも消え、鍵、assertion、cookieをR2やmanifestへ保存しない。`bootstrapMode=session`は、本人が別browserで正常loginした後に短命なcookie＋同一User-Agentをsecretとして投入し、mypageを検証してからread-only replayする。
 
@@ -95,7 +95,6 @@ bun scripts/sync-bitwarden-passkey.ts -- \
 
 ```sh
 wrangler secret put MYJCB_CONNECTIONS_JSON
-wrangler secret put ADMIN_TRIGGER_TOKEN
 ```
 
 Cloudflare Workersのenvironment variable/secretは1値5 KB上限である。複数IDやcomplete cookie jarを一つのJSONへ集約すると超過するため、実装は`MYJCB_CONNECTION_SECRET_NAMES`にcomma区切りのsecret binding名を置き、各`MYJCB_ACCOUNT_<NAME>_JSON`へ一接続ずつ分割する経路も持つ。
@@ -221,7 +220,7 @@ HTMLは取得時sourceをUTF-8へdecodeし、script/style/metaと埋込み要素
 
 `wrangler.jsonc`のCron `0 21 * * *`（06:00 JST）からWorkerの`scheduled()`を直接呼ぶ。GitHub Actionsをschedulerとして使わない。
 
-手動runは`POST /trigger`だけで、`ADMIN_TRIGGER_TOKEN`が必要。`GET /health`はsecret不要でsource/schemaだけを返す。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。中央Importerへの転送、`POST /backfill-raw-evidence`、source専用bucketは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
+通常runは既存の固定action private RPC／schedule経路を使い、公開手動triggerは404になる。`GET /health`はsecret不要でsource/schemaだけを返す。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。中央Importerへの転送、`POST /backfill-raw-evidence`、source専用bucketは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 ```sh
 bun install --frozen-lockfile

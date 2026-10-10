@@ -5,14 +5,8 @@
   // updates, and keeps the Miniflare -> compatibility_date manager working for
   // wrangler.jsonc. Normal updates therefore reach main through CI Check and
   // native auto-merge without extra rules here.
-  extends: ["github>risu729/renovate-config#3.19.0"],
+  extends: ["github>risu729/renovate-config#3.19.1"],
   packageRules: [
-    {
-      // mise.lock binds these generated graphs by digest; update them through
-      // mise, never as independent Python projects or package-manager locks.
-      matchFileNames: [".mise/locks/**"],
-      enabled: false,
-    },
     {
       // The Workers toolchain is version-coupled: wrangler, its runtime and the
       // test runtime have to move together or the dry runs disagree.

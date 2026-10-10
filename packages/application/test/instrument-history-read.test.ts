@@ -1,3 +1,9 @@
+import { INSTRUMENT_HISTORY_SQL } from "../../read-model/src/instrument-resolution.ts";
+import { LEGACY_INSTRUMENT_HISTORY_SQL } from "../../read-model/test/decision-origin-legacy-sql.ts";
+import {
+  originDecisionFixture,
+  ORIGIN_CASES,
+} from "../../read-model/test/decision-origin-fixture.ts";
 import { beforeAll, describe, expect, test } from "bun:test";
 import {
   readInstrumentHistoryForGrant,
@@ -71,8 +77,30 @@ describe("the grant-graded complete history", () => {
     ).toEqual([1, 2]);
     expect(outcome.history.entries.some((entry) => entry.relationStatus === "rejected")).toBe(true);
     expect(validInstrumentHistoryRead(outcome.history)).toBe(true);
+    expect(
+      outcome.history.entries
+        .filter((row) => row.entry !== "mapping" || row.revision === 2)
+        .every((row) => row.decisionOrigin === "operator"),
+    ).toBe(true);
+    await decide(
+      w,
+      OPERATOR,
+      "identity.release-override",
+      { subject: "instrument", referenceId: id.broker9001, reason: "synthetic release" },
+      "op-origin-release",
+    );
+    const released = await queryInstrumentHistory(w.sql, [id.broker9001]);
+    expect(
+      released[0]!.entries.find((row) => row.entry === "mapping" && row.revision === 2)!
+        .decisionOrigin,
+    ).toBe("operator");
+    expect(
+      released[0]!.entries.find((row) => row.decisionKind === "release-override")!.decisionOrigin,
+    ).toBe("operator");
+    // Release remains a later decision; take the read-only snapshot after that native command.
+    const afterRelease = w.snapshot();
     const count = await w.sql.first<{ n: number }>(INSTRUMENT_HISTORY_COUNT_SQL, [id.broker9001]);
-    expect(count!.n).toBe(outcome.history.total);
+    expect(count!.n).toBe(outcome.history.total + 1);
     const plan = await w.sql.all<{ detail: string }>(
       `EXPLAIN QUERY PLAN ${INSTRUMENT_HISTORY_COUNT_SQL}`,
       [id.broker9001],
@@ -80,7 +108,8 @@ describe("the grant-graded complete history", () => {
     expect(
       plan.some((row) => /SCAN (instrument_mappings|decision_revisions|r)\b/u.test(row.detail)),
     ).toBe(false);
-    expect(w.snapshot()).toBe(before);
+    expect(before).not.toBe(afterRelease);
+    expect(w.snapshot()).toBe(afterRelease);
     w.db.close();
   });
   test("capability, either narrowed scope and malformed identifier refuse before any read", async () => {
@@ -138,3 +167,131 @@ describe("the grant-graded complete history", () => {
     w.db.close();
   });
 });
+
+test("persisted origin is closed, private, exact-revision and differential on scaled random histories", async () => {
+  const w = await world();
+  const target = (w.db.query("SELECT id FROM instruments LIMIT 1").get() as { id: string }).id;
+  let random = 7;
+  const next = () => (random = (Math.imul(random, 1664525) + 1013904223) >>> 0);
+  const identifiers: string[] = [];
+  for (let n = 0; n < 80; n++) {
+    const id = "synthetic-origin-identifier-" + n;
+    identifiers.push(id);
+    w.db
+      .query("INSERT INTO instrument_identifiers VALUES (?,'synthetic-origin','fixture',?,'{}')")
+      .run(id, String(n));
+    for (let revision = 1, max = 2 + (next() % 14); revision <= max; revision++) {
+      const key = n + "-" + revision;
+      w.db
+        .query(
+          "INSERT INTO instrument_mappings VALUES (?,?,?,?,'manual','synthetic',1,'2099-01-01','synthetic','provider-local')",
+        )
+        .run("synthetic-origin-mapping-" + key, id, revision, target);
+      const fixture = originDecisionFixture(
+        "instrument_mapping",
+        id,
+        revision,
+        next() % ORIGIN_CASES.length,
+        key,
+      );
+      for (const write of fixture.writes) w.db.query(write.sql).run(...write.args);
+      const read = await readInstrumentHistoryForGrant({
+        grant: GRANT,
+        sql: w.sql,
+        identifierId: id,
+      });
+      expect(read.ok).toBe(true);
+      if (!read.ok) throw new Error("synthetic history refused");
+      expect(
+        read.history.entries
+          .filter((row) => row.revision === revision)
+          .every((row) => row.decisionOrigin === fixture.origin),
+      ).toBe(true);
+      expect(JSON.stringify(read.history)).not.toContain(fixture.actor);
+      const invalid = structuredClone(read.history);
+      invalid.entries[0]!.decisionOrigin = "raw-actor" as never;
+      expect(validInstrumentHistoryRead(invalid)).toBe(false);
+    }
+  }
+  const before = w.snapshot();
+  const args = [JSON.stringify([...identifiers, identifiers[0]!])];
+  const rows = await w.sql.all<Record<string, unknown>>(INSTRUMENT_HISTORY_SQL, args);
+  expect(rows.map(({ decisionOrigin: _origin, ...old }) => old)).toEqual(
+    await w.sql.all(LEGACY_INSTRUMENT_HISTORY_SQL, args),
+  );
+  const plan = await w.sql.all<{ detail: string }>(
+    "EXPLAIN QUERY PLAN " + INSTRUMENT_HISTORY_SQL,
+    args,
+  );
+  expect(plan.some((row) => /SCAN (origin_d|origin_op)\b/u.test(row.detail))).toBe(false);
+  expect(plan.some((row) => row.detail.includes("decision_revisions_subject"))).toBe(true);
+  expect(plan.some((row) => row.detail.includes("sqlite_autoindex_decision_operations"))).toBe(
+    true,
+  );
+  expect(w.snapshot()).toBe(before);
+  // A second assignment for the same mapping revision is ambiguous, not an actor guess.
+  const fixture = originDecisionFixture("instrument_mapping", identifiers[0]!, 1, 1, "ambiguous");
+  for (const write of fixture.writes) w.db.query(write.sql).run(...write.args);
+  const ambiguous = await readInstrumentHistoryForGrant({
+    grant: GRANT,
+    sql: w.sql,
+    identifierId: identifiers[0]!,
+  });
+  if (!ambiguous.ok) throw new Error("synthetic history refused");
+  expect(
+    ambiguous.history.entries.find((row) => row.entry === "mapping" && row.revision === 1)!
+      .decisionOrigin,
+  ).toBe("unknown");
+  const exactId = "synthetic-origin-exact-release";
+  w.db
+    .query(
+      "INSERT INTO instrument_identifiers VALUES (?,'synthetic-origin','fixture','release','{}')",
+    )
+    .run(exactId);
+  w.db
+    .query(
+      "INSERT INTO instrument_mappings VALUES ('origin-exact-release-mapping',?,1,?,'manual','synthetic',1,'2099','synthetic','identified')",
+    )
+    .run(exactId, target);
+  const delegated = originDecisionFixture("instrument_mapping", exactId, 1, 0, "exact-release");
+  for (const write of delegated.writes) w.db.query(write.sql).run(...write.args);
+  const release = await decide(
+    w,
+    OPERATOR,
+    "identity.release-override",
+    {
+      subject: "instrument",
+      referenceId: exactId,
+      reason: "synthetic release of delegated assignment",
+    },
+    "op-origin-exact-release",
+  );
+  expect(release.stage === "commit" && release.result.ok).toBe(true);
+  const exact = (await queryInstrumentHistory(w.sql, [exactId]))[0]!;
+  expect(exact.entries.find((row) => row.entry === "mapping")!.decisionOrigin).toBe("delegated");
+  expect(exact.entries.find((row) => row.decisionKind === "release-override")!.decisionOrigin).toBe(
+    "operator",
+  );
+  // Relation history classifies its own decision, not the mapping or querying human.
+  w.db
+    .query(
+      "INSERT INTO decision_operations VALUES ('origin-relation-op','mcp-client:synthetic-relation','server','accept',?,'{}','2100')",
+    )
+    .run("0".repeat(64));
+  w.db
+    .query(
+      "INSERT INTO decision_revisions VALUES ('origin-relation-decision','relation','origin-relation',1,'accept','manual','mcp-client:synthetic-relation','origin-relation-op','synthetic','[]',NULL,NULL,'2100')",
+    )
+    .run();
+  w.db
+    .query(
+      "INSERT INTO entity_relations VALUES ('origin-relation','listed_as',?,?,NULL,NULL,'accepted','origin-relation-decision','[]','2100')",
+    )
+    .run("instrument:" + target, "identifier:" + exactId);
+  const relation = (await queryInstrumentHistory(w.sql, [exactId]))[0]!.entries.find(
+    (row) => row.entry === "relation",
+  )!;
+  expect(relation.decisionOrigin).toBe("delegated");
+  expect(JSON.stringify(relation)).not.toContain("mcp-client:");
+  w.db.close();
+}, 30000);
