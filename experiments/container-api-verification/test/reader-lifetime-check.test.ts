@@ -200,8 +200,9 @@ test("each arm observes idle only through DO state and restarts a different proc
         calls.push(path);
         return Response.json({ code: "pass", elapsedMs: 36_000, bytes });
       },
-      waitState: async (predicate: (state: { running: number }) => boolean) => {
+      waitState: async (predicate: (state: { running: number }) => boolean, substage: string) => {
         calls.push("waitState");
+        expect(substage).toBe(arm === "resume" ? "reader_resume_idle" : "reader_cancel_idle");
         expect(predicate({ running: 0 })).toBe(true);
         time += 30_000;
       },

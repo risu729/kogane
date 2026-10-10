@@ -35,6 +35,7 @@ function recordPath(temp, name) {
       "container-api-verification-stream-check-failure.json",
       "container-api-verification-sdk-startup-failure.json",
       "container-api-verification-initialize-outer-failure.json",
+      "container-api-verification-state-timeout-failure.json",
     ].includes(name)
   )
     closed("record");
@@ -85,6 +86,85 @@ export function writeRecord(temp, name, value) {
   } finally {
     if (fd !== undefined) closeSync(fd);
   }
+}
+const stateWaitStages = new Set([
+  "reader_resume_idle",
+  "reader_cancel_idle",
+  "signal_stop",
+  "nonzero_exit_stop",
+]);
+const stateWaitPhases = new Set(["baseline_sdk", "native", "native_unmonitored", "rollback_sdk"]);
+export function stateTimeoutFailureRecord(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !==
+      "code,errors,exitSeven,phase,running,sdkAlarmPresent,signaled,startup,stops,substage" ||
+    value.code !== "state_timeout_observation" ||
+    !stateWaitPhases.has(value.phase) ||
+    !stateWaitStages.has(value.substage) ||
+    value.running !== 1 ||
+    ![0, 1].includes(value.sdkAlarmPresent) ||
+    ["startup", "stops", "errors", "signaled", "exitSeven"].some(
+      (key) => !Number.isSafeInteger(value[key]) || value[key] < 0,
+    )
+  )
+    closed("state_timeout_record");
+  return {
+    code: "state_timeout_observation",
+    phase: value.phase,
+    substage: value.substage,
+    running: value.running,
+    sdkAlarmPresent: value.sdkAlarmPresent,
+    startup: value.startup,
+    stops: value.stops,
+    errors: value.errors,
+    signaled: value.signaled,
+    exitSeven: value.exitSeven,
+  };
+}
+/** Observe only the last existing poll; no extra request or activity renewal. */
+export async function waitForState({
+  json,
+  predicate,
+  phase,
+  substage,
+  temp,
+  timeout = 90_000,
+  now = Date.now,
+  sleep = pause,
+}) {
+  const deadline = now() + timeout;
+  let state;
+  do {
+    state = await json("/state");
+    if (predicate(state)) return state;
+    await sleep(3000);
+  } while (now() < deadline);
+  try {
+    if (state?.revision !== (phase === "rollback_sdk" ? "baseline_sdk" : phase))
+      closed("state_timeout_record");
+    writeRecord(
+      temp,
+      "container-api-verification-state-timeout-failure.json",
+      stateTimeoutFailureRecord({
+        code: "state_timeout_observation",
+        phase,
+        substage,
+        running: state.running,
+        sdkAlarmPresent: state.sdkAlarmPresent,
+        startup: state[phase.startsWith("native") ? "starts" : "startCallbacks"],
+        stops: state.stops,
+        errors: state.errors,
+        signaled: state.signaled,
+        exitSeven: state.exitSeven,
+      }),
+    );
+  } catch {
+    // Invalid state or persistence failure cannot replace the original timeout.
+  }
+  closed("state_timeout");
 }
 export function baselineRecord(value, account) {
   if (
@@ -476,7 +556,10 @@ export async function verifyReaderIdleCycle({ arm, request, json, waitState, now
   }
   await verifyReaderLifetimeCheck({ request, arm });
   const started = now();
-  await waitState((value) => value.running === 0);
+  await waitState(
+    (value) => value.running === 0,
+    arm === "resume" ? "reader_resume_idle" : "reader_cancel_idle",
+  );
   const observed = now() - started;
   if (!Number.isSafeInteger(observed) || observed < 20_000 || observed > 90_000)
     closed("reader_idle");
@@ -923,15 +1006,8 @@ export async function verifyPhase({
       workerVersion: canonicalUuid(versions[0].version_id),
     };
   }
-  async function waitState(predicate, timeout = 90_000) {
-    const deadline = Date.now() + timeout;
-    do {
-      const state = await json("/state");
-      if (predicate(state)) return state;
-      await pause(3000);
-    } while (Date.now() < deadline);
-    closed("state_timeout");
-  }
+  const waitState = (predicate, substage, timeout = 90_000) =>
+    waitForState({ json, predicate, phase, substage, temp, timeout });
   const bootstrapState = () =>
     waitHttpReady({
       phase,
@@ -1025,13 +1101,13 @@ export async function verifyPhase({
   if ((await json("/stats")).posts !== 1) closed("restart");
   counts.destroyRestartChecks++;
   await json("/signal", "POST");
-  await waitState((value) => value.running === 0);
+  await waitState((value) => value.running === 0, "signal_stop");
   counts.signalChecks++;
   if (["native", "native_recovered"].includes(phase) && (await json("/state")).signaled < 1)
     closed("signal_diagnostic");
   await json("/once", "POST", "signal_restart");
   await json("/exit", "POST");
-  await waitState((value) => value.running === 0);
+  await waitState((value) => value.running === 0, "nonzero_exit_stop");
   counts.nonzeroExitChecks++;
   if (["native", "native_recovered"].includes(phase) && (await json("/state")).exitSeven < 1)
     closed("exit_diagnostic");

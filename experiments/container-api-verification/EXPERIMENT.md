@@ -3,7 +3,7 @@
 - Owner: risu729
 - Started: 2026-10-05
 - Expires: 2026-10-13
-- Status: Run 38017948414 at 0441c1df failed the first SDK baseline POST /initialize with an unmarked HTTP 404 after authenticated GET /state readiness. Runtime cleanup and independent Worker/application/namespace absence checks passed. The 404 cause remains unclassified; SDK startup diagnosis and later acceptance stages were not reached.
+- Status: Run 38021681182 at d0d31f18 failed baseline_sdk_verify with verification_state_timeout at an unspecified substage; zero phases completed. Runtime cleanup and independent Worker/application/namespace absence checks passed. The manual source Checks job also failed a separate browser readiness assertion. No runtime acceptance is established.
 
 ## Question
 
@@ -85,6 +85,58 @@ There is no additional request, retry, warm-up or activity lease. Cloudflare's
 [error-header documentation](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-error-headers/)
 describes its generated error pages; missing headers remain limited evidence
 and cannot prove a non-Cloudflare cause or route failure.
+
+The next hosted attempt, [run 38021681182](https://github.com/risu729/kogane/actions/runs/38021681182)
+at signed head `d0d31f18` / tree `99c03cd8`, failed
+`baseline_sdk_verify` with `verification_state_timeout` at
+2026-10-10T03:52:33.1577022Z. No phase-complete report was emitted: zero
+acceptance phases completed. The log did not identify the timeout substage;
+neither the initialization-404 nor SDK-startup-503 category was reported.
+The control-plane failure snapshot counted one running instance and zero in
+the other closed state categories. Runtime cleanup completed for four
+resources at 2026-10-10T03:53:34.685Z; the separate always-run cleanup passed
+with zero remaining. Independent API reads confirmed Worker/application/
+namespace absence. No later phase is promoted to success.
+
+The same manual workflow's source Checks job separately failed the all-routes
+CSP test in `experiments/observation-pipeline-local/test/production-browser.test.ts`:
+immediately after `page.goto(..., { waitUntil: "networkidle" })`, its first
+`h1.count()` assertion expected one element and observed zero. That browser
+readiness failure is separate from the synthetic state timeout; no common
+cause is established.
+
+The browser test now waits at most ten seconds for its existing exact
+single-heading and expected-body conditions after navigation, including the
+provenance route. A synthetic deferred-metadata regression observes network
+idle with no heading and requires readiness to remain false until metadata
+is released. Removing only the new readiness wait makes that regression fail;
+the restored final file passes nine tests / 174 assertions under the native
+coverage wrapper with CI enabled. Existing CSP, API, content and request
+assertions and the route test's 60-second deadline remain intact. This is
+source-test readiness evidence; it does not resolve or classify the hosted
+state timeout.
+
+A failure-only state-wait observation now labels the four existing waits
+`reader_resume_idle`, `reader_cancel_idle`, `signal_stop` and
+`nonzero_exit_stop`. It projects only the last already-returned state into
+running/alarm-presence bits and safe nonnegative startup, stop, error, signal
+and exit counters. `startup` means SDK readiness callbacks or native start
+callbacks according to the closed phase; it is not a new process-start claim.
+No raw state, provider text, object identity, alarm deadline or private SDK
+inflight count is retained. The minimal schema adds no required elapsed-time
+or poll-count metadata.
+
+The private mode-0600, at-most-1-KiB artifact uses synchronous O_EXCL
+first-writer protection and strict validation. Invalid state or persistence
+failure cannot replace `verification_state_timeout`. The runner reads it only
+for that primary error at a matching verification phase; missing, malformed
+or cross-phase records remain unavailable. The bootstrap readiness helper
+can emit the same primary timeout without reaching these four waits, so an
+absent record does not identify an idle or stop boundary. The existing
+90-second wait, three-second polls, request order/count, predicate and late
+response behavior remain unchanged. There is no extra GET, Container fetch,
+POST retry, warm-up, lease or acceptance relaxation. SDK, native controller,
+producer and timeout policies remain unchanged.
 
 A separate GitHub environment and a dedicated scoped token isolate this check
 from production credentials. The normal CI and production release never deploy

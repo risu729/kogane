@@ -1750,6 +1750,18 @@ export async function execute(
     const code = diagnosticCode(error);
     failure = new Error(code);
     report(JSON.stringify({ code: "verification_execution_failed", stage, error: code }));
+    if (stage.endsWith("_verify") && code === "verification_state_timeout") {
+      try {
+        const { readRecord, stateTimeoutFailureRecord } = await import("./driver.mjs");
+        const observation = stateTimeoutFailureRecord(
+          readRecord(input.temp, "container-api-verification-state-timeout-failure.json"),
+        );
+        if (stage !== `${observation.phase}_verify`) fail("driver_output");
+        report(JSON.stringify({ ...observation, code: "verification_state_timeout_observation" }));
+      } catch {
+        report(JSON.stringify({ code: "verification_state_timeout_observation_unavailable" }));
+      }
+    }
     if (
       stage === "baseline_sdk_verify" &&
       code === "verification_http_initialize_outer_not_found"
