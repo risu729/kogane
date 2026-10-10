@@ -122,7 +122,9 @@ const READ_TABLES = [
   "balance_snapshot_pointer",
   "balance_read_snapshots",
   // The reward second stage of migration 0002 (U16) is in the same database:
-  // "every READ table" includes it, and the reset re-applies both migrations.
+  // "every READ table" includes it, and the reset re-applies all READ migrations.
+  "reward_provider_display_checkpoints",
+  "reward_provider_expiry_sections",
   "reward_build_checkpoints",
   "reward_conversion_simulations",
   "reward_expiry_estimates",

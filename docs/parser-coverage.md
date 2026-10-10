@@ -177,8 +177,10 @@ Both variants keep the existing rules: the parent run must be `success` with
 gate the rule was `ok` and not superseded), every artifact
 of the run's dataset/unit must have such a parse, `required_parser_version`
 applies (`0.3.0` for foreign positions), and the newest complete run wins by
-`fetched_at`, then artifact id. `unit_scope` is `run` for every seeded row;
-`unit` names `unit-independent-v1` and is described under "Unit-scoped
+`fetched_at`, then artifact id. The existing seeded snapshot-selection policies retain the defaults
+`unit_scope=run` and `snapshot_selection=1`. CORE 0080 adds only the J-POINT
+`jpoint-balance` eligibility policy with `unit_scope=unit` and
+`snapshot_selection=0`; it does not add a container snapshot dataset. `unit` names `unit-independent-v1` and is described under "Unit-scoped
 eligibility" below.
 
 ### D13 predicates (`packages/read-model/src/concepts.ts`)
@@ -227,10 +229,12 @@ policy reads as before.
 
 ## Unit-scoped eligibility (`unit-independent-v1`, D13 / PR-14)
 
-Migration `0037_unit_scope_eligibility.sql`. Additive and inert on deploy: no
-policy row is switched, so every dataset keeps the run-scoped rule and the
-served result set is unchanged (`read-model-parity.test.ts`,
-`unit-scope-api.test.ts` first case).
+Migration `0037_unit_scope_eligibility.sql` introduced this predicate without
+switching any policy row; its original served result set was unchanged
+(`read-model-parity.test.ts`, `unit-scope-api.test.ts` first case). CORE 0080
+now adds the independently sealed J-POINT reward unit as an eligibility-only
+policy. Existing seeded statement/container snapshot policies keep their default run scope
+([ADR 0068](adr/0068-provider-reward-expiry-subsets.md)).
 
 Before this change one failed range inside a collector run made the whole run
 ineligible: the Worker parsed only artifacts of runs with
@@ -335,8 +339,10 @@ in one run:
 
 By contrast Vpass creates exactly one `card` unit per run (the run _is_ the
 card) and V Point one `collection` unit, so for them the unit scope and the run
-scope coincide and there is nothing to gain. Every other collector is
-single-unit or unit-less.
+scope coincide and there is nothing to gain. MyJCB also has an independent
+`j-point` reward unit when the selected product is supported; its success can
+remain eligible beside partial statement history. The new point policy does
+not change statement snapshot coverage.
 
 MyJCB's credit datasets are not container-snapshot datasets: their
 current-statement selection is the per-source multi-page contract in
@@ -429,11 +435,14 @@ also works, because both then apply the run scope unconditionally.
 
 ### Invariants
 
-- INV: no dataset is seeded on the `unit` scope, and `snapshot_selection` is 1
-  for every seeded row (`read-model.test.ts`, `snapshot-policies.test.ts`,
-  `unit-scope.test.ts` first case).
-- INV: with every row on the `run` scope, the Worker creates the same jobs,
-  parses the same artifacts and the reader serves the same rows as before
+- INV: the 14 existing seeded container snapshot policies retain the defaults
+  `unit_scope=run` and `snapshot_selection=1`. The sole additional seeded policy is
+  `myjcb-jpoint-balance` / `jpoint-balance`, with `unit_scope=unit` and
+  `snapshot_selection=0` (`read-model.test.ts`, `coverage.test.ts`,
+  `unit-scope.test.ts`).
+- INV: with every existing container snapshot policy on the `run` scope,
+  the Worker creates the same jobs, parses the same artifacts and the reader
+  serves the same rows in that existing dataset domain as before unit-scoped eligibility
   (`read-model-parity.test.ts`, `unit-scope.test.ts` "restores the strict
   rule", `unit-scope-api.test.ts`).
 - INV: a rescued unit replaces only its own `fetch_unit_key` partition; a

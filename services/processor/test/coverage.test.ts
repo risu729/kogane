@@ -49,10 +49,33 @@ test("the current production migration chain preserves legacy policies and adds 
     "parse_coverage_claims",
     "parse_issues",
   ]);
-  const policies = await all<{ parser_name: string; policy_id: string; unit_scope: string }>(
-    "SELECT parser_name,policy_id,unit_scope FROM dataset_snapshot_policies",
+  const policies = await all<{
+    source_id: string;
+    parser_name: string;
+    dataset: string;
+    policy_id: string;
+    unit_scope: string;
+    snapshot_selection: number;
+  }>(
+    "SELECT source_id,parser_name,dataset,policy_id,unit_scope,snapshot_selection FROM dataset_snapshot_policies ORDER BY parser_name,dataset",
   );
-  expect(policies).toHaveLength(SNAPSHOT_DATASETS.length);
+  const containers = policies.filter((row) => row.snapshot_selection === 1);
+  expect(containers.map(({ parser_name, dataset }) => [parser_name, dataset])).toEqual(
+    SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort(),
+  );
+  expect(policies).toHaveLength(SNAPSHOT_DATASETS.length + 1);
+  expect(
+    policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
+  ).toEqual([
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-jpoint-balance",
+      dataset: "jpoint-balance",
+      policy_id: "legacy-warning-compat-v1",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+  ]);
   expect(
     policies
       .filter(
@@ -73,7 +96,7 @@ test("the current production migration chain preserves legacy policies and adds 
   expect(policies.find((row) => row.parser_name === "sbi-shinsei-exchange-rate")?.policy_id).toBe(
     "coverage-v1",
   );
-  expect(policies.every((row) => row.unit_scope === "run")).toBe(true);
+  expect(containers.every((row) => row.unit_scope === "run")).toBe(true);
   // A coverage-v1 row that pins a version names one this build deploys: the
   // selection matches it exactly, so a stale pin would adopt nothing (0056
   // moves the SBI Shinsei board to 1.0.1, 0059 to 1.0.2).
@@ -213,7 +236,18 @@ test("a claim on a pending parse run is invisible to coverage-v1 until the run p
       .dispatchFetch("https://pipeline.internal/snapshot-policy/compare")
       .then((r) => r.json())) as {
       datasets: { parserName: string; coverageV1: { count: number }; differences: unknown[] }[];
-      policies: { parser_name: string; policy_id: string }[];
+      policies: {
+        source_id: string;
+        parser_name: string;
+        dataset: string;
+        policy_id: string;
+        policy_version: number;
+        required_parser_version: string | null;
+        replaces_previous_on_complete_empty: number;
+        unit_scope: string;
+        snapshot_selection: number;
+        updated_at_ms: number;
+      }[];
     };
   const before = (await current()).datasets.find((d) => d.parserName === "smbc-direct-balance")!;
   expect(before.differences).toEqual([]);
@@ -242,7 +276,18 @@ test("the comparison route reports counts, ids and policies only", async () => {
   expect(text).not.toContain("12345");
   expect(text).not.toContain("warnings");
   const body = JSON.parse(text) as {
-    policies: { parser_name: string; policy_id: string }[];
+    policies: {
+      source_id: string;
+      parser_name: string;
+      dataset: string;
+      policy_id: string;
+      policy_version: number;
+      required_parser_version: string | null;
+      replaces_previous_on_complete_empty: number;
+      unit_scope: string;
+      snapshot_selection: number;
+      updated_at_ms: number;
+    }[];
     datasets: {
       sourceId: string;
       parserName: string;
@@ -251,7 +296,34 @@ test("the comparison route reports counts, ids and policies only", async () => {
     }[];
     differingDatasets: number;
   };
-  expect(body.policies).toHaveLength(SNAPSHOT_DATASETS.length);
+  expect(body.policies).toHaveLength(SNAPSHOT_DATASETS.length + 1);
+  expect(
+    body.policies
+      .filter((row) => row.snapshot_selection === 1)
+      .map(({ parser_name, dataset }) => [parser_name, dataset]),
+  ).toEqual(SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort());
+  expect(
+    body.policies
+      .filter((row) => row.snapshot_selection === 1)
+      .every((row) => row.unit_scope === "run"),
+  ).toBe(true);
+  expect(
+    body.policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
+  ).toEqual([
+    {
+      source_id: "myjcb",
+      dataset: "jpoint-balance",
+      parser_name: "myjcb-jpoint-balance",
+      policy_id: "legacy-warning-compat-v1",
+      policy_version: 1,
+      required_parser_version: null,
+      replaces_previous_on_complete_empty: 1,
+      unit_scope: "unit",
+      snapshot_selection: 0,
+      updated_at_ms: 1791590400000,
+    },
+  ]);
+  expect(body.datasets.some((row) => row.parserName === "myjcb-jpoint-balance")).toBe(false);
   expect(body.datasets.find((d) => d.parserName === "smbc-direct-balance")).toMatchObject({
     sourceId: "smbc-bank",
     legacy: { count: 1 },
