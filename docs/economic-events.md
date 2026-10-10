@@ -9,7 +9,7 @@ live key/alias holders in one SQL snapshot, returning closed reasons and
 digested pins only. It writes nothing and has no HTTP/MCP/UI connection.
 Provider-ID identity may be admitted; overall readiness remains blocked by
 the unresolved principal-to-owner contract. Proposal/writer flags stay false
-and history coverage stays unknown. See [ADR 0066](adr/0066-economic-row-readiness.md)
+and history coverage stays unknown. See [ADR 0067](adr/0067-economic-row-readiness.md)
 for exact input, restriction refs, fail-closed behavior and verification limits.
 
 ## Existing event model

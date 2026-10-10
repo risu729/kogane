@@ -1,4 +1,4 @@
-# ADR 0066: Current economic-row evidence readiness before event writers
+# ADR 0067: Current economic-row evidence readiness before event writers
 
 - Status: proposed
 - Date: 2026-10-10
