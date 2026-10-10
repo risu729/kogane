@@ -468,3 +468,9 @@ flag停止、未適用migration、promoterがskipし続ける候補、未完のp
 繰返すrevision/visibility変更、writer lease競合がある場合には、この通常復旧の前提が成立しない。
 各closed codeとpromotion/pointerの状態で原因を調べる。pending/503の継続を成功扱いしない。
 本変更はsynthetic検証済みであり、本番DBのmigration適用・再promotion・READ公開・HTTP復旧は未検証。
+
+## Provider expiry subsets (ADR 0068)
+
+J-POINT's observed total is one unclassified holding in points:j-point. Its provider-expiring portion is a non-additive display section attached to the exact total source fact, carried inside the same fixed READ snapshot. The portion is not another bucket and does not enter by-kind/consumable totals, conversion or a computed expiry rule. The total's expiry stays unattached; no remainder is computed.
+
+Not-displayed and unknown sections are stored even with zero display rows, and the UI calls the expiry unconfirmed. They never become zero or no expiry. READ 0005 adds provider display sections/checkpoints and immutable snapshot section counts. projection-input-v3 / projection-v4 fixed inputs and output digests include the bounded provider stream; publication waits for verification of every stream. Existing rule-derived estimates retain their rule-reference guards and pagination. Provider sections in the expiry response are a complete bounded companion set from the same resolved sealed snapshot.

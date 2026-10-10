@@ -441,6 +441,15 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
  * reported, and nothing in it is the record of a decision (04 §1, §3).
  */
 export const READ_CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
+  reward_provider_expiry_sections: {
+    classification: "read-projection",
+    planRow:
+      "READ: non-additive provider expiry display sections of one fixed reward snapshot (ADR 0068)",
+  },
+  reward_provider_display_checkpoints: {
+    classification: "read-operational",
+    planRow: "READ: bounded provider display stream progress committed with its chunk (ADR 0068)",
+  },
   balance_read_snapshots: {
     classification: "read-projection",
     planRow: "READ: one build of the projection, keyed by content and attempt (05 §4)",

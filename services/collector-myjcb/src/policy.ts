@@ -12,6 +12,7 @@ export type ReadOperation =
   | "credit-ofx"
   | "credit-pdf"
   | "credit-past-json"
+  | "jpoint-json"
   | "debit-menu"
   | "debit-detail";
 
@@ -23,6 +24,11 @@ interface RoutePolicy {
 }
 
 const ACTIVE_ALLOWLIST: readonly RoutePolicy[] = [
+  {
+    operation: "jpoint-json",
+    method: "POST",
+    pathname: "/iss-pc/general_json/member/point/pointJson.json",
+  },
   { operation: "login-page", method: "GET", pathname: "/Login" },
   {
     operation: "login-submit",

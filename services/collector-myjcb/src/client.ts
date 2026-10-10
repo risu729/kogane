@@ -1,9 +1,13 @@
+import {
+  MYJCB_POINT_RPC_ID,
+  readMyJcbJPointResponse,
+} from "../../../packages/domain/src/myjcb-jpoint-response";
 import { CookieJar } from "./cookie-jar";
 import { allowedUrl, assertAllowedRequest, type ReadOperation } from "./policy";
 import { StopConditionError } from "./types";
 
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
-type GetOperation = Exclude<ReadOperation, "login-submit" | "credit-past-json">;
+type GetOperation = Exclude<ReadOperation, "login-submit" | "credit-past-json" | "jpoint-json">;
 
 export interface ReadResponse {
   readonly url: URL;
@@ -65,6 +69,55 @@ export class MyJcbReadClient {
       contentType: response.headers.get("content-type") ?? "application/octet-stream",
       body,
     };
+  }
+
+  /** One observed read-only RPC, with no redirect following or retry. */
+  async postJPointJson(generalJsonShikibetuId: string): Promise<ReadResponse> {
+    if (!generalJsonShikibetuId || generalJsonShikibetuId.length > 512) {
+      throw new StopConditionError("myjcb_jpoint_discriminator_invalid");
+    }
+    const url = allowedUrl("jpoint-json");
+    assertAllowedRequest("jpoint-json", "POST", url);
+    const headers = new Headers({
+      Accept: "application/json",
+      "Accept-Language": "ja,en-US;q=0.8,en;q=0.6",
+      "Content-Type": "application/json",
+      Origin: url.origin,
+      Referer: allowedUrl("mypage").href,
+      "User-Agent": this.userAgent,
+    });
+    const cookie = this.jar.header(url);
+    if (cookie) headers.set("Cookie", cookie);
+    const response = await fetch(url, {
+      method: "POST",
+      headers,
+      redirect: "manual",
+      signal: AbortSignal.timeout(30_000),
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        method: "execute",
+        params: [{ generalJsonShikibetuId }],
+        id: MYJCB_POINT_RPC_ID,
+      }),
+    });
+    this.jar.updateFromResponse(response, url);
+    const contentType = response.headers.get("content-type") ?? "";
+    if (response.status !== 200 || !/^application\/json(?:;|$)/iu.test(contentType)) {
+      await response.body?.cancel();
+      throw Object.assign(new StopConditionError("myjcb_jpoint_http_unavailable"), {
+        httpStatus: response.status,
+      });
+    }
+    const body = await boundedPointBody(response);
+    try {
+      readMyJcbJPointResponse(
+        JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(body)),
+        MYJCB_POINT_RPC_ID,
+      );
+    } catch {
+      throw new StopConditionError("myjcb_jpoint_response_unsupported");
+    }
+    return { url, status: response.status, contentType, body };
   }
 
   async postCreditPastJson(input: {
@@ -151,4 +204,38 @@ export function decodeMyJcbHtml(body: ArrayBuffer, contentType: string): string 
   } catch {
     throw new StopConditionError(`Unsupported MyJCB response charset: ${charset}`);
   }
+}
+
+// Bound allocation while streaming: Content-Length alone is not authoritative.
+async function boundedPointBody(response: Response): Promise<ArrayBuffer> {
+  const max = 1024 * 1024;
+  if (Number(response.headers.get("content-length")) > max) {
+    await response.body?.cancel();
+    throw new StopConditionError("myjcb_jpoint_response_too_large");
+  }
+  if (!response.body) throw new StopConditionError("myjcb_jpoint_response_empty");
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > max) {
+        await reader.cancel();
+        throw new StopConditionError("myjcb_jpoint_response_too_large");
+      }
+      chunks.push(part.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes.buffer;
 }
