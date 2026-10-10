@@ -95,8 +95,24 @@ test("local scheduled handler has closed HTTP, disabled activation and once-only
     await worker.scheduled(controller, { DB: db, RUN_AUTHORIZATION: corpusDigest });
     const before = await db.prepare("SELECT * FROM conformance_run").all();
     expect(before.results).toHaveLength(1);
-    expect(before.results[0]!.state).toBe("passed");
     const report = JSON.parse(String(before.results[0]!.report_json));
+    expect({
+      code: report.code ?? null,
+      failures: (report.cases ?? [])
+        .filter((item: { passed: boolean }) => !item.passed)
+        .map((item: { name: string; errorCode: string | null }) => ({
+          name: item.name,
+          errorCode: item.errorCode,
+        })),
+      foreignKeyViolations: report.foreignKeyViolations ?? null,
+      unloggedCount: report.unloggedCount ?? null,
+    }).toEqual({
+      code: null,
+      failures: [],
+      foreignKeyViolations: 0,
+      unloggedCount: 0,
+    });
+    expect(before.results[0]!.state).toBe("passed");
     // This is a local call of the remote handler: no hosted proof is claimed.
     expect(report.passed).toBe(true);
     expect(report.remoteGateSatisfied).toBe(false);

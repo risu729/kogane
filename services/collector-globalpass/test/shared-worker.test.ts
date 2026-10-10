@@ -1,3 +1,4 @@
+mock.module("cloudflare:workers", () => ({ DurableObject: class {} }));
 // U09 (G1-15): the GLOBAL PASS Worker writes a finished run where
 // COLLECTION_TARGET says, end to end with the container mocked away.
 //
@@ -14,8 +15,7 @@ let container: {
   fetch(request: Request): Promise<Response>;
   destroy(): Promise<void>;
 };
-mock.module("@cloudflare/containers", () => ({
-  Container: class {},
+mock.module("../../../packages/collection/src/container-stub", () => ({
   getContainer: () => container,
 }));
 const { runCollection } = await import("../src/worker");

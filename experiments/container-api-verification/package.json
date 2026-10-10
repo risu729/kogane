@@ -1,0 +1,14 @@
+{
+  "name": "@kogane/container-api-verification",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/node": "26.6.4",
+    "typescript": "7.0.2",
+    "wrangler": "4.146.0"
+  }
+}
