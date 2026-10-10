@@ -378,6 +378,10 @@ describe("serial workflow resumes publication once without bypassing a Container
       expect(readFileSync(resolve(REPO_ROOT, ".github/workflows", caller), "utf8")).not.toContain(
         "group: production-deploy",
       );
+    // Failed CI notifications must not queue ahead of eligible releases.
+    expect(readFileSync(resolve(REPO_ROOT, ".github/workflows/deploy.yml"), "utf8")).not.toMatch(
+      /^concurrency:/m,
+    );
   });
   test("original native publication order and gate order survive simulated failures at every boundary", () => {
     const publications = steps.filter((s) => s.body.includes("id: cf-deploy-"));

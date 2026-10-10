@@ -45,14 +45,14 @@ jobs:
             echo "configured=true" >> "${GITHUB_OUTPUT}"
           fi
       - name: Checkout the default branch
-        if: steps.config.outputs.configured == 'true'
+        if: ${{ steps.config.outputs.configured == 'true' }}
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Trusted code only. The pull request head is never fetched here.
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - name: Install mise
-        if: steps.config.outputs.configured == 'true'
+        if: ${{ steps.config.outputs.configured == 'true' }}
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
           version: 2026.10.7
@@ -63,10 +63,13 @@ jobs:
           MISE_ENABLE_TOOLS: node
       - name: Create an installation token
         id: token
-        if: steps.config.outputs.configured == 'true'
+        if: ${{ steps.config.outputs.configured == 'true' }}
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ vars.KOGANE_AUTOMATION_APP_ID }}
+          # The repository-scoped automation app is documented in docs/ci-cd.md;
+          # this trusted-base job must also run before a deployment is approved.
+          # jactionlint ignore=secrets-outside-env
           private-key: ${{ secrets.KOGANE_AUTOMATION_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
           repositories: ${{ github.event.repository.name }}
@@ -75,7 +78,7 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
       - name: Register native auto-merge
-        if: steps.config.outputs.configured == 'true'
+        if: ${{ steps.config.outputs.configured == 'true' }}
         run: mise run --no-deps automation:automerge
         env:
           # Pull request metadata reaches the script only as environment values.

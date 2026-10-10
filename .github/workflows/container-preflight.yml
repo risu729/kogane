@@ -13,10 +13,13 @@ permissions: {}
 concurrency:
   group: container-readonly-preflight
   cancel-in-progress: false
+defaults:
+  run:
+    shell: bash
 jobs:
   readback:
     name: Read Container account shapes
-    if: github.ref == 'refs/heads/main'
+    if: ${{ github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     environment: production
