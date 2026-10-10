@@ -29,6 +29,7 @@ export function ownershipReview(): CardOwnershipReview {
           mappingId as string,
         ),
         blockers: [],
+        selfDeclarationBlockers: [],
         claims: [],
         claimsTruncated: false,
       };

@@ -23,6 +23,8 @@ export interface CardOwnershipSide {
   ownershipRevision: number;
   evidenceRefs: string[];
   blockers: string[];
+  /** Additional blockers for the explicit sole-personal self-declaration only. */
+  selfDeclarationBlockers: string[];
   claims: CardOwnershipClaim[];
   claimsTruncated: boolean;
 }

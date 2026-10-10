@@ -211,6 +211,35 @@ and account mapping, and explains the decision. The same identifier names the
 same party; the identifier alone is not proof, and no party is derived from the
 login. The UI adds the internal `party:` prefix; there is no new party registry.
 
+For a sole personal account, the operator may instead select **本人申告
+（名義未確認）** and explicitly declare the selected role. A bank declaration
+states personal beneficial ownership; a card declaration separately states
+personal payment liability. Neither follows from the other or from login.
+Joint, third-party, corporate and family-card liability are excluded. This
+assertion is not provider-name verification or KYC. The assertion date is not
+the beginning of ownership and does not prove a historical ownership period.
+The command adds a closed, versioned `ownership-declaration:sole-personal-v1`
+evidence reference; simulation and immutable claim history retain and display
+that provenance. Ordinary reviewed-evidence decisions remain available and
+are not automatically labelled provider-verified.
+
+The self-declared fallback requires an individually scoped `card-statement` or
+`deposit` account and a non-aggregate, non-unresolved current mapping. A MyJCB
+connection root is a `card-statement-aggregate`, not an individual card. The
+same root can have separate identities under legacy and current producers;
+those counts are not physical card counts. Self-declaration cannot resolve or
+merge these identities, and the operator must identify the account scope first.
+
+The self-declared fallback also refuses any recorded ownership-role history for the
+same resolved account, including rejected or dated claims and the other role.
+It also refuses recorded `contradicts` relations touching the account,
+source-account reference or review evidence. The read response exposes these
+as separate `selfDeclarationBlockers`; explicit evidence review is still
+available. These checks do not infer relationships through account aliases or
+provider text, nor detect an unrecorded conflict. Commit repeats the exact
+checks atomically. Corrections append through explicit review rather than
+overwriting the declaration.
+
 The existing `relation.accept` / `relation.reject` lifecycle then plans,
 simulates, obtains verified human approval and commits the decision. The
 candidate marker, observation, parse revision and current account mapping are
