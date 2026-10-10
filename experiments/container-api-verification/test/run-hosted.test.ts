@@ -1373,6 +1373,12 @@ test("execution and cleanup errors are both reported without erasing the initial
     "baseline_sdk_secret",
     "baseline_sdk_deploy",
     "baseline_sdk_http_ready",
+    "baseline_sdk_http_ready_match",
+    "baseline_sdk_http_ready_forged",
+    "baseline_sdk_http_ready_missing",
+    "baseline_sdk_http_ready_wrong_phase",
+    "baseline_sdk_http_ready_wrong_pair",
+    "baseline_sdk_http_ready_wrong_primary",
     "baseline_sdk_verify",
     "baseline_sdk_verify_exhausted",
     "baseline_sdk_verify_exhausted_valid",
@@ -1407,6 +1413,13 @@ test("execution and cleanup errors are both reported without erasing the initial
     const reports: string[] = [];
     let comparisonCalls = 0,
       streamComparisonCalls = 0;
+    const readyFailure = failing.startsWith("baseline_sdk_http_ready");
+    const readyObservation = {
+      code: "http_ready_timeout_observation",
+      phase: "baseline_sdk",
+      lastCompletedResponse: "validated_old_revision",
+      observedRevision: "native",
+    };
     const stateFailure = failing.startsWith("baseline_sdk_verify_state");
     const stateObservation = {
       code: "state_timeout_observation",
@@ -1455,30 +1468,34 @@ test("execution and cleanup errors are both reported without erasing the initial
       identityMatches: 1,
       postsMatches: 1,
     };
-    const original = stateFailure
+    const original = readyFailure
       ? failing.endsWith("wrong_primary")
         ? "verification_sentinel"
         : "verification_state_timeout"
-      : outerFailure
+      : stateFailure
         ? failing.endsWith("wrong_primary")
           ? "verification_sentinel"
-          : "verification_http_initialize_outer_not_found"
-        : startupFailure
-          ? "verification_http_once_concurrency_upstream_unavailable"
-          : checkFailure
-            ? "verification_stream_check_" +
-              (failing.endsWith("after") ? "streams_after" : "streams_before")
-            : failing.startsWith("baseline_sdk_verify_stream")
-              ? failing.endsWith("missing")
-                ? "verification_stream_failure_missing_body"
-                : "verification_stream_failure_clean_eof"
-              : failing.startsWith("baseline_sdk_verify_exhausted")
-                ? "verification_backpressure_exhausted_late"
-                : failing === "baseline_sdk_verify"
-                  ? "verification_sentinel"
-                  : failing === "baseline_sdk_http_ready"
-                    ? "verification_state_timeout"
-                    : "verification_runner_child";
+          : "verification_state_timeout"
+        : outerFailure
+          ? failing.endsWith("wrong_primary")
+            ? "verification_sentinel"
+            : "verification_http_initialize_outer_not_found"
+          : startupFailure
+            ? "verification_http_once_concurrency_upstream_unavailable"
+            : checkFailure
+              ? "verification_stream_check_" +
+                (failing.endsWith("after") ? "streams_after" : "streams_before")
+              : failing.startsWith("baseline_sdk_verify_stream")
+                ? failing.endsWith("missing")
+                  ? "verification_stream_failure_missing_body"
+                  : "verification_stream_failure_clean_eof"
+                : failing.startsWith("baseline_sdk_verify_exhausted")
+                  ? "verification_backpressure_exhausted_late"
+                  : failing === "baseline_sdk_verify"
+                    ? "verification_sentinel"
+                    : failing === "baseline_sdk_http_ready"
+                      ? "verification_state_timeout"
+                      : "verification_runner_child";
     const api = async (path: string, options: any = {}) => {
       if (options.method === "DELETE") {
         removed = true;
@@ -1510,8 +1527,26 @@ test("execution and cleanup errors are both reported without erasing the initial
     try {
       await expect(
         execute(input(temp), {
-          httpReady: async () => {
-            if (failing === "baseline_sdk_http_ready") throw new Error(original);
+          httpReady: async ({ onTimeout }: any) => {
+            if (readyFailure) {
+              if (failing.endsWith("match")) onTimeout(readyObservation);
+              if (
+                failing !== "baseline_sdk_http_ready" &&
+                !failing.endsWith("missing") &&
+                !failing.endsWith("match")
+              )
+                protectedFile(
+                  resolve(temp, "container-api-verification-http-ready-timeout-failure.json"),
+                  failing.endsWith("forged")
+                    ? { ...readyObservation, private: token }
+                    : failing.endsWith("wrong_phase")
+                      ? { ...readyObservation, phase: "rollback_sdk" }
+                      : failing.endsWith("wrong_pair")
+                        ? { ...readyObservation, observedRevision: "baseline_sdk" }
+                        : readyObservation,
+                );
+              throw new Error(original);
+            }
           },
           api,
           report: (line: string) => reports.push(line),
@@ -1623,9 +1658,18 @@ test("execution and cleanup errors are both reported without erasing the initial
             outerFailure ||
             stateFailure
               ? "baseline_sdk_verify"
-              : failing,
+              : readyFailure
+                ? "baseline_sdk_http_ready"
+                : failing,
           error: original,
         },
+        ...(readyFailure && !failing.endsWith("wrong_primary")
+          ? [
+              failing.endsWith("match")
+                ? { ...readyObservation, code: "verification_http_ready_timeout_observation" }
+                : { code: "verification_http_ready_timeout_observation_unavailable" },
+            ]
+          : []),
         ...(stateFailure && !failing.endsWith("wrong_primary")
           ? [
               failing.endsWith("match")
@@ -2073,7 +2117,7 @@ test("a fresh runner with the wrong installed CLI fails before network, ownershi
       });
     writeFileSync(
       resolve(temp, "driver.mjs"),
-      'export function identity() { throw new Error("fixture_forbidden"); }',
+      'export function identity() { throw new Error("fixture_forbidden"); } export function readRecord() { throw new Error("fixture_forbidden"); } export function writeRecord() { throw new Error("fixture_forbidden"); }',
       { mode: 0o600, flag: "wx" },
     );
     mkdirSync(resolve(temp, "node_modules/wrangler"), { recursive: true, mode: 0o700 });

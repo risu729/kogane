@@ -36,6 +36,7 @@ function recordPath(temp, name) {
       "container-api-verification-sdk-startup-failure.json",
       "container-api-verification-initialize-outer-failure.json",
       "container-api-verification-state-timeout-failure.json",
+      "container-api-verification-http-ready-timeout-failure.json",
     ].includes(name)
   )
     closed("record");

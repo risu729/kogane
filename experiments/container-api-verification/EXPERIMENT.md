@@ -3,7 +3,7 @@
 - Owner: risu729
 - Started: 2026-10-05
 - Expires: 2026-10-13
-- Status: Run 38021681182 at d0d31f18 failed baseline_sdk_verify with verification_state_timeout at an unspecified substage; zero phases completed. Runtime cleanup and independent Worker/application/namespace absence checks passed. The manual source Checks job also failed a separate browser readiness assertion. No runtime acceptance is established.
+- Status: Run 38023814368 at 41aafd66 passed the SDK baseline (one phase), then failed native_http_ready with verification_state_timeout before native_verify. Cleanup four resources, separate zero-remaining readback and independent absence checks passed. Source checks passed; native/recovery/rollback runtime acceptance remains pending.
 
 ## Question
 
@@ -168,3 +168,41 @@ recorded, or revisit its scope at expiry. Extending expiry requires a reason.
 No runtime, billing or browser/VPC equivalence is established by source tests.
 The approved production API migration preserves existing configuration and
 source routing; this experiment never initiates a real collection.
+
+## Latest SDK baseline and native readiness result
+
+[Hosted run 38023814368](https://github.com/risu729/kogane/actions/runs/38023814368)
+used exact source 41aafd667842066dd6530561024b52f43e41d10f, tree
+ae2aad299f3925a7132b206595226f0bb99be288. The SDK baseline completed
+at 2026-10-10T04:28:11.7389877Z; reader resume/cancel idle observations were
+30,388/30,382 ms and all baseline acceptance checks passed. Exactly one phase
+completed. At 2026-10-10T04:31:15.1711082Z the runner failed
+native_http_ready with verification_state_timeout; native_verify was
+not entered. The existing result does not distinguish repeated unmarked
+404/503, a validated older revision, or an unfinished response. Native,
+recovery and rollback acceptance remain pending; the failure does not establish
+a Cloudflare defect or runtime equivalence.
+
+Cleanup reported four resources removed at 2026-10-10T04:32:19.1197763Z;
+the separate always-run cleanup reported zero remaining at
+2026-10-10T04:32:19.2099090Z. Independent Worker/application/namespace absence
+checks returned zero. Source Checks, both processor shards and CI guards passed
+on this source; those results are separate from the hosted failure and from
+subsequent main integration.
+
+The failure-only readiness observation retains four closed fields: code, phase,
+last completed response classification, and observed revision. Classifications
+are none, unmarked 404, unmarked 503, or a strictly validated older known
+revision. Only the older-revision classification permits a revision value;
+it must differ from the expected revision, with rollback expecting baseline SDK.
+A pending later request or body leaves the earlier completed sample intact;
+none means no retryable response passed the existing classification checks. This
+does not identify the pending request's outcome.
+
+The runner reads this private, exclusive-create record (at most 1 KiB) only
+for an actual matching *_http_ready stage and primary state timeout. Missing
+or invalid records report unavailable. The observer adds no request, body read,
+POST, lease, retry, sleep or deadline change; synchronous persistence cannot
+preempt timers, and its failure cannot replace the original primary error.
+Driver bootstrap and later verification state waits remain separate. SDK,
+native controller, producer and production configurations remain unchanged.

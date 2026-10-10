@@ -14,9 +14,9 @@ import {
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { identity } from "./driver.mjs";
+import { identity, readRecord, writeRecord } from "./driver.mjs";
 import { canonicalDriverHttpCode, createSyntheticRequest } from "./http-diagnostics.mjs";
-import { waitHttpReady } from "./http-readiness.mjs";
+import { waitHttpReady, httpReadyTimeoutFailureRecord } from "./http-readiness.mjs";
 import { canonicalHex, canonicalUuid, canonicalImageRef } from "./identifiers.mjs";
 
 export const WORKER = "kogane-container-api-verification";
@@ -1679,7 +1679,18 @@ export async function execute(
       driverEnv.HARNESS_APPLICATION_ID = current.appId;
       writeProtected(statePath, state);
       stage = `${phase}_http_ready`;
-      await httpReady({ phase, subdomain: input.subdomain, key, deadline: rolloutDeadline });
+      await httpReady({
+        phase,
+        subdomain: input.subdomain,
+        key,
+        deadline: rolloutDeadline,
+        onTimeout: (value) =>
+          writeRecord(
+            input.temp,
+            "container-api-verification-http-ready-timeout-failure.json",
+            httpReadyTimeoutFailureRecord(value),
+          ),
+      });
       if (Date.now() >= rolloutDeadline) fail("rollout_timeout");
       return rolloutDeadline;
     }
@@ -1740,6 +1751,12 @@ export async function execute(
       subdomain: input.subdomain,
       key,
       deadline: rollbackDeadline,
+      onTimeout: (value) =>
+        writeRecord(
+          input.temp,
+          "container-api-verification-http-ready-timeout-failure.json",
+          httpReadyTimeoutFailureRecord(value),
+        ),
     });
     if (Date.now() >= rollbackDeadline) fail("rollout_timeout");
     await verify("rollback_sdk", rollbackDeadline);
@@ -1750,6 +1767,19 @@ export async function execute(
     const code = diagnosticCode(error);
     failure = new Error(code);
     report(JSON.stringify({ code: "verification_execution_failed", stage, error: code }));
+    if (stage.endsWith("_http_ready") && code === "verification_state_timeout") {
+      try {
+        const observation = httpReadyTimeoutFailureRecord(
+          readRecord(input.temp, "container-api-verification-http-ready-timeout-failure.json"),
+        );
+        if (stage !== observation.phase + "_http_ready") fail("driver_output");
+        report(
+          JSON.stringify({ ...observation, code: "verification_http_ready_timeout_observation" }),
+        );
+      } catch {
+        report(JSON.stringify({ code: "verification_http_ready_timeout_observation_unavailable" }));
+      }
+    }
     if (stage.endsWith("_verify") && code === "verification_state_timeout") {
       try {
         const { readRecord, stateTimeoutFailureRecord } = await import("./driver.mjs");

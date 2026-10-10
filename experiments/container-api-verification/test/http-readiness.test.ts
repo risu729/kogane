@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { waitHttpReady } from "../http-readiness.mjs";
+import { waitHttpReady, httpReadyTimeoutFailureRecord } from "../http-readiness.mjs";
+import { writeRecord, readRecord } from "../driver.mjs";
+import { mkdtempSync, rmSync, writeFileSync, symlinkSync, readFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { canonicalDriverHttpCode } from "../http-diagnostics.mjs";
 
 function state(revision = "baseline_sdk") {
@@ -368,4 +372,256 @@ test("unknown phase, endpoint selectors and expired or extended budgets fail bef
     ),
   ).rejects.toThrow("verification_state_timeout");
   expect(calls).toBe(0);
+});
+
+test("timeout retains only the last completed classified response without changing polling or sleeping", async () => {
+  for (const [phase, kind, revision, response] of [
+    ["native", "unmarked_404", "none", () => new Response("private", { status: 404 })],
+    ["native", "unmarked_503", "none", () => new Response("private", { status: 503 })],
+    ["native", "validated_old_revision", "baseline_sdk", () => Response.json(state())],
+    [
+      "rollback_sdk",
+      "validated_old_revision",
+      "native_recovered",
+      () => Response.json(state("native_recovered")),
+    ],
+  ] as const) {
+    let clock = 175_500,
+      calls = 0;
+    const sleeps: number[] = [],
+      observations: unknown[] = [];
+    await expect(
+      waitHttpReady(
+        options({
+          phase,
+          now: () => clock,
+          fetchImpl: async () => {
+            calls++;
+            return response();
+          },
+          sleep: async (ms: number) => {
+            sleeps.push(ms);
+            clock += ms;
+          },
+          onTimeout: (value: unknown) => observations.push(value),
+        }),
+      ),
+    ).rejects.toThrow("verification_state_timeout");
+    expect(calls).toBe(3);
+    expect(sleeps).toEqual([2000, 2000, 500]);
+    expect(clock).toBe(180_000);
+    expect(observations).toEqual([
+      {
+        code: "http_ready_timeout_observation",
+        phase,
+        lastCompletedResponse: kind,
+        observedRevision: revision,
+      },
+    ]);
+    expect(JSON.stringify(observations)).not.toContain("private");
+  }
+});
+test("success and non-timeout failures never observe, and an expired initial budget reports none without fetching", async () => {
+  let observed = 0,
+    calls = 0;
+  await waitHttpReady(
+    options({ fetchImpl: async () => Response.json(state()), onTimeout: () => observed++ }),
+  );
+  await expect(
+    waitHttpReady(
+      options({
+        fetchImpl: async () => Response.json({ ...state(), private: "private" }),
+        onTimeout: () => observed++,
+      }),
+    ),
+  ).rejects.toThrow("verification_state_schema");
+  expect(observed).toBe(0);
+  const values: unknown[] = [];
+  await expect(
+    waitHttpReady(
+      options({
+        deadline: 0,
+        fetchImpl: async () => {
+          calls++;
+          return Response.json(state());
+        },
+        onTimeout: (value: unknown) => values.push(value),
+      }),
+    ),
+  ).rejects.toThrow("verification_state_timeout");
+  expect(calls).toBe(0);
+  expect(values).toEqual([
+    {
+      code: "http_ready_timeout_observation",
+      phase: "baseline_sdk",
+      lastCompletedResponse: "none",
+      observedRevision: "none",
+    },
+  ]);
+});
+test("a pending request records none or the earlier completed response and never guesses the pending result", async () => {
+  for (const earlier of [false, true]) {
+    const started = Date.now(),
+      values: unknown[] = [];
+    let calls = 0;
+    await expect(
+      waitHttpReady(
+        options({
+          now: Date.now,
+          deadline: started + 100,
+          sleep: async () => {},
+          fetchImpl: async () => {
+            calls++;
+            if (earlier && calls === 1) return new Response("private", { status: 503 });
+            return new Promise(() => {});
+          },
+          onTimeout: (value: unknown) => values.push(value),
+        }),
+      ),
+    ).rejects.toThrow("verification_state_timeout");
+    expect(calls).toBe(earlier ? 2 : 1);
+    expect(values).toEqual([
+      {
+        code: "http_ready_timeout_observation",
+        phase: "baseline_sdk",
+        lastCompletedResponse: earlier ? "unmarked_503" : "none",
+        observedRevision: "none",
+      },
+    ]);
+    expect(Date.now() - started).toBeLessThan(1000);
+  }
+});
+test("a late body cannot overwrite the last completed response or change acceptance", async () => {
+  let clock = 178_000,
+    calls = 0;
+  const values: unknown[] = [];
+  await expect(
+    waitHttpReady(
+      options({
+        phase: "native",
+        now: () => clock,
+        sleep: async () => {
+          clock = 179_000;
+        },
+        fetchImpl: async () => {
+          calls++;
+          if (calls === 1) return Response.json(state());
+          return new Response(
+            new ReadableStream(
+              {
+                pull(controller) {
+                  clock = 180_001;
+                  controller.enqueue(new TextEncoder().encode(JSON.stringify(state("native"))));
+                  controller.close();
+                },
+              },
+              { highWaterMark: 0 },
+            ),
+          );
+        },
+        onTimeout: (value: unknown) => values.push(value),
+      }),
+    ),
+  ).rejects.toThrow("verification_state_timeout");
+  expect(calls).toBe(2);
+  expect(values).toEqual([
+    {
+      code: "http_ready_timeout_observation",
+      phase: "native",
+      lastCompletedResponse: "validated_old_revision",
+      observedRevision: "baseline_sdk",
+    },
+  ]);
+});
+test("record validation rejects extra data, unknown enums, and inconsistent classification/revision pairs", () => {
+  const base = {
+    code: "http_ready_timeout_observation",
+    phase: "native",
+    lastCompletedResponse: "validated_old_revision",
+    observedRevision: "baseline_sdk",
+  };
+  expect(httpReadyTimeoutFailureRecord(base)).toEqual(base);
+  for (const invalid of [
+    null,
+    [],
+    {},
+    { ...base, private: "private" },
+    { ...base, code: "other" },
+    { ...base, phase: "private" },
+    { ...base, lastCompletedResponse: "other" },
+    { ...base, observedRevision: "private" },
+    { ...base, observedRevision: "native" },
+    { ...base, observedRevision: "none" },
+    ...["none", "unmarked_404", "unmarked_503"].map((lastCompletedResponse) => ({
+      ...base,
+      lastCompletedResponse,
+    })),
+    { ...base, phase: "rollback_sdk", observedRevision: "baseline_sdk" },
+  ])
+    expect(() => httpReadyTimeoutFailureRecord(invalid)).toThrow("verification_state_observation");
+});
+test("synchronous observer errors preserve the original error object and cause", async () => {
+  const cause = new Error("private"),
+    primary = new Error("verification_state_timeout", { cause });
+  let observed = 0,
+    caught: unknown;
+  try {
+    await waitHttpReady(
+      options({
+        fetchImpl: async () => new Response("", { status: 404 }),
+        sleep: async () => {
+          throw primary;
+        },
+        onTimeout: () => {
+          observed++;
+          throw new Error("private-write-error");
+        },
+      }),
+    );
+  } catch (error) {
+    caught = error;
+  }
+  expect(observed).toBe(1);
+  expect(caught).toBe(primary);
+  expect((caught as Error).cause).toBe(cause);
+});
+test("the private timeout record preserves its first writer and never overwrites a symlink target", async () => {
+  const name = "container-api-verification-http-ready-timeout-failure.json";
+  for (const mode of ["record", "symlink", "invalid"] as const) {
+    const temp = mkdtempSync(resolve(tmpdir(), "http-ready-timeout-"));
+    const target = resolve(temp, "target");
+    const first = {
+      code: "http_ready_timeout_observation",
+      phase: "native",
+      lastCompletedResponse: "unmarked_404",
+      observedRevision: "none",
+    };
+    try {
+      if (mode === "record") writeRecord(temp, name, first);
+      if (mode === "symlink") {
+        writeFileSync(target, "private");
+        symlinkSync(target, resolve(temp, name));
+      }
+      await expect(
+        waitHttpReady(
+          options({
+            deadline: 0,
+            onTimeout: (value: unknown) =>
+              writeRecord(
+                temp,
+                name,
+                httpReadyTimeoutFailureRecord(
+                  mode === "invalid" ? { ...(value as object), private: "private" } : value,
+                ),
+              ),
+          }),
+        ),
+      ).rejects.toThrow("verification_state_timeout");
+      if (mode === "record") expect(readRecord(temp, name)).toEqual(first);
+      if (mode === "symlink") expect(readFileSync(target, "utf8")).toBe("private");
+      if (mode === "invalid") expect(existsSync(resolve(temp, name))).toBe(false);
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  }
 });
