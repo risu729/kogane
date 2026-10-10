@@ -135,7 +135,89 @@ export function sdkStartupCategory(response) {
   const value = response.headers.get("x-verification-sdk-startup");
   return sdkStartupCategories.find((category) => category === value);
 }
-export function createSyntheticRequest({ origin, key, fetchImpl = fetch, onFailure }) {
+const initializeOuterCode = "verification_http_initialize_outer_not_found";
+const cfErrorTypes = Object.freeze([
+  "1000",
+  "1016",
+  "1101",
+  "1102",
+  "521",
+  "522",
+  "523",
+  "524",
+  "525",
+  "526",
+]);
+const contentTypes = Object.freeze([
+  "application/json",
+  "text/html",
+  "text/plain",
+  "application/octet-stream",
+]);
+/** Closed header evidence from the existing unmarked initial POST failure; never reads its body. */
+export function initializeOuterFailureObservation({
+  phase,
+  path,
+  method,
+  code,
+  response,
+  requestUrl,
+}) {
+  if (
+    phase !== "baseline_sdk" ||
+    path !== "/initialize" ||
+    method !== "POST" ||
+    code !== initializeOuterCode ||
+    response.status !== 404 ||
+    response.headers.get("x-verification-failure") !== null ||
+    response.headers.get("x-verification-upstream-status") !== null
+  )
+    return undefined;
+  const errorType = response.headers.get("cf-error-type");
+  const contentType = response.headers.get("content-type");
+  const mime =
+    typeof contentType === "string" && contentType.length <= 128
+      ? contentType.split(";", 1)[0].trim().toLowerCase()
+      : undefined;
+  const responseUrl = response.url;
+  return {
+    code: "initialize_outer_failure_observation",
+    phase: "baseline_sdk",
+    cfErrorType:
+      errorType === null
+        ? "missing"
+        : (cfErrorTypes.find((value) => value === errorType) ?? "other"),
+    cfErrorOriginPresent: response.headers.has("cf-error-origin"),
+    cfRayPresent: response.headers.has("cf-ray"),
+    contentType:
+      contentType === null ? "missing" : (contentTypes.find((value) => value === mime) ?? "other"),
+    responseUrl:
+      typeof responseUrl !== "string" || responseUrl === ""
+        ? "absent"
+        : responseUrl === requestUrl
+          ? "expected"
+          : "other",
+    redirected: response.redirected === true,
+  };
+}
+async function settleDiagnostic(promise, deadline) {
+  // Attach a rejection handler before racing so a late rejection cannot escape.
+  const pending = Promise.resolve(promise).catch(() => {});
+  const remaining = Math.max(0, deadline - performance.now());
+  if (remaining === 0) return;
+  let timer;
+  try {
+    await Promise.race([
+      pending,
+      new Promise((done) => {
+        timer = setTimeout(done, remaining);
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+export function createSyntheticRequest({ origin, key, phase, fetchImpl = fetch, onFailure }) {
   return async function request(path, method = "GET", substage) {
     syntheticRoute(path, method, substage);
     let response;
@@ -160,6 +242,28 @@ export function createSyntheticRequest({ origin, key, fetchImpl = fetch, onFailu
           void Promise.resolve(onFailure?.({ code, category })).catch(() => {});
         } catch {
           // Closed observations cannot alter the canonical primary error.
+        }
+      }
+      if (phase === "baseline_sdk" && code === initializeOuterCode) {
+        const deadline = performance.now() + 1000;
+        try {
+          const observation = initializeOuterFailureObservation({
+            phase,
+            path,
+            method,
+            code,
+            response,
+            requestUrl: `${origin}${path}`,
+          });
+          // The phase writer uses synchronous O_EXCL persistence before this primary error.
+          if (observation) await settleDiagnostic(onFailure?.({ code, observation }), deadline);
+        } catch {
+          // Header observation/persistence cannot replace the original HTTP failure.
+        }
+        try {
+          await settleDiagnostic(response.body?.cancel(), deadline);
+        } catch {
+          // No body reads; failed, blocked or late cancellation preserves the primary error.
         }
       }
       throw new Error(code);

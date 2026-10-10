@@ -4,6 +4,7 @@ import {
   createSyntheticRequest,
   syntheticHttpFailure,
   sdkStartupCategory,
+  initializeOuterFailureObservation,
 } from "../http-diagnostics.mjs";
 import { worker, classifySdkStartupResponse, SDK_NO_INSTANCE_RESPONSE } from "../src/common";
 import {
@@ -14,10 +15,18 @@ import {
   rmSync,
   existsSync,
   mkdirSync,
+  symlinkSync,
+  linkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { sdkStartupFailureRecord, readRecord, writeRecord } from "../driver.mjs";
+import {
+  sdkStartupFailureRecord,
+  initializeOuterFailureRecord,
+  readRecord,
+  writeRecord,
+} from "../driver.mjs";
 import { verifyPhase, verifyConcurrency } from "../driver.mjs";
 
 const routes = [
@@ -1003,3 +1012,404 @@ test("startup classifier test budgets cannot loosen the fixed one-second bound",
     await response.body?.cancel();
   }
 });
+
+const initializeOuterCode = "verification_http_initialize_outer_not_found";
+const initializeRequestUrl = "https://synthetic.invalid/initialize";
+const initializeObservation = {
+  code: "initialize_outer_failure_observation",
+  phase: "baseline_sdk",
+  cfErrorType: "missing",
+  cfErrorOriginPresent: false,
+  cfRayPresent: false,
+  contentType: "missing",
+  responseUrl: "absent",
+  redirected: false,
+};
+function observeInitialize(response: Response, changes = {}) {
+  return initializeOuterFailureObservation({
+    phase: "baseline_sdk",
+    path: "/initialize",
+    method: "POST",
+    code: initializeOuterCode,
+    requestUrl: initializeRequestUrl,
+    response,
+    ...changes,
+  });
+}
+test("initial outer 404 records only closed header categories and never reads values/body", () => {
+  for (const category of [
+    "1000",
+    "1016",
+    "1101",
+    "1102",
+    "521",
+    "522",
+    "523",
+    "524",
+    "525",
+    "526",
+    "missing",
+    "other",
+  ]) {
+    const response = new Response(null, {
+      status: 404,
+      headers:
+        category === "missing"
+          ? {}
+          : {
+              "cf-error-type": category === "other" ? "private-unknown-error" : category,
+              "cf-error-origin": "private-origin",
+              "cf-ray": "private-ray",
+              "content-type": "Text/HTML; charset=private-charset",
+            },
+    });
+    expect(observeInitialize(response)).toEqual({
+      ...initializeObservation,
+      cfErrorType: category,
+      ...(category === "missing"
+        ? {}
+        : { cfErrorOriginPresent: true, cfRayPresent: true, contentType: "text/html" }),
+    });
+    expect(response.bodyUsed).toBe(false);
+    expect(JSON.stringify(observeInitialize(response))).not.toContain("private");
+  }
+  for (const [header, expected] of [
+    [null, "missing"],
+    ["application/json", "application/json"],
+    ["text/plain; charset=utf-8", "text/plain"],
+    ["application/octet-stream", "application/octet-stream"],
+    ["text/xml", "other"],
+    ["x".repeat(129), "other"],
+  ]) {
+    const response = new Response(null, {
+      status: 404,
+      headers: header ? { "content-type": header } : {},
+    });
+    expect(observeInitialize(response)?.contentType).toBe(expected);
+  }
+  for (const [url, expected] of [
+    [initializeRequestUrl, "expected"],
+    ["https://private.invalid/secret", "other"],
+    ["", "absent"],
+  ]) {
+    const response = new Response(null, { status: 404 });
+    Object.defineProperties(response, { url: { value: url }, redirected: { value: true } });
+    expect(observeInitialize(response)).toEqual({
+      ...initializeObservation,
+      responseUrl: expected,
+      redirected: true,
+    });
+    expect(JSON.stringify(observeInitialize(response))).not.toContain("private");
+  }
+});
+test("initial outer diagnostic gate rejects other phases/routes/methods/statuses and any owned marker", () => {
+  const response = new Response(null, { status: 404 });
+  for (const changes of [
+    { phase: "native" },
+    { phase: "native_unmonitored" },
+    { phase: "native_recovered" },
+    { phase: "rollback_sdk" },
+    { phase: undefined },
+    { path: "/state" },
+    { path: "/once" },
+    { method: "GET" },
+    { code: "verification_http_state_outer_not_found" },
+    { response: new Response(null, { status: 503 }) },
+    { response: new Response(null, { status: 200 }) },
+    {
+      response: new Response(null, {
+        status: 404,
+        headers: { "x-verification-failure": "worker_route_missing" },
+      }),
+    },
+    { response: new Response(null, { status: 404, headers: { "x-verification-failure": "" } }) },
+    {
+      response: new Response(null, {
+        status: 404,
+        headers: { "x-verification-upstream-status": "404" },
+      }),
+    },
+    {
+      response: new Response(null, {
+        status: 404,
+        headers: { "x-verification-upstream-status": "" },
+      }),
+    },
+  ])
+    expect(observeInitialize(response, changes)).toBeUndefined();
+});
+test("initial outer request persists observation before canonical failure and cancels without body reads/retry", async () => {
+  let calls = 0,
+    cancels = 0,
+    reads = 0,
+    completed = false;
+  const response = new Response("private-body", { status: 404 });
+  spyOn(response.body!, "getReader").mockImplementation(() => {
+    reads++;
+    throw new Error("private-read");
+  });
+  spyOn(response.body!, "cancel").mockImplementation(async () => {
+    cancels++;
+  });
+  const request = createSyntheticRequest({
+    origin: "https://synthetic.invalid",
+    key: "private-key",
+    phase: "baseline_sdk",
+    fetchImpl: async (url: string, options: RequestInit) => {
+      calls++;
+      expect(url).toBe(initializeRequestUrl);
+      expect(options.method).toBe("POST");
+      expect(options.redirect).toBe("manual");
+      return response;
+    },
+    onFailure: async (value: unknown) => {
+      expect(value).toEqual({ code: initializeOuterCode, observation: initializeObservation });
+      await new Promise((done) => setTimeout(done, 10));
+      completed = true;
+    },
+  });
+  await expect(request("/initialize", "POST")).rejects.toThrow(initializeOuterCode);
+  expect(completed).toBe(true);
+  expect(calls).toBe(1);
+  expect(cancels).toBe(1);
+  expect(reads).toBe(0);
+});
+test("initial outer secondary failures and one shared monotonic cleanup budget preserve original error", async () => {
+  for (const mode of ["write", "late_write", "cancel", "late_cancel", "pending"]) {
+    const response = new Response("private-body", { status: 404 });
+    let lateTimer: ReturnType<typeof setTimeout> | undefined;
+    const cancel = spyOn(response.body!, "cancel").mockImplementation(() => {
+      if (mode === "cancel") throw new Error("private-cancel");
+      if (mode === "late_cancel")
+        return new Promise((_, reject) => {
+          lateTimer = setTimeout(() => reject(new Error("private-late")), 1100);
+        });
+      if (mode === "pending") return new Promise(() => {});
+      return Promise.resolve();
+    });
+    const started = performance.now();
+    await expect(
+      createSyntheticRequest({
+        origin: "https://synthetic.invalid",
+        key: "private-key",
+        phase: "baseline_sdk",
+        fetchImpl: async () => response,
+        onFailure: () => {
+          if (mode === "write") throw new Error("private-write");
+          if (mode === "late_write") return Promise.reject(new Error("private-async-write"));
+          return undefined;
+        },
+      })("/initialize", "POST"),
+    ).rejects.toThrow(initializeOuterCode);
+    expect(performance.now() - started).toBeLessThan(1200);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    if (lateTimer) await new Promise((done) => setTimeout(done, 150));
+  }
+  // Time spent in a secondary observer cannot reset the cancellation budget.
+  const response = new Response("private-body", { status: 404 });
+  spyOn(response.body!, "cancel").mockImplementation(() => new Promise(() => {}));
+  const started = performance.now();
+  await expect(
+    createSyntheticRequest({
+      origin: "https://synthetic.invalid",
+      key: "private-key",
+      phase: "baseline_sdk",
+      fetchImpl: async () => response,
+      onFailure: () => new Promise((done) => setTimeout(done, 250)),
+    })("/initialize", "POST"),
+  ).rejects.toThrow(initializeOuterCode);
+  expect(performance.now() - started).toBeLessThan(1200);
+});
+test("initial outer private record requires exact keys/enums/booleans and never carries header text/URL", () => {
+  expect(initializeOuterFailureRecord(initializeObservation)).toEqual(initializeObservation);
+  expect(initializeOuterFailureRecord(initializeObservation)).not.toBe(initializeObservation);
+  for (const change of [
+    { code: "private" },
+    { phase: "rollback_sdk" },
+    { cfErrorType: "520" },
+    { cfErrorType: "private" },
+    { cfErrorOriginPresent: 1 },
+    { cfRayPresent: "true" },
+    { contentType: "private" },
+    { responseUrl: initializeRequestUrl },
+    { redirected: 0 },
+    { body: "private" },
+    { header: "private" },
+  ])
+    expect(() => initializeOuterFailureRecord({ ...initializeObservation, ...change })).toThrow(
+      "verification_record",
+    );
+  const missing = { ...initializeObservation };
+  delete (missing as Partial<typeof missing>).cfErrorType;
+  for (const value of [null, [], missing])
+    expect(() => initializeOuterFailureRecord(value)).toThrow("verification_record");
+});
+test("baseline initial outer failure writes a private first observation before exit and makes only GET/state + POST/initialize", async () => {
+  for (const mode of [
+    "normal",
+    "existing",
+    "directory",
+    "unsafe_directory",
+    "symlink",
+    "hardlink",
+  ]) {
+    const temp = mkdtempSync(resolve(tmpdir(), "initialize-outer-"));
+    chmodSync(temp, mode === "unsafe_directory" ? 0o755 : 0o700);
+    const name = "container-api-verification-initialize-outer-failure.json";
+    const path = resolve(temp, name);
+    const existing = { ...initializeObservation, cfErrorType: "other" };
+    if (mode === "existing") writeFileSync(path, JSON.stringify(existing), { mode: 0o600 });
+    if (mode === "directory") mkdirSync(path, { mode: 0o700 });
+    const target = resolve(temp, "private-target.json");
+    if (mode === "symlink" || mode === "hardlink") {
+      writeFileSync(target, "private-target", { mode: 0o600 });
+      if (mode === "symlink") symlinkSync(target, path);
+      else linkSync(target, path);
+    }
+    const calls: string[] = [],
+      reports: string[] = [];
+    try {
+      await expect(
+        verifyPhase({
+          phase: "baseline_sdk",
+          temp,
+          subdomain: "synthetic",
+          key: "private-key",
+          accountId: "a".repeat(32),
+          apiToken: "private-api-token",
+          appId: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+          rolloutDeadline: Date.now() + 180_000,
+          report: (line: string) => reports.push(line),
+          fetchImpl: async (input: string, options: RequestInit) => {
+            const url = new URL(input);
+            calls.push(`${options.method} ${url.pathname}`);
+            if (url.pathname === "/state")
+              return Response.json({
+                kvSentinelMatch: 0,
+                sqlSentinelMatch: 0,
+                sdkAlarmPresent: 0,
+                revision: "baseline_sdk",
+                running: 0,
+                startCallbacks: 0,
+                stops: 0,
+                errors: 0,
+                signaled: 0,
+                exitSeven: 0,
+              });
+            expect(url.pathname).toBe("/initialize");
+            return new Response(null, { status: 404 });
+          },
+        }),
+      ).rejects.toThrow(initializeOuterCode);
+      expect(calls).toEqual(["GET /state", "POST /initialize"]);
+      expect(reports).toEqual([]);
+      if (mode === "normal" || mode === "existing")
+        expect(readRecord(temp, name)).toEqual(
+          mode === "existing" ? existing : initializeObservation,
+        );
+      if (mode === "unsafe_directory") expect(existsSync(path)).toBe(false);
+      if (mode === "symlink" || mode === "hardlink") {
+        expect(readFileSync(target, "utf8")).toBe("private-target");
+        expect(() => readRecord(temp, name)).toThrow();
+      }
+      expect(existsSync(resolve(temp, "container-api-verification-sdk-startup-failure.json"))).toBe(
+        false,
+      );
+    } finally {
+      rmSync(temp, { recursive: true });
+    }
+  }
+});
+
+test("initial outer diagnostic metadata exceptions keep canonical failure and still cancel without reading", async () => {
+  for (const mode of ["header", "url"]) {
+    const response = new Response("private-body", { status: 404 });
+    const headers = response.headers;
+    if (mode === "header")
+      Object.defineProperty(response, "headers", {
+        value: {
+          get: (name: string) => {
+            if (name === "cf-error-type") throw new Error("private-header");
+            return headers.get(name);
+          },
+          has: (name: string) => headers.has(name),
+        },
+      });
+    else
+      Object.defineProperty(response, "url", {
+        get: () => {
+          throw new Error("private-url");
+        },
+      });
+    const cancel = spyOn(response.body!, "cancel").mockResolvedValue(undefined);
+    const read = spyOn(response.body!, "getReader").mockImplementation(() => {
+      throw new Error("private-read");
+    });
+    let observations = 0;
+    await expect(
+      createSyntheticRequest({
+        phase: "baseline_sdk",
+        origin: "https://synthetic.invalid",
+        key: "private-key",
+        fetchImpl: async () => response,
+        onFailure: () => {
+          observations++;
+        },
+      })("/initialize", "POST"),
+    ).rejects.toThrow(initializeOuterCode);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(read).not.toHaveBeenCalled();
+    expect(observations).toBe(0);
+  }
+});
+
+test("native Node fetch classifies only the existing real TCP POST response with closed headers and URL evidence", () => {
+  const output = execFileSync(
+    "node",
+    [
+      "--input-type=module",
+      "-e",
+      `
+      import { createServer } from "node:http";
+      import { once } from "node:events";
+      const { createSyntheticRequest } = await import(process.argv[1]);
+      let calls = 0, observed;
+      const server = createServer((request, response) => {
+        calls++;
+        if (request.method !== "POST" || request.url !== "/initialize") throw new Error("unexpected_request");
+        response.writeHead(404, {
+          "cf-error-type": "1101", "cf-error-origin": "synthetic-private-origin",
+          "cf-ray": "synthetic-private-ray", "content-type": "text/html; charset=utf-8",
+        });
+        response.end("synthetic-private-body");
+      });
+      server.listen(0, "127.0.0.1");
+      await once(server, "listening");
+      let primary;
+      try {
+        await createSyntheticRequest({
+          phase: "baseline_sdk", origin: "http://127.0.0.1:" + server.address().port,
+          key: "synthetic-key", onFailure: (value) => { observed = value.observation; },
+        })("/initialize", "POST");
+      } catch (error) { primary = error.message; }
+      finally { server.closeAllConnections(); server.close(); await once(server, "close"); }
+      console.log(JSON.stringify({ primary, calls, observed }));
+    `,
+      new URL("../http-diagnostics.mjs", import.meta.url).href,
+    ],
+    { encoding: "utf8", timeout: 15000 },
+  );
+  expect(JSON.parse(output)).toEqual({
+    primary: initializeOuterCode,
+    calls: 1,
+    observed: {
+      ...initializeObservation,
+      cfErrorType: "1101",
+      cfErrorOriginPresent: true,
+      cfRayPresent: true,
+      contentType: "text/html",
+      responseUrl: "expected",
+    },
+  });
+  expect(output).not.toContain("synthetic-private");
+}, 16000);

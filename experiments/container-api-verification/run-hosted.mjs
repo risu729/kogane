@@ -1751,6 +1751,27 @@ export async function execute(
     failure = new Error(code);
     report(JSON.stringify({ code: "verification_execution_failed", stage, error: code }));
     if (
+      stage === "baseline_sdk_verify" &&
+      code === "verification_http_initialize_outer_not_found"
+    ) {
+      try {
+        const { readRecord, initializeOuterFailureRecord } = await import("./driver.mjs");
+        const observation = initializeOuterFailureRecord(
+          readRecord(input.temp, "container-api-verification-initialize-outer-failure.json"),
+        );
+        report(
+          JSON.stringify({
+            ...observation,
+            code: "verification_initialize_outer_failure_observation",
+          }),
+        );
+      } catch {
+        report(
+          JSON.stringify({ code: "verification_initialize_outer_failure_observation_unavailable" }),
+        );
+      }
+    }
+    if (
       ["baseline_sdk_verify", "rollback_sdk_verify"].includes(stage) &&
       code === "verification_http_once_concurrency_upstream_unavailable"
     ) {

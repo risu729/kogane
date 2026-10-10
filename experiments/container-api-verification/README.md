@@ -24,6 +24,32 @@ budget. Only a closed category is retained; the primary upstream failure remains
 unchanged. No additional request, readiness assertion or success promotion is
 introduced. A literal match does not establish the underlying allocation cause.
 
+Run 38017948414 at `0441c1df` failed the first SDK baseline `POST /initialize`
+with `verification_http_initialize_outer_not_found` at
+2026-10-10T02:43:41.4629923Z, after authenticated `GET /state` readiness. The
+response was HTTP 404 without either owned failure marker. Runtime cleanup
+completed for four resources, and the separate always-run cleanup passed with
+zero resources remaining. Independent API reads confirmed
+Worker/application/namespace absence. SDK startup classification
+and the later acceptance gates were not reached.
+
+The driver now observes only headers of that existing baseline initial response
+when the exact route, method, canonical failure, HTTP 404 and absence of both
+owned markers match. It stores only the documented `cf-error-type` whitelist
+(1000, 1016, 1101, 1102, 521–526) or missing/other, presence booleans for
+`cf-error-origin` and `cf-ray`, a closed content-type category, response URL
+expected/other/absent and a redirect boolean. It never stores body text, free
+header values or URLs. The separate private artifact is schema-validated and
+written synchronously with first-writer protection; the runner accepts it only
+for the matching primary failure and baseline stage. Asynchronous observation
+settlement and optional no-read response cancellation waits share a fixed
+monotonic one-second budget; synchronous file persistence cannot be preempted
+by that timer. They cannot replace the primary failure. No body read, extra request, POST retry,
+warm-up or lease is introduced; the SDK startup observer is unchanged.
+Cloudflare's [error-header documentation](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-error-headers/)
+applies to generated error pages. Header presence/absence is bounded evidence
+and does not establish which layer caused this 404.
+
 The earlier run 37915871908 at `7d0e8bc6` failed the public stream-error gate
 with clean EOF. Its same-DO diagnostic observed the expected reader error in
 both SDK and raw-port responses after 35 bytes and more than 35 seconds. This

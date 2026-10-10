@@ -3,7 +3,7 @@
 - Owner: risu729
 - Started: 2026-10-05
 - Expires: 2026-10-13
-- Status: Run 37963677064 at 430691a6 failed the initial SDK concurrent POST gate with upstream HTTP 503, before the revised stream-release gate. Runtime cleanup and independent absence checks passed. The 503 cause remains unclassified. Reader-lifecycle parity, native, recovery and rollback remain unverified.
+- Status: Run 38017948414 at 0441c1df failed the first SDK baseline POST /initialize with an unmarked HTTP 404 after authenticated GET /state readiness. Runtime cleanup and independent Worker/application/namespace absence checks passed. The 404 cause remains unclassified; SDK startup diagnosis and later acceptance stages were not reached.
 
 ## Question
 
@@ -58,6 +58,33 @@ checks and the separate cleanup step passed; independent API reads at 02:09 JST
 confirmed Worker/application/namespace absence. SDK 0.3.7 has a fixed HTTP 503
 response for `NoInstanceError`, and also preserves a TCP fetch response status;
 status alone cannot identify the branch or establish a Cloudflare defect.
+
+Normal CI and CodeQL passed at `0441c1df`. The next hosted attempt
+(run 38017948414) failed its first SDK baseline `POST /initialize` at
+2026-10-10T02:43:41.4629923Z with
+`verification_http_initialize_outer_not_found`, an HTTP 404 lacking both owned
+HTTP failure markers, after authenticated `GET /state` readiness. Runtime
+cleanup completed for four resources, and the separate always-run cleanup
+passed with zero resources remaining. Independent API reads confirmed
+Worker/application/namespace absence. The existing SDK startup
+classifier, concurrency, reader, native, recovery and rollback gates were not
+reached. Neither successful state readiness nor absent owned markers locates
+the source of the 404.
+
+A failure-only header observation now retains closed categories from that same
+baseline `POST /initialize` response only: the documented `cf-error-type`
+whitelist or missing/other, `cf-error-origin` and `cf-ray` presence, a closed
+content-type category, expected/other/absent response URL and redirect boolean.
+No body or free header/URL value is read into the record. The private first
+observation is written synchronously before preserving the original failure.
+Asynchronous observation settlement and optional no-read response cancellation
+waits share a fixed monotonic one-second budget; synchronous file persistence
+cannot be preempted by that timer. Neither observation nor cancellation replaces
+the original failure.
+There is no additional request, retry, warm-up or activity lease. Cloudflare's
+[error-header documentation](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-error-headers/)
+describes its generated error pages; missing headers remain limited evidence
+and cannot prove a non-Cloudflare cause or route failure.
 
 A separate GitHub environment and a dedicated scoped token isolate this check
 from production credentials. The normal CI and production release never deploy

@@ -34,6 +34,7 @@ function recordPath(temp, name) {
       "container-api-verification-stream-failure.json",
       "container-api-verification-stream-check-failure.json",
       "container-api-verification-sdk-startup-failure.json",
+      "container-api-verification-initialize-outer-failure.json",
     ].includes(name)
   )
     closed("record");
@@ -510,6 +511,54 @@ const streamCheckReasons = new Set([
   "partial",
   "timing",
 ]);
+export function initializeOuterFailureRecord(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.keys(value).sort().join(",") !==
+      "cfErrorOriginPresent,cfErrorType,cfRayPresent,code,contentType,phase,redirected,responseUrl" ||
+    value.code !== "initialize_outer_failure_observation" ||
+    value.phase !== "baseline_sdk" ||
+    ![
+      "missing",
+      "other",
+      "1000",
+      "1016",
+      "1101",
+      "1102",
+      "521",
+      "522",
+      "523",
+      "524",
+      "525",
+      "526",
+    ].includes(value.cfErrorType) ||
+    typeof value.cfErrorOriginPresent !== "boolean" ||
+    typeof value.cfRayPresent !== "boolean" ||
+    ![
+      "missing",
+      "other",
+      "application/json",
+      "text/html",
+      "text/plain",
+      "application/octet-stream",
+    ].includes(value.contentType) ||
+    !["expected", "other", "absent"].includes(value.responseUrl) ||
+    typeof value.redirected !== "boolean"
+  )
+    closed("record");
+  return {
+    code: "initialize_outer_failure_observation",
+    phase: "baseline_sdk",
+    cfErrorType: value.cfErrorType,
+    cfErrorOriginPresent: value.cfErrorOriginPresent,
+    cfRayPresent: value.cfRayPresent,
+    contentType: value.contentType,
+    responseUrl: value.responseUrl,
+    redirected: value.redirected,
+  };
+}
 export function sdkStartupFailureRecord(value) {
   if (
     !value ||
@@ -777,7 +826,20 @@ export async function verifyPhase({
     origin,
     key,
     fetchImpl,
-    onFailure: ({ code, category }) => {
+    phase,
+    onFailure: ({ code, category, observation }) => {
+      if (phase === "baseline_sdk" && code === "verification_http_initialize_outer_not_found") {
+        try {
+          writeRecord(
+            temp,
+            "container-api-verification-initialize-outer-failure.json",
+            initializeOuterFailureRecord(observation),
+          );
+        } catch {
+          // O_EXCL retains the first observation; persistence cannot replace the HTTP error.
+        }
+        return;
+      }
       if (
         !["baseline_sdk", "rollback_sdk"].includes(phase) ||
         code !== "verification_http_once_concurrency_upstream_unavailable"

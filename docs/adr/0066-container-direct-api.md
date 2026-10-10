@@ -347,6 +347,38 @@ and GitHub environment when the work is complete or at the approved deadline,
 whichever comes first. The research expiry is extended to 2026-10-13 for this
 bounded re-verification; production, resource and role scope are unchanged.
 
+Normal CI and CodeQL passed on `0441c1df` after integration of main
+`f761630d` and the bounded authorization renewal. Its hosted attempt
+([run 38017948414](https://github.com/risu729/kogane/actions/runs/38017948414))
+failed the first SDK baseline `POST /initialize` at
+2026-10-10T02:43:41.4629923Z with
+`verification_http_initialize_outer_not_found`. Authenticated `GET /state`
+readiness had passed; the HTTP 404 carried neither owned failure marker. Runtime
+cleanup completed for four resources, and the separate always-run cleanup
+passed with zero resources remaining. Independent API reads confirmed Worker,
+application and namespace absence. The SDK startup
+classifier, concurrency, reader, native, recovery and rollback gates were not
+reached. A successful state GET and an unmarked 404 do not identify the response
+source or establish a routing cause.
+
+A header-only failure observation is added for that exact baseline initial
+POST, canonical failure code, HTTP status and absence of both owned markers. It
+retains only a closed documented `cf-error-type` value (1000, 1016, 1101, 1102,
+521–526), missing/other, `cf-error-origin`/`cf-ray` presence booleans, closed
+content-type category, response URL expected/other/absent and redirect boolean.
+No response body, free header value or URL is retained. A separate mode-0600
+artifact under the owned private directory uses synchronous O_EXCL first-writer
+protection and strict validation. The runner emits it only for the matching
+baseline primary failure; invalid or missing observations remain unavailable.
+Asynchronous observation settlement and optional no-read response cancellation
+waits share a fixed monotonic one-second budget; synchronous file persistence
+cannot be preempted by that timer. Neither can replace the original 404. There
+is no additional fetch, state GET, POST retry, warm-up or lease. The existing
+SDK startup category observer and actual SDK/controller/producer stay unchanged.
+Cloudflare's [error-header documentation](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-error-headers/),
+updated 2026-04-23, describes Cloudflare-generated error pages. Missing headers
+remain limited evidence; they cannot prove a non-Cloudflare cause.
+
 These attempts do not establish runtime equivalence or a Cloudflare defect.
 The following hosted runtime gates remain pending:
 
