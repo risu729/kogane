@@ -157,3 +157,19 @@ screen. No transfer, FX, deposit creation/cancellation, memo or settings flow.
 - Require fresh independent review, relevant native CI, approved deployment
   and read-only production evidence before claiming acquisition is enabled
   or complete. Do not close #447 for this offline slice.
+
+## Separate byte-lineage comparison slice
+
+The offline csv-byte-lineage helper compares optional caller-supplied HTTP
+response bytes, the already-inspected decoded CSV text, and optional browser
+artifact bytes. It validates strict Shift_JIS decoding versus exact UTF-8 BOM
+re-encoding, rejects malformed/lossy inputs and local budget overflow, and
+returns only sizes, counts and fixed comparison classifications.
+
+Neither byte input is required: decoded-text-only observations retain both
+byte sources as absent. Supplying matching arrays does not prove their origin
+or a completed download. Capture/provider-origin verification, persistence
+and registration readiness remain false; coverage remains unknown. There is
+no storage writer, manifest/descriptor construction, parser registration or
+provider request in this slice. Its synthetic Blob test is not live download
+evidence. See the ADR 0070 amendment for the exact limits and refusal policy.
