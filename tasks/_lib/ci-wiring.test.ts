@@ -81,7 +81,7 @@ test("hk's full plan preserves linters alongside the repository graph", () => {
     steps: { name: string; status: string }[];
   };
   const included = plan.steps.filter((step) => step.status === "included").map((step) => step.name);
-  for (const name of ["oxlint", "oxfmt", "actionlint", "repository"])
+  for (const name of ["oxlint", "oxfmt", "jactionlint", "repository"])
     expect(included).toContain(name);
 });
 
