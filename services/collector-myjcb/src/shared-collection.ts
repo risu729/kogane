@@ -510,6 +510,15 @@ export async function persistSharedRun(
   return { result, artifactCount: plan.artifacts.length };
 }
 
+/** Best effort: a log failure must not turn a persisted run into a failed run. */
+export function logSharedRunDiagnostic(input: SharedRunInput, outcome: SharedRunOutcome): void {
+  try {
+    console.log(JSON.stringify(sharedRunDiagnostic(input, outcome)));
+  } catch {
+    /* Preserve the provider and persistence result; never retry collection. */
+  }
+}
+
 /** Safe, code-only diagnostics for a persist attempt: no provider text, no
  * amounts, no bodies. */
 export function sharedRunDiagnostic(
@@ -523,6 +532,11 @@ export function sharedRunDiagnostic(
     status: input.status,
     persistence: result.outcome,
     connectionCount: input.connections.length,
+    coverageStatus: runCoverage(input.status),
+    coverageReason: input.status === "failed" ? "collection-unavailable" : "rolling-window",
+    completeConnectionCount: input.connections.filter((c) => c.summary.status === "success").length,
+    incompleteConnectionCount: input.connections.filter((c) => c.summary.status !== "success")
+      .length,
     artifactCount: outcome.artifactCount,
     ...(result.outcome === "incomplete"
       ? {

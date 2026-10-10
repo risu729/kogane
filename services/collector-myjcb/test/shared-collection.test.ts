@@ -26,6 +26,7 @@ import {
 } from "../src/shared-collection";
 import type { CollectionFailure, ConnectionStopCode } from "../src/types";
 import worker from "../src/worker";
+import * as collector from "../src/collector";
 
 const runId = "7d8f4b16-6d5c-4f0f-9a3e-0a1b2c3d4e5f";
 const schemaVersion = "myjcb-worker-poc-v1";
@@ -616,6 +617,10 @@ describe("G1-01 a failed put leaves no terminal", () => {
       status: "success",
       persistence: "incomplete",
       connectionCount: 1,
+      coverageStatus: "partial",
+      coverageReason: "rolling-window",
+      completeConnectionCount: 1,
+      incompleteConnectionCount: 0,
       artifactCount: plan.artifacts.length,
       reasonCode: "object_put_failed",
       persistedCount: outcome.result.checkpoint.persistedArtifactKeys.length,
@@ -625,6 +630,52 @@ describe("G1-01 a failed put leaves no terminal", () => {
 });
 
 describe("G1-15 shared mode writes once", () => {
+  test.each(["success", "human-required"] as const)(
+    "throwing all log sinks preserves %s and one collection/persistence attempt",
+    async (status) => {
+      const data = new FakeR2Bucket();
+      const collect = spyOn(collector, "collectConnection").mockResolvedValue(
+        connection("account-one", status),
+      );
+      const sinks = (["log", "error"] as const).map((level) =>
+        spyOn(console, level).mockImplementation(() => {
+          throw new Error("private-logger-failure");
+        }),
+      );
+      const env = {
+        COLLECTOR_SCHEMA_VERSION: schemaVersion,
+        MYJCB_CONNECTIONS_JSON: JSON.stringify([
+          {
+            connectionId: "account-one",
+            bootstrapMode: "password",
+            userId: "synthetic-user",
+            password: "synthetic-password",
+          },
+        ]),
+        DATA: data,
+      } as unknown as Env;
+      try {
+        const scheduled = worker.scheduled?.(
+          { scheduledTime: Date.now(), cron: "0 21 * * *", noRetry: () => {} },
+          env,
+          { waitUntil: () => {}, passThroughOnException: () => {} } as unknown as ExecutionContext,
+        );
+        if (status === "success") await expect(scheduled).resolves.toBeUndefined();
+        else await expect(scheduled).rejects.toThrow("MyJCB shared collection did not complete");
+        expect(collect).toHaveBeenCalledTimes(1);
+        const terminals = [...data.entries.keys()].filter((key) => key.endsWith("/terminal.json"));
+        expect(terminals).toHaveLength(1);
+        expect(data.putKeys).toHaveLength(data.entries.size);
+        const manifest = JSON.parse(
+          new TextDecoder().decode(data.entries.get(terminals[0]!)!.bytes),
+        );
+        expect(manifest.providerOutcome).toBe(status === "success" ? "success" : "failed");
+      } finally {
+        collect.mockRestore();
+        sinks.forEach((sink) => sink.mockRestore());
+      }
+    },
+  );
   test("a shared-target run touches neither the legacy bucket nor the importer", async () => {
     const data = new FakeR2Bucket();
     let legacyWrites = 0;

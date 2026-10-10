@@ -14,6 +14,12 @@ import {
   type MizuhoSession,
 } from "./client";
 import { loginMizuho } from "./login";
+import {
+  logMizuhoPhase,
+  logMizuhoRecord,
+  mizuhoCoverageDiagnostic,
+  type MizuhoPhase,
+} from "./diagnostics";
 import { persistMizuhoRun } from "./storage";
 
 const MAX_REQUEST_BYTES = 96 * 1024;
@@ -85,23 +91,40 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
         startedAt = new Date().toISOString();
       let collection: MizuhoCollection | undefined;
       let errorCode: string | undefined;
+      let phase: MizuhoPhase = "configuration";
+      let failurePhase: MizuhoPhase | undefined;
+      logMizuhoPhase(runId, phase);
       try {
         let session = suppliedSession;
         if (session === undefined) {
           if (!env.MIZUHO_CUSTOMER_NUMBER || !env.MIZUHO_LOGIN_PASSWORD)
             throw new MizuhoClientError("mizuho-credentials-missing");
+          phase = "login";
+          logMizuhoPhase(runId, phase);
           session = await deps.login({
             customerNumber: env.MIZUHO_CUSTOMER_NUMBER,
             password: env.MIZUHO_LOGIN_PASSWORD,
           });
         }
+        phase = "collection";
+        logMizuhoPhase(runId, phase);
         collection = await deps.collect({ session });
       } catch (error) {
         errorCode = safeMizuhoErrorCode(error);
+        failurePhase = phase;
       }
       const status =
         collection === undefined ? "failed" : collection.partial ? "partial" : "success";
       const artifactCount = collection?.artifacts.length ?? 0;
+      const diagnostic = {
+        event: "mizuho-collection-result",
+        runId,
+        status,
+        artifactCount,
+        ...mizuhoCoverageDiagnostic(collection),
+        ...(errorCode ? { errorCode, failurePhase } : {}),
+      };
+      logMizuhoPhase(runId, "persistence");
       try {
         const persisted = await deps.persist(env.DATA, {
           runId,
@@ -115,6 +138,11 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
         });
         const complete =
           persisted.outcome === "persisted" || persisted.outcome === "already_persisted";
+        logMizuhoRecord({
+          ...diagnostic,
+          persistence: persisted.outcome,
+          ...(!complete ? { persistenceErrorCode: "persistence-incomplete" } : {}),
+        });
         return {
           httpStatus: !complete || status === "failed" ? 502 : status === "partial" ? 207 : 200,
           body: {
@@ -126,6 +154,11 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
           },
         };
       } catch {
+        logMizuhoRecord({
+          ...diagnostic,
+          persistence: "failed",
+          persistenceErrorCode: "persistence-failed",
+        });
         return {
           httpStatus: 502,
           body: {
@@ -170,17 +203,8 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
       // a platform retry; the next configured daily event is independent.
       controller.noRetry();
       const result = await execute(env);
-      // Keep scheduler observability independent of provider error text and
-      // financial/session fields, including when login or persistence fails.
-      console.log(
-        JSON.stringify({
-          event: "mizuho-scheduled-collection",
-          runId: result.body.runId,
-          status: result.body.status,
-          artifactCount: result.body.artifactCount,
-          persistence: result.body.persistence,
-        }),
-      );
+      // execute logs safe phases and one result for every entrypoint,
+      // including the service-binding alarm path used by production.
       if (result.httpStatus === 502) throw new Error("mizuho-scheduled-collection-failed");
     },
   } satisfies ExportedHandler<Env> & { alarmCollection(env: Env): Promise<ScheduledResult> };

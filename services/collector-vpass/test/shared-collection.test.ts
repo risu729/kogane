@@ -584,6 +584,35 @@ describe("ADR 0023 option 8 / ADR 0026 the card unit is complete only when every
     expect(await cardUnit({ "202609": month(customized(2, "2")) })).toBe("complete");
   });
 
+  test("diagnostics distinguish short, excess and unverified months without leaking month or row values", async () => {
+    const outcome = await persistCardRun(
+      new FakeR2Bucket(),
+      run({
+        months: {
+          "209901": month(finalized(1, "2")),
+          "209902": month(finalized(3, "2")),
+          "209903": month(finalized(1, undefined)),
+          "209904": month(finalized(2, "2")),
+        },
+      }),
+    );
+    const diagnostic = sharedRunDiagnostic("r", "card-001", outcome);
+    expect(diagnostic).toMatchObject({
+      coverage: "stated_total_mismatch",
+      coverageStatus: "partial",
+      coverageReason: "rolling-window",
+      coverageCounts: {
+        monthCount: 4,
+        completeMonthCount: 1,
+        unverifiedMonthCount: 1,
+        shortMonthCount: 1,
+        excessMonthCount: 1,
+      },
+    });
+    for (const forbidden of ["2099", "SYNTHETIC SHOP", "allCnt", "amount"])
+      expect(JSON.stringify(diagnostic)).not.toContain(forbidden);
+  });
+
   test("a missing, unparsable or unmet stated total makes the unit partial with its code", async () => {
     const cases: [VpassCardRun["months"], string][] = [
       [{ "202609": month(finalized(1, "2")) }, "stated_total_mismatch"],
@@ -638,6 +667,15 @@ describe("G1-01 a failed put leaves no terminal", () => {
       artifactCount: plan.artifacts.length,
       binding: "binding_tuple_absent",
       coverage: "complete",
+      coverageStatus: "partial",
+      coverageReason: "rolling-window",
+      coverageCounts: {
+        monthCount: 2,
+        completeMonthCount: 2,
+        unverifiedMonthCount: 0,
+        shortMonthCount: 0,
+        excessMonthCount: 0,
+      },
       reasonCode: "object_put_failed",
       persistedCount: outcome.result.checkpoint.persistedArtifactKeys.length,
       pendingCount: outcome.result.checkpoint.pendingArtifactKeys.length,
@@ -647,61 +685,65 @@ describe("G1-01 a failed put leaves no terminal", () => {
 });
 
 describe("G1-15 shared mode writes once", () => {
-  test("a shared-target session touches neither the legacy bucket nor the queue", async () => {
-    const data = new FakeR2Bucket();
-    let legacyWrites = 0;
-    let enqueued = 0;
-    let imports = 0;
-    const records: Record<string, unknown>[] = [];
-    const spies = [
-      spyOn(console, "log").mockImplementation((value) =>
-        records.push(JSON.parse(String(value)) as Record<string, unknown>),
-      ),
-      spyOn(console, "error").mockImplementation((value) =>
-        records.push(JSON.parse(String(value)) as Record<string, unknown>),
-      ),
-    ];
-    const env = {
-      COLLECTION_TARGET: "shared",
-      DATA: data,
-      // Missing secrets deliberately fail the session before any provider
-      // request, which is the failed-run path.
-      SNAPSHOTS: {
-        put: async () => {
-          legacyWrites += 1;
-          throw new Error("the legacy bucket must not be written in shared mode");
-        },
-      },
-      RAW_EVIDENCE_QUEUE: {
-        send: async () => {
-          enqueued += 1;
-        },
-      },
-      RAW_EVIDENCE_IMPORTER: {
-        fetch: async () => {
-          imports += 1;
-          return Response.json({ status: "sealed" });
-        },
-      },
-    } as unknown as Parameters<typeof worker.scheduled>[1];
-    try {
-      await expect(
-        worker.scheduled(
-          { scheduledTime: Date.parse("2026-09-05T00:00:00Z") } as ScheduledController,
-          env,
+  test.each([false, true])(
+    "a shared-target session touches neither the legacy bucket nor the queue (throwing logs=%s)",
+    async (loggerThrows) => {
+      const data = new FakeR2Bucket();
+      let legacyWrites = 0;
+      let enqueued = 0;
+      let imports = 0;
+      const records: Record<string, unknown>[] = [];
+      const spies = [
+        ...(["log", "error"] as const).map((level) =>
+          spyOn(console, level).mockImplementation((value) => {
+            records.push(JSON.parse(String(value)) as Record<string, unknown>);
+            if (loggerThrows) throw new Error("private-logger-failure");
+          }),
         ),
-      ).rejects.toThrow("Missing Worker secret");
-      expect(legacyWrites).toBe(0);
-      expect(enqueued).toBe(0);
-      expect(imports).toBe(0);
-      // The session failure is recorded as a failed run with no artifact.
-      expect([...data.entries.keys()]).toEqual([
-        terminalKey("vpass", "2026-09-05T00-00-00-000Z-run"),
-      ]);
-      const persisted = records.find((record) => record.event === "vpass-shared-collection");
-      expect(persisted).toMatchObject({ persistence: "persisted", artifactCount: 0 });
-    } finally {
-      spies.forEach((spy) => spy.mockRestore());
-    }
-  });
+      ];
+      const env = {
+        COLLECTION_TARGET: "shared",
+        DATA: data,
+        // Missing secrets deliberately fail the session before any provider
+        // request, which is the failed-run path.
+        SNAPSHOTS: {
+          put: async () => {
+            legacyWrites += 1;
+            throw new Error("the legacy bucket must not be written in shared mode");
+          },
+        },
+        RAW_EVIDENCE_QUEUE: {
+          send: async () => {
+            enqueued += 1;
+          },
+        },
+        RAW_EVIDENCE_IMPORTER: {
+          fetch: async () => {
+            imports += 1;
+            return Response.json({ status: "sealed" });
+          },
+        },
+      } as unknown as Parameters<typeof worker.scheduled>[1];
+      try {
+        await expect(
+          worker.scheduled(
+            { scheduledTime: Date.parse("2026-09-05T00:00:00Z") } as ScheduledController,
+            env,
+          ),
+        ).rejects.toThrow("Missing Worker secret");
+        expect(legacyWrites).toBe(0);
+        expect(enqueued).toBe(0);
+        expect(imports).toBe(0);
+        expect(data.putKeys).toHaveLength(1);
+        // The session failure is recorded as a failed run with no artifact.
+        expect([...data.entries.keys()]).toEqual([
+          terminalKey("vpass", "2026-09-05T00-00-00-000Z-run"),
+        ]);
+        const persisted = records.find((record) => record.event === "vpass-shared-collection");
+        expect(persisted).toMatchObject({ persistence: "persisted", artifactCount: 0 });
+      } finally {
+        spies.forEach((spy) => spy.mockRestore());
+      }
+    },
+  );
 });

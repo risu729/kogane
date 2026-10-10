@@ -20,6 +20,7 @@ import {
   type VpassMonthCapture,
 } from "./shared-collection";
 import { collectMonth } from "./statement-walk";
+import { logVpassDiagnostic } from "./log-diagnostic";
 const AUTH_URL = "https://spap.smbc-card.com/api/v3/Fauth";
 const CONFIG_URL = "https://spap.smbc-card.com/api/v3/common/Config";
 const MEMBER_BASE_URL = "https://www.smbc-card.com";
@@ -357,7 +358,7 @@ async function captureCard(
         webMeisaiTopRawJson: top.rawText,
         months: captures,
       });
-      console.log(JSON.stringify(sharedRunDiagnostic(runId, cardLabel, outcome)));
+      logVpassDiagnostic(sharedRunDiagnostic(runId, cardLabel, outcome));
       // A run whose terminal was not written is not a finished run (G1-01).
       if (!sharedRunPersisted(outcome)) throw new Error("shared_persist_incomplete");
       onPersisted?.(`${runId}-${cardLabel}`);
@@ -393,7 +394,7 @@ async function persistFailedCard(
     startedAt: started.toISOString(),
     failedAt: new Date().toISOString(),
   });
-  console.log(JSON.stringify(sharedRunDiagnostic(runId, unitKey, outcome)));
+  logVpassDiagnostic(sharedRunDiagnostic(runId, unitKey, outcome));
   return sharedRunPersisted(outcome);
 }
 async function collectOneCard(
@@ -475,7 +476,7 @@ async function collectAllCards(
       transactionCount: summaries.reduce((total, item) => total + item.transactionCount, 0),
       objectCount: summaries.reduce((total, item) => total + item.objectCount, 0) + failures.length,
     };
-    console.log(JSON.stringify({ event: "vpass-daily-collection-complete", ...summary }));
+    logVpassDiagnostic({ event: "vpass-daily-collection-complete", ...summary });
     diagnostic.finish(
       failures.length === 0 ? "success" : summaries.length === 0 ? "failed" : "partial",
     );
