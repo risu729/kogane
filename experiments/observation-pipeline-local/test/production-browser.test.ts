@@ -2,7 +2,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { createApi } from "../src/api.ts";
 import { buildFixture, HOSTILE_DESCRIPTION } from "./fixture.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
@@ -216,6 +216,82 @@ describe.if(runnable)("combined production client", () => {
     server?.stop(true);
   });
 
+  async function openObservation(page: Page, path: string, expected: string) {
+    await page.goto(origin + path, { waitUntil: "networkidle" });
+    // Navigation can become idle before the client starts its data request.
+    // Wait for the existing exact heading/content assertions to be ready.
+    await page.waitForFunction(
+      (expectedText) =>
+        document.querySelectorAll("h1").length === 1 &&
+        document.body.innerText.includes(expectedText),
+      expected,
+      { timeout: 10_000 },
+    );
+  }
+
+  test("route readiness waits for deferred metadata before accepting the page", async () => {
+    const page = await browser.newPage();
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const controlled = window as typeof window & {
+        productionMetadataBlocked: boolean;
+        releaseProductionMetadata: () => void;
+      };
+      controlled.productionMetadataBlocked = false;
+      controlled.releaseProductionMetadata = () => release();
+      window.fetch = (async (...args: Parameters<typeof originalFetch>) => {
+        const input = args[0];
+        const url =
+          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (new URL(url, location.href).pathname === "/api/meta") {
+          controlled.productionMetadataBlocked = true;
+          await gate;
+        }
+        return originalFetch(...args);
+      }) as typeof window.fetch;
+    });
+    let ready = false;
+    const opening = openObservation(page, "/transactions", HOSTILE_DESCRIPTION).then(() => {
+      ready = true;
+    });
+    void opening.catch(() => {});
+    try {
+      await page.waitForFunction(
+        () =>
+          (window as typeof window & { productionMetadataBlocked: boolean })
+            .productionMetadataBlocked,
+        undefined,
+        { timeout: 10_000 },
+      );
+      await page.waitForLoadState("networkidle", { timeout: 10_000 });
+      expect(await page.locator("h1").count()).toBe(0);
+      expect(ready).toBe(false);
+      await page.evaluate(() =>
+        (
+          window as typeof window & { releaseProductionMetadata: () => void }
+        ).releaseProductionMetadata(),
+      );
+      await opening;
+      expect(ready).toBe(true);
+      expect(await page.locator("h1").count()).toBe(1);
+      expect(await page.locator("body").innerText()).toContain(HOSTILE_DESCRIPTION);
+    } finally {
+      await page
+        .evaluate(() =>
+          (
+            window as typeof window & { releaseProductionMetadata: () => void }
+          ).releaseProductionMetadata(),
+        )
+        .catch(() => {});
+      await opening.catch(() => {});
+      await page.close();
+    }
+  }, 30_000);
+
   test("all observation routes render under production CSP at desktop and mobile widths", async () => {
     for (const width of [1280, 390]) {
       const page = await browser.newPage({ viewport: { width, height: 900 } });
@@ -231,7 +307,7 @@ describe.if(runnable)("combined production client", () => {
         [`/observations/transaction/${observation.id}`, "json:$.rows[0]"],
         ["/evidence", "テスト銀行"],
       ]) {
-        await page.goto(origin + path, { waitUntil: "networkidle" });
+        await openObservation(page, path!, expected!);
         expect(await page.locator("h1").count()).toBe(1);
         const text = await page.locator("body").innerText();
         expect(text).toContain(expected!);
@@ -254,7 +330,18 @@ describe.if(runnable)("combined production client", () => {
   test("summary counts come from the shared query service, with its hand-off references", async () => {
     const page = await browser.newPage();
     const before = requests.length;
+    const coverageResponse = page.waitForResponse(
+      (response) =>
+        response.url() === origin + "/api/v2/query?intent=coverage" &&
+        response.request().method() === "GET",
+      { timeout: 10_000 },
+    );
     await page.goto(origin + "/", { waitUntil: "networkidle" });
+    const response = await coverageResponse;
+    expect(response.status()).toBe(200);
+    expect(await response.finished()).toBeNull();
+    await page.locator(".overview-stat-value").nth(2).waitFor({ timeout: 10_000 });
+    await page.getByText("この数字の出どころ").waitFor({ timeout: 10_000 });
     const observed = requests.slice(before);
     // The page asks the shared service, and only for the coverage intent.
     expect(observed).toContain("/api/v2/query?intent=coverage");
@@ -277,7 +364,7 @@ describe.if(runnable)("combined production client", () => {
     expect(text).toContain(`ctx_${"0".repeat(64)}`);
     expect(text).toContain(`result:${"1".repeat(64)}`);
     await page.close();
-  });
+  }, 15_000);
 
   test("evidence navigation preserves observation routes and does not deny available parsing", async () => {
     const page = await browser.newPage();
@@ -356,9 +443,7 @@ describe.if(runnable)("combined production client", () => {
 
   test("observation provenance links to its artifact and protected original without auto-fetch", async () => {
     const page = await browser.newPage();
-    await page.goto(`${origin}/observations/transaction/${observation.id}`, {
-      waitUntil: "networkidle",
-    });
+    await openObservation(page, `/observations/transaction/${observation.id}`, "json:$.rows[0]");
     expect(await page.locator("body").innerText()).toContain("json:$.rows[0]");
     const raw = page.locator(`a[href='/api/raw/${fixture.sha256}']`).first();
     expect(await raw.count()).toBe(1);
