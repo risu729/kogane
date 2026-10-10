@@ -9,6 +9,7 @@
 //   * Confidence is written out. Every row says whether its date is
 //     provider-observed or policy-estimated, and every reason code has text;
 //     colour alone never carries the meaning.
+import type { RewardProviderExpirySection } from "../../../../packages/domain/src/reward-expiry-observations.ts";
 import { type ReactNode } from "react";
 import { Badge, EmptyState, Kv, KvRow, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import {
@@ -466,7 +467,43 @@ function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
   );
 }
 
-/** The READ endpoint returns one row per bucket, not the legacy grouped DTO. */
+function ProviderExpirySection({ section }: { section: RewardProviderExpirySection }): ReactNode {
+  return (
+    <Panel
+      id={domId("reward-provider-expiry", section.holdingRef)}
+      title={`${section.programId === "program:j-point" ? "J-POINT" : section.programId} ／ 取得元の失効予定表示`}
+      note="保有ポイントのうち、取得元が失効予定として表示した分です。合計残高へは加算しません。"
+    >
+      <div className="panel-body">
+        {section.coverage !== "observed" ? (
+          <p>
+            取得元の期限表示{section.coverage === "not-displayed" ? "なし" : "未確認"} ／ 期限未確認
+          </p>
+        ) : section.displays.length === 0 ? (
+          <p>取得元の表示範囲に失効予定量の記載なし ／ 期限未確認</p>
+        ) : (
+          section.displays.map((display) => (
+            <Kv key={display.displayRef}>
+              <KvRow label="失効予定の部分量">
+                <Quantity quantity={display.quantity} />
+              </KvRow>
+              <KvRow label="取得元の表示期限">
+                <Time time={display.expires} />
+              </KvRow>
+            </Kv>
+          ))
+        )}
+        <Kv>
+          <KvRow label="観測時点">
+            <Time time={section.observedAt} />
+          </KvRow>
+          <KvRow label="元観測">{section.sourceFactRefs.join(" ／ ")}</KvRow>
+        </Kv>
+      </div>
+    </Panel>
+  );
+}
+/** The READ endpoint returns estimates and non-additive provider display sections. */
 export function RewardExpiryResults({ data }: { data: RewardExpiryPage }): ReactNode {
   if ("snapshot" in data)
     return (
@@ -474,6 +511,9 @@ export function RewardExpiryResults({ data }: { data: RewardExpiryPage }): React
         <p className="footnote">
           判定時点: {data.snapshot.evaluatedAt} ／ 暦の基準: {data.snapshot.evaluationCalendar}
         </p>
+        {(data.providerDisplaySections ?? []).map((section) => (
+          <ProviderExpirySection key={section.parentBucketRef} section={section} />
+        ))}
         {data.rows.map((row) => (
           <ReadExpiry key={`${row.holdingRef}:${row.ruleRef}:${row.bucketRef}`} row={row} />
         ))}
@@ -529,8 +569,11 @@ export function RewardsPage(): ReactNode {
       </QueryBoundary>
       <QueryBoundary
         query={expiry}
-        label="期限の見込み"
-        isEmpty={(data) => data.rows.length === 0}
+        label="期限の表示・見込み"
+        isEmpty={(data) =>
+          data.rows.length === 0 &&
+          (!("snapshot" in data) || (data.providerDisplaySections ?? []).length === 0)
+        }
         empty={<EmptyState>期限を判定できる規約がまだありません。</EmptyState>}
       >
         {(data) => (

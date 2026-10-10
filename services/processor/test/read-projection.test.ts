@@ -325,8 +325,10 @@ test("G0-09/G3-12: dropping every READ table leaves CORE and DATA untouched, and
     "balance_snapshot_pointer",
     "balance_read_snapshots",
     // The reward second stage of migration 0002 lives in the same database
-    // (U16): "every READ table" includes it, and the reset re-applies both
-    // migrations.
+    // (U16): "every READ table" includes it, and the reset re-applies all
+    // READ migrations.
+    "reward_provider_display_checkpoints",
+    "reward_provider_expiry_sections",
     "reward_build_checkpoints",
     "reward_conversion_simulations",
     "reward_expiry_estimates_v2",

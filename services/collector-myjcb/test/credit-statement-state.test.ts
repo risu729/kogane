@@ -757,6 +757,7 @@ describe("ADR 0005 amendment: the Worker keeps a stopped connection's months", (
     expect(manifest.status).toBe("partial");
     expect(manifest.connections).toEqual([
       {
+        jpointCode: "unsupported",
         connectionId: "account-one",
         bootstrapMode: "session",
         status: "partial",

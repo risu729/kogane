@@ -13,6 +13,7 @@
 //   * The job is idempotent: `claim_digest` is a digest of the source fact
 //     reference and the promotion release, and the insert ignores a conflict.
 //     Re-running it, or running it while another sweep runs, adds nothing new.
+import { unitScopedEligibilitySql } from "../../../packages/parsers/src/snapshot-query.ts";
 import type { D1Like as RewardReadD1 } from "../../../packages/storage-d1/src/d1.ts";
 import type { BucketKind } from "../../../packages/domain/src/rewards.ts";
 import { validTemporalValue, type TemporalValue } from "../../../packages/domain/src/time.ts";
@@ -41,7 +42,7 @@ interface PromotionRule {
    * programme's account, not the provider's per-bucket display slot: those
    * become bucket references below.
    */
-  holdingRef: string;
+  holdingRef: string | ((sourceAccount: string) => string);
   unitRef: string;
   bucketKind: BucketKind;
   restrictionRefs: string[];
@@ -53,6 +54,17 @@ interface PromotionRule {
  * the general V Point bucket rule, exactly as `classifyBalance` does today.
  */
 export const PROMOTION_RULES: readonly PromotionRule[] = [
+  {
+    sourceId: "myjcb",
+    parserName: "myjcb-jpoint-balance",
+    metric: "displayed_jpoint_total",
+    sourceAccountPrefix: "myjcb:",
+    programId: "program:j-point",
+    holdingRef: (sourceAccount) => `program:j-point:${sourceAccount}`,
+    unitRef: "points:j-point",
+    bucketKind: "unclassified",
+    restrictionRefs: [],
+  },
   {
     sourceId: "v-point",
     parserName: "v-point-balance-info",
@@ -151,6 +163,13 @@ const candidateScope = PROMOTION_RULES.map((rule) => {
   if (rule.sourceAccountEquals)
     clauses.push(`b.source_account=${parameter(rule.sourceAccountEquals)}`);
   if (rule.unitRef === "JPY") clauses.push(`b.instrument=${parameter("JPY")}`);
+  if (rule.programId === "program:j-point") {
+    clauses.push(`b.instrument=${parameter("J_POINT")}`);
+    clauses.push(`b.source_account LIKE ${parameter("myjcb:%:j-point:total")}`);
+    clauses.push(
+      `length(b.source_account) BETWEEN 21 AND 84 AND substr(b.source_account,7,length(b.source_account)-20) NOT GLOB '*[^a-z0-9-]*' AND substr(b.source_account,7,1) GLOB '[a-z0-9]'`,
+    );
+  }
   return `(${clauses.join(" AND ")})`;
 }).join(" OR ");
 
@@ -164,13 +183,21 @@ const CANDIDATE_SQL = `SELECT b.id,b.parse_run_id,a.source_id,p.parser_name,b.so
  JOIN observation_fetch_runs f ON f.id=a.fetch_run_id
  LEFT JOIN observation_decimal_values d
    ON d.kind='balance' AND d.observation_id=b.id AND d.policy_version='decimal-v1'
- WHERE f.status='success' AND f.failure_count=0 AND (${candidateScope})
+ WHERE ((f.status='success' AND f.failure_count=0) OR (a.source_id='myjcb' AND p.parser_name='myjcb-jpoint-balance' AND a.dataset='jpoint-balance' AND ${unitScopedEligibilitySql("f", "a")})) AND (${candidateScope})
  AND NOT EXISTS (
    SELECT 1 FROM reward_bucket_claims_v2 claimed
    WHERE claimed.source_fact_kind='balance' AND claimed.source_fact_id=b.id
      AND claimed.promotion_release=?1
  )
  ORDER BY b.id LIMIT ?2`;
+
+/** The exact bounded candidate read shared by promotion and pending-input checks. */
+export function rewardCandidateQuery(
+  release: string,
+  limit: number,
+): { sql: string; bindings: readonly (string | number)[] } {
+  return { sql: CANDIDATE_SQL, bindings: [release, limit, ...candidateBindings] };
+}
 
 const CURSOR_SQL = `SELECT COALESCE(MAX(source_fact_id),0) AS cursor FROM reward_bucket_claims_v2
  WHERE source_fact_kind='balance' AND promotion_release=?1`;
@@ -187,6 +214,12 @@ function matches(rule: PromotionRule, row: CandidateRow): boolean {
   if (rule.sourceAccountPrefix && !row.source_account.startsWith(rule.sourceAccountPrefix))
     return false;
   if (rule.sourceAccountEquals && row.source_account !== rule.sourceAccountEquals) return false;
+  if (
+    rule.programId === "program:j-point" &&
+    (!/^myjcb:[a-z0-9][a-z0-9-]{0,63}:j-point:total$/u.test(row.source_account) ||
+      row.instrument !== "J_POINT")
+  )
+    return false;
   return true;
 }
 
@@ -246,9 +279,10 @@ async function digest(input: string): Promise<string> {
  * not a proof that a current source set has been promoted (late publication).
  */
 export async function rewardPromotionPending(db: Pick<RewardReadD1, "prepare">): Promise<boolean> {
+  const query = rewardCandidateQuery(REWARD_PROMOTION_RELEASE, 1);
   const row = await db
-    .prepare(CANDIDATE_SQL)
-    .bind(REWARD_PROMOTION_RELEASE, 1, ...candidateBindings)
+    .prepare(query.sql)
+    .bind(...query.bindings)
     .first<{ id: number }>();
   return row !== null;
 }
@@ -278,9 +312,10 @@ export async function promoteRewardClaims(
   // Claims are the durable completion record. A lower-id observation may
   // become published after a higher-id one, so a high-water id cannot decide
   // eligibility; the indexed anti-join also makes retries idempotent.
+  const query = rewardCandidateQuery(release, limit);
   const rows = await db
-    .prepare(CANDIDATE_SQL)
-    .bind(release, limit, ...candidateBindings)
+    .prepare(query.sql)
+    .bind(...query.bindings)
     .all<CandidateRow>();
   const statements: D1PreparedStatement[] = [];
   let cursor = from;
@@ -314,7 +349,9 @@ export async function promoteRewardClaims(
         row.parse_run_id,
         row.id,
         rule.programId,
-        rule.holdingRef,
+        typeof rule.holdingRef === "function"
+          ? rule.holdingRef(row.source_account)
+          : rule.holdingRef,
         // The provider's own display slot. A V Point array index is not a
         // durable account id (docs/sources/v-point.md §4.1), so a reader
         // takes the newest claim per slot rather than treating each claim as

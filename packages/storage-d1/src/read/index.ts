@@ -86,3 +86,12 @@ export {
   type StartedRewardSnapshot,
 } from "./rewards.ts";
 export type { D1Like, D1StatementLike } from "../d1.ts";
+
+export {
+  rewardProviderSectionRows,
+  rewardProviderCheckpoint,
+  writeRewardProviderSectionChunk,
+  writtenRewardProviderSectionsMatch,
+  rewardProviderSections,
+  type RewardProviderSectionRow,
+} from "./reward-provider-expiry.ts";
