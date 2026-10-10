@@ -502,7 +502,12 @@ describe.if(runnable)("combined production client", () => {
     await page.goto(origin + "/balances", { waitUntil: "domcontentloaded" });
     await page.getByRole("status").filter({ hasText: "接続を確認中" }).first().waitFor();
     expect(requests.slice(before).filter((path) => path.startsWith("/api/balances"))).toEqual([]);
+    // Page idleness can precede metadata delivery and the query it enables.
+    // Arm the exact response waiter before releasing metadata, then keep the
+    // original count, parameters and ordering assertions over server requests.
+    const balancesResponse = page.waitForResponse(origin + "/api/balances?view=balances");
     release();
+    await balancesResponse;
     await page.waitForLoadState("networkidle");
     const observed = requests.slice(before);
     expect(observed.filter((path) => path.startsWith("/api/balances"))).toEqual([
