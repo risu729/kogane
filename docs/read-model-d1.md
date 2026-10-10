@@ -153,7 +153,7 @@ A build writes rows while `building`, and:
 - each chunk and its checkpoint are one D1 batch, so a statement error rolls
   both back (G2-08), and a re-sent chunk is a no-op only when its content is
   identical — different content for a row that exists raises `projection chunk
-conflict` in a trigger (G2-07);
+  conflict` in a trigger (G2-07);
 - a writer holds a 60 s lease and a fence; a writer whose lease was taken can no
   longer write, seal or publish (G2-09);
 - the seal and the pointer switch are one batch. The pointer moves only to a

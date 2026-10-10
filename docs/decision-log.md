@@ -74,7 +74,7 @@ interface IdentityCommand {
   on the ledger row, so a failed guard writes nothing, and a trigger failure
   aborts everything including the ledger row.
 - Receipts: `{ operationId, action, kind, referenceId, revision, mappingId,
-decisionRevisionId, payloadDigest }`; `revision` is the mapping revision after
+  decisionRevisionId, payloadDigest }`; `revision` is the mapping revision after
   the command. Ids are derived from the operation id, so a resend produces the
   same ids.
 - Errors: `invalid_command`, `idempotency_conflict`, `revision_conflict`,

@@ -497,7 +497,7 @@ released`). The DB CHECK is unchanged.
   `eventTransition`, plus the pure checks:
   - `conservationCheck` — `source decrease = destination increase + explicit fee
     - unresolved difference`, **per unit**. Legs in more than one unit are
-returned side by side with `cross_unit_requires_fx_model`; signed amounts in
+      returned side by side with `cross_unit_requires_fx_model`; signed amounts in
       different units are never added and never forced to zero (SC05: 1,005 AUD
       against 95,000 JPY). A single-unit event must balance, and any gap is
       reported rather than absorbed into a fee.
@@ -970,7 +970,7 @@ writes one guarded batch:
   Statement 1 (the survivor's decision) carries every guard: both events still
   at the planned live revisions, holding exactly the keys being merged, which
   no other live event holds. Every later statement is `WHERE EXISTS(decision)
-AND NOT EXISTS(own row)`, so a replay or a stale batch writes nothing.
+  AND NOT EXISTS(own row)`, so a replay or a stale batch writes nothing.
 
 The captured total is unchanged: the posted leg moves, it is not added, and
 the authorisation is no longer held apart. The merged event's statement is the
