@@ -467,123 +467,140 @@ describe("serial workflow resumes publication once without bypassing a Container
   });
 });
 
-test("real Node restores native and legacy prepared bytes with exact artifact/image proof", () => {
-  const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } = require("node:fs");
-  const { tmpdir } = require("node:os");
-  const { execFileSync, spawnSync } = require("node:child_process");
-  const { containerInputDigest } = require("./ci/cf-container-release.mjs");
-  for (const native of [false, true]) {
-    const dir = mkdtempSync(resolve(tmpdir(), "kogane-resume-cli-"));
-    try {
-      const root = resolve(dir, "checkout"),
-        temp = resolve(dir, "temp"),
-        tools = resolve(dir, "tools");
-      for (const path of [
-        root,
-        temp,
-        tools,
-        resolve(root, target.path, "container"),
-        resolve(root, "dist/test"),
-      ])
-        mkdirSync(path, { recursive: true });
-      const config = resolve(root, target.path, "wrangler.jsonc");
-      writeFileSync(config, '{"synthetic":"original stamped config"}');
-      writeFileSync(resolve(root, "dist/test/entry.js"), "synthetic original bundle");
-      writeFileSync(
-        resolve(root, target.path, "Dockerfile"),
-        "FROM scratch\nCOPY container/source.mjs /source.mjs\n",
-      );
-      writeFileSync(resolve(root, target.path, "container/source.mjs"), "synthetic image input");
-      const cf = resolve(root, target.path, ".cloudflare/output/v0");
-      mkdirSync(cf, { recursive: true });
-      writeFileSync(resolve(cf, "metadata.json"), "synthetic exact cf output");
-      const manifest = {
-        configs: [{ path: target.path + "/wrangler.jsonc" }],
-        bundles: [{ directory: "dist/test" }],
-        workers: [{ name: target.name, path: target.path }],
-        ...(native ? { cfArtifacts: [{ name: target.name }] } : {}),
-      };
-      writeFileSync(resolve(temp, "release-manifest.json"), JSON.stringify(manifest));
-      writeFileSync(
-        resolve(temp, "release-plan.json"),
-        JSON.stringify({ selected: [target.name] }),
-      );
-      writeFileSync(resolve(temp, "previous-record.json"), "null");
-      writeFileSync(
-        resolve(temp, "container-baseline.json"),
-        JSON.stringify({ registryNamespace: "synthetic", snapshots: [before] }),
-      );
-      const imageId = `sha256:${"f".repeat(64)}`;
-      const localTag = `cloudflare-build/${"d".repeat(12)}/${target.appName}:${"e".repeat(12)}`;
-      writeFileSync(
-        resolve(temp, "container-manifest.json"),
-        JSON.stringify([
-          {
-            name: target.name,
-            imageId,
-            localTag,
-            inputs: containerInputDigest(root, target),
-            daemonId: "original-daemon",
-          },
-        ]),
-      );
-      writeFileSync(
-        resolve(tools, "docker"),
-        '#!/bin/sh\ncase "$1 $2" in "image save") printf "synthetic Docker archive" > "$4";; "image load") test -s "$4";; "image inspect") test "$#" -eq 3 || exit 1; printf "%s\\n" "$MOCK_IMAGE_ID";; "info --format") printf "restored-daemon\\n";; *) exit 1;; esac\n',
-      );
-      chmodSync(resolve(tools, "docker"), 0o755);
-      const guard = resolve(REPO_ROOT, "tasks/_lib/ci/release-resume.mjs");
-      const env = {
-        ...process.env,
-        PATH: `${tools}:${process.env.PATH}`,
-        RUNNER_TEMP: temp,
-        GITHUB_ENV: resolve(temp, "env"),
-        GITHUB_OUTPUT: resolve(temp, "outputs"),
-        GITHUB_TOKEN: "synthetic-token",
-        GITHUB_REPOSITORY: "synthetic/repository",
-        GITHUB_RUN_ID: "123",
-        GITHUB_RUN_ATTEMPT: "2",
-        SHA: sha,
-        TRUSTED_SHA: trustedSha,
-        CLOUDFLARE_ACCOUNT_ID: "b".repeat(32),
-        CLOUDFLARE_API_TOKEN: "synthetic-cf-token",
-        MOCK_IMAGE_ID: JSON.stringify([{ Id: imageId, Os: "linux", Architecture: "amd64" }]),
-      };
-      const packed = spawnSync("node", [guard, "pack"], { cwd: root, env, encoding: "utf8" });
-      expect(packed.stderr).toBe("");
-      expect(packed.status).toBe(0);
-      const zip = resolve(dir, "prepared.zip");
-      execFileSync("python3", [
-        "-c",
-        "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w'); z.write(sys.argv[2],'prepared.tar'); z.close()",
-        zip,
-        resolve(temp, "prepared.tar"),
-      ]);
-      rmSync(resolve(temp, "prepared"), { recursive: true });
-      rmSync(resolve(temp, "prepared.tar"));
-      const bytes = readFileSync(zip),
-        artifactDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-      const record = {
-        ...deployment().payload,
-        resume: { ...deployment().payload.resume, artifactDigest },
-        containerManifestSha256: createHash("sha256")
-          .update(readFileSync(resolve(temp, "container-manifest.json")))
-          .digest("hex"),
-        containerBaselineSha256: createHash("sha256")
-          .update(readFileSync(resolve(temp, "container-baseline.json")))
-          .digest("hex"),
-      };
-      writeFileSync(resolve(temp, "release-record.json"), JSON.stringify(record));
-      writeFileSync(
-        resolve(temp, "resume-receipt.json"),
-        JSON.stringify({ ...receipt(), targets: [{ ...before, version: 4 }] }),
-      );
-      writeFileSync(config, "changed local config");
-      writeFileSync(resolve(root, "dist/test/entry.js"), "changed local bundle");
-      const bootstrap = resolve(dir, "bootstrap.mjs");
-      writeFileSync(
-        bootstrap,
-        `import {readFileSync} from 'node:fs';
+for (const native of [false, true])
+  for (const phase of [
+    "success",
+    "artifact-tamper",
+    "artifact-fetch",
+    "image-mismatch",
+    "input-changed",
+  ] as const)
+    test(
+      "real Node restores native and legacy prepared bytes with exact artifact/image proof: " +
+        (native ? "native" : "legacy") +
+        " " +
+        phase,
+      () => {
+        const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } = require("node:fs");
+        const { tmpdir } = require("node:os");
+        const { execFileSync, spawnSync } = require("node:child_process");
+        const { containerInputDigest } = require("./ci/cf-container-release.mjs");
+        const dir = mkdtempSync(resolve(tmpdir(), "kogane-resume-cli-"));
+        try {
+          const root = resolve(dir, "checkout"),
+            temp = resolve(dir, "temp"),
+            tools = resolve(dir, "tools");
+          for (const path of [
+            root,
+            temp,
+            tools,
+            resolve(root, target.path, "container"),
+            resolve(root, "dist/test"),
+          ])
+            mkdirSync(path, { recursive: true });
+          const config = resolve(root, target.path, "wrangler.jsonc");
+          writeFileSync(config, '{"synthetic":"original stamped config"}');
+          writeFileSync(resolve(root, "dist/test/entry.js"), "synthetic original bundle");
+          writeFileSync(
+            resolve(root, target.path, "Dockerfile"),
+            "FROM scratch\nCOPY container/source.mjs /source.mjs\n",
+          );
+          writeFileSync(
+            resolve(root, target.path, "container/source.mjs"),
+            "synthetic image input",
+          );
+          const cf = resolve(root, target.path, ".cloudflare/output/v0");
+          mkdirSync(cf, { recursive: true });
+          writeFileSync(resolve(cf, "metadata.json"), "synthetic exact cf output");
+          const manifest = {
+            configs: [{ path: target.path + "/wrangler.jsonc" }],
+            bundles: [{ directory: "dist/test" }],
+            workers: [{ name: target.name, path: target.path }],
+            ...(native ? { cfArtifacts: [{ name: target.name }] } : {}),
+          };
+          writeFileSync(resolve(temp, "release-manifest.json"), JSON.stringify(manifest));
+          writeFileSync(
+            resolve(temp, "release-plan.json"),
+            JSON.stringify({ selected: [target.name] }),
+          );
+          writeFileSync(resolve(temp, "previous-record.json"), "null");
+          writeFileSync(
+            resolve(temp, "container-baseline.json"),
+            JSON.stringify({ registryNamespace: "synthetic", snapshots: [before] }),
+          );
+          const imageId = `sha256:${"f".repeat(64)}`;
+          const localTag = `cloudflare-build/${"d".repeat(12)}/${target.appName}:${"e".repeat(12)}`;
+          writeFileSync(
+            resolve(temp, "container-manifest.json"),
+            JSON.stringify([
+              {
+                name: target.name,
+                imageId,
+                localTag,
+                inputs: containerInputDigest(root, target),
+                daemonId: "original-daemon",
+              },
+            ]),
+          );
+          writeFileSync(
+            resolve(tools, "docker"),
+            '#!/bin/sh\ncase "$1 $2" in "image save") printf "synthetic Docker archive" > "$4";; "image load") test -s "$4";; "image inspect") test "$#" -eq 3 || exit 1; printf "%s\\n" "$MOCK_IMAGE_ID";; "info --format") printf "restored-daemon\\n";; *) exit 1;; esac\n',
+          );
+          chmodSync(resolve(tools, "docker"), 0o755);
+          const guard = resolve(REPO_ROOT, "tasks/_lib/ci/release-resume.mjs");
+          const env = {
+            ...process.env,
+            PATH: `${tools}:${process.env.PATH}`,
+            RUNNER_TEMP: temp,
+            GITHUB_ENV: resolve(temp, "env"),
+            GITHUB_OUTPUT: resolve(temp, "outputs"),
+            GITHUB_TOKEN: "synthetic-token",
+            GITHUB_REPOSITORY: "synthetic/repository",
+            GITHUB_RUN_ID: "123",
+            GITHUB_RUN_ATTEMPT: "2",
+            SHA: sha,
+            TRUSTED_SHA: trustedSha,
+            CLOUDFLARE_ACCOUNT_ID: "b".repeat(32),
+            CLOUDFLARE_API_TOKEN: "synthetic-cf-token",
+            MOCK_IMAGE_ID: JSON.stringify([{ Id: imageId, Os: "linux", Architecture: "amd64" }]),
+          };
+          const packed = spawnSync("node", [guard, "pack"], { cwd: root, env, encoding: "utf8" });
+          expect(packed.error).toBeUndefined();
+          expect(packed.signal).toBeNull();
+          expect(packed.stderr).toBe("");
+          expect(packed.status).toBe(0);
+          const zip = resolve(dir, "prepared.zip");
+          execFileSync("python3", [
+            "-c",
+            "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w'); z.write(sys.argv[2],'prepared.tar'); z.close()",
+            zip,
+            resolve(temp, "prepared.tar"),
+          ]);
+          rmSync(resolve(temp, "prepared"), { recursive: true });
+          rmSync(resolve(temp, "prepared.tar"));
+          const bytes = readFileSync(zip),
+            artifactDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+          const record = {
+            ...deployment().payload,
+            resume: { ...deployment().payload.resume, artifactDigest },
+            containerManifestSha256: createHash("sha256")
+              .update(readFileSync(resolve(temp, "container-manifest.json")))
+              .digest("hex"),
+            containerBaselineSha256: createHash("sha256")
+              .update(readFileSync(resolve(temp, "container-baseline.json")))
+              .digest("hex"),
+          };
+          writeFileSync(resolve(temp, "release-record.json"), JSON.stringify(record));
+          writeFileSync(
+            resolve(temp, "resume-receipt.json"),
+            JSON.stringify({ ...receipt(), targets: [{ ...before, version: 4 }] }),
+          );
+          writeFileSync(config, "changed local config");
+          writeFileSync(resolve(root, "dist/test/entry.js"), "changed local bundle");
+          const bootstrap = resolve(dir, "bootstrap.mjs");
+          writeFileSync(
+            bootstrap,
+            `import {readFileSync} from 'node:fs';
       globalThis.fetch=async(url,options={})=>{
         const text=String(url);
         if(text==='https://artifact.invalid/archive'){
@@ -603,46 +620,66 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
         else throw Error('unexpected request');
         return Response.json(value);
       };`,
-      );
-      const run = (patch = {}) =>
-        spawnSync("node", ["--import", bootstrap, guard, "restore"], {
-          cwd: root,
-          env: { ...env, ...patch },
-          encoding: "utf8",
-        });
-      const restored = run();
-      expect(restored.stderr).toBe("");
-      expect(restored.status).toBe(0);
-      expect(readdirSync(temp).filter((entry) => entry.startsWith("release-resume-"))).toEqual([]);
-      expect(readdirSync(temp)).not.toContain("docker-images.tar");
-      expect(readFileSync(config, "utf8")).toContain("original stamped config");
-      expect(readFileSync(resolve(root, "dist/test/entry.js"), "utf8")).toBe(
-        "synthetic original bundle",
-      );
-      if (native)
-        expect(readFileSync(resolve(cf, "metadata.json"), "utf8")).toBe(
-          "synthetic exact cf output",
-        );
-      expect(readFileSync(resolve(temp, "env"), "utf8")).toContain(
-        "CONTAINER_RESTORED_DAEMON=restored-daemon",
-      );
-      expect(run({ MOCK_TAMPER: "true" }).stderr.trim()).toBe("release_resume_artifact_digest");
-      expect(readdirSync(temp).filter((entry) => entry.startsWith("release-resume-"))).toEqual([]);
-      expect(run({ MOCK_FETCH_FAIL: "true" }).stderr.trim()).toBe("release_resume_artifact_fetch");
-      expect(
-        run({
-          MOCK_IMAGE_ID: JSON.stringify([
-            { Id: `sha256:${"a".repeat(64)}`, Os: "linux", Architecture: "amd64" },
-          ]),
-        }).stderr.trim(),
-      ).toBe("release_resume_restored_image");
-      writeFileSync(resolve(root, target.path, "container/source.mjs"), "changed input");
-      expect(run().stderr.trim()).toBe("release_resume_restored_image");
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
-  }
-});
+          );
+          const run = (patch = {}) => {
+            const result = spawnSync("node", ["--import", bootstrap, guard, "restore"], {
+              cwd: root,
+              env: { ...env, ...patch },
+              encoding: "utf8",
+            });
+            expect(result.error).toBeUndefined();
+            expect(result.signal).toBeNull();
+            return result;
+          };
+          if (phase === "success") {
+            const restored = run();
+            expect(restored.stderr).toBe("");
+            expect(restored.status).toBe(0);
+            expect(
+              readdirSync(temp).filter((entry) => entry.startsWith("release-resume-")),
+            ).toEqual([]);
+            expect(readdirSync(temp)).not.toContain("docker-images.tar");
+            expect(readFileSync(config, "utf8")).toContain("original stamped config");
+            expect(readFileSync(resolve(root, "dist/test/entry.js"), "utf8")).toBe(
+              "synthetic original bundle",
+            );
+            if (native)
+              expect(readFileSync(resolve(cf, "metadata.json"), "utf8")).toBe(
+                "synthetic exact cf output",
+              );
+            expect(readFileSync(resolve(temp, "env"), "utf8")).toContain(
+              "CONTAINER_RESTORED_DAEMON=restored-daemon",
+            );
+          }
+          if (phase === "artifact-tamper") {
+            expect(run({ MOCK_TAMPER: "true" }).stderr.trim()).toBe(
+              "release_resume_artifact_digest",
+            );
+            expect(
+              readdirSync(temp).filter((entry) => entry.startsWith("release-resume-")),
+            ).toEqual([]);
+          }
+          if (phase === "artifact-fetch")
+            expect(run({ MOCK_FETCH_FAIL: "true" }).stderr.trim()).toBe(
+              "release_resume_artifact_fetch",
+            );
+          if (phase === "image-mismatch")
+            expect(
+              run({
+                MOCK_IMAGE_ID: JSON.stringify([
+                  { Id: `sha256:${"a".repeat(64)}`, Os: "linux", Architecture: "amd64" },
+                ]),
+              }).stderr.trim(),
+            ).toBe("release_resume_restored_image");
+          if (phase === "input-changed") {
+            writeFileSync(resolve(root, target.path, "container/source.mjs"), "changed input");
+            expect(run().stderr.trim()).toBe("release_resume_restored_image");
+          }
+        } finally {
+          rmSync(dir, { recursive: true, force: true });
+        }
+      },
+    );
 
 test("streamed artifact stays private until complete checksum and never overwrites promotion", async () => {
   const temp = mkdtempSync(resolve(tmpdir(), "kogane-stream-"));
@@ -882,31 +919,62 @@ describe("allocation capture waits only for zero within an absolute deadline", (
   });
 });
 
-test("real Node capture waits for allocation visibility and rechecks proof before writing", () => {
-  const { spawnSync } = require("node:child_process");
-  const temp = mkdtempSync(resolve(tmpdir(), "kogane-publication-cli-"));
-  try {
-    const imageId = `sha256:${"f".repeat(64)}`;
-    const registryBytes = JSON.stringify({
-      schemaVersion: 2,
-      mediaType: "application/vnd.oci.image.manifest.v1+json",
-      config: { digest: imageId },
-    });
-    const newImage = `registry.cloudflare.com/synthetic/${target.appName}@sha256:${createHash("sha256").update(registryBytes).digest("hex")}`;
-    writeFileSync(
-      resolve(temp, "container-baseline.json"),
-      JSON.stringify({ registryNamespace: "synthetic", snapshots: [before] }),
-    );
-    writeFileSync(
-      resolve(temp, "container-manifest.json"),
-      JSON.stringify([{ name: target.name, imageId, legacy: false }]),
-    );
-    writeFileSync(resolve(temp, "release-record.json"), JSON.stringify(deployment().payload));
-    writeFileSync(resolve(temp, "release-plan.json"), JSON.stringify({ selected: [target.name] }));
-    const bootstrap = resolve(temp, "bootstrap.mjs");
-    writeFileSync(
-      bootstrap,
-      `
+// Each scenario owns one child process and one default test deadline. Grouping
+// them together lets the test watchdog kill a later child before it can report
+// its closed refusal code, even though each individual command is bounded.
+for (const phase of [
+  "delayed",
+  "final-older",
+  "final-old-image",
+  "registry-late",
+  "image",
+  "final-newer",
+  "final-namespace",
+  "legacy-drift",
+  "zero",
+  "late",
+  "ambiguous",
+  "worker",
+  "namespace",
+  "final-worker",
+  "final-app",
+  "manifest-identity",
+  "config-identity",
+  "untyped-manifest",
+  "mismatched-manifest",
+  "unstable-baseline",
+  "unstable-prepare",
+] as const)
+  test(
+    "real Node capture waits for allocation visibility and rechecks proof before writing: " + phase,
+    () => {
+      const { spawnSync } = require("node:child_process");
+      const temp = mkdtempSync(resolve(tmpdir(), "kogane-publication-cli-"));
+      try {
+        const imageId = `sha256:${"f".repeat(64)}`;
+        const registryBytes = JSON.stringify({
+          schemaVersion: 2,
+          mediaType: "application/vnd.oci.image.manifest.v1+json",
+          config: { digest: imageId },
+        });
+        const newImage = `registry.cloudflare.com/synthetic/${target.appName}@sha256:${createHash("sha256").update(registryBytes).digest("hex")}`;
+        writeFileSync(
+          resolve(temp, "container-baseline.json"),
+          JSON.stringify({ registryNamespace: "synthetic", snapshots: [before] }),
+        );
+        writeFileSync(
+          resolve(temp, "container-manifest.json"),
+          JSON.stringify([{ name: target.name, imageId, legacy: false }]),
+        );
+        writeFileSync(resolve(temp, "release-record.json"), JSON.stringify(deployment().payload));
+        writeFileSync(
+          resolve(temp, "release-plan.json"),
+          JSON.stringify({ selected: [target.name] }),
+        );
+        const bootstrap = resolve(temp, "bootstrap.mjs");
+        writeFileSync(
+          bootstrap,
+          `
       let clock=0,reads=0,versionReads=0; Date.now=()=>clock;
       globalThis.setTimeout=(done,ms)=>{clock+=ms;queueMicrotask(done);return {unref(){}}};
       const mode=process.env.MOCK_MODE;
@@ -929,101 +997,119 @@ test("real Node capture waits for allocation visibility and rechecks proof befor
         else throw Error('unexpected request');
         return Response.json({success:true,result:value});
       };`,
-    );
-    const env = {
-      ...process.env,
-      RUNNER_TEMP: temp,
-      GITHUB_RUN_ID: "123",
-      GITHUB_RUN_ATTEMPT: "1",
-      SHA: sha,
-      TRUSTED_SHA: trustedSha,
-      CLOUDFLARE_ACCOUNT_ID: "b".repeat(32),
-      CLOUDFLARE_API_TOKEN: "synthetic",
-      PUBLISHED_WORKER_VERSION: versionId,
-      DEPLOYMENT_ID: "42",
-      STEPS_JSON: JSON.stringify(receipt().steps),
-    };
-    const resume = resolve(REPO_ROOT, "tasks/_lib/ci/release-resume.mjs");
-    const run = (mode: string, command = "capture", helper = resume) =>
-      spawnSync("node", ["--import", bootstrap, helper, command, target.name], {
-        cwd: REPO_ROOT,
-        env: {
-          ...env,
-          MOCK_MODE: mode,
-          ...(mode === "legacy-drift"
-            ? { PUBLISHED_WORKER_VERSION: "", LEGACY_PUBLICATION: "true" }
-            : {}),
-        },
-        encoding: "utf8",
-      });
-    const saved = resolve(temp, "resume-receipt.json");
-    const delayed = run("delayed");
-    expect(delayed.stderr).toBe("");
-    expect(delayed.status).toBe(0);
-    expect(JSON.parse(readFileSync(saved, "utf8")).targets[0]).toMatchObject({
-      version: 4,
-      image: newImage,
-      workerVersion: versionId,
-    });
-    for (const [mode, code] of [
-      ["final-older", "application_superseded"],
-      ["final-old-image", "application_superseded"],
-      ["registry-late", "publication_pending"],
-      ["image", "registry_digest_mismatch"],
-      ["final-newer", "application_superseded"],
-      ["final-namespace", "registry_namespace_changed"],
-      ["legacy-drift", "published_worker_mismatch"],
-      ["zero", "publication_pending"],
-      ["late", "publication_pending"],
-      ["ambiguous", "publication_ambiguous"],
-      ["worker", "published_worker_mismatch"],
-      ["namespace", "registry_namespace_changed"],
-      ["final-worker", "worker_superseded"],
-      ["final-app", "application_superseded"],
-    ]) {
-      rmSync(saved, { force: true });
-      const result = run(mode!);
-      expect(result.status).toBe(1);
-      expect(result.stderr).toContain(code!);
-      expect(readdirSync(temp)).not.toContain("resume-receipt.json");
-    }
-    const manifestId = newImage.split("@")[1];
-    for (const [id, kind, success] of [
-      [manifestId, "manifest", true],
-      [imageId, "config", true],
-      [manifestId, undefined, false],
-      [imageId, "manifest", false],
-    ] as const) {
-      rmSync(saved, { force: true });
-      writeFileSync(
-        resolve(temp, "container-manifest.json"),
-        JSON.stringify([{ name: target.name, imageId: id, imageIdKind: kind, legacy: false }]),
-      );
-      const result = run("success");
-      expect(result.status).toBe(success ? 0 : 1);
-      expect(readdirSync(temp).includes("resume-receipt.json")).toBe(success);
-      if (!success) expect(result.stderr).toContain("registry_image_mismatch");
-    }
-    expect(run("unstable", "verify-publication-baseline").stderr).toContain("rollout_pending");
-    const original = readFileSync(resolve(temp, "container-baseline.json"));
-    writeFileSync(
-      resolve(temp, "container-manifest.json"),
-      JSON.stringify([
-        { name: target.name, imageId, legacy: true, localTag: "synthetic-original" },
-      ]),
-    );
-    expect(
-      run("unstable", "prepare", resolve(REPO_ROOT, "tasks/_lib/ci/cf-container-release.mjs"))
-        .stderr,
-    ).toContain("rollout_pending");
-    expect(readFileSync(resolve(temp, "container-baseline.json"))).toEqual(original);
-  } finally {
-    rmSync(temp, { recursive: true, force: true });
-  }
-});
+        );
+        const env = {
+          ...process.env,
+          RUNNER_TEMP: temp,
+          GITHUB_RUN_ID: "123",
+          GITHUB_RUN_ATTEMPT: "1",
+          SHA: sha,
+          TRUSTED_SHA: trustedSha,
+          CLOUDFLARE_ACCOUNT_ID: "b".repeat(32),
+          CLOUDFLARE_API_TOKEN: "synthetic",
+          PUBLISHED_WORKER_VERSION: versionId,
+          DEPLOYMENT_ID: "42",
+          STEPS_JSON: JSON.stringify(receipt().steps),
+        };
+        const resume = resolve(REPO_ROOT, "tasks/_lib/ci/release-resume.mjs");
+        const run = (mode: string, command = "capture", helper = resume) => {
+          const result = spawnSync("node", ["--import", bootstrap, helper, command, target.name], {
+            cwd: REPO_ROOT,
+            env: {
+              ...env,
+              MOCK_MODE: mode,
+              ...(mode === "legacy-drift"
+                ? { PUBLISHED_WORKER_VERSION: "", LEGACY_PUBLICATION: "true" }
+                : {}),
+            },
+            encoding: "utf8",
+          });
+          expect(result.error).toBeUndefined();
+          expect(result.signal).toBeNull();
+          return result;
+        };
+        const saved = resolve(temp, "resume-receipt.json");
+        if (phase === "delayed") {
+          const delayed = run("delayed");
+          expect(delayed.stderr).toBe("");
+          expect(delayed.status).toBe(0);
+          expect(JSON.parse(readFileSync(saved, "utf8")).targets[0]).toMatchObject({
+            version: 4,
+            image: newImage,
+            workerVersion: versionId,
+          });
+        }
+        for (const [mode, code] of [
+          ["final-older", "application_superseded"],
+          ["final-old-image", "application_superseded"],
+          ["registry-late", "publication_pending"],
+          ["image", "registry_digest_mismatch"],
+          ["final-newer", "application_superseded"],
+          ["final-namespace", "registry_namespace_changed"],
+          ["legacy-drift", "published_worker_mismatch"],
+          ["zero", "publication_pending"],
+          ["late", "publication_pending"],
+          ["ambiguous", "publication_ambiguous"],
+          ["worker", "published_worker_mismatch"],
+          ["namespace", "registry_namespace_changed"],
+          ["final-worker", "worker_superseded"],
+          ["final-app", "application_superseded"],
+        ].filter(([mode]) => mode === phase)) {
+          rmSync(saved, { force: true });
+          const result = run(mode!);
+          expect(result.status).toBe(1);
+          expect(result.stderr).toContain(code!);
+          expect(readdirSync(temp)).not.toContain("resume-receipt.json");
+        }
+        const manifestId = newImage.split("@")[1];
+        for (const [name, id, kind, success] of [
+          ["manifest-identity", manifestId, "manifest", true],
+          ["config-identity", imageId, "config", true],
+          ["untyped-manifest", manifestId, undefined, false],
+          ["mismatched-manifest", imageId, "manifest", false],
+        ] as const) {
+          if (name !== phase) continue;
+          rmSync(saved, { force: true });
+          writeFileSync(
+            resolve(temp, "container-manifest.json"),
+            JSON.stringify([{ name: target.name, imageId: id, imageIdKind: kind, legacy: false }]),
+          );
+          const result = run("success");
+          expect(result.status).toBe(success ? 0 : 1);
+          expect(readdirSync(temp).includes("resume-receipt.json")).toBe(success);
+          if (!success) expect(result.stderr).toContain("registry_image_mismatch");
+        }
+        if (phase === "unstable-baseline")
+          expect(run("unstable", "verify-publication-baseline").stderr).toContain(
+            "rollout_pending",
+          );
+        if (phase === "unstable-prepare") {
+          const original = readFileSync(resolve(temp, "container-baseline.json"));
+          writeFileSync(
+            resolve(temp, "container-manifest.json"),
+            JSON.stringify([
+              { name: target.name, imageId, legacy: true, localTag: "synthetic-original" },
+            ]),
+          );
+          expect(
+            run("unstable", "prepare", resolve(REPO_ROOT, "tasks/_lib/ci/cf-container-release.mjs"))
+              .stderr,
+          ).toContain("rollout_pending");
+          expect(readFileSync(resolve(temp, "container-baseline.json"))).toEqual(original);
+        }
+      } finally {
+        rmSync(temp, { recursive: true, force: true });
+      }
+    },
+  );
 
 for (const phase of [
   "success",
+  "delayed",
+  "legacy",
+  "typed-manifest",
+  "typed-index",
+  "final-active",
   "namespace-late",
   "credentials-late",
   "registry-fetch-late",
@@ -1138,7 +1224,7 @@ for (const phase of [
               },
             ]),
           );
-          return spawnSync(
+          const result = spawnSync(
             "node",
             [
               "--import",
@@ -1159,10 +1245,18 @@ for (const phase of [
               encoding: "utf8",
             },
           );
+          expect(result.error).toBeUndefined();
+          expect(result.signal).toBeNull();
+          return result;
         };
-        for (const mode of phase === "success"
-          ? ["success", "delayed", "legacy", "typed-manifest", "typed-index", "final-active"]
-          : []) {
+        for (const mode of [
+          "success",
+          "delayed",
+          "legacy",
+          "typed-manifest",
+          "typed-index",
+          "final-active",
+        ].filter((mode) => mode === phase)) {
           const result = run(mode);
           expect(result.status).toBe(0);
           expect(result.stderr).toBe("");
