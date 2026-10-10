@@ -199,6 +199,40 @@ test("republication, rollback and mapping revisions invalidate context", async (
   expect(mapped).not.toEqual(rollback);
   db.close();
 });
+test("parse success is not publication; unfinished parses supply no readiness payload", async () => {
+  const { db, store } = world();
+  for (const [parseId, status] of [
+    [10, "ok"],
+    [11, "pending"],
+  ] as const) {
+    db.run(
+      `INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status)
+      VALUES(?,1,'smbc-direct-transactions',?,'2030-01-02',?)`,
+      [parseId, `synthetic-${parseId}`, status],
+    );
+    db.run(
+      `INSERT INTO transaction_observations(id,parse_run_id,source_account,external_id,status,extra_json,raw_locator)
+      SELECT ?,?,source_account,external_id,status,extra_json,raw_locator FROM transaction_observations WHERE id=101`,
+      [1000 + parseId, parseId],
+    );
+    const rows = [{ observationId: 1000 + parseId, parseRunId: parseId }];
+    const result = await queryEconomicRowReadiness(store, { ...request(), rows });
+    if (result.status !== "ok") throw Error("unexpected");
+    const [loaded] = await loadEconomicRowReadiness(store, rows, "bank-movement");
+    expect(loaded!.current_parse).toBe(1);
+    expect(result.manifest.rows[0]!.readiness).not.toBe("admitted");
+    if (status === "ok") {
+      expect(loaded!.visible).toBe(1);
+      expect(result.manifest.rows[0]!.reasons).toContain("evidence_not_current");
+    } else {
+      expect(loaded!.visible).toBe(0);
+      expect(loaded!.extra_json).toBeNull();
+      expect(result.manifest.rows[0]!.reasons).toEqual(["evidence_unavailable"]);
+    }
+  }
+  db.close();
+});
+
 test("same fact under another producer detects alias, own key detects holder; revision release changes context", async () => {
   const { db, store } = world();
   const before = await queryEconomicRowReadiness(store, request([101, 111]));
