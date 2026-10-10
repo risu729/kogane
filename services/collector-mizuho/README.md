@@ -43,8 +43,14 @@ establish successful bank access.
   HTTP 207 means incomplete coverage; HTTP 502 means acquisition or persistence
   failure. A login challenge requires completing the bank's authentication
   separately; an explicit fresh browser session remains available as a fallback.
-- Scheduled runs log only a run ID, status, artifact count and persistence
-  outcome. A login or storage failure fails the scheduled invocation after
+- Every entrypoint (including the production service-binding alarm) logs
+  closed configuration/login/collection/persistence phases and one result.
+  The result distinguishes provider outcome, run coverage and persistence,
+  with account/history/failed-unit counts and deduplicated allowlisted issue
+  codes. Unknown issue text becomes `unclassified-collection-issue`; neither
+  exception text nor private identifiers are logged. Logging is best effort:
+  a failed log sink cannot prevent collection, retry a storage write, or turn
+  an already-persisted run into a failure. A login or storage failure fails the scheduled invocation after
   recording safe acquisition failure evidence where storage is available.
 
 The configured Processor route is `mizuho-bank` / `collector-mizuho-bank` in
@@ -79,6 +85,15 @@ remain separate; identity across unobserved pagination is not established.
 The latest published complete account list replaces current balance membership;
 accounts absent from that list retain their transaction history without retaining
 their old balances as current.
+
+A successful first-page read with no visible further page still has run
+coverage `unknown` (`first-page-scope-unverified` in the operational log): the
+page unit is complete, but the run has not established an all-history or date
+range boundary. This is not an acquisition failure. `history-pagination-unverified`
+means visible additional history was not traversed. `collection-incomplete`
+instead means at least one requested account failed; the allowlisted issue
+codes identify the failure class. None of these diagnostics changes stored
+coverage, retries a login, or widens the observed read protocol.
 
 ## Verification
 
