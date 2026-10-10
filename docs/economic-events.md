@@ -1,5 +1,19 @@
 # Economic events, allocations, obligations and reconciliation
 
+## Internal current row readiness (S0)
+
+The internal `queryEconomicRowReadiness` query diagnoses 1–64 explicit
+transaction/parse pairs for bank movements or securities executions. It reads
+publication, current restrictions, mapping/ownership evidence and same-book
+live key/alias holders in one SQL snapshot, returning closed reasons and
+digested pins only. It writes nothing and has no HTTP/MCP/UI connection.
+Provider-ID identity may be admitted; overall readiness remains blocked by
+the unresolved principal-to-owner contract. Proposal/writer flags stay false
+and history coverage stays unknown. See [ADR 0067](adr/0067-economic-row-readiness.md)
+for exact input, restriction refs, fail-closed behavior and verification limits.
+
+## Existing event model
+
 Architecture addendum A10 (findings AR07 and AR08; addendum 07; root review 09
 §2–§4). This change adds the first Layer C vertical slice: a rule that proposes
 matches between observations, a decision that adopts one, and an event model

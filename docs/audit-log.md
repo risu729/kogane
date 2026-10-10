@@ -256,7 +256,7 @@ a token-shaped value and an amount).
 
 Status: proposed until the integration PR merges. The implementation reuses
 the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
-against main `f6fb5bdd`; #652's temporal refusal and #643's release guard are
+against main `c0c4088a`; #652's temporal refusal and #643's release guard are
 preserved. The [integration plan](plans/2026-10-mcp-maintenance-followups.md)
 records the publication and activation boundaries. No grant or deployment is
 implied by this implementation.

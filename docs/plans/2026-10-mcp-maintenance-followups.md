@@ -3,7 +3,7 @@
 - Status: in progress; owner authorized integration, publication, review,
   required CI, merge and deployment on 2026-10-10. The former local-only
   publication gate is superseded by that approval.
-- Current integration baseline: main `f6fb5bdd` (recheck before publication).
+- Current integration baseline: main `c0c4088a` (#661, #662 and #653 merged).
 - Earlier local candidate: tree `46d19ada3b2a05c954f4a9d82c44fed34c7006fb`,
   based on `f761630d` and the frozen S3/R2/jobs integration `dc7be256`.
 
@@ -13,10 +13,11 @@
 status and ADR 0050's open-PR reference are corrected. #643's prewrite release
 guard and #652's temporal journal/refusal remain intact.
 
-Draft #638 supplies S3/R1 and shared readers; Draft #641 supplies R2 command
+Former Draft #638 supplied S3/R1 and shared readers; Draft #641 supplied R2 command
 and provider confirmation; the reviewed frozen jobs/origin corrections and
-maintenance follow-up build on those slices. One main-based integration PR
-supersedes those runtime drafts and documentation Draft #650. Their historical
+maintenance follow-up build on those slices. Integration PR #660
+supersedes those runtime drafts and documentation Draft #650; all three
+predecessors are closed with their branches retained. Their historical
 heads remain inspectable. Collection-quality #639, collector changes, #436
 and deployment implementation have separate owners and are not duplicated.
 
@@ -44,11 +45,15 @@ append-only history. No migration or second writer is introduced.
 Synthetic tests cover signed MCP entry, revocation and scope-before-replay,
 prepare/effect linkage, shared budgets, rollback, native idempotency and writer
 races. Saved state is distinct from completed/pending alarm reconciliation;
-reservation state is read separately. Prior local full App/Web/root suites
-and independent focused tests passed. Processor startup timeouts from the
-earlier candidate must be diagnosed and verified under the unchanged test
-deadlines before publication is presented as ready. No timing failure is
-treated as success and local evidence is not hosted or production proof.
+reservation state is read separately. At published head `e10189b5`, dedicated
+CI passed 838 Processor tests with one existing timing skip, 450 App tests
+with one skip, 206 Web tests and CodeQL. Independent runtime review is approved.
+Test-only migration batching and outbox fixture isolation preserve deadlines
+and production behavior. Local timeout failures remain recorded as failures.
+The sole overall CI failure was the unchanged root release-proof test, now
+repaired in #662. The final composition also preserves #661 browser readiness
+and #653 read-only S0 diagnostics. Its new exact-head CI remains required;
+earlier successful results are not substituted for that run or production proof.
 
 ## Completion gates
 
