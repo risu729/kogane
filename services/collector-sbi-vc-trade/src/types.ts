@@ -95,6 +95,7 @@ export interface CollectionSummary {
  * collection types stay one module, with no import cycle through the worker.
  */
 export interface SharedRunSummary {
+  readonly runId: string;
   readonly target: "shared";
   readonly outcome: "persisted" | "already_persisted" | "conflict" | "incomplete";
   readonly terminalKey: string;

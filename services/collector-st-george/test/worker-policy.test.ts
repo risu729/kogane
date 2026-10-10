@@ -32,6 +32,21 @@ class Storage implements StateStorage {
   }
 }
 describe("durable collection policy", () => {
+  test("legacy blocked state has no invented run id and never starts a bank request", async () => {
+    const state = new Storage();
+    await state.put("state", { kind: "blocked", reason: "login-rejected" });
+    const coordinator = new CollectionCoordinator(
+      state,
+      async () => {
+        throw new Error("must not call provider");
+      },
+      async () => {
+        throw new Error("must not persist");
+      },
+    );
+    expect(await coordinator.trigger()).toEqual({ status: "blocked", reason: "login-rejected" });
+    expect(await coordinator.resume()).toEqual({ status: "ready" });
+  });
   test("an R2 outage retries a large captured snapshot after restart without another bank request", async () => {
     const state = new Storage();
     const bucket = new FakeR2Bucket();
@@ -82,9 +97,11 @@ describe("durable collection policy", () => {
           },
           (run) => persistSharedRun(bucket, run),
         );
-      expect(await create().trigger()).toMatchObject({ status: "blocked", reason });
+      const first = await create().trigger();
+      expect(first).toMatchObject({ status: "blocked", reason });
+      expect(first.runId).toBeString();
       const restarted = create();
-      expect(await restarted.trigger()).toEqual({ status: "blocked", reason });
+      expect(await restarted.trigger()).toEqual({ status: "blocked", reason, runId: first.runId! });
       expect(reads).toBe(1);
       expect(await restarted.resume()).toEqual({ status: "ready" });
       await restarted.trigger();
