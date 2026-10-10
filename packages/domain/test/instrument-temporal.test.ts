@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { canonicalDigest, canonicalJson } from "../src/context.ts";
 import {
   selectInstrumentTemporal,
+  instrumentTemporalContextRequested,
   type InstrumentDecisionVersion,
   type InstrumentPeriod,
   type InstrumentTemporalInput,
@@ -119,6 +120,23 @@ function knownAt(
 const outcome = (result: ReturnType<typeof selected>) => result.manifest.selection.outcomes[0]!;
 
 describe("pure temporal instrument selector", () => {
+  test("the explicit context namespace refuses malformed suffix downgrade without labelling ordinary contexts", () => {
+    for (const value of [
+      "instrument-temporal:",
+      "instrument-temporal:unknown",
+      "instrument-temporal:" + "a".repeat(300),
+    ])
+      expect(instrumentTemporalContextRequested(value)).toBe(true);
+    for (const value of [
+      null,
+      {},
+      "manual:correction",
+      "identity-current-v1",
+      "a".repeat(64),
+      "instrument-candidate:pair",
+    ])
+      expect(instrumentTemporalContextRequested(value)).toBe(false);
+  });
   test("B1/B5 half-open adjacent periods resolve reused code to exactly one product", async () => {
     const v = version();
     v.validity = {
@@ -264,6 +282,8 @@ describe("pure temporal instrument selector", () => {
     expect((await select(data)).setVersion).not.toBe(one.setVersion);
     expect(one.setVersion).toBe(await canonicalDigest(one.manifest.selection));
     expect(one.contextId).toBe(await canonicalDigest(one.manifest));
+    expect(one.contextRef).toBe(`instrument-temporal:${one.contextId}`);
+    expect(instrumentTemporalContextRequested(one.contextRef)).toBe(true);
   });
   test("B14/B15/B20 malformed atomic member data is purely rejected", async () => {
     const mutations: ((data: InstrumentTemporalInput) => void)[] = [

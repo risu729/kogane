@@ -48,6 +48,7 @@ import type { OperationCall } from "../audit/call.ts";
 import { AUDIT_IDEMPOTENCY_KEY } from "../audit/vocabulary.ts";
 import { simulationCounts } from "./plan.ts";
 import { instrumentCandidatePlanIsPinned } from "../operations/instrument-candidate-context.ts";
+import { instrumentTemporalContextRequested } from "../../../domain/src/instrument-temporal.ts";
 import {
   approvalConsumptionWrite,
   outboxWrite,
@@ -182,6 +183,11 @@ export async function commit(
     return existing.payload_digest === payloadDigest
       ? { ok: true, replayed: true, receipt: receiptFromRow(existing) }
       : commandError("idempotency_conflict", [operationId]);
+
+  // A labelled temporal selection is not a current-only mutation. Keep exact
+  // completed receipts replayable, but never create a new effect from this context.
+  if (instrumentTemporalContextRequested(plan.baseContextId))
+    return commandError("unsupported_semantics");
 
   if (Date.parse(plan.expiresAt) <= Date.parse(input.now))
     return commandError("plan_expired", [plan.planId]);

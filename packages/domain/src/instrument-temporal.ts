@@ -7,6 +7,13 @@ import { canonicalCutInstant } from "./knowledge-selector.ts";
 import { validLocalDateText, validTemporalValue, type TemporalValue } from "./time.ts";
 
 export const INSTRUMENT_TEMPORAL_RELEASE = "instrument-temporal-v1";
+/** A labelled selection reference, not authority to use a current-only command. */
+export const INSTRUMENT_TEMPORAL_CONTEXT_PREFIX = "instrument-temporal:";
+/** Also reserve malformed/unknown suffixes: they must never become manual context. */
+export function instrumentTemporalContextRequested(value: unknown): boolean {
+  return typeof value === "string" && value.startsWith(INSTRUMENT_TEMPORAL_CONTEXT_PREFIX);
+}
+
 export const INSTRUMENT_TEMPORAL_BOUNDS = {
   identifiers: 256,
   acceptances: 5_000,
@@ -126,6 +133,8 @@ export type InstrumentTemporalSelection =
       status: "selected";
       setVersion: string;
       contextId: string;
+      /** Use this labelled reference at command boundaries; contextId remains the digest. */
+      contextRef: string;
       manifest: {
         request: InstrumentTemporalRequest;
         cutStanding: "final" | "provisional";
@@ -601,5 +610,12 @@ export async function selectInstrumentTemporal(
   };
   const setVersion = await canonicalDigest(selection);
   const manifest = { request: req, cutStanding: standing, setVersion, selection };
-  return { status: "selected", setVersion, contextId: await canonicalDigest(manifest), manifest };
+  const contextId = await canonicalDigest(manifest);
+  return {
+    status: "selected",
+    setVersion,
+    contextId,
+    contextRef: `${INSTRUMENT_TEMPORAL_CONTEXT_PREFIX}${contextId}`,
+    manifest,
+  };
 }

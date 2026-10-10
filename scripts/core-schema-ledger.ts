@@ -58,6 +58,14 @@ interface ClassificationEntry {
  * them on purpose.
  */
 export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
+  instrument_temporal_acceptances: {
+    classification: "core-keep",
+    planRow: "append-only temporal identity acceptance journal (ADR 0055)",
+  },
+  instrument_temporal_versions: {
+    classification: "core-keep",
+    planRow: "sealed append-only temporal identity version members (ADR 0055)",
+  },
   collection_schedules: {
     classification: "operational-mutable",
     planRow: "alarm configuration and reservations",

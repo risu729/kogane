@@ -233,6 +233,15 @@ export async function changeCommandRoute(
     case "plan": {
       if (!isChangeKind(input.kind)) return fail("unsupported_semantics");
       const baseContextId = input.baseContextId;
+      // Only omission selects the existing current context. Invalid explicit
+      // provenance must not be silently downgraded to a manual current command.
+      if (
+        Object.hasOwn(input, "baseContextId") &&
+        (typeof baseContextId !== "string" ||
+          baseContextId.length === 0 ||
+          baseContextId.length > 256)
+      )
+        return fail("invalid_command");
       const audit = writerCall(envelope, "command.plan", principal);
       const result = await createPlan(
         input.kind,
