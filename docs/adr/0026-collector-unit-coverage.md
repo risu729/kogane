@@ -1,5 +1,30 @@
 # ADR 0026: A collector's unit coverage is a claim about what the run set out to collect
 
+## Amendment: distinguish refusal, pending reauthentication and terminal write failure (2026-10-10)
+
+Status: proposed until this amendment merges.
+
+Operational alarm results must preserve a persisted failed-run reference and a
+closed reason without promoting the run's coverage. SBI VC's explicit
+`manual_agreement_required` prevents repeated automatic login attempts; only the
+existing owner-controlled reauthentication path may retry it after agreement.
+St.George keeps its explicit-resume block and reports its closed refusal reason;
+legacy blocks without a run id do not gain a fabricated one. V Point's initial
+expired-session run remains failed with `reauthentication_pending`, regardless
+of whether a separate post-authentication run subsequently succeeds. Terminal
+persistence failure takes precedence over that pending-auth label.
+
+Collapsing these cases into `collection_failed`, automatically resuming blocked
+bank logins, or relabeling historical failures as successes was rejected: those
+options respectively hide the required action, repeat an uncertain login, or
+rewrite the meaning of append-only evidence. Added diagnostics use only closed
+codes and counts; a logging failure cannot replace the collection outcome.
+
+Verification and limits are recorded in the
+[implementation plan](../plans/2026-10-collector-refusal-diagnostics.md).
+This amendment changes operational classification, not provider semantics,
+financial adoption, authentication authority or unit coverage.
+
 - Status: accepted (#272, merged 2026-09-27)
 - Date: 2026-09-26
 - Carried by:

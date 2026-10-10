@@ -76,7 +76,7 @@ export interface StateStorage {
 }
 type StoredState =
   | { kind: "running" }
-  | { kind: "blocked"; reason: FailureCode }
+  | { kind: "blocked"; reason: FailureCode; runId?: string }
   | { kind: "pending"; run: Omit<SharedRunInput, "snapshot">; snapshotChunks: number };
 export interface PublicRunResult {
   status: "stored" | "blocked" | "busy" | "failed" | "ready";
@@ -90,7 +90,7 @@ export class CollectionCoordinator {
   private active = false;
   constructor(
     private readonly storage: StateStorage,
-    private readonly collect: () => Promise<CollectionOutput>,
+    private readonly collect: (runId: string) => Promise<CollectionOutput>,
     private readonly persist: (run: SharedRunInput) => Promise<PersistRunResult>,
   ) {}
   async resume(): Promise<PublicRunResult> {
@@ -114,7 +114,12 @@ export class CollectionCoordinator {
         state = { kind: "blocked", reason: "collection-interrupted" };
         await this.storage.put("state", state);
       }
-      if (state?.kind === "blocked") return { status: "blocked", reason: state.reason };
+      if (state?.kind === "blocked")
+        return {
+          status: "blocked",
+          reason: state.reason,
+          ...(state.runId ? { runId: state.runId } : {}),
+        };
       let run: SharedRunInput;
       let pending: Extract<StoredState, { kind: "pending" }>;
       if (state?.kind === "pending") {
@@ -128,7 +133,7 @@ export class CollectionCoordinator {
         await this.storage.put("state", { kind: "running" });
         let output: CollectionOutput;
         try {
-          output = parseCollectionOutput(await this.collect());
+          output = parseCollectionOutput(await this.collect(runId));
         } catch (error) {
           output = {
             status: "failed",
@@ -156,7 +161,11 @@ export class CollectionCoordinator {
       if (!sharedRunPersisted(result))
         return { status: "failed", reason: "persistence-incomplete", runId: run.runId };
       if (run.reason !== undefined) {
-        await this.finishPending(pending, { kind: "blocked", reason: run.reason });
+        await this.finishPending(pending, {
+          kind: "blocked",
+          reason: run.reason,
+          runId: run.runId,
+        });
         return {
           status: "blocked",
           reason: run.reason,
