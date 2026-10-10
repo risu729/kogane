@@ -1,3 +1,4 @@
+import { isDecisionOrigin } from "./decision-origin-contract.ts";
 import { isRecord, isText } from "../../domain/src/guards.ts";
 
 export const INSTRUMENT_HISTORY_PATH = "/api/identity/instrument-history";
@@ -22,6 +23,7 @@ export function validInstrumentHistoryRead(value: unknown): boolean {
       isRecord(entry) &&
       ["mapping", "decision", "relation"].includes(String(entry.entry)) &&
       count(entry.revision) &&
+      (entry.decisionOrigin === undefined || isDecisionOrigin(entry.decisionOrigin)) &&
       [entry.createdAt, entry.method, entry.reason, entry.recordId].every(
         (text) => typeof text === "string",
       ) &&

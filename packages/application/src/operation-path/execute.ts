@@ -99,6 +99,19 @@ async function recordAnswer(
         operation: call.operation,
         riskClass: call.riskClass,
         result: outcome.result,
+        step: call.step,
+        ...(call.delegatedExecution
+          ? {
+              idempotencyKey: call.delegatedExecution.idempotencyKey,
+              payloadDigest: call.delegatedExecution.payloadDigest,
+              ...(call.delegatedExecution.revertsAuditId
+                ? { revertsAuditId: call.delegatedExecution.revertsAuditId }
+                : {}),
+              ...(call.step === "confirm" && call.delegatedExecution.confirmsAuditId
+                ? { confirmsAuditId: call.delegatedExecution.confirmsAuditId }
+                : {}),
+            }
+          : {}),
         ...(refused
           ? {
               resultCode: closedCode(outcome.code, outcome.result),

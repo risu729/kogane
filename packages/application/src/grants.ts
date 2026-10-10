@@ -23,6 +23,8 @@ export const AGENT_CAPABILITIES = [
   "summary.read",
   /** Structured records inside the granted scope. */
   "records.read",
+  /** Scoped common operation history. */
+  "audit.read",
   /** Bounded expansion to raw locators; never granted by records.read. */
   "evidence.read",
   /** Immutable relation proposals; never adoption. */

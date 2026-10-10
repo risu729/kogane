@@ -35,6 +35,7 @@ export interface CatalogueEntry {
 }
 
 const UI: readonly SubjectPath[] = ["ui"];
+const UI_MCP: readonly SubjectPath[] = ["ui", "mcp"];
 const AGENT: readonly SubjectPath[] = ["agent-http", "mcp"];
 // The operations tools of docs/ops-api.md are never served on `/mcp` now: its
 // only caller is an MCP client, which is agent-only (ADR 0047), so the tools
@@ -50,35 +51,35 @@ export const OPERATION_CATALOGUE = {
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.propose",
-    paths: UI,
+    paths: UI_MCP,
   },
   "command.simulate": {
     risk: ["R0"],
     effect: null,
     quiet: "read",
     capability: "interpretation.propose",
-    paths: UI,
+    paths: UI_MCP,
   },
   "command.approve": {
     risk: ["R2"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: UI_MCP,
   },
   "command.commit": {
     risk: ["R2"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: UI_MCP,
   },
   "command.operation.get": {
     risk: ["R0"],
     effect: null,
     quiet: "read",
     capability: "interpretation.propose",
-    paths: UI,
+    paths: UI_MCP,
   },
   // ── operations requests (H2–H7) ────────────────────────────────────────
   "ops.collection.request": {
@@ -129,16 +130,13 @@ export const OPERATION_CATALOGUE = {
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: UI_MCP,
   },
-  // A maintenance revision (W3): R1 inside the direct envelope of ADR 0063
-  // item 8 — a delegated revision that leaves no new joined deferral over
-  // seven days. Beyond that bound it is R3 until the owner answers the plan's
-  // question 1, and the writer refuses it (`maintenance_deferral_too_long`).
-  // On `ui` the operator's edit; on `mcp` the delegated tool, which no
-  // delegation can execute yet, so every call there is a recorded refusal.
+  // Maintenance: delegated R1 within seven days; R2 prepare/confirm within
+  // 31 days. The wider option is private to the confirmed Processor adapter.
+  // R3 remains reserved for the operator beyond the delegated envelope.
   "schedules.maintenance.update": {
-    risk: ["R1", "R3"],
+    risk: ["R1", "R2", "R3"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
@@ -215,6 +213,27 @@ export const OPERATION_CATALOGUE = {
     effect: null,
     quiet: "read",
     capability: "schedules.read",
+    paths: AGENT,
+  },
+  "instruments.history": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  "audit.search": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "audit.read",
+    paths: AGENT,
+  },
+  "audit.get": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "audit.read",
     paths: AGENT,
   },
   // An inert proposal (H8); acceptance is the operator's.

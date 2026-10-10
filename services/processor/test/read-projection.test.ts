@@ -24,7 +24,7 @@ import {
 } from "../src/balance-projection-job.ts";
 import { inputObjectKey, readInputRecord } from "../src/projection-input.ts";
 import type { OutboxRow } from "../src/decision-outbox.ts";
-import { applyReadMigrations } from "../../../packages/storage-d1/src/migrations.ts";
+import { applyTestReadMigrations } from "./migration-setup.ts";
 import { checkReadCursor } from "../../../packages/storage-d1/src/read/index.ts";
 import { sha256Hex } from "../../../packages/domain/src/context.ts";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
@@ -337,7 +337,7 @@ test("G0-09/G3-12: dropping every READ table leaves CORE and DATA untouched, and
     "read_instance",
   ])
     await env.READ.prepare(`DROP TABLE IF EXISTS ${table}`).run();
-  await applyReadMigrations(env.READ);
+  await applyTestReadMigrations(env.READ);
   expect(await readCount("SELECT count(*) AS n FROM balance_read_snapshots")).toBe(0);
   expect(await readFirst("SELECT read_instance_id FROM read_instance WHERE id=1")).toBeNull();
 

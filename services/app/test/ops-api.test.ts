@@ -727,7 +727,7 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
     for (const [name, args] of calls) {
       const called = await mcp("tools/call", { name, arguments: args }, THROUGH_MCP);
       expect(called.result.isError, name).toBe(true);
-      expect(called.result.structuredContent, name).toEqual({ error: "actor_not_supported" });
+      expect(called.result.structuredContent, name).toEqual({ error: "delegation_not_configured" });
     }
     // Only the HTTP import above was written.
     expect(await opsRows()).toBe((before ?? 0) + 1);
@@ -816,7 +816,7 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
       );
       expect(called.result.isError, name).toBe(true);
       expect(called.result.structuredContent, `${subject} ${name}`).toEqual({
-        error: "actor_not_supported",
+        error: "delegation_not_configured",
       });
     }
   });
@@ -838,7 +838,7 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
       { ...THROUGH_MCP, ...broken },
     );
     expect(called.result.isError).toBe(true);
-    expect(called.result.structuredContent).toEqual({ error: "actor_not_supported" });
+    expect(called.result.structuredContent).toEqual({ error: "delegation_not_configured" });
     const overHttp = await call(`${OPS}/projections`, {
       body: { reason: "misconfigured" },
       environment: { ...ENABLED, ...broken },
@@ -870,7 +870,7 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
       THROUGH_MCP,
     );
     expect(read.result.isError).toBe(true);
-    expect(read.result.structuredContent).toEqual({ error: "actor_not_supported" });
+    expect(read.result.structuredContent).toEqual({ error: "delegation_not_configured" });
     expect(read.result.structuredContent).not.toEqual(receipt);
   });
 });

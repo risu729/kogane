@@ -192,8 +192,8 @@ caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows
 **The writer.** Every maintenance revision goes through the Processor's single
 writer, `writeMaintenanceRevision(env, write, append, options?)`
 (`services/processor/src/schedule-store.ts`): the operator's edit and an
-accepted re-survey proposal call it, and no route calls it as a delegated
-principal yet. It sends the revision, its provenance update and what its
+accepted re-survey proposal call it, as does the private delegated maintenance
+adapter after current authority and confirmation checks. It sends the revision, its provenance update and what its
 caller appends — the audit record ([audit log](audit-log.md)), an acceptance
 row — as one batch, so they exist together or not at all. Its actors are the
 operator and a delegated principal (`mcp-client:<sub>`); there is no other
@@ -234,8 +234,8 @@ the table.
 ### The writer's contract for delegated execution (plan slice S3)
 
 Three exports of `services/processor/src/schedule-store.ts` are what slice S3
-builds its delegated execution and confirmation on. Nothing calls the first two
-as a delegated principal yet.
+builds its delegated execution and confirmation on. The private delegated
+adapter reuses their validation; it does not introduce a second writer.
 
 - `prepareMaintenanceRevision(env, write, options?)` →
   `{ok: true, source, ruleId, expectedRevision, currentRevision, deferralClass, budgetRemaining}`
@@ -257,31 +257,76 @@ as a delegated principal yet.
   and the budget once more. A prepare is never an authorization by itself.
 
 `options.deferralBound` is `"delegated-7d"` (the default) or `"confirmed-31d"`.
-Under `"confirmed-31d"` a delegated revision may leave a joined deferral of up
-to 31 days (`CONFIRMED_MAX_DEFERRAL_MS`) and never longer;
-`maintenance_deferral_too_long` past 31 days holds under either bound, and the
-audit reference, the named-source rule, the 30-a-day budget and the batch are
-the same under both. The option is trusted and in-process: no request field,
-header, tool argument or grant sets it. No route, tool or relay of either
-Worker names it (a test scans both Workers' sources), the operator's route
-refuses a body that tries, and the MCP tool's closed arguments refuse it.
-Nothing passes `"confirmed-31d"` today. Slice S3 owns who may: its R2 confirm
-handler, after verifying a confirm that references the prepare's audit record.
+Under `"confirmed-31d"` the delegated validation refuses a newly caused,
+moved or extended joined deferral over 31 days (`CONFIRMED_MAX_DEFERRAL_MS`).
+Pre-existing longer operator windows may remain unchanged or shorten. The
+audit reference, named-source rule, native 30/day budget and batch hold under
+both bounds. Only the trusted private Processor adapter chooses the option;
+the public tool and operator route reject any caller-supplied override.
 
-Also S3's, and not built:
+The App reserves an effect audit id for R1 and references the verified prepared
+audit id for an R2 confirmation. The common applied/accepted-effect count
+enforces the delegation's actual `budget.writesPerDay` across all operations;
+that guard and the native writer's 30/day guard share the domain/audit batch.
+The preparation checks the current source/rule/host/bounds and reports the
+smaller remaining budget, without saving a maintenance revision. Confirm runs
+the validations again and consumes the preparation only with the effect.
 
-- the delegated audit record itself. S3 reserves the effect's audit id before
-  it calls the writer and passes it as `delegated-audit:<audit_id>`: the
-  prepare record's for an R2 confirm, the apply record's for an R1 call;
-- the delegation's `budget.writesPerDay`, counted over the common audit
-  records at the App chokepoint. It and the writer's own 30-a-day cap inside
-  its INSERT are two separate atomic guards, not one transaction;
-- the confirmation step itself.
+The checked-in delegation table is empty, and the MCP financial-reader grant
+has no schedule authority. Production migration application and real-client
+maintenance writes were not verified by these local synthetic tests.
 
-Beyond the seven-day bound a delegated revision is class R3 until the owner
-answers the plan's question 1, and stays the operator's in the UI; its target
-class is R2 (prepare/confirm) up to the 31-day ceiling, for which the writer's
-prepare and option above exist and the confirm does not. Not verified in
-production: no grant or delegation holds a schedule capability (the committed
-MCP reader's grant names none), CORE 0078 is not applied, and no MCP client has
-called these tools.
+## S3 maintenance execution and confirmation (2026-10-10)
+
+Status: proposed until the integration PR merges. The implementation reuses
+the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
+against main `c0c4088a`; #652's temporal refusal and #643's release guard are
+preserved. The [integration plan](plans/2026-10-mcp-maintenance-followups.md)
+records the publication and activation boundaries. No grant or deployment is
+implied by this implementation.
+
+The closed MCP payload accepts `apply`, `prepare` and `confirm` plus an
+idempotency key. R1 apply keeps the seven-day joined-deferral bound. R2
+prepare validates with the trusted 31-day bound and records a capped,
+expiring preparation; only a matching confirmation may use that bound to
+write. A newly caused, moved or extended joined deferral over 31 days is
+refused; pre-existing longer operator windows may remain unchanged or shorten.
+A caller cannot supply `decisionRef`,
+`deferralBound` or a rollback audit reference. The R1 rule references its
+reserved effect audit id; the R2 rule references the verified preparation
+audit id, and its effect record links the same preparation.
+
+Current delegation capability and source scope are checked before looking
+up a replay receipt. Exact retries return the original saved id/revision
+without another writer call or alarm reconciliation. Changed payloads do not
+reuse a receipt. Fresh writes revalidate at the private Processor adapter.
+The common applied/accepted-effect audit count enforces the actual delegation's
+`writesPerDay` across operation kinds and delegation-reference changes. It
+shares one D1 batch with the native writer's 30-per-principal rolling-day cap,
+revision guard, domain write and audit append; failure rolls back the batch.
+Preparation reports the lesser remaining budget. It grants no authority by
+itself.
+
+The native writer captures the source's append-only revision count before
+reading joined windows. Its delegated INSERT checks that count again inside
+the batch, so concurrent edits to different rules cannot jointly exceed the
+deferral bound. The count uses the existing covering maintenance source
+index and scales with that source's history, not constant time. The immediate
+provenance update also requires that INSERT to have changed a row, and the
+append guard binds the decision reference: a same-millisecond losing retry
+cannot replace a winner's official URL or append an effect.
+
+The write result distinguishes `saved` from reconciliation `completed` or
+`pending`; a replay returns reconciliation `null`. None asserts that a
+reservation is armed. The maintenance read tool supplies the reservation and
+next-run state. Audit rows keep digests, closed codes and references, not the
+official URL or other provider text.
+
+The tests use synthetic local D1 data and synthetic Access keys. They cover
+signed MCP entry, revocation and scope-before-replay, both hard bounds,
+prepare/effect linkage, shared daily budget, rollback, exact retries,
+concurrent joined windows and losing-provenance writes. Production migration
+state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
+the committed MCP financial-reader grant receives no schedule authority.
+S6 survey acceptance remains unavailable pending the separate owner decision;
+no survey grammar, grants, Access, authentication or deployment is changed.

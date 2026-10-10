@@ -1,6 +1,9 @@
+import { mappingDecisionOriginSql } from "../../../packages/read-model/src/decision-origin.ts";
+import type { DecisionOrigin } from "../../../packages/domain/src/decision-origin.ts";
 export interface PreferredInstrumentName {
   label: string;
   reason: "manual" | "provider-current" | "observed-japanese-script";
+  decisionOrigin: DecisionOrigin;
   origin: { kind: "transaction" | "position" | "valuation"; id: number } | null;
 }
 
@@ -10,7 +13,9 @@ export interface PreferredInstrumentName {
  * Names from unknown language contexts are not classified as Japanese.
  */
 export const PREFERRED_INSTRUMENT_NAMES_SQL = `WITH requested AS MATERIALIZED (
-  SELECT m.identifier_id,m.label,m.method FROM json_each(?1) requested
+  SELECT m.identifier_id,m.label,m.method,
+    ${mappingDecisionOriginSql("instrument_mapping", "m.identifier_id", "m.revision", "m.method")} decisionOrigin
+  FROM json_each(?1) requested
   JOIN current_instrument_mappings m ON m.identifier_id=requested.value
 ), eligible AS MATERIALIZED (
   SELECT o.id,o.kind,o.observation_id,o.parse_run_id,u.identifier_id
@@ -52,7 +57,7 @@ export const PREFERRED_INSTRUMENT_NAMES_SQL = `WITH requested AS MATERIALIZED (
 ) SELECT r.identifier_id referenceId,coalesce(n.label,r.label) label,
   CASE WHEN r.method='manual' THEN 'manual' WHEN n.label IS NOT NULL
     THEN 'observed-japanese-script' ELSE 'provider-current' END reason,
-  n.kind,n.observation_id observationId
+  n.kind,n.observation_id observationId,r.decisionOrigin
   FROM requested r LEFT JOIN ranked n ON n.identifier_id=r.identifier_id AND n.priority=1`;
 
 /** One set-oriented query per bounded response page; no process-global cache. */
@@ -67,6 +72,7 @@ export async function preferredInstrumentNames(
     referenceId: string;
     label: string;
     reason: PreferredInstrumentName["reason"];
+    decisionOrigin: DecisionOrigin;
     kind: "transaction" | "position" | "valuation" | null;
     observationId: number | null;
   }>();
@@ -76,6 +82,7 @@ export async function preferredInstrumentNames(
       {
         label: row.label,
         reason: row.reason,
+        decisionOrigin: row.decisionOrigin,
         origin:
           row.kind !== null && row.observationId !== null
             ? { kind: row.kind, id: row.observationId }

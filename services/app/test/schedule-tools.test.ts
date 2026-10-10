@@ -7,16 +7,14 @@
 // with native workerd alarms. Every principal, host, delegation and window is
 // synthetic.
 //
-// What is shown: the read is one function on both agent paths (HTTP and MCP
-// answer the same object) and records a `read`; the revision is reachable only
-// as a delegated MCP operation, which no delegation can execute yet, so every
-// call of it — with or without a delegation, in scope or not — is a closed,
-// recorded refusal that relays nothing and writes no revision.
+// Shared read parity and pre-relay refusals. Positive native writes and the
+// current-authority replay boundary are covered by delegated-maintenance and
+// cross-boundary-maintenance-auth tests.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { scheduleUpdateSchema } from "../src/schedule-tools";
+import { delegatedMaintenanceSchema as scheduleUpdateSchema } from "../../../packages/application/src/index";
 import { scheduleRoute } from "../../processor/src/schedule-store";
 import { ScheduleAlarm } from "../../processor/src/schedule-alarm";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
@@ -241,6 +239,8 @@ function window(source: string, overrides: Record<string, unknown> = {}) {
     referenceUrl: `${REFERENCE}/window`,
     verifiedAt: iso(Date.now() - 60_000),
     reason: "official-notice-added",
+    step: "apply",
+    idempotencyKey: crypto.randomUUID(),
     ...overrides,
   };
 }
@@ -266,7 +266,7 @@ async function records(operation: string): Promise<Record<string, unknown>[]> {
 }
 
 describe("the maintenance read: one function on both agent paths", () => {
-  it("is listed to an MCP client holding schedules.read, and the revision to nobody", async () => {
+  it("lists reads by grant and revisions only by valid delegation", async () => {
     const names = async (subject: string, environment?: Record<string, unknown>) =>
       ((await mcp(subject, "tools/list", {}, environment)).result.tools as { name: string }[]).map(
         (entry) => entry.name,
@@ -277,9 +277,11 @@ describe("the maintenance read: one function on both agent paths", () => {
     // without the capability reaches nothing.
     expect(await names(FINANCIAL)).not.toContain(READ);
     expect(await names(REVIEWER)).not.toContain(READ);
-    // The revision is published to no one, even under a valid delegation:
-    // nothing can execute it yet.
-    for (const subject of [OWNER, READER, FINANCIAL])
+    // Only the named owner delegation publishes the installed writer.
+    expect(
+      await names(OWNER, { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) }),
+    ).toContain(UPDATE);
+    for (const subject of [READER, FINANCIAL])
       expect(
         await names(subject, { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) }),
       ).not.toContain(UPDATE);
@@ -358,7 +360,7 @@ describe("the maintenance read: one function on both agent paths", () => {
   });
 });
 
-describe("the maintenance revision: a delegated operation nothing can execute yet", () => {
+describe("the maintenance revision: delegated authority and closed request boundary", () => {
   /** Calls the update tool as `subject`'s MCP client and shows it relayed and wrote nothing. */
   async function refusedUpdate(
     subject: string,
@@ -466,7 +468,7 @@ describe("the maintenance revision: a delegated operation nothing can execute ye
     expect(status).toBe("delegation_capability_denied");
   });
 
-  it("checks arguments and scope under a valid delegation, then is still not available", async () => {
+  it("checks arguments and scope under a valid delegation before relaying", async () => {
     const environment = { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) };
     // Out of the delegation's scope, existing or not: one answer.
     const outside = await refusedUpdate(OWNER, window("sony-bank"), environment);
@@ -494,28 +496,6 @@ describe("the maintenance revision: a delegated operation nothing can execute ye
       expect((await refusedUpdate(OWNER, window("vpass", extra), environment)).status).toBe(
         "invalid_request",
       );
-    // Inside the envelope and inside the bound: the delegation, its capability,
-    // the arguments and the scope all hold, and nothing executes it.
-    const inside = await refusedUpdate(OWNER, window("vpass"), environment);
-    expect(inside.status).toBe("delegation_execution_unavailable");
-    expect(inside.record).toMatchObject({
-      principal: OWNER_MCP,
-      principal_kind: "agent",
-      delegation_ref: null,
-      result: "refused",
-      result_code: "delegation_execution_unavailable",
-      risk_class: "R1",
-    });
-    // Beyond the seven-day bound it is not available either; the writer, which
-    // the call never reaches, would refuse it as maintenance_deferral_too_long.
-    const long = await refusedUpdate(
-      OWNER,
-      window("vpass", {
-        pattern: { kind: "once", from: iso(Date.now() + DAY), to: iso(Date.now() + 9 * DAY) },
-      }),
-      environment,
-    );
-    expect(long.status).toBe("delegation_execution_unavailable");
   });
 
   it("an agent grant cannot name the revision: the whole table is refused", async () => {
@@ -544,7 +524,7 @@ describe("the maintenance revision: a delegated operation nothing can execute ye
     expect(relayed).toEqual([]);
   });
 
-  it("publishes no schema of its own, and enforces a closed one at the edge", () => {
+  it("shares the published closed schema with the executable adapter", () => {
     expect(scheduleUpdateSchema.safeParse(window("vpass")).success).toBe(true);
     for (const extra of [{ actor: "x" }, { ruleId: "Has Space" }, { reason: "correction " }])
       expect(scheduleUpdateSchema.safeParse({ ...window("vpass"), ...extra }).success).toBe(false);
@@ -556,7 +536,7 @@ describe("the maintenance revision: a delegated operation nothing can execute ye
     ).toBe(false);
   });
 
-  it("records codes and counts only: no argument value reaches a record or a revision", async () => {
+  it("records codes and counts only: refused argument values reach no record or revision", async () => {
     const environment = { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) };
     await refusedUpdate(
       OWNER,
@@ -568,7 +548,7 @@ describe("the maintenance revision: a delegated operation nothing can execute ye
     );
     await refusedUpdate(
       OWNER,
-      window("vpass", { referenceUrl: `${REFERENCE}/y?t=${TOKEN}&a=123456` }),
+      window("vpass", { ruleId: "Has Space", referenceUrl: `${REFERENCE}/y?t=${TOKEN}&a=123456` }),
       environment,
     );
     const stored = JSON.stringify(

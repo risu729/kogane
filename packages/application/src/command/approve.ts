@@ -16,6 +16,8 @@ import { resolveAndSimulate } from "../operations/targets.ts";
 import { loadPlan } from "./plan.ts";
 import { currentRevisions, markStale } from "./simulate.ts";
 import type { OperationCall } from "../audit/call.ts";
+import { delegatedCommandFamilyAllowed } from "../delegation/execution.ts";
+import { expectedRevisionsJson, expectedRevisionsSql } from "../operations/sql.ts";
 import { instrumentCandidatePlanIsPinned } from "../operations/instrument-candidate-context.ts";
 import { instrumentTemporalContextRequested } from "../../../domain/src/instrument-temporal.ts";
 
@@ -56,11 +58,21 @@ export async function approve(
   // Approving is `interpretation.accept`. Initially only human operators hold
   // it; the check is here rather than in the transport so every adapter (HTTP,
   // MCP, CLI) inherits it.
-  if (input.actor.kind !== "human" || !principalCan(input.actor, "interpretation.accept"))
+  if (
+    (input.actor.kind !== "human" &&
+      !(
+        input.actor.kind === "delegated" &&
+        input.audit?.actor.principal === input.actor.id &&
+        input.audit.delegatedExecution?.confirmsAuditId
+      )) ||
+    !principalCan(input.actor, "interpretation.accept")
+  )
     return commandError("approval_required");
 
   const plan = await loadPlan(store, input.planId);
   if (!plan) return commandError("plan_not_found");
+  if (input.actor.kind === "delegated" && !delegatedCommandFamilyAllowed(input.audit, plan.kind))
+    return commandError("approval_required");
   if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
   if (instrumentTemporalContextRequested(plan.baseContextId))
     return commandError("unsupported_semantics");
@@ -113,7 +125,8 @@ export async function approve(
       sql: `INSERT INTO approvals(approval_id,plan_id,plan_digest,approver_actor,approver_verification,scope_json,expires_at,uses_remaining,created_at)
         SELECT ?1,?2,?3,?4,'server',?5,?6,?7,?8
         WHERE NOT EXISTS(SELECT 1 FROM approvals WHERE approval_id=?1)
-        AND EXISTS(SELECT 1 FROM change_plans WHERE plan_id=?2 AND status IN ('planned','approved') AND expires_at>?8)`,
+        AND EXISTS(SELECT 1 FROM change_plans WHERE plan_id=?2 AND status IN ('planned','approved') AND expires_at>?8)
+        AND ${expectedRevisionsSql("?9")}`,
       binds: [
         approvalId,
         plan.planId,
@@ -123,6 +136,7 @@ export async function approve(
         expiresAt,
         uses,
         createdAt,
+        expectedRevisionsJson(plan.expectedRevisions),
       ],
     },
     {
@@ -156,4 +170,35 @@ export async function approve(
       createdAt,
     },
   };
+}
+
+/** Read one own approval for a retry/preview; the writer revalidates it at commit. */
+export async function readOwnApproval(
+  store: CommandStore,
+  principal: string,
+  approvalId: string,
+): Promise<ApprovalReceipt | null> {
+  const row = await store.first<{
+    approval_id: string;
+    plan_id: string;
+    plan_digest: string;
+    approver_actor: string;
+    scope_json: string;
+    expires_at: string;
+    uses_remaining: number;
+    created_at: string;
+  }>("SELECT * FROM approvals WHERE approval_id=? AND approver_actor=?", [approvalId, principal]);
+  return row
+    ? {
+        approvalId: row.approval_id,
+        planId: row.plan_id,
+        planDigest: row.plan_digest,
+        approverActor: row.approver_actor,
+        approverVerification: "server",
+        scope: JSON.parse(row.scope_json) as string[],
+        expiresAt: row.expires_at,
+        usesRemaining: row.uses_remaining,
+        createdAt: row.created_at,
+      }
+    : null;
 }
