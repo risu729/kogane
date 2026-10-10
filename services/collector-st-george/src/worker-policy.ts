@@ -85,6 +85,115 @@ export interface PublicRunResult {
   terminalKey?: string;
 }
 
+type PendingState = Extract<StoredState, { kind: "pending" }>;
+type RetryPendingResult =
+  | { status: "busy" }
+  | {
+      status: "refused";
+      reason:
+        | "invalid-request"
+        | "not-pending"
+        | "run-mismatch"
+        | "invalid-pending"
+        | "state-changed";
+    }
+  | { status: "failed"; reason: "state-unavailable" | "persistence-incomplete" }
+  | { status: "stored"; runId: string; terminalKey: string }
+  | { status: "blocked"; reason: FailureCode; runId: string; terminalKey: string };
+
+const RUN_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+function record(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+function exactKeys(value: Record<string, unknown>, keys: string): boolean {
+  return (
+    Reflect.ownKeys(value).length === keys.split(",").length &&
+    Object.keys(value).sort().join(",") === keys
+  );
+}
+function timestamp(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value) &&
+    Number.isFinite(Date.parse(value)) &&
+    new Date(value).toISOString() === value
+  );
+}
+/** Strict, owned metadata for this new path; legacy trigger/resume decoding is unchanged. */
+function pendingState(value: unknown): PendingState | undefined {
+  const state = record(value);
+  if (!state || !exactKeys(state, "kind,run,snapshotChunks") || state.kind !== "pending") return;
+  const run = record(state.run);
+  if (
+    !run ||
+    !exactKeys(
+      run,
+      Object.hasOwn(run, "reason")
+        ? "attemptId,completedAt,reason,runId,startedAt"
+        : "attemptId,completedAt,runId,startedAt",
+    )
+  )
+    return;
+  if (
+    typeof run.runId !== "string" ||
+    !RUN_UUID.test(run.runId) ||
+    typeof run.attemptId !== "string" ||
+    !run.attemptId.startsWith("attempt-") ||
+    !RUN_UUID.test(run.attemptId.slice(8)) ||
+    !timestamp(run.startedAt) ||
+    !timestamp(run.completedAt) ||
+    run.completedAt < run.startedAt
+  )
+    return;
+  const count = state.snapshotChunks;
+  if (typeof count !== "number" || !Number.isInteger(count) || count < 0 || count > 32) return;
+  const hasReason = Object.hasOwn(run, "reason");
+  if (
+    hasReason
+      ? count !== 0 || typeof run.reason !== "string" || safeFailureCode(run.reason) !== run.reason
+      : count === 0
+  )
+    return;
+  return {
+    kind: "pending",
+    run: {
+      runId: run.runId,
+      attemptId: run.attemptId,
+      startedAt: run.startedAt,
+      completedAt: run.completedAt,
+      ...(hasReason ? { reason: safeFailureCode(run.reason) } : {}),
+    },
+    snapshotChunks: count,
+  };
+}
+
+function samePending(left: PendingState, right: PendingState): boolean {
+  return (
+    left.snapshotChunks === right.snapshotChunks &&
+    left.run.runId === right.run.runId &&
+    left.run.attemptId === right.run.attemptId &&
+    left.run.startedAt === right.run.startedAt &&
+    left.run.completedAt === right.run.completedAt &&
+    left.run.reason === right.run.reason
+  );
+}
+
+function snapshotRun(pending: PendingState, chunks: Uint8Array[]): SharedRunInput {
+  if (pending.snapshotChunks === 0) return { ...pending.run };
+  const bytes = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.byteLength, 0));
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  const snapshot = parseStGeorgeSnapshot(
+    JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
+  );
+  return { ...pending.run, snapshot };
+}
+
 /** A durable attempt marker prevents a restart from replaying an uncertain login. */
 export class CollectionCoordinator {
   private active = false;
@@ -93,6 +202,111 @@ export class CollectionCoordinator {
     private readonly collect: (runId: string) => Promise<CollectionOutput>,
     private readonly persist: (run: SharedRunInput) => Promise<PersistRunResult>,
   ) {}
+  /** Internal only: no route/RPC calls this, and the run id is not an authorization credential. */
+  async retryPending(input: unknown): Promise<RetryPendingResult> {
+    let expectedRunId: string;
+    try {
+      const request = record(input);
+      const id = request?.expectedRunId;
+      if (
+        !request ||
+        !exactKeys(request, "expectedRunId") ||
+        typeof id !== "string" ||
+        !RUN_UUID.test(id)
+      )
+        return { status: "refused", reason: "invalid-request" };
+      expectedRunId = id;
+    } catch {
+      return { status: "refused", reason: "invalid-request" };
+    }
+    if (this.active) return { status: "busy" };
+    this.active = true;
+    try {
+      const selected = await this.storage.transaction(async (storage) => {
+        const raw = await storage.get<unknown>("state");
+        if (record(raw)?.kind !== "pending") return { reason: "not-pending" as const };
+        const pending = pendingState(raw);
+        if (!pending) return { reason: "invalid-pending" as const };
+        if (pending.run.runId !== expectedRunId) return { reason: "run-mismatch" as const };
+        const chunks = await this.retryChunks(storage, pending);
+        if (!chunks) return { reason: "invalid-pending" as const };
+        try {
+          return { pending, chunks, run: snapshotRun(pending, chunks) };
+        } catch {
+          return { reason: "invalid-pending" as const };
+        }
+      });
+      if ("reason" in selected) return { status: "refused", reason: selected.reason };
+      let result: PersistRunResult;
+      try {
+        result = await this.persist(selected.run);
+      } catch {
+        return { status: "failed", reason: "persistence-incomplete" };
+      }
+      if (!sharedRunPersisted(result))
+        return { status: "failed", reason: "persistence-incomplete" };
+      // Only storage operations occur inside the retriable transaction. Never repeat external persistence here.
+      const finished = await this.storage.transaction(async (storage) => {
+        const current = pendingState(await storage.get<unknown>("state"));
+        if (!current || !samePending(selected.pending, current)) return false;
+        const chunks = await this.retryChunks(storage, current);
+        if (
+          !chunks ||
+          chunks.some((chunk, index) => {
+            const saved = selected.chunks[index];
+            return (
+              !saved ||
+              chunk.byteLength !== saved.byteLength ||
+              chunk.some((byte, offset) => byte !== saved[offset])
+            );
+          })
+        )
+          return false;
+        const run = selected.pending.run;
+        if (run.reason === undefined) await storage.delete("state");
+        else await storage.put("state", { kind: "blocked", reason: run.reason, runId: run.runId });
+        for (let index = 0; index < current.snapshotChunks; index++)
+          await storage.delete(this.chunkKey(run.runId, index));
+        return true;
+      });
+      if (!finished) return { status: "refused", reason: "state-changed" };
+      const run = selected.pending.run;
+      return run.reason === undefined
+        ? { status: "stored", runId: run.runId, terminalKey: result.terminalKey }
+        : {
+            status: "blocked",
+            reason: run.reason,
+            runId: run.runId,
+            terminalKey: result.terminalKey,
+          };
+    } catch {
+      return { status: "failed", reason: "state-unavailable" };
+    } finally {
+      this.active = false;
+    }
+  }
+  /** Inspect every bounded slot, including absent slots: do not erase changed or residual evidence. */
+  private async retryChunks(
+    storage: StateStorage,
+    pending: PendingState,
+  ): Promise<Uint8Array[] | undefined> {
+    const chunks: Uint8Array[] = [];
+    for (let index = 0; index < 32; index++) {
+      const value = await storage.get<unknown>(this.chunkKey(pending.run.runId, index));
+      if (index >= pending.snapshotChunks) {
+        if (value !== undefined) return;
+      } else {
+        if (
+          !(value instanceof Uint8Array) ||
+          value.byteLength === 0 ||
+          value.byteLength > 64 * 1024
+        )
+          return;
+        chunks.push(value.slice());
+      }
+    }
+    return chunks;
+  }
   async resume(): Promise<PublicRunResult> {
     if (this.active) return { status: "busy" };
     this.active = true;
