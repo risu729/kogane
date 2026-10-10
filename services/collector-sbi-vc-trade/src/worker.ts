@@ -17,10 +17,12 @@ import {
   persistSharedRun,
   sharedRunPersisted,
   waitingForHuman,
+  TerminalPersistenceError,
   type SharedCapture,
   type SharedRunSummary,
 } from "./shared-collection";
 import { describeArtifact, runPrefix } from "./storage";
+import { blockedScheduleResult, sessionFailureCode, shouldReauthenticate } from "./session-policy";
 import type {
   CollectionFailure,
   CollectionManifest,
@@ -54,6 +56,25 @@ export class SbiVcSessionState extends DurableObject<Env> {
   #reauthRunning: Promise<HealthState> | null = null;
   #collectionRunning: Promise<CollectionSummary> | null = null;
   #operationTail: Promise<void> = Promise.resolve();
+  /** Classify local persistence errors before the RPC boundary loses their identity. */
+  async runScheduledCollection(cron: string): Promise<ScheduledResult> {
+    try {
+      const health = await ensureHealthySession(this);
+      if (cron === KEEPALIVE_CRON)
+        return {
+          status: health.lastErrorCode === null ? "completed" : "failed",
+          runIds: [],
+          failureCode: sessionFailureCode(health),
+        };
+      if (health.lastErrorCode !== null)
+        return blockedScheduleResult(health, await this.recordBlockedCollection());
+      return scheduledResult(await this.runCollection());
+    } catch (error) {
+      if (error instanceof TerminalPersistenceError)
+        return { status: "failed", runIds: [], failureCode: "terminal_persistence_failed" };
+      return scheduledFailure(error);
+    }
+  }
   async getHealth(): Promise<HealthState> {
     return { ...INITIAL_HEALTH, ...(await this.ctx.storage.get<HealthState>("health")) };
   }
@@ -98,7 +119,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
    * that the scheduled collection did not happen and whether a person has to
    * act (G3-10, G3-11). No login is retried here.
    */
-  async recordBlockedCollection(): Promise<SharedRunSummary | null> {
+  async recordBlockedCollection(): Promise<SharedRunSummary> {
     const health = await this.getHealth();
     const startedAt = new Date().toISOString();
     const runId = crypto.randomUUID();
@@ -122,15 +143,19 @@ export class SbiVcSessionState extends DurableObject<Env> {
       },
       { waitingForHuman: waitingForHuman(health) },
     );
-    console.error(
-      JSON.stringify({
-        message: "sbi_vc_collection_blocked",
-        runId,
-        errorCode: manifest.failures[0]?.errorCode,
-        waitingForHuman: summary.waitingForHuman,
-        sharedOutcome: summary.outcome,
-      }),
-    );
+    try {
+      console.error(
+        JSON.stringify({
+          message: "sbi_vc_collection_blocked",
+          runId,
+          errorCode: manifest.failures[0]?.errorCode,
+          waitingForHuman: summary.waitingForHuman,
+          sharedOutcome: summary.outcome,
+        }),
+      );
+    } catch {
+      /* A failed diagnostic cannot hide the persisted blocked run. */
+    }
     return summary;
   }
   /**
@@ -244,7 +269,8 @@ export class SbiVcSessionState extends DurableObject<Env> {
         );
         // No terminal means the run did not finish persisting; it is never
         // reported as stored (G1-01).
-        if (!sharedRunPersisted(shared)) throw new Error("shared_persist_incomplete");
+        if (!sharedRunPersisted(shared))
+          throw new TerminalPersistenceError("terminal_persistence_failed");
         diagnostic.finish(status);
         return {
           runId,
@@ -509,7 +535,7 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 async function ensureHealthySession(
-  stub: DurableObjectStub<SbiVcSessionState>,
+  stub: Pick<SbiVcSessionState, "runKeepAlive" | "runReauthenticate">,
 ): Promise<HealthState> {
   let health = await stub.runKeepAlive();
   if (!shouldReauthenticate(health)) return health;
@@ -524,14 +550,6 @@ async function ensureHealthySession(
     health = reauthenticated;
   }
   return health;
-}
-function shouldReauthenticate(health: HealthState): boolean {
-  return (
-    health.lastHttpStatus === 401 ||
-    health.lastHttpStatus === 403 ||
-    health.lastErrorCode === "gateway_rejected" ||
-    health.lastErrorCode === "load_session_missing_session_seed"
-  );
 }
 function classifyError(error: unknown): string {
   if (error instanceof Error && /^[a-z0-9_-]+$/u.test(error.message)) {
@@ -606,18 +624,7 @@ export async function alarmCollection(
 ): Promise<ScheduledResult> {
   try {
     const stub = env.SESSION_STATE.getByName("singleton");
-    const health = await ensureHealthySession(stub);
-    if (cron === KEEPALIVE_CRON)
-      return {
-        status: health.lastErrorCode === null ? "completed" : "failed",
-        runIds: [],
-        failureCode: health.lastErrorCode === null ? null : "session_unavailable",
-      };
-    if (health.lastErrorCode !== null) {
-      const blocked = await stub.recordBlockedCollection();
-      return { ...scheduledResult(blocked), status: "failed", failureCode: "session_unavailable" };
-    }
-    return scheduledResult(await stub.runCollection());
+    return await stub.runScheduledCollection(cron);
   } catch (error) {
     return scheduledFailure(error);
   }

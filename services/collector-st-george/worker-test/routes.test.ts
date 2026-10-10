@@ -1,7 +1,35 @@
 import { expect, test, vi } from "vitest";
-import worker from "../src/worker";
+import worker, { alarmCollection } from "../src/worker";
 const token = "synthetic-admin-token-00000000000000000000";
 const context = { waitUntil() {} } as unknown as ExecutionContext;
+test("alarm retains durable refusal and persistence reasons without a second request", async () => {
+  const cases = [
+    [
+      { status: "blocked", reason: "login-rejected", runId: "synthetic-run" },
+      { status: "failed", failureCode: "st_george_login_rejected", runIds: ["synthetic-run"] },
+    ],
+    [
+      { status: "failed", reason: "persistence-incomplete" },
+      { status: "failed", failureCode: "terminal_persistence_failed", runIds: [] },
+    ],
+    [
+      { status: "blocked", reason: "synthetic_secret" },
+      { status: "failed", failureCode: "collection_failed", runIds: [] },
+    ],
+    [
+      { status: "stored", runId: "synthetic-run" },
+      { status: "completed", failureCode: null, runIds: ["synthetic-run"] },
+    ],
+  ] as const;
+  for (const [body, expected] of cases) {
+    const fetch = vi.fn(async () => Response.json(body));
+    const env = {
+      SESSION_STATE: { idFromName: () => "test", get: () => ({ fetch }) },
+    } as unknown as Env;
+    expect(await alarmCollection(env, "35 21 * * *", 0)).toEqual(expected);
+    expect(fetch).toHaveBeenCalledOnce();
+  }
+});
 function bindings(): Env {
   return {
     ADMIN_TRIGGER_TOKEN: token,

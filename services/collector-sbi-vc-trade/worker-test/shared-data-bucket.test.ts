@@ -5,7 +5,7 @@
 // The Worker writes DATA only. It does not read a collection-target var, and
 // the deployed configuration does not declare one.
 import { env, applyD1Migrations, runInDurableObject, type D1Migration } from "cloudflare:test";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   readTerminal,
   runPrefix as terminalRunPrefix,
@@ -44,6 +44,23 @@ function manifest(runId: string): CollectionManifest {
 }
 
 describe("SBI VC Trade shared DATA bucket", () => {
+  it("a throwing blocked-result logger cannot hide the durable run", async () => {
+    const stub = env.SESSION_STATE.getByName("blocked-log-failure");
+    const summary = await runInDurableObject(stub, async (instance) => {
+      const log = vi.spyOn(console, "error").mockImplementation(() => {
+        throw new Error("synthetic_log_failure");
+      });
+      try {
+        return await instance.recordBlockedCollection();
+      } finally {
+        log.mockRestore();
+      }
+    });
+    expect(summary.outcome).toBe("persisted");
+    expect(await readTerminal(dataBucket(env.DATA), "sbi-vc-trade", summary.runId)).toMatchObject({
+      outcome: "found",
+    });
+  });
   it("stores every object and the terminal last, and R2 can re-verify them", async () => {
     const bucket = dataBucket(env.DATA);
     const value = manifest(RUN_ID);

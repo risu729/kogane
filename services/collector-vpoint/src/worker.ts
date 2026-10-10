@@ -1,7 +1,6 @@
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
   scheduledFailure,
-  scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
 import { timingSafeEqual } from "node:crypto";
@@ -9,7 +8,13 @@ import type { PersistRunResult } from "../../../packages/collection/src/index";
 import { logEvent, logFailure, logStage, type CollectionStage } from "./diagnostics";
 import { extractVPointEmailCode, isCollectorRecipient } from "./email";
 import { VPointSession } from "./session";
-import { emailSessionRefFor, persistVPointPayEmailRun, persistVPointRun } from "./shared-run";
+import { awaitingReauthentication, vPointScheduledResult } from "./scheduled-result";
+import {
+  emailSessionRefFor,
+  persistVPointPayEmailRun,
+  persistVPointRun,
+  TerminalPersistenceError,
+} from "./shared-run";
 import type { CollectionFailure, CollectionManifest, RawArtifact, StoredArtifact } from "./types";
 import { collectVPoint, VPointSessionExpiredError } from "./vpoint";
 import {
@@ -398,15 +403,6 @@ function publicResult(outcome: CollectionOutcome): object {
     },
   };
 }
-function awaitingReauthentication(manifest: CollectionManifest): boolean {
-  return (
-    manifest.status === "failed" &&
-    manifest.failures.length === 1 &&
-    ["VPointReauthenticationPendingError", "VPointSessionExpiredError"].includes(
-      manifest.failures[0]?.errorType ?? "",
-    )
-  );
-}
 class VPointReauthenticationPendingError extends Error {
   constructor() {
     super("V Point email reauthentication is pending");
@@ -422,8 +418,10 @@ export async function alarmCollection(
 ): Promise<ScheduledResult> {
   try {
     const outcome = await runCollection(env);
-    return scheduledResult(outcome);
+    return vPointScheduledResult(outcome);
   } catch (error) {
+    if (error instanceof TerminalPersistenceError)
+      return { status: "failed", runIds: [], failureCode: "terminal_persistence_failed" };
     return scheduledFailure(error);
   }
 }
