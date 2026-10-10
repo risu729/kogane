@@ -263,9 +263,18 @@ describe("offline CSV byte lineage comparisons", () => {
   });
 
   test("never requests provider data", () => {
-    const fetch = spyOn(globalThis, "fetch").mockImplementation(() => {
-      throw new Error("unexpected_fetch");
-    });
+    const fetch = spyOn(globalThis, "fetch").mockImplementation(
+      Object.assign(
+        () => {
+          throw new Error("unexpected_fetch");
+        },
+        {
+          preconnect: () => {
+            throw new Error("unexpected_preconnect");
+          },
+        },
+      ),
+    );
     try {
       inspect({ httpResponseBytes: http, browserArtifactBytes: browser });
       expect(fetch).not.toHaveBeenCalled();
