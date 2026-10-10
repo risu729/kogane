@@ -53,6 +53,8 @@ import { evidenceReader, type ObservationReader, type Overview } from "./observa
 import { proposalStore } from "./proposals";
 import type { OperationCall } from "../../../packages/application/src/audit/call.ts";
 
+import { callReadTool, isReadToolName, type ReadToolName } from "./read-tools";
+
 /** The tools every configured deployment serves. */
 export const AGENT_TOOL_NAMES = [
   "kogane.capabilities",
@@ -77,13 +79,15 @@ export const RECONSTRUCTED_STATE_TOOL_NAME = "kogane.reconstructed-state.read";
 export type AgentToolName =
   | (typeof AGENT_TOOL_NAMES)[number]
   | typeof PURCHASES_TOOL_NAME
-  | typeof RECONSTRUCTED_STATE_TOOL_NAME;
+  | typeof RECONSTRUCTED_STATE_TOOL_NAME
+  | ReadToolName;
 
 /** Largest request body any agent route reads, in bytes. */
 export const MAX_REQUEST_BYTES = 65_536;
 
 export function isAgentToolName(value: string): value is AgentToolName {
   return (
+    isReadToolName(value) ||
     value === PURCHASES_TOOL_NAME ||
     value === RECONSTRUCTED_STATE_TOOL_NAME ||
     (AGENT_TOOL_NAMES as readonly string[]).includes(value)
@@ -93,6 +97,8 @@ export function isAgentToolName(value: string): value is AgentToolName {
 export interface ToolResult {
   status: number;
   body: unknown;
+  /** Internal classifier facts; transports expose only status and body. */
+  auditOutcome?: import("../../../packages/application/src/index").AnswerOutcome;
 }
 
 interface ToolContext {
@@ -182,6 +188,7 @@ export async function callTool(
   body: unknown,
   context: ToolContext,
 ): Promise<ToolResult> {
+  if (isReadToolName(name)) return callReadTool(name, body, context.env, context.grant);
   switch (name) {
     case "kogane.capabilities": {
       if (body !== undefined && body !== null && Object.keys(body as object).length > 0)

@@ -9,7 +9,6 @@ export default defineConfig({
         r2Buckets: ["DATA"],
         bindings: {
           RELEASE_SHA: "0000000000000000000000000000000000000000",
-          ADMIN_TRIGGER_TOKEN: "local-test-only",
           PRESTIA_BANK_USER_ID: "syntheticuser12",
           PRESTIA_BANK_PASSWORD: "syntheticpassword",
           PRESTIA_BANK_USER_AGENT: "Synthetic WebView",

@@ -72,26 +72,7 @@ export default {
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket" && url.pathname === "/tcp") {
       return relayTcp(request, env, ctx, url);
     }
-    if (request.method !== "POST" || url.pathname !== "/trigger") {
-      return Response.json({ error: "Not found" }, { status: 404 });
-    }
-    if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    if (url.searchParams.size !== 0) {
-      return Response.json(
-        { error: "SBI Shinsei collection is a current snapshot and accepts no date range" },
-        { status: 400 },
-      );
-    }
-    try {
-      const result = await runCollection(env);
-      return Response.json(publicResult(result), {
-        status: result.status === "failed" ? 503 : 200,
-      });
-    } catch (error) {
-      return Response.json({ error: publicError(error) }, { status: 400 });
-    }
+    return Response.json({ error: "Not found" }, { status: 404 });
   },
   async scheduled(_controller, env): Promise<void> {
     const result = await runCollection(env);
@@ -100,7 +81,8 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
-async function runCollection(
+/** Module-only executor; the entrypoint exposes it solely through validated private RPC. */
+export async function runCollection(
   env: Env,
   // The hook U06's operations API fills in when it dispatches a run: the
   // operation it accepted and the attempt this invocation is. Both end up in
@@ -318,13 +300,6 @@ async function readBoundedText(response: Response, maximumBytes: number): Promis
     reader.releaseLock();
   }
 }
-function authorized(request: Request, expected: string | undefined): boolean {
-  const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
-  if (!provided || !expected) return false;
-  const left = new TextEncoder().encode(provided);
-  const right = new TextEncoder().encode(expected);
-  return left.byteLength === right.byteLength && timingSafeEqual(left, right);
-}
 async function relayTcp(
   request: Request,
   env: Env,
@@ -380,28 +355,8 @@ function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
 }
-function publicError(error: unknown): string {
-  const value = error instanceof Error ? error.message : "Unknown error";
-  return value
-    .replace(/Bearer\s+[^\s,;]+/giu, "Bearer [redacted]")
-    .replace(
-      /(password|accountNumber|branchNumber|cookie|csrf|token)=?[^\s,;]+/giu,
-      "$1=[redacted]",
-    )
-    .slice(0, 300);
-}
-function publicResult(result: CollectionResult): object {
-  return {
-    runId: result.runId,
-    status: result.status,
-    liveReadsEnabled: result.liveReadsEnabled,
-    artifactCount: result.artifacts.length,
-    failureCount: result.failures.length,
-    manifestKey: result.manifestKey,
-  };
-}
 
-/** Private service-binding collection; public token/Access routes keep their checks. */
+/** Private service-binding collection; public HTTP cannot invoke collection. */
 export async function alarmCollection(
   env: Env,
   _cron: string,

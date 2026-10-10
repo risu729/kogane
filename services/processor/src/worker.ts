@@ -1,3 +1,5 @@
+import { delegatedMaintenanceRoute } from "./delegated-maintenance";
+import { delegatedScheduleRoute } from "./delegated-schedules";
 import { retireReplacedJobsSql } from "./job-retirement-sql.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { PersistedObservation } from "../../../packages/parsers/src/scheduled-payment.ts";
@@ -2069,6 +2071,10 @@ export default {
     // Worker is published on no hostname, so the App asks it over the
     // `PIPELINE` service binding after authenticating the caller; a request
     // that did not arrive that way is refused, not answered. Read-only.
+    const delegatedScheduling =
+      (await delegatedMaintenanceRoute(request, env, url)) ??
+      (await delegatedScheduleRoute(request, env, url));
+    if (delegatedScheduling) return delegatedScheduling;
     const scheduling = await scheduleRoute(request, env, url);
     if (scheduling) return scheduling;
     const health = await internalHealthRoute(request, env, path);

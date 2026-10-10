@@ -14,7 +14,7 @@ import {
 } from "../src/parsers";
 import { myJcbRunPlan } from "../src/shared-collection";
 import { HumanRequiredError, StopConditionError } from "../src/types";
-import worker from "../src/worker";
+import worker, { runSharedCollection } from "../src/worker";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { readTerminal } from "../../../packages/collection/src/index";
 import { creditMenu } from "./synthetic-myjcb";
@@ -839,7 +839,6 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
     try {
       const env = {
         COLLECTOR_SCHEMA_VERSION: "myjcb-worker-poc-v1",
-        ADMIN_TRIGGER_TOKEN: "synthetic-token",
         MYJCB_CONNECTIONS_JSON: JSON.stringify([
           {
             connectionId: "account-one",
@@ -850,14 +849,7 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
         ]),
         DATA: data,
       } as unknown as Env;
-      const response = await worker.fetch!(
-        new Request("https://collector.invalid/trigger", {
-          method: "POST",
-          headers: { authorization: "Bearer synthetic-token" },
-        }) as unknown as Parameters<NonNullable<typeof worker.fetch>>[0],
-        env,
-        {} as ExecutionContext,
-      );
+      const response = await runSharedCollection(env, "scheduled");
       const decoder = new TextDecoder();
       const stored = [...data.entries.entries()]
         .map(([key, entry]) => `${key}\n${decoder.decode(entry.bytes)}`)
@@ -865,7 +857,7 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
       return {
         stored,
         logs: lines.join("\n"),
-        response: await response.text(),
+        response: JSON.stringify(response),
         status: response.status,
       };
     } finally {
@@ -890,7 +882,7 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
 
   test("a thrown fetch at a month stops the connection with a code only", async () => {
     const result = await run((url) => (detail(2)(url) ? "throw" : undefined));
-    expect(result.status).toBe(200);
+    expect(result.status).not.toBe("failed");
     expect(blockers(result)).toEqual([{ connectionId: "account-one", code: "month_fetch" }]);
     expect(result.stored).toContain('"safeErrorCode":"month_fetch"');
     // The capture sees the stop log and the diagnostics, so the check below reads them.
@@ -921,7 +913,7 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
       rows: [row("お支払日", ["2026/03/10", LEAK_WORD, "2026/04/10", `${LEAK_DIGITS}円`], "1円")],
     });
     const result = await run((url) => (detail(2)(url) ? html(scheduled) : undefined));
-    expect(result.status).toBe(200);
+    expect(result.status).not.toBe("failed");
     expect(blockers(result)).toEqual([
       { connectionId: "account-one", code: "scheduled_payments_page" },
     ]);
@@ -962,7 +954,7 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
             : undefined,
       creditMenu([0, 1], [7, 8]),
     );
-    expect(result.status).toBe(200);
+    expect(result.status).not.toBe("failed");
     expect(blockers(result)).toEqual([]);
     // The unit covers the months, which were read whole.
     expect(result.stored).toContain('"coverageStatus":"complete"');
@@ -996,7 +988,7 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
         `<h2>${LEAK_WORD}</h2><a href="detail.html?detailMonth=2">x</a></body>`,
       ),
     );
-    expect(result.status).toBe(502);
+    expect(result.status).toBe("failed");
     expect(blockers(result)).toEqual([
       { connectionId: "account-one", code: "credit_menu_group_unrecognized" },
     ]);
@@ -1009,7 +1001,7 @@ describe("ADR 0005 amendment: no stop path carries provider or error text", () =
     const menuStop = await run((url) =>
       url.pathname.endsWith("/detailMenu.html") ? "throw" : undefined,
     );
-    expect(menuStop.status).toBe(502);
+    expect(menuStop.status).toBe("failed");
     expect(blockers(menuStop)).toEqual([{ connectionId: "account-one", code: "credit_menu" }]);
     expect(menuStop.stored).toContain('"safeErrorCode":"credit_menu"');
     expectNoLeak(menuStop);

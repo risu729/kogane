@@ -1,3 +1,10 @@
+import {
+  callDelegatedScheduleTool,
+  delegatedScheduleTools,
+  delegatedSchedulesServed,
+  EXECUTABLE_SCHEDULE_CAPABILITIES,
+  isDelegatedScheduleTool,
+} from "./delegated-schedule-tools";
 // The agent API routes and the human UI's shared-query route.
 //
 // One of the browser's two non-GET surfaces (the other is A09's change
@@ -59,17 +66,43 @@ import {
 } from "./mcp";
 import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { opsApiEnabled } from "./ops-api";
-import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
 import {
   readScheduleTool,
   SCHEDULE_READ_TOOL,
   SCHEDULE_UPDATE_TOOL,
   scheduleToolsFor,
   schedulesServed,
-  updateScheduleTool,
 } from "./schedule-tools";
+import {
+  callOpsTool,
+  callDelegatedOpsTool,
+  delegatedOpsTools,
+  EXECUTABLE_OPS_CAPABILITIES,
+  isOpsToolName,
+  OPS_MCP_TOOLS,
+} from "./ops-tools";
+import {
+  callDelegatedMaintenanceTool,
+  delegatedMaintenanceTools,
+} from "./delegated-maintenance-tools";
 import { HttpError, json } from "./http";
-import { mcpDelegationCapabilities } from "./delegation";
+import { mcpDelegationCapabilities, resolveMcpDelegation } from "./delegation";
+
+import { commandsEnabled } from "./command-api";
+import {
+  callDelegatedCommandTool,
+  delegatedCommandTools,
+  EXECUTABLE_COMMAND_CAPABILITIES,
+  isDelegatedCommandTool,
+} from "./delegated-command-tools";
+
+import { readMcpTools } from "./read-tools";
+import {
+  callDelegatedDecisionTool,
+  delegatedDecisionTools,
+  EXECUTABLE_DECISION_CAPABILITIES,
+  isDelegatedDecisionTool,
+} from "./delegated-decision-tools";
 
 const AGENT_PREFIX = "/api/agent/v1/";
 export const MCP_PATH = "/mcp";
@@ -202,15 +235,15 @@ export async function agentApi(
     // so a client that asks anyway is told `grants_misconfigured` rather than
     // "no such tool".
     const listOps = ops && caller.kind !== "mcp-client" && grantsUsable(env);
+    let delegated: ReturnType<typeof resolveMcpDelegation> | undefined;
+    const delegation = () => (delegated ??= resolveMcpDelegation(env, caller, delegationNow));
     // The purchase explanation exists exactly while the operator route does
     // (`cardPurchaseRecognition`): otherwise it is neither listed nor callable.
     // That needs the store's schema, so it is asked once, and only by a message
     // that depends on it: `initialize`, `ping` and notifications touch no table.
     let served: Promise<boolean> | undefined;
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
-    // The maintenance tools (ADR 0046) exist while the settings routes do. The
-    // read is listed to a grant holding `schedules.read`; the revision is
-    // listed to nobody, since no delegation executes yet (ADR 0063).
+    // Reads require schedules.read; the write is separately listed to a resolved delegation.
     const schedules = schedulesServed(env);
     // The reconstructed state likewise exists exactly while its GET route does.
     let reconstructedServed: Promise<boolean> | undefined;
@@ -231,34 +264,71 @@ export async function agentApi(
               ...result,
               body: {
                 ...(result.body as Record<string, unknown>),
-                delegation: await mcpDelegationCapabilities(env, caller, delegationNow),
+                delegation: await mcpDelegationCapabilities(env, caller, delegationNow, [
+                  ...(ops ? EXECUTABLE_OPS_CAPABILITIES : []),
+                  ...(delegatedSchedulesServed(env)
+                    ? [...EXECUTABLE_SCHEDULE_CAPABILITIES, "schedules.maintenance.update" as const]
+                    : []),
+                  ...(commandsEnabled(env) && env.PIPELINE
+                    ? [...EXECUTABLE_COMMAND_CAPABILITIES, ...EXECUTABLE_DECISION_CAPABILITIES]
+                    : []),
+                ]),
               },
             };
+          });
+        if (schedules && name === SCHEDULE_UPDATE_TOOL)
+          return toolCall(request, env, caller, name, async (audit) => {
+            if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
+            return callDelegatedMaintenanceTool(body, env, await delegation(), audit);
+          });
+        if (isDelegatedScheduleTool(name) && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async (audit) => {
+            if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
+            return callDelegatedScheduleTool(name, body, env, await delegation(), audit);
+          });
+        if (isDelegatedDecisionTool(name) && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async (audit) => {
+            if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
+            return callDelegatedDecisionTool(name, body, env, await delegation(), audit);
+          });
+        if (isDelegatedCommandTool(name) && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async (audit) => {
+            if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
+            return callDelegatedCommandTool(name, body, env, await delegation(), audit);
           });
         if (isAgentToolName(name))
           return toolCall(request, env, caller, name, (audit) =>
             callTool(name, body, { ...context, audit }),
           );
         if (ops && isOpsToolName(name))
-          return toolCall(request, env, caller, name, (audit) =>
-            callOpsTool(name, body, env, caller, audit),
-          );
-        // The maintenance read is graded by this API's grant, as on its HTTP
-        // route; the maintenance revision only by the caller's delegation,
-        // which nothing executes under yet (ADR 0063, plan S3/S4).
+          return toolCall(request, env, caller, name, async (audit) => {
+            if (caller.kind !== "mcp-client") return callOpsTool(name, body, env, caller, audit);
+            if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
+            return callDelegatedOpsTool(name, body, env, await delegation(), audit);
+          });
+        // The maintenance read is graded by this API's grant, as on its HTTP route.
         if (schedules && name === SCHEDULE_READ_TOOL)
           return toolCall(request, env, caller, name, () => readScheduleTool(body, env, grant));
-        if (schedules && name === SCHEDULE_UPDATE_TOOL)
-          return toolCall(request, env, caller, name, () =>
-            updateScheduleTool(body, env, caller, delegationNow),
-          );
         return null;
       },
       async () => [
         ...MCP_TOOLS,
+        ...readMcpTools(grant),
+        ...(caller.kind === "mcp-client"
+          ? [
+              ...delegatedCommandTools(env, await delegation()),
+              ...delegatedDecisionTools(env, await delegation()),
+              ...delegatedScheduleTools(env, await delegation()),
+              ...delegatedMaintenanceTools(env, await delegation()),
+            ]
+          : []),
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),
         ...((await reconstructed()) ? RECONSTRUCTED_STATE_MCP_TOOLS : []),
-        ...(listOps ? OPS_MCP_TOOLS : []),
+        ...(caller.kind === "mcp-client" && ops
+          ? delegatedOpsTools(await delegation())
+          : listOps
+            ? OPS_MCP_TOOLS
+            : []),
         ...(schedules ? scheduleToolsFor(grant) : []),
       ],
     );

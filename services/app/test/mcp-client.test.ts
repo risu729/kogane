@@ -608,7 +608,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
     ] as const) {
       const called = await callTool(name, args, { environment: HOSTILE });
       expect(called.isError, name).toBe(true);
-      expect(called.structuredContent, name).toEqual({ error: "actor_not_supported" });
+      expect(called.structuredContent, name).toEqual({ error: "delegation_not_configured" });
     }
     expect(await opsRowCount()).toBe(before);
   });
@@ -627,7 +627,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
         kind: "mcp-client",
         principal: AGENT,
       });
-      expect(outcome).toEqual({ status: 403, body: { error: "actor_not_supported" } });
+      expect(outcome).toEqual({ status: 403, body: { error: "delegation_not_configured" } });
       expect(await opsRowCount()).toBe(before);
       // Even the agent-only name as a bare string is never graded.
       expect(() => principalFor(vars, AGENT), JSON.stringify(vars)).toThrow(
@@ -904,7 +904,16 @@ describe("tools under each grant shape", () => {
       const environment = grants({ [AGENT]: grant(capabilities) });
       // The list describes this deployment; the grant is enforced on the call
       // and described by kogane.capabilities.
-      expect(await listTools({ environment })).toEqual(PUBLISHED);
+      expect(await listTools({ environment })).toEqual(
+        capabilities.includes("records.read")
+          ? [
+              ...AGENT_TOOL_NAMES,
+              "kogane.instruments.history",
+              PURCHASES_TOOL_NAME,
+              RECONSTRUCTED_STATE_TOOL_NAME,
+            ]
+          : PUBLISHED,
+      );
       const report = await callTool("kogane.capabilities", {}, { environment });
       expect(report.structuredContent["capabilities"]).toEqual(capabilities);
       const expected: [string, unknown, string][] = [

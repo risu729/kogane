@@ -40,7 +40,6 @@ export interface Env {
   VPASS_DEVICE_ID: string;
   VPASS_AUTH_PUBLIC_KEY_B64: string;
   VPASS_CONFIG_PUBLIC_KEY_B64: string;
-  ADMIN_TRIGGER_TOKEN: string;
   SCHEDULE_DB?: D1Database;
 }
 type JsonObject = Record<string, unknown>;
@@ -397,39 +396,6 @@ async function persistFailedCard(
   logVpassDiagnostic(sharedRunDiagnostic(runId, unitKey, outcome));
   return sharedRunPersisted(outcome);
 }
-async function collectOneCard(
-  env: Env,
-  selectedCardZeroBased: number,
-  scheduledTime = Date.now(),
-): Promise<RunSummary> {
-  return withCollectionLease(env, "vpass", async () => {
-    const started = new Date(scheduledTime);
-    const runId = safeRunId(started);
-    const cardLabel = `card-${String(selectedCardZeroBased + 1).padStart(3, "0")}`;
-
-    const diagnostic = createDiagnostics("vpass", runId);
-    let session: VpassSession;
-    try {
-      session = await diagnostic.step("session-open", () => openSession(env));
-    } catch (error) {
-      diagnostic.finish("failed");
-      {
-        await persistFailedCard(env, runId, cardLabel, started).catch(() => {});
-        throw error;
-      }
-    }
-    try {
-      const result = await diagnostic.step("card-collection", () =>
-        captureCard(env, session, selectedCardZeroBased, started, runId),
-      );
-      diagnostic.finish("success");
-      return result;
-    } catch (error) {
-      diagnostic.finish("failed");
-      throw error;
-    }
-  });
-}
 async function collectAllCards(
   env: Env,
   scheduledTime: number,
@@ -490,50 +456,16 @@ export default {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     await collectAllCards(env, controller.scheduledTime);
   },
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, _env: Env): Promise<Response> {
     const url = new URL(request.url);
     if (request.method === "GET" && url.pathname === "/health") {
       return Response.json({ ok: true, service: "kogane-vpass-collector-poc" });
     }
-    if (
-      request.method !== "POST" ||
-      (url.pathname !== "/__collect" && url.pathname !== "/__collect-all")
-    ) {
-      return new Response("Not found", { status: 404 });
-    }
-    if (!(await authorized(request, env.ADMIN_TRIGGER_TOKEN))) {
-      return new Response("Unauthorized", { status: 401 });
-    }
-    if (url.pathname === "/__collect-all") {
-      return Response.json(await collectAllCards(env, Date.now()));
-    }
-    const requestedCard = Number(url.searchParams.get("card"));
-    if (!Number.isInteger(requestedCard) || requestedCard < 1) {
-      return Response.json({ error: "card must be a positive integer" }, { status: 400 });
-    }
-    const summary = await collectOneCard(env, requestedCard - 1);
-    return Response.json(summary);
+    return Response.json({ error: "Not found" }, { status: 404 });
   },
 } satisfies ExportedHandler<Env>;
-async function authorized(request: Request, configured: string | undefined): Promise<boolean> {
-  const token = requireSecret(configured, "ADMIN_TRIGGER_TOKEN");
-  const expected = new TextEncoder().encode(`Bearer ${token}`);
-  const actual = new TextEncoder().encode(request.headers.get("authorization") ?? "");
-  if (expected.byteLength !== actual.byteLength) return false;
-  const subtle = crypto.subtle as SubtleCrypto & {
-    timingSafeEqual?: (left: ArrayBuffer, right: ArrayBuffer) => boolean;
-  };
-  if (typeof subtle.timingSafeEqual === "function") {
-    return subtle.timingSafeEqual(new Uint8Array(expected).buffer, new Uint8Array(actual).buffer);
-  }
-  let difference = 0;
-  for (let index = 0; index < expected.byteLength; index += 1) {
-    difference |= expected[index]! ^ actual[index]!;
-  }
-  return difference === 0;
-}
 
-/** Private service-binding collection; public token/Access routes keep their checks. */
+/** Private service-binding collection; public HTTP cannot invoke collection. */
 export async function alarmCollection(
   env: Env,
   _cron: string,

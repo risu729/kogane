@@ -49,11 +49,11 @@ TAMIA経路のCloudflare live run `0e999a32-6994-450e-a495-2daff0e7aeb1` は `st
 
 ## Worker surface
 
-| Trigger           | Behavior                                                                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health`     | schema version、source、live-read readiness のみ返す。                                                                                                           |
-| `POST /trigger`   | `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>` 必須。実行時点のsnapshotを1回収集し、validated artifactとmanifestを共有DATA bucketへ保存。期間指定は受け付けない。 |
-| Cron `0 21 * * *` | 毎日 06:00 JSTに同じContainer収集を1回実行。全失敗はfailure manifestを保存した上でinvocationを失敗させ、部分取得はpartial evidenceとして保存する。               |
+| Trigger                           | Behavior                                                                                                                                           |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`                     | schema version、source、live-read readiness のみ返す。                                                                                             |
+| Private `ScheduledCollection` RPC | 既存の固定actionで現在snapshotを収集する。公開 `/trigger` は404。                                                                                  |
+| Cron `0 21 * * *`                 | 毎日 06:00 JSTに同じContainer収集を1回実行。全失敗はfailure manifestを保存した上でinvocationを失敗させ、部分取得はpartial evidenceとして保存する。 |
 
 R2 key（共有DATA bucket `kogane-raw-evidence`）:
 
@@ -80,26 +80,9 @@ Cloudflare secret として設定します。値を repository、`.dev.vars`、l
 
 - `SBI_SHINSEI_CREDENTIAL_JSON`
   - `{ "branchNumber": "...", "accountNumber": "...", "powerDirectPassword": "..." }`
-- `ADMIN_TRIGGER_TOKEN`
 - `RELAY_TOKEN`
 
-`ADMIN_TRIGGER_TOKEN`はCloudflareから値を読み戻せないため、collector専用スクリプトでローカルfileとWorker secretを同じ値へ同期する。初回作成またはrotationは次を実行する。このスクリプトは32-byteの乱数を生成し、current user所有・mode 0600のregular non-symlink fileだけを使用する。token値はstdout、stderr、Wrangler引数へ出さない。
-
-```bash
-bash services/collector-sbi-shinsei/scripts/sync-admin-trigger-token.sh --rotate
-```
-
-rotationは保護されたtemporary fileから同じdirectoryの`.pending`を原子的に作り、その値をstdinで`ADMIN_TRIGGER_TOKEN`へ同期する。Wrangler成功後だけ`.pending`を既定pathへatomic renameする。同期結果が不明または失敗した場合は、既存のlocal tokenを変更せず`.pending`を残す。新しいtokenを生成せず、次で同じ値を再送して回復する。
-
-```bash
-bash services/collector-sbi-shinsei/scripts/sync-admin-trigger-token.sh --resume
-```
-
-既存local tokenをrotationせずWorkerへ再同期する場合だけ`--sync`を使う。`.pending`が存在する間は`--sync`と新しい`--rotate`を拒否する。成功出力はsecret名とlocal pathだけである。以前canaryに使った`backfill-raw-evidence.sh`はrouteとともに廃止した。
-
-```bash
-bash services/collector-sbi-shinsei/scripts/sync-admin-trigger-token.sh --sync
-```
+公開admin入口と専用token同期scriptは廃止した。`RELAY_TOKEN` と銀行資格情報は変更しない。
 
 ローカルCLIは次の順でcredentialを読みます。
 

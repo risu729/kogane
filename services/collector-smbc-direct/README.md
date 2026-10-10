@@ -45,7 +45,7 @@ printf '%s\n' '<item-id>' > /home/risu/.local/state/kogane/smbc-direct-bitwarden
 ```
 
 `SESSION_ENCRYPTION_KEY` は初回同期時に32 byteで生成し、ローカルの `smbc-direct-session-encryption-key` とWorker secretへ保存する。
-第三引数の管理token fileは未作成ならowner-onlyで生成され、`ADMIN_TRIGGER_TOKEN`として同期される。認証値は標準出力へ出さない。
+未使用の管理token生成・同期は廃止した。既存のAccess認証、同一origin/action-header検証、session暗号鍵を維持する。認証値は標準出力へ出さない。
 
 ## 中央raw-evidenceへの保存
 
@@ -56,7 +56,7 @@ runは`packages/collection`で共有DATA bucketへ直接書き、ProcessorがDAT
 - Worker: `kogane-smbc-direct-backfill-poc`
 - Durable Object: `SmbcBackfillSession`
 - R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
-- Worker secrets: `SMBC_CREDENTIAL_JSON`, `SESSION_ENCRYPTION_KEY`, `ADMIN_TRIGGER_TOKEN`
+- Worker secrets: `SMBC_CREDENTIAL_JSON`, `SESSION_ENCRYPTION_KEY`
 - Worker-level Cloudflare Access: productionとpreviewを保護（preview自体は無効）
 
 Access未認証requestはWorker側でも403にする。POSTは同一originとcustom action headerを要求する。

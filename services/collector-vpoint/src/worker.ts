@@ -3,7 +3,6 @@ import {
   scheduledFailure,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
-import { timingSafeEqual } from "node:crypto";
 import type { PersistRunResult } from "../../../packages/collection/src/index";
 import { logEvent, logFailure, logStage, type CollectionStage } from "./diagnostics";
 import { extractVPointEmailCode, isCollectorRecipient } from "./email";
@@ -53,19 +52,7 @@ export default {
         schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       });
     }
-    if (request.method !== "POST" || url.pathname !== "/trigger") {
-      return Response.json({ error: "Not found" }, { status: 404 });
-    }
-    if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const outcome = await runCollection(env);
-    const manifest = outcomeManifest(outcome);
-    const pending = awaitingReauthentication(manifest);
-    const persisted = outcome.terminal.persisted;
-    return Response.json(publicResult(outcome), {
-      status: pending ? 202 : manifest.status === "failed" || !persisted ? 502 : 200,
-    });
+    return Response.json({ error: "Not found" }, { status: 404 });
   },
   async scheduled(_controller, env): Promise<void> {
     const outcome = await runCollection(env);
@@ -181,7 +168,8 @@ export default {
     }
   },
 } satisfies ExportedHandler<Env>;
-async function runCollection(
+/** Module-only executor; the entrypoint exposes it solely through validated private RPC. */
+export async function runCollection(
   env: Env,
   acquisition?: {
     parentRunId?: string;
@@ -351,13 +339,6 @@ function reasonCodeOf(result: PersistRunResult): string {
 function sessionStub(env: Env): DurableObjectStub<VPointSession> {
   return env.VPOINT_SESSION.get(env.VPOINT_SESSION.idFromName("primary"));
 }
-function authorized(request: Request, expected: string | undefined): boolean {
-  const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
-  if (!provided || !expected) return false;
-  const left = new TextEncoder().encode(provided);
-  const right = new TextEncoder().encode(expected);
-  return left.byteLength === right.byteLength && timingSafeEqual(left, right);
-}
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
@@ -378,31 +359,6 @@ function outcomeManifest(outcome: CollectionOutcome): CollectionManifest {
 function runReference(outcome: CollectionOutcome): string {
   return `terminal=${outcome.terminal.terminalKey}; outcome=${outcome.terminal.outcome}`;
 }
-function publicResult(outcome: CollectionOutcome): object {
-  const manifest = outcomeManifest(outcome);
-  return {
-    runId: manifest.runId,
-    status: manifest.status,
-    historyTotal: manifest.historyTotal,
-    historyPageCount: manifest.historyPageCount,
-    artifactCount: manifest.artifacts.length,
-    failureCount: manifest.failures.length,
-    emailReconciliation: manifest.emailReconciliation,
-    reauthenticationPending: awaitingReauthentication(manifest),
-    ...{
-      terminal: {
-        outcome: outcome.terminal.outcome,
-        persisted: outcome.terminal.persisted,
-        terminalKey: outcome.terminal.terminalKey,
-        terminalDigest: outcome.terminal.terminalDigest,
-        objectCount: outcome.terminal.objectCount,
-        ...(outcome.terminal.reasonCode === undefined
-          ? {}
-          : { reasonCode: outcome.terminal.reasonCode }),
-      },
-    },
-  };
-}
 class VPointReauthenticationPendingError extends Error {
   constructor() {
     super("V Point email reauthentication is pending");
@@ -410,7 +366,7 @@ class VPointReauthenticationPendingError extends Error {
   }
 }
 
-/** Private service-binding collection; public token/Access routes keep their checks. */
+/** Private service-binding collection; public HTTP cannot invoke collection. */
 export async function alarmCollection(
   env: Env,
   _cron: string,

@@ -66,7 +66,7 @@ describe("V Point Pay readiness without credential changes", () => {
     expect(f.writes()).toBe(0);
   });
 
-  test("credential diagnostics require admin authentication before reading state", async () => {
+  test("retired credential diagnostics never read state", async () => {
     let reads = 0;
     const env = Object.assign({} as Env, {
       ADMIN_TRIGGER_TOKEN: "admin-test-only",
@@ -80,7 +80,7 @@ describe("V Point Pay readiness without credential changes", () => {
       new Request("https://collector.test/credential-status", { method: "POST" }),
       env,
     );
-    expect(response.status).toBe(401);
+    expect(response.status).toBe(404);
     expect(reads).toBe(0);
   });
 });

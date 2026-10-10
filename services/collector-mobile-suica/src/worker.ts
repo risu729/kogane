@@ -4,21 +4,16 @@ import {
   scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
-import { timingSafeEqual } from "node:crypto";
 import type { PersistRunResult } from "../../../packages/collection/src/index";
 import {
   createDiagnostics,
   safeErrorDetails,
 } from "../../../packages/collector-diagnostics/src/index";
-import {
-  bootstrapMobileSuicaSessionWithBrowser,
-  checkBrowserPasskeyLogin,
-  inspectBrowserBootstrap,
-} from "./browser-bootstrap";
+import { bootstrapMobileSuicaSessionWithBrowser } from "./browser-bootstrap";
 import { collectMobileSuica, parseSessionEnvelope } from "./mobile-suica";
 import { persistMobileSuicaRun } from "./shared-run";
 import type { CollectionFailure, CollectionManifest, RawArtifact, StoredArtifact } from "./types";
-import { checkStoredJreCredential, parseStoredJreCredential } from "./webauthn";
+import { parseStoredJreCredential } from "./webauthn";
 /** What the shared target recorded about the run's terminal (03 §2). */
 interface SharedTerminalSummary {
   outcome: PersistRunResult["outcome"];
@@ -49,116 +44,7 @@ export default {
         schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       });
     }
-    if (request.method === "POST" && url.pathname === "/credential-check") {
-      if (!authorized(request, secretBinding(env, "ADMIN_TRIGGER_TOKEN"))) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      const credential = parseStoredJreCredential(
-        requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
-      );
-      const check = checkStoredJreCredential(credential);
-      return Response.json(
-        {
-          ok: check.verified,
-          rpId: credential.rpId,
-          algorithm: "ES256",
-          credentialIdBytes: check.credentialIdBytes,
-          authenticatorDataBytes: check.authenticatorDataBytes,
-          flags: check.flags,
-          signCount: check.signCount,
-          syncedAt: credential.syncedAt,
-        },
-        { status: check.verified ? 200 : 500 },
-      );
-    }
-    if (request.method === "POST" && url.pathname === "/browser-bootstrap-inspect") {
-      if (!authorized(request, secretBinding(env, "ADMIN_TRIGGER_TOKEN"))) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      try {
-        const credential = parseStoredJreCredential(
-          requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
-        );
-        return Response.json(await inspectBrowserBootstrap(env.BROWSER, credential));
-      } catch (error) {
-        return Response.json(
-          {
-            ok: false,
-            errorType: error instanceof Error ? error.name : "UnknownError",
-            message: publicError(error),
-          },
-          { status: 502 },
-        );
-      }
-    }
-    if (request.method === "POST" && url.pathname === "/browser-login-check") {
-      if (!authorized(request, secretBinding(env, "ADMIN_TRIGGER_TOKEN"))) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      try {
-        const credential = parseStoredJreCredential(
-          requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
-        );
-        const result = await checkBrowserPasskeyLogin(env.BROWSER, credential);
-        return Response.json(result, { status: result.ok ? 200 : 502 });
-      } catch (error) {
-        return Response.json(
-          {
-            ok: false,
-            errorType: error instanceof Error ? error.name : "UnknownError",
-            message: publicError(error),
-          },
-          { status: 502 },
-        );
-      }
-    }
-    if (request.method === "POST" && url.pathname === "/browser-session-check") {
-      if (!authorized(request, secretBinding(env, "ADMIN_TRIGGER_TOKEN"))) {
-        return Response.json({ error: "Unauthorized" }, { status: 401 });
-      }
-      try {
-        const credential = parseStoredJreCredential(
-          requiredSecret(secretBinding(env, "JRE_ID_CREDENTIAL_JSON"), "JRE_ID_CREDENTIAL_JSON"),
-        );
-        const session = parseSessionEnvelope(
-          JSON.stringify(await bootstrapMobileSuicaSessionWithBrowser(env.BROWSER, credential)),
-        );
-        return Response.json({
-          ok: true,
-          capturedAt: session.capturedAt,
-          cookieNames: session.cookieHeader
-            .split(";")
-            .map((part) => part.split("=", 1)[0]?.trim())
-            .sort(),
-          hasFormState: new URLSearchParams(session.formBody).has("baseVariable"),
-        });
-      } catch (error) {
-        return Response.json(
-          {
-            ok: false,
-            errorType: error instanceof Error ? error.name : "UnknownError",
-            message: publicError(error),
-          },
-          { status: 502 },
-        );
-      }
-    }
-    if (request.method !== "POST" || url.pathname !== "/trigger") {
-      return Response.json({ error: "Not found" }, { status: 404 });
-    }
-    if (!authorized(request, secretBinding(env, "ADMIN_TRIGGER_TOKEN"))) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    const asOfDateJst = url.searchParams.get("asOf") ?? tokyoDate(new Date());
-    if (!validDate(asOfDateJst)) {
-      return Response.json({ error: "asOf must be a valid YYYY-MM-DD" }, { status: 400 });
-    }
-    const outcome = await runCollection(env, asOfDateJst);
-    const manifest = outcomeManifest(outcome);
-    const persisted = outcome.terminal.persisted;
-    return Response.json(publicResult(outcome), {
-      status: manifest.status === "success" && persisted ? 200 : 502,
-    });
+    return Response.json({ error: "Not found" }, { status: 404 });
   },
   async scheduled(_controller, env): Promise<void> {
     const outcome = await runCollection(env, tokyoDate(new Date()));
@@ -315,13 +201,6 @@ function reasonCodeOf(result: PersistRunResult): string {
     ? result.reasonCode
     : "persisted";
 }
-function authorized(request: Request, expected: string | undefined): boolean {
-  const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
-  if (!provided || !expected) return false;
-  const left = new TextEncoder().encode(provided);
-  const right = new TextEncoder().encode(expected);
-  return left.byteLength === right.byteLength && timingSafeEqual(left, right);
-}
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
@@ -332,12 +211,6 @@ function secretBinding(env: Env, name: string): string | undefined {
 }
 function tokyoDate(now: Date): string {
   return new Date(now.getTime() + 9 * 3600000).toISOString().slice(0, 10);
-}
-function validDate(value: string): boolean {
-  return (
-    /^\d{4}-\d{2}-\d{2}$/u.test(value) &&
-    new Date(`${value}T00:00:00.000Z`).toISOString().slice(0, 10) === value
-  );
 }
 function failure(
   operation: CollectionFailure["operation"],
@@ -352,38 +225,8 @@ function failure(
     ...(artifactKey ? { artifactKey } : {}),
   };
 }
-function publicError(error: unknown): string {
-  const value = error instanceof Error ? error.message : "Unknown error";
-  return value
-    .replace(/(cookie|session|baseVariable|token|assertion)=?[^\s,;]+/giu, "$1=[redacted]")
-    .slice(0, 300);
-}
-function publicResult(outcome: CollectionOutcome): object {
-  const manifest = outcomeManifest(outcome);
-  return {
-    runId: manifest.runId,
-    status: manifest.status,
-    asOfDateJst: manifest.asOfDateJst,
-    transactionCount: manifest.transactionCount,
-    pageCount: manifest.pageCount,
-    artifactCount: manifest.artifacts.length,
-    failureCount: manifest.failures.length,
-    ...{
-      terminal: {
-        outcome: outcome.terminal.outcome,
-        persisted: outcome.terminal.persisted,
-        terminalKey: outcome.terminal.terminalKey,
-        terminalDigest: outcome.terminal.terminalDigest,
-        objectCount: outcome.terminal.objectCount,
-        ...(outcome.terminal.reasonCode === undefined
-          ? {}
-          : { reasonCode: outcome.terminal.reasonCode }),
-      },
-    },
-  };
-}
 
-/** Private service-binding collection; public token/Access routes keep their checks. */
+/** Private service-binding collection; public HTTP cannot invoke collection. */
 export async function alarmCollection(
   env: Env,
   _cron: string,

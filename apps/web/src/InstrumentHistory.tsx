@@ -1,3 +1,4 @@
+import { decisionOriginLabel } from "../../../packages/observation-shared/src/decision-origin-contract.ts";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { getJson } from "./api.ts";
@@ -52,7 +53,7 @@ export function InstrumentHistory({ identifierId }: { identifierId: string }) {
                       · {entry.createdAt}
                       <p>{entry.reason || "理由の記録なし"}</p>
                       <p>
-                        {entry.method} ·{" "}
+                        {decisionOriginLabel(entry.decisionOrigin, entry.method)} ·{" "}
                         {entry.decisionKind ?? entry.relationStatus ?? entry.status ?? "状態不明"}
                       </p>
                       {entry.instrumentId ? (

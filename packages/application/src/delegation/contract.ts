@@ -66,6 +66,7 @@ export interface DelegatedPrincipal {
   scopes: DelegationScopes;
   notAfter: string;
   delegationRef: string;
+  budget: { writesPerDay: number };
 }
 export type DelegationCaller =
   | { readonly kind: "mcp-client"; readonly principal: string }

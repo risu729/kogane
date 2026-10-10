@@ -1,3 +1,4 @@
+import { isDecisionOrigin } from "./decision-origin-contract.ts";
 import {
   INSTRUMENT_HISTORY_PATH,
   validInstrumentHistoryRead,
@@ -123,6 +124,7 @@ const organizationAccountFields = {
   status: literal("identified", "provider-local", "aggregate", "unresolved"),
   revision: (value: unknown): value is number => identifier(value) && value > 0,
   method: literal("rule", "manual"),
+  decisionOrigin: optional(isDecisionOrigin),
   reason: text,
 } satisfies Shape<Omit<OrganizedAccount, "connection">>;
 const organizationShape = object<ObservationOrganization>({
@@ -147,6 +149,7 @@ const organizationShape = object<ObservationOrganization>({
       nameEvidence: optional(
         object<NonNullable<OrganizedInstrument["nameEvidence"]>>({
           reason: literal("manual", "provider-current", "observed-japanese-script"),
+          decisionOrigin: optional(isDecisionOrigin),
           origin: nullable(object({ kind: observationKind, id: identifier })),
         }),
       ),
