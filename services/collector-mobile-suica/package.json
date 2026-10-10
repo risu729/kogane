@@ -11,7 +11,7 @@
     "@types/bun": "1.4.2",
     "@types/node": "26.6.4",
     "@vitest/coverage-istanbul": "4.1.11",
-    "cf": "1.0.0-beta.12",
+    "cf": "1.0.0-beta.13",
     "devtools-protocol": "0.0.1710668",
     "typescript": "7.0.2",
     "vitest": "4.1.11",

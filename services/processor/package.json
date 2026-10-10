@@ -10,7 +10,7 @@
   "devDependencies": {
     "@types/bun": "1.4.2",
     "@types/node": "26.6.4",
-    "cf": "1.0.0-beta.12",
+    "cf": "1.0.0-beta.13",
     "miniflare": "5.20260831.0-alpha",
     "typescript": "7.0.2",
     "undici": "8.11.2",

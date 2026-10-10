@@ -9,7 +9,7 @@
   ],
   "type": "module",
   "devDependencies": {
-    "cf": "1.0.0-beta.12",
+    "cf": "1.0.0-beta.13",
     "dependency-cruiser": "18.5.0",
     "istanbul-lib-coverage": "3.2.2",
     "knip": "6.40.0",
