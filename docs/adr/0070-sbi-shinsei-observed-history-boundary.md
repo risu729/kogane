@@ -75,3 +75,40 @@ all CSV columns. Existing route tests require zero session access, rotations
 and network calls for both candidates in all execution profiles. An
 independent reviewer must verify this slice before publication; hosted
 acquisition and original-file persistence are not verified by these tests.
+
+## Amendment: offline CSV byte comparisons (2026-10-10)
+
+Public controller source establishes a decoded-string to UTF-8 BOM Blob
+transformation, while the actual response declared Shift_JIS. Treating these
+representations as interchangeable would lose their lineage. No actual
+download or original HTTP byte capture has subsequently been observed.
+
+Options were to leave byte comparison entirely manual, accept normalized
+text equality as original-file proof, or add a bounded comparison-only helper.
+The last is selected; normalized equality as provenance proof is rejected.
+
+The new local helper reuses the decoded CSV/context/JSON-row checks. Optional
+candidate HTTP bytes must decode exactly to that text using the fatal WHATWG
+Shift_JIS decoder. Optional browser-artifact bytes must equal a U+FEFF prefix
+and UTF-8 encoding of the same text byte for byte. Absent bytes stay absent;
+an expected encoding is never returned as a reconstructed original.
+
+The helper rejects malformed encodings, isolated UTF-16 surrogates (which
+Blob would otherwise replace), altered bytes, missing/double BOMs, and local
+budget overflow. HTTP bytes and UTF-8 text have a 2 MiB local cap; the browser
+derivative allows only the additional three-byte BOM. No newline, decimal,
+Unicode or quote normalization is performed.
+
+Results contain sizes/counts and fixed classifications only. Successful
+comparisons still explicitly leave capture/provider-origin verification,
+persistence and registration readiness false and coverage unknown. This
+does not produce a terminal, descriptor, invented parent relation or stored
+artifact; ADR 0021's registration and append-only evidence rules are unchanged.
+
+Synthetic tests cover valid separate/combined/absent representations, Blob
+construction, bounded byte views, invalid Shift_JIS, normalization and BOM
+mismatches, lossy Unicode, budgets, context checks and zero network calls.
+The source semantics follow the [Encoding Standard](https://encoding.spec.whatwg.org/#interface-textdecoder)
+and [File API Blob processing](https://w3c.github.io/FileAPI/#process-blob-parts).
+Real capture provenance, token rotation and completeness require later
+authorized observation; these tests cannot establish them.
