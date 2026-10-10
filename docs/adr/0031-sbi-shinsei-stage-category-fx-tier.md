@@ -202,7 +202,7 @@ provider states both, in one session.
   the public page's statement although the logged-in FX page does not list
   it. The per-1-unit list is the provider's documentation of today; a change
   of convention would not be detected by the parser (`quoteBasis:
-"not-stated"` on every row).
+  "not-stated"` on every row).
 - **The stage observation is visible evidence.** It appears among valuation
   observations with currency `XXX` and no amount (its decimal row is
   `missing`, never zero); the financial-product reader stops at it as it does

@@ -320,7 +320,7 @@ For the card unit's coverage:
   registered descriptor changes and the contract stays
   `terminal-registration-v2`. `scripts/artifact-datasets.test.ts` pins it.
 - **View.** The specification is migration 0021's select, unchanged, `UNION
-ALL` a shared-R2 select with the same requirements: a visible artifact of a
+  ALL` a shared-R2 select with the same requirements: a visible artifact of a
   successful, sealed Vpass run; the
   financial unit `card-NNN` of kind `card`; one binding unit of kind `card`
   keyed `vpass-card-v1-<64 lowercase hex>` with a successful terminal report

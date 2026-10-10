@@ -361,7 +361,7 @@ metadata — so the boundary has its own tests:
 - Grant entries (fact 6): `packages/application/test/grants.test.ts` and
   `test/agent-api.test.ts` refuse a table whose entry names a different
   principal, the same principal, or an unknown key (`403
-agent_api_not_configured` on the HTTP agent route and `/mcp`), and still
+  agent_api_not_configured` on the HTTP agent route and `/mcp`), and still
   parse the documented shape under its key.
 - `test/agent-api.test.ts`, `test/ops-api.test.ts` (whose MCP block now pins
   that no operation is published or accepted on `/mcp` while HTTP still

@@ -33,7 +33,7 @@ command or financial consumer, and cannot prove storage atomicity.
 
 - `ExactDecimal { coefficient, scale }` in the decimal-v1 canonical form (no
   trailing zeros, `-0` is `0`). `ValueState` is `exact | missing | unparsed |
-conflict`; `Quantity { unitRef, value }`.
+  conflict`; `Quantity { unitRef, value }`.
 - Arithmetic on BigInt: `addDecimals`, `subtractDecimals`, `negateDecimal`,
   `multiplyDecimals`, `compareDecimals`, `sumDecimals`, scale alignment.
   `multiplyByRatio` and `divideDecimals` are exact or return
@@ -168,11 +168,11 @@ policy it applies; none has a default.
 - `ScopeDefinition` (perimeter, sorted source refs, account / product /
   pocket, instrument, time range, membership evidence) with `scopeDigest`
   over the canonical form. `ScopeRelationClaim` is `same | disjoint | subset
-| overlaps | unknown` with evidence and decision references.
+  | overlaps | unknown` with evidence and decision references.
 - `selectAdoptedSet(target, candidates, relations, options)` implements
   addendum 05 §5 steps 2–7 deterministically and returns `{ adopted,
-excluded: [{ ref, reasonCode }], unresolved: [{ ref, reasonCode }],
-adoptedTotal, completeness, warnings }`:
+  excluded: [{ ref, reasonCode }], unresolved: [{ ref, reasonCode }],
+  adoptedTotal, completeness, warnings }`:
   1. candidates of another metric or unit are excluded;
   2. non-exact values and partial or unknown coverage are unresolved;
   3. `same` evidence is bundled when it agrees; disagreements stay
@@ -217,7 +217,7 @@ adoptedTotal, completeness, warnings }`:
 - `TransformManifest` (root review 03, D03) identifies a transformation by
   code digest and contract versions, not by semver alone.
 - `Replayability`: `replayable | artifact-preserved | restricted |
-unavailable`. `InterpretationContext`: `latest | as-recorded | snapshot`
+  unavailable`. `InterpretationContext`: `latest | as-recorded | snapshot`
   with the release identifiers used (root review 04).
 - Canonical form `canonical-json-v1`: object keys sorted by UTF-16 code
   units, arrays in given order, strings as JSON, booleans, null and safe
@@ -245,7 +245,7 @@ unavailable`. `InterpretationContext`: `latest | as-recorded | snapshot`
   `published`.
 - `Allocation` and the conservation checks of addendum 07 §4:
   `checkTransferConservation` (`source decrease = destination increase +
-explicit fees + declared unresolved difference`, per unit, gap reported not
+  explicit fees + declared unresolved difference`, per unit, gap reported not
   absorbed), `checkObligationAllocations`, `checkFillAllocations` and
   `checkSourceAllocations` (sums never exceed the limit; negative allocations
   rejected).
@@ -321,7 +321,7 @@ described in [identity](identity.md#cross-identifier-instrument-candidates).
   lot selections. `validLotInput`, `validLotInputRef` and `validLotPolicy`
   reject unknown keys.
 - `LotPolicy` pins purpose, method (`fifo | moving-average |
-specific-identification`), scope, time basis, ordering rule, fee and FX
+  specific-identification`), scope, time basis, ordering rule, fee and FX
   treatment, `fxPolicyRef`, `costUnitRef` and an optional `leg`/`carry`
   `RoundingPolicy`.
 - Whole-run refusals, in order: `policy_missing`; `invalid_input` for a

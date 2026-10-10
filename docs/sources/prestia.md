@@ -932,7 +932,7 @@ Observed on the live Account Activities screen by the owner's agent
 - The month select (`W131301.referenceDate`, a placeholder option plus 15
   months) submits by POST on change.
 - A month with more than ten statements shows `Found N Result [p/Ppage] Back
-Next`. Back and Next are Nablarch POST links; there are no page-number
+  Next`. Back and Next are Nablarch POST links; there are no page-number
   links and no page-size setting. A page holds at most ten statement blocks
   (each block two `table.tableStyle4`). Of 15 months, five had two pages;
   the largest stated total was 20. (This survey also said a month of ten or
@@ -1055,7 +1055,7 @@ switched back afterwards, in Japanese:
   `name` is `nextSubmit` on the top pager and `nablarch_form5_2` (Nablarch's
   automatic numbering) on the bottom one, `href` is the same path with
   no query or fragment, `onclick` is `return
-window.nablarch_submit(event, this);`. Back is the same with `prevSubmit`.
+  window.nablarch_submit(event, this);`. Back is the same with `prevSubmit`.
   A disabled link is its label as plain text in the div, no `a`, still shown.
 - **Two pages.** Page 1 of a two-page month showed `[1/2page]` and ten
   statement blocks (`table.tableStyle4` ×20, two per block), Back disabled.
@@ -1072,7 +1072,7 @@ window.nablarch_submit(event, this);`. Back is the same with `prevSubmit`.
   為替手数料, 確定状態, 承認番号, 備考, ご利用通貨 金額, ご利用手数料, 換算レート.
   The Japanese month page is titled 「利用明細照会」.
 - **Small and empty months.** A month of ten or fewer still shows `Found N
-Result [1/1page] Back Next` with both links disabled (the 2026-09-27 note
+  Result [1/1page] Back Next` with both links disabled (the 2026-09-27 note
   above said otherwise). A month with no statement shows no Found line, no
   pager and no table.
 - **Month switch.** Selecting another month resets the pager to page 1; a
@@ -1082,7 +1082,7 @@ Result [1/1page] Back Next` with both links disabled (the 2026-09-27 note
   page, Next and Back navigated on the first click every time. It is not
   site behaviour.
 - **Language.** 「Change language to Japanese」 sits in `form
-nablarch_form2` (post; hidden `cc`, `engUseFlg`,
+  nablarch_form2` (post; hidden `cc`, `engUseFlg`,
   `nablarch_needs_hidden_encryption`, `nablarch_hidden`, `nablarch_submit`).
   Its `onclick` is `set_language()` with no argument, a function that reads
   and writes a cookie and neither touches `engUseFlg` nor submits; its `href`
