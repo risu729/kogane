@@ -1,5 +1,6 @@
 import type { IdentityStatus, IdentityOrigin } from "./identity-contract.ts";
 import type { AccountConnection } from "./account-connection-contract.ts";
+import type { DecisionOrigin } from "./decision-origin-contract.ts";
 import type { FinancialProductClaim } from "./financial-products.ts";
 
 /** Effective interpretation alongside, never in place of, the stored source fields. */
@@ -11,6 +12,8 @@ export interface OrganizedAccount {
   status: IdentityStatus;
   revision: number;
   method: "rule" | "manual";
+  /** Closed persisted actor classification; optional only for older server responses. */
+  decisionOrigin?: DecisionOrigin;
   reason: string;
 }
 export interface OrganizedInstrument extends Omit<OrganizedAccount, "connection"> {
@@ -20,6 +23,8 @@ export interface OrganizedInstrument extends Omit<OrganizedAccount, "connection"
   value: string;
   nameEvidence?: {
     reason: "manual" | "provider-current" | "observed-japanese-script";
+    /** Origin of the current display-only name, independent of selected mapping read mode. */
+    decisionOrigin?: DecisionOrigin;
     origin: IdentityOrigin | null;
   };
 }

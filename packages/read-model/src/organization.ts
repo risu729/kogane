@@ -4,6 +4,7 @@
 // evidence browser so the read mode is a named input of the query rather than
 // a rewrite of its text.
 import { type IdentityReadMode, MAPPING_RELATIONS } from "./identity";
+import { mappingDecisionOriginSql } from "./decision-origin.ts";
 
 // Do not widen a 500-row list into a bulk download of every provider body.
 // These fixed paths retain JSON types and missing fields (not synthetic nulls).
@@ -67,9 +68,12 @@ SELECT o.kind,o.observation_id,o.historical,o.parse_run_id,o.parser_name,o.artif
  am.source_account_id account_reference,am.account_id account_target,
  am.label account_label,am.status account_status,am.revision account_revision,
  am.method account_method,am.reason account_reason,
+ ${mappingDecisionOriginSql("account_mapping", "am.source_account_id", "am.revision", "am.method")} account_decision_origin,
  u.role,d.id instrument_reference,im.instrument_id instrument_target,
  im.label instrument_label,im.status instrument_status,im.revision instrument_revision,
- im.method instrument_method,im.reason instrument_reason,d.namespace,d.scope,d.value
+ im.method instrument_method,im.reason instrument_reason,
+ ${mappingDecisionOriginSql("instrument_mapping", "im.identifier_id", "im.revision", "im.method")} instrument_decision_origin,
+ d.namespace,d.scope,d.value
 FROM ranked o ${mapping.account}
 JOIN source_accounts sa ON sa.id=o.source_account_id
 JOIN identity_run_contexts ctx ON ctx.identity_run_id=o.identity_run_id

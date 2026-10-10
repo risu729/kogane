@@ -13,6 +13,12 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import type { IdentityInput, IdentityPlan } from "../../../packages/identity/src/types.ts";
 import {
   approve,
+  assertDelegatedReversal,
+  prepareDelegatedOperation,
+  confirmDelegatedOperation,
+  OperationCall as Call,
+  type DelegatedPrincipal,
+  type OperationName,
   CARD_REVIEW_KINDS,
   CHANGE_KINDS,
   commit,
@@ -50,6 +56,7 @@ import {
   splitSql,
   startPipeline,
 } from "./harness.ts";
+import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { envelopeHeaders, testCall } from "./audit-envelope.ts";
 
 let mf: Miniflare;
@@ -601,6 +608,17 @@ test("an approval is bound to its plan digest, its expiry and its uses", async (
   });
 });
 
+// Earlier scenarios intentionally leave accepted operations in this shared DB.
+// Keep their evidence intact while dispatching only this scenario's due rows.
+async function isolateDueOutbox(operationId: string) {
+  await db
+    .prepare(
+      "UPDATE decision_outbox SET available_at_ms=? WHERE operation_id<>? AND processed_at IS NULL",
+    )
+    .bind(Date.parse("9999-01-01T00:00:00.000Z"), operationId)
+    .run();
+}
+
 test("the outbox publishes an accepted receipt once, and a duplicate delivery changes nothing", async () => {
   // A07 owns the balance-projection target; the dispatcher is handed the real
   // processor exactly as the scheduled run does. Without it the row is blocked
@@ -633,8 +651,9 @@ test("the outbox publishes an accepted receipt once, and a duplicate delivery ch
 
   // No processor for balance-projection: that row is blocked, so the read
   // model was not updated and the receipt is not published (05 section 6).
+  await isolateDueOutbox("op-outbox");
   const unowned = await dispatchDecisionOutbox(db, { limit: 50 });
-  expect(unowned.blocked).toBeGreaterThanOrEqual(1);
+  expect(unowned).toMatchObject({ claimed: 2, processed: 1, blocked: 1, published: 0 });
   expect(
     await db
       .prepare(
@@ -656,8 +675,7 @@ test("the outbox publishes an accepted receipt once, and a duplicate delivery ch
   // The identity row completed in the pass above; what is left is the
   // projection row, and only its completion publishes the receipt.
   const first = await dispatchDecisionOutbox(db, { limit: 50, processors: projection });
-  expect(first.processed).toBeGreaterThanOrEqual(1);
-  expect(first.published).toBeGreaterThanOrEqual(1);
+  expect(first).toMatchObject({ claimed: 1, processed: 1, published: 1 });
   const published = await getReceipt(store, operator.id, "op-outbox");
   expect(published).toMatchObject({ ok: true });
   if (!published.ok) throw new Error("unreachable");
@@ -701,13 +719,14 @@ test("an outbox target that throws is retried with backoff and never marked proc
   const plan = await planFor(mapping.ref, await target("target-retry"));
   const approval = await approveFor(plan);
   expect((await commitWith("op-retry", plan, approval.approvalId)).ok).toBe(true);
+  await isolateDueOutbox("op-retry");
   const failing = await dispatchDecisionOutbox(db, {
     limit: 50,
     processors: {
       "identity-projection": () => Promise.reject(new Error("synthetic outage amount=999999")),
     },
   });
-  expect(failing.failed).toBeGreaterThanOrEqual(1);
+  expect(failing).toMatchObject({ claimed: 2, failed: 1, blocked: 1, published: 0 });
   const row = await db
     .prepare(
       "SELECT processed_at,attempts,last_error_code,available_at_ms,lease_token FROM decision_outbox WHERE operation_id='op-retry' AND target='identity-projection'",
@@ -1432,4 +1451,628 @@ test("an audit record that cannot be written rolls back the plan, approval or co
   expect((await commitOnce(audit)).ok).toBe(true);
   expect(audit.recorded).toBe(true);
   expect(await auditRows("idempotency_key='op-audit-refused'")).toHaveLength(1);
+}, 60_000);
+
+test("delegated private binding admits a bounded plan but no financial adoption or forged family", async () => {
+  const mapping = await seedParse(249, "smbc-bank:delegated");
+  const targetId = await target("target-delegated");
+  const body = {
+    kind: "identity.assign",
+    payload: {
+      subject: "account",
+      referenceId: mapping.ref,
+      targetId,
+      reason: "synthetic delegated plan",
+    },
+    idempotencyKey: "delegated-plan-1",
+  };
+  const owner = "delegated-owner-synthetic";
+  const principal = `mcp-client:${owner}`;
+  const authority = {
+    delegationRef: `dlg_${"d".repeat(64)}`,
+    writesPerDay: 1,
+    notAfter: new Date(Date.now() + 600_000).toISOString(),
+    commandFamilies: ["plan"],
+    idempotencyKey: body.idempotencyKey,
+    payloadDigest: await canonicalDigest({
+      v: "kogane-delegated-payload-v1",
+      operation: "command.plan",
+      payload: body,
+    }),
+  };
+  const headers = {
+    "content-type": "application/json",
+    "x-kogane-verified-actor": principal,
+    "x-kogane-actor-kind": "delegated",
+    "x-kogane-audit-path": "mcp",
+    "x-kogane-correlation-id": crypto.randomUUID(),
+    "x-kogane-delegation-ref": authority.delegationRef,
+    "x-kogane-delegated-execution": JSON.stringify(authority),
+  };
+  const before = await counts();
+  const planned = await mf.dispatchFetch("https://pipeline.internal/command/v1/plan", {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  expect(planned.status).toBe(200);
+  expect(planned.headers.get("x-kogane-audit-recorded")).toBe("1");
+  const result = (await planned.json()) as { plan: ChangePlan; created: boolean };
+  expect(result.created).toBe(true);
+  const records = await auditRows("principal=?", principal);
+  expect(records).toHaveLength(1);
+  expect(records[0]).toMatchObject({
+    principal_kind: "delegated",
+    subject: owner,
+    delegation_ref: authority.delegationRef,
+    idempotency_key: body.idempotencyKey,
+    operation: "command.plan",
+    result: "applied",
+  });
+  const approved = await mf.dispatchFetch("https://pipeline.internal/command/v1/approve", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ planId: result.plan.planId, planDigest: result.plan.planId }),
+  });
+  expect(approved.status).toBe(403);
+  expect(await approved.json()).toEqual({ error: "confirmation_required" });
+  const denied = await mf.dispatchFetch("https://pipeline.internal/command/v1/plan", {
+    method: "POST",
+    headers: {
+      ...headers,
+      "x-kogane-delegated-execution": JSON.stringify({ ...authority, commandFamilies: [] }),
+    },
+    body: JSON.stringify(body),
+  });
+  expect(denied.status).toBe(403);
+  const forged = await mf.dispatchFetch("https://pipeline.internal/command/v1/plan", {
+    method: "POST",
+    headers: { ...headers, "x-kogane-actor-kind": "human" },
+    body: JSON.stringify(body),
+  });
+  expect(forged.status).toBe(400);
+  const changed = {
+    ...body,
+    idempotencyKey: "delegated-plan-2",
+    payload: { ...body.payload, reason: "another synthetic plan" },
+  };
+  const changedAuth = {
+    ...authority,
+    idempotencyKey: changed.idempotencyKey,
+    payloadDigest: await canonicalDigest({
+      v: "kogane-delegated-payload-v1",
+      operation: "command.plan",
+      payload: changed,
+    }),
+  };
+  const spent = await mf.dispatchFetch("https://pipeline.internal/command/v1/plan", {
+    method: "POST",
+    headers: { ...headers, "x-kogane-delegated-execution": JSON.stringify(changedAuth) },
+    body: JSON.stringify(changed),
+  });
+  expect(spent.status).toBe(429);
+  expect(await spent.json()).toEqual({ error: "delegation_budget_exceeded" });
+  expect(await auditRows("principal=?", principal)).toHaveLength(1);
+  const after = await counts();
+  expect(after).toEqual({ ...before, plans: before.plans + 1 });
+});
+
+test("delegated R2 prepares without effects, binds family and revision, and commits once with audit", async () => {
+  const mapping = await seedParse(250, "smbc-bank:delegated-r2");
+  const targetId = await target("target-delegated-r2");
+  const now = new Date().toISOString();
+  const plan = await planFor(mapping.ref, targetId, operator, now);
+  const p: DelegatedPrincipal = {
+    kind: "delegated",
+    id: "mcp-client:synthetic-r2-owner",
+    delegator: "synthetic-r2-owner",
+    capabilities: ["commands.decide.identity"],
+    scopes: { sources: "*", accounts: "*", scheduleSources: [] },
+    notAfter: new Date(Date.now() + 3_600_000).toISOString(),
+    delegationRef: `dlg_${"e".repeat(64)}`,
+    budget: { writesPerDay: 2 },
+  };
+  const call = (operation: OperationName) =>
+    new Call(operation, {
+      path: "mcp",
+      subject: p.delegator,
+      principal: p.id,
+      principalKind: "agent",
+      correlationId: crypto.randomUUID(),
+    });
+  const send = async (c: OperationCall, payload: unknown) =>
+    mf.dispatchFetch(
+      `https://pipeline.internal/command/v1/${c.operation.slice("command.".length)}`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-kogane-verified-actor": p.id,
+          "x-kogane-actor-kind": "delegated",
+          ...c.envelopeHeaders(),
+        },
+        body: JSON.stringify(payload),
+      },
+    );
+  const payload = {
+    planId: plan.planId,
+    planDigest: plan.planDigest,
+    scope: [],
+    idempotencyKey: "r2-approve",
+  };
+  const intent = {
+    idempotencyKey: payload.idempotencyKey,
+    payload,
+    targetRef: `plan:${plan.planId}`,
+    scope: null,
+  };
+  const before = await counts();
+  const prep = await prepareDelegatedOperation(
+    store,
+    call("command.approve"),
+    p,
+    "commands.decide.identity",
+    intent,
+    undefined,
+  );
+  expect(Date.parse(prep.confirmation.expiresAt) - Date.now()).toBeLessThanOrEqual(600_000);
+  expect(await counts()).toEqual(before);
+  const c = call("command.approve");
+  await confirmDelegatedOperation(
+    store,
+    c,
+    p,
+    "commands.decide.identity",
+    intent,
+    prep.confirmation.digest,
+  );
+  const changed = await send(c, { ...payload, scope: ["other"] });
+  expect(changed.status).toBe(409);
+  expect(await counts()).toEqual(before);
+  const wrongFamily = await mf.dispatchFetch("https://pipeline.internal/command/v1/approve", {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-kogane-verified-actor": p.id,
+      "x-kogane-actor-kind": "delegated",
+      ...c.envelopeHeaders(),
+      "x-kogane-delegated-execution": JSON.stringify({
+        ...c.delegatedExecution,
+        commandFamilies: ["relation"],
+      }),
+    },
+    body: JSON.stringify(payload),
+  });
+  expect(wrongFamily.status).toBe(403);
+  const approved = await send(c, payload);
+  expect(approved.status).toBe(200);
+  expect(approved.headers.get("x-kogane-audit-recorded")).toBe("1");
+  const result = (await approved.json()) as { approval: { approvalId: string } };
+  expect((await counts()).approvals).toBe(before.approvals + 1);
+  const repeated = await send(c, payload);
+  expect(repeated.status).toBe(403);
+  expect(await repeated.json()).toEqual({ error: "confirmation_used" });
+  const commitPayload = {
+    planId: plan.planId,
+    approvalId: result.approval.approvalId,
+    operationId: "r2-commit",
+  };
+  const commitIntent = {
+    idempotencyKey: commitPayload.operationId,
+    payload: commitPayload,
+    targetRef: `plan:${plan.planId}`,
+    scope: null,
+  };
+  const preview = await prepareDelegatedOperation(
+    store,
+    call("command.commit"),
+    p,
+    "commands.decide.identity",
+    commitIntent,
+    undefined,
+  );
+  const commitCall = call("command.commit");
+  await confirmDelegatedOperation(
+    store,
+    commitCall,
+    p,
+    "commands.decide.identity",
+    commitIntent,
+    preview.confirmation.digest,
+  );
+  const committed = await send(commitCall, commitPayload);
+  expect(committed.status).toBe(200);
+  expect(committed.headers.get("x-kogane-audit-recorded")).toBe("1");
+  const receipt = (await committed.json()) as {
+    receipt: { principal: string; operationKind: string };
+  };
+  expect(receipt.receipt.principal).toBe(p.id);
+  expect(receipt.receipt.operationKind).toBe("identity.assign");
+  const rows = await auditRows("principal=?", p.id);
+  expect(rows.filter((r) => r.result === "prepared")).toHaveLength(2);
+  expect(rows.filter((r) => r.result === "applied")).toHaveLength(2);
+  expect(rows.filter((r) => r.step === "confirm").every((r) => r.confirms_audit_id)).toBe(true);
+  expect((await counts()).receipts).toBe(before.receipts + 1);
+  expect((await getReceipt(store, p.id, "r2-commit")).ok).toBe(true);
+}, 60_000);
+
+test("R2 approval checks the pinned revision inside its insert and rolls back an exhausted delegated budget", async () => {
+  const mapping = await seedParse(251, "smbc-bank:r2-raced-approval");
+  const targetId = await target("target-r2-raced-approval");
+  const now = new Date().toISOString();
+  const plan = await planFor(mapping.ref, targetId, operator, now);
+  const p: DelegatedPrincipal = {
+    kind: "delegated",
+    id: "mcp-client:synthetic-r2-race",
+    delegator: "synthetic-r2-race",
+    capabilities: ["commands.decide.identity"],
+    scopes: { sources: "*", accounts: "*", scheduleSources: [] },
+    notAfter: new Date(Date.now() + 3_600_000).toISOString(),
+    delegationRef: `dlg_${"f".repeat(64)}`,
+    budget: { writesPerDay: 1 },
+  };
+  const actor: Principal = {
+    id: p.id,
+    kind: "delegated",
+    verification: "server",
+    capabilities: ["interpretation.accept"],
+  };
+  const call = () =>
+    new Call("command.approve", {
+      path: "mcp",
+      subject: p.delegator,
+      principal: p.id,
+      principalKind: "agent",
+      correlationId: crypto.randomUUID(),
+    });
+  const payload = {
+    planId: plan.planId,
+    planDigest: plan.planDigest,
+    scope: [],
+    idempotencyKey: "r2-raced-approve",
+  };
+  const intent = {
+    idempotencyKey: payload.idempotencyKey,
+    payload,
+    targetRef: `plan:${plan.planId}`,
+    scope: null,
+  };
+  const prep = await prepareDelegatedOperation(
+    store,
+    call(),
+    p,
+    "commands.decide.identity",
+    intent,
+    undefined,
+  );
+  const audit = call();
+  await confirmDelegatedOperation(
+    store,
+    audit,
+    p,
+    "commands.decide.identity",
+    intent,
+    prep.confirmation.digest,
+  );
+  let moved = false;
+  const race: CommandStore = {
+    first: store.first.bind(store),
+    all: store.all.bind(store),
+    batch: async (writes) => {
+      if (!moved && writes.some((w) => w.sql.includes("INSERT INTO approvals"))) {
+        moved = true;
+        const result = await executeIdentityCommand(
+          db,
+          {
+            operationId: "r2-race-human",
+            actorId: operator.id,
+            actorVerification: "server",
+            action: "assign",
+            kind: "account",
+            referenceId: mapping.ref,
+            expectedRevision: mapping.revision,
+            targetId: await target("target-r2-race-other"),
+            reason: "synthetic intervening operator change",
+          },
+          IDENTITY_POLICY_VERSION,
+        );
+        if ("error" in result) throw new Error(result.error);
+      }
+      return store.batch(writes);
+    },
+  };
+  const countBefore = (await counts()).approvals;
+  const result = await approve(race, { ...payload, actor, ttlSeconds: 600, now, audit });
+  expect(result.ok).toBe(false);
+  expect(moved).toBe(true);
+  expect((await counts()).approvals).toBe(countBefore);
+  expect(await auditRows("principal=? AND result='applied'", p.id)).toHaveLength(0);
+  expect(await auditRows("principal=? AND result='prepared'", p.id)).toHaveLength(1);
+  // An unbound delegated principal still cannot use the shared writer directly.
+  const fresh = await planFor(mapping.ref, targetId, operator, new Date().toISOString());
+  expect(
+    await approve(store, {
+      planId: fresh.planId,
+      planDigest: fresh.planDigest,
+      actor,
+      scope: [],
+      ttlSeconds: 600,
+      now,
+    }),
+  ).toMatchObject({ ok: false, error: "approval_required" });
+  expect(
+    await commit(store, {
+      operationId: "r2-unbound",
+      planId: fresh.planId,
+      approvalId: "ap_" + "0".repeat(64),
+      principal: actor,
+      planners: changeMutationPlanners(db),
+      now,
+    }),
+  ).toMatchObject({ ok: false, error: "approval_required" });
+  const boundPayload = {
+    planId: fresh.planId,
+    planDigest: fresh.planDigest,
+    scope: [],
+    idempotencyKey: "r2-bounded-first",
+  };
+  const boundIntent = {
+    ...intent,
+    idempotencyKey: boundPayload.idempotencyKey,
+    payload: boundPayload,
+    targetRef: `plan:${fresh.planId}`,
+  };
+  const first = await prepareDelegatedOperation(
+    store,
+    call(),
+    p,
+    "commands.decide.identity",
+    boundIntent,
+    undefined,
+  );
+  const firstAudit = call();
+  await confirmDelegatedOperation(
+    store,
+    firstAudit,
+    p,
+    "commands.decide.identity",
+    boundIntent,
+    first.confirmation.digest,
+  );
+  expect(
+    (await approve(store, { ...boundPayload, actor, ttlSeconds: 600, now, audit: firstAudit })).ok,
+  ).toBe(true);
+  const secondPayload = { ...boundPayload, idempotencyKey: "r2-bounded-second" };
+  const secondIntent = {
+    ...boundIntent,
+    idempotencyKey: secondPayload.idempotencyKey,
+    payload: secondPayload,
+  };
+  const second = await prepareDelegatedOperation(
+    store,
+    call(),
+    p,
+    "commands.decide.identity",
+    secondIntent,
+    undefined,
+  );
+  const secondAudit = call();
+  await confirmDelegatedOperation(
+    store,
+    secondAudit,
+    p,
+    "commands.decide.identity",
+    secondIntent,
+    second.confirmation.digest,
+  );
+  const afterFirst = await counts();
+  await expect(
+    approve(store, {
+      ...secondPayload,
+      actor,
+      ttlSeconds: 600,
+      now: new Date().toISOString(),
+      audit: secondAudit,
+    }),
+  ).rejects.toThrow();
+  expect(await counts()).toEqual(afterFirst);
+  expect(await auditRows("principal=? AND result='applied'", p.id)).toHaveLength(1);
+}, 60_000);
+
+test("audit-linked reversal refuses A after reassignment to B and guards original decision inside the native batch", async () => {
+  const mapping = await seedParse(252, "smbc-bank:r2-linked-current");
+  const now = new Date().toISOString();
+  async function assign(operationId: string, targetId: string) {
+    const plan = await planFor(mapping.ref, await target(targetId), operator, now);
+    const approval = await approveFor(plan, now);
+    const audit = testCall("command.commit");
+    const result = await commit(store, {
+      operationId,
+      principal: operator,
+      planId: plan.planId,
+      approvalId: approval.approvalId,
+      planners: changeMutationPlanners(db),
+      now,
+      audit,
+    });
+    if (!result.ok || !audit.recordedAuditId) throw new Error("synthetic assignment failed");
+    return { plan, receipt: result.receipt, auditId: audit.recordedAuditId };
+  }
+  async function releasePlan() {
+    const result = await createPlan(
+      "identity.release-override",
+      {
+        subject: "account",
+        referenceId: mapping.ref,
+        reason: "synthetic linked release",
+      },
+      { actor: operator, baseContextId: "identity-current-v1", now, ttlSeconds: 900 },
+      store,
+    );
+    if (!result.ok) throw new Error(result.error);
+    return result.plan;
+  }
+  const a = await assign("r2-original-a", "target-r2-original-a");
+  const firstRelease = await releasePlan();
+  const principalId = `mcp-client:${operator.id}`;
+  await expect(
+    assertDelegatedReversal(store, operator.id, principalId, firstRelease, a.auditId),
+  ).resolves.toMatchObject({ sql: expect.stringContaining("superseded_by IS NULL") });
+  const b = await assign("r2-original-b", "target-r2-original-b");
+  const secondRelease = await releasePlan();
+  await expect(
+    assertDelegatedReversal(store, operator.id, principalId, secondRelease, a.auditId),
+  ).rejects.toMatchObject({ code: "revert_invalid" });
+  const currentGuard = await assertDelegatedReversal(
+    store,
+    operator.id,
+    principalId,
+    secondRelease,
+    b.auditId,
+  );
+  expect(currentGuard.binds).toContain(b.receipt.decisionRevisionId);
+  expect((await getReceipt(store, operator.id, "r2-original-a")).ok).toBe(true);
+  const currentMapping = await db
+    .prepare("SELECT account_id,revision FROM current_account_mappings WHERE source_account_id=?")
+    .bind(mapping.ref)
+    .first<{ account_id: string; revision: number }>();
+  expect(currentMapping).toEqual({
+    account_id: "target-r2-original-b",
+    revision: Number(b.receipt.result.revision),
+  });
+
+  const p: DelegatedPrincipal = {
+    kind: "delegated",
+    id: principalId,
+    delegator: operator.id,
+    capabilities: ["commands.decide.identity"],
+    scopes: { sources: "*", accounts: "*", scheduleSources: [] },
+    notAfter: new Date(Date.now() + 3_600_000).toISOString(),
+    delegationRef: `dlg_${"c".repeat(64)}`,
+    budget: { writesPerDay: 10 },
+  };
+  const actor: Principal = {
+    id: p.id,
+    kind: "delegated",
+    verification: "server",
+    capabilities: ["interpretation.accept"],
+  };
+  const call = (operation: "command.approve" | "command.commit") =>
+    new Call(operation, {
+      path: "mcp",
+      subject: p.delegator,
+      principal: p.id,
+      principalKind: "agent",
+      correlationId: crypto.randomUUID(),
+    });
+  async function bound(
+    operation: "command.approve" | "command.commit",
+    payload: Record<string, unknown>,
+    key: string,
+    revertsAuditId?: string,
+  ) {
+    const intent = {
+      idempotencyKey: key,
+      payload,
+      targetRef: `plan:${secondRelease.planId}`,
+      scope: null,
+      ...(revertsAuditId ? { revertsAuditId } : {}),
+    };
+    const prepared = await prepareDelegatedOperation(
+      store,
+      call(operation),
+      p,
+      "commands.decide.identity",
+      intent,
+      undefined,
+    );
+    const audit = call(operation);
+    await confirmDelegatedOperation(
+      store,
+      audit,
+      p,
+      "commands.decide.identity",
+      intent,
+      prepared.confirmation.digest,
+    );
+    return audit;
+  }
+  const approvalInput = {
+    planId: secondRelease.planId,
+    planDigest: secondRelease.planDigest,
+    scope: [],
+    idempotencyKey: "r2-linked-approval",
+  };
+  const approved = await approve(store, {
+    ...approvalInput,
+    actor,
+    ttlSeconds: 600,
+    now,
+    audit: await bound("command.approve", approvalInput, approvalInput.idempotencyKey),
+  });
+  if (!approved.ok) throw new Error(approved.error);
+  const payload = {
+    planId: secondRelease.planId,
+    approvalId: approved.approval.approvalId,
+    operationId: "r2-linked-raced-release",
+    revertsAuditId: b.auditId,
+  };
+  const audit = await bound("command.commit", payload, payload.operationId, b.auditId);
+  let interposed = false;
+  const raced: CommandStore = {
+    first: store.first.bind(store),
+    all: store.all.bind(store),
+    batch: async (writes) => {
+      if (!interposed && writes.some((w) => w.sql.includes("INSERT INTO operation_receipts"))) {
+        interposed = true;
+        // A release changes the original decision's active state, not the mapping revision.
+        const external = await executeIdentityCommand(
+          db,
+          {
+            operationId: "r2-linked-intervening-release",
+            actorId: operator.id,
+            actorVerification: "server",
+            action: "release-override",
+            kind: "account",
+            referenceId: mapping.ref,
+            expectedRevision: Number(b.receipt.result.revision),
+            targetId: null,
+            reason: "synthetic intervening release",
+          },
+          IDENTITY_POLICY_VERSION,
+        );
+        if (!external.ok) throw new Error(external.error);
+      }
+      return store.batch(writes);
+    },
+  };
+  const before = await counts();
+  const result = await commit(raced, {
+    operationId: payload.operationId,
+    principal: actor,
+    planId: secondRelease.planId,
+    approvalId: approved.approval.approvalId,
+    planners: changeMutationPlanners(db),
+    now,
+    audit,
+  });
+  expect(interposed).toBe(true);
+  expect(result).toMatchObject({ ok: false, error: "stale_context" });
+  expect((await counts()).receipts).toBe(before.receipts);
+  expect(
+    await auditRows(
+      "principal=? AND idempotency_key=? AND result='applied'",
+      p.id,
+      payload.operationId,
+    ),
+  ).toHaveLength(0);
+  expect(
+    await db
+      .prepare("SELECT account_id,revision FROM current_account_mappings WHERE source_account_id=?")
+      .bind(mapping.ref)
+      .first<{ account_id: string; revision: number }>(),
+  ).toEqual({ account_id: "target-r2-original-b", revision: Number(b.receipt.result.revision) });
+  await expect(
+    assertDelegatedReversal(store, operator.id, principalId, secondRelease, b.auditId),
+  ).rejects.toMatchObject({ code: "revert_invalid" });
 }, 60_000);

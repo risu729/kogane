@@ -1,8 +1,11 @@
 // Real Worker + official MCP transport; all identities and configuration are synthetic.
+import { originDecisionFixture } from "../../../packages/read-model/test/decision-origin-fixture.ts";
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
+import { createPlan, d1CommandStore } from "../../../packages/application/src/index";
+import { changeCommandRoute } from "../../processor/src/change-commands";
 import { mcpDelegationCapabilities } from "../src/delegation";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
@@ -55,6 +58,17 @@ beforeAll(async () => {
       (id,source_id,producer_id,reference_json) VALUES (?,'sony-bank','evidence-test',?)`)
       .bind(id, JSON.stringify([id]))
       .run();
+  await env.DB.batch([
+    env.DB.prepare(
+      "INSERT INTO instruments VALUES ('delegated-history-instrument','security','Synthetic delegation listing','provider-local')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO instrument_identifiers VALUES ('delegated-history-identifier','synthetic-code','fixture','SYN-DELEGATED-HISTORY','{}')",
+    ),
+    env.DB.prepare(
+      "INSERT INTO instrument_mappings VALUES ('delegated-history-mapping','delegated-history-identifier',1,'delegated-history-instrument','rule','synthetic delegation mapping',1,'2099-01-01','Synthetic delegation listing','provider-local')",
+    ),
+  ]);
   keys = await generateKeyPair("RS256", { extractable: true });
   jwks = {
     keys: [{ ...(await exportJWK(keys.publicKey)), kid: "fixture", alg: "RS256", use: "sig" }],
@@ -125,7 +139,7 @@ async function capabilityReport(configuration: Record<string, unknown>, subject 
   expect(message.result.isError).not.toBe(true);
   return message.result.structuredContent;
 }
-describe("MCP S3 declaration status never enables delegated operations", () => {
+describe("MCP S3 declarations activate only installed delegated operations", () => {
   it("distinguishes inactive states from valid-but-unconnected without exposing owner configuration", async () => {
     for (const [configured, subject, reason] of [
       ["", OWNER, "delegation_not_configured"],
@@ -248,13 +262,19 @@ describe("MCP S3 declaration status never enables delegated operations", () => {
       expect(JSON.stringify(await ui.json())).not.toContain("delegation");
     }
   });
-  it("valid declarations publish no new write tools and cannot reach browser operator routes", async () => {
+  it("valid declarations publish only implemented delegated tools and cannot reach browser operator routes", async () => {
     const configuration = { ...vars(), OPS_API_ENABLED: "true", COMMANDS_ENABLED: "true" };
     const response = await send("/mcp", rpcBody("tools/list", {}), configuration);
     const message = (await response.json()) as { result: { tools: { name: string }[] } };
     expect(
-      message.result.tools.some((tool) => /kogane\.(ops|command|schedules)\./u.test(tool.name)),
-    ).toBe(false);
+      message.result.tools
+        .filter((tool) => /kogane\.(ops|command|schedules)\./u.test(tool.name))
+        .map((tool) => tool.name),
+    ).toEqual([
+      "kogane.ops.import.request",
+      "kogane.ops.replay.request",
+      "kogane.ops.operation.get",
+    ]);
     for (const name of [
       "kogane.ops.collection.request",
       "kogane.command.approve",
@@ -268,7 +288,7 @@ describe("MCP S3 declaration status never enables delegated operations", () => {
       const text = JSON.stringify(await call.json());
       expect(text).not.toContain('"accepted"');
       expect(text).not.toContain('"applied"');
-      expect(text).toMatch(/actor_not_supported|unknown_tool/u);
+      expect(text).toMatch(/capability_not_delegated|operation_not_delegable|unknown_tool/u);
     }
     const browserRoute = await send("/api/command/v1/approve", {}, configuration);
     expect(browserRoute.status).toBe(401);
@@ -300,4 +320,697 @@ describe("MCP S3 declaration status never enables delegated operations", () => {
       ),
     ).toMatchObject({ reason: "delegation_not_mcp_client", capabilities: [], available: false });
   });
+  it("uses real MCP transport for atomic delegated import, replay and bounded authority", async () => {
+    vi.useRealTimers();
+    const declaration = {
+      ...DECLARATION,
+      issuedAt: new Date(Date.now() - 60_000).toISOString(),
+      notAfter: new Date(Date.now() + 3_600_000).toISOString(),
+      scopes: { sources: ["sony-bank"], accounts: "*", scheduleSources: [] },
+      budget: { writesPerDay: 1 },
+    };
+    const configuration = {
+      ...vars(JSON.stringify({ [PRINCIPAL]: declaration })),
+      OPS_API_ENABLED: "true",
+    };
+    const invoke = async (
+      name: string,
+      arguments_: unknown,
+      configuration_: Record<string, unknown> = configuration,
+    ) => {
+      const response = await send(
+        "/mcp",
+        rpcBody("tools/call", { name, arguments: arguments_ }),
+        configuration_,
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()) as {
+        result: { structuredContent: Record<string, unknown>; isError?: boolean };
+      };
+    };
+    const arguments_ = {
+      source: "sony-bank",
+      runId: "synthetic-delegated-import",
+      idempotencyKey: "delegated-real-1",
+    };
+    const accepted = await invoke("kogane.ops.import.request", arguments_);
+    expect(accepted.result.structuredContent).not.toHaveProperty("error");
+    expect(accepted.result.isError).not.toBe(true);
+    const operationId = accepted.result.structuredContent["operationId"];
+    expect(typeof operationId).toBe("string");
+    const rows = await env.DB.prepare(
+      "SELECT * FROM audit_records WHERE principal=? AND idempotency_key=? AND result='accepted'",
+    )
+      .bind(PRINCIPAL, arguments_.idempotencyKey)
+      .all<Record<string, unknown>>();
+    expect(rows.results).toHaveLength(1);
+    expect(rows.results[0]).toMatchObject({
+      principal_kind: "delegated",
+      path: "mcp",
+      subject: OWNER,
+      operation: "ops.import.request",
+    });
+    expect(rows.results[0]!["delegation_ref"]).toMatch(/^dlg_[0-9a-f]{64}$/u);
+    expect(rows.results[0]!["payload_digest"]).toMatch(/^[0-9a-f]{64}$/u);
+    const replay = await invoke("kogane.ops.import.request", arguments_);
+    expect(replay.result.isError).not.toBe(true);
+    expect(replay.result.structuredContent["operationId"]).toBe(operationId);
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM ops_requests WHERE principal=? AND idempotency_key=?",
+      )
+        .bind(PRINCIPAL, arguments_.idempotencyKey)
+        .first<number>("n"),
+    ).toBe(1);
+    const conflict = await invoke("kogane.ops.import.request", { ...arguments_, runId: "changed" });
+    expect(conflict.result.structuredContent).toEqual({ error: "idempotency_conflict" });
+    const spent = await invoke("kogane.ops.import.request", {
+      ...arguments_,
+      idempotencyKey: "delegated-real-2",
+    });
+    expect(spent.result.structuredContent).toEqual({ error: "delegation_budget_exceeded" });
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM ops_requests WHERE principal=? AND idempotency_key=?",
+      )
+        .bind(PRINCIPAL, "delegated-real-2")
+        .first<number>("n"),
+    ).toBe(0);
+    const receipt = await invoke("kogane.ops.operation.get", { operationId });
+    expect(receipt.result.isError).not.toBe(true);
+    const narrowed = {
+      ...configuration,
+      MCP_DELEGATIONS: JSON.stringify({
+        [PRINCIPAL]: { ...declaration, scopes: { ...declaration.scopes, sources: [] } },
+      }),
+    };
+    const denied = await invoke("kogane.ops.operation.get", { operationId }, narrowed);
+    const missing = await invoke(
+      "kogane.ops.operation.get",
+      { operationId: `op_${"0".repeat(64)}` },
+      narrowed,
+    );
+    expect(denied.result.structuredContent).toEqual(missing.result.structuredContent);
+    const revoked = await invoke("kogane.ops.import.request", arguments_, {
+      ...configuration,
+      MCP_DELEGATIONS: "",
+    });
+    expect(revoked.result.structuredContent).toEqual({ error: "delegation_not_configured" });
+    const browser = await send("/api/command/v1/plan", {}, configuration);
+    expect(browser.status).toBe(401);
+  });
+
+  it("returns identical history and scoped audit data through HTTP and MCP using shared readers", async () => {
+    const grant = {
+      ...GRANT,
+      capabilities: ["records.read", "audit.read"],
+      scopes: { sources: "*", accounts: "*", scheduleSources: "*" },
+    };
+    const configuration = {
+      ...vars(""),
+      AGENT_API_GRANTS: JSON.stringify({ [OWNER]: grant, [PRINCIPAL]: grant }),
+    };
+    const invoke = async (
+      name: string,
+      arguments_: unknown,
+      configuration_: Record<string, unknown> = configuration,
+    ) => {
+      const response = await send(
+        "/mcp",
+        rpcBody("tools/call", { name, arguments: arguments_ }),
+        configuration_,
+      );
+      const value = (await response.json()) as {
+        result: { structuredContent: Record<string, unknown>; isError?: boolean };
+      };
+      expect(response.status).toBe(200);
+      return value.result;
+    };
+    const fixture = originDecisionFixture(
+      "instrument_mapping",
+      "delegated-history-identifier",
+      2,
+      0,
+      "http-mcp-parity",
+    );
+    await env.DB.batch([
+      env.DB.prepare(
+        "INSERT INTO instrument_mappings VALUES ('delegated-origin-mapping','delegated-history-identifier',2,'delegated-history-instrument','manual','synthetic origin',1,'2100-01-01','Synthetic delegation listing','provider-local')",
+      ),
+      ...fixture.writes.map((write) => env.DB.prepare(write.sql).bind(...write.args)),
+    ]);
+    const args = { identifierId: "delegated-history-identifier" };
+    const ui = await send(
+      "/api/identity/instrument-history?identifierId=delegated-history-identifier",
+      undefined,
+      configuration,
+      OWNER,
+      APP_AUD,
+    );
+    const http = await send(
+      "/api/agent/v1/instruments.history",
+      args,
+      configuration,
+      OWNER,
+      APP_AUD,
+    );
+    const mcp = await invoke("kogane.instruments.history", args);
+    expect(ui.status).toBe(200);
+    expect(http.status).toBe(200);
+    expect(mcp.isError).not.toBe(true);
+    expect(await ui.json()).toEqual(mcp.structuredContent);
+    expect(await http.json()).toEqual(mcp.structuredContent);
+    expect(mcp.structuredContent).toMatchObject({
+      total: 3,
+      entries: expect.arrayContaining([
+        expect.objectContaining({ entry: "mapping", revision: 1, decisionOrigin: "automatic" }),
+        expect.objectContaining({ entry: "mapping", revision: 2, decisionOrigin: "delegated" }),
+        expect.objectContaining({ entry: "decision", revision: 2, decisionOrigin: "delegated" }),
+      ]),
+    });
+    expect(JSON.stringify(mcp.structuredContent)).not.toContain(fixture.actor);
+    const filter = { filters: { operation: "instruments.history" } };
+    const auditHttp = await send(
+      "/api/agent/v1/audit.search",
+      filter,
+      configuration,
+      OWNER,
+      APP_AUD,
+    );
+    const auditMcp = await invoke("kogane.audit.search", filter);
+    expect(auditHttp.status).toBe(200);
+    expect(auditMcp.isError).not.toBe(true);
+    expect(await auditHttp.json()).toEqual(auditMcp.structuredContent);
+    const records = auditMcp.structuredContent["records"] as { auditId: string }[];
+    expect(records.length).toBeGreaterThan(0);
+    const detail = { auditId: records[0]!.auditId };
+    const detailHttp = await send("/api/agent/v1/audit.get", detail, configuration, OWNER, APP_AUD);
+    const detailMcp = await invoke("kogane.audit.get", detail);
+    expect(await detailHttp.json()).toEqual(detailMcp.structuredContent);
+    const narrowedGrant = {
+      ...grant,
+      scopes: { ...grant.scopes, sources: ["sony-bank"], scheduleSources: [] },
+    };
+    const narrowed = {
+      ...configuration,
+      AGENT_API_GRANTS: JSON.stringify({ [OWNER]: narrowedGrant, [PRINCIPAL]: narrowedGrant }),
+    };
+    const refusedHttp = await send(
+      "/api/agent/v1/instruments.history",
+      args,
+      narrowed,
+      OWNER,
+      APP_AUD,
+    );
+    const refusedMcp = await invoke("kogane.instruments.history", args, narrowed);
+    expect(refusedHttp.status).toBe(403);
+    expect(refusedMcp.isError).toBe(true);
+    expect(await refusedHttp.json()).toEqual(refusedMcp.structuredContent);
+    const missing = await invoke(
+      "kogane.audit.get",
+      { auditId: "aud_00000000-0000-4000-8000-000000000000" },
+      narrowed,
+    );
+    const denied = await invoke("kogane.audit.get", detail, narrowed);
+    expect(denied.structuredContent).toEqual(missing.structuredContent);
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM instrument_mappings WHERE identifier_id='delegated-history-identifier'",
+      ).first<number>("n"),
+    ).toBe(2);
+  });
+});
+
+it("real MCP R2 owner decision prepares, confirms through the existing writer, and replays without a second effect", async () => {
+  vi.useRealTimers();
+  await env.DB.prepare(
+    "INSERT INTO instruments VALUES ('delegated-r2-target','security','Synthetic R2 target','identified')",
+  ).run();
+  const plan = await createPlan(
+    "identity.assign",
+    {
+      subject: "instrument",
+      referenceId: "delegated-history-identifier",
+      targetId: "delegated-r2-target",
+      reason: "synthetic MCP decision",
+    },
+    {
+      actor: {
+        id: OWNER,
+        kind: "human",
+        verification: "server",
+        capabilities: ["interpretation.propose", "interpretation.accept"],
+      },
+      baseContextId: "identity-current-v1",
+      now: new Date().toISOString(),
+      ttlSeconds: 900,
+    },
+    d1CommandStore(env.DB),
+  );
+  if (!plan.ok) throw new Error(plan.error);
+  const pipeline = {
+    fetch: vi.fn(async (request: Request) => {
+      const response = await changeCommandRoute(
+        env as Parameters<typeof changeCommandRoute>[0],
+        request,
+        new URL(request.url).pathname,
+      );
+      if (!response) throw new Error("unexpected pipeline route");
+      return response;
+    }),
+  };
+  const configuration = {
+    ...vars(
+      JSON.stringify({
+        [PRINCIPAL]: {
+          ...DECLARATION,
+          role: "operator-delegate",
+          scopes: { sources: "*", accounts: "*", scheduleSources: [] },
+        },
+      }),
+    ),
+    COMMANDS_ENABLED: "true",
+    PIPELINE: pipeline,
+  };
+  const invoke = async (name: string, args: unknown) => {
+    const response = await send(
+      "/mcp",
+      rpcBody("tools/call", { name, arguments: args }),
+      configuration,
+    );
+    return (await response.json()) as { result: { structuredContent: any; isError?: boolean } };
+  };
+  const approveBody = {
+    planId: plan.plan.planId,
+    planDigest: plan.plan.planDigest,
+    scope: [],
+    idempotencyKey: "mcp-r2-approve",
+  };
+  const before = await env.DB.prepare("SELECT count(*) n FROM approvals").first<{ n: number }>();
+  const prepared = await invoke("kogane.command.approve", { ...approveBody, step: "prepare" });
+  expect(prepared.result.isError).not.toBe(true);
+  expect(pipeline.fetch).not.toHaveBeenCalled();
+  expect(await env.DB.prepare("SELECT count(*) n FROM approvals").first()).toEqual(before);
+  const digest = prepared.result.structuredContent.confirmation.digest as string;
+  const changed = await invoke("kogane.command.approve", {
+    ...approveBody,
+    scope: ["changed"],
+    step: "confirm",
+    confirmationDigest: digest,
+  });
+  expect(changed.result.isError).toBe(true);
+  expect(pipeline.fetch).not.toHaveBeenCalled();
+  const accepted = await invoke("kogane.command.approve", {
+    ...approveBody,
+    step: "confirm",
+    confirmationDigest: digest,
+  });
+  expect(accepted.result.isError).not.toBe(true);
+  const approval = accepted.result.structuredContent.approval as { approvalId: string };
+  const retried = await invoke("kogane.command.approve", {
+    ...approveBody,
+    step: "confirm",
+    confirmationDigest: digest,
+  });
+  expect(retried.result.isError).not.toBe(true);
+  expect(retried.result.structuredContent.approval.approvalId).toBe(approval.approvalId);
+  expect(pipeline.fetch).toHaveBeenCalledTimes(1);
+  const commitBody = {
+    planId: plan.plan.planId,
+    approvalId: approval.approvalId,
+    operationId: "mcp-r2-commit",
+  };
+  const commitPrep = await invoke("kogane.command.commit", { ...commitBody, step: "prepare" });
+  expect(commitPrep.result.isError).not.toBe(true);
+  const commitDigest = commitPrep.result.structuredContent.confirmation.digest as string;
+  const applied = await invoke("kogane.command.commit", {
+    ...commitBody,
+    step: "confirm",
+    confirmationDigest: commitDigest,
+  });
+  expect(applied.result.isError).not.toBe(true);
+  expect(applied.result.structuredContent.receipt.principal).toBe(PRINCIPAL);
+  const repeated = await invoke("kogane.command.commit", {
+    ...commitBody,
+    step: "confirm",
+    confirmationDigest: commitDigest,
+  });
+  expect(repeated.result.structuredContent.replayed).toBe(true);
+  expect(pipeline.fetch).toHaveBeenCalledTimes(2);
+  const rows = await env.DB.prepare(
+    "SELECT operation,result,step,confirms_audit_id FROM audit_records WHERE principal=? AND idempotency_key IN ('mcp-r2-approve','mcp-r2-commit')",
+  )
+    .bind(PRINCIPAL)
+    .all();
+  expect(rows.results.filter((r) => r.result === "applied")).toHaveLength(2);
+  expect(rows.results.filter((r) => r.result === "prepared")).toHaveLength(2);
+  expect(rows.results.filter((r) => r.result === "replayed")).toHaveLength(2);
+  expect(
+    rows.results
+      .filter((r) => r.result === "applied")
+      .every((r) => r.step === "confirm" && r.confirms_audit_id),
+  ).toBe(true);
+  const original = await env.DB.prepare(
+    "SELECT audit_id FROM audit_records WHERE principal=? AND operation='command.commit' AND idempotency_key='mcp-r2-commit' AND result='applied'",
+  )
+    .bind(PRINCIPAL)
+    .first<{ audit_id: string }>();
+  const reverse = await createPlan(
+    "identity.release-override",
+    {
+      subject: "instrument",
+      referenceId: "delegated-history-identifier",
+      reason: "synthetic explicit reversal",
+    },
+    {
+      actor: {
+        id: OWNER,
+        kind: "human",
+        verification: "server",
+        capabilities: ["interpretation.propose", "interpretation.accept"],
+      },
+      baseContextId: "identity-current-v1",
+      now: new Date().toISOString(),
+      ttlSeconds: 900,
+    },
+    d1CommandStore(env.DB),
+  );
+  if (!reverse.ok) throw new Error(reverse.error);
+  const reverseApproval = {
+    planId: reverse.plan.planId,
+    planDigest: reverse.plan.planDigest,
+    scope: [],
+    idempotencyKey: "mcp-r2-reversal-approval",
+  };
+  const reversePrepare = await invoke("kogane.command.approve", {
+    ...reverseApproval,
+    step: "prepare",
+  });
+  const approvedReverse = await invoke("kogane.command.approve", {
+    ...reverseApproval,
+    step: "confirm",
+    confirmationDigest: reversePrepare.result.structuredContent.confirmation.digest,
+  });
+  const reverseCommit = {
+    planId: reverse.plan.planId,
+    approvalId: approvedReverse.result.structuredContent.approval.approvalId as string,
+    operationId: "mcp-r2-reversal",
+    revertsAuditId: original!.audit_id,
+  };
+  const invalidReverse = await invoke("kogane.command.commit", {
+    ...reverseCommit,
+    revertsAuditId: "aud_11111111-2222-4333-8444-555555555555",
+    step: "prepare",
+  });
+  expect(invalidReverse.result.structuredContent.error).toBe("revert_invalid");
+  const reverseConfirmation = await invoke("kogane.command.commit", {
+    ...reverseCommit,
+    step: "prepare",
+  });
+  expect(reverseConfirmation.result.isError).not.toBe(true);
+  const reversed = await invoke("kogane.command.commit", {
+    ...reverseCommit,
+    step: "confirm",
+    confirmationDigest: reverseConfirmation.result.structuredContent.confirmation.digest,
+  });
+  expect(reversed.result.isError).not.toBe(true);
+  const reversedRetry = await invoke("kogane.command.commit", {
+    ...reverseCommit,
+    step: "confirm",
+    confirmationDigest: reverseConfirmation.result.structuredContent.confirmation.digest,
+  });
+  expect(reversedRetry.result.isError).not.toBe(true);
+  expect(reversedRetry.result.structuredContent.replayed).toBe(true);
+  expect(reversedRetry.result.structuredContent.receipt.operationId).toBe(
+    reverseCommit.operationId,
+  );
+  const auditReverse = await env.DB.prepare(
+    "SELECT reverts_audit_id,result FROM audit_records WHERE principal=? AND idempotency_key='mcp-r2-reversal' AND result='applied'",
+  )
+    .bind(PRINCIPAL)
+    .first();
+  expect(auditReverse).toEqual({ reverts_audit_id: original!.audit_id, result: "applied" });
+  expect(
+    await env.DB.prepare("SELECT audit_id FROM audit_records WHERE audit_id=?")
+      .bind(original!.audit_id)
+      .first(),
+  ).not.toBeNull();
+});
+
+it("provider-contact requests use R2, pin human session policy, refuse expired preparation and roll back spent budget", async () => {
+  vi.useRealTimers();
+  const alreadySpent = await env.DB.prepare(
+    "SELECT count(*) n FROM audit_records WHERE principal=? AND principal_kind='delegated' AND result IN ('applied','accepted') AND recorded_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')",
+  )
+    .bind(PRINCIPAL)
+    .first<{ n: number }>();
+  const declaration = {
+    ...DECLARATION,
+    role: "operator-delegate",
+    scopes: { sources: ["sony-bank"], accounts: "*", scheduleSources: [] },
+    capabilities: undefined,
+    budget: { writesPerDay: alreadySpent!.n + 1 },
+  };
+  // Restrict additive operator capabilities through a maintainer declaration plus these two explicit capabilities.
+  const configured = {
+    ...declaration,
+    role: "maintainer",
+    capabilities: ["operations.collection.request", "operations.session.refresh"],
+  };
+  const configuration = {
+    ...vars(JSON.stringify({ [PRINCIPAL]: configured })),
+    OPS_API_ENABLED: "true",
+    SESSION_REFRESH_POLICY: "",
+  };
+  const invoke = async (name: string, args: unknown, extra: Record<string, unknown> = {}) => {
+    const response = await send("/mcp", rpcBody("tools/call", { name, arguments: args }), {
+      ...configuration,
+      ...extra,
+    });
+    return (await response.json()) as { result: { structuredContent: any; isError?: boolean } };
+  };
+  const request = {
+    source: "sony-bank",
+    requestedScope: { from: "2026-10-01", to: "2026-10-02" },
+    idempotencyKey: "provider-r2-collection",
+  };
+  const prepared = await invoke("kogane.ops.collection.request", { ...request, step: "prepare" });
+  expect(prepared.result.isError).not.toBe(true);
+  expect(prepared.result.structuredContent.preview).toMatchObject({
+    externalEffect: true,
+    revertAvailable: false,
+    status: "accepted",
+  });
+  const target = prepared.result.structuredContent.preview.targetRef as string;
+  expect(
+    await env.DB.prepare("SELECT operation_id FROM ops_requests WHERE operation_id=?")
+      .bind(target)
+      .first(),
+  ).toBeNull();
+  const expiredDigest = prepared.result.structuredContent.confirmation.digest as string;
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(Date.now() + 600_001));
+  const expired = await invoke("kogane.ops.collection.request", {
+    ...request,
+    step: "confirm",
+    confirmationDigest: expiredDigest,
+  });
+  expect(expired.result.structuredContent.error).toBe("confirmation_expired");
+  expect(
+    await env.DB.prepare("SELECT operation_id FROM ops_requests WHERE operation_id=?")
+      .bind(target)
+      .first(),
+  ).toBeNull();
+  vi.useRealTimers();
+  const again = await invoke("kogane.ops.collection.request", { ...request, step: "prepare" });
+  const accepted = await invoke("kogane.ops.collection.request", {
+    ...request,
+    step: "confirm",
+    confirmationDigest: again.result.structuredContent.confirmation.digest,
+  });
+  expect(accepted.result.structuredContent).toEqual({ operationId: target, status: "accepted" });
+  const replay = await invoke("kogane.ops.collection.request", {
+    ...request,
+    step: "confirm",
+    confirmationDigest: again.result.structuredContent.confirmation.digest,
+  });
+  expect(replay.result.structuredContent).toEqual(accepted.result.structuredContent);
+  const session = { source: "sony-bank", idempotencyKey: "provider-r2-session" };
+  const sessionPrep = await invoke("kogane.ops.session.refresh", { ...session, step: "prepare" });
+  expect(sessionPrep.result.structuredContent.preview).toMatchObject({
+    status: "waiting_for_human",
+    policy: "human",
+  });
+  const confirmationDigest = sessionPrep.result.structuredContent.confirmation.digest as string;
+  const policyChanged = await invoke(
+    "kogane.ops.session.refresh",
+    { ...session, step: "confirm", confirmationDigest },
+    { SESSION_REFRESH_POLICY: JSON.stringify({ "sony-bank": "unattended" }) },
+  );
+  expect(policyChanged.result.structuredContent.error).toBe("confirmation_invalid");
+  const spent = await invoke("kogane.ops.session.refresh", {
+    ...session,
+    step: "confirm",
+    confirmationDigest,
+  });
+  expect(spent.result.structuredContent.error).toBe("delegation_budget_exceeded");
+  expect(
+    await env.DB.prepare("SELECT operation_id FROM ops_requests WHERE operation_id=?")
+      .bind(sessionPrep.result.structuredContent.preview.targetRef)
+      .first(),
+  ).toBeNull();
+  const effects = await env.DB.prepare(
+    "SELECT result,step,confirms_audit_id FROM audit_records WHERE principal=? AND delegation_ref=? AND result='accepted'",
+  )
+    .bind(
+      PRINCIPAL,
+      (await env.DB.prepare(
+        "SELECT delegation_ref FROM audit_records WHERE operation='ops.collection.request' AND idempotency_key=? AND result='accepted'",
+      )
+        .bind(request.idempotencyKey)
+        .first<{ delegation_ref: string }>())!.delegation_ref,
+    )
+    .all();
+  expect(effects.results).toHaveLength(1);
+  expect(effects.results[0]).toMatchObject({ result: "accepted", step: "confirm" });
+  expect(effects.results[0]!.confirms_audit_id).toBeTruthy();
+});
+
+it("MCP schedule job tools are installed only for a resolved grant and write only through prepared native confirmation", async () => {
+  vi.useRealTimers();
+  const { delegatedScheduleRoute } = await import("../../processor/src/delegated-schedules");
+  const pipeline = {
+    fetch: vi.fn(async (request: Request) => {
+      const response = await delegatedScheduleRoute(
+        request,
+        {
+          ...env,
+          SCHEDULES_ENABLED: "true",
+          SCHEDULE_ALARMS: {
+            getByName: () => ({
+              reconcile: async () => {
+                throw Error("synthetic private provider detail");
+              },
+              alarmTime: async () => null,
+            }),
+          },
+        } as unknown as Parameters<typeof delegatedScheduleRoute>[1],
+        new URL(request.url),
+      );
+      if (!response) throw Error("unexpected delegated settings route");
+      return response;
+    }),
+  };
+  const grant = { ...GRANT, scopes: { sources: "*", accounts: "*", scheduleSources: ["vpass"] } };
+  const configured = {
+    ...vars(
+      JSON.stringify({
+        [PRINCIPAL]: {
+          ...DECLARATION,
+          capabilities: ["schedules.job.update"],
+          scopes: { sources: "*", accounts: "*", scheduleSources: ["vpass"] },
+        },
+      }),
+    ),
+    AGENT_API_GRANTS: JSON.stringify({ [PRINCIPAL]: grant, [OWNER]: grant }),
+    SCHEDULES_ENABLED: "true",
+    PIPELINE: pipeline,
+  };
+  const invoke = async (name: string, args: unknown, configuration = configured) => {
+    const response = await send(
+      "/mcp",
+      rpcBody("tools/call", { name, arguments: args }),
+      configuration,
+    );
+    expect(response.status).toBe(200);
+    return (await response.json()) as { result: { structuredContent: any; isError?: boolean } };
+  };
+  const listed = await send("/mcp", rpcBody("tools/list", {}), configured);
+  const tools = (await listed.json()) as {
+    result: { tools: { name: string; inputSchema: any }[] };
+  };
+  const tool = tools.result.tools.find((t) => t.name === "kogane.schedules.job.update");
+  expect(tool).toBeDefined();
+  expect(JSON.stringify(tool!.inputSchema)).toContain("weekdays");
+  const disabled = await send("/mcp", rpcBody("tools/list", {}), {
+    ...configured,
+    SCHEDULES_ENABLED: "false",
+  });
+  expect(JSON.stringify(await disabled.json())).not.toContain("kogane.schedules.job.update");
+  const report = await capabilityReport(configured);
+  expect(report["delegation"]).toMatchObject({ available: true });
+  const row = await env.DB.prepare("SELECT * FROM collection_schedules WHERE id='vpass'").first<
+    Record<string, unknown>
+  >();
+  if (!row) throw Error("missing synthetic schedule");
+  const body = {
+    jobId: "vpass",
+    source: "vpass",
+    revision: row["revision"],
+    enabled: true,
+    timezone: row["timezone"],
+    pattern: JSON.parse(row["pattern_json"] as string),
+    idempotencyKey: "mcp-job-native",
+  };
+  const prep = await invoke("kogane.schedules.job.update", { ...body, step: "prepare" });
+  expect(prep.result.isError).not.toBe(true);
+  expect(
+    await env.DB.prepare("SELECT * FROM collection_schedules WHERE id='vpass'").first(),
+  ).toEqual(row);
+  const cfm = prep.result.structuredContent.confirmation.digest as string;
+  const changed = await invoke("kogane.schedules.job.update", {
+    ...body,
+    enabled: false,
+    step: "confirm",
+    confirmationDigest: cfm,
+  });
+  expect(changed.result.structuredContent).toEqual({ error: "confirmation_invalid" });
+  const saved = await invoke("kogane.schedules.job.update", {
+    ...body,
+    step: "confirm",
+    confirmationDigest: cfm,
+  });
+  expect(saved.result.isError).not.toBe(true);
+  expect(saved.result.structuredContent).toEqual({
+    saved: true,
+    jobId: "vpass",
+    revision: Number(row["revision"]) + 1,
+    reservation: "pending",
+    actualAlarmAt: null,
+    replayed: false,
+  });
+  const retried = await invoke("kogane.schedules.job.update", {
+    ...body,
+    step: "confirm",
+    confirmationDigest: cfm,
+  });
+  expect(retried.result.structuredContent).toEqual({
+    ...saved.result.structuredContent,
+    reservation: null,
+    actualAlarmAt: null,
+    replayed: true,
+  });
+  expect(pipeline.fetch).toHaveBeenCalledTimes(2);
+  const audit = await env.DB.prepare(
+    "SELECT principal_kind,result,step,scope_source FROM audit_records WHERE operation='schedules.job.update' AND idempotency_key='mcp-job-native' ORDER BY result",
+  ).all();
+  expect(audit.results).toEqual([
+    { principal_kind: "delegated", result: "applied", step: "confirm", scope_source: "vpass" },
+    { principal_kind: "delegated", result: "prepared", step: "prepare", scope_source: "vpass" },
+    { principal_kind: "delegated", result: "replayed", step: "confirm", scope_source: "vpass" },
+  ]);
+  const http = await send(
+    "/api/agent/v1/schedules.job.update",
+    { ...body, step: "prepare" },
+    configured,
+    OWNER,
+    APP_AUD,
+  );
+  expect(http.status).toBe(404);
+  const revoked = await invoke(
+    "kogane.schedules.job.update",
+    { ...body, step: "confirm", confirmationDigest: cfm },
+    { ...configured, MCP_DELEGATIONS: "" },
+  );
+  expect(revoked.result.structuredContent).toEqual({ error: "delegation_not_configured" });
 });

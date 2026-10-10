@@ -294,7 +294,7 @@ export function isChangeKind(value: unknown): value is ChangeKind {
 export const COMMAND_CAPABILITIES = ["interpretation.propose", "interpretation.accept"] as const;
 export type CommandCapability = (typeof COMMAND_CAPABILITIES)[number];
 
-export const PRINCIPAL_KINDS = ["human", "agent"] as const;
+export const PRINCIPAL_KINDS = ["human", "agent", "delegated"] as const;
 export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number];
 
 /** Always built from a server-verified identity, never from a request body. */

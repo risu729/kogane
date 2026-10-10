@@ -521,37 +521,34 @@ naming `schedules.maintenance.update` is refused whole, so `/mcp` answers
 their own MCP identity in `MCP_DELEGATIONS` (ADR 0063; the `maintainer` role
 holds it), with the source in the delegation's `scopes.scheduleSources`, which
 must lie inside the read grant's. It has no `/api/agent/v1` route: a browser
-session yields no delegation. On `/mcp` it is listed to nobody, and every call
-is refused, in this order, with nothing relayed to the Processor and nothing
-written but the refusal record:
+session yields no delegation. On `/mcp` it is advertised only when the
+current resolved delegation permits the operation. Checked-in delegations are
+empty, so the existing financial-reader client gains no maintenance authority.
 
-1. the caller's delegation, as #628's resolver answers it:
-   `403 delegation_not_configured`, `503 delegation_misconfigured`,
-   `403 delegation_not_yet_valid` or `403 delegation_expired`;
-2. the delegated capability: `403 delegation_capability_denied`;
-3. the arguments, a closed schema whose `reason` is one of
-   `official-notice-added`, `official-notice-changed`,
-   `official-notice-withdrawn`, `outage-observed`, `owner-instructed`,
-   `correction` (never free text): `400 invalid_request`;
-4. the delegation's schedule scope, existing source or not:
-   `403 source_not_granted`;
-5. whether delegated execution is connected:
-   `403 delegation_execution_unavailable`, always today.
-   `delegationExecutionReadiness` answers `available: false` for every
-   capability until slice S3 connects the delegated audit record, the
-   operation path and the Processor's delegation guards.
+The App checks the current delegation, capability, closed arguments and source
+scope before looking up a completed receipt. Missing/invalid/early/expired
+delegations retain the resolver's closed codes; a missing capability is
+`delegation_capability_denied`, invalid arguments are `invalid_request`, and
+an out-of-scope source is `source_not_granted` whether or not it exists.
 
-No route reaches the Processor's single writer as a delegated principal. The
-writer itself already holds the direct envelope for one: R1 within the
-seven-day joined-deferral bound and 30 revisions per principal per rolling
-day; beyond the bound it refuses (`maintenance_deferral_too_long`, R3 until
-the owner answers the plan's question 1), and the operator makes such a
-revision in the UI ([schedules](schedules.md#agent-maintenance-tools)). The
-writer's side of a confirmation exists — a prepare that writes nothing and a
-trusted 31-day bound no request can set
-([contract](schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3))
-— but no confirm step does (S3), so no revision of a class that needs one is
-offered.
+Arguments include `step` (`apply`, `prepare`, `confirm`) and `idempotencyKey`;
+confirmation also requires `confirmationDigest`. Reasons remain the closed
+codes `official-notice-added`, `official-notice-changed`,
+`official-notice-withdrawn`, `outage-observed`, `owner-instructed`, `correction`.
+The caller cannot set a decision audit reference or trusted deferral bound.
+
+R1 applies within the seven-day joined-window envelope. R2 prepares and
+confirms within the 31-day envelope. Existing longer operator windows may
+remain unchanged or shorten, but new/moved/extended over-bound unions are
+refused. Both reuse the Processor's single writer, expected revision, source
+and provenance validation and 30/day native cap. The actual delegation's
+shared daily budget and effect audit append are guarded in the same batch.
+
+Exact retries return the saved rule id/revision without another write or
+alarm reconciliation. A fresh result reports reconciliation `completed` or
+`pending`; a replay reports `null`. Read the maintenance tool for the current
+reservation/alarm instead of assuming that a saved revision is armed.
+See [the writer contract](schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3).
 
 ## Contexts, cursors and hand-off
 
@@ -1081,3 +1078,92 @@ written stay as `proposed` rows; they are inert, and removing the capability
 does not need to remove them.
 
 [cf-mcp-portal-policy]: https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/mcp-portals/#policy-limitations
+
+## Delegated execution integration and shared history reads (S3, 2026-10-10)
+
+The deployment configuration remains empty: this code change creates no grant,
+MCP delegation or authentication resource. An explicitly configured owner MCP
+delegation can use only the adapters reported ready by `kogane.capabilities`.
+Installed operations are persisted-run import, parser replay, whole-store
+projection, own-operation status, and inert command planning/simulation.
+They reuse the operator's existing application services and Processor planner.
+They cannot approve or commit a financial decision, contact a provider, release
+a collection lease, or change authority. The operation's delegated effect and
+its audit record share a batch with a strict rolling-day budget; a retry under
+the same key does not spend a second write.
+
+`POST /api/agent/v1/instruments.history` and
+`kogane.instruments.history` use the same reader as
+`GET /api/identity/instrument-history?identifierId=...`: `records.read`,
+whole source/account scope, and the grant's row budget. They return the same
+history contract and do not write a mapping or decision.
+
+`POST /api/agent/v1/audit.search` / `audit.get` and the corresponding
+`kogane.audit.search` / `kogane.audit.get` require `audit.read`.
+Search accepts the common closed filters plus an opaque cursor; detail accepts
+an `auditId`. Source scope is applied in SQL before the page window, account
+scope must be whole-store, and other subjects are pseudonymized. Schedule
+sources use their own `scheduleSources` axis; null-source records need both
+source axes whole-store. An absent detail and an out-of-scope detail are
+indistinguishable.
+
+Synthetic tests verify these paths and their authority boundaries. Real
+client authentication, delegation activation, and production operation remain
+unverified. A preparation helper alone is not a completed settings adapter;
+the remaining #564 writer integration and other schedule operations stay
+unavailable until implemented and independently reviewed.
+
+## S3 maintenance execution and confirmation (2026-10-10)
+
+Status: proposed until the integration PR merges. The implementation reuses
+the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
+against main `f6fb5bdd`; #652's temporal refusal and #643's release guard are
+preserved. The [integration plan](plans/2026-10-mcp-maintenance-followups.md)
+records the publication and activation boundaries. No grant or deployment is
+implied by this implementation.
+
+The closed MCP payload accepts `apply`, `prepare` and `confirm` plus an
+idempotency key. R1 apply keeps the seven-day joined-deferral bound. R2
+prepare validates with the trusted 31-day bound and records a capped,
+expiring preparation; only a matching confirmation may use that bound to
+write. A newly caused, moved or extended joined deferral over 31 days is
+refused; pre-existing longer operator windows may remain unchanged or shorten.
+A caller cannot supply `decisionRef`,
+`deferralBound` or a rollback audit reference. The R1 rule references its
+reserved effect audit id; the R2 rule references the verified preparation
+audit id, and its effect record links the same preparation.
+
+Current delegation capability and source scope are checked before looking
+up a replay receipt. Exact retries return the original saved id/revision
+without another writer call or alarm reconciliation. Changed payloads do not
+reuse a receipt. Fresh writes revalidate at the private Processor adapter.
+The common applied/accepted-effect audit count enforces the actual delegation's
+`writesPerDay` across operation kinds and delegation-reference changes. It
+shares one D1 batch with the native writer's 30-per-principal rolling-day cap,
+revision guard, domain write and audit append; failure rolls back the batch.
+Preparation reports the lesser remaining budget. It grants no authority by
+itself.
+
+The native writer captures the source's append-only revision count before
+reading joined windows. Its delegated INSERT checks that count again inside
+the batch, so concurrent edits to different rules cannot jointly exceed the
+deferral bound. The count uses the existing covering maintenance source
+index and scales with that source's history, not constant time. The immediate
+provenance update also requires that INSERT to have changed a row, and the
+append guard binds the decision reference: a same-millisecond losing retry
+cannot replace a winner's official URL or append an effect.
+
+The write result distinguishes `saved` from reconciliation `completed` or
+`pending`; a replay returns reconciliation `null`. None asserts that a
+reservation is armed. The maintenance read tool supplies the reservation and
+next-run state. Audit rows keep digests, closed codes and references, not the
+official URL or other provider text.
+
+The tests use synthetic local D1 data and synthetic Access keys. They cover
+signed MCP entry, revocation and scope-before-replay, both hard bounds,
+prepare/effect linkage, shared daily budget, rollback, exact retries,
+concurrent joined windows and losing-provenance writes. Production migration
+state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
+the committed MCP financial-reader grant receives no schedule authority.
+S6 survey acceptance remains unavailable pending the separate owner decision;
+no survey grammar, grants, Access, authentication or deployment is changed.

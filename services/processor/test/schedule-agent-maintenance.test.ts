@@ -21,7 +21,7 @@ import {
   MAINTENANCE_CHANGE_REASONS,
 } from "../../../packages/collection/src/schedule-model";
 import { LAYER_A_SQL, layerBMigrations, applyMigration } from "./harness";
-import { applyReadMigrations } from "../../../packages/storage-d1/src/migrations";
+import { applyTestReadMigrations } from "./migration-setup.ts";
 import {
   CONFIRMED_MAX_DEFERRAL_MS,
   currentMaintenanceRevision,
@@ -95,7 +95,9 @@ beforeAll(async () => {
   db = (await mf.getD1Database("DB", "processor")) as unknown as D1Database;
   await db.exec(LAYER_A_SQL);
   for (const name of layerBMigrations()) await applyMigration(db, name);
-  await applyReadMigrations((await mf.getD1Database("READ", "processor")) as unknown as D1Database);
+  await applyTestReadMigrations(
+    (await mf.getD1Database("READ", "processor")) as unknown as D1Database,
+  );
   namespace = (await mf.getBindings("processor"))["SCHEDULE_ALARMS"];
   processorEnv = { DB: db, SCHEDULE_ALARMS: namespace } as unknown as Env;
   // Independent of the seeded research: every job off and every seeded rule
@@ -1541,15 +1543,15 @@ describe("prepare and write share one validation (the contract plan slice S3 bui
     }
   });
 
-  test("the default bound is seven days, and the option is the writer's own: no route or request sets it", async () => {
+  test("the default bound is seven days; only the private confirmed adapter selects the wider option", async () => {
     // The default, without the option, is the seven-day bound.
     const { sqlite, env } = freshStore();
     expect(
       await prepareMaintenanceRevision(env, make("delegated", { pattern: span(7 * DAY + 1) })),
     ).toEqual({ ok: false, code: "maintenance_deferral_too_long", status: 422 });
     sqlite.close();
-    // Only the writer's own code names the 31-day bound or the option's key:
-    // no route, tool, grant reader or relay of either Worker does.
+    // The writer and the private delegated adapter are the only code allowed
+    // to name the trusted option; no public schema/route/grant forwards it.
     const writerFile = new URL("../src/schedule-store.ts", import.meta.url).pathname;
     const roots = ["../src/", "../../app/src/"].map(
       (dir) => new URL(dir, import.meta.url).pathname,
@@ -1559,7 +1561,11 @@ describe("prepare and write share one validation (the contract plan slice S3 bui
         if (!/\.tsx?$/u.test(name)) continue;
         const file = `${root}${name}`;
         const text = readFileSync(file, "utf8");
-        if (file === writerFile) continue;
+        if (
+          file === writerFile ||
+          file === new URL("../src/delegated-maintenance.ts", import.meta.url).pathname
+        )
+          continue;
         expect([name, text.includes("confirmed-31d"), text.includes("deferralBound")]).toEqual([
           name,
           false,
