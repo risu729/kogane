@@ -375,7 +375,7 @@ function syntheticEnvironmentAllowed(file: string, text: string): boolean {
         uses: "actions/checkout",
         with: { ref: "${{ github.sha }}", "persist-credentials": false },
       },
-      { name: "Install mise", uses: "jdx/mise-action", with: { version: "2026.10.6" } },
+      { name: "Install mise", uses: "jdx/mise-action", with: { version: "2026.10.7" } },
       {
         name: "Install pinned verification dependencies",
         "timeout-minutes": 5,

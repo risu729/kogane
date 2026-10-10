@@ -2,7 +2,7 @@
 
 - Owner: risu729
 - Started: 2026-10-05
-- Expires: 2026-10-12
+- Expires: 2026-10-13
 - Status: Run 37963677064 at 430691a6 failed the initial SDK concurrent POST gate with upstream HTTP 503, before the revised stream-release gate. Runtime cleanup and independent absence checks passed. The 503 cause remains unclassified. Reader-lifecycle parity, native, recovery and rollback remain unverified.
 
 ## Question
@@ -44,9 +44,9 @@ The renewed hosted attempt at `becff3cc` (run 37957689144) failed with
 running and none had failed; native and later stages were not reached. The same
 error code covers before and after stream counts, so the failure does not yet
 identify the release boundary. All runtime cleanup checks and independent API
-absence checks passed at 2026-10-10 01:20 JST. The renewed temporary token and
-GitHub environment must be retired by 2026-10-10 02:45 JST; the experiment's
-longer research expiry does not extend that authorization.
+absence checks passed at 2026-10-10 01:20 JST. That authorization bounded the temporary token and
+GitHub environment by 2026-10-10 02:45 JST; the experiment's longer research
+expiry did not extend that historical authorization.
 
 After reviewed release-condition hardening and integration of main `6e2fe858`,
 normal CI and CodeQL passed on `430691a6`. Run 37963677064 then failed the initial
@@ -63,10 +63,21 @@ A separate GitHub environment and a dedicated scoped token isolate this check
 from production credentials. The normal CI and production release never deploy
 this experiment. The manual verification job requires explicit selection.
 
+On 2026-10-10, the user explicitly renewed the same three-role scoped
+credential and dedicated GitHub environment through 2026-10-13 13:00 JST
+(04:00 UTC). The replacement credential handoff was saved at
+2026-10-10T02:20:51Z. This approval permits necessary reviewed re-verification
+and reuse of that dedicated credential within the approved window, until the
+work is complete. It does not expand resource, role or production scope.
+The research expiry is extended to cover this bounded re-verification.
+
 ## Stop condition
 
-After the reviewed hosted test, remove only its temporary application, Worker,
-namespace and image tag, verify their absence and retire the temporary credential.
+After every successful or failed hosted attempt, remove only its temporary
+application, Worker, namespace and image tag and verify their absence. The
+dedicated credential and GitHub environment may remain for necessary reviewed
+re-verification within the approved window. Retire both when the work is
+complete or by 2026-10-13 13:00 JST (04:00 UTC), whichever comes first.
 Image cleanup does not run account-wide registry garbage collection; underlying
 blobs may remain until normal registry collection.
 On failure retain closed diagnostics, stop the verification and confirm cleanup;

@@ -667,7 +667,7 @@ describe("the synthetic environment is an exact manual capability exception", ()
     ],
     [
       "outdated synthetic toolchain",
-      "version: 2026.10.6\n      - name: Install pinned verification dependencies",
+      "version: 2026.10.7\n      - name: Install pinned verification dependencies",
       "version: 2026.10.5\n      - name: Install pinned verification dependencies",
     ],
     ["changed timeout", "timeout-minutes: 45", "timeout-minutes: 46"],

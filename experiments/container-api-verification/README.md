@@ -31,7 +31,10 @@ establishes a measurement-boundary distinction, not a Cloudflare defect or
 runtime equivalence. The revised acceptance check below still requires
 successful hosted execution.
 Cleanup runs after each attempt; failed or interrupted cleanup requires separate
-absence confirmation. Temporary authorization must be retired after the session.
+absence confirmation. The explicit 2026-10-10 renewal permits reuse of the
+same three-role dedicated scoped credential and GitHub environment for necessary
+reviewed re-verification through 2026-10-13 13:00 JST (04:00 UTC). Retire both
+when the work is complete or at that deadline, whichever comes first.
 
 The SDK and native configs intentionally have the same Worker, exported class,
 SQLite migration, binding, explicit app name, basic/APAC/max1 configuration and
@@ -118,7 +121,9 @@ The driver performs no deployment:
    Registry cleanup deletes only the owned image tag and verifies tag absence
    using the OCI manifest HEAD operation with a bounded 90-second wait;
    it does not run account-wide garbage collection or prove blob removal.
-   Retire the temporary token and GitHub environment after resource readback.
+   Keep the dedicated token and GitHub environment only for necessary reviewed
+   re-verification within the explicit approved window. Retire both when the
+   work is complete or by 2026-10-13 13:00 JST (04:00 UTC), whichever comes first.
 
 `run-hosted.mjs` stops on any unsuccessful stage and attempts cleanup on failure.
 It never translates a failed stage into runtime success. Forced runner

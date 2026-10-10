@@ -308,7 +308,7 @@ one instance was running and none had failed. Native, reader-lifetime, recovery
 and rollback phases were not reached. All four runtime cleanup checks and the
 separate cleanup step passed; independent API reads at 2026-10-10 01:20 JST
 confirmed Worker, application and namespace absence. The temporary token and
-dedicated environment remain bounded by the renewed 02:45 JST stop deadline.
+dedicated environment were bounded by that renewed 02:45 JST stop deadline.
 
 The reviewed release-condition hardening was published at `47f4da60`; its
 single-stream wait remains bounded by three seconds / 31 samples and requires
@@ -327,8 +327,7 @@ SDK 0.3.7 returns a fixed HTTP 503 response when its startup catches
 `NoInstanceError`; it can also preserve an HTTP 503 returned by TCP fetch. The
 recorded status cannot distinguish those branches or prove an allocation cause.
 No retry, warm-up, lease or diagnostic can promote these failed or unreached
-stages. The authorization deadline remains 02:45 JST unless renewed by explicit
-user confirmation.
+stages. That historical authorization was bounded by 02:45 JST.
 
 A failure-only diagnostic classifies the existing SDK `POST /once` HTTP 503
 response. It recognizes the pinned SDK's 337-byte literal only with complete
@@ -336,6 +335,17 @@ EOF, within 338 bytes / 338 read samples and one shared 1-second read/cleanup
 budget. Only a closed category is retained; the primary upstream failure remains
 unchanged. No additional request, readiness assertion or success promotion is
 introduced. A literal match does not establish the underlying allocation cause.
+
+On 2026-10-10, the user explicitly renewed the same three-role scoped
+credential and dedicated GitHub environment through 2026-10-13 13:00 JST
+(04:00 UTC); the replacement credential handoff was saved at
+2026-10-10T02:20:51Z. Necessary reviewed re-verification may reuse this dedicated
+credential within that window until the work is complete. Every successful or
+failed attempt must still remove and independently verify absence of the owned
+temporary Worker, application, namespace and image tag. Retire the credential
+and GitHub environment when the work is complete or at the approved deadline,
+whichever comes first. The research expiry is extended to 2026-10-13 for this
+bounded re-verification; production, resource and role scope are unchanged.
 
 These attempts do not establish runtime equivalence or a Cloudflare defect.
 The following hosted runtime gates remain pending:
