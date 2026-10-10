@@ -3,6 +3,7 @@
 - Status: accepted (merged 2026-10-08 in #578); the
   [2026-10-09 amendment](#amendment-2026-10-09-route-and-page-as-implemented)
   (route, page, agent read tool and cost) is proposed
+- The [server anchor and history amendment](#amendment-2026-10-09-server-anchor-and-history) below is proposed.
 - Date: 2026-10-08
 - Issue: part of #546
 
@@ -610,3 +611,422 @@ Synthetic data only, no production access:
   re-read and the plan is refused, a held candidate shows its reason and
   only the keep-apart button, decided, separated and hint views, disabled
   actions without `commands`, no horizontal scroll at 390 px).
+
+## Amendment 2026-10-09: server anchor and history
+
+- Status: proposed (until this PR merges)
+- Date: 2026-10-09
+- Issue: part of #546
+
+### Context
+
+The preceding amendment checked an anchor only in the page. An anchor
+mapping could move after that read while the subject stayed unchanged, so
+an API or agent plan could adopt into the anchor's former instrument. The
+existing history query also had no route or page access. This slice uses the
+existing lifecycle and history query; it adds no financial adoption rule.
+
+### Options considered
+
+1. Pin every identifier mapped to the target instrument on every assignment:
+   this would change the scope of direct manual corrections and cannot tie a
+   plan to the particular candidate whose evidence was reviewed.
+2. Add optional anchor fields without distinguishing candidate provenance:
+   omission would let a candidate context claim the old subject-only guard.
+3. A candidate provenance bundle verified against the current open candidate,
+   while explicit direct assignments remain distinguishable. Chosen.
+
+### Decision
+
+Candidate adoption payloads of `identity.assign` carry `candidate` with
+`candidateId`, `anchorIdentifierId`, `anchorMappingRevision` and
+`subjectMappingRevision`. The server verifies that the current resolution
+still offers adoption for that exact candidate, with the same orientation,
+subject, target and revisions. It refuses held, decided, missing or changed
+candidates. The same 500,000 observation bound is checked before this read.
+This applies to the shared `createPlan` service for every caller.
+
+The bundle must match `baseContextId`; an assignment whose context starts
+`instrument-candidate:` must carry it. A direct manual assignment omits it
+and cannot claim candidate provenance. The plan payload and digest retain
+the evidence bundle. The planner checks that the anchor still maps to the
+target, pins both mappings in `expectedRevisions`, and leaves the simulation
+target as the subject actually being changed. Existing simulation, approval
+and commit guards apply to both pins, including the atomic receipt reservation
+before any mutation, outbox write or approval consumption. A same-target
+anchor revision also invalidates the plan. The page verifies both returned
+pins before opening confirmation.
+Stored candidate plans made under the earlier subject-only contract are
+refused with `stale_context` at simulation, approval and commit and must be
+re-planned. Direct manual plans remain valid under their existing contract.
+
+`readInstrumentHistoryForGrant` serves the shipped `queryInstrumentHistory`
+for one identifier. It requires `records.read` and whole-store source/account
+scope before a read, validates the id, and counts every history branch by its
+indexed key before loading entries. More than the grant's `maxRows` is refused
+whole; a concurrent append is checked again against the returned row count.
+The route is `GET /api/identity/instrument-history?identifierId=` behind the
+existing Access gate; HEAD has the existing body suppression. The page loads
+history on request, validates the wire contract, and displays every mapping,
+decision and relation entry in stored order. No SQL history rewrite, schema
+migration or new library is needed.
+
+### Consequences and limits
+
+Candidate adoption now has server anchor protection. Explicit manual
+corrections keep their existing contract without claiming candidate evidence.
+A candidate's entire evidence graph is not pinned: unrelated identifier facts
+or `listed_as` decisions changed after planning are outside the two mapping
+pins. The confirmation screen still renders the assignment generically.
+
+The history adapter for agents/MCP remains pending integration with the shared
+audit service in #619; the grant-graded application service is ready for that
+connection. The route makes no audit implementation of its own. Remote D1 and
+production are unmeasured. No second broker's securities, ISIN/share-class
+observations, or price/quantity/cost connection are introduced. #546 remains
+incomplete.
+
+### Deferred effective-date model
+
+Two separate meanings need a repository decision before implementation:
+recorded-time history (which mapping was known at a cutoff) and effective-time
+mapping (which product a code denoted on a business date). Reading append-only
+revisions by `created_at` would provide only the first and cannot establish
+the second. An additive effective-interval mapping model could preserve old
+decisions and add new revisions, but requires chosen interval boundaries,
+overlap and correction rules, the treatment of undated observations, and
+explicit handling of provider identifier reuse/replacement.
+
+Migrating every current mapping to an unbounded interval would make an
+unobserved historical assertion; backfilling from first/last observation also
+does not prove validity. No such migration is made. A future implementation
+must move this work to an explicit next step, not treat deferral as completion.
+The recommended next design is owner-stated intervals with cited evidence:
+unset intervals are unknown, undated observations remain unresolved, a
+correction appends a version, and conflicting intervals refuse rather than
+choosing a winner. Retained earlier results stay immutable; a new valuation
+pins the interval decision version it uses. This is a proposal for the next
+ADR decision, not behavior this amendment implements.
+
+Choices that can change financial results are the interval boundary convention,
+which dated field determines a trade/position/price's applicability, whether
+non-overlapping intervals can resolve reused provider codes, and whether a
+new calculation restates past holdings or costs. None is assigned a default
+here. The owner must authorize a concrete contract before code/schema changes.
+A future implementation
+must define how historical prices, quantities, costs and retained reports use
+the new intervals and whether correction restates earlier derived results.
+`listed_as.valid_from/valid_to` still have the documented ignored-window
+limitation; choosing the reference date and interaction with superseding
+relations is part of that decision, not inferred here.
+
+### Verification
+
+Synthetic stores only: candidate provenance omission/tampering/context mismatch,
+held candidate refusal, plan payload/digest and both mapping pins; anchor
+changes between reading and planning, between planning and simulation/approval,
+after approval, and after the commit's preparatory reads immediately before
+the batch, with no subject mutation, receipt, outbox or approval consumption.
+The history service matches the shipped query after correction and rejection,
+keeps every revision, checks grant refusals before reads, refuses above budget
+before loading text, and uses indexed count plans without table statistics.
+Worker tests cover Access, method/query validation, HEAD and the wire contract.
+
+## Design proposal 2026-10-09: evidence-backed effective identity
+
+- Status: proposed; design only, not an implemented or authorized policy.
+- Date: 2026-10-09.
+- Issue: remaining effective-time part of #546, after #629.
+- Baseline: `ba775d914b3d3a54c489719a93823ab743db19f4`.
+- Companion: [remaining implementation and verification plan](../plans/2026-10-instrument-resolution-remaining.md).
+
+### Context
+
+A provider code can denote different products in different periods. Current
+mapping revisions state the latest accepted assignment, not when that
+assignment was true. Their recorded time is not a listing, trade, position or
+price effective time. A dated `listed_as` rejection is currently applied
+without its validity window. Neither first nor last observation establishes
+a period's endpoints. Existing retained reports and adopted event seals must
+not be rewritten to manufacture this evidence.
+
+The current lot adapter also reads current mappings and marks an identifier
+remapped away `needs_review` (ADR 0059); the market-data selector reads
+provider-local price bases and its knowledge mode does not bound positions
+or identity (ADR 0056). Changing these consumers is a separately reviewed
+integration step, not a consequence of creating a candidate.
+
+### Options considered
+
+1. Treat each current mapping as true for all time. Rejected: a migration
+   would assert historical and future validity nobody observed.
+2. Use recorded time, or the first/last observation, as effective time.
+   Rejected: discovery time and observed coverage do not prove validity.
+3. Resolve a historical observation by the latest accepted mapping.
+   Rejected: a correction or reused code could move a price or quantity to
+   another product; reproducible earlier results would silently change.
+4. Owner-stated, evidence-cited intervals in append-only decision-set
+   versions, with a pure two-time selector and pinned results. Recommended.
+   Missing intervals and incomparable dates remain unresolved. This option
+   needs the policy choices below decided before schema or consumer changes.
+
+### Proposed decision contract
+
+**Two axes and one acceptance order.** Effective intervals state when a
+provider identifier denotes a target; knowledge states when the server
+accepted that assertion. Every mapping and relation decision-set version
+belongs to one atomic acceptance with its complete member list and explicit
+supersession references. All their series share one dense acceptance sequence
+per `coreEpoch`, not a separate clock or counter per identifier or pair.
+At atomic acceptance the server allocates `max(sequence) + 1` and canonical
+UTC-millisecond `known_at = max(server now, previous global known_at)` in the
+same guarded database batch. Neither a payload clock, prepare time nor a
+per-series predecessor's clock determines it. A mapping and relation accepted
+together have one sequence, one time and all-or-nothing membership. Idempotent
+resend returns that original acceptance and receipt; it adds no member or
+sequence. A restored CORE changes epoch. A regression, gap, missing member,
+ambiguous successor or successor accepted before its predecessor refuses.
+An acceptance contains at most one complete version per series. Two versions
+in one millisecond can be successive only in distinct, ordered acceptances;
+there is no unstated intra-batch ordering by member position or id.
+
+This adopts ADR 0054's acceptance-order pattern and ADR 0058's cut semantics,
+not a claim that 0070's economic-event-only log currently stores identities.
+The storage implementation must choose a compatible identity journal, with
+one order across mapping and relation series, without copying #619's general
+audit service. The common audit is not itself proof of an atomic identity
+acceptance or of the complete member set.
+
+The request explicitly chooses `current` or `known-at` and an effective
+reference time; there is no implicit knowledge mode. A historical cut is
+`{coreEpoch, commitSeq}` or `{coreEpoch, instant}`. Resolve an instant to the
+largest sequence whose `known_at` is at or before its canonical bound, including
+every acceptance with that same instant across every series. Reuse ADR 0058's
+`canonicalCutInstant`: floor finer precision to milliseconds, never round up;
+retain both the requested cut and resolved sequence/time. This does not change
+ADR 0056's separately defined price-input validator. Sequence 0 means before
+the first acceptance; beyond-head sequences and another epoch refuse. No
+`created_at` or highest row id resolves the cut.
+
+A sequence cut is `final`. An instant strictly before the journal's last
+`known_at` is `final`; an instant at or after it is `provisional`, because a
+later acceptance from a lagging server clock can share the same instant and
+resolve that request to a later sequence. Return `cutStanding` explicitly.
+Retain the resolved sequence and selected version set to reproduce either
+answer. Standing is outside `setVersion`, so provisional becoming final alone
+does not change a pinned set's digest; requesting the same instant again may
+select a new sequence/context. No empty/pre-log cut proves historical coverage.
+
+For `current`, capture the latest acceptance sequence once and read every
+mapping and relation series at that sequence. Immutable member/version rows
+permit subsequent reads constrained to the captured cut; an implementation
+that also depends on mutable pointers must revalidate the shared revision or
+use a database snapshot and refuse/retry the whole read on a race. It cannot
+mix one mapping's newer version with a relation's older version. Echo the
+captured sequence, pinned set and coverage. Do not label an unlogged legacy
+row as accepted knowledge because it is present in a current table.
+
+**Intervals.** Recommend half-open `[from, to)` rather than closed intervals:
+two periods meeting at a boundary do not both apply there. The initial
+contract should admit market business dates with an explicit canonical
+zone; an instant or another temporal basis must be explicitly converted by
+a named, versioned conversion contract, not string-compared or inferred.
+Whether an instant-level interval is needed remains a review question.
+An absent validity is `unknown`, not an unbounded interval. An explicitly
+open-ended interval is a distinct owner assertion, with a finite start,
+evidence and a reason; a nullable end alone cannot distinguish the two.
+The owner may instead choose bounded intervals only. That alternative
+would refuse observations after the last proved endpoint rather than
+treating them as still covered, so it changes financial coverage.
+
+**Reference role.** Recommend using the provider-confirmed trade role for
+a trade's product identity, the position's own as-of for a holding, and the
+price's own effective basis for a quote. A settlement date never silently
+stands in for a trade date; a fetched instant never silently stands in for
+a position date. A date with an unconfirmed role or zone, an undated fact,
+or a date incomparable with an interval is unresolved. The lot engine's
+explicit trade/settlement time-basis policy remains independent of this
+identity reference role: selecting settlement for allocation must not
+remap a traded product by its settlement day's reused code.
+
+**Correction and conflict.** Each version supplies the complete interval
+set for one identifier, with explicit evidence references and a reason.
+It supersedes a prior complete set, not selected rows mutated in place.
+There is at most one accepted successor of a version; two commands racing
+to supersede the same version must be guarded by the common revision and
+atomic commit checks. Within a set, overlapping intervals are refused,
+including overlaps with the same target; a person may submit an explicit
+merged interval with its combined evidence instead. Non-overlapping
+intervals may name different targets when evidence demonstrates provider
+code reuse. No equality of code, display name or currency adopts a set.
+
+**Relation version before effective time.** A temporal relation series is
+the exact directed tuple `(kind, fromRef, toRef)`; for `listed_as` the stored
+instrument and identifier references retain their original meaning, not
+today's remapped display names. A new operation-specific relation id is an
+entry id, not a series key. Load all touched series and resolve each one's
+single in-force, complete decision-set version at the same knowledge cut as
+the mappings, before filtering its dates, disposition or target. An accepted
+successor's membership declares the version it supersedes. Same-millisecond
+decisions are ordered by the common sequence and that proved chain, never
+`created_at DESC, id DESC`. Two in-force versions, an undeclared/missing
+predecessor or a competing accepted successor refuse as chain conflicts.
+Existing `LISTED_AS_SQL` top-1 and today's `relationMutation` rows are a
+current-review implementation, not this temporal history contract.
+
+A relation version restates its complete non-overlapping period set with
+`accepted` or `rejected` assertions and evidence. An accept, reject or
+correction supersedes the prior whole set, retaining any earlier periods
+only when explicitly restated with their evidence. A release is an explicit
+new version with an empty assertion set that supersedes the old version;
+it withdraws the series, does not resurrect an earlier rejection and does
+not assert that the pair is identical. Partial withdrawal is a complete
+replacement set retaining the other periods, with withdrawn gaps unknown.
+These are proposed temporal dispositions, not a claim that a relation-release
+command exists today. All use the same guarded atomic lifecycle, expected
+series revision and acceptance membership as mappings.
+
+Only after version resolution apply the requested effective time. An active
+rejection separates that pair in its covered period; an acceptance records
+a relation but never independently adopts a mapping. A gap, a released set,
+or missing relation evidence is no affirmative equivalence proof. A mapped
+pair contradicting an applicable rejection refuses with both pinned versions;
+there is no latest-write-wins precedence between mapping and relation.
+
+Legacy relevant rows without acceptance membership are `knowledge_unlogged`;
+undated, zone-less dated, or ambiguous-endpoint rows also carry
+`relation_validity_unknown`. Do not invent their zone, endpoint convention,
+open end or knowledge time from `created_at` or ids. A new logged version may
+explicitly supersede named legacy rows with newly cited evidence, at its
+honest acceptance cut only, never backdating their old assertions. Until
+such evidence resolves the relevant pair, it is **unresolved**, not a usable
+identity with a warning: price, quantity and cost adapters must not consume
+it. This restriction applies to the requested identity closure, not unrelated
+pairs. Legacy rows remain in recorded history; the old non-temporal candidate
+review view is unchanged until a reviewed temporal mode replaces it.
+
+**Retained results and new evaluations.** Stored reports, selected-event
+seals and earlier manifests remain immutable. A new retrospective
+evaluation under corrected knowledge is a new context, not an overwrite.
+The manifest records selector release, interval-contract version, explicit
+knowledge mode/cut, effective reference role/time/zone, decision-set ids
+and versions, acceptance membership and common resolved sequence/time,
+target ids, resolved relation sets/dispositions and evidence refs.
+It also records every unresolved outcome, rather than omitting it or
+turning it into zero. The canonical selection body and `setVersion` include
+the resolved cut and every selected mapping/relation version in its at-cut
+form, not mutable current pointers, requested mode or cut standing. The outer
+manifest retains the original requested mode/cut. A current read pins one
+captured sequence; a known-at read pins the historical chain and its cut.
+A retained manifest's pinned version is not reinterpreted through
+today's mapping. A later accepted correction yields a different context.
+
+**Migration.** Additive only. No current mapping or old relation receives
+an automatic interval, whether unbounded or inferred from observations.
+Existing current-assignment commands remain explicitly non-temporal.
+A future temporal command requires an evidence-backed interval set and
+uses the shared prepare/simulate/approve/commit path; it must not let an
+omitted interval bundle fall back to that manual command while claiming
+temporal provenance. No migration number, table or command name is fixed
+by this design proposal.
+
+### Consequences and owner choices
+
+The following choices can change which product receives a historical
+price, quantity or cost, or whether a value is available at all:
+
+- Half-open versus closed endpoints: recommend half-open, with the
+  boundary belonging only to the successor period.
+- Business-date plus named zone versus instant intervals: recommend the
+  former initial contract, refusing incomparable inputs; broaden only
+  with observed need and a reviewed conversion rule.
+- Explicit open-ended validity versus bounded-only: recommend permitting
+  an evidence-cited, deliberate open-ended assertion, never deriving it
+  from missing metadata. Bounded-only gives narrower future coverage.
+- Trade-role versus settlement-role identity: recommend trade-role,
+  independently of lot allocation policy; missing trade-role evidence
+  remains unknown rather than using settlement as a fallback.
+- Corrected current knowledge versus historical known-at: require callers
+  to choose; neither may replace an existing retained result. The UI may
+  offer both named modes but must not silently choose on the caller's
+  behalf.
+
+These are recommendations awaiting owner/design review, not defaults
+implemented by this amendment. They do not choose price source priority,
+currency conversion, lot pooling, tax, fee inclusion or acquisition-cost
+semantics. Those stay under ADRs 0051, 0056 and 0059. The first adapter must
+still distinguish product identity from listing, unit and price basis;
+one ISIN can cover multiple listings with different prices.
+
+### Proposed verification
+
+No executable implementation is added in this proposal. The companion
+plan specifies synthetic contract cases, migration assertions and query
+cost gates. Before implementation, a fresh independent design reviewer
+must check the two-time semantics, unknown/open-ended distinction,
+relation interaction and retained-manifest behavior against existing
+adopted-event and market-data contracts. After implementation, the
+reviewer must run the contract cases and atomic-race tests on the exact
+head and review ordinary latest-main integration.
+A read retains the existing caller grant and whole-store boundary. Explicit
+limits on identifiers, decision versions and returned entries are required;
+overflow refuses the whole request. Operational output contains counts and
+closed codes only, never an interval's free-text reason or provider facts.
+
+## Amendment 2026-10-09: pure temporal selector
+
+- Status: proposed (until this PR merges).
+- Date: 2026-10-09.
+- Issue: part of #546; the issue remains incomplete.
+
+### Context and options considered
+
+The reviewed effective-identity proposal can be tested without choosing a
+database journal or changing a financial consumer. Implementing a writer
+first would mix its atomicity proof with temporal selection. This slice
+instead adds the pure domain contract and synthetic selector, retaining the
+existing current review queries and all their documented limitations.
+
+### Decision
+
+`selectInstrumentTemporal` takes a complete acceptance journal, all its
+mapping and directed `listed_as` version members, explicit legacy records,
+and a requested identifier closure. It verifies the common dense sequence,
+canonical nondecreasing global acceptance time, epoch, exact membership and
+single complete-version successor chain before selecting the cut. It then
+resolves each series before applying effective dates or dispositions.
+
+The caller must supply a versioned interval contract: half-open business
+dates, a canonical named zone, whether deliberate open ends are allowed or
+refused, and a reference role (`trade`, `position` or `price`). No field has a
+default. This release supports provider-confirmed local dates only. Instants,
+collector dates, mismatched roles or zones and missing dates remain
+unresolved; no conversion is implemented. Unknown intervals are distinct
+from explicit open ends. Relevant unlogged legacy records block use until a
+logged version explicitly supersedes their exact series. Either an initial
+logged version or a valid logged successor may name still-unsuperseded legacy
+rows; each legacy row has one proved superseder at its honest acceptance cut.
+All consumed arrays require an own element at every index before canonical
+copying; a hole cannot denote missing evidence or an empty relation release.
+Relations never
+adopt a mapping; an applicable rejection of the mapped target conflicts.
+
+The canonical selection pins its common resolved sequence/time, interval
+contract, effective reference, complete membership of the selected versions'
+acceptances, selected complete versions, relevant unlogged legacy records,
+relation dispositions, evidence and all outcomes. `setVersion` digests this
+body. The outer manifest also retains the requested mode/cut and standing.
+Same-time instant cuts can advance provisionally; a retained sequence pin
+reproduces its set, and becoming final alone leaves `setVersion` unchanged.
+
+### Consequences, limits and verification
+
+No schema, SQL, loader, command, transport, migration or production consumer
+uses this module yet. Complete supplied membership is not proof of database
+atomicity or loader completeness. Synthetic B14/B15/B16/B20 checks cover only
+malformed-snapshot refusal and input preservation, not writer races,
+migration execution or guarded command provenance. The later writer must
+prove those separately. Price/quantity/unit/currency/cost conversion and real
+second-provider evidence remain pending. Domain CI and synthetic selector
+tests verify the implemented cut, interval, relation, legacy and manifest
+semantics; production was not accessed.

@@ -91,7 +91,9 @@ const otherId = (write: SqlWrite, digit: string) => {
 describe("CORE 0072 is additive", () => {
   test("every object before 0072 is unchanged, and 0072's objects read no command or rebuilt table", () => {
     const files = migrationFiles(CORE_MIGRATIONS_URL);
-    expect(files.at(-1)).toBe(MIGRATION);
+    // 0072 is applied to a store stopped just before it, so a later migration
+    // (0075, the audit record) takes no part in this comparison.
+    expect(files).toContain(MIGRATION);
     const objects = (db: Database) =>
       db
         .query(

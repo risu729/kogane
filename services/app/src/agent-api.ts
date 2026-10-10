@@ -28,8 +28,12 @@ import {
   DEFAULT_QUERY_LIMIT,
   type Grant,
   grantFor,
+  type OperationCall,
+  type OperationName,
   parseGrants,
   parseQueryRequest,
+  subjectOfPrincipal,
+  toolOperation,
 } from "../../../packages/application/src/index";
 import {
   type AgentToolName,
@@ -40,8 +44,10 @@ import {
   queryResponse,
   RECONSTRUCTED_STATE_TOOL_NAME,
   toolContext,
+  type ToolResult,
 } from "./agent-service";
-import type { AgentCaller } from "./auth";
+import { auditContext, auditedTool, recordThrown, recordTransportStatus } from "./audit";
+import { type AgentCaller, authenticate } from "./auth";
 import { cardPurchasesAvailable } from "./card-purchases-api";
 import { grantsUsable } from "./grants";
 import {
@@ -54,7 +60,16 @@ import {
 import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { opsApiEnabled } from "./ops-api";
 import { callOpsTool, isOpsToolName, OPS_MCP_TOOLS } from "./ops-tools";
+import {
+  readScheduleTool,
+  SCHEDULE_READ_TOOL,
+  SCHEDULE_UPDATE_TOOL,
+  scheduleToolsFor,
+  schedulesServed,
+  updateScheduleTool,
+} from "./schedule-tools";
 import { HttpError, json } from "./http";
+import { mcpDelegationCapabilities } from "./delegation";
 
 const AGENT_PREFIX = "/api/agent/v1/";
 export const MCP_PATH = "/mcp";
@@ -165,7 +180,10 @@ export async function agentApi(
   assertAgentTransport(request, url);
   const grant = agentGrant(env, caller.principal);
   if (grant === null) throw new HttpError(403, "agent_api_not_configured");
-  const now = new Date().toISOString().replace(/\.\d{3}Z$/u, "Z");
+  // Query/proposal clocks keep their existing whole-second contract. Authority
+  // validity must not round backwards across a subsecond issuedAt/notAfter.
+  const delegationNow = new Date().toISOString();
+  const now = delegationNow.replace(/\.\d{3}Z$/u, "Z");
   const context = toolContext(env, grant, now);
 
   if (path === MCP_PATH) {
@@ -190,6 +208,10 @@ export async function agentApi(
     // that depends on it: `initialize`, `ping` and notifications touch no table.
     let served: Promise<boolean> | undefined;
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
+    // The maintenance tools (ADR 0046) exist while the settings routes do. The
+    // read is listed to a grant holding `schedules.read`; the revision is
+    // listed to nobody, since no delegation executes yet (ADR 0063).
+    const schedules = schedulesServed(env);
     // The reconstructed state likewise exists exactly while its GET route does.
     let reconstructedServed: Promise<boolean> | undefined;
     const reconstructed = (): Promise<boolean> =>
@@ -199,8 +221,37 @@ export async function agentApi(
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
-        if (isAgentToolName(name)) return callTool(name, body, context);
-        if (ops && isOpsToolName(name)) return callOpsTool(name, body, env, caller);
+        // An MCP client's capabilities also carry its delegation declaration
+        // (#628, inert: nothing executes under it); recorded like any call.
+        if (name === "kogane.capabilities" && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async (audit) => {
+            const result = await callTool(name, body, { ...context, audit });
+            if (result.status !== 200) return result;
+            return {
+              ...result,
+              body: {
+                ...(result.body as Record<string, unknown>),
+                delegation: await mcpDelegationCapabilities(env, caller, delegationNow),
+              },
+            };
+          });
+        if (isAgentToolName(name))
+          return toolCall(request, env, caller, name, (audit) =>
+            callTool(name, body, { ...context, audit }),
+          );
+        if (ops && isOpsToolName(name))
+          return toolCall(request, env, caller, name, (audit) =>
+            callOpsTool(name, body, env, caller, audit),
+          );
+        // The maintenance read is graded by this API's grant, as on its HTTP
+        // route; the maintenance revision only by the caller's delegation,
+        // which nothing executes under yet (ADR 0063, plan S3/S4).
+        if (schedules && name === SCHEDULE_READ_TOOL)
+          return toolCall(request, env, caller, name, () => readScheduleTool(body, env, grant));
+        if (schedules && name === SCHEDULE_UPDATE_TOOL)
+          return toolCall(request, env, caller, name, () =>
+            updateScheduleTool(body, env, caller, delegationNow),
+          );
         return null;
       },
       async () => [
@@ -208,9 +259,20 @@ export async function agentApi(
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),
         ...((await reconstructed()) ? RECONSTRUCTED_STATE_MCP_TOOLS : []),
         ...(listOps ? OPS_MCP_TOOLS : []),
+        ...(schedules ? scheduleToolsFor(grant) : []),
       ],
     );
     return message;
+  }
+  // The maintenance read is the one schedule tool on this route: a browser
+  // session yields no delegation, so the revision has no HTTP agent route.
+  if (path === `${AGENT_PREFIX}${SCHEDULE_READ_TOOL.slice("kogane.".length)}`) {
+    if (!schedulesServed(env)) throw new HttpError(404, "not_found");
+    const body = await boundedJson(request);
+    const outcome = (await toolCall(request, env, caller, SCHEDULE_READ_TOOL, () =>
+      readScheduleTool(body, env, grant),
+    ))!;
+    return json(outcome.body, outcome.status);
   }
   const tool = toolForPath(path);
   if (tool === null) throw new HttpError(404, "not_found");
@@ -219,7 +281,10 @@ export async function agentApi(
     throw new HttpError(404, "not_found");
   if (tool === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructedStateAvailable(env)))
     throw new HttpError(404, "not_found");
-  const outcome = await callTool(tool, await boundedJson(request), context);
+  const body = await boundedJson(request);
+  const outcome = (await toolCall(request, env, caller, tool, (audit) =>
+    callTool(tool, body, { ...context, audit }),
+  ))!;
   return json(outcome.body, outcome.status);
 }
 
@@ -261,4 +326,102 @@ export async function sharedQueryApi(
     parsed.value,
   );
   return json(outcome.body, outcome.status);
+}
+
+// ── the audit record of every agent call (ADR 0064) ──────────────────────
+
+/** The audit path of a caller: `mcp` for an MCP client, `agent-http` for a browser session. */
+function auditPath(caller: AgentCaller): "agent-http" | "mcp" {
+  return caller.kind === "mcp-client" ? "mcp" : "agent-http";
+}
+
+/**
+ * The audit context of one agent caller: its principal as the boundary built
+ * it (`mcp-client:<sub>` on `/mcp`), the subject that principal stands for,
+ * graded `agent`.
+ */
+function agentAudit(request: Request, env: Env, caller: AgentCaller) {
+  return auditContext(
+    request,
+    env,
+    auditPath(caller),
+    subjectOfPrincipal(caller.principal),
+    caller.principal,
+  );
+}
+
+/** One tool call of `caller`, recorded through the chokepoint under its catalogued operation. */
+function toolCall(
+  request: Request,
+  env: Env,
+  caller: AgentCaller,
+  name: string,
+  run: (audit: OperationCall | undefined) => Promise<ToolResult>,
+): Promise<ToolResult | null> {
+  const operation = toolOperation(name, auditPath(caller));
+  if (operation === null) return run(undefined);
+  return auditedTool(agentAudit(request, env, caller), operation, run);
+}
+
+/** The operation a refusal of `path` before any tool ran is recorded under, or null. */
+function transportOperation(path: string): OperationName | null {
+  if (path === MCP_PATH) return "mcp.request";
+  if (path.startsWith(AGENT_PREFIX))
+    return toolOperation(`kogane.${path.slice(AGENT_PREFIX.length)}`, "agent-http");
+  return null;
+}
+
+/**
+ * The agent routes as `worker.ts` calls them, with the caller the boundary
+ * resolves (`mcpCaller` on `/mcp`, `browserCaller` on `/api/agent/v1/*`).
+ *
+ * Every refusal the transport makes after the caller is known and before a
+ * tool runs (a method, a query string, the transport check, no grant, a body
+ * too large or not JSON) is recorded once, under the tool the path names on
+ * `/api/agent/v1/*` and under `mcp.request` on `/mcp`; a refusal a tool call
+ * already recorded is not recorded again, and a path no tool serves is not an
+ * operation. A caller that cannot be resolved has no subject (401) and is not
+ * recorded — except a browser session whose verified subject claims the
+ * agent-only namespace (`403 actor_not_supported`): that is a refusal of a
+ * named subject, and it is recorded on `agent-http` with that subject.
+ */
+export async function auditedAgentApi(
+  request: Request,
+  env: Env,
+  url: URL,
+  resolveCaller: () => Promise<AgentCaller>,
+): Promise<Response | null> {
+  const path = url.pathname;
+  let caller: AgentCaller;
+  try {
+    caller = await resolveCaller();
+  } catch (error) {
+    const operation = transportOperation(path);
+    if (
+      operation !== null &&
+      path !== MCP_PATH &&
+      error instanceof HttpError &&
+      error.status === 403 &&
+      error.code === "actor_not_supported"
+    ) {
+      // `browserCaller` verified the session and refused its subject; the
+      // subject is read again from the same verified assertion to name it.
+      const subject = await authenticate(request, env).catch(() => null);
+      if (subject !== null)
+        await recordThrown(auditContext(request, env, "agent-http", subject), operation, error);
+    }
+    throw error;
+  }
+  try {
+    const response = await agentApi(request, env, url, caller);
+    // The MCP SDK answers a transport refusal (a body that is not JSON, too
+    // large, the wrong media type) itself, with an HTTP status: recorded here.
+    if (response !== null && path === MCP_PATH)
+      await recordTransportStatus(agentAudit(request, env, caller), response.status);
+    return response;
+  } catch (error) {
+    const operation = transportOperation(path);
+    if (operation !== null) await recordThrown(agentAudit(request, env, caller), operation, error);
+    throw error;
+  }
 }

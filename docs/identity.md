@@ -1,5 +1,14 @@
 # Account and instrument identity (Layers C, phases 4–5)
 
+The additive pure temporal selector in
+[`packages/domain/src/instrument-temporal.ts`](../packages/domain/src/instrument-temporal.ts)
+implements supplied-snapshot cut, interval, relation and manifest contracts
+([ADR 0055](adr/0055-instrument-candidates.md#amendment-2026-10-09-pure-temporal-selector)).
+It requires an explicit interval/reference policy and keeps unknown legacy
+validity unresolved. No persisted temporal journal, guarded temporal writer
+or consumer integration exists yet. The current review view described below
+still uses its existing current mappings and relation query.
+
 The identity layer organizes the observations already collected. It does not
 deduplicate purchases, turn debit-card activity into another deposit, add
 balances, calculate holdings, or invent an instrument's ISIN/network.
@@ -161,11 +170,21 @@ reading the page behind Access; routine agent polling needs a written bound
 first. A reader pages to offset 950 of a view (no `nextOffset` past it);
 `identifierId` narrows a larger one. The page re-reads a candidate before it
 plans and plans nothing if the candidate, its commands or either
-identifier's mapping revision changed; the server pins only the subject's
-mapping revision, so an agent's or a direct API adoption plan does not pin
-the anchor.
+identifier's mapping revision changed. Candidate adoption payloads carry the
+candidate id, anchor identifier, anchor revision and subject revision; the
+server verifies the current open candidate and pins both mappings. Their
+revisions are checked at approval and atomically in the commit batch.
+A direct manual assignment carries no candidate provenance and cannot use
+an `instrument-candidate:` base context without that bundle.
 
-Limits today: no route serves `queryInstrumentHistory`. Only SBI
+`GET /api/identity/instrument-history?identifierId=` serves the complete
+stored mapping/decision/relation history for one identifier under
+`records.read` and whole-store scope. The page opens it on request. The
+service counts by index before loading entries and refuses past `maxRows`;
+it never truncates the history. This is recorded history, not effective-date
+mapping. The agent/MCP adapter remains pending the shared audit integration.
+
+Limits today: only SBI
 Securities and SBI VC Trade store security, crypto or product identifiers, so
 cross-broker candidates need a second source whose identity rule records a
 code and country, an ISIN or a RIC. No rule records ISIN, share class or

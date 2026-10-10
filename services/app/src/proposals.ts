@@ -15,6 +15,7 @@ import {
   visibleEvidence,
 } from "../../../packages/read-model/src/index";
 import type {
+  OperationCall,
   ProposalStore,
   ResolvedRef,
   StoredProposal,
@@ -42,7 +43,13 @@ interface ScopeRow {
   account?: string | null;
 }
 
-export function proposalStore(db: D1Database): ProposalStore {
+/**
+ * `audit` is the tool call's audit record (ADR 0064): the proposal's
+ * `applied` record is the third statement of the same batch, joined to the
+ * decision row this batch wrote, so a proposal exists exactly when its record
+ * does.
+ */
+export function proposalStore(db: D1Database, audit?: OperationCall): ProposalStore {
   const resolve = async (sql: string, argument: unknown): Promise<ResolvedRef | null> => {
     const row = await db.prepare(sql).bind(argument).first<ScopeRow>();
     if (!row || typeof row.sourceId !== "string") return null;
@@ -65,7 +72,24 @@ export function proposalStore(db: D1Database): ProposalStore {
     },
     async appendProposal(proposal: StoredProposal) {
       const evidence = JSON.stringify(proposal.evidenceRefs);
-      await db.batch([
+      const record = audit?.effect(
+        {
+          targetRef: `proposal:${proposal.decisionRevisionId.replace(/^dr_prop_/u, "")}`,
+          refs: [`decision:${proposal.decisionRevisionId}`],
+          diff: {
+            kind: "decision",
+            decisionRevisions: 1,
+            commitSeq: null,
+            counts: { targets: proposal.evidenceRefs.length + 2 },
+          },
+        },
+        {
+          sql: "EXISTS(SELECT 1 FROM decision_revisions WHERE id=? AND actor_id=? AND created_at=?)",
+          binds: [proposal.decisionRevisionId, proposal.actorId, proposal.recordedAt],
+        },
+        { kind: "target" },
+      );
+      const results = await db.batch([
         db
           .prepare(
             `INSERT INTO decision_revisions
@@ -97,7 +121,9 @@ export function proposalStore(db: D1Database): ProposalStore {
             evidence,
             proposal.recordedAt,
           ),
+        ...(record ? [db.prepare(record.sql).bind(...record.binds)] : []),
       ]);
+      audit?.settle(results[2]?.meta.changes);
     },
   };
 }

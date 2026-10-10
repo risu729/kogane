@@ -1,8 +1,21 @@
 // Operator schedule settings, plus one narrowly scoped deployment bootstrap.
+//
+// Every settings write (a job edit, a maintenance edit, a survey decision, a
+// lease release) is recorded (ADR 0064, path `ui`): the Processor appends the
+// `applied` record to the write's own batch, and this module records every
+// refusal — its own or the Processor's — once, after the answer. The page's
+// GET is a page load and is not recorded; the bootstrap is a service token's,
+// with no subject, and is not recorded either.
 import { accessIdentity } from "./auth";
+import { type Answer, auditContext, auditedRoute, UpstreamLost, upstreamOutcome } from "./audit";
 import { principalFor } from "./grants";
 import { HttpError } from "./http";
-import { parseSubjectList, principalCan } from "../../../packages/application/src/index";
+import {
+  type OperationCall,
+  type OperationName,
+  parseSubjectList,
+  principalCan,
+} from "../../../packages/application/src/index";
 export const SCHEDULES_PATH = "/api/ops/v1/schedules";
 type ScheduleEnv = Env & { SCHEDULES_ENABLED?: string; DEPLOYMENT_SCHEDULE_TOKENS?: string };
 function enabled(env: ScheduleEnv) {
@@ -14,6 +27,7 @@ async function relay(
   suffix: string,
   actor?: string,
   body?: string,
+  envelope: Record<string, string> = {},
 ): Promise<Response> {
   try {
     return await env.PIPELINE.fetch(
@@ -23,6 +37,7 @@ async function relay(
           "x-kogane-internal-caller": "kogane-evidence-browser",
           ...(actor ? { "x-kogane-operator": actor } : {}),
           ...(body ? { "content-type": "application/json" } : {}),
+          ...envelope,
         },
         ...(body ? { body } : {}),
       }),
@@ -61,6 +76,16 @@ export async function scheduleBootstrapApi(
   if (tokens === null) throw new HttpError(503, "grants_misconfigured");
   if (!identity.serviceToken || !tokens.includes(identity.serviceToken))
     throw new HttpError(403, "deployment_token_required");
+  // Capture the deployment identity after service-token authorization. This
+  // refusal is before bootstrap writes; only this closed code may be retried.
+  const appSha = env.RELEASE_SHA;
+  const expectedSha = request.headers.get("x-kogane-release-sha");
+  if (typeof appSha !== "string" || !/^[0-9a-f]{40}$/u.test(appSha))
+    throw new HttpError(503, "scheduling_unavailable");
+  if (expectedSha !== null) {
+    if (!/^[0-9a-f]{40}$/u.test(expectedSha)) throw new HttpError(400, "invalid_request");
+    if (expectedSha !== appSha) throw new HttpError(503, "release_mismatch");
+  }
   // An older App must not initialize a newer Processor (or the reverse).
   let health: Response;
   try {
@@ -80,11 +105,39 @@ export async function scheduleBootstrapApi(
   }
   if (
     health.status !== 200 ||
-    !/^[0-9a-f]{40}$/u.test(env.RELEASE_SHA) ||
-    value.releaseSha !== env.RELEASE_SHA
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    typeof value.releaseSha !== "string" ||
+    !/^[0-9a-f]{40}$/u.test(value.releaseSha)
   )
-    throw new HttpError(503, "release_mismatch");
-  return relay(request, env, "/bootstrap");
+    throw new HttpError(503, "scheduling_unavailable");
+  if (value.releaseSha !== appSha) throw new HttpError(503, "release_mismatch");
+  const upstream = await relay(request, env, "/bootstrap", undefined, undefined, {
+    "x-kogane-release-sha": appSha,
+  });
+  if (upstream.status !== 200) return upstream;
+  // Identity comes from the POST that actually reconciled reservations, never
+  // the earlier health GET. A lost/malformed postwrite answer is not replayable.
+  let result: unknown;
+  try {
+    result = await upstream.json();
+  } catch {
+    throw new HttpError(503, "scheduling_unavailable");
+  }
+  if (
+    !result ||
+    typeof result !== "object" ||
+    Array.isArray(result) ||
+    !("releaseSha" in result) ||
+    result.releaseSha !== appSha ||
+    !("status" in result) ||
+    result.status !== "armed" ||
+    !("reservations" in result) ||
+    !Array.isArray(result.reservations)
+  )
+    throw new HttpError(503, "scheduling_unavailable");
+  return Response.json({ ...result, releaseSha: appSha, processorReleaseSha: result.releaseSha });
 }
 async function boundedBody(request: Request): Promise<string> {
   if (request.headers.get("content-type")?.split(";", 1)[0] !== "application/json")
@@ -121,6 +174,15 @@ async function boundedBody(request: Request): Promise<string> {
   }
   return text;
 }
+/** The settings write a POST names, or null for a path that is not one. */
+export function scheduleOperation(suffix: string): OperationName | null {
+  if (suffix === "/maintenance") return "schedules.maintenance.update";
+  if (/^\/leases\/[a-z0-9-]{1,100}$/u.test(suffix)) return "schedules.lease.release";
+  if (/^\/proposals\/[1-9][0-9]{0,15}$/u.test(suffix)) return "schedules.survey.decide";
+  if (/^\/[a-z0-9-]{1,100}$/u.test(suffix) && suffix !== "/bootstrap")
+    return "schedules.job.update";
+  return null;
+}
 export async function schedulesApi(
   request: Request,
   env: ScheduleEnv,
@@ -130,24 +192,70 @@ export async function schedulesApi(
   if (url.pathname !== SCHEDULES_PATH && !url.pathname.startsWith(`${SCHEDULES_PATH}/`))
     return null;
   enabled(env);
+  const suffix = url.pathname.slice(SCHEDULES_PATH.length);
+  const operation = request.method === "POST" ? scheduleOperation(suffix) : null;
+  if (operation === null) return scheduleRoute(request, env, url, subject, suffix);
+  return auditedRoute(auditContext(request, env, "ui", subject), operation, (call) =>
+    scheduleWrite(request, env, url, subject, suffix, call),
+  );
+}
+/** The page's read and every request that names no settings write: recorded by nobody. */
+async function scheduleRoute(
+  request: Request,
+  env: ScheduleEnv,
+  url: URL,
+  subject: string,
+  suffix: string,
+): Promise<Response> {
   if (url.search) throw new HttpError(400, "invalid_query");
   if (!principalCan(principalFor(env, subject), "interpretation.accept"))
     throw new HttpError(403, "operator_required");
-  const suffix = url.pathname.slice(SCHEDULES_PATH.length);
   if (request.method === "GET" && suffix === "") return relay(request, env, "");
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
   // A job id, a lease release, or the decision on one survey proposal (ADR 0050).
-  if (
-    !/^\/(?:[a-z0-9-]{1,100}|leases\/[a-z0-9-]{1,100}|proposals\/[1-9][0-9]{0,15})$/u.test(
-      suffix,
-    ) ||
-    suffix === "/bootstrap"
-  )
-    throw new HttpError(404, "not_found");
+  throw new HttpError(404, "not_found");
+}
+/** One settings write, forwarded with the audit envelope (ADR 0064). */
+async function scheduleWrite(
+  request: Request,
+  env: ScheduleEnv,
+  url: URL,
+  subject: string,
+  suffix: string,
+  call: OperationCall,
+): Promise<Answer> {
+  if (url.search) throw new HttpError(400, "invalid_query");
+  const principal = principalFor(env, subject);
+  call.grade(principal.id, principal.kind);
+  if (!principalCan(principal, "interpretation.accept"))
+    throw new HttpError(403, "operator_required");
   if (
     request.headers.get("origin") !== url.origin ||
     request.headers.get("x-kogane-settings") !== "1"
   )
     throw new HttpError(403, "same_origin_required");
-  return relay(request, env, suffix, subject, await boundedBody(request));
+  const body = await boundedBody(request);
+  // A survey rejection changes no rule (R1); everything else this operation
+  // records stays at its catalogued R2, whatever the Processor answers.
+  if (call.operation === "schedules.survey.decide") {
+    const decision = (JSON.parse(body) as { decision?: unknown } | null)?.decision;
+    if (decision === "reject") call.setRisk("R1");
+  }
+  let upstream: Response;
+  let text: string;
+  try {
+    upstream = await relay(request, env, suffix, subject, body, call.envelopeHeaders());
+    text = await upstream.text();
+  } catch {
+    // The answer is the one a lost relay always produced; the record says the
+    // Processor's answer was lost (its own `applied` record, if any, stands).
+    throw new UpstreamLost(503, "scheduling_unavailable");
+  }
+  return {
+    response: new Response(text, {
+      status: upstream.status,
+      headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" },
+    }),
+    outcome: upstreamOutcome(upstream.status, upstream.headers, text, { result: "replayed" }),
+  };
 }

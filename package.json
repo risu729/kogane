@@ -12,11 +12,11 @@
     "cf": "1.0.0-beta.12",
     "dependency-cruiser": "18.5.0",
     "istanbul-lib-coverage": "3.2.2",
-    "knip": "6.39.0",
+    "knip": "6.40.0",
     "lcov-parse": "1.0.0",
     "typescript": "6.0.3",
     "vitest": "4.1.11",
-    "wrangler": "4.147.0"
+    "wrangler": "4.148.0"
   },
   "packageManager": "bun@1.4.2"
 }

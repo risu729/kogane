@@ -204,13 +204,19 @@ function overfull(db: D1Database): D1Database {
   });
 }
 
-/** The store with every statement the Worker prepares recorded, so "reads nothing" is checkable. */
+/**
+ * The store with every statement the Worker prepares recorded, so "reads
+ * nothing" is checkable. The call's own audit record (ADR 0064), appended
+ * after the answer, is the one write every agent call makes; it is not a read
+ * of the store and is left out here (test/audit.test.ts covers it).
+ */
+const AUDIT_WRITE = /audit_records|audit_overflow_counters/u;
 function recording(db: D1Database, statements: string[]): D1Database {
   return new Proxy(db, {
     get(target, property) {
       if (property === "prepare")
         return (sql: string) => {
-          statements.push(sql);
+          if (!AUDIT_WRITE.test(sql)) statements.push(sql);
           return target.prepare(sql);
         };
       const value = Reflect.get(target, property) as unknown;
@@ -296,13 +302,17 @@ async function mcp(message: Record<string, unknown>, options: CallOptions = {}) 
   return (await response.json()) as Record<string, any>;
 }
 
-/** Every table's row count and the CORE source revision. */
+/**
+ * Every table's row count and the CORE source revision, but for the audit
+ * tables: each call's own audit record is the one write an agent call makes
+ * (ADR 0064), and it never moves the source revision.
+ */
 async function tables() {
   const names = await env.DB.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name",
   ).all<{ name: string }>();
   const counts: Record<string, number> = {};
-  for (const { name } of names.results)
+  for (const { name } of names.results.filter(({ name }) => !AUDIT_WRITE.test(name)))
     counts[name] = (await env.DB.prepare(`SELECT count(*) AS n FROM "${name}"`).first<number>(
       "n",
     ))!;
@@ -473,23 +483,29 @@ async function advertised(options: CallOptions = {}): Promise<unknown> {
 }
 
 describe("served only while card purchase recognition is", () => {
-  it("is neither listed nor callable with the reader flag off or CORE 0047 absent", async () => {
-    for (const options of [{ enabled: false }, { schema: false }] as const) {
-      const response = await explain({}, options);
-      expect(response.status).toBe(404);
-      expect(await response.json()).toMatchObject({ error: "not_found" });
-      const listed = await mcp({ method: "tools/list" }, options);
-      expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).not.toContain(
-        "kogane.purchases.explain",
-      );
-      const called = await mcp(
-        { method: "tools/call", params: { name: "kogane.purchases.explain", arguments: {} } },
-        options,
-      );
-      expect(called["error"]).toMatchObject({ code: -32602, message: "unknown_tool" });
-      // The agent is told the same fact the tool list shows.
-      expect(await advertised(options)).toBe(false);
-    }
+  it("stays unlisted when CORE 0047 is absent, and the retired flag does not hide it", async () => {
+    const missing = { schema: false, enabled: true } as const;
+    const response = await explain({}, missing);
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: "not_found" });
+    const hidden = await mcp({ method: "tools/list" }, missing);
+    expect(hidden["result"].tools.map((tool: { name: string }) => tool.name)).not.toContain(
+      "kogane.purchases.explain",
+    );
+    const called = await mcp(
+      { method: "tools/call", params: { name: "kogane.purchases.explain", arguments: {} } },
+      missing,
+    );
+    expect(called["error"]).toMatchObject({ code: -32602, message: "unknown_tool" });
+    expect(await advertised(missing)).toBe(false);
+
+    const retired = { enabled: false } as const;
+    expect((await explain({}, retired)).status).not.toBe(404);
+    const shown = await mcp({ method: "tools/list" }, retired);
+    expect(shown["result"].tools.map((tool: { name: string }) => tool.name)).toContain(
+      "kogane.purchases.explain",
+    );
+    expect(await advertised(retired)).toBe(true);
     const listed = await mcp({ method: "tools/list" });
     expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).toContain(
       "kogane.purchases.explain",

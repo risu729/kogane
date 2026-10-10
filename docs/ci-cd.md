@@ -544,9 +544,16 @@ Rerunning the failed release job reacquires its own `production-deploy` lock,
 refuses any newer release record (including failed/pending releases), and verifies
 artifact metadata and incrementally computed whole-ZIP checksums before restoring original
 stamped configs, bundles, cf output and Docker images. It skips only receipt-bound
-Container publication; their full 180-second guards run again against the exact
-original target. Ordinary Workers and idempotent migrations follow the original
-ordered path, and every health/lifecycle/schedule postcheck remains required.
+Container publication; their complete 600-second postchecks run again against
+the exact original target. One absolute deadline begins at postcheck entry and covers every
+allocation/identity read, registry credentials and manifest proof, and the final
+complete live readback. Late results cannot pass. A final pending state may poll
+again only within that same budget; identity drift fails immediately. Each
+postcheck step has an 11-minute fail-safe timeout and the release job retains its
+60-minute cap. Three full postcheck budgets consume at most 30 minutes; the
+separate 30-second capture budgets and all other release work must fit in the
+remaining time. No prewaiting, deadline resets or automatic reruns are added.
+Ordinary Workers and idempotent migrations follow the original ordered path, and every health/lifecycle/schedule postcheck remains required.
 
 Downloads write unverified bytes only into a unique private quarantine. The helper
 promotes the closed ZIP only after its bound checksum matches, then extracts it.
@@ -837,7 +844,7 @@ Verified in CI on every commit, with synthetic data only:
   Processor cannot be reached, and refused on the Processor for a caller that
   did not arrive through the service binding (`services/app/test/health.test.ts`,
   `services/processor/test/internal-health.test.ts`);
-- `actionlint`, `ghalint` and `zizmor --pedantic` on every workflow.
+- `jactionlint --profile correctness`, `ghalint` and `zizmor --pedantic` on every workflow.
 
 Not verifiable without a live deployment, and therefore listed as such: that
 the Cloudflare token's scopes are sufficient, that `wrangler d1 migrations
@@ -860,7 +867,7 @@ cannot be proven offline and is verified on the first live pull request.
 | G5-05      | The former owner-approval requirement is removed; no replacement approval gate is added.                                                                                                                                                                                                |
 | G5-06      | Live only: the App token update starts CI, no human approval loop. Not provable offline.                                                                                                                                                                                                |
 | G5-07      | Live only: the merge push starts `CI`, whose successful run on `main` starts `Deploy` (push event, this repository, `main`). Proven by the first merge after enabling CD.                                                                                                               |
-| G5-08      | Workflows pass pull request strings through `env` only; zizmor, ghalint and actionlint enforce the shape. Tests: pagination fails closed.                                                                                                                                               |
+| G5-08      | Workflows pass pull request strings through `env` only; zizmor, ghalint and jactionlint enforce the shape. Tests: pagination fails closed.                                                                                                                                              |
 | G5-09      | CI runs the deploy Action in `dry-run` mode with no account or token, and the release job builds and dry-runs before any credential is in scope. Both asserted.                                                                                                                         |
 | G5-10      | Tests: no workflow declares an environment other than `production`, uses a preview mode or a preview alias. The deploy ledger carries no preview target.                                                                                                                                |
 | G5-11      | Tests: a changed lockfile, configuration, migration or bundle is reported by field name. The workflow re-verifies the manifest immediately before the first upload.                                                                                                                     |

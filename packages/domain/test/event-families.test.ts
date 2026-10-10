@@ -33,7 +33,7 @@ const clone = (entry: TransactionFamilyEntry) =>
 
 describe("closed codes", () => {
   test("the lists are exactly the reviewed codes", () => {
-    expect(TRANSACTION_FAMILY_REGISTRY_VERSION).toBe("transaction-family-registry-v2");
+    expect(TRANSACTION_FAMILY_REGISTRY_VERSION).toBe("transaction-family-registry-v3");
     expect(TRANSACTION_FAMILIES).toEqual([
       "bank-movement",
       "stored-value-movement",
@@ -140,7 +140,7 @@ describe("registry entries", () => {
     expect(memberships).toBe(36);
   });
 
-  test("only Vpass/MyJCB card purchases and SMBC card settlement debits have writers", () => {
+  test("only Vpass/MyJCB card purchases and SMBC and SBI Shinsei card settlement debits have writers", () => {
     const supported = TRANSACTION_FAMILY_REGISTRY.flatMap((entry) =>
       entry.families
         .filter((membership) => membership.writer === "supported")
@@ -148,8 +148,10 @@ describe("registry entries", () => {
     );
     expect(supported).toEqual([
       "myjcb/myjcb-credit-ledger:card-purchase",
-      // SBI Shinsei debits are refused by the human-adopted settlement writer
-      // until their parser records the id's origin (ADR 0054, G1b).
+      // SBI Shinsei debits: the writer admits a row only when the row records
+      // the id's origin, which the parser does from 0.1.3 (ADR 0054 rule 2,
+      // ADR 0018); a row a 0.1.2 run stored is refused per row.
+      "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity:card-settlement",
       "smbc-bank/smbc-direct-transactions:card-settlement",
       "vpass/vpass-statement-page:card-purchase",
     ]);
@@ -179,7 +181,6 @@ describe("registry entries", () => {
     ).toEqual([
       "paypay/paypay-csv",
       "sbi-securities/sbi-yen-detail-history",
-      "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity",
       "sbi-vc-trade/sbi-vc-cashflows",
       "sbi-vc-trade/sbi-vc-executions",
     ]);
@@ -187,6 +188,7 @@ describe("registry entries", () => {
       "sbi-securities/sbi-domestic-trade-records",
     ]);
     expect(by((entry) => entry.identity.stageAReads === "provider")).toEqual([
+      "sbi-shinsei-bank/sbi-shinsei-top-balances-and-activity",
       "smbc-bank/smbc-direct-transactions",
       "v-point-pay/v-point-pay-notification-event",
     ]);
@@ -334,10 +336,8 @@ describe("lookups", () => {
   });
 
   test("unsupported reasons per family", () => {
-    expect(familyUnsupportedReasons("card-settlement")).toEqual([
-      "no_event_writer",
-      "identity_origin_unrecorded",
-    ]);
+    // Every card settlement source has a writer since SBI Shinsei 0.1.3.
+    expect(familyUnsupportedReasons("card-settlement")).toEqual([]);
     expect(familyUnsupportedReasons("securities-order")).toEqual([
       "no_event_writer",
       "not_collected",

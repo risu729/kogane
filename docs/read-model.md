@@ -361,12 +361,19 @@ currentness rule). Its newest capture is its newest fetch run by capture time;
 its current capture is the newest fetch run with a member of the current set,
 decided by `current_global_pass_snapshots`, `current_vpass_snapshots`
 (`VPASS_SNAPSHOT_MEMBER`), `current_myjcb_snapshots` (`MYJCB_LEDGER_MEMBER`),
-or `activeStateProjection` with `completeSnapshotCandidates.currentMember`. The
-CTE texts are composed unchanged; `GLOBAL_PASS_MONTH` and
-`VPASS_STATEMENT_MONTH` are exported from `src/sql.ts` so the cell's period is
-the expression the snapshot partitions on. The parsers whose current set a
-read narrows further (`UNCOMPOSED_QUERY_RULE_PARSERS`) carry
-`query_rule_not_composed`. A capture no job or parse names is its own cell,
+or the shipped SMBC request-key, MoneyForward account-month, V Point
+complete-run and MyJCB past-month connection CTEs of `src/current-captures.ts`,
+or `activeStateProjection` with `completeSnapshotCandidates.currentMember`.
+CTEs and partition expressions are shared unchanged with Transactions and
+Balances. Request keys and connection prefixes are opaque stored identifiers,
+not new date/account inference; the existing authenticated reader boundary is
+unchanged. A V Point cell needs its own published eligible parse as well as
+complete run membership. A published parse without a stored coverage claim
+carries `coverage_not_recorded`; stored incomplete/unknown claims still carry
+`coverage_incomplete`. Neither current membership nor publishing proves full
+provider-history completeness. `UNCOMPOSED_QUERY_RULE_PARSERS` is empty today,
+but pinned against the lists' parser guards to detect a future withheld rule.
+A capture no job or parse names is its own cell,
 shown only while it is newer than every parsed capture of its slot. The read
 counts no observation, so an empty current capture is `current` like any
 other; the GLOBAL PASS months where such a capture supersedes an older one
@@ -396,8 +403,11 @@ evaluated once (an `IN` list materialized once, or an automatic index built
 once), never per row. A per-source CTE is reached only from a cell of its
 dataset: measured once on `bun:sqlite`, a Sony Bank page took the same time
 with 0 or 2,000 GLOBAL PASS pages in the store (not asserted). On the test's
-scaled store (90 daily captures of four sources) one source's cells take
-roughly 10 to 50 ms on `bun:sqlite`; not measured on workerd or D1.
+original scaled store (90 daily captures of four sources) one source's cells
+took roughly 10 to 50 ms on `bun:sqlite`. The amendment's fixture also exercises
+SMBC, MoneyForward, V Point and MyJCB past-month captures and checks the same
+indexed plan boundaries; timings are indicative, not asserted. Not measured
+on remote D1; no production scope/completeness proof is claimed.
 
 ## Knowledge selector
 

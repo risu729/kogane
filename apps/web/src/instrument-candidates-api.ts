@@ -92,7 +92,7 @@ const revisionOf = (identifiers: readonly ResolutionIdentifier[], id: string) =>
  * shown, or nothing is planned. After planning, an adoption whose plan pinned
  * another revision of the subject than the one on screen (a change between
  * the two requests) is not offered for approval either. The server pins the
- * subject's mapping revision only; the anchor is checked here.
+ * subject and anchor mapping revisions; the page checks both pins too.
  */
 export async function planCandidateDecision(
   candidate: ReviewCandidate,
@@ -126,8 +126,10 @@ export async function planCandidateDecision(
   );
   if (
     decision === "adopt" &&
-    response.plan.expectedRevisions[`instrument_mapping:${candidate.subjectIdentifierId}`] !==
-      shown.subject.mappingRevision
+    (response.plan.expectedRevisions[`instrument_mapping:${candidate.subjectIdentifierId}`] !==
+      shown.subject.mappingRevision ||
+      response.plan.expectedRevisions[`instrument_mapping:${candidate.anchorIdentifierId}`] !==
+        shown.anchor.mappingRevision)
   )
     throw new Error(STALE);
   return response.plan;

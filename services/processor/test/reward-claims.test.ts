@@ -86,7 +86,7 @@ const claims = async (programId: string): Promise<ClaimRow[]> =>
     await env.DB.prepare(
       `SELECT bucket_ref,bucket_kind,program_id,holding_ref,unit_ref,quantity_coefficient,
        quantity_status,restriction_refs_json,observed_expiry_json
-       FROM reward_bucket_claims WHERE program_id=? ORDER BY id`,
+       FROM reward_bucket_claims_v2 WHERE program_id=? ORDER BY id`,
     )
       .bind(programId)
       .all<ClaimRow>()
@@ -185,7 +185,7 @@ test("reference and claim tables are append-only; retired CORE projections are a
   ).toBe(0);
 });
 
-test("V Point buckets promote by restriction and by whether the provider dated them", async () => {
+test("V Point common buckets stay unclassified with or without expiry; structural restrictions and qualification remain", async () => {
   const parse = await seedParse(900, "v-point", "v-point-balance-info", "balance-info");
   await seedBalance(parse, "v-point:common:bucket-0", "available_point_bucket", 300, "V_POINT", {
     _kogane: { asset: "v_point", expiration: "", pointTypeMeaning: "unmapped-provider-enum" },
@@ -221,9 +221,9 @@ test("V Point buckets promote by restriction and by whether the provider dated t
       row.observed_expiry_json === null ? null : JSON.parse(row.observed_expiry_json),
     ]),
   ).toEqual([
-    ["regular", "300", "points:v-point", [], null],
+    ["unclassified", "300", "points:v-point", [], null],
     [
-      "time-limited",
+      "unclassified",
       "500",
       "points:v-point",
       [],
@@ -270,12 +270,13 @@ test("prepaid balances promote under their own programme and keep the JPY unit",
 
 test("promotion is idempotent: re-running adds nothing and a release bump promotes afresh", async () => {
   const before =
-    (await env.DB.prepare("SELECT count(*) AS n FROM reward_bucket_claims").first<number>("n")) ??
-    0;
+    (await env.DB.prepare("SELECT count(*) AS n FROM reward_bucket_claims_v2").first<number>(
+      "n",
+    )) ?? 0;
   const again = await promoteRewardClaims(env.DB, { now: "2026-09-09T00:00:00.000Z" });
   expect(again.promoted).toBe(0);
   expect(
-    await env.DB.prepare("SELECT count(*) AS n FROM reward_bucket_claims").first<number>("n"),
+    await env.DB.prepare("SELECT count(*) AS n FROM reward_bucket_claims_v2").first<number>("n"),
   ).toBe(before);
   // Running the same batch twice concurrently must also be a no-op the second time.
   await Promise.all([
@@ -283,14 +284,14 @@ test("promotion is idempotent: re-running adds nothing and a release bump promot
     promoteRewardClaims(env.DB, { now: "2026-09-09T00:00:00.000Z" }),
   ]);
   expect(
-    await env.DB.prepare("SELECT count(*) AS n FROM reward_bucket_claims").first<number>("n"),
+    await env.DB.prepare("SELECT count(*) AS n FROM reward_bucket_claims_v2").first<number>("n"),
   ).toBe(before);
   const bumped = await promoteRewardClaims(env.DB, {
     release: "reward-promotion-v2-test",
     now: "2026-09-09T00:00:00.000Z",
   });
   expect(bumped.promoted).toBe(before);
-  expect(REWARD_PROMOTION_RELEASE).toBe("reward-promotion-v1");
+  expect(REWARD_PROMOTION_RELEASE).toBe("reward-promotion-v2");
 });
 
 test("an unpublished parse run is never promoted, at the job and at the trigger", async () => {
@@ -307,7 +308,7 @@ test("an unpublished parse run is never promoted, at the job and at the trigger"
   expect(result.promoted).toBe(0);
   await expect(
     env.DB.prepare(
-      `INSERT INTO reward_bucket_claims(claim_digest,parse_run_id,source_fact_kind,source_fact_id,
+      `INSERT INTO reward_bucket_claims_v2(claim_digest,parse_run_id,source_fact_kind,source_fact_id,
        program_id,holding_ref,bucket_ref,bucket_kind,restriction_refs_json,unit_ref,
        quantity_coefficient,quantity_scale,quantity_status,observed_expiry_json,observed_at,promotion_release,recorded_at)
        VALUES('digest-unpublished',?,'balance',?,'program:v-point','h','b','regular','[]','points:v-point','1',0,'exact',NULL,'2026-09-09','x','2026-09-09')`,
@@ -359,13 +360,16 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "price_promotion",
     "operation_dispatch",
     "decision_outbox",
+    // Unflagged (ADR 0064): the audit log's daily overflow aggregate.
+    "audit_overflow",
   ]);
 
   const enabled = { ...env, REWARD_CLAIMS_ENABLED: "true" } as unknown as Env;
   expect(rewardClaimsEnabled(enabled.REWARD_CLAIMS_ENABLED)).toBe(true);
   lines.length = 0;
   await runScheduled(enabled, undefined, (line) => lines.push(JSON.parse(line)));
-  // The reward lane runs before the decision outbox, which stays last.
+  // The reward lane runs before the decision outbox, which only the audit
+  // overflow aggregate follows.
   expect(lines.map((line) => line.event)).toEqual([
     "observation_sweep",
     "collection_scan",
@@ -375,6 +379,7 @@ test("the scheduled lane never runs while the flag is off", async () => {
     "price_promotion",
     "operation_dispatch",
     "decision_outbox",
+    "audit_overflow",
   ]);
   // Counts and identifiers only: no amount, account label or provider text.
   expect(Object.keys(lines[4]!).sort()).toEqual([
@@ -418,6 +423,7 @@ test("migration 0033 applies on the earlier Layer B schema with rows already pre
 
     await applyMigration(upgrade.env.DB, "0033_reward_buckets.sql");
     await applyMigration(upgrade.env.DB, "0041_reward_revision_triggers.sql");
+    await applyMigration(upgrade.env.DB, "0077_reward_bucket_claims_v2.sql");
 
     // Existing evidence is untouched and the new tables start empty.
     expect(
@@ -426,14 +432,119 @@ test("migration 0033 applies on the earlier Layer B schema with rows already pre
       ),
     ).toBe(observationsBefore);
     expect(
-      await upgrade.env.DB.prepare("SELECT count(*) AS n FROM reward_bucket_claims").first<number>(
-        "n",
-      ),
+      await upgrade.env.DB.prepare(
+        "SELECT count(*) AS n FROM reward_bucket_claims_v2",
+      ).first<number>("n"),
     ).toBe(0);
     const promoted = await promoteRewardClaims(upgrade.env.DB, {
       now: "2026-09-09T00:00:00.000Z",
     });
     expect(promoted.promoted).toBe(1);
+  } finally {
+    await upgrade.mf.dispose();
+  }
+}, 60000);
+
+test("migration 0077 preserves legacy claims and re-promotes their original evidence under v2", async () => {
+  const upgrade = await startPipeline(
+    layerBMigrations().filter((name) => !name.startsWith("0077_")),
+  );
+  try {
+    await seedArtifact(upgrade.env, 11, "v-point", "balance-info", "balance-info.json", {
+      synthetic: true,
+    });
+    const parse = await upgrade.env.DB.prepare(
+      `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+       VALUES(11,'v-point-balance-info','1.0.0','2026-09-08','ok','[]') RETURNING id`,
+    ).first<{ id: number }>();
+    const originalExtra = JSON.stringify({
+      _kogane: { expiration: "20261231", pointTypeMeaning: "unmapped-provider-enum" },
+      point_type: "synthetic-unverified-code",
+    });
+    const observation = await upgrade.env.DB.prepare(
+      `INSERT INTO balance_observations
+       (parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,observed_at,raw_locator,extra_json)
+       VALUES(?,'v-point:common:bucket-0','available_point_bucket',7,'7',0,'V_POINT','2026-09-08','2026-09-08','$.result.common[0]',?) RETURNING id`,
+    )
+      .bind(parse!.id, originalExtra)
+      .first<{ id: number }>();
+    await publishParse(upgrade.env.DB, parse!.id);
+    const claimSql = (table: string, kind: string, digest: string) =>
+      upgrade.env.DB.prepare(
+        `INSERT INTO ${table}(claim_digest,parse_run_id,source_fact_kind,source_fact_id,
+         program_id,holding_ref,bucket_ref,bucket_kind,restriction_refs_json,unit_ref,
+         quantity_coefficient,quantity_scale,quantity_status,observed_expiry_json,observed_at,promotion_release,recorded_at)
+         VALUES(?,?,'balance',?,'program:v-point','program:v-point:member','program:v-point:v-point:common:bucket-0',?,'[]','points:v-point','7',0,'exact',NULL,'2026-09-08','reward-promotion-v1','2026-09-09')`,
+      ).bind(digest, parse!.id, observation!.id, kind);
+    await claimSql("reward_bucket_claims", "time-limited", "legacy-claim").run();
+    const legacyBefore = await upgrade.env.DB.prepare("SELECT * FROM reward_bucket_claims").all();
+    const evidenceBefore = await upgrade.env.DB.prepare("SELECT * FROM balance_observations").all();
+    const revisionBefore = await upgrade.env.DB.prepare(
+      "SELECT source_revision FROM core_source_revision WHERE id=1",
+    ).first<number>("source_revision");
+    await applyMigration(upgrade.env.DB, "0077_reward_bucket_claims_v2.sql");
+    expect(
+      (await upgrade.env.DB.prepare("SELECT * FROM reward_bucket_claims").all()).results,
+    ).toEqual(legacyBefore.results);
+    expect(
+      (await upgrade.env.DB.prepare("SELECT * FROM balance_observations").all()).results,
+    ).toEqual(evidenceBefore.results);
+    expect(
+      await upgrade.env.DB.prepare(
+        "SELECT count(*) AS n FROM reward_bucket_claims_v2",
+      ).first<number>("n"),
+    ).toBe(0);
+    expect(await promoteRewardClaims(upgrade.env.DB)).toMatchObject({
+      promoted: 1,
+      release: "reward-promotion-v2",
+    });
+    const promoted = await upgrade.env.DB.prepare(
+      `SELECT c.source_fact_kind,c.source_fact_id,c.bucket_kind,c.quantity_coefficient,c.quantity_scale,
+       c.observed_expiry_json,c.promotion_release,b.raw_locator,b.extra_json
+       FROM reward_bucket_claims_v2 c JOIN balance_observations b ON b.id=c.source_fact_id`,
+    ).first();
+    expect(promoted).toEqual({
+      source_fact_kind: "balance",
+      source_fact_id: observation!.id,
+      bucket_kind: "unclassified",
+      quantity_coefficient: "7",
+      quantity_scale: 0,
+      observed_expiry_json: JSON.stringify({
+        kind: "local-date",
+        value: "2026-12-31",
+        zone: "Asia/Tokyo",
+        basis: "provider",
+      }),
+      promotion_release: "reward-promotion-v2",
+      raw_locator: "$.result.common[0]",
+      extra_json: originalExtra,
+    });
+    expect(
+      await upgrade.env.DB.prepare(
+        "SELECT source_revision FROM core_source_revision WHERE id=1",
+      ).first<number>("source_revision"),
+    ).toBe(revisionBefore! + 1);
+    expect(await promoteRewardClaims(upgrade.env.DB)).toMatchObject({ promoted: 0 });
+    expect(
+      await promoteRewardClaims(upgrade.env.DB, { release: "reward-promotion-v2-test" }),
+    ).toMatchObject({ promoted: 1 });
+    expect(
+      (await upgrade.env.DB.prepare("SELECT * FROM reward_bucket_claims").all()).results,
+    ).toEqual(legacyBefore.results);
+    for (const table of ["reward_bucket_claims", "reward_bucket_claims_v2"]) {
+      await expect(
+        upgrade.env.DB.prepare(`UPDATE ${table} SET bucket_kind='regular'`).run(),
+      ).rejects.toThrow("append-only");
+      await expect(upgrade.env.DB.prepare(`DELETE FROM ${table}`).run()).rejects.toThrow(
+        "append-only",
+      );
+    }
+    await expect(
+      claimSql("reward_bucket_claims_v2", "invented-kind", "wrong-kind").run(),
+    ).rejects.toThrow();
+    await expect(
+      claimSql("reward_bucket_claims", "unclassified", "legacy-unknown").run(),
+    ).rejects.toThrow();
   } finally {
     await upgrade.mf.dispose();
   }
@@ -498,7 +609,7 @@ test("a lower-id observation published later is promoted without replaying compl
   expect(await promoteRewardClaims(env.DB)).toMatchObject({ scanned: 1, promoted: 1 });
   expect(
     await env.DB.prepare(
-      "SELECT count(*) AS n FROM reward_bucket_claims WHERE source_fact_kind='balance' AND source_fact_id IN (?,?) AND promotion_release=?",
+      "SELECT count(*) AS n FROM reward_bucket_claims_v2 WHERE source_fact_kind='balance' AND source_fact_id IN (?,?) AND promotion_release=?",
     )
       .bind(low, high, REWARD_PROMOTION_RELEASE)
       .first<number>("n"),

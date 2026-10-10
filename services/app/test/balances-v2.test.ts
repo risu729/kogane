@@ -49,17 +49,18 @@ async function token() {
     .sign(keys.privateKey);
 }
 
-/** `projection` switches the reader flag; it never changes authentication. */
-async function call(path: string, options: { projection?: boolean } = {}) {
+/** `read: false` drops the READ binding. `retired` is the old App env name. */
+async function call(path: string, options: { read?: boolean; retired?: string } = {}) {
+  const { READ: _read, ...withoutRead } = env;
   return worker.fetch(
     new Request(`https://fixture.test${path}`, {
       headers: { "cf-access-jwt-assertion": await token() },
     }),
     {
-      ...env,
+      ...(options.read === false ? withoutRead : env),
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: "fixture-audience",
-      BALANCE_PROJECTION_ENABLED: options.projection === false ? "0" : "1",
+      ...(options.retired === undefined ? {} : { BALANCE_PROJECTION_ENABLED: options.retired }),
     } as Env,
   );
 }
@@ -122,6 +123,7 @@ describe("v2 balance read model", () => {
     expect(before.capabilities.balancesV2).toBe(false);
     expect(before.capabilities.balancesV2Pagination).toBe("none");
     expect((await call("/api/v2/balances/latest")).status).toBe(503);
+    expect((await call("/api/v2/balances/latest", { retired: "0" })).status).toBe(503);
 
     const run = await seedRun({ count: 1, source: "other-test" });
     const parse = await parseRun(run.artifacts[0].id, "v2-fixture");
@@ -135,12 +137,12 @@ describe("v2 balance read model", () => {
       // The v1 routes keep their own pagination contract.
       paginationVersion: "offset-v1",
     });
-    // With the reader flag off the capability is not advertised at all.
-    const flagOff = (await (
-      await call("/api/meta", { projection: false })
-    ).json()) as typeof before;
-    expect(flagOff.capabilities.balancesV2).toBe(false);
-    expect((await call("/api/v2/balances/latest", { projection: false })).status).toBe(404);
+    // The retired App env name does not hide a published snapshot.
+    const retired = (await (await call("/api/meta", { retired: "0" })).json()) as typeof before;
+    expect(retired.capabilities.balancesV2).toBe(true);
+    expect((await call("/api/v2/balances/latest", { retired: "0" })).status).toBe(200);
+    // Without the READ binding the v2 route is not this deployment's route.
+    expect((await call("/api/v2/balances/latest", { read: false })).status).toBe(404);
   });
 
   it("returns typed quantities, measures, adoption and time, and never a net worth", async () => {
@@ -258,11 +260,12 @@ describe("v2 balance read model", () => {
     const run = await seedRun({ count: 1, source: "other-test" });
     const parse = await parseRun(run.artifacts[0].id, "v2-oversized-fixture");
     await seedBalances(parse, "v2-oversized-account", 5002, "over");
-    // The projection refuses to build rather than projecting a partial set,
-    // and v1 still answers 413 with the flag on and with it off.
+    // The projection refuses to build rather than projecting a partial set.
+    // v1 still answers 413 with the retired name set and with READ unbound.
     expect((await build()).status).toBe("refused");
-    for (const projection of [true, false])
-      expect((await call("/api/balances", { projection })).status).toBe(413);
+    for (const retired of ["0", "1", "true"])
+      expect((await call("/api/balances", { retired })).status).toBe(413);
+    expect((await call("/api/balances", { read: false })).status).toBe(413);
     await env.DB.prepare(
       "INSERT INTO fetch_run_annotations VALUES (?, 'exclude_from_financial_views', 'synthetic-fixture', 0)",
     )
@@ -341,10 +344,10 @@ describe("v2 balance read model", () => {
     await seedBalances(parse, "v2-parity-account", 40, "parity");
     expect((await build()).status).toBe("complete");
     const base = "/api/balances?source=other-test&account=v2-parity-account";
-    const legacy = (await (await call(base, { projection: false })).json()) as {
+    const legacy = (await (await call(base, { read: false })).json()) as {
       latest: unknown[];
     };
-    const viaProjection = (await (await call(base)).json()) as typeof legacy;
+    const viaProjection = (await (await call(base, { retired: "0" })).json()) as typeof legacy;
     expect(viaProjection.latest).toEqual(legacy.latest);
     // Independently of the comparison: the expected set is the 40 rows.
     expect(legacy.latest).toHaveLength(40);

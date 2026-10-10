@@ -1123,6 +1123,24 @@
       "statementCount": 11,
       "insertStatements": [],
       "sha256": "73e7700feb07abd831c3e9ef0f65e34d471e719034629a947e1291f3e3cbfc30"
+    },
+    {
+      "file": "0075_audit_records.sql",
+      "statementCount": 14,
+      "insertStatements": [],
+      "sha256": "3e5a5c2ebce700b5914ca0dfefe2d55ddf49c75c2d2ec011677bff39b77e61ff"
+    },
+    {
+      "file": "0077_reward_bucket_claims_v2.sql",
+      "statementCount": 10,
+      "insertStatements": [],
+      "sha256": "2f77d555e0f64215837e4f6e70addcfe018a17a184986aea5a3272500f7a5980"
+    },
+    {
+      "file": "0078_maintenance_change_provenance.sql",
+      "statementCount": 4,
+      "insertStatements": [],
+      "sha256": "786ec712f3e9118c9dc5afc9fac258f197dc11c187bde2d7cacb1ee8de2a8d2e"
     }
   ],
   "tables": [
@@ -2672,6 +2690,365 @@
       ],
       "appendOnly": true,
       "sqlSha256": "085bb9b55a635cfe"
+    },
+    {
+      "name": "audit_overflow_counters",
+      "classification": "operational-mutable",
+      "planRow": "daily audit overflow counters (ADR 0064)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "day",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "principal",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 3
+        },
+        {
+          "name": "result",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 4
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "principal_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "day",
+        "principal",
+        "path",
+        "result"
+      ],
+      "foreignKeys": [],
+      "indexes": [],
+      "triggers": [],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "1cb14d51f8dcb779"
+    },
+    {
+      "name": "audit_records",
+      "classification": "core-keep",
+      "planRow": "common audit records (ADR 0064)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "audit_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "recorded_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "path",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "subject",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "principal",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "principal_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "delegation_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "operation",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "risk_class",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "step",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "scope_namespace",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "scope_source",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "target_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "result",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "result_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reason_code",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "correlation_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "idempotency_key",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "payload_digest",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "confirmation_digest",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "confirm_expires_at",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "confirms_audit_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "reverts_audit_id",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "refs_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": "'[]'",
+          "pk": 0
+        },
+        {
+          "name": "diff_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "audit_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "confirms_audit_id",
+          "references": "audit_records(audit_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "reverts_audit_id",
+          "references": "audit_records(audit_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "audit_records_by_correlation",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "correlation_id"
+          ]
+        },
+        {
+          "name": "audit_records_by_operation",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "operation",
+            "recorded_at"
+          ]
+        },
+        {
+          "name": "audit_records_by_principal",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "principal",
+            "recorded_at"
+          ]
+        },
+        {
+          "name": "audit_records_by_scope",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "scope_namespace",
+            "scope_source",
+            "recorded_at"
+          ]
+        },
+        {
+          "name": "audit_records_by_target",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "target_ref"
+          ]
+        },
+        {
+          "name": "audit_records_by_time",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "recorded_at",
+            "audit_id"
+          ]
+        },
+        {
+          "name": "audit_records_confirm_once",
+          "unique": true,
+          "partial": true,
+          "columns": [
+            "confirms_audit_id"
+          ]
+        },
+        {
+          "name": "audit_records_idempotency",
+          "unique": true,
+          "partial": true,
+          "columns": [
+            "principal",
+            "operation",
+            "idempotency_key"
+          ]
+        }
+      ],
+      "triggers": [
+        "audit_records_closed_json",
+        "audit_records_no_delete",
+        "audit_records_no_replace",
+        "audit_records_no_update"
+      ],
+      "noUpdateTriggers": [
+        "audit_records_no_update"
+      ],
+      "noDeleteTriggers": [
+        "audit_records_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "8cb2c7d5b677d90e"
     },
     {
       "name": "balance_observations",
@@ -13491,6 +13868,27 @@
           "notNull": true,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "change_reason",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "decision_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -13499,6 +13897,15 @@
       ],
       "foreignKeys": [],
       "indexes": [
+        {
+          "name": "maintenance_agent_writes",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "actor",
+            "created_at"
+          ]
+        },
         {
           "name": "maintenance_source",
           "unique": false,
@@ -13521,7 +13928,7 @@
         "maintenance_no_delete"
       ],
       "appendOnly": true,
-      "sqlSha256": "069618216f10aa80"
+      "sqlSha256": "eb2571a92dbe5f3e"
     },
     {
       "name": "publication_events",
@@ -14765,6 +15172,203 @@
       ],
       "appendOnly": true,
       "sqlSha256": "7bad495cf9b32816"
+    },
+    {
+      "name": "reward_bucket_claims_v2",
+      "classification": "core-keep",
+      "planRow": "append-only canonical reward source claims with unclassified provider semantics",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "id",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "claim_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "parse_run_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_fact_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "source_fact_id",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "program_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "holding_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bucket_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "bucket_kind",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "restriction_refs_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "unit_ref",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "quantity_coefficient",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "quantity_scale",
+          "type": "INTEGER",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "quantity_status",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "observed_expiry_json",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "observed_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "promotion_release",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "recorded_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "parse_run_id",
+          "references": "parse_runs(id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        },
+        {
+          "column": "program_id",
+          "references": "reward_programs(program_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "reward_bucket_claims_v2_fact",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "source_fact_kind",
+            "source_fact_id"
+          ]
+        },
+        {
+          "name": "reward_bucket_claims_v2_holding",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "program_id",
+            "holding_ref",
+            "id"
+          ]
+        },
+        {
+          "name": "reward_bucket_claims_v2_parse_run",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "parse_run_id"
+          ]
+        }
+      ],
+      "triggers": [
+        "reward_bucket_claims_v2_bump_revision_delete",
+        "reward_bucket_claims_v2_bump_revision_insert",
+        "reward_bucket_claims_v2_bump_revision_update",
+        "reward_bucket_claims_v2_no_delete",
+        "reward_bucket_claims_v2_no_update",
+        "reward_bucket_claims_v2_requires_published"
+      ],
+      "noUpdateTriggers": [
+        "reward_bucket_claims_v2_no_update"
+      ],
+      "noDeleteTriggers": [
+        "reward_bucket_claims_v2_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "552f36bcd627627b"
     },
     {
       "name": "reward_programs",
@@ -16953,6 +17557,34 @@
       "timing": "BEFORE",
       "event": "INSERT",
       "sqlSha256": "7948a88aeaad590e"
+    },
+    {
+      "name": "audit_records_closed_json",
+      "table": "audit_records",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "857f4c878c6ad894"
+    },
+    {
+      "name": "audit_records_no_delete",
+      "table": "audit_records",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "be729c78acd021be"
+    },
+    {
+      "name": "audit_records_no_replace",
+      "table": "audit_records",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "5502deffe25ac7cc"
+    },
+    {
+      "name": "audit_records_no_update",
+      "table": "audit_records",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "4a2fad82b3a1334e"
     },
     {
       "name": "balance_decimals_v1",
@@ -19811,6 +20443,48 @@
       "sqlSha256": "14d19757f349438e"
     },
     {
+      "name": "reward_bucket_claims_v2_bump_revision_delete",
+      "table": "reward_bucket_claims_v2",
+      "timing": "AFTER",
+      "event": "DELETE",
+      "sqlSha256": "4d1d8548b5fa1692"
+    },
+    {
+      "name": "reward_bucket_claims_v2_bump_revision_insert",
+      "table": "reward_bucket_claims_v2",
+      "timing": "AFTER",
+      "event": "INSERT",
+      "sqlSha256": "7739d3d9f91edcaa"
+    },
+    {
+      "name": "reward_bucket_claims_v2_bump_revision_update",
+      "table": "reward_bucket_claims_v2",
+      "timing": "AFTER",
+      "event": "UPDATE",
+      "sqlSha256": "771c4cf4e8e7c4e9"
+    },
+    {
+      "name": "reward_bucket_claims_v2_no_delete",
+      "table": "reward_bucket_claims_v2",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "dd3e0563120d2c8f"
+    },
+    {
+      "name": "reward_bucket_claims_v2_no_update",
+      "table": "reward_bucket_claims_v2",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "f78de2bffcd9ce0f"
+    },
+    {
+      "name": "reward_bucket_claims_v2_requires_published",
+      "table": "reward_bucket_claims_v2",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "41e9721aed0abdc1"
+    },
+    {
       "name": "reward_programs_bump_revision_delete",
       "table": "reward_programs",
       "timing": "AFTER",
@@ -20076,6 +20750,46 @@
       "name": "approvals_plan",
       "table": "approvals",
       "sqlSha256": "089100c983ade003"
+    },
+    {
+      "name": "audit_records_by_correlation",
+      "table": "audit_records",
+      "sqlSha256": "ca8ff0aba20481ef"
+    },
+    {
+      "name": "audit_records_by_operation",
+      "table": "audit_records",
+      "sqlSha256": "edce12b65dc4141e"
+    },
+    {
+      "name": "audit_records_by_principal",
+      "table": "audit_records",
+      "sqlSha256": "0ecb4a7dfe24afac"
+    },
+    {
+      "name": "audit_records_by_scope",
+      "table": "audit_records",
+      "sqlSha256": "01f00f31d541f360"
+    },
+    {
+      "name": "audit_records_by_target",
+      "table": "audit_records",
+      "sqlSha256": "46cccaf3d5a85e4b"
+    },
+    {
+      "name": "audit_records_by_time",
+      "table": "audit_records",
+      "sqlSha256": "87acbf1316f3368e"
+    },
+    {
+      "name": "audit_records_confirm_once",
+      "table": "audit_records",
+      "sqlSha256": "31ca412ce23ae4d0"
+    },
+    {
+      "name": "audit_records_idempotency",
+      "table": "audit_records",
+      "sqlSha256": "431bca47022f2627"
     },
     {
       "name": "calculation_policies_kind",
@@ -20453,6 +21167,11 @@
       "sqlSha256": "621bbd1c45936b0d"
     },
     {
+      "name": "maintenance_agent_writes",
+      "table": "provider_maintenance_rules",
+      "sqlSha256": "cab3c1e216c7a262"
+    },
+    {
       "name": "maintenance_source",
       "table": "provider_maintenance_rules",
       "sqlSha256": "d640aeb09437edd1"
@@ -20688,6 +21407,21 @@
       "sqlSha256": "21d60bd4a871f0cc"
     },
     {
+      "name": "reward_bucket_claims_v2_fact",
+      "table": "reward_bucket_claims_v2",
+      "sqlSha256": "963ebe41dd8d1ab3"
+    },
+    {
+      "name": "reward_bucket_claims_v2_holding",
+      "table": "reward_bucket_claims_v2",
+      "sqlSha256": "436dd9e2916ce383"
+    },
+    {
+      "name": "reward_bucket_claims_v2_parse_run",
+      "table": "reward_bucket_claims_v2",
+      "sqlSha256": "ffb6ded37b7774ff"
+    },
+    {
       "name": "reward_programs_source",
       "table": "reward_programs",
       "sqlSha256": "2fe5e243ea0a9dff"
@@ -20719,10 +21453,10 @@
     }
   ],
   "summary": {
-    "tableCount": 136,
+    "tableCount": 139,
     "viewCount": 44,
-    "triggerCount": 507,
-    "explicitIndexCount": 132,
+    "triggerCount": 517,
+    "explicitIndexCount": 144,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -20739,6 +21473,7 @@
         "artifact_relations",
         "artifact_storage_metadata",
         "artifact_transform_steps",
+        "audit_records",
         "balance_observations",
         "calculation_policies",
         "calculation_results",
@@ -20829,6 +21564,7 @@
         "report_events",
         "retention_classes",
         "reward_bucket_claims",
+        "reward_bucket_claims_v2",
         "reward_programs",
         "run_inventories",
         "run_inventory_items",
@@ -20842,6 +21578,7 @@
       ],
       "read-candidate": [],
       "operational-mutable": [
+        "audit_overflow_counters",
         "card_purchase_retirement_check",
         "card_purchase_scan_cursor",
         "card_settlement_scan_cursor",
@@ -20872,6 +21609,7 @@
       "active_releases",
       "allocations",
       "approvals",
+      "audit_overflow_counters",
       "calculation_runs",
       "card_purchase_retirement_check",
       "card_purchase_scan_cursor",
@@ -20972,6 +21710,6 @@
       "0070_economic_commit_guard.sql",
       "0071_economic_event_command_kinds.sql"
     ],
-    "schemaSha256": "c5fa75fff962ce895d32b305eed5c4e66fa35540459e75e89f74f5a80a58238b"
+    "schemaSha256": "339280b496419e8e5088994123ae86ee7c18b341ac7ed245c570823d34efb7cb"
   }
 }

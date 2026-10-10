@@ -1,16 +1,19 @@
 # ADR 0064: One append-only audit record per operation, for the human UI and the AI alike, referencing the existing logs
 
-- Status: proposed (accepted when its pull request merges). Nothing it decides
-  is implemented; the slices are in the
-  [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
+- Status: proposed (accepted when its pull request merges). Slice S1 of the
+  [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)
+  implements the table, the chokepoint for the existing `ui`, `agent-http` and
+  `mcp` paths, the daily caps with their overflow aggregate and the operator's
+  `GET /api/v2/audit` ([audit log](../audit-log.md)); slice S4 (#564) adds the
+  maintenance read and revision to the catalogue, the revision on `mcp` only
+  as a recorded refusal. The `alarm` and `lane` writers, the agent read and
+  delegated execution (ADR 0063) are not implemented.
 - Date: 2026-10-09
 - Related: [ADR 0063](0063-delegated-ai-operation-path.md) (the delegated AI
   operation path, whose two-step confirmation and idempotency use this
   record).
-- Migration: CORE `audit_records`, **0075 or later (candidate; fixed after
-  root coordination: CORE 0072 is the financial G3 migration, 0073/0074 are UI
-  candidates, 0067 is #564's; re-check latest main and every open PR before
-  the implementation PR)**.
+- Migration: CORE 0075 (`0075_audit_records.sql`: `audit_records` and
+  `audit_overflow_counters`).
 
 ## Context
 
@@ -36,7 +39,8 @@ What is recorded today (the plan's section 6.1 has the full table):
   mutable execution state.
 - **Settings** — `collection_schedule_revisions` (0065; written, never read),
   `provider_maintenance_rules` (0065; `actor_kind`, `change_reason`,
-  `decision_ref` on #564's 0067), `maintenance_survey_decisions` (0069) — carry
+  `decision_ref` on #564's 0067, renumbered 0078 in slice S4),
+  `maintenance_survey_decisions` (0069) — carry
   an actor. `collection_schedules`, `collection_schedule_occurrences` and
   `collection_execution_leases` are mutable; releasing a lease leaves no trace
   at all.
@@ -226,3 +230,32 @@ records, and no echo of a refused value; a deep scan of every stored record
 after seeding provider text with a token-shaped string and an amount; and, for
 the agent read, the plan's leakage tests (section 7). Not verified: anything in
 production.
+
+## Amendment: implementation details fixed by slice S1 (2026-10-09)
+
+The implementation slice settled four details this decision left open or
+stated too tightly; none changes what is recorded or who may read it.
+
+- **A time index.** Besides the indexes listed above, `audit_records_by_time`
+  on `(recorded_at, audit_id)` serves the operator's whole-store page newest
+  first without scanning and sorting the table on every page.
+- **The overflow counter's key and columns.** `audit_overflow_counters` is
+  keyed by `(day, principal, path, result)` and also keeps the principal kind,
+  so the aggregate record carries exactly the counted path and kind. One
+  principal on one path — the case the decision describes — gets at most one
+  overflow record per capped result per day; a principal on several paths gets
+  one per path.
+- **A confirm cites its prepare when it applies.** `confirms_audit_id` is
+  required on an `applied` or `accepted` confirm and allowed only on a
+  confirm, instead of being set exactly on every confirm: a confirm refused
+  because no matching prepare exists (`confirmation_invalid`) has nothing to
+  cite and is still recorded with `step = 'confirm'`. The unique index still
+  allows one applied confirm per prepare.
+- **One effect record per effect.** The effect statement also refuses a second
+  `applied`/`accepted` record for the same effect (same target and operation,
+  and the same revision, approval or operation id), so a batch that lost a race
+  but still sees the winner's row adds no record of its own; the unique
+  indexes remain the backstop.
+
+The plan's S1 verification is in [the audit log](../audit-log.md#cost) and its
+test files.

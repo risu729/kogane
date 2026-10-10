@@ -48,6 +48,7 @@ import {
   dataBucket,
   persistSharedRun,
   sharedRunPersisted,
+  sharedOutcome,
   type SharedCapture,
   type SharedRunSummary,
 } from "./shared-collection";
@@ -575,6 +576,9 @@ async function collectWithContainer(
         status,
         artifactCount: artifacts.length,
         failureCount: failures.length,
+        coverageStatus: sharedOutcome(manifest).coverageStatus,
+        unitCoverageStatus: sharedOutcome(manifest).unitCoverageStatus,
+        coverageReason: status === "failed" ? "collection-unavailable" : "rolling-window",
         manifestKey,
         collectionTarget: target,
         sharedOutcome: shared.outcome,

@@ -143,12 +143,16 @@ jobs:
         run: |
           guard="${RUNNER_TEMP}/container-tools"
           mkdir -p "${guard}/tasks/_lib/ci" "${guard}/scripts"
-          for path in tasks/_lib/ci/cf-container-release.mjs tasks/_lib/ci/cf-do-identity.mjs tasks/_lib/ci/release-resume.mjs tasks/_lib/ci/github-api.mjs tasks/_lib/ci/release-ledger.mjs tasks/_lib/ci/release-manifest.mjs scripts/jsonc.ts; do
+          for path in tasks/_lib/ci/cf-container-release.mjs tasks/_lib/ci/cf-do-identity.mjs tasks/_lib/ci/release-resume.mjs tasks/_lib/ci/release-health.mjs tasks/_lib/ci/github-api.mjs tasks/_lib/ci/alarm-bootstrap.mjs tasks/_lib/ci/alarm-cron-readback.mjs tasks/_lib/ci/release-ledger.mjs tasks/_lib/ci/release-manifest.mjs scripts/jsonc.ts; do
             gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${TRUSTED_SHA}" --jq '.content' | base64 --decode > "${guard}/${path}"
             test -s "${guard}/${path}"
           done
-          printf 'CONTAINER_GUARD=%s\n' "${guard}/tasks/_lib/ci/cf-container-release.mjs" >> "${GITHUB_ENV}"
-          printf 'RELEASE_RESUME=%s\n' "${guard}/tasks/_lib/ci/release-resume.mjs" >> "${GITHUB_ENV}"
+          {
+            printf 'CONTAINER_GUARD=%s\n' "${guard}/tasks/_lib/ci/cf-container-release.mjs"
+            printf 'RELEASE_RESUME=%s\n' "${guard}/tasks/_lib/ci/release-resume.mjs"
+            printf 'RELEASE_HEALTH=%s\n' "${guard}/tasks/_lib/ci/release-health.mjs"
+            printf 'ALARM_BOOTSTRAP=%s\n' "${guard}/tasks/_lib/ci/alarm-bootstrap.mjs"
+          } >> "${GITHUB_ENV}"
       - name: Checkout the exact commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -173,7 +177,7 @@ jobs:
         # its mise configuration and the scripts below are reviewed code.
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: 2026.10.5
+          version: 2026.10.7
           # No tool cache anywhere in this job: its cache scope is shared with
           # pull request CI, which runs pull request code, so a restored archive
           # is not a trusted source of the interpreter that decides whether this
@@ -243,7 +247,7 @@ jobs:
         if: steps.decide.outputs.proceed == 'true'
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: 2026.10.5
+          version: 2026.10.7
           cache: false
       - name: Install the locked dependencies
         if: steps.decide.outputs.proceed == 'true'
@@ -559,7 +563,7 @@ jobs:
       - name: Deploy the GlobalPass collector with cf
         id: cf-deploy-globalpass-worker
         if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker') && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'globalpass-worker')
-        uses: risu729/wrangler-deploy-action@251e42de418f3f5aece2789cc1c0f76d3f8264f5 # v2.2.0
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-globalpass
@@ -596,6 +600,8 @@ jobs:
         run: node "${RELEASE_RESUME}" checkpoint
       - name: Verify the GlobalPass Container application and image
         id: verify-container-globalpass-worker
+        # The helper enforces one 600-second total postcheck budget.
+        timeout-minutes: 11
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker')
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -614,7 +620,7 @@ jobs:
       - name: Deploy the Mobile Suica collector with cf
         id: cf-deploy-mobile-suica-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mobile-suica-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'mobile-suica-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-mobile-suica
@@ -636,7 +642,7 @@ jobs:
       - name: Deploy the Money Forward collector with cf
         id: cf-deploy-moneyforward-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'moneyforward-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'moneyforward-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-moneyforward
@@ -658,7 +664,7 @@ jobs:
       - name: Deploy the MyJCB collector with cf
         id: cf-deploy-myjcb-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'myjcb-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'myjcb-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-myjcb
@@ -680,7 +686,7 @@ jobs:
       - name: Deploy the SBI Securities collector with cf
         id: cf-deploy-sbi-securities-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-securities-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-securities-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-sbi-securities
@@ -709,7 +715,7 @@ jobs:
       - name: Deploy the SBI Shinsei collector with cf
         id: cf-deploy-sbi-shinsei-worker
         if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker') && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-shinsei-worker')
-        uses: risu729/wrangler-deploy-action@251e42de418f3f5aece2789cc1c0f76d3f8264f5 # v2.2.0
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-sbi-shinsei
@@ -746,6 +752,8 @@ jobs:
         run: node "${RELEASE_RESUME}" checkpoint
       - name: Verify the SBI Shinsei Container application and image
         id: verify-container-sbi-shinsei-worker
+        # The helper enforces one 600-second total postcheck budget.
+        timeout-minutes: 11
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker')
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -764,7 +772,7 @@ jobs:
       - name: Deploy the SBI VC Trade collector with cf
         id: cf-deploy-sbi-vc-trade-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-vc-trade-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-vc-trade-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-sbi-vc-trade
@@ -786,7 +794,7 @@ jobs:
       - name: Deploy the SMBC Direct collector with cf
         id: cf-deploy-smbc-direct-backfill-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'smbc-direct-backfill-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'smbc-direct-backfill-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-smbc-direct
@@ -808,7 +816,7 @@ jobs:
       - name: Deploy the Mizuho collector with cf
         id: cf-deploy-mizuho-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mizuho-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'mizuho-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-mizuho
@@ -830,7 +838,7 @@ jobs:
       - name: Deploy the Sony Bank collector with cf
         id: cf-deploy-sony-bank-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sony-bank-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sony-bank-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-sony-bank
@@ -859,7 +867,7 @@ jobs:
       - name: Deploy the St.George collector with cf
         id: cf-deploy-st-george-worker
         if: steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker') && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'st-george-worker')
-        uses: risu729/wrangler-deploy-action@251e42de418f3f5aece2789cc1c0f76d3f8264f5 # v2.2.0
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-st-george
@@ -896,6 +904,8 @@ jobs:
         run: node "${RELEASE_RESUME}" checkpoint
       - name: Verify the St.George Container application and image
         id: verify-container-st-george-worker
+        # The helper enforces one 600-second total postcheck budget.
+        timeout-minutes: 11
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'st-george-worker')
         env:
           CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
@@ -914,7 +924,7 @@ jobs:
       - name: Deploy the PRESTIA bank collector with cf
         id: cf-deploy-prestia-bank-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'prestia-bank-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'prestia-bank-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-prestia-bank
@@ -936,7 +946,7 @@ jobs:
       - name: Deploy the Vpass collector with cf
         id: cf-deploy-vpass-json
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpass-json') && contains(fromJson(steps.select.outputs.cf-selected), 'vpass-json')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-vpass
@@ -958,7 +968,7 @@ jobs:
       - name: Deploy the V Point Pay collector with cf
         id: cf-deploy-vpoint-pay-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-pay-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-pay-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-vpoint-pay
@@ -980,7 +990,7 @@ jobs:
       - name: Deploy the V Point collector with cf
         id: cf-deploy-vpoint-worker
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-worker')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/collector-vpoint
@@ -1004,7 +1014,7 @@ jobs:
       - name: Deploy the Processor with cf
         id: cf-deploy-processor
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'processor') && contains(fromJson(steps.select.outputs.cf-selected), 'processor')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/processor
@@ -1030,7 +1040,7 @@ jobs:
         # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
         # from the job's `steps` context to record, per Worker, what happened.
         if: steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app') && contains(fromJson(steps.select.outputs.cf-selected), 'app')
-        uses: risu729/wrangler-deploy-action@0d45a001e87e556e88dcf4aa6111a2dab05ea42b # v2.1.1
+        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
         with:
           mode: production
           working-directory: services/app
@@ -1104,61 +1114,10 @@ jobs:
           SHA: ${{ inputs.sha }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-        run: |
-          order=infra/deploy-order.json
-          mapfile -t rows < <(jq -r '.workers[] | select(.deploy and .healthAuth == "access") | [.name, .worker, .healthPath, .healthIdentity] | @tsv' "${order}")
-          if [[ ${#rows[@]} -ne 1 ]]; then
-            echo "Expected exactly one authenticated health route in ${order}, found ${#rows[@]}." >&2
-            exit 1
-          fi
-          IFS=$'\t' read -r name worker path _field <<<"${rows[0]}"
-          if ! jq -e --arg name "${name}" 'index($name)' <<<"${SELECTED}" > /dev/null; then
-            echo "${name} was not deployed by this run; nothing to postcheck." | tee -a "${GITHUB_STEP_SUMMARY}"
-            exit 0
-          fi
-          if [[ -z ${CF_ACCESS_CLIENT_ID} || -z ${CF_ACCESS_CLIENT_SECRET} ]]; then
-            echo "The production Environment holds no CF_ACCESS_CLIENT_ID/CF_ACCESS_CLIENT_SECRET, so the App's health route cannot be read; see docs/rollout.md section 6.6." >&2
-            exit 1
-          fi
-          subdomain=$(jq -r '.workersDevSubdomain' "${order}")
-          body="${RUNNER_TEMP}/health-${name}.json"
-          # No --location: an unauthenticated request is redirected to the
-          # Access login screen, and following that would turn a rejected
-          # request into a 200 with an HTML body.
-          code=$(curl --silent --show-error --max-time 30 \
-            --retry 5 --retry-delay 5 --retry-all-errors \
-            --header "CF-Access-Client-Id: ${CF_ACCESS_CLIENT_ID}" \
-            --header "CF-Access-Client-Secret: ${CF_ACCESS_CLIENT_SECRET}" \
-            --output "${body}" --write-out '%{http_code}' \
-            "https://${worker}.${subdomain}${path}" || echo 000)
-          if [[ ${code} != 200 ]]; then
-            echo "${worker}${path}: ${code}" | tee -a "${GITHUB_STEP_SUMMARY}"
-            exit 1
-          fi
-          if ! jq -e 'type == "object"' "${body}" > /dev/null 2>&1; then
-            echo "${worker}${path}: 200 without a JSON object body (an edge or login page is not the App)." | tee -a "${GITHUB_STEP_SUMMARY}" >&2
-            exit 1
-          fi
-          expected=$(jq -r '.migrations.core.files[-1].file // ""' "${RUNNER_TEMP}/release-manifest.json")
-          reasons=$(jq -r --arg sha "${SHA}" --arg migration "${expected}" '
-            [ if .status != "ok" then "status=\(.status // "absent")" else empty end,
-              if .releaseSha != $sha then "releaseSha=\(.releaseSha // "absent")" else empty end,
-              if ($migration != "") and (((.core.migrationsApplied // []) | index($migration)) == null)
-                then "CORE is missing \($migration)" else empty end,
-              if (.read.required == true) and (.read.ok != true) then "READ is required and not ok" else empty end,
-              if .processor.releaseSha != $sha then "processor.releaseSha=\(.processor.releaseSha // "absent")" else empty end
-            ] | .[]' "${body}")
-          if [[ -n ${reasons} ]]; then
-            {
-              echo "${worker}${path}: 200 but the release is not healthy:"
-              echo "${reasons}"
-            } | tee -a "${GITHUB_STEP_SUMMARY}" >&2
-            exit 1
-          fi
-          {
-            echo "${worker}${path}: 200 (release ${SHA}, CORE through ${expected})"
-            jq -r '"processor: \(.processor.releaseSha // "absent"), read required=\(.read.required), marker=\(.data.markerPresent)"' "${body}"
-          } | tee -a "${GITHUB_STEP_SUMMARY}"
+        # One read-only 205s deadline: up to six 30s requests and five 5s waits.
+        # Only transport failures or a structurally healthy old SHA are retried.
+        # This trusted helper also serves older compatible rollback checkouts.
+        run: node "${RELEASE_HEALTH}"
       - name: Reconcile future schedule alarms
         # Explicit deployment-only authority; no settings write or immediate
         # collection. First activation waits beyond Cron propagation.
@@ -1168,7 +1127,16 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
-        run: mise run --no-deps automation:alarm-bootstrap
+          SHA: ${{ inputs.sha }}
+          MODE: ${{ inputs.mode }}
+        # Release retries only a complete prewrite mismatch within 120s total.
+        # Rollback preserves the immutable target's existing bootstrap contract.
+        run: |
+          case "${MODE}" in
+            release) node "${ALARM_BOOTSTRAP}" ;;
+            rollback) mise run --no-deps automation:alarm-bootstrap ;;
+            *) echo "schedule_bootstrap_mode_invalid" >&2; exit 1 ;;
+          esac
       - name: Record what this run deployed
         id: progress
         # The deployment payload was fixed when the deployment was opened, so it

@@ -66,7 +66,7 @@ Migration 0002 adds the reward second stage, table for table the same shape
 | Table                           | What it holds                                                                                                                                               |
 | ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `reward_expiry_snapshots`       | One reward build: the baseline's content key and attempt, plus the fixed `evaluated_at`, the evaluation calendar, the rule-set digest and the claim window. |
-| `reward_expiry_estimates`       | One estimated deadline per bucket and rule version, with a date-only `expires_on`, the amount at risk in the programme's own unit, and a `row_digest`.      |
+| `reward_expiry_estimates_v2`    | One estimated deadline per bucket and rule version, with a date-only `expires_on`, the amount at risk in the programme's own unit, and a `row_digest`.      |
 | `reward_conversion_simulations` | One saved simulation, replayed when its request was retained and `not_reproducible` with a reason code when only its digest survived.                       |
 | `reward_snapshot_input_refs`    | The rules, offers, claim set, evaluation clock and calendar the build was made from, each with a digest (04 §3).                                            |
 | `reward_snapshot_pointer`       | What is published, and the watermark it was verified against.                                                                                               |
@@ -135,11 +135,13 @@ a row that kept nothing but a digest is written as `not_reproducible` with
 not carry as `offer_not_in_fixed_input`. Nothing recomputes a digest-only
 simulation against today's offers (G2-20).
 
-The CORE tables of migration 0033 are read, never written by this lane, and
+The CORE reference tables introduced in migration 0033 and the corrected
+claim table introduced in 0077 are read, never written by this lane, and
 `reward_programs`, `expiry_rules`, `conversion_offers`,
-`reward_bucket_claims` and `membership_state_claims` stay in CORE as 04 §2
+`reward_bucket_claims_v2` and `membership_state_claims` stay in CORE as 04 §2
 requires — they are versioned reference claims and provider claims, not a
-projection. CORE migration 0041 adds them to the dependency ledger of 0038 so
+projection. CORE migration 0041 adds the original tables to the dependency
+ledger of 0038; migration 0077 adds the corrected claim table and its triggers so
 the r0/r1 capture can see a rule or claim change. Migration 0042 removes the
 two obsolete CORE projection tables. New reward inputs contain no legacy
 simulation cache; archived inputs retain their captured replay semantics.
@@ -206,10 +208,10 @@ stopped working. Two details of its semantics:
 
 ## Flags
 
-| Flag                             | Where          | Default | Effect                                                                         |
-| -------------------------------- | -------------- | ------- | ------------------------------------------------------------------------------ |
-| `BALANCE_PROJECTION_ENABLED`     | processor, app | `0`     | The existing A07 gate: nothing builds or reads the projection while it is off. |
-| `REWARD_READ_PROJECTION_ENABLED` | processor      | `false` | The `reward_read_projection` lane runs and builds the reward snapshot (U16).   |
+| Flag                             | Where     | Default | Effect                                                                                      |
+| -------------------------------- | --------- | ------- | ------------------------------------------------------------------------------------------- |
+| `BALANCE_PROJECTION_ENABLED`     | processor | `0`     | The writer gate. Anything but `"1"` skips the balance READ build. The App does not read it. |
+| `REWARD_READ_PROJECTION_ENABLED` | processor | `false` | The `reward_read_projection` lane runs and builds the reward snapshot (U16).                |
 
 Production enables the remaining flags. Both writers and App readers use READ
 exclusively; there is no storage-target switch.
@@ -246,8 +248,8 @@ writers enabled. CORE migration 0042 retires the old projection tables after a
 verified READ-only release.
 
 Pause the Processor with `BALANCE_PROJECTION_ENABLED=0` and
-`REWARD_READ_PROJECTION_ENABLED=false`. The App can hide balance or reward routes
-with its corresponding feature flag. No flag restores a CORE projection path.
+`REWARD_READ_PROJECTION_ENABLED=false`. The App keeps serving; a missing
+snapshot is `503`, not a hidden route. No flag restores a CORE projection path.
 Choose schema-compatible releases for code rollback; reconstruct READ using
 [the rebuild runbook](read-rebuild-runbook.md).
 

@@ -7,21 +7,14 @@
   "compatibility_flags": ["nodejs_compat"],
   "workers_dev": true,
   "preview_urls": false,
+  "routes": [{ "pattern": "kogane-mcp.takuk.me", "custom_domain": true }],
   "vars": {
     "SCHEDULES_ENABLED": "true",
     "DEPLOYMENT_SCHEDULE_TOKENS": "[\"32f6a8d0612c6a657eb74dc066cefbcf.access\"]",
-    "BALANCE_PROJECTION_ENABLED": "1",
-    // U11: with this off the v2 balance routes read the CORE projection of
-    // migration 0030; with it on they read the READ database below, and a
-    // cursor from the other store is refused rather than reinterpreted.
-    "REWARDS_V2_ENABLED": "true",
-    // U16: with this off the reward routes answer from CORE's rules and claims
-    // at request time; with it on they read the reward snapshot published in
-    // the READ database, and `/api/v2/rewards/simulations` is served.
     "EVIDENCE_SOURCE_ID": "sony-bank",
-    "EVENTS_V2_ENABLED": "true",
     "ACCESS_ISSUER": "https://risu729.cloudflareaccess.com",
     "ACCESS_AUDIENCE": "20cc9cb6173e2755bc3ffd5f43a9adf45b0c2ad8451a1b2d330cc2b75f0d85c8",
+    "ACCESS_MCP_AUDIENCE": "b03b28c7c41d79c4730e18ccbad8dc57f69bb6742a1e27af3bde3fae366b6921",
     "COMMANDS_ENABLED": "true",
     // The command/operations allow-lists (docs/change-lifecycle.md §Grants).
     // JSON arrays of verified Access subjects. The sole operator is risu,
@@ -29,7 +22,11 @@
     // remain ungranted until individually named; unknown subjects are refused.
     "OPERATOR_SUBJECTS": "[\"2c440753-9011-502c-a22d-bb013593c11a\"]",
     "AGENT_GRANTS": "",
-    "AGENT_API_GRANTS": "",
+    // The owner's dedicated MCP identity may read structured data only.
+    "AGENT_API_GRANTS": "{\"mcp-client:2c440753-9011-502c-a22d-bb013593c11a\":{\"scopes\":{\"sources\":\"*\",\"accounts\":\"*\"},\"capabilities\":[\"summary.read\",\"records.read\"],\"budget\":{\"maxRows\":100,\"maxProposalTargets\":3,\"maxExplainDepth\":3}}}",
+    // S3 core validates declarations only; no delegated execution is connected.
+    // Empty by default. Filling this requires the owner's concrete approval.
+    "MCP_DELEGATIONS": "",
     "OPS_API_ENABLED": "true",
     "SESSION_REFRESH_POLICY": "",
     // U14 postcheck (plan 11 §6, docs/ci-cd.md). The release stamps the

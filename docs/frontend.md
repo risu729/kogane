@@ -143,7 +143,7 @@ failure, and `no-store` apply before any capability is read.
 | `measureViews`         | `balances`, `summaries` | none         | both                          | `view=` is sent only for an advertised view                                             |
 | `identityReadModes`    | `latest`, `as-recorded` | none         | both                          | The 口座・銘柄 page and link exist; `identityRead=` is sent only for an advertised mode |
 | `paginationVersion`    | `none`, `offset-v1`     | `none`       | `offset-v1`                   | Coverage record, next-page links, no client column sort                                 |
-| `balancesV2`           | boolean                 | false        | flag + snapshot               | The 最新の残高 read-model section exists; the v2 balance routes are requested           |
+| `balancesV2`           | boolean                 | false        | sealed snapshot               | The 最新の残高 read-model section exists; the v2 balance routes are requested           |
 | `balancesV2Pagination` | `none`, `keyset-v2`     | `none`       | `keyset-v2` when `balancesV2` | Cursor paging over one fixed snapshot, with a "read the newest snapshot" action         |
 | `collectionFilters`    | boolean                 | false        | true                          | Server filter controls replace client record controls                                   |
 | `organizedDisplay`     | boolean                 | false        | true                          | Rows carry `organization`                                                               |
@@ -152,9 +152,10 @@ failure, and `no-store` apply before any capability is read.
 | `sharedQuery`          | boolean                 | false        | true                          | Summary counts come from `GET /api/v2/query`, not page arithmetic                       |
 
 `balancesV2` is the one capability that also depends on stored state: the
-production Worker advertises it only when its reader flag is on **and** the
-balance projection has a sealed snapshot, so a capability is never a promise
-the store cannot keep (see [Balance read model](balance-read-model.md)). A
+production Worker advertises it only when the balance projection has a sealed
+snapshot, so a capability is never a promise the store cannot keep (see
+[Balance read model](balance-read-model.md)). While READ is bound the v2
+balance paths still exist and answer 503 until that snapshot is published. A
 path whose own capability is missing answers 404, not 400: there is no route
 to reject a parameter for.
 

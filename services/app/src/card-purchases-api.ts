@@ -13,7 +13,6 @@ import {
   queryCardPurchases,
 } from "../../../packages/application/src/query/card-purchases.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
-import { flagOn } from "./events-api";
 import { principalFor } from "./grants";
 import { HttpError, json } from "./http";
 
@@ -21,11 +20,10 @@ export const CARD_PURCHASES_PATH = "/api/v2/card-purchases";
 const PARAMETERS = ["offset", "period", "eventId"];
 
 /**
- * Served only where the event reader flag is on and CORE 0047 is applied, so
- * a build deployed ahead of the migration neither advertises nor serves it.
+ * Served only where CORE 0047 is applied, so a build deployed ahead of the
+ * migration neither advertises nor serves it.
  */
 export async function cardPurchasesAvailable(env: Env): Promise<boolean> {
-  if (!flagOn(env.EVENTS_V2_ENABLED)) return false;
   const row = await env.DB.prepare(
     `SELECT count(*) AS present FROM sqlite_master
      WHERE (type='table' AND name='card_purchase_recognitions')

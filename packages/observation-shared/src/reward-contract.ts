@@ -2,11 +2,18 @@
 import type { Quantity, ValueState } from "../../domain/src/values.ts";
 import type { TemporalValue } from "../../domain/src/time.ts";
 import {
+  BUCKET_KINDS,
   validBucketExpiryBasis,
+  type BucketKind,
   type BucketExpiryBasis,
   type ComputedExpiry,
   type DisplayedExpiry,
 } from "../../domain/src/rewards.ts";
+/** Provider enum values are never guessed into a supported kind. */
+export function validRewardBucketKind(value: unknown): value is BucketKind {
+  return typeof value === "string" && (BUCKET_KINDS as readonly string[]).includes(value);
+}
+
 export type RewardValue = ValueState;
 export type RewardQuantity = Quantity;
 export type RewardTime = TemporalValue;

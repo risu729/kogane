@@ -12,6 +12,23 @@ Every validator in the package rejects unknown keys. A new field is a reviewed
 contract change, not a free extension. Every "cannot add / cannot adopt"
 outcome is a typed result, never a thrown string.
 
+## `instrument-temporal.ts` — pure temporal identity
+
+`selectInstrumentTemporal` validates a complete, globally ordered acceptance
+journal and all its mapping/`listed_as` members, resolves one common cut and
+each series version, then applies the explicitly supplied interval contract
+and effective reference. Missing validity, unsupported time/role/zone and
+relevant unlogged legacy records remain unresolved; a rejected relation to
+the selected target conflicts. No relation independently adopts a mapping.
+
+The manifest pins complete selected versions, acceptance membership,
+evidence, unresolved outcomes and the resolved sequence/time. Its
+`setVersion` excludes the original knowledge request and cut standing;
+the outer context retains both. Static bounds refuse whole inputs. See
+[ADR 0055](adr/0055-instrument-candidates.md#amendment-2026-10-09-pure-temporal-selector).
+This is a pure supplied-snapshot contract: it has no database writer/reader,
+command or financial consumer, and cannot prove storage atomicity.
+
 ## `values.ts` — exact quantities
 
 - `ExactDecimal { coefficient, scale }` in the decimal-v1 canonical form (no

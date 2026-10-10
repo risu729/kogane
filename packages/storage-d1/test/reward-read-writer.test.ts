@@ -248,7 +248,7 @@ describe("the reward build", () => {
     expect(() =>
       sqlite
         .query(
-          `INSERT INTO reward_expiry_estimates(snapshot_id,row_key,row_seq,program_id,holding_ref,
+          `INSERT INTO reward_expiry_estimates_v2(snapshot_id,row_key,row_seq,program_id,holding_ref,
             bucket_ref,rule_id,rule_version,bucket_kind,state,deadline_basis,expires_on,
             amount_coefficient,amount_scale,amount_status,unit_ref,provider_observed_json,
             policy_estimated_json,reason_codes_json,uncertainty_codes_json,basis_refs_json,
@@ -541,5 +541,27 @@ describe("the unchanged reward context", () => {
       visibility_revision: 3,
       core_epoch: "core-epoch-1",
     });
+  });
+});
+
+test("v2 current context is not reused under v3 on the same day and unchanged CORE revisions", async () => {
+  const { db, instanceId } = await claimed();
+  const previous = await build(db, instanceId, { policyRelease: "reward-projection-v2" });
+  const oldContext = {
+    ...(await plan({ policyRelease: "reward-projection-v2" })),
+    readInstanceId: instanceId,
+  };
+  expect((await currentRewardContext(db, oldContext))?.snapshot_id).toBe(previous.snapshotId);
+  const corrected = {
+    ...oldContext,
+    policyRelease: "reward-projection-v3",
+    claimsRelease: "reward-promotion-v2",
+    contractVersion: "reward-projection-input-v2",
+  };
+  expect(await currentRewardContext(db, corrected)).toBeNull();
+  expect(await activeRewardSnapshot(db)).toMatchObject({
+    snapshot_id: previous.snapshotId,
+    source_revision: oldContext.sourceRevision,
+    visibility_revision: oldContext.visibilityRevision,
   });
 });

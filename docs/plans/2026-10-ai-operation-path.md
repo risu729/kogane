@@ -1,6 +1,10 @@
 # Plan: AI as a delegated operation path, with a common audit log
 
-- Status: **proposed**. Nothing in this plan is implemented. The decisions it
+- Status: **proposed**. Slice S1 (section 8) is implemented
+  ([audit log](../audit-log.md)); of S3 only the inert declaration core
+  (#628) is, and no delegated operation executes; S4 is on #564 up to the
+  delegation gate (its tool refuses every call until S3 connects execution);
+  no other slice is. The decisions it
   rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and
   [ADR 0064](../adr/0064-common-audit-log.md) (common append-only audit log),
@@ -453,7 +457,7 @@ its bounds, and changes in four ways:
    `MCP_DELEGATIONS`; `schedules.read` stays a read capability. The writer's
    actor kinds become `operator` and `delegated` (CORE 0067 is #564's and is
    still unmerged, so its CHECK is rewritten before merge, not migrated
-   again). The same rewrite changes 0067's partial index
+   again; S4 renumbers it CORE 0078). The same rewrite changes 0067's partial index
    `maintenance_agent_writes` from `WHERE actor_kind='agent'` to
    `WHERE actor_kind='delegated'`, so the daily budget check inside the
    `INSERT` keeps an index to read.
@@ -465,7 +469,8 @@ its bounds, and changes in four ways:
    `official-notice-changed`, `official-notice-withdrawn`, `outage-observed`,
    `owner-instructed`, `correction`, `operator-edit` (the UI path) and the
    existing `maintenance-survey-proposal-accepted` — enforced by 0067's CHECK.
-   `decision_ref` of a delegated revision is `audit:<audit_id>`.
+   `decision_ref` of a delegated revision names its audit record; S4 settled
+   the shape as `delegated-audit:<audit_id>` (the S4 status in section 8).
 3. **Direct inside the envelope; beyond it, the operator for now.** Direct
    (R1) when all hold: the source is in `scopes.scheduleSources`; the rule is
    the named source's or new; after the revision the source has no joined
@@ -759,7 +764,7 @@ reconciliation after a settings write stays outside the batch, as today.
 
 After authentication, every refusal is recorded with its closed code:
 authorization (`subject_not_granted`, `approval_required`,
-`agent_api_not_configured`, `delegation_*`, `capability_not_delegated`,
+`agent_api_not_configured`, `delegation_*` (`delegation_capability_denied` included),
 `unauthorized`, `evidence_restricted`, `source_not_granted`), validation
 (`invalid_request`, `invalid_query`), confirmation, stale and idempotency
 codes, writer codes (`revision_conflict`, `maintenance_deferral_too_long`, …),
@@ -962,6 +967,30 @@ need S3; S5 needs S2 (and S1 for its read records); S7 and S8 need S1.
 
 **S3 — delegation** (after S1 and S2).
 
+S3 is split into **declaration core** and **execution integration**. The
+core can be reviewed independently of unmerged S1 (#619): strict configuration
+validation, role bundles, owner/read-grant scope attenuation, expiry,
+canonical delegation reference, and a safe MCP capabilities status. It adds
+only the empty `MCP_DELEGATIONS` variable. It connects no writer, adds no tool,
+changes no read grant, and does not complete S3 or owner-equivalent delegation.
+Even a valid declaration reports `available: false`; closed reasons distinguish
+missing audit, operation path, Processor guards and confirmation. Inactive
+reports disclose no other entry, identity, scope, expiry, budget or digest.
+Existing legal read/proposal capabilities and browser/UI authority are unchanged.
+
+**Required follow-up after #619 merges:** connect the resolver to S1's existing
+`OPERATION_CATALOGUE`/`executeOperation` and common audit builders; add the
+delegated principal kind and validated Processor family/ref forwarding;
+prepare/confirm with atomic single-use audit/idempotency and budget checks;
+scope-before-write guards and per-operation risk gates; then publish only the
+actually executable delegated operations. Reconcile #564's schedule scope and
+single maintenance writer as S4. Do not copy either unmerged implementation.
+Until this integration is independently reviewed and ships, no delegated
+operation is executable and the S3 matrix remains incomplete.
+The parallel #546 instrument-resolution history service/read route also needs
+a later S3/S6 agent/MCP parity adapter through this common audited path; the
+declaration core does not expose or duplicate that history reader.
+
 - What: `MCP_DELEGATIONS` (added as `""` in a reviewed configuration change),
   its parser and resolver (`packages/application/src/delegation/`), the roles,
   `PRINCIPAL_KINDS` gaining `delegated`, the Processor's `principalOf`, the
@@ -994,6 +1023,29 @@ contradicts it, so #564 lands as this slice, not before it.
   audit record per call.
 - Review gate: fresh reviewer; the review checks that the writer is still the
   only path to a maintenance revision.
+- Status (2026-10-09): implemented on #564 ahead of S3's execution
+  integration, up to the delegation gate
+  ([ADR 0046's amendment](../adr/0046-agent-maintenance-windows.md#amendment-a-delegated-operation-not-an-agent-grant-2026-10-09)).
+  The migration is CORE 0078, the next free number above main's 0077 (first
+  0067, then 0076 until #632 merged as 0077; no file uses 0073, 0074 or 0076). The write capability is in `MCP_DELEGATIONS` only; the update
+  tool resolves the delegation with #628's core, checks capability, closed
+  arguments and scope, and is refused by `delegationExecutionReadiness`
+  (`available: false`), so it relays nothing and is published to nobody; the
+  read is served on both agent paths with one function. The writer takes
+  `append` and the operator's edit records `operator-edit`. The writer's
+  contract for S3 (owner-approved): a delegated revision must carry
+  `delegated-audit:<audit_id>` as its decision reference;
+  `prepareMaintenanceRevision` and `currentMaintenanceRevision` reuse the
+  write's validation and current-revision read without writing; a trusted
+  `deferralBound` option (`"delegated-7d"` default, `"confirmed-31d"` up to 31
+  days) that no request sets and nothing passes yet
+  ([schedules](../schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3)).
+  Left to S3: the delegated audit record (`principal_kind` `delegated`,
+  `delegation_ref`) and the reservation of its id, Processor family/ref
+  forwarding, `budget.writesPerDay` at the App chokepoint, and the confirm
+  that may pass `"confirmed-31d"`, and therefore the R2 path. The
+  missing-capability code is #628's `delegation_capability_denied`, which
+  section 8's matrix item 4 and section 6.4 now name.
 
 **S5 — MCP read, search and detail** (after S2).
 
@@ -1054,7 +1106,7 @@ contradicts it, so #564 lands as this slice, not before it.
    subject never resolve a delegation; `principalFor` still refuses
    `mcp-client:`; a delegated principal is refused on every browser operator
    route.
-4. Each tool refused without its capability (`capability_not_delegated`),
+4. Each tool refused without its capability (`delegation_capability_denied`),
    served with it; R3 and R4 have no tool, and the Processor refuses a
    forwarded family the App did not grant.
 5. Out-of-scope and nonexistent targets get byte-identical refusals with no

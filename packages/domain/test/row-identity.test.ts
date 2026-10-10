@@ -121,7 +121,8 @@ describe("humanAdoptedRowIdentity", () => {
         smbc({ extra: { id: "synthetic-row-1", _kogane: { identityOrigin: "parser" } } }),
       ),
     ).toEqual({ admitted: false, refusal: "identity_origin_unrecorded" });
-    // SBI Shinsei: the function is declared, the parser records no origin.
+    // SBI Shinsei: the function is declared; a row stored by parser 0.1.2
+    // records no origin (0.1.3 records it, below).
     expect(humanAdoptedRowIdentity(shinsei())).toEqual({
       admitted: false,
       refusal: "identity_origin_unrecorded",

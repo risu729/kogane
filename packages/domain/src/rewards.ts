@@ -56,7 +56,7 @@ import {
 } from "./values.ts";
 
 /** Release stamped on everything this module derives. */
-export const REWARD_POLICY_RELEASE = "reward-model-v1";
+export const REWARD_POLICY_RELEASE = "reward-model-v2";
 /** Search release; bumped whenever the traversal rules change a returned plan. */
 export const CONVERSION_SEARCH_RELEASE = "conversion-search-v1";
 
@@ -67,6 +67,8 @@ export const CONVERSION_SEARCH_RELEASE = "conversion-search-v1";
  * `time-limited` in when. `pending-award` is announced but not held, and
  * `qualification` is a status measure that is never consumable. The kinds are
  * deliberately not ordered: none of them is a superset of another.
+ * `unclassified` preserves a provider quantity whose kind has not been confirmed;
+ * it proves neither consumability nor qualification.
  */
 export const BUCKET_KINDS = [
   "regular",
@@ -74,6 +76,7 @@ export const BUCKET_KINDS = [
   "time-limited",
   "pending-award",
   "qualification",
+  "unclassified",
 ] as const;
 export type BucketKind = (typeof BUCKET_KINDS)[number];
 /** Kinds that may be summed into the holding's consumable quantity. */
@@ -231,7 +234,7 @@ export type DeadlineBasis = (typeof DEADLINE_BASES)[number];
  * Release of the expiry derivation: stamped on every computed expiry and
  * bumped whenever the same inputs could produce a different date or reason.
  */
-export const EXPIRY_DERIVATION_RELEASE = "reward-expiry-v1";
+export const EXPIRY_DERIVATION_RELEASE = "reward-expiry-v2";
 
 /**
  * The deadline the provider displayed for one bucket. An observation, never a
@@ -306,6 +309,8 @@ export const COMPUTED_EXPIRY_REASONS = [
   "rule_transition_unconfirmed",
   /** This rule version does not apply to the bucket's kind. */
   "rule_bucket_kind_not_covered",
+  /** The provider quantity is retained, but its bucket kind has not been confirmed. */
+  "bucket_kind_unclassified",
   /** The rule fixes each lot's own deadline; only the provider's display states it. */
   "fixed_deadline_not_derivable",
   /** An inactivity rule whose qualifying-activity policy did not resolve. */
@@ -388,6 +393,7 @@ export const REWARD_UNCERTAINTY_CODES = [
   "rule_family_unsupported",
   "rule_out_of_force",
   "rule_bucket_kind_not_covered",
+  "bucket_kind_unclassified",
   "membership_required",
   "membership_self_reported",
   "membership_not_retroactive",
@@ -910,9 +916,9 @@ export interface RewardHoldingSummary {
   holdingRef: string;
   programId: string;
   unitRef: string;
-  /** Sum of the consumable buckets only, in the program's own unit. */
+  /** Sum of confirmed consumable buckets; unavailable while any bucket kind is unclassified. */
   consumable: Quantity;
-  /** Per-kind subtotals; `pending-award` and `qualification` stay outside `consumable`. */
+  /** Per-kind subtotals; unclassified, pending awards and qualification stay outside consumable. */
   byKind: { kind: BucketKind; quantity: Quantity; bucketRefs: string[] }[];
   /** Buckets deliberately left out of `consumable`, each with its reason. */
   excluded: { bucketRef: string; kind: BucketKind; reasonCode: string }[];
@@ -930,7 +936,8 @@ function bucketError(quantities: readonly Quantity[], unitRef: string): ValueErr
  * A holding's consumable quantity and its qualification measures, never mixed.
  * A holding with no consumable bucket reports an exact zero only because the
  * bucket list itself is the complete observed set; an unparsed bucket makes
- * the whole sum an error rather than a smaller number (INV05).
+ * the whole sum an error rather than a smaller number (INV05). Unclassified
+ * quantities remain in per-kind subtotals, but block an exact consumable total.
  */
 export function summarizeHolding(
   holding: RewardHolding,
@@ -954,7 +961,11 @@ export function summarizeHolding(
         bucketRef: bucket.bucketRef,
         kind: bucket.kind,
         reasonCode:
-          bucket.kind === "qualification" ? "qualification_not_consumable" : "award_not_yet_held",
+          bucket.kind === "unclassified"
+            ? "bucket_kind_unclassified"
+            : bucket.kind === "qualification"
+              ? "qualification_not_consumable"
+              : "award_not_yet_held",
       });
   }
   const byKind: RewardHoldingSummary["byKind"] = [];
@@ -986,15 +997,25 @@ export function summarizeHolding(
     holding.unitRef,
     consumableBuckets.map((bucket) => bucket.quantity),
   );
+  const unclassified = holding.buckets.some((bucket) => bucket.kind === "unclassified");
+  if (unclassified) uncertaintyCodes.push("bucket_kind_unclassified");
   const measures = qualifications.filter((measure) => measure.programId === holding.programId);
   if (measures.length > 0) uncertaintyCodes.push("qualification_measures_reported_separately");
   return {
     holdingRef: holding.holdingRef,
     programId: holding.programId,
     unitRef: holding.unitRef,
-    consumable: summed.ok
-      ? summed.quantity
-      : { unitRef: holding.unitRef, value: { status: "conflict", reasonCode: summed.error.code } },
+    consumable: unclassified
+      ? {
+          unitRef: holding.unitRef,
+          value: { status: "missing", reasonCode: "bucket_kind_unclassified" },
+        }
+      : summed.ok
+        ? summed.quantity
+        : {
+            unitRef: holding.unitRef,
+            value: { status: "conflict", reasonCode: summed.error.code },
+          },
     byKind,
     excluded,
     qualificationMeasures: measures,
@@ -1282,7 +1303,8 @@ export function estimateExpiry(
   }
 
   const computedFor = (bucket: RewardBucket): ComputedExpiry => {
-    let reasonCode: ComputedExpiryReason | null = ruleFailure;
+    let reasonCode: ComputedExpiryReason | null =
+      bucket.kind === "unclassified" ? "bucket_kind_unclassified" : ruleFailure;
     let status: ComputedExpiryStatus = "unavailable";
     let value: LocalDateValue | null = null;
     if (reasonCode === null && !rule.applicability.bucketKinds.includes(bucket.kind))
@@ -1324,6 +1346,7 @@ export function estimateExpiry(
     const consumed =
       ruleFailure === null &&
       reasonCode !== "rule_bucket_kind_not_covered" &&
+      reasonCode !== "bucket_kind_unclassified" &&
       (rule.family === "inactivity" || rule.family === "none");
     return {
       status,
@@ -1358,6 +1381,8 @@ export function estimateExpiry(
       push(reasonCodes, "no_expiry_under_verified_terms");
       push(uncertaintyCodes, "no_expiry_under_verified_terms");
     }
+    if (computed.reasonCode === "bucket_kind_unclassified")
+      push(uncertaintyCodes, "bucket_kind_unclassified");
     if (computed.reasonCode === "rule_bucket_kind_not_covered")
       push(uncertaintyCodes, "rule_bucket_kind_not_covered");
     if (computed.reasonCode === "rule_transition_unconfirmed")
@@ -1427,6 +1452,7 @@ export function estimateExpiry(
     uncertaintyCodes.includes("no_qualifying_activity_observed") ||
     uncertaintyCodes.includes("acquisition_date_unknown") ||
     uncertaintyCodes.includes("activity_date_unknown") ||
+    uncertaintyCodes.includes("bucket_kind_unclassified") ||
     uncertaintyCodes.includes("rule_transition_unconfirmed");
   const state: ExpiryEstimateState =
     ruleFailure !== null
@@ -1467,6 +1493,11 @@ export function availableForOffer(
   for (const bucket of buckets) {
     if (bucket.quantity.unitRef !== offer.fromUnitRef) {
       excluded.push({ bucketRef: bucket.bucketRef, reasonCode: "unit_mismatch" });
+      continue;
+    }
+    if (bucket.kind === "unclassified") {
+      excluded.push({ bucketRef: bucket.bucketRef, reasonCode: "bucket_kind_unclassified" });
+      push(uncertaintyCodes, "bucket_kind_unclassified");
       continue;
     }
     if (bucket.kind === "qualification" || bucket.kind === "pending-award") {

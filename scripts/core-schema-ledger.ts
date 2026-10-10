@@ -214,6 +214,15 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "operational-mutable",
     planRow: "operation collector execution state",
   },
+  // The common audit record (0075, ADR 0064): one append-only envelope per
+  // operation that references the logs above by id, kept without pruning like
+  // the decision log. Its daily overflow counters are mutable bookkeeping
+  // that the Processor turns into records and deletes once the day ends.
+  audit_records: { classification: "core-keep", planRow: "common audit records (ADR 0064)" },
+  audit_overflow_counters: {
+    classification: "operational-mutable",
+    planRow: "daily audit overflow counters (ADR 0064)",
+  },
   // The shared-R2 terminal registration records (0039) sit in the same row as
   // the rest of the acquisition history: `collection_runs` is the fact that a
   // terminal was seen for one run under one registration contract, and its
@@ -345,6 +354,10 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
     classification: "core-keep",
     planRow: "prices and calculation policies",
   },
+  reward_bucket_claims_v2: {
+    classification: "core-keep",
+    planRow: "append-only canonical reward source claims with unclassified provider semantics",
+  },
   // The price promotion lane's scan progress per claim kind (0053).
   price_promotion_cursor: {
     classification: "operational-mutable",
@@ -457,6 +470,11 @@ export const READ_CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> 
   reward_expiry_estimates: {
     classification: "read-projection",
     planRow: "READ: the estimated deadlines of one snapshot (04 §2, second stage)",
+  },
+  reward_expiry_estimates_v2: {
+    classification: "read-projection",
+    planRow:
+      "READ: corrected bucket kinds and displayed expiry of a fixed snapshot (ADR 0049 amendment)",
   },
   reward_conversion_simulations: {
     classification: "read-projection",

@@ -88,7 +88,7 @@ a postcheck that only works once an unrelated flag is on is not a postcheck
 | `releaseSha`   | the commit the deploy stamped into `RELEASE_SHA`, or `""` outside a release                                                                                                                    |
 | `worker`       | `kogane-evidence-browser`                                                                                                                                                                      |
 | `core`         | `SELECT 1` against CORE, plus the applied migration file names in order                                                                                                                        |
-| `read`         | the same for READ, with `required` — true only while a READ flag is on                                                                                                                         |
+| `read`         | the same for READ, with `required: true`. This deployment always requires READ. The retired `READ_PROJECTION_ENABLED` name is not read. A binding that does not answer is `degraded`           |
 | `data`         | one R2 `head` of the fixed key `health/release-marker`; `markerPresent` is reported, never required                                                                                            |
 | `capabilities` | this deployment's capability snapshot, the same object `/api/meta` serves                                                                                                                      |
 | `grants`       | `{ "usable": true }`, or `{ "usable": false, "problem": "<code>" }` when `OPERATOR_SUBJECTS`/`AGENT_GRANTS` cannot be read or overlap — a code, never a subject; `usable: false` is `degraded` |
@@ -423,6 +423,13 @@ enabled; `projected` (READ) is not traced, so a published collection stays
 per Processor invocation, inside the tick; the web UI has no operations view.
 
 ## Storage
+
+Every request to the six routes, and every operations MCP tool call, is
+recorded in the common audit log ([audit log](audit-log.md), ADR 0064): an
+accepted request's `accepted` record is the last statement of the acceptance
+batch (so a request exists exactly when its record does), and a re-send, a read
+or a refusal is recorded once after the answer. A validation refusal records
+the field paths, never the refused value.
 
 Migration `0040_operations_api.sql` (CORE), additive:
 

@@ -17,6 +17,7 @@ export default defineConfig({
     entrypoint: "src/worker.ts",
     workersDev: true,
     previewUrls: false,
+    domains: ["kogane-mcp.takuk.me"],
     observability: {
       enabled: true,
       redactQueryString: true,
@@ -33,18 +34,22 @@ export default defineConfig({
     env: {
       SCHEDULES_ENABLED: bindings.text("true"),
       DEPLOYMENT_SCHEDULE_TOKENS: bindings.text('["32f6a8d0612c6a657eb74dc066cefbcf.access"]'),
-      BALANCE_PROJECTION_ENABLED: bindings.text("1"),
-      REWARDS_V2_ENABLED: bindings.text("true"),
       EVIDENCE_SOURCE_ID: bindings.text("sony-bank"),
-      EVENTS_V2_ENABLED: bindings.text("true"),
       ACCESS_ISSUER: bindings.text("https://risu729.cloudflareaccess.com"),
       ACCESS_AUDIENCE: bindings.text(
         "20cc9cb6173e2755bc3ffd5f43a9adf45b0c2ad8451a1b2d330cc2b75f0d85c8",
       ),
+      ACCESS_MCP_AUDIENCE: bindings.text(
+        "b03b28c7c41d79c4730e18ccbad8dc57f69bb6742a1e27af3bde3fae366b6921",
+      ),
       COMMANDS_ENABLED: bindings.text("true"),
       OPERATOR_SUBJECTS: bindings.text('["2c440753-9011-502c-a22d-bb013593c11a"]'),
       AGENT_GRANTS: bindings.text(""),
-      AGENT_API_GRANTS: bindings.text(""),
+      AGENT_API_GRANTS: bindings.text(
+        '{"mcp-client:2c440753-9011-502c-a22d-bb013593c11a":{"scopes":{"sources":"*","accounts":"*"},"capabilities":["summary.read","records.read"],"budget":{"maxRows":100,"maxProposalTargets":3,"maxExplainDepth":3}}}',
+      ),
+      // Inert S3 declaration default, matching the canonical/test configuration.
+      MCP_DELEGATIONS: bindings.text(""),
       OPS_API_ENABLED: bindings.text("true"),
       SESSION_REFRESH_POLICY: bindings.text(""),
       RELEASE_SHA: bindings.text(legacyConfig.vars.RELEASE_SHA),

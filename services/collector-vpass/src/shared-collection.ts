@@ -110,6 +110,13 @@ export interface SharedRunOutcome {
   readonly binding?: "bound" | VpassBindingUnavailable;
   /** A card run only: the card unit's coverage code (ADR 0023 option 8). */
   readonly coverage?: VpassCardCoverage;
+  readonly coverageCounts?: {
+    readonly monthCount: number;
+    readonly completeMonthCount: number;
+    readonly unverifiedMonthCount: number;
+    readonly shortMonthCount: number;
+    readonly excessMonthCount: number;
+  };
 }
 
 /**
@@ -541,10 +548,28 @@ export async function persistCardRun(
   const binding = await deriveVpassCardBinding(run);
   const outcome = await persist(bucket, await planFor(run, binding));
   const months = Object.keys(run.months).sort();
+  const checks = months.map((month) => monthCheck(run.months[month]!));
   return {
     ...outcome,
     binding: binding.status === "derived" ? "bound" : binding.code,
-    coverage: cardCoverage(months.map((month) => monthCheck(run.months[month]!))),
+    coverage: cardCoverage(checks),
+    coverageCounts: {
+      monthCount: checks.length,
+      completeMonthCount: checks.filter((c) => c.coverage === "complete").length,
+      unverifiedMonthCount: checks.filter((c) => c.coverage === "stated_total_unverified").length,
+      shortMonthCount: checks.filter(
+        (c) =>
+          c.coverage === "stated_total_mismatch" &&
+          c.statedTotal !== null &&
+          c.capturedRows < c.statedTotal,
+      ).length,
+      excessMonthCount: checks.filter(
+        (c) =>
+          c.coverage === "stated_total_mismatch" &&
+          c.statedTotal !== null &&
+          c.capturedRows > c.statedTotal,
+      ).length,
+    },
   };
 }
 
@@ -576,6 +601,9 @@ export function sharedRunDiagnostic(
     artifactCount: outcome.artifactCount,
     ...(outcome.binding === undefined ? {} : { binding: outcome.binding }),
     ...(outcome.coverage === undefined ? {} : { coverage: outcome.coverage }),
+    coverageStatus: outcome.coverage === undefined ? "unknown" : "partial",
+    coverageReason: outcome.coverage === undefined ? "collection-unavailable" : "rolling-window",
+    ...(outcome.coverageCounts === undefined ? {} : { coverageCounts: outcome.coverageCounts }),
     ...(result.outcome === "incomplete"
       ? {
           reasonCode: result.reasonCode,

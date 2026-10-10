@@ -145,6 +145,7 @@ const RESULTS = {
     known: 0,
     failures: { timeout: 1, not_a_code: 4 },
   },
+  auditOverflow: { counters: 2, written: 2 },
 } satisfies Record<keyof ScheduledStages, object>;
 
 /** Every stage wired, each resolving to its synthetic result and counting its calls. */
@@ -175,6 +176,7 @@ const RECORDED = [
   "maintenance_survey",
   "operation_dispatch",
   "decision_outbox",
+  "audit_overflow",
 ];
 
 test("the recorded lanes are exactly the ones whose own records do not say a tick ran", () => {
@@ -215,6 +217,7 @@ test("a tick records one row per recorded lane with exactly the counts its log l
     "maintenance_survey",
     "operation_dispatch",
     "decision_outbox",
+    "audit_overflow",
   ]);
   const rows = await ticks();
   expect(rows.map((row) => row.lane)).toEqual(RECORDED);
@@ -259,6 +262,7 @@ test("a tick records one row per recorded lane with exactly the counts its log l
     blocked: 0,
     published: 1,
   });
+  expect(counts["audit_overflow"]).toEqual({ counters: 2, written: 2 });
   // Only the closed failure codes of the survey are kept (ADR 0050).
   expect(counts["maintenance_survey"]).toEqual({
     ...RESULTS.maintenanceSurvey,
@@ -349,6 +353,7 @@ test("a lane whose flag is off records `skipped-by-flag`, is not run and still l
     "price_promotion",
     "operation_dispatch",
     "decision_outbox",
+    "audit_overflow",
   ]);
   for (const stage of [
     "reconcile",
@@ -371,6 +376,7 @@ test("a lane whose flag is off records `skipped-by-flag`, is not run and still l
     ["maintenance_survey", "skipped-by-flag"],
     ["operation_dispatch", "skipped-by-flag"],
     ["decision_outbox", "ran"],
+    ["audit_overflow", "ran"],
   ]);
   for (const row of rows.filter((row) => row.outcome === "skipped-by-flag")) {
     expect(row.counts_json).toBe("{}");
@@ -431,7 +437,7 @@ test("a tick that cannot be recorded is logged as a code and stops no lane", asy
   expect(lines.filter((line) => line.event === "lane_tick_record_failed")).toEqual(
     RECORDED.map((lane) => ({ event: "lane_tick_record_failed", lane, code: "RangeError" })),
   );
-  expect(lines.at(-2)).toMatchObject({ event: "decision_outbox" });
+  expect(lines.at(-2)).toMatchObject({ event: "audit_overflow" });
   expect(await ticks()).toEqual([]);
 }, 60000);
 

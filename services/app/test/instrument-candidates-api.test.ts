@@ -151,13 +151,19 @@ async function mcp(message: Record<string, unknown>, options: CallOptions = {}) 
   return (await response.json()) as Record<string, any>;
 }
 
-/** Every table's row count, so "writes nothing" is checkable. */
+/**
+ * Every table's row count, so "writes nothing" is checkable — but for the
+ * audit tables: an agent call's own audit record (ADR 0064) is the one write
+ * it makes, and `test/audit.test.ts` covers it.
+ */
 async function tables() {
   const names = await env.DB.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name",
   ).all<{ name: string }>();
   const counts: Record<string, number> = {};
-  for (const { name } of names.results)
+  for (const { name } of names.results.filter(
+    ({ name }) => name !== "audit_records" && name !== "audit_overflow_counters",
+  ))
     counts[name] = (await env.DB.prepare(`SELECT count(*) AS n FROM "${name}"`).first<number>(
       "n",
     ))!;
@@ -352,5 +358,50 @@ describe("kogane.instruments.candidates", () => {
     expect(response.status).toBe(403);
     expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
     expect(await tables()).toEqual(before);
+  });
+
+  it("records each served call as one read of the page's candidates, and a refusal under its tool (ADR 0064)", async () => {
+    const last = (await env.DB.prepare(
+      "SELECT coalesce(max(rowid),0) AS n FROM audit_records",
+    ).first<number>("n"))!;
+    const records = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT path,principal,subject,principal_kind,risk_class,result,result_code,diff_json FROM audit_records WHERE operation='instruments.candidates' AND rowid>? ORDER BY rowid",
+        )
+          .bind(last)
+          .all()
+      ).results;
+    const page = (await (await call(PATH)).json()) as { items: unknown[]; total: number };
+    expect((await call(AGENT_PATH, { subject: "synthetic-agent", body: {} })).status).toBe(200);
+    await mcp({
+      method: "tools/call",
+      params: { name: "kogane.instruments.candidates", arguments: {} },
+    });
+    const refused = await call(AGENT_PATH, { subject: "synthetic-agent", body: { source: "x" } });
+    expect(refused.status).toBe(400);
+    const read = {
+      principal_kind: "agent",
+      risk_class: "R0",
+      result: "read",
+      result_code: null,
+      diff_json: JSON.stringify({
+        kind: "read",
+        rows: page.items.length,
+        truncated: page.total > page.items.length,
+      }),
+    };
+    // The browser route is not an agent call and records nothing.
+    expect(await records()).toEqual([
+      { path: "agent-http", principal: "synthetic-agent", subject: "synthetic-agent", ...read },
+      { path: "mcp", principal: "mcp-client:synthetic-agent", subject: "synthetic-agent", ...read },
+      expect.objectContaining({
+        path: "agent-http",
+        principal: "synthetic-agent",
+        risk_class: "R0",
+        result: "refused",
+        result_code: "unsupported_semantics",
+      }),
+    ]);
   });
 });

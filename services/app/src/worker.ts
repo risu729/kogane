@@ -4,7 +4,15 @@ import {
   type EvidenceMeta,
 } from "../../../packages/observation-shared/src/evidence-contract";
 import { authenticate, browserCaller, mcpCaller } from "./auth";
-import { agentApi, classifyAgentPath, isAgentPath, MCP_PATH, sharedQueryApi } from "./agent-api";
+import {
+  auditedAgentApi,
+  classifyAgentPath,
+  isAgentPath,
+  MCP_PATH,
+  sharedQueryApi,
+} from "./agent-api";
+import { auditLogCode, beginAudit } from "./audit";
+import { AUDIT_PATH, auditApi } from "./audit-api";
 import { commandApi, isCommandPath } from "./command-api";
 import { classifyOpsPath, opsApi } from "./ops-api";
 import { healthApi } from "./health";
@@ -22,6 +30,7 @@ import { reconstructedStateApi, RECONSTRUCTED_STATE_PATH } from "./reconstructed
 import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
+import { instrumentHistoryApi } from "./instrument-history-api";
 import { reportsApi } from "./reports-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
 import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
@@ -33,6 +42,7 @@ function classify(path: string): string {
   const ops = classifyOpsPath(path);
   if (ops !== null) return ops;
   if (isCommandPath(path)) return "command";
+  if (path === AUDIT_PATH) return "audit";
   if (path === CARD_SETTLEMENT_PATH || path === CARD_OWNERSHIP_PATH)
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
@@ -67,14 +77,11 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // (ADR 0047). Every path below accepts only this Worker's own Access
   // application and refuses a token minted for the MCP one, as `/mcp` refuses
   // the browser's.
+  // Every agent call is recorded in the audit log (ADR 0064) under the caller
+  // resolved here: `mcp` for an MCP client, `agent-http` for a browser session.
   const agentResponse = isAgentPath(url.pathname)
-    ? await agentApi(
-        request,
-        env,
-        url,
-        url.pathname === MCP_PATH
-          ? await mcpCaller(request, env)
-          : await browserCaller(request, env),
+    ? await auditedAgentApi(request, env, url, () =>
+        url.pathname === MCP_PATH ? mcpCaller(request, env) : browserCaller(request, env),
       )
     : null;
   if (agentResponse) return agentResponse;
@@ -96,10 +103,13 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     throw new HttpError(405, "method_not_allowed");
   const sharedQueryResponse = await catalogue(() => sharedQueryApi(request, env, url, subject));
   if (sharedQueryResponse) return sharedQueryResponse;
+  // The operator's read of the audit record (ADR 0064); a page load, not recorded.
+  const auditResponse = await catalogue(() => auditApi(env, url, subject));
+  if (auditResponse) return auditResponse;
   const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
   if (settlementResponse) return settlementResponse;
-  // Operator-only and read-only; 404 unless the event reader flag is on and
-  // CORE 0047 exists (docs/economic-events.md, HTTP).
+  // Operator-only and read-only; 404 unless CORE 0047 exists
+  // (docs/economic-events.md, HTTP).
   const purchaseResponse = await catalogue(() => cardPurchasesApi(request, env, url, subject));
   if (purchaseResponse) return purchaseResponse;
   // Reader authority and read-only; 404 unless the store has the views it
@@ -118,19 +128,21 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     instrumentCandidatesApi(request, env, url, subject),
   );
   if (candidatesResponse) return candidatesResponse;
+  const historyResponse = await catalogue(() => instrumentHistoryApi(request, env, url, subject));
+  if (historyResponse) return historyResponse;
   const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
   // Fixed report artifacts (A12). Re-display only; recomputing and sharing a
   // correction are commands, not reads (docs/calculation-and-reports.md).
   const reportResponse = await catalogue(() => reportsApi(env, url));
   if (reportResponse) return reportResponse;
-  // Reward reads are behind the deployment's own capability, so a Worker with
-  // the flag off serves exactly the routes it served before (docs/rewards.md).
+  // Reward reads. Expiry and stored simulations refuse a missing or stale
+  // READ snapshot (docs/rewards.md).
   const rewardsResponse = await catalogue(() => rewardsApi(request, env, url));
   if (rewardsResponse) return rewardsResponse;
   const observationResponse = await catalogue(() => observationApi(request, env, url));
   if (observationResponse) return observationResponse;
-  // A10 read side: 404 unless the projection exists and the reader flag is on.
+  // A10 read side: 404 unless the projection table exists.
   const eventsResponse = await catalogue(() => eventsApi(env, url));
   if (eventsResponse) return eventsResponse;
   if (env.EVIDENCE_SOURCE_ID !== "sony-bank") throw new HttpError(503, "source_not_configured");
@@ -189,6 +201,9 @@ export default {
     const url = new URL(request.url);
     let response: Response;
     let errorCode: string | null = null;
+    // Every audit record of this request carries its request id as the
+    // correlation id (ADR 0064).
+    beginAudit(request, requestId);
     try {
       response = await route(request, env, url);
     } catch (error) {
@@ -206,6 +221,8 @@ export default {
           requestId,
           durationMs: Date.now() - started,
           errorCode,
+          // A record of this request could not be written; the answer stands.
+          ...(auditLogCode(request) ? { auditError: auditLogCode(request) } : {}),
         }),
       );
     } catch {

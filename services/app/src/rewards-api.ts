@@ -1,9 +1,10 @@
 // Reward programme reads and a pure conversion simulation (A11).
 //
-// Everything under /api/v2/rewards is GET-only, behind the `rewardsV2`
-// capability, and off by default. The simulation route in particular is a
-// query: it takes an offer, a quantity and a goal and returns a plan. It
-// writes nothing, contacts no provider and performs no exchange. There is no
+// Everything under /api/v2/rewards is GET-only. Holdings and offer simulation
+// read CORE. Expiry and stored simulations read the published READ snapshot
+// and refuse a missing or stale one. The simulation route is a query: it
+// takes an offer, a quantity and a goal and returns a plan. It writes
+// nothing, contacts no provider and performs no exchange. There is no
 // command route here and no route that would create one.
 //
 // Every quantity is reported in the programme's own unit. No reward quantity
@@ -33,7 +34,6 @@ import {
   type Page,
   type RewardHoldingView,
 } from "../../../packages/read-model/src/index";
-import { rewardsV2Enabled } from "./capabilities";
 import { HttpError, json } from "./http";
 import { rewardExpiryFromRead, rewardReadContext, rewardSimulationsFromRead } from "./rewards-read";
 
@@ -136,11 +136,7 @@ function pageEnvelope<T, U>(source: Page<T>, map: (row: T) => U): Page<U> {
 export async function rewardsApi(request: Request, env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
   if (path !== REWARDS_PREFIX && !path.startsWith(`${REWARDS_PREFIX}/`)) return null;
-  // An unadvertised capability is a missing route, not a forbidden one: the
-  // deployment simply does not serve rewards. The same flag decides this and
-  // what /api/meta advertises (src/capabilities.ts).
-  const capabilities = { ...CENTRAL_STORE_CAPABILITIES, rewardsV2: rewardsV2Enabled(env) };
-  if (!capabilities.rewardsV2) throw new HttpError(404, "not_found");
+  const capabilities = { ...CENTRAL_STORE_CAPABILITIES, rewardsV2: true };
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
   if (!isRewardPath(path)) throw new HttpError(404, "not_found");

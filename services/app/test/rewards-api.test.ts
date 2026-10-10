@@ -1,3 +1,4 @@
+import { seedRewardCapture } from "./reward-capture-fixture";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
 // /api/v2/rewards behind the rewardsV2 capability (A11). Synthetic data only.
 // The simulation route is a query: these tests prove it writes nothing and
@@ -7,7 +8,7 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { publishParse, seedRegistry, seedRun } from "./fixtures";
+import { publishParse, seedRegistry } from "./fixtures";
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;
@@ -76,7 +77,7 @@ beforeAll(async () => {
   jwks = {
     keys: [{ ...(await exportJWK(keys.publicKey)), kid: "fixture", alg: "RS256", use: "sig" }],
   };
-  const run = await seedRun({ count: 1 });
+  const run = await seedRewardCapture();
   const parse = await env.DB.prepare(`INSERT INTO parse_runs
     (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
     VALUES (?,'v-point-balance-info','1.0.0','2026-09-07','ok','[]') RETURNING id`)
@@ -92,12 +93,12 @@ beforeAll(async () => {
     expiry: string | null,
   ) =>
     env.DB.prepare(
-      `INSERT INTO reward_bucket_claims(claim_digest,parse_run_id,source_fact_kind,source_fact_id,
+      `INSERT INTO reward_bucket_claims_v2(claim_digest,parse_run_id,source_fact_kind,source_fact_id,
        program_id,holding_ref,bucket_ref,bucket_kind,restriction_refs_json,unit_ref,
        quantity_coefficient,quantity_scale,quantity_status,observed_expiry_json,observed_at,
        promotion_release,recorded_at)
        VALUES(?1,?2,'balance',?3,'program:v-point','program:v-point:member',?4,?5,?6,'points:v-point',
-       ?7,0,'exact',?8,'2026-09-08T00:00:00.000Z','reward-promotion-v1','2026-09-09T00:00:00.000Z')`,
+       ?7,0,'exact',?8,'2026-09-08T00:00:00.000Z','reward-promotion-v2','2026-09-09T00:00:00.000Z')`,
     ).bind(
       digest,
       parse!.id,
@@ -207,17 +208,17 @@ it("serves holdings in the browser's validated contract", async () => {
 });
 
 describe("reward reads", () => {
-  it("is absent while the flag is off, and /api/meta says so", async () => {
-    expect((await get("/api/v2/rewards/holdings", false)).status).toBe(404);
-    expect((await get("/api/v2/rewards/expiry", false)).status).toBe(404);
-    const meta = (await (await get("/api/meta", false)).json()) as {
-      capabilities: { rewardsV2: boolean };
-    };
-    expect(meta.capabilities.rewardsV2).toBe(false);
-    const on = (await (await get("/api/meta", true)).json()) as {
-      capabilities: { rewardsV2: boolean };
-    };
-    expect(on.capabilities.rewardsV2).toBe(true);
+  it("stays available when the retired flag is off, and expiry still needs a snapshot", async () => {
+    expect((await get("/api/v2/rewards/holdings", false)).status).toBe(200);
+    const expiry = await get("/api/v2/rewards/expiry", false);
+    expect(expiry.status).toBe(503);
+    expect(await expiry.json()).toMatchObject({ error: "reward_read_model_unavailable" });
+    for (const enabled of [false, true]) {
+      const meta = (await (await get("/api/meta", enabled)).json()) as {
+        capabilities: { rewardsV2: boolean };
+      };
+      expect(meta.capabilities.rewardsV2).toBe(true);
+    }
   });
 
   it("requires authentication before any capability applies", async () => {
@@ -298,7 +299,7 @@ describe("reward reads", () => {
 
   it("simulates a conversion as a pure query: 2,500 uses 2,000 and receives 1,000", async () => {
     const before = await env.DB.prepare(
-      "SELECT count(*) AS n FROM reward_bucket_claims",
+      "SELECT count(*) AS n FROM reward_bucket_claims_v2",
     ).first<number>("n");
     const body = (await (
       await get(
@@ -329,7 +330,7 @@ describe("reward reads", () => {
     );
     // The query wrote nothing.
     expect(
-      await env.DB.prepare("SELECT count(*) AS n FROM reward_bucket_claims").first<number>("n"),
+      await env.DB.prepare("SELECT count(*) AS n FROM reward_bucket_claims_v2").first<number>("n"),
     ).toBe(before);
     expect(
       await env.DB.prepare(

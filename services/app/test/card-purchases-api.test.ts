@@ -243,10 +243,10 @@ describe("card purchase explanation boundary", () => {
     expect((await call(PATH, { method: "HEAD" })).status).toBe(200);
   });
 
-  it("does not exist while the reader flag is off or CORE 0047 is absent", async () => {
-    expect((await call(PATH, { enabled: false })).status).toBe(404);
-    expect((await call(PATH, { schema: false })).status).toBe(404);
-    expect(await cardPurchasesAvailable({ ...env, EVENTS_V2_ENABLED: "true" } as Env)).toBe(true);
+  it("stays served when the retired flag is off, and is absent without CORE 0047", async () => {
+    expect((await call(PATH, { enabled: false })).status).toBe(200);
+    expect((await call(PATH, { schema: false, enabled: true })).status).toBe(404);
+    expect(await cardPurchasesAvailable({ ...env, EVENTS_V2_ENABLED: "0" } as Env)).toBe(true);
     expect(
       await cardPurchasesAvailable({
         ...env,
@@ -293,7 +293,7 @@ describe("card purchase explanation boundary", () => {
     const meta = async (options: { enabled?: boolean; schema?: boolean }) =>
       ((await (await call("/api/meta", options)).json()) as { capabilities: unknown }).capabilities;
     expect(await meta({})).toMatchObject({ cardPurchaseRecognition: true });
-    expect(await meta({ enabled: false })).toMatchObject({ cardPurchaseRecognition: false });
+    expect(await meta({ enabled: false })).toMatchObject({ cardPurchaseRecognition: true });
     expect(await meta({ schema: false })).toMatchObject({ cardPurchaseRecognition: false });
   });
 });
