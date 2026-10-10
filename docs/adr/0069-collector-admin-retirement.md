@@ -67,6 +67,52 @@ configuration or expanding agent authority.
 
 ## Consequences
 
+### St.George saved-only preparation amendment (2026-10-10)
+
+`CollectionCoordinator.retryPending({ expectedRunId })` is a module-only internal
+method, not a public route, Durable Object RPC, schedule or App/MCP operation.
+It is not connected to production callers. The exact input is copied before the
+first await; the existing UUID identifies the intended pending run, not an
+authorized principal. No new UUID, provider callback, login, collection fallback,
+credential read or authentication unblock occurs through this method.
+
+The new path strictly decodes owned pending metadata: original UUID and attempt
+UUID, canonical ordered timestamps, exact fields, and either a snapshot with
+1–32 chunks or a known failure reason with zero chunks. It reads state and all
+32 bounded chunk slots through a storage transaction handle. Snapshot bytes stay
+bounded at 2 MiB, each nonempty chunk at 64 KiB, and pass fatal UTF-8, JSON and the
+existing strict snapshot parser. Unexpected populated slots in that bounded
+namespace are refused without deletion. Other run keys and indices outside
+0–31 are not inspected, attributed to the run or deleted; this is not an orphan
+cleanup or general storage-integrity scanner.
+
+Persistence uses the existing writer outside any transaction, preserving the
+original run/attempt/timestamps and snapshot. An incomplete/conflicting/thrown
+write retains pending evidence. After a persisted or already-persisted terminal,
+a new transaction rechecks every metadata field and every bounded slot byte for
+byte against the selected evidence before cleanup. A changed state or chunk
+refuses cleanup and preserves current evidence, even if the selected terminal
+was saved meanwhile. Transaction replay cannot repeat external persistence.
+Cleanup failure rolls back pending cleanup; retrying the same run can receive
+`already_persisted` and finish. A saved failure terminal leaves an authentication
+block, never a successful-collection result. Closed results expose no exception
+text or financial data. The existing instance busy guard excludes trigger,
+resume and retry while any one is active; transactional comparisons protect
+cleanup across intervening durable-state changes, not external-write rollback.
+
+Existing trigger and resume behavior is deliberately unchanged. Trigger can
+start a fresh bank login when no pending state exists; resume refuses pending
+state and can clear an authentication block. Neither is a saved-only substitute.
+The private audited human recovery adapter, authorization, route/RPC wiring and
+auth-unblock replacement still need separate design/review before retiring the
+St.George admin secret. SBI VC forced reauthentication remains deferred too.
+
+Synthetic tests cover both pending outcomes, restart/identity preservation,
+strict refusal and byte limits, mutation during persistence, transaction-handle
+use/replay/rollback, same-run idempotent completion, and all three busy paths.
+Poisoned provider callbacks and UUID spies prove this method does not collect or
+invent a new identity. These tests do not establish hosted or real-data recovery.
+
 - Old trigger/backfill/admin-token synchronization scripts are removed, not
   silently pointed at a semantically different API.
 - Arbitrary SBI/Sony ranges, Vpass card selection, GLOBAL PASS backfill/probes,
