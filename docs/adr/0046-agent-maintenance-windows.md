@@ -1,6 +1,6 @@
 # ADR 0046: Maintenance windows as a separately granted agent capability
 
-Status: proposed until this PR merges; accepted upon merge
+Status: accepted (#564 merged on 2026-10-10 JST)
 Date: 2026-10-08
 Amended by: [ADR 0063](0063-delegated-ai-operation-path.md) item 8, as
 [the amendment below](#amendment-a-delegated-operation-not-an-agent-grant-2026-10-09)
@@ -202,7 +202,7 @@ or deployment was exercised.
 
 ## Amendment: a delegated operation, not an agent grant (2026-10-09)
 
-Status: proposed until this PR merges; accepted upon merge.
+Status: accepted (#564 merged on 2026-10-10 JST).
 
 The owner's direction of 2026-10-09 — conditional direct application by the
 AI, and not anonymous-agent power
