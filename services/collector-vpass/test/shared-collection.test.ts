@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import {
   objectKey,
+  persistRun,
   readTerminal,
   terminalKey,
   verifyReferencedObjects,
@@ -642,6 +643,114 @@ describe("ADR 0023 option 8 / ADR 0026 the card unit is complete only when every
       expect(sharedRunDiagnostic("r", "card-001", outcome)).toMatchObject({ coverage: code });
     }
   });
+});
+
+describe("statement shape diagnostics do not change persistence or coverage", () => {
+  test.each(["available", "throwing-logger", "over-bound"])(
+    "unchanged bytes, calls and partial status with %s diagnostics",
+    async (mode) => {
+      const detailRow = {
+        rowType: "4K",
+        data: ["4K", "005", ...Array(9).fill("SYNTHETIC_PRIVATE_ROW")],
+      };
+      const page = envelope({
+        WebMeisaiTopDisplayServiceBean: {
+          meisaiList: [{ rowType: "45", data: ["45", "", "", "", ""] }, detailRow],
+          webMeisaiTopK3Vo: { allCnt: "1", nextPageRow: "2" },
+        },
+      });
+      const card = run({
+        months: Object.fromEntries(
+          Array.from({ length: mode === "over-bound" ? 25 : 1 }, (_, index) => [
+            `${2097 + Math.floor(index / 12)}${String((index % 12) + 1).padStart(2, "0")}`,
+            { pages: [{ kind: "top", index: 0, rawJson: page }], transactionCount: 2 },
+          ]),
+        ),
+      });
+      const baseline = new FakeR2Bucket();
+      const actual = new FakeR2Bucket();
+      const baselineHead = spyOn(baseline, "head");
+      const baselineGet = spyOn(baseline, "get");
+      const baselineList = spyOn(baseline, "list");
+      const actualHead = spyOn(actual, "head");
+      const actualGet = spyOn(actual, "get");
+      const actualList = spyOn(actual, "list");
+      const records: unknown[] = [];
+      const logger = spyOn(console, "log").mockImplementation((value) => {
+        records.push(JSON.parse(String(value)));
+        if (mode === "throwing-logger") throw new Error("SYNTHETIC_PRIVATE_LOGGER_FAILURE");
+      });
+      const network = spyOn(globalThis, "fetch").mockImplementation(
+        Object.assign(
+          () => {
+            throw new Error("unexpected_fetch");
+          },
+          {
+            preconnect: () => {
+              throw new Error("unexpected_preconnect");
+            },
+          },
+        ),
+      );
+      try {
+        const expected = await persistRun(baseline, await vpassCardRunPlan(card));
+        const outcome = await persistCardRun(actual, card);
+        expect(outcome.result).toEqual(expected);
+        expect(outcome.coverage).toBe("stated_total_mismatch");
+        expect(actual.putKeys).toEqual(baseline.putKeys);
+        expect(actualHead.mock.calls).toEqual(baselineHead.mock.calls);
+        expect(actualGet.mock.calls).toEqual(baselineGet.mock.calls);
+        expect(actualList.mock.calls).toEqual(baselineList.mock.calls);
+        expect([...actual.entries]).toEqual([...baseline.entries]);
+        expect(records).toHaveLength(1);
+        if (mode === "over-bound")
+          expect(records[0]).toEqual({
+            event: "vpass-statement-count-shapes",
+            status: "unavailable",
+            code: "count_diagnostic_unavailable",
+          });
+        else
+          expect(records[0]).toMatchObject({
+            event: "vpass-statement-count-shapes",
+            status: "available",
+            report: {
+              finalized: {
+                rawRowsVersusLastTotal: { excess: 1 },
+                detailRowsVersusLastTotal: { equal: 1 },
+              },
+            },
+          });
+        const serialized = JSON.stringify(records);
+        for (const forbidden of [
+          "SYNTHETIC",
+          sessionRunId,
+          card.cardLabel,
+          "2097",
+          "rawJson",
+          "runId",
+          "unitKey",
+          "allCnt",
+          "coverage",
+          "artifact",
+          "amount",
+        ])
+          expect(serialized).not.toContain(forbidden);
+        expect(network).not.toHaveBeenCalled();
+      } finally {
+        for (const spy of [
+          baselineHead,
+          baselineGet,
+          baselineList,
+          actualHead,
+          actualGet,
+          actualList,
+        ])
+          spy.mockRestore();
+        network.mockRestore();
+        logger.mockRestore();
+      }
+    },
+  );
 });
 
 describe("G1-01 a failed put leaves no terminal", () => {

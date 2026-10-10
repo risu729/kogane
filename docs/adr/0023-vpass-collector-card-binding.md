@@ -591,3 +591,56 @@ the cause is how the value is read, which this note checks.
 - Not verified: no production diagnostic or stored page was read for this
   note; whether any live month logs `stated_total_unverified` or
   `stated_total_mismatch` is answered by the next collection's diagnostics.
+
+## Counts-only shape diagnostic amendment (2026-10-10)
+
+Status: proposed until this amendment merges.
+
+### Context and options
+
+`stated_total_mismatch` does not distinguish a short page walk from a
+different granularity of display rows and the provider's stated total.
+Finalized pages can contain display rows (`45`, `4C`, `4K/002`) and detail
+rows (`4K/005`, `4K/007`). Their presence alone does not establish what
+`allCnt` counts. Changing coverage to count only detail rows, or changing
+pagination without observed semantics, would guess (ADR 0004). Keeping only
+the old mismatch code would not help distinguish these possibilities.
+
+### Decision
+
+After a normal card persistence attempt returns, aggregate only its statement
+pages already in memory and emit one separate `vpass-statement-count-shapes`
+record. Do not make a provider, D1 or R2 request for this diagnostic and do not
+change the persistence outcome, artifacts, pagination or coverage rule.
+
+The record groups counts by `finalized`, `customized` or `unknown` family:
+months, pages, rows, the five closed row kinds above plus `other`, unreadable
+pages and missing row lists. It counts month-level relations (`equal`,
+`short`, `excess`, `unverified`) of all rows and recognized detail rows to
+the last page's total; total stability (`stable`, `changed`, `unverified`);
+and whether that last total is less than the last cursor (`yes`, `no`,
+`unverified`). Mixed/unknown families and unknown finalized row shapes do
+not become detail-count evidence. No total, cursor, month, card, run id,
+amount, provider text or raw value appears in the new record.
+
+The diagnostic is bounded to 24 months, 100 pages per month, 5 million
+characters per page, 20 million overall, and 100,000 rows. These are safety
+limits, not claims about provider limits. Any bound or unexpected failure
+emits only `unavailable` / `count_diagnostic_unavailable`, with no partial
+counts. Logging failure is swallowed without another attempt.
+
+### Consequences and verification
+
+Count equality is investigation data, not coverage proof; in particular,
+equality with a last total does not establish a stable total across pages.
+The existing `stated_total_mismatch` stays partial even when the diagnostic's
+recognized detail count equals the total. Missing diagnostics are unknown,
+not zero. Production semantics and the mismatch cause remain unverified until
+a later authorized read of natural-run aggregate diagnostics.
+
+Synthetic tests cover both families, mixed and unknown shapes, malformed and
+changing totals, every bound, and diagnostic/logger exceptions. Integration
+tests compare stored bytes, write calls and persistence outcomes against the
+same plan persisted without the diagnostic; the card stays partial and a
+network trap records no added fetch. No real provider request or production
+payload was used to implement or test this amendment.
