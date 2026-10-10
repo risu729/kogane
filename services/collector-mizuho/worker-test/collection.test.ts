@@ -14,7 +14,7 @@ import {
   parseHistoryPage,
   sanitizeMizuhoPage,
 } from "../../../packages/parsers/src/parsers/mizuho-html";
-import { createHandler } from "../src/worker";
+import { createHandler, createCollection } from "../src/worker";
 import { persistMizuhoRun } from "../src/storage";
 import { MizuhoClientError, type MizuhoCollection, type MizuhoSession } from "../src/client";
 
@@ -75,8 +75,8 @@ function collection(partial = false): MizuhoCollection {
     ],
   };
 }
-async function manifestFor(response: Response) {
-  const result = (await response.json()) as { runId: string };
+async function manifestFor(response: Awaited<ReturnType<ReturnType<typeof createCollection>>>) {
+  const result = response.body as { runId: string };
   const terminal = await readTerminal(env.DATA, "mizuho-bank", result.runId);
   if (terminal.outcome !== "found") throw new Error("terminal-not-found");
   return terminal.manifest;
@@ -223,7 +223,7 @@ describe("Mizuho Worker and shared DATA integration", () => {
       }
     },
   );
-  it("authenticates before reading sessions or calling the bank", async () => {
+  it("rejects retired triggers before reading sessions or calling the bank", async () => {
     let called = false;
     const login = vi.fn(async () => session);
     const handler = createHandler({
@@ -234,27 +234,27 @@ describe("Mizuho Worker and shared DATA integration", () => {
       },
       persist: persistMizuhoRun,
     });
-    expect((await handler.fetch(request("private-invalid", "wrong-token"), env)).status).toBe(401);
-    expect((await handler.fetch(request("private-invalid"), env)).status).toBe(400);
-    expect((await handler.fetch(request("x".repeat(96 * 1024 + 1)), env)).status).toBe(400);
-    expect((await handler.fetch(request("{}", "wrong-token"), env)).status).toBe(401);
+    expect((await handler.fetch(request("private-invalid", "wrong-token"), env)).status).toBe(404);
+    expect((await handler.fetch(request("private-invalid"), env)).status).toBe(404);
+    expect((await handler.fetch(request("x".repeat(96 * 1024 + 1)), env)).status).toBe(404);
+    expect((await handler.fetch(request("{}", "wrong-token"), env)).status).toBe(404);
     for (const invalid of ["null", "[]", '{"password":"syntheticpassword"}', '{"session":{}}'])
-      expect((await handler.fetch(request(invalid), env)).status).toBe(400);
+      expect((await handler.fetch(request(invalid), env)).status).toBe(404);
     expect(login).not.toHaveBeenCalled();
     expect(called).toBe(false);
   });
-  it("logs in once with configured credentials for an empty-object trigger and retains no authentication data", async () => {
+  it("the internal executor logs in once with configured credentials and retains no authentication data", async () => {
     const login = vi.fn(async () => session);
     const collect = vi.fn(async () => collection());
-    const handler = createHandler({ login, collect, persist: persistMizuhoRun });
-    const response = await handler.fetch(request("{}"), env);
-    expect(response.status).toBe(200);
+    const handler = createCollection({ login, collect, persist: persistMizuhoRun });
+    const response = await handler(env);
+    expect(response.httpStatus).toBe(200);
     expect(login).toHaveBeenCalledExactlyOnceWith({
       customerNumber: "0000000000",
       password: "syntheticpassword",
     });
     expect(collect).toHaveBeenCalledExactlyOnceWith({ session });
-    const text = await response.clone().text();
+    const text = JSON.stringify(response.body);
     const manifest = await manifestFor(response);
     const persisted = [JSON.stringify(manifest)];
     for (const item of manifest.artifacts)
@@ -267,7 +267,7 @@ describe("Mizuho Worker and shared DATA integration", () => {
     ])
       expect(text + persisted.join("\n")).not.toContain(secret);
   });
-  it("preserves explicit-session collection without reading password credentials or logging in", async () => {
+  it("retires explicit-session injection without reading credentials or logging in", async () => {
     const login = vi.fn(async () => {
       throw new Error("must-not-login");
     });
@@ -281,7 +281,7 @@ describe("Mizuho Worker and shared DATA integration", () => {
       MIZUHO_CUSTOMER_NUMBER: "",
       MIZUHO_LOGIN_PASSWORD: "",
     });
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(404);
     expect(login).not.toHaveBeenCalled();
   });
   it.each(["MIZUHO_CUSTOMER_NUMBER", "MIZUHO_LOGIN_PASSWORD"] as const)(
@@ -289,10 +289,10 @@ describe("Mizuho Worker and shared DATA integration", () => {
     async (secret) => {
       const login = vi.fn(async () => session);
       const collect = vi.fn(async () => collection());
-      const handler = createHandler({ login, collect, persist: persistMizuhoRun });
-      const response = await handler.fetch(request("{}"), { ...env, [secret]: "" });
-      expect(response.status).toBe(502);
-      expect(await response.clone().json()).toMatchObject({
+      const handler = createCollection({ login, collect, persist: persistMizuhoRun });
+      const response = await handler({ ...env, [secret]: "" });
+      expect(response.httpStatus).toBe(502);
+      expect(response.body).toMatchObject({
         status: "failed",
         error: "mizuho-credentials-missing",
         artifactCount: 0,
@@ -307,10 +307,10 @@ describe("Mizuho Worker and shared DATA integration", () => {
       throw new MizuhoClientError("login-challenge-required");
     });
     const collect = vi.fn(async () => collection());
-    const handler = createHandler({ login, collect, persist: persistMizuhoRun });
-    const response = await handler.fetch(request("{}"), env);
-    expect(response.status).toBe(502);
-    expect(await response.clone().json()).toMatchObject({
+    const handler = createCollection({ login, collect, persist: persistMizuhoRun });
+    const response = await handler(env);
+    expect(response.httpStatus).toBe(502);
+    expect(response.body).toMatchObject({
       error: "login-challenge-required",
       artifactCount: 0,
     });
@@ -408,10 +408,14 @@ describe("Mizuho Worker and shared DATA integration", () => {
     }
   });
   it("writes sanitized objects and a verifiable terminal, without exposing sessions", async () => {
-    const handler = createHandler({ collect: async () => collection(), persist: persistMizuhoRun });
-    const response = await handler.fetch(request(), env);
-    expect(response.status).toBe(200);
-    const publicText = await response.clone().text();
+    const handler = createCollection({
+      login: async () => session,
+      collect: async () => collection(),
+      persist: persistMizuhoRun,
+    });
+    const response = await handler(env);
+    expect(response.httpStatus).toBe(200);
+    const publicText = JSON.stringify(response.body);
     expect(publicText).not.toContain("synthetic-private");
     expect(publicText).not.toContain("1234567");
     const manifest = await manifestFor(response);
@@ -429,12 +433,13 @@ describe("Mizuho Worker and shared DATA integration", () => {
     }
   });
   it("keeps successful page acquisition distinct from incomplete history coverage", async () => {
-    const handler = createHandler({
+    const handler = createCollection({
+      login: async () => session,
       collect: async () => collection(true),
       persist: persistMizuhoRun,
     });
-    const response = await handler.fetch(request(), env);
-    expect(response.status).toBe(207);
+    const response = await handler(env);
+    expect(response.httpStatus).toBe(207);
     const manifest = await manifestFor(response);
     expect(manifest.providerOutcome).toBe("success");
     expect(manifest.coverageStatus).toBe("partial");
@@ -444,14 +449,15 @@ describe("Mizuho Worker and shared DATA integration", () => {
     expect(manifest.ranges).toEqual([]);
   });
   it("records expiration as a failed acquisition without an empty-success observation", async () => {
-    const handler = createHandler({
+    const handler = createCollection({
+      login: async () => session,
       collect: async () => {
         throw new MizuhoClientError("authentication-required");
       },
       persist: persistMizuhoRun,
     });
-    const response = await handler.fetch(request(), env);
-    expect(response.status).toBe(502);
+    const response = await handler(env);
+    expect(response.httpStatus).toBe(502);
     const manifest = await manifestFor(response);
     expect(manifest.providerOutcome).toBe("failed");
     expect(manifest.artifacts).toEqual([]);
@@ -464,17 +470,22 @@ describe("Mizuho Worker and shared DATA integration", () => {
       "</form>",
       '<input type="hidden" value="synthetic-private-token"></form>',
     );
-    const handler = createHandler({ collect: async () => invalid, persist: persistMizuhoRun });
-    expect((await handler.fetch(request(), env)).status).toBe(502);
+    const handler = createCollection({
+      login: async () => session,
+      collect: async () => invalid,
+      persist: persistMizuhoRun,
+    });
+    expect((await handler(env)).httpStatus).toBe(502);
     expect(await listTerminals(env.DATA, { source: "mizuho-bank" })).toEqual(before);
-    const failedWrite = createHandler({
+    const failedWrite = createCollection({
+      login: async () => session,
       collect: async () => collection(),
       persist: async () => {
         throw new Error("synthetic-private-cookie");
       },
     });
-    const response = await failedWrite.fetch(request(), env);
-    expect(response.status).toBe(502);
-    expect(await response.text()).not.toContain("synthetic-private");
+    const response = await failedWrite(env);
+    expect(response.httpStatus).toBe(502);
+    expect(JSON.stringify(response.body)).not.toContain("synthetic-private");
   });
 });

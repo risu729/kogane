@@ -13,7 +13,7 @@ import {
   type MoneyForwardIdentityState,
   type SharedRunInput,
 } from "../src/shared-collection";
-import worker from "../src/worker";
+import { runSharedCollection } from "../src/worker";
 
 const runId = "3f2504e0-4f89-41d3-9a0c-0305e82c3327";
 const schemaVersion = "moneyforward-worker-poc-v1";
@@ -311,18 +311,11 @@ describe("ADR 0029 the Worker needs no identity secret", () => {
     ];
     try {
       // Missing credential deliberately fails before any provider request.
-      await worker.fetch(
-        new Request("https://worker.invalid/trigger", {
-          method: "POST",
-          headers: { authorization: "Bearer synthetic-admin" },
-        }) as Request<unknown, IncomingRequestCfProperties>,
-        {
-          ADMIN_TRIGGER_TOKEN: "synthetic-admin",
-          COLLECTOR_SCHEMA_VERSION: schemaVersion,
-          DATA: new FakeR2Bucket(),
-          ...extra,
-        } as unknown as Env,
-      );
+      await runSharedCollection({
+        COLLECTOR_SCHEMA_VERSION: schemaVersion,
+        DATA: new FakeR2Bucket(),
+        ...extra,
+      } as unknown as Env);
     } finally {
       spies.forEach((spy) => spy.mockRestore());
     }

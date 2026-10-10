@@ -73,3 +73,4 @@ for current behavior.
 - [ADR 0064: One append-only audit record per operation, for the human UI and the AI alike, referencing the existing logs](0064-common-audit-log.md) — proposed; no table yet, migration number not fixed
 - [ADR 0065: Collect native coverage by runtime, without a fabricated repository total](0065-native-test-coverage.md) — proposed; native measurements, no numerical threshold
 - [ADR 0067: Current economic-row evidence readiness before event writers](0067-economic-row-readiness.md) — proposed; internal read-only diagnostic, no writer activation
+- [ADR 0069: Retire collector-local public admin bearer entrypoints in bounded slices](0069-collector-admin-retirement.md)

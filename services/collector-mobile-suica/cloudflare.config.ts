@@ -19,7 +19,6 @@ export default defineConfig({
     },
     env: {
       COLLECTOR_SCHEMA_VERSION: bindings.text("mobile-suica-worker-poc-v2"),
-      ADMIN_TRIGGER_TOKEN: bindings.secret(),
       JRE_ID_CREDENTIAL_JSON: bindings.secret(),
       SCHEDULE_DB: bindings.d1({
         name: "kogane-raw-evidence",

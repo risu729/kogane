@@ -3,5 +3,4 @@
 // only their names here.
 interface Env {
   SONY_BANK_CREDENTIAL_JSON: string;
-  ADMIN_TRIGGER_TOKEN: string;
 }
