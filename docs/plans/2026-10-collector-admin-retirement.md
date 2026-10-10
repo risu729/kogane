@@ -49,6 +49,23 @@ RPC before editing the shared App/MCP files. No new agent grant or auth strategy
 
 ## Release and exact-secret handoff
 
+### St.George internal saved-only preparation
+
+The internal `CollectionCoordinator.retryPending({ expectedRunId })` now separates
+saved evidence persistence from generic trigger and authentication unblock.
+It is intentionally unconnected: no HTTP, Durable Object RPC, schedule, App/MCP,
+grant or secret change. Its strict pending-envelope and bounded-chunk comparison
+preserves current evidence after stale/interleaved changes; transaction callbacks
+perform storage operations only. See the [ADR amendment](../adr/0069-collector-admin-retirement.md#stgeorge-saved-only-preparation-amendment-2026-10-10)
+for identity, failure-terminal and residual-key guarantees and limits.
+
+This is synthetic preparation, not an available recovery command or a retired
+fourteenth token. Existing `/resume` rejects pending state and can unblock
+authentication; existing trigger may start a new login without pending state.
+An audited human operator adapter and narrowly scoped private RPC, plus a
+separate authentication-unblock replacement, remain prerequisites. No real DATA
+read/write, bank request, deployed recovery proof or secret deletion is claimed.
+
 1. Complete synthetic negative, persistence, relay, Access, type/config and root
    checks; obtain fresh independent review of the exact candidate tree.
 2. Publish the normal PR; required CI must pass before normal merge.
