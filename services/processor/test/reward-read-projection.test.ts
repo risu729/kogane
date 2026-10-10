@@ -474,6 +474,8 @@ test("G0-09: dropping the reward READ tables leaves every CORE claim intact and 
   const before = await coreDigest();
 
   for (const table of [
+    "reward_provider_display_checkpoints",
+    "reward_provider_expiry_sections",
     "reward_build_checkpoints",
     "reward_conversion_simulations",
     "reward_expiry_estimates_v2",

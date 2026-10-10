@@ -16,6 +16,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "5b40a5fb92a270668fbc3e9053e84af0d990c16d5873934e125b1e9822aa4fc9",
     "packages/domain/src/myjcb-amounts.ts":
       "072dc5fc2570fc8257343d85d53e93cf9fa9036f61a1648390a8d8845303ea3e",
+    "packages/domain/src/myjcb-jpoint-response.ts":
+      "2ab195e078255201c9a9d4ce9d44100f505b10cdca430e9801623841bf472c5e",
     "packages/domain/src/myjcb-schedule-page-kind.ts":
       "89fba9fd5860dbabc0c1e15e97a5318bb69e8d0ecd6409c504e7c73d25e0f3d1",
     "packages/domain/src/myjcb-skip-payment-schedule.ts":
@@ -24,6 +26,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "cc3b16e3df6274bb2cbaf86275a30ec2fa836fc8160052115a2ee5b1b12248ca",
     "packages/domain/src/myjcb-statement-page.ts":
       "e5f382ed90b5f133ed794b479aebb4c5e42e27477198030d2d00e64972984587",
+    "packages/domain/src/reward-expiry-observations.ts":
+      "975495c7701f055d355bfa0ea2d625149d9ff328174296d71c76541cb6210024",
     "packages/domain/src/smbc-account-context.ts":
       "01c28f112fe3a0f9f3668deb114047b0cc9d17fdbb891dae6c106877aaa7450f",
     "packages/domain/src/time.ts":
@@ -50,6 +54,8 @@ export const PARSER_DIGESTS: ParserDigests = {
       "9ff15fc630314c798312a9d39872bbeb88872a03e83a464abf53446eff373108",
     "poc/observation-pipeline/src/parsers/moneyforward.ts":
       "00f80782d205b967c6c7d9719d18b7800a0ff9b0a6dd992b0991cd840a564815",
+    "poc/observation-pipeline/src/parsers/myjcb-jpoint.ts":
+      "a2999acd2acef6d12066dd83c6a1d663e2ef9d92518fc5c9c49b942a1567f0e1",
     "poc/observation-pipeline/src/parsers/myjcb-skip-payment-schedule.ts":
       "7c0f8cef804522f0cc19902aceacc64dd017c65a917575de55b81618c8fd4c69",
     "poc/observation-pipeline/src/parsers/myjcb.ts":
@@ -283,6 +289,23 @@ export const PARSER_DIGESTS: ParserDigests = {
         "poc/observation-pipeline/src/money.ts",
         "poc/observation-pipeline/src/parsers/myjcb.ts",
         "poc/observation-pipeline/src/parsers/sbi-strict.ts",
+        "poc/observation-pipeline/src/parsers/util.ts",
+        "poc/observation-pipeline/src/types.ts",
+      ],
+    },
+    "myjcb-jpoint-balance": {
+      version: "1.0.0",
+      codeDigest: "7166be1bcdb9d3b682e6b11fc2f90293cd02b557c02ff8e5d294a48fb6129671",
+      sources: [
+        "packages/domain/src/coverage.ts",
+        "packages/domain/src/guards.ts",
+        "packages/domain/src/myjcb-jpoint-response.ts",
+        "packages/domain/src/reward-expiry-observations.ts",
+        "packages/domain/src/time.ts",
+        "packages/domain/src/values.ts",
+        "packages/observation-shared/src/normalized-decimal.ts",
+        "poc/observation-pipeline/src/money.ts",
+        "poc/observation-pipeline/src/parsers/myjcb-jpoint.ts",
         "poc/observation-pipeline/src/parsers/util.ts",
         "poc/observation-pipeline/src/types.ts",
       ],

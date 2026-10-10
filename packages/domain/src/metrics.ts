@@ -385,6 +385,19 @@ export const METRIC_REGISTRY: readonly RegistryEntry[] = [
       timeBasis: "unknown",
     },
   }),
+  entry([balance("myjcb", "myjcb-jpoint-balance", ["displayed_jpoint_total"])], {
+    metricId: "reward.displayed-total-balance",
+    measurementKind: "stock",
+    subjectKind: "program",
+    unitDimension: "reward",
+    signMeaning: "provider-sign",
+    timeBasis: "point-in-time",
+    aggregationRule: "non-additive",
+    overlapGroup: "myjcb:jpoint-total-vs-subset",
+    sourceAuthority: "provider-reported",
+    // The frozen legacy classifier has no J-POINT mapping; typed axes above define it.
+    legacyBalance: LEGACY_UNKNOWN,
+  }),
   entry([balance("v-point", "v-point-smfg-point", ["displayed_point_balance"])], {
     metricId: "reward.previous-month-earned",
     measurementKind: "period-total",

@@ -222,6 +222,12 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
   // `text/html; charset=utf-8`, which no terminal can declare.
   myjcb: [
     {
+      key: /^[^/]+\/jpoint-balance\.json$/u,
+      role: "provider_response",
+      mediaTypes: JSON_TYPE,
+      dataset: "jpoint-balance",
+    },
+    {
       key: /^[^/]+\/discovery\.json$/u,
       role: "collector_derived",
       mediaTypes: JSON_TYPE,

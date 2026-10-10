@@ -1,4 +1,5 @@
 // Wire contract shared by runtime validation and the rewards screen.
+import type { RewardProviderExpirySection } from "../../domain/src/reward-expiry-observations.ts";
 import type { Quantity, ValueState } from "../../domain/src/values.ts";
 import type { TemporalValue } from "../../domain/src/time.ts";
 import {
@@ -117,6 +118,7 @@ export function validRewardExpiryBasis(value: unknown): value is RewardExpiryBas
 }
 
 export interface RewardReadExpiryPage {
+  providerDisplaySections?: RewardProviderExpirySection[];
   rows: RewardReadExpiryRow[];
   page: { limit: number; hasMore: boolean; nextCursor: string | null };
   snapshot: {

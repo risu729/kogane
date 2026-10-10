@@ -1147,6 +1147,21 @@
       "statementCount": 11,
       "insertStatements": [],
       "sha256": "c8fae1df7c374ec7873d0b033271b7d483f18a7f3036e8fde7eeed909e0c79d8"
+    },
+    {
+      "file": "0080_jpoint_program.sql",
+      "statementCount": 2,
+      "insertStatements": [
+        {
+          "table": "reward_programs",
+          "kind": "seed-or-backfill"
+        },
+        {
+          "table": "dataset_snapshot_policies",
+          "kind": "seed-or-backfill"
+        }
+      ],
+      "sha256": "f8ad258b0146a79780b706d7caef693120a575973e190f13f913a3fa27b40118"
     }
   ],
   "tables": [
@@ -21961,7 +21976,8 @@
       "0065_alarm_schedules.sql",
       "0066_prestia_bank_snapshot_schedule.sql",
       "0070_economic_commit_guard.sql",
-      "0071_economic_event_command_kinds.sql"
+      "0071_economic_event_command_kinds.sql",
+      "0080_jpoint_program.sql"
     ],
     "schemaSha256": "91cf2b56e847ae6ae155844b0ea00d09ba71bc9e3ff57a4e4c7b41c6ce792e71"
   }

@@ -3,6 +3,7 @@ import {
   INSTRUMENT_HISTORY_PATH,
   validInstrumentHistoryRead,
 } from "./instrument-history-contract.ts";
+import { validRewardProviderExpirySection } from "../../domain/src/reward-expiry-observations.ts";
 import { validQuantity } from "../../domain/src/values.ts";
 import { validTemporalValue, validInstantText, validLocalDateText } from "../../domain/src/time.ts";
 import type {
@@ -688,6 +689,7 @@ const rewardReadExpiry = object<RewardReadExpiryRow>({
   expiryBasis: optional(nullable(validRewardExpiryBasis)),
 });
 const rewardReadPage = object<RewardReadExpiryPage>({
+  providerDisplaySections: optional(array(validRewardProviderExpirySection)),
   rows: array(rewardReadExpiry),
   page: object<RewardReadExpiryPage["page"]>({
     limit: identifier,
