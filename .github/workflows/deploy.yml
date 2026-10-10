@@ -2,6 +2,9 @@ name: Deploy
 # Continuous deployment without a preview or staging lane (unified plan 11).
 # A merge to main starts CI; a successful CI run on main starts this workflow,
 # which releases that exact commit.
+# The called release job serializes production-deploy after eligibility checks.
+# Queuing workflow_run notifications here lets failed CI displace a valid release.
+# jactionlint ignore=concurrency-limits
 on:
   # zizmor: ignore[dangerous-triggers]
   # `workflow_run` is privileged by design: the release needs the production
@@ -34,7 +37,7 @@ jobs:
     # CI run that a pull request started, one on any branch but main, or one
     # whose head lives in another repository.
     if: >-
-      github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository)
+      ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.head_repository.full_name == github.repository) }}
     permissions:
       contents: read # for checkout
       deployments: write # the release ledger
