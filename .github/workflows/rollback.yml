@@ -25,7 +25,7 @@ jobs:
       contents: read # for checkout
       deployments: write # the release ledger
       actions: read # immutable same-run release checkpoints
-    uses: ./.github/workflows/_deploy-workers.yml # zizmor: ignore[secrets-inherit,self-repository] -- Use the caller's revision and pass deployment secrets.
+    uses: $/.github/workflows/_deploy-workers.yml # zizmor: ignore[secrets-inherit] -- Pass deployment secrets to the reusable workflow.
     # The Cloudflare credentials live in the `production` Environment and are
     # read by the called workflow's job, which is where `environment:
     # production` is declared. GitHub resolves `secrets.*` inside a called
