@@ -1,6 +1,6 @@
 # SBI Shinsei: first history acquisition slice
 
-Status: in progress; offline validation implemented, acquisition not enabled.
+Status: in progress; offline validation/evidence adapter implemented, acquisition not enabled.
 Date: 2026-10-10.
 Issue: [#447](https://github.com/risu729/kogane/issues/447).
 Decision: [ADR 0070](../adr/0070-sbi-shinsei-observed-history-boundary.md), proposed.
@@ -156,7 +156,8 @@ screen. No transfer, FX, deposit creation/cancellation, memo or settings flow.
   and owner-accepted economic relations separate.
 - Require fresh independent review, relevant native CI, approved deployment
   and read-only production evidence before claiming acquisition is enabled
-  or complete. Do not close #447 for this offline slice.
+  or complete. The currently closed #447 is not evidence of all-history
+  completion; this offline slice does not change its state.
 
 ## Separate byte-lineage comparison slice
 
@@ -173,3 +174,36 @@ and registration readiness remain false; coverage remains unknown. There is
 no storage writer, manifest/descriptor construction, parser registration or
 provider request in this slice. Its synthetic Blob test is not live download
 evidence. See the ADR 0070 amendment for the exact limits and refusal policy.
+
+## Separate decoded-JSON evidence-only persistence slice
+
+`src/local/history-evidence.ts` accepts only explicit metadata, request context
+and an already-decoded JSON response. It validates and snapshots the input,
+rejects duplicate/escaped duplicate keys, authentication/unknown fields,
+lossy Unicode and budgets, then preserves its exact decoded UTF-8 representation
+and a generated private replay context with the shared append-only writer.
+This is not HTTP-original capture. The two artifacts are derived/generated,
+have no fabricated parent, and carry no registered dataset. Requested dates
+and provider echo are separate; coverage remains unknown and the terminal
+outcome stays partial with `history_capture_origin_unverified`.
+
+Readback checks the expected terminal digest and both actual object bodies,
+then repeats inspection and rebuilds the entire expected plan. An existing
+terminal alone is not successful readback. The result distinguishes persisted,
+already persisted, incomplete, conflict and unknown storage failure; readback
+refusal does not roll back or overwrite persistence. Retry requires the same
+caller-owned input; there is no provider refetch or automatic retry.
+
+Only synthetic in-memory persistence/readback has been exercised. The adapter
+has no runtime caller, real DATA write, D1 registration, parser or publication.
+It therefore leaves real registration/seal state untouched; it does not prove
+a scanner-enforced unsealed state. A derived-only partial terminal is not
+automatically rejected by the scanner's failed/no-provider guard. Integrating
+with shared production DATA requires a separate registration/seal-policy gate
+before any real write, as well as approved capture provenance. No runtime,
+route, catalog, CSV/PDF or existing snapshot persistence path changes here.
+
+Later owners still need authenticated pagination/truncation and token-boundary
+evidence, original-byte capture where applicable, cross-capture identity and
+deduplication, separate parser/registration review and production acceptance.
+See ADR 0070's persistence amendment for exact artifact and replay guarantees.

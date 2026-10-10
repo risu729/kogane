@@ -112,3 +112,56 @@ The source semantics follow the [Encoding Standard](https://encoding.spec.whatwg
 and [File API Blob processing](https://w3c.github.io/FileAPI/#process-blob-parts).
 Real capture provenance, token rotation and completeness require later
 authorized observation; these tests cannot establish them.
+
+## Amendment: offline decoded-JSON evidence persistence (2026-10-10)
+
+A separate local adapter can now plan, persist and reread a caller-supplied
+explicit-period decoded JSON response using the shared terminal-last writer.
+It has no runtime caller, provider transport, registration call or live store
+connection. Tests use synthetic input and an in-memory bucket only.
+
+The selected option retains two artifacts: the exact decoded string encoded
+as UTF-8 (`history-decoded.json`, `collector_derived`, `reencoded`) and a
+generated private context manifest (`history-context.json`,
+`collector_manifest`, `generated`). Original HTTP bytes were not captured;
+there is no fabricated source artifact or parent relation. Existing descriptor
+derivation classifies the decoded response as transformed with
+`source_bytes_not_available`, and neither artifact matches a registered dataset.
+The context includes the private account/period needed to replay the observed
+empty response; these values never enter keys, terminal units or public results.
+
+The terminal describes persistence only: `partial`, coverage `unknown`, a
+fixed `yen-period` unit and requested/request-based date range, and
+`history_capture_origin_unverified`. Echo matching does not prove complete
+coverage, capture provenance or provider origin. UUID run IDs and an exact
+input envelope exclude arbitrary identifiers, headers and authentication fields.
+All metadata primitives are copied before awaiting any digest. Duplicate JSON
+keys at every depth (including escaped equivalents), isolated surrogates,
+unknown response fields and local budget overflow are refused before storage.
+JSON has a 2 MiB/depth-64 budget; the generated context has a 16 KiB budget.
+
+The reader requires the caller's terminal digest, validates the canonical
+terminal, retrieves both actual object bodies, checks byte counts and hashes,
+and decodes with fatal UTF-8. It rebuilds the plan using fresh strict response
+inspection and requires identical terminal digest, binding exact artifact
+inventory, roles, transformations, metadata, scope and recomputed context.
+A resend also performs this readback. Persistence, readback verification,
+incomplete writes and conflicts remain distinct; failures never overwrite,
+delete earlier evidence, refetch a provider or automatically retry.
+
+No registration, parsing, publication or seal is performed by this adapter.
+This is not a claim that derived-only terminals can never seal: the existing
+scanner's no-provider early refusal applies to failed outcomes, not every
+partial outcome. Connecting this adapter to shared production DATA would
+expose its terminal to that scanner and is a separate, unapproved integration
+gate. A future connection must review registration/seal policy explicitly;
+this amendment does not change it or label a synthetic result as production
+evidence. Routes, catalog, browser, CSV/PDF, snapshot writer and parsers remain
+unchanged. All-history completion, original-response capture, deduplication,
+and production acceptance remain unproved.
+
+Synthetic verification covers decoded-byte fidelity, secret/shape refusal,
+input mutation during awaits, empty-context replay, terminal-last ordering,
+idempotent actual-byte readback, conflict/non-overwrite, partial failure
+preservation, damaged bytes/metadata/context, tampered canonical manifests,
+closed diagnostics, existing descriptor classification and zero provider calls.

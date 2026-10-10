@@ -33,6 +33,7 @@ import * as myjcb from "../services/collector-myjcb/src/shared-collection.ts";
 import * as prestiaBank from "../services/collector-prestia-bank/src/storage.ts";
 import * as sbiSecurities from "../services/collector-sbi-securities/src/shared-run.ts";
 import * as sbiShinsei from "../services/collector-sbi-shinsei/src/shared-collection.ts";
+import * as sbiShinseiHistory from "../services/collector-sbi-shinsei/src/local/history-evidence.ts";
 import * as sbiVcTrade from "../services/collector-sbi-vc-trade/src/shared-collection.ts";
 import * as smbcDirect from "../services/collector-smbc-direct/src/shared-collection.ts";
 import * as sonyBank from "../services/collector-sony-bank/src/shared-collection.ts";
@@ -116,6 +117,13 @@ const COLLECTORS: Readonly<Record<string, readonly TerminalIdentity[]>> = {
     },
   ],
   "collector-sbi-shinsei": [
+    {
+      file: "src/local/history-evidence.ts",
+      sourceName: "SHARED_SOURCE",
+      source: sbiShinseiHistory.SHARED_SOURCE,
+      producerName: "PRODUCER",
+      producer: sbiShinseiHistory.PRODUCER,
+    },
     {
       file: "src/shared-collection.ts",
       sourceName: "SHARED_SOURCE",
