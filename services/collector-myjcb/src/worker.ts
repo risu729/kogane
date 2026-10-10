@@ -10,7 +10,7 @@ import {
   connectionErrorCode,
   persistSharedRun,
   sharedBucket,
-  sharedRunDiagnostic,
+  logSharedRunDiagnostic,
   type SharedConnectionRun,
 } from "./shared-collection";
 import type { CollectionFailure, CollectionManifest } from "./types";
@@ -155,7 +155,7 @@ async function runSharedCollection(
       const outcome = await diagnostic.step("artifact-write", () =>
         persistSharedRun(sharedBucket(env.DATA), input),
       );
-      console.log(JSON.stringify(sharedRunDiagnostic(input, outcome)));
+      logSharedRunDiagnostic(input, outcome);
       diagnostic.finish(status);
       return {
         runId,

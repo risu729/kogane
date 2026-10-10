@@ -39,6 +39,19 @@ const metadata = {
 };
 const artifact = { type: "artifact", month: "2099-02", page: 1, pageCount: 1, html: fixtureHtml() };
 
+test("stored diagnostics separate rolling run coverage from incomplete acquisition", async () => {
+  const result = await run([metadata, artifact]);
+  const stored = result.logs
+    .map((line) => JSON.parse(line))
+    .find((r) => r.event === "globalpass-collection-stored");
+  expect(stored).toMatchObject({
+    status: "partial",
+    coverageStatus: "partial",
+    unitCoverageStatus: "partial",
+    coverageReason: "rolling-window",
+  });
+});
+
 async function run(
   records: unknown[],
   options: {
@@ -165,6 +178,15 @@ describe("GLOBAL PASS diagnostics preserve the current collection contract", () 
     expect(r.manifest?.captureComplete).toBe(true);
     expect(r.manifest?.paginationStatus).toBe("pages_walked");
     expect(r.destroyed).toBe(1);
+  });
+  test("throwing loggers preserve an original collection failure and one teardown", async () => {
+    const r = await run([], { httpStatus: 503, loggerThrows: true });
+    expect(r.response.status).toBe(502);
+    expect(r.manifest?.status).toBe("failed");
+    expect(r.manifest?.artifacts).toHaveLength(0);
+    expect(r.manifest?.failures[0]?.errorCode).toBe("browser_collection_failed");
+    expect(r.destroyed).toBe(1);
+    expect([...r.stored.keys()].filter((key) => key.endsWith("/terminal.json"))).toHaveLength(1);
   });
 });
 
