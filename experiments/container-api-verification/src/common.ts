@@ -194,6 +194,19 @@ export function worker() {
             },
           );
         }
+        if (path === "/state" && request.method === "GET") {
+          const headers = new Headers(response.headers);
+          const workerRevision = env.HARNESS_REVISION;
+          headers.set(
+            "x-verification-worker-revision",
+            revisions.has(workerRevision) ? workerRevision : "unknown",
+          );
+          return new Response(response.body, {
+            status: response.status,
+            statusText: response.statusText,
+            headers,
+          });
+        }
         return response;
       } catch {
         return Response.json(

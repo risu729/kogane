@@ -416,6 +416,7 @@ test("timeout retains only the last completed classified response without changi
         phase,
         lastCompletedResponse: kind,
         observedRevision: revision,
+        workerRevision: "unknown",
       },
     ]);
     expect(JSON.stringify(observations)).not.toContain("private");
@@ -456,6 +457,7 @@ test("success and non-timeout failures never observe, and an expired initial bud
       phase: "baseline_sdk",
       lastCompletedResponse: "none",
       observedRevision: "none",
+      workerRevision: "unknown",
     },
   ]);
 });
@@ -486,6 +488,7 @@ test("a pending request records none or the earlier completed response and never
         phase: "baseline_sdk",
         lastCompletedResponse: earlier ? "unmarked_503" : "none",
         observedRevision: "none",
+        workerRevision: "unknown",
       },
     ]);
     expect(Date.now() - started).toBeLessThan(1000);
@@ -505,7 +508,10 @@ test("a late body cannot overwrite the last completed response or change accepta
         },
         fetchImpl: async () => {
           calls++;
-          if (calls === 1) return Response.json(state());
+          if (calls === 1)
+            return Response.json(state(), {
+              headers: { "x-verification-worker-revision": "native" },
+            });
           return new Response(
             new ReadableStream(
               {
@@ -517,6 +523,7 @@ test("a late body cannot overwrite the last completed response or change accepta
               },
               { highWaterMark: 0 },
             ),
+            { headers: { "x-verification-worker-revision": "native_recovered" } },
           );
         },
         onTimeout: (value: unknown) => values.push(value),
@@ -530,6 +537,7 @@ test("a late body cannot overwrite the last completed response or change accepta
       phase: "native",
       lastCompletedResponse: "validated_old_revision",
       observedRevision: "baseline_sdk",
+      workerRevision: "native",
     },
   ]);
 });
@@ -539,6 +547,7 @@ test("record validation rejects extra data, unknown enums, and inconsistent clas
     phase: "native",
     lastCompletedResponse: "validated_old_revision",
     observedRevision: "baseline_sdk",
+    workerRevision: "unknown",
   };
   expect(httpReadyTimeoutFailureRecord(base)).toEqual(base);
   for (const invalid of [
@@ -552,6 +561,9 @@ test("record validation rejects extra data, unknown enums, and inconsistent clas
     { ...base, observedRevision: "private" },
     { ...base, observedRevision: "native" },
     { ...base, observedRevision: "none" },
+    { ...base, workerRevision: "private-worker-value" },
+    { ...base, workerRevision: undefined },
+    { ...base, lastCompletedResponse: "none", observedRevision: "none", workerRevision: "native" },
     ...["none", "unmarked_404", "unmarked_503"].map((lastCompletedResponse) => ({
       ...base,
       lastCompletedResponse,
@@ -595,6 +607,7 @@ test("the private timeout record preserves its first writer and never overwrites
       phase: "native",
       lastCompletedResponse: "unmarked_404",
       observedRevision: "none",
+      workerRevision: "unknown",
     };
     try {
       if (mode === "record") writeRecord(temp, name, first);
@@ -623,5 +636,213 @@ test("the private timeout record preserves its first writer and never overwrites
     } finally {
       rmSync(temp, { recursive: true, force: true });
     }
+  }
+});
+
+test("outer Worker revision is a closed field of the same completed old-state observation", async () => {
+  for (const header of [
+    "baseline_sdk",
+    "native",
+    "native_unmonitored",
+    "native_recovered",
+    "rollback_sdk",
+    undefined,
+    "private-worker-value",
+    "",
+  ]) {
+    let clock = 178_000;
+    const values: unknown[] = [];
+    await expect(
+      waitHttpReady(
+        options({
+          phase: "native",
+          now: () => clock,
+          fetchImpl: async () =>
+            Response.json(state("baseline_sdk"), {
+              headers: {
+                ...(header === undefined ? {} : { "x-verification-worker-revision": header }),
+                "x-unrelated-private": "private-other-header",
+              },
+            }),
+          sleep: async (ms: number) => {
+            clock += ms;
+          },
+          onTimeout: (value: unknown) => values.push(value),
+        }),
+      ),
+    ).rejects.toThrow("verification_state_timeout");
+    expect(values).toEqual([
+      {
+        code: "http_ready_timeout_observation",
+        phase: "native",
+        lastCompletedResponse: "validated_old_revision",
+        observedRevision: "baseline_sdk",
+        workerRevision: header && !header.startsWith("private") ? header : "unknown",
+      },
+    ]);
+    expect(JSON.stringify(values)).not.toContain("private");
+  }
+});
+
+test("pending state headers cannot mix into an earlier completed revision tuple", async () => {
+  const started = Date.now();
+  let calls = 0;
+  const values: unknown[] = [];
+  await expect(
+    waitHttpReady(
+      options({
+        phase: "native",
+        now: Date.now,
+        deadline: started + 100,
+        sleep: async () => {},
+        fetchImpl: async () => {
+          calls++;
+          if (calls === 1)
+            return Response.json(state(), {
+              headers: { "x-verification-worker-revision": "baseline_sdk" },
+            });
+          return new Response(new ReadableStream({}, { highWaterMark: 0 }), {
+            headers: { "x-verification-worker-revision": "native" },
+          });
+        },
+        onTimeout: (value: unknown) => values.push(value),
+      }),
+    ),
+  ).rejects.toThrow("verification_state_timeout");
+  expect(calls).toBe(2);
+  expect(values).toEqual([
+    {
+      code: "http_ready_timeout_observation",
+      phase: "native",
+      lastCompletedResponse: "validated_old_revision",
+      observedRevision: "baseline_sdk",
+      workerRevision: "baseline_sdk",
+    },
+  ]);
+});
+
+test("an unreadable Worker marker preserves readiness outcome, primary failure, and request/body trace", async () => {
+  for (const kind of ["old", "404", "503", "ready", "malformed", "outer-failure"]) {
+    const run = async (throwObservation: boolean) => {
+      let clock = 178_000,
+        markerReads = 0;
+      const trace: unknown[] = [],
+        observations: unknown[] = [];
+      let outcome: unknown;
+      try {
+        const ready = await waitHttpReady(
+          options({
+            phase: "native",
+            now: () => clock,
+            fetchImpl: async (url: string, init: RequestInit) => {
+              trace.push(["fetch", url, init.method, init.redirect, init.cache]);
+              const body = new ReadableStream(
+                {
+                  pull(controller) {
+                    trace.push(["body-pull"]);
+                    controller.enqueue(
+                      new TextEncoder().encode(
+                        JSON.stringify(
+                          kind === "malformed"
+                            ? { private: "malformed" }
+                            : state(kind === "ready" ? "native" : "baseline_sdk"),
+                        ),
+                      ),
+                    );
+                    controller.close();
+                  },
+                  cancel() {
+                    trace.push(["body-cancel"]);
+                  },
+                },
+                { highWaterMark: 0 },
+              );
+              const getReader = body.getReader.bind(body);
+              Object.defineProperty(body, "getReader", {
+                value: () => {
+                  trace.push(["get-reader"]);
+                  const reader = getReader();
+                  const read = reader.read.bind(reader),
+                    cancel = reader.cancel.bind(reader);
+                  Object.defineProperty(reader, "read", {
+                    value: () => {
+                      trace.push(["body-read"]);
+                      return read();
+                    },
+                  });
+                  Object.defineProperty(reader, "cancel", {
+                    value: () => {
+                      trace.push(["reader-cancel"]);
+                      return cancel();
+                    },
+                  });
+                  return reader;
+                },
+              });
+              const response = new Response(body, {
+                status:
+                  kind === "404"
+                    ? 404
+                    : kind === "503"
+                      ? 503
+                      : kind === "outer-failure"
+                        ? 500
+                        : 200,
+              });
+              const get = response.headers.get.bind(response.headers);
+              Object.defineProperty(response.headers, "get", {
+                value: (name: string) => {
+                  if (name === "x-verification-worker-revision") {
+                    markerReads++;
+                    if (throwObservation) throw new Error("private-observer-error");
+                  }
+                  return get(name);
+                },
+              });
+              return response;
+            },
+            sleep: async (ms: number) => {
+              trace.push(["sleep", ms]);
+              clock += ms;
+            },
+            onTimeout: (value: unknown) => observations.push(value),
+          }),
+        );
+        outcome = ready;
+      } catch (error) {
+        outcome = (error as Error).message;
+      }
+      return { outcome, trace, observations, markerReads };
+    };
+    const baseline = await run(false),
+      faulty = await run(true);
+    expect(faulty).toEqual(baseline);
+    expect(faulty.markerReads).toBe(["old", "404", "503"].includes(kind) ? 1 : 0);
+    if (["old", "404", "503"].includes(kind)) {
+      expect(faulty.outcome).toBe("verification_state_timeout");
+      expect(faulty.observations).toEqual([
+        {
+          code: "http_ready_timeout_observation",
+          phase: "native",
+          lastCompletedResponse: kind === "old" ? "validated_old_revision" : "unmarked_" + kind,
+          observedRevision: kind === "old" ? "baseline_sdk" : "none",
+          workerRevision: "unknown",
+        },
+      ]);
+      expect(faulty.trace.filter((row) => (row as unknown[])[0] === "fetch")).toHaveLength(1);
+      expect(faulty.trace.filter((row) => (row as unknown[])[0] === "sleep")).toEqual([
+        ["sleep", 2_000],
+      ]);
+    } else {
+      expect(faulty.observations).toEqual([]);
+      if (kind === "ready") expect(faulty.outcome).toEqual(state("native"));
+      else
+        expect(faulty.outcome).toBe(
+          kind === "malformed"
+            ? "verification_state_schema"
+            : "verification_http_state_outer_server_error",
+        );
+    }
+    expect(JSON.stringify(faulty)).not.toContain("private-observer-error");
   }
 });

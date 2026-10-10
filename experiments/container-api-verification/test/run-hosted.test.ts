@@ -1419,6 +1419,7 @@ test("execution and cleanup errors are both reported without erasing the initial
       phase: "baseline_sdk",
       lastCompletedResponse: "validated_old_revision",
       observedRevision: "native",
+      workerRevision: "baseline_sdk",
     };
     const stateFailure = failing.startsWith("baseline_sdk_verify_state");
     const stateObservation = {

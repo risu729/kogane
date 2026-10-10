@@ -1413,3 +1413,171 @@ test("native Node fetch classifies only the existing real TCP POST response with
   });
   expect(output).not.toContain("synthetic-private");
 }, 16000);
+
+test("only successful GET/state adds the closed outer Worker revision without reading or teeing its body", async () => {
+  for (const revision of [
+    "baseline_sdk",
+    "native",
+    "native_unmonitored",
+    "native_recovered",
+    "rollback_sdk",
+  ]) {
+    let pulls = 0;
+    const body = new ReadableStream(
+      {
+        pull(controller) {
+          pulls++;
+          controller.enqueue(new TextEncoder().encode("unchanged-state-body"));
+          controller.close();
+        },
+      },
+      { highWaterMark: 0 },
+    );
+    const original = new Response(body, {
+      status: 200,
+      statusText: "Synthetic state",
+      headers: {
+        "content-type": "application/json",
+        "x-existing": "preserved",
+        "x-verification-worker-revision": "private-spoof",
+      },
+    });
+    Object.defineProperty(original.headers, "set", {
+      value: () => {
+        throw new Error("immutable-original-headers");
+      },
+    });
+    const env = {
+      ...environment(async () => original),
+      HARNESS_REVISION: revision,
+    };
+    const response = await worker().fetch(
+      new Request("https://synthetic.invalid/state", {
+        headers: { authorization: "Bearer private-key" },
+      }),
+      env as never,
+    );
+    expect(response).not.toBe(original);
+    expect(response.body).toBe(original.body);
+    expect(response.status).toBe(original.status);
+    expect(response.statusText).toBe(original.statusText);
+    expect(response.headers.get("content-type")).toBe("application/json");
+    expect(response.headers.get("x-existing")).toBe("preserved");
+    expect(response.headers.get("x-verification-worker-revision")).toBe(revision);
+    expect(original.headers.get("x-verification-worker-revision")).toBe("private-spoof");
+    expect(pulls).toBe(0);
+    expect(await response.text()).toBe("unchanged-state-body");
+    expect(pulls).toBe(1);
+  }
+});
+
+test("outer revision diagnostic preserves identity for every other successful route and all existing failures", async () => {
+  for (const [path, method] of [
+    ["/initialize", "POST"],
+    ["/once", "POST"],
+    ["/stats", "GET"],
+    ["/delay", "GET"],
+    ["/stream", "GET"],
+    ["/backpressure", "GET"],
+    ["/backpressure-check", "GET"],
+    ["/reader-resume-check", "GET"],
+    ["/reader-cancel-check", "GET"],
+    ["/backpressure-compare", "GET"],
+    ["/stream-error-compare", "GET"],
+    ["/stream-error-check", "GET"],
+    ["/stream-error", "GET"],
+    ["/hold", "GET"],
+    ["/destroy", "POST"],
+    ["/signal", "POST"],
+    ["/exit", "POST"],
+  ]) {
+    const original = new Response("unchanged", { status: 200 });
+    const response = await worker().fetch(
+      new Request("https://synthetic.invalid" + path, {
+        method,
+        headers: { authorization: "Bearer private-key" },
+      }),
+      environment(async () => original) as never,
+    );
+    expect(response).toBe(original);
+    expect(response.headers.get("x-verification-worker-revision")).toBeNull();
+  }
+  for (const kind of [
+    "unauthorized",
+    "invalid-revision",
+    "wrong-method",
+    "upstream",
+    "exception",
+  ]) {
+    let calls = 0;
+    const env = {
+      ...environment(async () => {
+        calls++;
+        if (kind === "exception") throw new Error("private-error");
+        return new Response("private-body", { status: 503 });
+      }),
+      HARNESS_REVISION: kind === "invalid-revision" ? "private-value" : "native",
+    };
+    const response = await worker().fetch(
+      new Request("https://synthetic.invalid/state", {
+        method: kind === "wrong-method" ? "POST" : "GET",
+        headers: kind === "unauthorized" ? {} : { authorization: "Bearer private-key" },
+      }),
+      env as never,
+    );
+    expect(response.headers.get("x-verification-worker-revision")).toBeNull();
+    expect(response.status).toBe(
+      kind === "unauthorized"
+        ? 401
+        : kind === "invalid-revision"
+          ? 503
+          : kind === "wrong-method"
+            ? 404
+            : 502,
+    );
+    expect(calls).toBe(["upstream", "exception"].includes(kind) ? 1 : 0);
+  }
+});
+
+test("outer revision emission closes unexpected values after the asynchronous DO response", async () => {
+  for (const unexpected of ["private-worker-value", "", "private-value\r\ninjected: value"]) {
+    let pulls = 0,
+      calls = 0;
+    const original = new Response(
+      new ReadableStream(
+        {
+          pull(controller) {
+            pulls++;
+            controller.enqueue(new TextEncoder().encode("unchanged-state-body"));
+            controller.close();
+          },
+        },
+        { highWaterMark: 0 },
+      ),
+      { status: 200, statusText: "Synthetic state" },
+    );
+    const env = {
+      ...environment(async () => {
+        calls++;
+        env.HARNESS_REVISION = unexpected;
+        return original;
+      }),
+      HARNESS_REVISION: "native",
+    };
+    const response = await worker().fetch(
+      new Request("https://synthetic.invalid/state", {
+        headers: { authorization: "Bearer private-key" },
+      }),
+      env as never,
+    );
+    expect(calls).toBe(1);
+    expect(response.status).toBe(original.status);
+    expect(response.statusText).toBe(original.statusText);
+    expect(response.body).toBe(original.body);
+    expect(response.headers.get("x-verification-worker-revision")).toBe("unknown");
+    expect(Array.from(response.headers.values()).join(",")).not.toContain("private");
+    expect(pulls).toBe(0);
+    expect(await response.text()).toBe("unchanged-state-body");
+    expect(pulls).toBe(1);
+  }
+});

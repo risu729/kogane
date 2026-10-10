@@ -20,10 +20,13 @@ export function httpReadyTimeoutFailureRecord(value) {
     !value ||
     typeof value !== "object" ||
     Array.isArray(value) ||
-    Object.keys(value).sort().join(",") !== "code,lastCompletedResponse,observedRevision,phase" ||
+    Object.keys(value).sort().join(",") !==
+      "code,lastCompletedResponse,observedRevision,phase,workerRevision" ||
     value.code !== "http_ready_timeout_observation" ||
     !phases.includes(value.phase) ||
     !completedResponses.has(value.lastCompletedResponse) ||
+    !(value.workerRevision === "unknown" || phases.includes(value.workerRevision)) ||
+    (value.lastCompletedResponse === "none" && value.workerRevision !== "unknown") ||
     (value.lastCompletedResponse === "validated_old_revision"
       ? !phases.includes(value.observedRevision) || value.observedRevision === expected
       : value.observedRevision !== "none")
@@ -34,12 +37,21 @@ export function httpReadyTimeoutFailureRecord(value) {
     phase: value.phase,
     lastCompletedResponse: value.lastCompletedResponse,
     observedRevision: value.observedRevision,
+    workerRevision: value.workerRevision,
   };
 }
 const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const fail = (code) => {
   throw new Error(`verification_state_${code}`);
 };
+function responseWorkerRevision(response) {
+  try {
+    const value = response.headers.get("x-verification-worker-revision");
+    return phases.includes(value) ? value : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
 function revisionState(value) {
   if (
     !value ||
@@ -106,7 +118,8 @@ export async function waitHttpReady({
     return rest;
   };
   let lastCompletedResponse = "none",
-    observedRevision = "none";
+    observedRevision = "none",
+    workerRevision = "unknown";
   try {
     while (true) {
       const controller = new AbortController();
@@ -131,8 +144,10 @@ export async function waitHttpReady({
               response.headers.get("x-verification-failure") === null &&
               response.headers.get("x-verification-upstream-status") === null
             ) {
+              const completedWorkerRevision = responseWorkerRevision(response);
               lastCompletedResponse = response.status === 404 ? "unmarked_404" : "unmarked_503";
               observedRevision = "none";
+              workerRevision = completedWorkerRevision;
               return false;
             }
             if (response.status !== 200)
@@ -158,8 +173,10 @@ export async function waitHttpReady({
             const revision = revisionState(state);
             remaining();
             if (revision !== expected) {
+              const completedWorkerRevision = responseWorkerRevision(response);
               lastCompletedResponse = "validated_old_revision";
               observedRevision = revision;
+              workerRevision = completedWorkerRevision;
             }
             return revision === expected ? state : undefined;
           })(),
@@ -199,6 +216,7 @@ export async function waitHttpReady({
             phase,
             lastCompletedResponse,
             observedRevision,
+            workerRevision,
           }),
         );
       } catch {

@@ -480,14 +480,51 @@ checks returned zero. Source Checks, both processor shards and CI guards passed
 on this source; those results are separate from the hosted failure and from
 subsequent main integration.
 
-The failure-only readiness observation retains four closed fields: code, phase,
-last completed response classification, and observed revision. Classifications
-are none, unmarked 404, unmarked 503, or a strictly validated older known
-revision. Only the older-revision classification permits a revision value;
-it must differ from the expected revision, with rollback expecting baseline SDK.
-A pending later request or body leaves the earlier completed sample intact;
-none means no retryable response passed the existing classification checks. This
-does not identify the pending request's outcome.
+Run 38031502897 at 904e40b6cec3fb6c2d115e41078e0542718ddb3c completed the SDK
+baseline at 2026-10-10T06:41:59.642Z. At 2026-10-10T06:45:03.830Z it failed
+native_http_ready with verification_state_timeout before native_verify. Its
+closed observation reported validated_old_revision and baseline_sdk. Separate
+private readbacks at 06:42:34 and 06:43:18 UTC recorded the native phase on the
+100% active Worker version with the same HARNESS namespace and v1 migration.
+That control-plane evidence and the completed SDK-shaped state response are
+different observations; their disagreement does not establish which serving
+Worker or Durable Object generation handled the public request.
+
+Both state handlers return their environment revision, not a persisted
+revision: storageState exposes only KV/SQL sentinel matches and alarm presence.
+The native state schema always has starts; a validated baseline SDK state has
+startCallbacks. The generated native configuration uses the absolute native
+entrypoint, and its static import graph contains no SDK entrypoint or Container
+class. These source checks exclude a configured SDK fallback or a persisted
+sentinel as the revision source; they do not prove the uploaded bundle bytes
+or identify the runtime cause. Cleanup removed four resources, the separate
+cleanup readback reported zero remaining, and independent owned-resource checks
+reported zero. Native, recovery and rollback runtime acceptance remain pending.
+
+The failure-only readiness observation retains five closed fields: code, phase,
+last completed response classification, observed DO revision, and outer Worker
+revision. Classifications are none, unmarked 404, unmarked 503, or a strictly
+validated older known revision. Only the older-revision classification permits
+an observed DO revision value; it must differ from the expected revision, with
+rollback expecting baseline SDK.
+
+Only authenticated successful GET/state adds the closed
+x-verification-worker-revision header from that Worker's HARNESS_REVISION.
+A new Headers and Response preserve the existing body stream, status, status
+text and other headers without a body read or tee. Other routes, application
+POSTs, stream responses and existing failures retain their response behavior.
+The timeout record maps missing or unrecognized outer markers to unknown; none
+also requires unknown. It updates the outer marker atomically with the same
+completed response classification and DO revision, after the existing body and
+schema checks. A later unfinished request or body cannot replace any field in
+that completed tuple.
+
+The outer marker labels a Worker environment phase, not a Worker version UUID
+or an acceptance condition. An outer native marker with a validated baseline
+SDK body would distinguish an outer/DO revision disagreement from an older
+outer marker, but neither result alone establishes the runtime cause. None
+means no retryable response passed the existing classification checks and does
+not identify a pending request's outcome.
 
 The runner reads this private, exclusive-create record (at most 1 KiB) only
 for an actual matching *_http_ready stage and primary state timeout. Missing

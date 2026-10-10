@@ -172,7 +172,15 @@ different revisions; each accepted state must pass the full schema and
 exact-revision checks. Worker-owned authentication, revision and route errors
 carry closed markers and fail immediately. Unknown or inconsistent error-response
 metadata also fails immediately; response bodies and arbitrary headers are not
-logged. The baseline initialization POST runs exactly once between them and
+logged. Only a successful authenticated GET/state adds the closed outer
+x-verification-worker-revision marker without reading or teeing its body. The
+emitter permits only the five known phases or unknown for an unexpected value.
+A timeout records that marker together with the same last completed response
+and DO revision; missing, unrecognized, or unreadable markers become unknown,
+and a none classification requires unknown. An unfinished later body cannot mix its header into the previous tuple.
+This environment phase is not a Worker version UUID and does not change the
+readiness predicate or any application/stream response.
+The baseline initialization POST runs exactly once between them and
 retains its existing 120-second request timeout; time spent there cannot reset
 the readiness deadline. Later runtime state reads and all application POSTs
 retain their single-request behavior. Readiness probes send no Container request.
@@ -329,11 +337,15 @@ checks returned zero. Source Checks, both processor shards and CI guards passed
 on this source; those results are separate from the hosted failure and from
 subsequent main integration.
 
-The failure-only readiness observation retains four closed fields: code, phase,
-last completed response classification, and observed revision. Classifications
-are none, unmarked 404, unmarked 503, or a strictly validated older known
-revision. Only the older-revision classification permits a revision value;
-it must differ from the expected revision, with rollback expecting baseline SDK.
+The current failure-only readiness observation retains five closed fields: code,
+phase, last completed response classification, observed DO revision, and outer
+Worker revision. The Worker revision is one of the five known phases or unknown;
+missing, unrecognized, or unreadable markers become unknown, and none requires
+unknown. The historical runs above retained the original four-field record and
+provide no outer Worker revision evidence. Classifications are none, unmarked
+404, unmarked 503, or a strictly validated older known revision. Only the
+older-revision classification permits an observed DO revision value; it must
+differ from the expected revision, with rollback expecting baseline SDK.
 A pending later request or body leaves the earlier completed sample intact;
 none means no retryable response passed the existing classification checks. This
 does not identify the pending request's outcome.
