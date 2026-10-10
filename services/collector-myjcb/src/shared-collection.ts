@@ -1,3 +1,4 @@
+import { readMyJcbJPointResponse } from "../../../packages/domain/src/myjcb-jpoint-response";
 // MyJCB → the shared DATA bucket (unified plan 03, U09).
 //
 // The collector already redacts every statement page it keeps
@@ -15,6 +16,7 @@
 import { assertRedactedHtml } from "./redaction";
 import {
   CONNECTION_STOP_CODES,
+  JPOINT_COLLECTION_CODES,
   SCHEDULE_PAGE_CODES,
   UNREAD_MONTH_CODES,
   type CollectionFailure,
@@ -112,7 +114,8 @@ export function sharedBucket(binding: R2Bucket): R2BucketLike {
  */
 export function artifactRole(artifact: RawArtifact): string {
   if (artifact.mediaType.startsWith("text/html")) return "sanitized_provider_capture";
-  if (artifact.dataset === "credit-past-months") return "provider_response";
+  if (artifact.dataset === "credit-past-months" || artifact.dataset === "jpoint-balance")
+    return "provider_response";
   if (
     artifact.dataset === "credit-csv" ||
     artifact.dataset === "credit-pdf" ||
@@ -301,6 +304,9 @@ function manifestBytes(
     status: input.status,
     trigger: input.trigger,
     connections: connections.map((connection) => ({
+      ...(connection.jpointCode === undefined
+        ? {}
+        : { jpointCode: pointCode(connection.jpointCode) }),
       connectionId: connection.connectionId,
       bootstrapMode: connection.bootstrapMode,
       status: connection.status,
@@ -366,6 +372,17 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
       }
       const bytes = bodyBytes(artifact.body);
       const role = artifactRole(artifact);
+      if (artifact.dataset === "jpoint-balance") {
+        if (
+          artifact.filename !== "jpoint-balance.json" ||
+          artifact.mediaType !== "application/json" ||
+          connection.summary.jpointCode !== "collected"
+        )
+          throw new Error("jpoint_artifact_metadata_invalid");
+        readMyJcbJPointResponse(
+          JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
+        );
+      }
       if (role === "sanitized_provider_capture") {
         // The redaction the collector applied is re-checked here, against the
         // same invariants the central path enforces, before the bytes leave
@@ -380,7 +397,7 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         byteSize: bytes.byteLength,
         mediaType: artifact.mediaType.split(";", 1)[0]!.trim(),
         role,
-        unitKey,
+        unitKey: artifact.dataset === "jpoint-balance" ? pointUnitKey(unitKey) : unitKey,
         body: { kind: "bytes", bytes },
       });
       stored.push({
@@ -425,11 +442,32 @@ export async function myJcbRunPlan(input: SharedRunInput): Promise<PersistRunPla
         });
       }
     }
+    const point = connection.summary.jpointCode;
+    const pointArtifacts = kept.filter((artifact) => artifact.dataset === "jpoint-balance").length;
+    if (point !== undefined && point !== "unsupported") {
+      pointCode(point);
+      if (
+        !failed &&
+        ((point === "collected" && pointArtifacts !== 1) ||
+          (point !== "collected" && pointArtifacts !== 0))
+      ) {
+        throw new Error("jpoint_artifact_count_invalid");
+      }
+      units.push({
+        unitKey: pointUnitKey(unitKey),
+        unitKind: "reward-balance",
+        artifactCount: pointArtifacts,
+        coverageStatus: !failed && point === "collected" ? "complete" : "unknown",
+        ...(!failed && point === "collected"
+          ? {}
+          : { safeErrorCode: failed ? "jpoint_stopped" : `jpoint_${point}` }),
+      });
+    } else if (pointArtifacts !== 0) throw new Error("jpoint_outcome_missing");
     const connectionCode = connectionErrorCode(connection.summary);
     units.push({
       unitKey,
       unitKind: "connection",
-      artifactCount: kept.length,
+      artifactCount: kept.length - pointArtifacts,
       coverageStatus: failed ? "unknown" : coverage(connection.summary.status),
       ...(connectionCode === undefined ? {} : { safeErrorCode: connectionCode }),
     });
@@ -547,4 +585,13 @@ export function sharedRunDiagnostic(
       : {}),
     ...(result.outcome === "conflict" ? { reasonCode: result.reasonCode } : {}),
   };
+}
+
+function pointUnitKey(connectionId: string): string {
+  return `${connectionId}:j-point`;
+}
+function pointCode(code: string): NonNullable<ConnectionSummary["jpointCode"]> {
+  if (!(JPOINT_COLLECTION_CODES as readonly string[]).includes(code))
+    throw new Error("manifest_jpoint_code_invalid");
+  return code as NonNullable<ConnectionSummary["jpointCode"]>;
 }

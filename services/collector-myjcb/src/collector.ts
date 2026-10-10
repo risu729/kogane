@@ -1,3 +1,4 @@
+import { collectJPoint, isObservedJPointProduct } from "./jpoint";
 import { safeErrorDetails } from "../../../packages/collector-diagnostics/src/index";
 import { decodeMyJcbHtml, MyJcbReadClient, type ReadResponse } from "./client";
 import { CookieJar } from "./cookie-jar";
@@ -149,6 +150,17 @@ export async function collectConnection(options: {
       );
     }
 
+    const point =
+      stop === undefined
+        ? await collectJPoint(client, login.mypageHtml)
+        : {
+            code: isObservedJPointProduct(login.mypageHtml)
+              ? ("stopped" as const)
+              : ("unsupported" as const),
+            artifacts: [],
+          };
+    artifacts.push(...point.artifacts);
+
     const discovery = {
       schemaVersion: 1,
       bootstrapMode: options.credential.bootstrapMode,
@@ -170,6 +182,7 @@ export async function collectConnection(options: {
     });
     return {
       summary: {
+        jpointCode: point.code,
         connectionId: options.credential.connectionId,
         bootstrapMode: options.credential.bootstrapMode,
         // A month whose rows are kept unread, or a stop that left months

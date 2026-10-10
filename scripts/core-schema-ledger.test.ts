@@ -185,6 +185,7 @@ describe("G0-09 READ schema ledger", () => {
       // ADR 0049: the displayed and computed expiry basis of each estimate.
       "0003_reward_expiry_basis.sql",
       "0004_reward_unclassified_buckets.sql",
+      "0005_reward_provider_expiry_sections.sql",
     ]);
     const core = new Set(ledger.tables.map((table) => table.name));
     expect(
@@ -216,6 +217,7 @@ describe("G0-09 READ schema ledger", () => {
       "reward_expiry_estimates",
       "reward_expiry_estimates_v2",
       "reward_expiry_snapshots",
+      "reward_provider_expiry_sections",
       "reward_snapshot_input_refs",
       "scope_relations",
       "snapshot_input_refs",
@@ -225,6 +227,7 @@ describe("G0-09 READ schema ledger", () => {
       "read_build_checkpoints",
       "read_instance",
       "reward_build_checkpoints",
+      "reward_provider_display_checkpoints",
       "reward_snapshot_pointer",
     ]);
     // The CORE ledger keeps exactly the classifications it always had.

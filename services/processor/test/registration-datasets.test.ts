@@ -21,6 +21,7 @@ import {
   registerTerminal,
   STRUCTURE_STEP_RESERVE,
 } from "../../../packages/application/src/collection/index.ts";
+import { myJcbRunPlan } from "../../collector-myjcb/src/shared-collection.ts";
 import { mobileSuicaRunPlan } from "../../collector-mobile-suica/src/shared-run.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
 import { sweep } from "../src/worker.ts";
@@ -572,3 +573,182 @@ test("a seal workerd's D1 refuses by trigger blocks the run with the trigger's c
     },
   ]);
 }, 60000);
+
+test.each(["success", "partial"] as const)(
+  "MyJCB J-POINT response registers independently under a %s run and preserves its expiry subset",
+  async (outcome) => {
+    const runId = "myjcb-jpoint-synthetic-registration-" + outcome;
+    const connection = "synthetic-jpoint-connection";
+    const unitKey = `${connection}:j-point`;
+    const artifactKey = `${connection}/jpoint-balance.json`;
+    const body = readFileSync(`${FIXTURES_ROOT}myjcb-jpoint/jpoint-balance.json`, "utf8");
+    // Synthetic terminal-contract case, including independently completed points beside an incomplete statement unit.
+    // This proves registration eligibility; it does not assert acquisition ordering or recovery.
+    const plan = await myJcbRunPlan({
+      schemaVersion: "myjcb-worker-poc-v1",
+      runId,
+      attemptId: "synthetic-jpoint-attempt",
+      startedAt: "2026-01-01T00:00:00.000Z",
+      completedAt: "2026-01-01T00:01:00.000Z",
+      status: outcome,
+      trigger: "manual",
+      connections: [
+        {
+          summary: {
+            connectionId: connection,
+            bootstrapMode: "session",
+            status: outcome,
+            cardCount: 1,
+            periodCount: 1,
+            artifactCount: 1,
+            jpointCode: "collected",
+            ...(outcome === "partial"
+              ? { stopCode: "month_fetch" as const, stopPosition: 0, capturedMonthCount: 0 }
+              : {}),
+          },
+          artifacts: [
+            {
+              dataset: "jpoint-balance",
+              filename: "jpoint-balance.json",
+              mediaType: "application/json",
+              body,
+            },
+          ],
+        },
+      ],
+      failures:
+        outcome === "partial"
+          ? [{ connectionId: connection, operation: "collect", code: "month_fetch", position: 0 }]
+          : [],
+    });
+    expect(plan.run.units).toContainEqual({
+      unitKey,
+      unitKind: "reward-balance",
+      artifactCount: 1,
+      coverageStatus: "complete",
+    });
+    expect(plan.run.units.find((unit) => unit.unitKey === connection)?.coverageStatus).toBe(
+      outcome === "success" ? "complete" : "partial",
+    );
+    expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+    const registered = await register("myjcb", runId);
+    expect(registered).toMatchObject({ outcome: "registered", artifacts: 2 });
+    const fetchRunId = (registered as { fetchRunId: number }).fetchRunId;
+    expect(
+      (
+        await env.DB.prepare(
+          "SELECT artifact_key,dataset FROM fetch_artifacts WHERE fetch_run_id=? ORDER BY artifact_key",
+        )
+          .bind(fetchRunId)
+          .all()
+      ).results,
+    ).toEqual([
+      { artifact_key: "manifest.json", dataset: null },
+      { artifact_key: artifactKey, dataset: "jpoint-balance" },
+    ]);
+    expect(
+      await env.DB.prepare(
+        "SELECT unit_scope FROM dataset_snapshot_policies WHERE source_id=? AND dataset=? AND parser_name=?",
+      )
+        .bind("myjcb", "jpoint-balance", "myjcb-jpoint-balance")
+        .first<string>("unit_scope"),
+    ).toBe("unit");
+    const swept = await sweep(env);
+    const parseErrors = (
+      await env.DB.prepare(
+        "SELECT j.last_error_code FROM observation_parse_jobs j JOIN fetch_artifacts a ON a.id=j.fetch_artifact_id WHERE a.fetch_run_id=? AND j.last_error_code IS NOT NULL",
+      )
+        .bind(fetchRunId)
+        .all()
+    ).results;
+    const unrelatedErrors = (
+      await env.DB.prepare(
+        "SELECT a.source_id,j.parser_name,j.last_error_code,CASE WHEN r.source_run_key LIKE 'mizuho-synthetic-overwritten:%' AND a.artifact_key='ordinary/001-7654321/history/1-1.html' THEN 1 ELSE 0 END AS prior_overwrite_fixture,COUNT(*) AS jobs FROM observation_parse_jobs j JOIN fetch_artifacts a ON a.id=j.fetch_artifact_id JOIN fetch_runs r ON r.id=a.fetch_run_id WHERE a.fetch_run_id<>? AND j.last_error_code IS NOT NULL GROUP BY a.source_id,j.parser_name,j.last_error_code,prior_overwrite_fixture",
+      )
+        .bind(fetchRunId)
+        .all()
+    ).results;
+    // The earlier terminal-overwrite fixture leaves a Mizuho artifact that its parser refuses.
+    // Its independent failed job may run in this sweep; it is not an error of this MyJCB run.
+    if (swept.error !== 0) {
+      expect(swept.error).toBe(1);
+      expect(unrelatedErrors).toEqual([
+        {
+          source_id: "mizuho-bank",
+          parser_name: "mizuho-ordinary-history",
+          last_error_code: "parser_rejected",
+          prior_overwrite_fixture: 1,
+          jobs: 1,
+        },
+      ]);
+    }
+    expect(swept.parsed).toBe(1);
+    expect(parseErrors).toEqual([]);
+    const targetJobs = (
+      await env.DB.prepare(
+        "SELECT a.artifact_key,j.parser_name,j.status,j.last_error_code FROM observation_parse_jobs j JOIN fetch_artifacts a ON a.id=j.fetch_artifact_id WHERE a.fetch_run_id=? ORDER BY a.artifact_key,j.parser_name",
+      )
+        .bind(fetchRunId)
+        .all()
+    ).results;
+    // Exactly one clean points job also proves that the companion manifest spawns no parser job.
+    expect(targetJobs).toEqual([
+      {
+        artifact_key: artifactKey,
+        parser_name: "myjcb-jpoint-balance",
+        status: "done",
+        last_error_code: null,
+      },
+    ]);
+    const balances = (
+      await env.DB.prepare(
+        `SELECT b.source_account,b.metric,b.amount_text,b.amount_scale,b.instrument,b.raw_locator,b.extra_json
+       FROM balance_observations b JOIN parse_runs p ON p.id=b.parse_run_id
+       JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id WHERE a.fetch_run_id=?`,
+      )
+        .bind(fetchRunId)
+        .all<{
+          source_account: string;
+          metric: string;
+          amount_text: string;
+          amount_scale: number;
+          instrument: string;
+          raw_locator: string;
+          extra_json: string;
+        }>()
+    ).results;
+    expect(balances).toHaveLength(1);
+    expect(balances[0]).toMatchObject({
+      source_account: `myjcb:${connection}:j-point:total`,
+      metric: "displayed_jpoint_total",
+      amount_text: "1000",
+      amount_scale: 0,
+      instrument: "J_POINT",
+      raw_locator: "json:$.result.pointJsonInfo.totalPointInfo.point",
+    });
+    const extra = JSON.parse(balances[0]!.extra_json);
+    expect(extra.result).toEqual(JSON.parse(body).result);
+    expect(extra._kogane.rewardExpiryDisplays).toMatchObject({
+      coverage: "observed",
+      reasonCode: null,
+      displays: [
+        {
+          displayRef: "total-expiring-subset",
+          scope: "holding-subset",
+          quantity: {
+            unitRef: "points:j-point",
+            value: { status: "exact", value: { coefficient: "200", scale: 0 } },
+          },
+          expires: {
+            kind: "local-date",
+            value: "2030-06-30",
+            zone: "Asia/Tokyo",
+            basis: "provider",
+          },
+        },
+      ],
+    });
+    expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+  },
+  60000,
+);

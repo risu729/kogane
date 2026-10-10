@@ -68,6 +68,7 @@ const snapshotColumns = (alias: string): string =>
     "status",
     "estimate_count",
     "simulation_count",
+    "provider_section_count",
     "output_digest",
     "input_manifest_json",
     "policy_release",
@@ -99,6 +100,7 @@ export interface RewardSnapshotRow {
   status: "building" | "complete" | "retired";
   estimate_count: number;
   simulation_count: number;
+  provider_section_count?: number;
   output_digest: string | null;
   input_manifest_json: string;
   policy_release: string;
@@ -687,6 +689,7 @@ export async function sealAndPublishRewardSnapshot(
   build: {
     estimateCount: number;
     simulationCount: number;
+    providerSectionCount?: number;
     rowDigests: readonly string[];
   },
   context: { lease: string; now: string },
@@ -698,7 +701,7 @@ export async function sealAndPublishRewardSnapshot(
         // `writer_lease` stays: it is what the pointer statement below names as
         // the seal's author, and a complete build takes no further writes.
         `UPDATE reward_expiry_snapshots SET status='complete',completed_at=?2,estimate_count=?3,
-          simulation_count=?4,output_digest=?5,writer_lease_until_ms=0
+          simulation_count=?4,output_digest=?5,writer_lease_until_ms=0,provider_section_count=?7
          WHERE snapshot_id=?1 AND status='building' AND writer_lease=?6`,
       )
       .bind(
@@ -708,6 +711,7 @@ export async function sealAndPublishRewardSnapshot(
         build.simulationCount,
         outputDigest,
         context.lease,
+        build.providerSectionCount ?? 0,
       ),
     rewardPointerStatement(db, { ...snapshot, outputDigest }, context.now, context.lease),
   ]);
@@ -853,6 +857,10 @@ async function retireRewardSnapshot(
     .bind(snapshotId)
     .run();
   await runBatch(db, [
+    db.prepare("DELETE FROM reward_provider_expiry_sections WHERE snapshot_id=?1").bind(snapshotId),
+    db
+      .prepare("DELETE FROM reward_provider_display_checkpoints WHERE snapshot_id=?1")
+      .bind(snapshotId),
     db.prepare("DELETE FROM reward_expiry_estimates_v2 WHERE snapshot_id=?1").bind(snapshotId),
     db.prepare("DELETE FROM reward_conversion_simulations WHERE snapshot_id=?1").bind(snapshotId),
     db.prepare("DELETE FROM reward_snapshot_input_refs WHERE snapshot_id=?1").bind(snapshotId),

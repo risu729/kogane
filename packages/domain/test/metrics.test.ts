@@ -37,6 +37,33 @@ function lookupsFor(
 }
 
 describe("metric registry seeded from the current PoC rules", () => {
+  test("J-POINT total is a non-additive reward stock with frozen legacy fallback", () => {
+    const definition = resolveMetric({
+      family: "balance",
+      sourceId: "myjcb",
+      parserName: "myjcb-jpoint-balance",
+      metric: "displayed_jpoint_total",
+      sourceAccount: "myjcb:synthetic-a:j-point:total",
+      amountBasis: null,
+    });
+    expect(definition).toMatchObject({
+      metricId: "reward.displayed-total-balance",
+      measurementKind: "stock",
+      subjectKind: "program",
+      unitDimension: "reward",
+      timeBasis: "point-in-time",
+      aggregationRule: "non-additive",
+      sourceAuthority: "provider-reported",
+      netAssetEligible: false,
+      legacyBalance: {
+        kind: "other",
+        measurementKind: "unknown",
+        assetClass: "unknown",
+        timeBasis: "unknown",
+      },
+    });
+    expect(additivityVerdict(definition, definition).additive).toBe(false);
+  });
   test("PRESTIA native, bank aggregate and monthly qualification measures stay non-additive", () => {
     const metrics = [
       ["available_balance", "capacity", "point-in-time"],

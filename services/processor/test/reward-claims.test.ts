@@ -99,6 +99,7 @@ test("migration 0033 seeds only programmes with a documented unit and refuses an
     ).all<{ program_id: string; unit_ref: string; holding_kind: string }>()
   ).results;
   expect(programs).toEqual([
+    { program_id: "program:j-point", unit_ref: "points:j-point", holding_kind: "reward-points" },
     {
       program_id: "program:mobile-suica-sf",
       unit_ref: "JPY",

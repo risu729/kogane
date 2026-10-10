@@ -9,7 +9,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { sweep } from "../src/worker.ts";
 import { publishParse, seedUnitRun, setUnitScope, startPipeline } from "./harness.ts";
-import { snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
+import { SNAPSHOT_DATASETS, snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
 
 // The reader's relations on the production schema (packages/read-model concepts).
 const RELATIONS = {
@@ -63,18 +63,37 @@ const rescan = async () => {
   await sweep(env);
 };
 
-test("0037 applies on the production chain and changes nothing while every row is run-scoped", async () => {
+test("0037 preserves prior run-scoped containers beside the explicit J-POINT unit policy", async () => {
   expect(
     await first<{ name: string }>(
       "SELECT name FROM sqlite_master WHERE type='view' AND name='observation_fetch_artifact_units'",
     ),
   ).toEqual({ name: "observation_fetch_artifact_units" });
-  const policies = await all<{ unit_scope: string; snapshot_selection: number }>(
-    "SELECT unit_scope,snapshot_selection FROM dataset_snapshot_policies",
+  const policies = await all<{
+    source_id: string;
+    parser_name: string;
+    dataset: string;
+    unit_scope: string;
+    snapshot_selection: number;
+  }>(
+    "SELECT source_id,parser_name,dataset,unit_scope,snapshot_selection FROM dataset_snapshot_policies ORDER BY parser_name,dataset",
   );
-  expect(policies.length).toBeGreaterThan(0);
-  expect(policies.every((row) => row.unit_scope === "run")).toBe(true);
-  expect(policies.every((row) => row.snapshot_selection === 1)).toBe(true);
+  const containers = policies.filter((row) => row.snapshot_selection === 1);
+  expect(containers.map(({ parser_name, dataset }) => [parser_name, dataset])).toEqual(
+    SNAPSHOT_DATASETS.map(([parserName, dataset]) => [parserName, dataset]).sort(),
+  );
+  expect(containers.every((row) => row.unit_scope === "run")).toBe(true);
+  expect(
+    policies.filter((row) => row.snapshot_selection !== 1 || row.unit_scope !== "run"),
+  ).toEqual([
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-jpoint-balance",
+      dataset: "jpoint-balance",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+  ]);
 
   // A partial run under the seeded policy: no job, no parse, for either unit.
   await seedUnitRun(env, {
@@ -220,13 +239,44 @@ test("the comparison route reports the eligibility scope of every policy row", a
   const body = (await mf
     .dispatchFetch("https://pipeline.internal/snapshot-policy/compare")
     .then((r) => r.json())) as {
-    policies: { parser_name: string; unit_scope: string; snapshot_selection: number }[];
+    policies: {
+      source_id: string;
+      parser_name: string;
+      dataset: string;
+      unit_scope: string;
+      snapshot_selection: number;
+    }[];
   };
   expect(body.policies.find((row) => row.parser_name === PARSER)).toMatchObject({
     unit_scope: "unit",
     snapshot_selection: 1,
   });
-  expect(body.policies.filter((row) => row.unit_scope === "unit")).toHaveLength(1);
+  expect(
+    body.policies
+      .filter((row) => row.unit_scope === "unit")
+      .map(({ source_id, parser_name, dataset, unit_scope, snapshot_selection }) => ({
+        source_id,
+        parser_name,
+        dataset,
+        unit_scope,
+        snapshot_selection,
+      })),
+  ).toEqual([
+    {
+      source_id: "myjcb",
+      parser_name: "myjcb-jpoint-balance",
+      dataset: "jpoint-balance",
+      unit_scope: "unit",
+      snapshot_selection: 0,
+    },
+    {
+      source_id: SOURCE,
+      parser_name: PARSER,
+      dataset: DATASET,
+      unit_scope: "unit",
+      snapshot_selection: 1,
+    },
+  ]);
 }, 30000);
 
 test("setting the policy row back to `run` restores the strict rule", async () => {

@@ -220,6 +220,7 @@ describe("CORE migrations (G0-02)", () => {
       "0002_reward_read.sql",
       "0003_reward_expiry_basis.sql",
       "0004_reward_unclassified_buckets.sql",
+      "0005_reward_provider_expiry_sections.sql",
     ]);
     expect(entries).toContain("README.md");
   });

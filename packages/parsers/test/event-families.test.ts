@@ -29,6 +29,7 @@ import {
   myJcbEvidenceOnly,
   myJcbPastMonthBalances,
 } from "../src/parsers/myjcb.ts";
+import { myJcbJPointBalance } from "../src/parsers/myjcb-jpoint.ts";
 import { myJcbSkipPaymentSchedule } from "../src/parsers/myjcb-skip-payment-schedule.ts";
 import { paypayCsv } from "../src/parsers/paypay-csv.ts";
 import { PARSERS } from "../src/parsers/registry.ts";
@@ -63,6 +64,7 @@ const NOT_IN_REGISTRY = [
   "myjcb-credit-past-month-balances",
   "myjcb-credit-statement-total",
   "myjcb-skip-payment-schedule",
+  "myjcb-jpoint-balance",
   "prestia-bank-balances",
   "sbi-account-assets-current",
   "sbi-foreign-cash-balances",
@@ -377,6 +379,15 @@ const CASES: Case[] = [
  */
 const MF_EVIDENCE = { fetchUnitKey: null, statementState: null, period: null, mime: "text/html" };
 const OUTSIDE_CASES: Case[] = [
+  one(
+    myJcbJPointBalance,
+    "jpoint-balance",
+    meta("myjcb", "jpoint-balance", {
+      artifactKey: "synthetic-a/jpoint-balance.json",
+      fetchUnitKey: "synthetic-a:j-point",
+    }),
+    read("myjcb-jpoint", "jpoint-balance.json"),
+  ),
   one(
     mizuhoAccountList,
     "account-list",
