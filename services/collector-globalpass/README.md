@@ -2,18 +2,18 @@
 
 GLOBAL PASS（Vpassデビット専用サイト）のサーバーレンダリングHTMLを、Cloudflare ContainerのPlaywright Google Chromeで取得し、private R2へ保存する独立PoCである。SMBCカード用VpassアプリAPIや`mnie`をruntime依存・設定源・submoduleとして使用しない。
 
-2026-08-30に、Cloudflare Containerのtimezoneを`Asia/Tokyo`へ合わせるだけでTurnstile token生成を再現し、実アカウントのlogin、daily、15か月backfillをend-to-endで完了した。HTMLとmanifestはprivate R2へ保存済みで、Workers Cronを1日1回だけ有効化している。GitHub Actionsのscheduleは使わない。手動`/trigger`と認証付きの`/browser-probe`・`/container-probe`・`/container-stop`は運用診断用に残す。旧staging bucketを読む`/latest-manifest`は2026-09-13に廃止した。
+2026-08-30に、Cloudflare Containerのtimezoneを`Asia/Tokyo`へ合わせるだけでTurnstile token生成を再現し、実アカウントのlogin、daily、15か月backfillをend-to-endで完了した。HTMLとmanifestはprivate R2へ保存済みで、Workers Cronを1日1回だけ有効化している。GitHub Actionsのscheduleは使わない。2026-10-10の公開admin入口廃止後、通常収集は固定dailyのprivate Service Binding／schedule経路のみ。旧手動backfill・診断・container停止入口は404になる。旧staging bucketを読む`/latest-manifest`は2026-09-13に廃止した。
 
 ## Runtime profile
 
 - **Browser: 全収集区間。** 通常のdaily/backfillはCloudflare Container内のheaded Google Chrome StableをPlaywrightで起動する。
 - browserの目的はTurnstile token生成、公式JavaScript login、server-rendered明細の表示、利用可能月selectorによる月切替である。login後にWorker `fetch`へ切り替えず、明細HTMLまで同じbrowser sessionで取得する。
-- Worker側のBrowser Run bindingは認証付き`/browser-probe`専用の診断経路であり、production collectionには使わない。Worker本体はContainer orchestration、TAMIAへのopaque relay、NDJSON受信、R2保存を担当する。
+- Worker側のBrowser Run bindingは旧診断用途の未使用bindingであり、公開`/browser-probe`は廃止した。production collectionには使わない。Worker本体はContainer orchestration、TAMIAへのopaque relay、NDJSON受信、R2保存を担当する。
 
 ## 現在の実行構成
 
 ```text
-authenticated POST /trigger
+private ScheduledCollection RPC / scheduled handler
   -> Worker orchestration
   -> Container Playwright Google Chrome Stable
   -> Container-local HTTP CONNECT proxy
@@ -25,10 +25,6 @@ authenticated POST /trigger
 GLOBAL PASS + Turnstile hosts
   -> 同じTAMIA出口へ固定
 
-authenticated POST /browser-probe
-  -> Cloudflare Browser Run Puppeteer
-  -> Cloudflare egress（TAMIAは経由しない）
-  -> GLOBAL PASS + Turnstile
 ```
 
 WorkerはTLSを終端せず暗号化済みTCPを中継するため、GLOBAL PASSとのTLS handshakeはChromium自身が行う。Container内ではNode.js標準HTTP serverの`connect` eventでChromeのCONNECT要求を受け、`ws.createWebSocketStream()`のbackpressure付きstreamへ接続する。Worker側のVPC relayとContainer側の両方で、次のproduction 3 host（および出口診断用Worker host）の443番だけを許可し、request指定の任意hostや汎用TCP proxyには広げない。
@@ -76,10 +72,9 @@ runは`packages/collection`で共有DATA bucketへ直接書き、ProcessorがDAT
 
 - `GLOBALPASS_ID`
 - `GLOBALPASS_PASSWORD`
-- `ADMIN_TRIGGER_TOKEN`: `/trigger`、`/browser-probe`、`/container-probe`、`/container-stop`専用
 - `RELAY_TOKEN`: WebSocket relay専用
 
-session cookie、Turnstile token、Nablarch hidden stateは保存・再利用せず、毎run新しいbrowser contextで取得する。資格情報JSON、secret、実データはGitへ入れない。remote secretは`wrangler.jsonc`にも生成型にも現れないため、`env.d.ts`は上記4 secret名だけをaugmentationする。
+session cookie、Turnstile token、Nablarch hidden stateは保存・再利用せず、毎run新しいbrowser contextで取得する。資格情報JSON、secret、実データはGitへ入れない。remote secretは`wrangler.jsonc`にも生成型にも現れないため、`env.d.ts`は上記3 secret名だけをaugmentationする。
 
 ローカルの必要項目だけを同期する例:
 
@@ -271,18 +266,7 @@ mise run //services/collector-globalpass:typecheck
 mise run //services/collector-globalpass:dry-run
 ```
 
-手動実行:
-
-```sh
-scripts/trigger.sh daily
-scripts/trigger.sh backfill
-scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token baseline
-scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token chrome-stable-headed-persistent-windows
-scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token patchright-chrome-native-all-tamia
-scripts/trigger.sh probe ~/.local/share/kogane/secrets/globalpass-worker-admin-token chrome-direct-process-attach-late-direct
-scripts/trigger.sh stop ~/.local/share/kogane/secrets/globalpass-worker-admin-token v19 stop
-scripts/trigger.sh manifest ~/.local/share/kogane/secrets/globalpass-worker-admin-token 2026-08-29
-```
+旧 `scripts/trigger.sh` と公開手動入口は廃止した。任意backfill・probe・container停止に代わる内部APIは追加しない。通常収集要求は既存のAccess保護されたApp操作経路を使う。
 
 ## 残る検証項目
 

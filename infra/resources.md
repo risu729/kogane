@@ -358,7 +358,7 @@ No wrangler config.
 - Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
-- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>MIZUHO_CUSTOMER_NUMBER<br>MIZUHO_LOGIN_PASSWORD
+- Required secrets (names only): MIZUHO_CUSTOMER_NUMBER<br>MIZUHO_LOGIN_PASSWORD
 
 ### `services/collector-mobile-suica`
 
@@ -384,7 +384,7 @@ No wrangler config.
 - Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
-- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>JRE_ID_CREDENTIAL_JSON
+- Required secrets (names only): JRE_ID_CREDENTIAL_JSON
 
 ### `services/collector-moneyforward`
 
@@ -462,7 +462,7 @@ No wrangler config.
 - Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>PRESTIA_BANK_USER_AGENT<br>RELEASE_SHA
-- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>PRESTIA_BANK_PASSWORD<br>PRESTIA_BANK_USER_ID
+- Required secrets (names only): PRESTIA_BANK_PASSWORD<br>PRESTIA_BANK_USER_ID
 
 ### `services/collector-sbi-securities`
 
@@ -670,7 +670,7 @@ No wrangler config.
 - Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION<br>VPOINT_PAY_EMAIL_RECIPIENT
-- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_EMAIL_FORWARD_TO<br>VPOINT_EMAIL_RECIPIENT<br>VPOINT_MEMBER_NUMBER
+- Required secrets (names only): VPOINT_EMAIL_FORWARD_TO<br>VPOINT_EMAIL_RECIPIENT<br>VPOINT_MEMBER_NUMBER
 
 ### `services/collector-vpoint-pay`
 
@@ -696,7 +696,7 @@ No wrangler config.
 - Crons: —
 - Assets: —
 - Vars (names only): COLLECTOR_SCHEMA_VERSION
-- Required secrets (names only): ADMIN_TRIGGER_TOKEN<br>VPOINT_PAY_DEVICE_UUID<br>VPOINT_PAY_REFRESH_TOKEN
+- Required secrets (names only): VPOINT_PAY_DEVICE_UUID<br>VPOINT_PAY_REFRESH_TOKEN
 
 ### `services/processor`
 

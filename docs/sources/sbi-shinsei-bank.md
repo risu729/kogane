@@ -861,7 +861,7 @@ remain unreachable. See the PoC's
 for the evidence boundary and enablement checklist.
 
 The deployed schedule is `0 21 * * *`. Teardown inventory is the active Worker,
-the SBI credential/admin-trigger/relay secrets, the R2 bucket containing the
+the SBI credential and relay secrets (the public admin trigger is retired), the R2 bucket containing the
 success and retained failure manifests/artifacts, the Container application and
 image revisions, and the explicit-tunnel VPC binding configuration. The local
 Docker test Container/image should be removed after validation; the cloud

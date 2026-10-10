@@ -706,7 +706,7 @@ longer-lived, lossy rewards path.
    service stop and record only success/failure stage, duration, Browser usage,
    row count and manifest key. Do not keep sessions alive between runs.
 2. **Credential rotation drill.** After the next owner-initiated JRE ID/passkey
-   change, run `bw:verify` and `bw:sync`, verify `/credential-check`, then confirm
+   change, run `bw:verify` and `bw:sync`, then confirm
    one collection. Ensure the old secret version is no longer deployed.
 3. **Optional Kogane-only passkey.** If isolation is worth another account
    credential, register a dedicated passkey through the official UI and switch

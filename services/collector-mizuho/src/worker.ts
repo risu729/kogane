@@ -4,14 +4,11 @@ import {
   scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
-import { timingSafeEqual } from "node:crypto";
 import {
   collectMizuho,
-  parseSession,
   safeMizuhoErrorCode,
   MizuhoClientError,
   type MizuhoCollection,
-  type MizuhoSession,
 } from "./client";
 import { loginMizuho } from "./login";
 import {
@@ -22,70 +19,21 @@ import {
 } from "./diagnostics";
 import { persistMizuhoRun } from "./storage";
 
-const MAX_REQUEST_BYTES = 96 * 1024;
 type Dependencies = {
   login: typeof loginMizuho;
   collect: typeof collectMizuho;
   persist: typeof persistMizuhoRun;
 };
 
-function authorized(request: Request, token: string): boolean {
-  const provided = request.headers.get("authorization")?.match(/^Bearer ([^\r\n]+)$/u)?.[1];
-  if (!provided || !token) return false;
-  const a = new TextEncoder().encode(provided),
-    b = new TextEncoder().encode(token);
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
-async function requestSession(request: Request) {
-  if (request.headers.get("content-type")?.split(";", 1)[0]?.trim() !== "application/json")
-    throw new Error("invalid-request");
-  if (Number(request.headers.get("content-length")) > MAX_REQUEST_BYTES || !request.body)
-    throw new Error("invalid-request");
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > MAX_REQUEST_BYTES) throw new Error("invalid-request");
-      chunks.push(value);
-    }
-  } finally {
-    await reader.cancel().catch(() => {});
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.length;
-  }
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-  const value: unknown = JSON.parse(text);
-  // Only the exact empty object selects configured credentials. Malformed
-  // session requests cannot accidentally trigger a password submission.
-  if (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    Object.keys(value).length === 0
-  )
-    return undefined;
-  return parseSession(text);
-}
-
-/** Passwords and sessions stay inside one invocation and never enter DATA or the response. */
-export function createHandler(overrides: Partial<Dependencies> = {}) {
+/** Module-only executor factory; passwords/sessions never enter DATA or operational results. */
+export function createCollection(overrides: Partial<Dependencies> = {}) {
   const deps: Dependencies = {
     login: loginMizuho,
     collect: collectMizuho,
     persist: persistMizuhoRun,
     ...overrides,
   };
-  async function execute(env: Env, suppliedSession?: MizuhoSession) {
+  async function execute(env: Env) {
     return withCollectionLease(env, "mizuho-bank", async () => {
       const runId = crypto.randomUUID(),
         startedAt = new Date().toISOString();
@@ -95,17 +43,14 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
       let failurePhase: MizuhoPhase | undefined;
       logMizuhoPhase(runId, phase);
       try {
-        let session = suppliedSession;
-        if (session === undefined) {
-          if (!env.MIZUHO_CUSTOMER_NUMBER || !env.MIZUHO_LOGIN_PASSWORD)
-            throw new MizuhoClientError("mizuho-credentials-missing");
-          phase = "login";
-          logMizuhoPhase(runId, phase);
-          session = await deps.login({
-            customerNumber: env.MIZUHO_CUSTOMER_NUMBER,
-            password: env.MIZUHO_LOGIN_PASSWORD,
-          });
-        }
+        if (!env.MIZUHO_CUSTOMER_NUMBER || !env.MIZUHO_LOGIN_PASSWORD)
+          throw new MizuhoClientError("mizuho-credentials-missing");
+        phase = "login";
+        logMizuhoPhase(runId, phase);
+        const session = await deps.login({
+          customerNumber: env.MIZUHO_CUSTOMER_NUMBER,
+          password: env.MIZUHO_LOGIN_PASSWORD,
+        });
         phase = "collection";
         logMizuhoPhase(runId, phase);
         collection = await deps.collect({ session });
@@ -172,6 +117,10 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
       }
     });
   }
+  return execute;
+}
+export function createHandler(overrides: Partial<Dependencies> = {}) {
+  const execute = createCollection(overrides);
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
       const url = new URL(request.url);
@@ -181,18 +130,7 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
           source: "mizuho-bank",
           schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
         });
-      if (!authorized(request, env.ADMIN_TRIGGER_TOKEN))
-        return Response.json({ error: "unauthorized" }, { status: 401 });
-      if (request.method !== "POST" || url.pathname !== "/trigger" || url.search)
-        return Response.json({ error: "not-found" }, { status: 404 });
-      let session;
-      try {
-        session = await requestSession(request);
-      } catch {
-        return Response.json({ error: "invalid-session-request" }, { status: 400 });
-      }
-      const result = await execute(env, session);
-      return Response.json(result.body, { status: result.httpStatus });
+      return Response.json({ error: "Not found" }, { status: 404 });
     },
     async alarmCollection(env: Env): Promise<ScheduledResult> {
       const result = await execute(env);
@@ -212,7 +150,7 @@ export function createHandler(overrides: Partial<Dependencies> = {}) {
 
 export default createHandler();
 
-/** Private service-binding collection; public token/Access routes keep their checks. */
+/** Private service-binding collection; public HTTP cannot invoke collection. */
 export async function alarmCollection(
   env: Env,
   _cron: string,

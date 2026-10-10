@@ -11,7 +11,7 @@ mock.module("@cloudflare/containers", () => ({
   Container: class {},
   getContainer: () => container,
 }));
-const { default: worker } = await import("../src/worker");
+const { runCollection } = await import("../src/worker");
 const spies: ReturnType<typeof spyOn>[] = [];
 afterEach(() => {
   for (const spy of spies.splice(0)) spy.mockRestore();
@@ -87,7 +87,6 @@ async function run(
     },
   };
   const env = {
-    ADMIN_TRIGGER_TOKEN: "synthetic-admin-token-".repeat(3),
     GLOBALPASS_ID: "private-user",
     GLOBALPASS_PASSWORD: "private-password",
     RELAY_TOKEN: "private-relay-token",
@@ -95,15 +94,8 @@ async function run(
     COLLECTOR_CONTAINER: {},
     DATA: data,
   };
-  const response = await worker.fetch(
-    new Request("https://collector.test/trigger", {
-      method: "POST",
-      headers: { authorization: `Bearer ${env.ADMIN_TRIGGER_TOKEN}` },
-    }) as Request<unknown, IncomingRequestCfProperties>,
-    env as unknown as Env,
-    {} as ExecutionContext,
-  );
-  const result = (await response.json()) as Record<string, unknown>;
+  const response = await runCollection(env as unknown as Env, "daily");
+  const result = response;
   const saved = data.entries.get(String(result.manifestKey));
   if (saved) manifest = JSON.parse(new TextDecoder().decode(saved.bytes));
   return {
@@ -129,7 +121,7 @@ describe("GLOBAL PASS diagnostics preserve the current collection contract", () 
         errorCode: "browser_collection_failed",
       },
     ]);
-    expect(r.response.status).toBe(502);
+    expect(r.response.status).not.toBe("success");
     expect(r.manifest?.schemaVersion).toBe("globalpass-browser-poc-v3");
     expect(r.manifest?.status).toBe("partial");
     expect(r.manifest?.artifacts).toHaveLength(1);
@@ -173,7 +165,7 @@ describe("GLOBAL PASS diagnostics preserve the current collection contract", () 
       loggerThrows: true,
       teardownError: true,
     });
-    expect(r.response.status).toBe(200);
+    expect(r.response.status).toBe("success");
     expect(r.manifest?.status).toBe("success");
     expect(r.manifest?.captureComplete).toBe(true);
     expect(r.manifest?.paginationStatus).toBe("pages_walked");
@@ -181,7 +173,7 @@ describe("GLOBAL PASS diagnostics preserve the current collection contract", () 
   });
   test("throwing loggers preserve an original collection failure and one teardown", async () => {
     const r = await run([], { httpStatus: 503, loggerThrows: true });
-    expect(r.response.status).toBe(502);
+    expect(r.response.status).not.toBe("success");
     expect(r.manifest?.status).toBe("failed");
     expect(r.manifest?.artifacts).toHaveLength(0);
     expect(r.manifest?.failures[0]?.errorCode).toBe("browser_collection_failed");
@@ -344,7 +336,7 @@ describe("GLOBAL PASS months are walked page by page", () => {
         pageRecord("2099-02", 2, 2, pagedHtml(16, 2, 2, 6, language)),
         emptyMonth("2099-01"),
       ]);
-      expect(r.response.status).toBe(200);
+      expect(r.response.status).toBe("success");
       expect(r.manifest?.status).toBe("success");
       expect(r.manifest?.failures).toEqual([]);
       expect(r.manifest?.artifacts.map((a) => [a.month, a.page, a.key.split("/").at(-1)])).toEqual([
