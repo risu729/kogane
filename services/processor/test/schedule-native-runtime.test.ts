@@ -4,7 +4,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import jobs from "../../../config/alarm-jobs.json";
 import { LAYER_A_SQL, layerBMigrations, applyMigration } from "./harness";
-import { applyReadMigrations } from "../../../packages/storage-d1/src/migrations";
+import { applyTestReadMigrations } from "./migration-setup.ts";
 let mf: Miniflare, db: D1Database, alarms: Env["SCHEDULE_ALARMS"];
 beforeAll(async () => {
   const bundle = await Bun.build({
@@ -54,7 +54,9 @@ beforeAll(async () => {
   db = (await mf.getD1Database("DB", "processor")) as unknown as D1Database;
   await db.exec(LAYER_A_SQL);
   for (const name of layerBMigrations()) await applyMigration(db, name);
-  await applyReadMigrations((await mf.getD1Database("READ", "processor")) as unknown as D1Database);
+  await applyTestReadMigrations(
+    (await mf.getD1Database("READ", "processor")) as unknown as D1Database,
+  );
   await db.prepare("UPDATE collection_schedules SET enabled=0").run();
   await db
     .prepare(

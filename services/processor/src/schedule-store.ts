@@ -665,6 +665,8 @@ interface ValidatedRevision {
   previous: PreviousRevision | null;
   /** The principal's delegated revisions in the rolling day; null for the operator. */
   budgetUsed: number | null;
+  /** Source revision count captured before reading the joined rules; fenced in the INSERT. */
+  sourceRevisionCount: number | null;
   /** Set for a delegated revision, and for the operator's when asked; never randomised. */
   deferralClass: MaintenanceDeferralClass | null;
 }
@@ -722,6 +724,12 @@ async function validateRevision(
     (previous && previous.source !== input.source)
   )
     throw new ScheduleError("revision_conflict", 409);
+  const sourceRevisionCount = delegated
+    ? await env.DB.prepare("SELECT count(*) AS n FROM provider_maintenance_rules WHERE source=?")
+        .bind(input.source)
+        .first<{ n: number }>()
+        .then((row) => row?.n ?? null)
+    : null;
   let deferralClass: MaintenanceDeferralClass | null = null;
   if (delegated || classifyOperator) {
     const rules = await maintenanceRules(env.DB, input.source);
@@ -739,7 +747,16 @@ async function validateRevision(
         throw new ScheduleError("maintenance_deferral_too_long", 422);
     }
   }
-  return { actor, reason, decisionRef, input, previous, budgetUsed, deferralClass };
+  return {
+    actor,
+    reason,
+    decisionRef,
+    input,
+    previous,
+    budgetUsed,
+    sourceRevisionCount,
+    deferralClass,
+  };
 }
 /** A closed refusal as the writer answers it; any other error is rethrown. */
 function refusalOf(error: unknown): { ok: false; code: MaintenanceWriteCode; status: number } {
@@ -789,12 +806,8 @@ async function writeRevision(
   append: (saved: SavedRevision) => RevisionAppend,
   bound: MaintenanceDeferralBound,
 ): Promise<Extract<MaintenanceWriteResult, { ok: true }>> {
-  const { actor, reason, decisionRef, input, previous } = await validateRevision(
-    env,
-    write,
-    bound,
-    false,
-  );
+  const { actor, reason, decisionRef, input, previous, sourceRevisionCount } =
+    await validateRevision(env, write, bound, false);
   const delegated = actor.kind === "delegated";
   // A new rule's id is chosen only now, after the whole chain has passed.
   const id =
@@ -805,8 +818,8 @@ async function writeRevision(
   const now = new Date().toISOString();
   const revision = input.revision + 1;
   const guard: SqlWrite = {
-    sql: "EXISTS(SELECT 1 FROM provider_maintenance_rules WHERE id=? AND revision=? AND actor=? AND created_at=?)",
-    binds: [id, revision, actor.id, now],
+    sql: "EXISTS(SELECT 1 FROM provider_maintenance_rules WHERE id=? AND revision=? AND actor=? AND created_at=? AND decision_ref IS ?)",
+    binds: [id, revision, actor.id, now, decisionRef],
   };
   const after = {
     source: input.source,
@@ -822,7 +835,9 @@ async function writeRevision(
   const statements = [
     env.DB.prepare(`INSERT OR IGNORE INTO provider_maintenance_rules(id,revision,source,timezone,pattern_json,enabled,reference_url,verified_at,scope,actor,created_at,actor_kind,change_reason,decision_ref)
     SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE COALESCE((SELECT MAX(revision) FROM provider_maintenance_rules WHERE id=?),0)=?${
-      delegated ? ` AND (${DELEGATED_WRITES_SINCE_SQL})<?` : ""
+      delegated
+        ? ` AND (${DELEGATED_WRITES_SINCE_SQL})<? AND (SELECT count(*) FROM provider_maintenance_rules WHERE source=?)=?`
+        : ""
     }`).bind(
       id,
       revision,
@@ -841,13 +856,19 @@ async function writeRevision(
       id,
       input.revision,
       ...(delegated
-        ? [actor.id, budgetSince(Date.parse(now)), DELEGATED_MAINTENANCE_WRITES_PER_DAY]
+        ? [
+            actor.id,
+            budgetSince(Date.parse(now)),
+            DELEGATED_MAINTENANCE_WRITES_PER_DAY,
+            input.source,
+            sourceRevisionCount,
+          ]
         : []),
     ),
-    // The provenance confirmation is guarded on the row the insert wrote, so
-    // the two are one effect.
+    // Only this batch's successful INSERT may update provenance. A losing
+    // same-actor/same-millisecond call must not match another call's row.
     env.DB.prepare(
-      `UPDATE provider_maintenance_references SET status='confirmed',reference_url=?,verified_at=? WHERE source=? AND ${guard.sql}`,
+      `UPDATE provider_maintenance_references SET status='confirmed',reference_url=?,verified_at=? WHERE source=? AND changes()=1 AND ${guard.sql}`,
     ).bind(input.referenceUrl, input.verifiedAt, input.source, ...guard.binds),
   ];
   const appended = append({

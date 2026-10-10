@@ -1,3 +1,4 @@
+import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
 // ADR 0025 end to end: a MyJCB run the collector persisted to the shared
 // bucket - built by its real `myJcbRunPlan`, so the manifest carries no
 // `connectionId` or `filename` - registers, and its ledger and statement
@@ -15,10 +16,8 @@ import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
   CORE_MIGRATIONS_URL,
-  applyReadMigrations,
   migrationFiles,
   migrationSql,
-  splitSqlStatements,
 } from "../../../packages/storage-d1/src/migrations.ts";
 import { persistRun } from "../../../packages/collection/src/writer.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
@@ -47,15 +46,14 @@ beforeAll(async () => {
   const db = await mf.getD1Database("DB");
   const read = await mf.getD1Database("READ");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))
-    for (const sql of splitSqlStatements(migrationSql(CORE_MIGRATIONS_URL, file)))
-      await db.prepare(sql).run();
+    await applyTestSql(db, migrationSql(CORE_MIGRATIONS_URL, file));
   // The ingest registry exactly as an operator applies it.
   const bootstrap = readFileSync(
     new URL("../../../infra/bootstrap/ingest-clients.sql", import.meta.url),
     "utf8",
   );
-  for (const sql of splitSqlStatements(bootstrap)) await db.prepare(sql).run();
-  await applyReadMigrations(read);
+  await applyTestSql(db, bootstrap);
+  await applyTestReadMigrations(read);
   env = {
     DB: db,
     READ: read,

@@ -47,6 +47,7 @@ interface OrganizationRow {
   account_revision: number;
   account_method: OrganizedAccount["method"];
   account_reason: string;
+  account_decision_origin: NonNullable<OrganizedAccount["decisionOrigin"]>;
   role: OrganizedInstrument["role"] | null;
   instrument_reference: string | null;
   instrument_target: string;
@@ -55,6 +56,7 @@ interface OrganizationRow {
   instrument_revision: number;
   instrument_method: OrganizedInstrument["method"];
   instrument_reason: string;
+  instrument_decision_origin: NonNullable<OrganizedInstrument["decisionOrigin"]>;
   namespace: string;
   scope: string;
   value: string;
@@ -136,6 +138,7 @@ export async function observationOrganizations(
             status: row.account_status,
             revision: row.account_revision,
             method: row.account_method,
+            decisionOrigin: row.account_decision_origin,
             reason: row.account_reason,
           },
           instruments: [],
@@ -160,6 +163,7 @@ export async function observationOrganizations(
           status: row.instrument_status,
           revision: row.instrument_revision,
           method: row.instrument_method,
+          decisionOrigin: row.instrument_decision_origin,
           reason: row.instrument_reason,
           role: row.role,
           namespace: row.namespace,
@@ -207,7 +211,11 @@ export async function observationOrganizations(
       const name = names.get(instrument.referenceId);
       if (name) {
         instrument.label = name.label;
-        instrument.nameEvidence = { reason: name.reason, origin: name.origin };
+        instrument.nameEvidence = {
+          reason: name.reason,
+          origin: name.origin,
+          decisionOrigin: name.decisionOrigin,
+        };
       }
     }
   }

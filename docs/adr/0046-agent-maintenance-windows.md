@@ -1,6 +1,6 @@
 # ADR 0046: Maintenance windows as a separately granted agent capability
 
-Status: proposed until this PR merges; accepted upon merge
+Status: accepted (#564 merged on 2026-10-10 JST); the S3 execution amendment remains proposed until its integration PR merges
 Date: 2026-10-08
 Amended by: [ADR 0063](0063-delegated-ai-operation-path.md) item 8, as
 [the amendment below](#amendment-a-delegated-operation-not-an-agent-grant-2026-10-09)
@@ -202,13 +202,15 @@ or deployment was exercised.
 
 ## Amendment: a delegated operation, not an agent grant (2026-10-09)
 
-Status: proposed until this PR merges; accepted upon merge.
+Status: accepted (#564 merged on 2026-10-10 JST). This section records the
+S4 contract at that merge; the S3 execution amendment below supersedes its
+statements about absent adapters, confirmation and separate budget batches.
 
 The owner's direction of 2026-10-09 — conditional direct application by the
 AI, and not anonymous-agent power
 ([ADR 0063](0063-delegated-ai-operation-path.md),
 [plan](../plans/2026-10-ai-operation-path.md) sections 3, 4.6 and slice S4)
-— re-shapes this decision before it merges. What the code does now:
+— re-shaped this decision before it merged. What #564 shipped:
 
 - **Who may write.** `schedules.maintenance.update` is no longer an
   agent-API capability: `AGENT_CAPABILITIES` keeps `schedules.read` only, and
@@ -329,7 +331,7 @@ not one transaction with it), and the confirm step are slice S3's; when the R2
 path may first be used waits for the owner's answer to question 1. Until then
 no delegated revision can be written outside a test.
 
-Verification: synthetic only.
+Verification of the #564 slice at its merge (historical): synthetic only.
 `services/processor/test/schedule-agent-maintenance.test.ts` exercises the
 writer for a delegated principal directly (no route reaches it): revisions
 with actor kind and closed reason, the readback of next run and armed
@@ -355,3 +357,58 @@ records and revisions for a token-shaped value and an amount. Not verified:
 anything in production. No delegation exists; the committed configuration's
 one agent-API grant (#640, the owner's MCP reader) names no schedule
 capability, and no MCP client has called these tools.
+
+## S3 maintenance execution and confirmation (2026-10-10)
+
+Status: proposed until the integration PR merges. The implementation reuses
+the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
+against main `c0c4088a`; #652's temporal refusal and #643's release guard are
+preserved. The [integration plan](../plans/2026-10-mcp-maintenance-followups.md)
+records the publication and activation boundaries. No grant or deployment is
+implied by this implementation.
+
+The closed MCP payload accepts `apply`, `prepare` and `confirm` plus an
+idempotency key. R1 apply keeps the seven-day joined-deferral bound. R2
+prepare validates with the trusted 31-day bound and records a capped,
+expiring preparation; only a matching confirmation may use that bound to
+write. A newly caused, moved or extended joined deferral over 31 days is
+refused; pre-existing longer operator windows may remain unchanged or shorten.
+A caller cannot supply `decisionRef`,
+`deferralBound` or a rollback audit reference. The R1 rule references its
+reserved effect audit id; the R2 rule references the verified preparation
+audit id, and its effect record links the same preparation.
+
+Current delegation capability and source scope are checked before looking
+up a replay receipt. Exact retries return the original saved id/revision
+without another writer call or alarm reconciliation. Changed payloads do not
+reuse a receipt. Fresh writes revalidate at the private Processor adapter.
+The common applied/accepted-effect audit count enforces the actual delegation's
+`writesPerDay` across operation kinds and delegation-reference changes. It
+shares one D1 batch with the native writer's 30-per-principal rolling-day cap,
+revision guard, domain write and audit append; failure rolls back the batch.
+Preparation reports the lesser remaining budget. It grants no authority by
+itself.
+
+The native writer captures the source's append-only revision count before
+reading joined windows. Its delegated INSERT checks that count again inside
+the batch, so concurrent edits to different rules cannot jointly exceed the
+deferral bound. The count uses the existing covering maintenance source
+index and scales with that source's history, not constant time. The immediate
+provenance update also requires that INSERT to have changed a row, and the
+append guard binds the decision reference: a same-millisecond losing retry
+cannot replace a winner's official URL or append an effect.
+
+The write result distinguishes `saved` from reconciliation `completed` or
+`pending`; a replay returns reconciliation `null`. None asserts that a
+reservation is armed. The maintenance read tool supplies the reservation and
+next-run state. Audit rows keep digests, closed codes and references, not the
+official URL or other provider text.
+
+The tests use synthetic local D1 data and synthetic Access keys. They cover
+signed MCP entry, revocation and scope-before-replay, both hard bounds,
+prepare/effect linkage, shared daily budget, rollback, exact retries,
+concurrent joined windows and losing-provenance writes. Production migration
+state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
+the committed MCP financial-reader grant receives no schedule authority.
+S6 survey acceptance remains unavailable pending the separate owner decision;
+no survey grammar, grants, Access, authentication or deployment is changed.

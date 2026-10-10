@@ -1,3 +1,4 @@
+import { decisionOriginLabel } from "../../../packages/observation-shared/src/decision-origin-contract.ts";
 import type { ReactNode } from "react";
 import type { IdentityStatus } from "../../../packages/observation-shared/src/identity-contract.ts";
 import type {
@@ -84,6 +85,11 @@ export function OrganizedSourceAccount({
           {organized.label} <IdentityStatusBadge status={organized.status} />
         </div>
       ) : null}
+      {organized?.method === "manual" ? (
+        <div className="table-secondary">
+          {decisionOriginLabel(organized.decisionOrigin, organized.method)}
+        </div>
+      ) : null}
       {product && !productPrimary ? <FinancialProductSummary claim={product} /> : null}
       <SourceAccount source={source} account={account} />
       {organized?.connection ? (
@@ -109,6 +115,9 @@ export function OrganizedInstrumentContext({
   return item && item.label !== original ? (
     <div className="table-secondary">
       {ROLE[role]}: {item.label}
+      {item.method === "manual" ? (
+        <> · {decisionOriginLabel(item.decisionOrigin, item.method)}</>
+      ) : null}
     </div>
   ) : null;
 }
@@ -119,7 +128,12 @@ function Interpretation({ item }: { item: OrganizedAccount }): ReactNode {
         {item.label} <IdentityStatusBadge status={item.status} />
       </div>
       <div className="table-secondary">
-        {item.method === "manual" ? "手動で整理" : "規則で整理"} · 改訂 {item.revision}
+        {item.decisionOrigin === "operator"
+          ? "手動で整理"
+          : item.decisionOrigin === "automatic" || item.method === "rule"
+            ? "規則で整理"
+            : decisionOriginLabel(item.decisionOrigin, item.method)}{" "}
+        · 改訂 {item.revision}
       </div>
       <details className="detail-disclosure">
         <summary>対応の根拠</summary>
@@ -165,7 +179,12 @@ export function OrganizationPanel({ organization }: { organization: Organization
                   </div>
                   {item.nameEvidence ? (
                     <div className="table-secondary">
-                      名称の根拠: {NAME_REASON[item.nameEvidence.reason]}
+                      名称の根拠:{" "}
+                      {item.nameEvidence.reason === "manual" &&
+                      item.nameEvidence.decisionOrigin !== "operator"
+                        ? decisionOriginLabel(item.nameEvidence.decisionOrigin, "manual") +
+                          "で指定した名称"
+                        : NAME_REASON[item.nameEvidence.reason]}
                       {item.nameEvidence.origin ? (
                         <>
                           {" "}
