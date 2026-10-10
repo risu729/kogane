@@ -166,7 +166,7 @@ forgot to add another Actions matrix row or root task-file include.
 ## Checks and coverage
 
 - Oxlint, Oxfmt, Tombi, yamllint and yamlfmt check source and configuration.
-- Actionlint, ShellCheck, ghalint, pinact and zizmor check workflow syntax,
+- Jactionlint, ShellCheck, ghalint, pinact and zizmor check workflow syntax,
   permissions, action pins, shell code and unsafe workflow patterns.
 - Ruff checks Python without executing probes; typos and hk-config's whole
   `hygiene` group cover spelling, whitespace, line endings, byte-order marks,
