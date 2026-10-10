@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { CardOwnershipSide } from "../../../packages/domain/src/card-ownership-review.ts";
+import { readOwnershipDeclaration } from "../../../packages/domain/src/ownership-declaration.ts";
 import { Link } from "./router.tsx";
 import { Kv, KvRow, Notice } from "./ui.tsx";
 export const OWNERSHIP_ROLES = {
@@ -59,23 +60,37 @@ export function CardOwnershipDetails({ side }: { side: CardOwnershipSide }): Rea
           <p>この関係に記録済みの保有者はいません。</p>
         ) : (
           <ul className="plain-list">
-            {side.claims.map((claim) => (
-              <li key={claim.id}>
-                {ownerLabel(claim.partyRef)} ·{" "}
-                {claim.status === "accepted"
-                  ? "採用済み"
-                  : claim.status === "rejected"
-                    ? "却下済み"
-                    : claim.status === "released"
-                      ? "解除済み"
-                      : "提案"}
-                {claim.validFrom !== null || claim.validTo !== null
-                  ? "（期間の指定あり。この照合では自動適用しません）"
-                  : ""}
-                <br />
-                判断の記録: {claim.decisionRevisionId}
-              </li>
-            ))}
+            {side.claims.map((claim) => {
+              const declaration = readOwnershipDeclaration(claim.evidenceRefs);
+              return (
+                <li key={claim.id}>
+                  {ownerLabel(claim.partyRef)} ·{" "}
+                  {claim.status === "accepted"
+                    ? "採用済み"
+                    : claim.status === "rejected"
+                      ? "却下済み"
+                      : claim.status === "released"
+                        ? "解除済み"
+                        : "提案"}
+                  {claim.validFrom !== null || claim.validTo !== null
+                    ? "（期間の指定あり。この照合では自動適用しません）"
+                    : ""}
+                  <br />
+                  {declaration.kind === "self-declared" ? (
+                    <>
+                      根拠: 本人申告（名義未確認） · 申告日: {declaration.declaredOn}
+                      <br />
+                    </>
+                  ) : declaration.kind === "invalid" ? (
+                    <>
+                      根拠の分類を確認できません。記録を確認してください。
+                      <br />
+                    </>
+                  ) : null}
+                  判断の記録: {claim.decisionRevisionId}
+                </li>
+              );
+            })}
           </ul>
         )}
         {side.claimsTruncated ? (

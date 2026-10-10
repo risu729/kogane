@@ -11,12 +11,14 @@ function fixture() {
   db.exec(`CREATE TABLE card_settlement_reviews(id TEXT,facts_json TEXT,revision INTEGER,status TEXT);
  CREATE TABLE card_settlement_readiness(id TEXT,statement_current INTEGER,bank_current INTEGER);
  CREATE TABLE current_identity_observations(kind TEXT,observation_id INTEGER,parse_run_id INTEGER,source_account_id TEXT);
- CREATE TABLE current_account_mappings(id TEXT,source_account_id TEXT,account_id TEXT,revision INTEGER);
+ CREATE TABLE current_account_mappings(id TEXT,source_account_id TEXT,account_id TEXT,revision INTEGER,status TEXT);
+ CREATE TABLE accounts(id TEXT,role TEXT,status TEXT);
  CREATE TABLE entity_relations(id TEXT,kind TEXT,from_ref TEXT,to_ref TEXT,status TEXT,valid_from TEXT,valid_to TEXT,evidence_refs_json TEXT,decision_revision_id TEXT);
  CREATE TABLE decision_revisions(id TEXT,superseded_by TEXT);
  INSERT INTO card_settlement_readiness VALUES('one',1,1);
  INSERT INTO current_identity_observations VALUES('balance',11,1,'sa-card'),('transaction',12,2,'sa-bank');
- INSERT INTO current_account_mappings VALUES('mapping-card','sa-card','acct-card',1),('mapping-bank','sa-bank','acct-bank',2);`);
+ INSERT INTO current_account_mappings VALUES('mapping-card','sa-card','acct-card',1,'provider-local'),('mapping-bank','sa-bank','acct-bank',2,'provider-local');
+ INSERT INTO accounts VALUES('acct-card','card-statement','provider-local'),('acct-bank','deposit','provider-local');`);
   db.prepare("INSERT INTO card_settlement_reviews VALUES('one',?,0,'proposed')").run(
     JSON.stringify(settlementFacts(true)),
   );
@@ -48,6 +50,7 @@ test("unknown ownership exposes current accounts and exact evidence without a de
     ownershipRevision: 0,
     claims: [],
     blockers: [],
+    selfDeclarationBlockers: [],
     evidenceRefs: [
       "card-settlement:one",
       "balance:11",
@@ -79,11 +82,23 @@ test("all alias and rejected history counts pin freshness while only latest part
   expect(side.claims).toHaveLength(2);
   expect(side.claims.map((c) => c.id)).toEqual(["r3", "r2"]);
   expect(side.claims[0]?.validFrom).toBe("2026-01-01");
+  expect(side.blockers).toEqual([]);
+  expect(side.selfDeclarationBlockers).toEqual(["ownership_claims_require_review"]);
+});
+test("a recorded contradiction prevents only the self-declared fallback", async () => {
+  const { db, sql } = fixture();
+  db.exec(
+    `INSERT INTO entity_relations VALUES('conflict','contradicts','parse_run:1','other','accepted',NULL,NULL,'[]',NULL)`,
+  );
+  const result = await queryCardOwnership(sql, "one");
+  expect(result!.sides[0]!.blockers).toEqual([]);
+  expect(result!.sides[0]!.selfDeclarationBlockers).toEqual(["contrary_evidence_recorded"]);
+  expect(result!.sides[1]!.selfDeclarationBlockers).toEqual([]);
 });
 test("ambiguous mappings and terminal candidates remain read-only", async () => {
   const { db, sql } = fixture();
   db.exec(
-    "INSERT INTO current_account_mappings VALUES('other','sa-card','other',3); UPDATE card_settlement_reviews SET status='rejected',revision=1;",
+    "INSERT INTO current_account_mappings VALUES('other','sa-card','other',3,'provider-local'); UPDATE card_settlement_reviews SET status='rejected',revision=1;",
   );
   const side = (await queryCardOwnership(sql, "one"))!.sides[0]!;
   expect(side.accountId).toBeNull();
@@ -98,4 +113,20 @@ test("duplicate current identity rows do not become a falsely unique mapping", a
   expect(side.accountId).toBeNull();
   expect(side.blockers).toContain("account_mapping_unresolved");
   expect(side.evidenceRefs).toEqual([]);
+});
+
+test("aggregate, unresolved and wrong-role accounts cannot use self-declaration", async () => {
+  for (const change of [
+    "UPDATE accounts SET role='card-statement-aggregate',status='aggregate' WHERE id='acct-card'",
+    "UPDATE accounts SET status='unresolved' WHERE id='acct-card'",
+    "UPDATE accounts SET role='deposit' WHERE id='acct-card'",
+    "UPDATE current_account_mappings SET status='unresolved' WHERE account_id='acct-card'",
+  ]) {
+    const { db, sql } = fixture();
+    db.exec(change);
+    const result = await queryCardOwnership(sql, "one");
+    expect(result!.sides[0]!.blockers).toEqual([]);
+    expect(result!.sides[0]!.selfDeclarationBlockers).toEqual(["single_account_scope_unconfirmed"]);
+    expect(result!.sides[1]!.selfDeclarationBlockers).toEqual([]);
+  }
 });

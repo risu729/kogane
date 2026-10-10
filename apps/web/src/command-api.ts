@@ -6,6 +6,7 @@
 // The buttons are enabled by the advertised `commands` capability only. That
 // is a display decision: the server still authenticates, checks the grant, and
 // refuses an agent's approval whatever the client sends.
+import type { OwnershipSelfDeclaration } from "../../../packages/domain/src/ownership-declaration.ts";
 
 export const COMMAND_PREFIX = "/api/command/v1";
 
@@ -46,6 +47,7 @@ export interface SimulationView {
   affectedScopes: string[];
   affectedParseRuns: number;
   outboxTargets: string[];
+  ownershipDeclaration?: OwnershipSelfDeclaration;
 }
 export interface ChangePlanView {
   planId: string;

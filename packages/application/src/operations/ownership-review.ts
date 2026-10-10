@@ -6,8 +6,19 @@ import {
   ownershipRevisionRef,
 } from "../../../domain/src/ownership-review.ts";
 import { commandError, type CommandResult } from "../command/errors.ts";
+import {
+  readOwnershipDeclaration,
+  type OwnershipSelfDeclaration,
+} from "../../../domain/src/ownership-declaration.ts";
+import {
+  OWNERSHIP_DECLARATION_CONTEXT_SQL,
+  ownershipDeclarationContextBinds,
+  ownershipDeclarationBlockers,
+  type OwnershipDeclarationContext,
+} from "../../../read-model/src/ownership-declaration.ts";
 import type {
   CommandStore,
+  ChangeKind,
   RelationPayload,
   CommitGuard,
   PlanTarget,
@@ -32,6 +43,7 @@ interface OwnershipReview {
   targets: PlanTarget[];
   sourceId: string;
   precondition: CommitGuard;
+  declaration?: OwnershipSelfDeclaration;
 }
 /**
  * The candidate `?` and whether both its source facts are still current,
@@ -55,14 +67,19 @@ export const OWNERSHIP_REVIEW_CANDIDATE_GUARD_SQL = `EXISTS(WITH chosen AS (SELE
 export async function prepareOwnershipReview(
   store: CommandStore,
   relation: RelationPayload,
+  kind: ChangeKind,
 ): Promise<CommandResult<{ review: OwnershipReview }>> {
+  const declaration = readOwnershipDeclaration(relation.evidenceRefs);
   const markers = relation.evidenceRefs.filter((ref) => ref.startsWith("card-settlement:"));
   if (
     markers.length !== 1 ||
     (relation.relationKind !== "liable_party" && relation.relationKind !== "beneficial_owner") ||
     !ownershipReviewPartyRef(relation.toRef) ||
     relation.validFrom !== null ||
-    relation.validTo !== null
+    relation.validTo !== null ||
+    declaration.kind === "invalid" ||
+    (declaration.kind === "self-declared" &&
+      (declaration.role !== relation.relationKind || kind !== "relation.accept"))
   )
     return commandError("invalid_command");
   const marker = markers[0]!,
@@ -103,11 +120,29 @@ export async function prepareOwnershipReview(
   if (mapping.account_id !== side.accountId || relation.fromRef !== "account:" + mapping.account_id)
     return commandError("stale_context", [marker]);
   const expectedEvidence = ownershipReviewEvidenceRefs(proposalId, side.ref, mapping.id);
+  const declarationRefs =
+    declaration.kind === "self-declared"
+      ? relation.evidenceRefs.filter((ref) => ref.startsWith("ownership-declaration:"))
+      : [];
   if (
-    relation.evidenceRefs.length !== expectedEvidence.length ||
+    relation.evidenceRefs.length !== expectedEvidence.length + declarationRefs.length ||
     !expectedEvidence.every((ref) => relation.evidenceRefs.includes(ref))
   )
     return commandError("incomplete_evidence", [marker]);
+  const declarationBinds = ownershipDeclarationContextBinds(
+    mapping.account_id,
+    mapping.source_account_id,
+    expectedEvidence,
+    relation.relationKind,
+  );
+  if (declaration.kind === "self-declared") {
+    const context = await store.first<OwnershipDeclarationContext>(
+      OWNERSHIP_DECLARATION_CONTEXT_SQL,
+      declarationBinds,
+    );
+    if (!context || ownershipDeclarationBlockers(context).length > 0)
+      return commandError("needs_scope_resolution", [marker]);
+  }
   const ownership = await store.first<{ revision: number }>(
     `SELECT count(*) AS revision FROM entity_relations
  WHERE kind=? AND from_ref IN(?,?)`,
@@ -116,6 +151,7 @@ export async function prepareOwnershipReview(
   return {
     ok: true,
     review: {
+      ...(declaration.kind === "self-declared" ? { declaration } : {}),
       sourceId: side.sourceId,
       targets: [
         {
@@ -142,7 +178,8 @@ export async function prepareOwnershipReview(
     AND (SELECT count(*) FROM current_identity_observations o JOIN current_account_mappings m ON m.source_account_id=o.source_account_id
      WHERE o.kind=? AND o.observation_id=? AND o.parse_run_id=?)=1
     AND EXISTS(SELECT 1 FROM current_identity_observations o JOIN current_account_mappings m ON m.source_account_id=o.source_account_id
-     WHERE o.kind=? AND o.observation_id=? AND o.parse_run_id=? AND m.id=? AND m.account_id=?)`,
+     WHERE o.kind=? AND o.observation_id=? AND o.parse_run_id=? AND m.id=? AND m.account_id=?)
+    ${declaration.kind === "self-declared" ? `AND NOT EXISTS(SELECT 1 FROM (${OWNERSHIP_DECLARATION_CONTEXT_SQL}) WHERE ownership_claims<>0 OR contrary_claims<>0 OR single_account_scope<>1)` : ""}`,
         binds: [
           proposalId,
           candidate.revision,
@@ -154,6 +191,7 @@ export async function prepareOwnershipReview(
           parseRunId,
           mapping.id,
           mapping.account_id,
+          ...(declaration.kind === "self-declared" ? declarationBinds : []),
         ],
       },
     },
@@ -164,7 +202,7 @@ export async function ownershipReviewPlan(
   relation: RelationPayload,
   base: ResolvedPlan,
 ): Promise<CommandResult<{ resolved: ResolvedPlan }>> {
-  const prepared = await prepareOwnershipReview(store, relation);
+  const prepared = await prepareOwnershipReview(store, relation, base.simulation.kind);
   if (!prepared.ok) return prepared;
   const { review } = prepared;
   const targets = [...base.targets, ...review.targets];
@@ -177,6 +215,7 @@ export async function ownershipReviewPlan(
       ),
       simulation: {
         ...base.simulation,
+        ...(review.declaration ? { ownershipDeclaration: review.declaration } : {}),
         targets,
         affectedScopes: [review.sourceId],
         affectedParseRuns: 1,

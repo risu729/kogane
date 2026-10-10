@@ -34,7 +34,7 @@ export async function relationMutation(input: MutationInput): Promise<MutationWr
   )
     return null;
   const ownership = ownershipReviewRequested(relation.evidenceRefs)
-    ? await prepareOwnershipReview(input.store, relation)
+    ? await prepareOwnershipReview(input.store, relation, plan.kind)
     : null;
   if (ownership && !ownership.ok) return null;
   const link = pendingPostedReviewRequested(relation.evidenceRefs)
