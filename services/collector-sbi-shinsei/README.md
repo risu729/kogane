@@ -66,6 +66,10 @@ unknown response や authentication response body は R2 に保存しません�
 
 現在の4 readはtop page由来のsnapshotです。manifestの`startedAt` / `completedAt`は実行時刻を表し、過去期間を取得済みとは記録しません。期間履歴を追加する場合は、期間を実際に送るread routeと取得範囲を別途検証してから導入します。
 
+期間指定履歴とCSVはcatalog上で未承認の候補routeで、全execution profileでsession参照・通信前に拒否します。2026-10-10の通常UI観測を基に、`src/local/history-observation.ts`は円普通預金の明示期間request（最大31日というローカル制限）と、取得済みJSON/CSVの**オフライン検証だけ**を提供します。JSONの正常明細・providerが空と報告した応答・未確認errorを区別し、期間/口座contextとCSVの全6列を照合します。CSVは`Shift_JIS`宣言付きのブラウザー復号済みtextであり、元bytesやdownload保存の確認ではありません。全結果は`coverageStatus: unknown`のままです。
+
+このmoduleはWorker/Container/既存parserから呼ばれず、通信・保存・採用・本番有効化を行いません。既存4 raw + 1 normalized snapshotは不変です。CSV用session tokenの取得/rotation、原本byte保存、paging/上限/`purgeflag`の意味、電子お取引レポートのroute/schemaは未確認です。[ADR 0070](../../docs/adr/0070-sbi-shinsei-observed-history-boundary.md)と[次の取得sliceの計画](../../docs/plans/2026-10-sbi-shinsei-history-first-slice.md)に、本番の取得拡張までの残条件を記載しています。
+
 runは`packages/collection`で共有DATA bucketへ直接書き、4件のprovider responseとnormalized snapshotはterminalを書くまでmemoryに保持する。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。private Service Bindingによる中央importer呼出し、`POST /backfill-raw-evidence`、`scripts/backfill-raw-evidence.sh`、source専用bucketは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 Kuebiko capture で得た core response の field-name topology は synthetic fixture と strict validator に反映済みです。1 sample だけなので known field を optional として扱う箇所がありますが、unknown field、unknown nested item、unknown schema は拒否します。validator実装だけでは route を有効化せず、exact request builder とaccepted browser-contextでの実行成功も必要です。
