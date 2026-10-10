@@ -16,6 +16,8 @@ import {
   localContainerImages,
   verifyLocalContainerImages,
   dockerImageId,
+  dockerImageIdentity,
+  sameDockerImageIdentity,
   containerInputDigest,
   readRegularFile,
   applicationSnapshot,
@@ -215,9 +217,81 @@ describe("legacy SQLite rollback conversion fails closed", () => {
 });
 
 describe("immutable local image and application identity", () => {
+  test("daemon descriptors type config, manifest and index IDs before publication", () => {
+    const tag = `cloudflare-build/${"d".repeat(12)}/${target.appName}:${"e".repeat(12)}`;
+    const inspect = (descriptor: unknown, os = "linux", arch = "amd64") =>
+      dockerImageIdentity(tag, () =>
+        JSON.stringify([{ Id: imageId, Descriptor: descriptor, Os: os, Architecture: arch }]),
+      );
+    expect(inspect(null)).toEqual({ imageId, imageIdKind: "config" });
+    expect(inspect(undefined)).toEqual({ imageId, imageIdKind: "config" });
+    for (const [mediaType, imageIdKind] of [
+      ["application/vnd.oci.image.manifest.v1+json", "manifest"],
+      ["application/vnd.docker.distribution.manifest.v2+json", "manifest"],
+      ["application/vnd.oci.image.index.v1+json", "index"],
+      ["application/vnd.docker.distribution.manifest.list.v2+json", "index"],
+    ])
+      expect(inspect({ digest: imageId, mediaType })).toEqual({ imageId, imageIdKind });
+    for (const descriptor of [
+      {},
+      { digest: hash("other") },
+      { digest: imageId, mediaType: "unknown" },
+    ])
+      expect(() => inspect(descriptor)).toThrow("local_image_invalid");
+    expect(() => inspect(null, "linux", "arm64")).toThrow("local_image_invalid");
+    expect(() => inspect(null, "windows")).toThrow("local_image_invalid");
+    expect(() => dockerImageIdentity(tag, () => "secret malformed response")).toThrow(
+      "local_image_invalid",
+    );
+    expect(sameDockerImageIdentity({ imageId }, { imageId, imageIdKind: "config" })).toBe(true);
+    expect(sameDockerImageIdentity({ imageId }, { imageId, imageIdKind: "manifest" })).toBe(false);
+    expect(
+      sameDockerImageIdentity({ imageId, imageIdKind: null }, { imageId, imageIdKind: "config" }),
+    ).toBe(false);
+    expect(
+      sameDockerImageIdentity(
+        { imageId, imageIdKind: "manifest" },
+        { imageId, imageIdKind: "config" },
+      ),
+    ).toBe(false);
+  });
+
+  test("Docker CLI boundary reads one raw JSON image including omitted classic Descriptor", () => {
+    const tag = `cloudflare-build/${"d".repeat(12)}/${target.appName}:${"e".repeat(12)}`;
+    const response = {
+      Id: imageId,
+      Os: "linux",
+      Architecture: "amd64",
+      Config: { Env: ["SYNTHETIC_UNRELATED=never-return-this-metadata"] },
+    };
+    const actual = dockerImageIdentity(tag, (command, args) => {
+      expect(command).toBe("docker");
+      expect(args).toEqual(["image", "inspect", tag]);
+      return JSON.stringify([response]);
+    });
+    expect(actual).toEqual({ imageId, imageIdKind: "config" });
+    for (const invalid of [
+      [],
+      [response, response],
+      response,
+      [null],
+      [[]],
+      [{ ...response, Id: undefined }],
+      [{ ...response, Id: "invalid" }],
+      [{ ...response, Descriptor: [] }],
+      [{ ...response, Descriptor: "invalid" }],
+    ])
+      expect(() => dockerImageIdentity(tag, () => JSON.stringify(invalid))).toThrow(
+        "cf_container_local_image_invalid",
+      );
+  });
   test("tag swaps and child errors cannot pass or leak raw credentials", () => {
     const tag = `cloudflare-build/${"d".repeat(12)}/${target.appName}:${"e".repeat(12)}`;
-    expect(dockerImageId(tag, () => `${imageId}\n`)).toBe(imageId);
+    expect(
+      dockerImageId(tag, () =>
+        JSON.stringify([{ Id: imageId, Os: "linux", Architecture: "amd64" }]),
+      ),
+    ).toBe(imageId);
     expect(() =>
       dockerImageId(tag, () => {
         throw new Error("secret-token stdout");
@@ -247,12 +321,16 @@ describe("immutable local image and application identity", () => {
         },
       };
       writeFileSync(path, JSON.stringify(config));
-      expect(localContainerImages(root, target, () => imageId)).toMatchObject({
+      expect(
+        localContainerImages(root, target, () => ({ imageId, imageIdKind: "config" })),
+      ).toMatchObject({
         imageId,
         appId: target.appId,
       });
       writeFileSync(path, JSON.stringify({ ...config, maxInstances: 3 }));
-      expect(() => localContainerImages(root, target, () => imageId)).toThrow("output_identity");
+      expect(() =>
+        localContainerImages(root, target, () => ({ imageId, imageIdKind: "config" })),
+      ).toThrow("output_identity");
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -329,6 +407,103 @@ describe("registry verification keeps credentials on the controlled host and rep
         return new Response(manifest);
       },
     });
+  });
+
+  test("typed identity proves the recorded kind, never whichever digest happens to match", async () => {
+    const bytes = JSON.stringify({
+      schemaVersion: 2,
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
+      config: { digest: imageId },
+    });
+    const child = hash(bytes);
+    const index = JSON.stringify({
+      schemaVersion: 2,
+      mediaType: "application/vnd.oci.image.index.v1+json",
+      manifests: [
+        { digest: child, platform: { os: "linux", architecture: "amd64" } },
+        { digest: hash("arm"), platform: { os: "linux", architecture: "arm64" } },
+      ],
+    });
+    const root = hash(index);
+    const run = (id: string, kind: string | undefined | null, indexed = false) =>
+      verifyRegistryImage({
+        ...args,
+        image: `registry.cloudflare.com/${account}/${target.appName}@${indexed ? root : child}`,
+        imageId: id,
+        imageIdKind: kind,
+        fetchImpl: async (url) => new Response(url.endsWith(root) ? index : bytes),
+      });
+    await run(imageId, "config");
+    await run(child, "manifest");
+    await run(child, "manifest", true);
+    await run(root, "index", true);
+    await run(imageId, undefined, true);
+    for (const [id, kind, indexed] of [
+      [child, undefined, false],
+      [child, "config", false],
+      [imageId, "manifest", false],
+      [child, "index", false],
+      [child, "index", true],
+      [root, "manifest", true],
+      [hash("unrelated"), "manifest", false],
+      [hash("unrelated"), "index", true],
+    ] as const)
+      await expect(run(id, kind, indexed)).rejects.toThrow("registry_image_mismatch");
+    await expect(run(child, "unknown")).rejects.toThrow("registry_identity_invalid");
+    await expect(run(child, null)).rejects.toThrow("registry_identity_invalid");
+    for (const malformed of [
+      { schemaVersion: 2, mediaType: "unknown", config: { digest: imageId } },
+      {
+        schemaVersion: 2,
+        mediaType: "application/vnd.oci.image.manifest.v1+json",
+        config: { digest: "invalid" },
+      },
+      {
+        schemaVersion: 1,
+        mediaType: "application/vnd.oci.image.manifest.v1+json",
+        config: { digest: imageId },
+      },
+    ]) {
+      const data = JSON.stringify(malformed);
+      await expect(
+        verifyRegistryImage({
+          ...args,
+          imageId: hash(data),
+          imageIdKind: "manifest",
+          image: `registry.cloudflare.com/${account}/${target.appName}@${hash(data)}`,
+          fetchImpl: async () => new Response(data),
+        }),
+      ).rejects.toThrow("registry_identity_invalid");
+    }
+    for (const entries of [
+      [{ digest: child, platform: { os: "linux", architecture: "arm64" } }],
+      [{ digest: child, platform: { os: "linux", architecture: "amd64", variant: "v3" } }],
+      Array(2).fill({ digest: child, platform: { os: "linux", architecture: "amd64" } }),
+    ]) {
+      const data = JSON.stringify({
+        schemaVersion: 2,
+        mediaType: "application/vnd.oci.image.index.v1+json",
+        manifests: entries,
+      });
+      await expect(
+        verifyRegistryImage({
+          ...args,
+          imageId: hash(data),
+          imageIdKind: "index",
+          image: `registry.cloudflare.com/${account}/${target.appName}@${hash(data)}`,
+          fetchImpl: async () => new Response(data),
+        }),
+      ).rejects.toThrow("registry_platform_unknown");
+    }
+    await expect(
+      verifyRegistryImage({
+        ...args,
+        imageId: root,
+        imageIdKind: "index",
+        image: `registry.cloudflare.com/${account}/${target.appName}@${root}`,
+        fetchImpl: async (url) => new Response(url.endsWith(root) ? index : "{}"),
+      }),
+    ).rejects.toThrow("registry_digest_mismatch");
   });
   test("uncontrolled hosts/accounts/repositories/tags are refused before fetch", () => {
     for (const bad of [
@@ -635,7 +810,7 @@ test("real Node CLI binds and rechecks the image manifest, daemon, source and ta
     );
     writeFileSync(
       resolve(tools, "docker"),
-      '#!/bin/sh\ncase "$1 $2" in "info --format") printf "%s\\n" "$MOCK_DAEMON" ;; "image inspect") printf "%s\\n" "$MOCK_IMAGE_ID" ;; *) exit 1 ;; esac\n',
+      '#!/bin/sh\ncase "$1 $2" in "info --format") printf "%s\\n" "$MOCK_DAEMON" ;; "image inspect") test "$#" -eq 3 || exit 1; printf "%s\\n" "$MOCK_IMAGE_ID" ;; *) exit 1 ;; esac\n',
     );
     chmodSync(resolve(tools, "docker"), 0o755);
     const guard = resolve(REPO_ROOT, "tasks/_lib/ci/cf-container-release.mjs");
@@ -644,7 +819,7 @@ test("real Node CLI binds and rechecks the image manifest, daemon, source and ta
       PATH: `${tools}:${process.env.PATH}`,
       RUNNER_TEMP: temp,
       MOCK_DAEMON: "synthetic-daemon",
-      MOCK_IMAGE_ID: imageId,
+      MOCK_IMAGE_ID: JSON.stringify([{ Id: imageId, Os: "linux", Architecture: "amd64" }]),
     };
     const run = (command: string, patch = {}) =>
       spawnSync("node", [guard, command], {
@@ -655,9 +830,11 @@ test("real Node CLI binds and rechecks the image manifest, daemon, source and ta
     expect(run("capture").status).toBe(0);
     expect(run("bind").status).toBe(0);
     expect(run("verify-pre").status).toBe(0);
-    expect(run("verify-pre", { MOCK_IMAGE_ID: hash("swap") }).stderr.trim()).toBe(
-      "cf_container_local_image_changed",
-    );
+    expect(
+      run("verify-pre", {
+        MOCK_IMAGE_ID: JSON.stringify([{ Id: hash("swap"), Os: "linux", Architecture: "amd64" }]),
+      }).stderr.trim(),
+    ).toBe("cf_container_local_image_changed");
     expect(run("verify-pre", { MOCK_DAEMON: "another-daemon" }).stderr.trim()).toBe(
       "cf_container_local_image_changed",
     );
@@ -665,6 +842,26 @@ test("real Node CLI binds and rechecks the image manifest, daemon, source and ta
     expect(run("verify-pre").stderr.trim()).toBe("cf_container_local_image_changed");
     const recorded = JSON.parse(readFileSync(resolve(temp, "container-manifest.json"), "utf8"));
     expect(recorded[0].daemonId).toBe("synthetic-daemon");
+    expect(recorded[0].imageIdKind).toBe("config");
+    writeFileSync(resolve(service, "container/source.mjs"), "synthetic source");
+    const typedImage = JSON.stringify([
+      {
+        Id: imageId,
+        Descriptor: {
+          digest: imageId,
+          mediaType: "application/vnd.oci.image.manifest.v1+json",
+        },
+        Os: "linux",
+        Architecture: "amd64",
+      },
+    ]);
+    expect(run("capture", { MOCK_IMAGE_ID: typedImage }).status).toBe(0);
+    expect(run("bind").status).toBe(0);
+    expect(run("verify-pre", { MOCK_IMAGE_ID: typedImage }).status).toBe(0);
+    expect(run("verify-pre").stderr.trim()).toBe("cf_container_local_image_changed");
+    expect(
+      JSON.parse(readFileSync(resolve(temp, "container-manifest.json"), "utf8"))[0].imageIdKind,
+    ).toBe("manifest");
     writeFileSync(resolve(temp, "container-manifest.json"), "[]");
     expect(run("verify-pre").stderr.trim()).toBe("cf_container_manifest_changed");
   } finally {

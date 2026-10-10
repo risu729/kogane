@@ -529,7 +529,7 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
       );
       writeFileSync(
         resolve(tools, "docker"),
-        '#!/bin/sh\ncase "$1 $2" in "image save") printf "synthetic Docker archive" > "$4";; "image load") test -s "$4";; "image inspect") printf "%s\\n" "$MOCK_IMAGE_ID";; "info --format") printf "restored-daemon\\n";; *) exit 1;; esac\n',
+        '#!/bin/sh\ncase "$1 $2" in "image save") printf "synthetic Docker archive" > "$4";; "image load") test -s "$4";; "image inspect") test "$#" -eq 3 || exit 1; printf "%s\\n" "$MOCK_IMAGE_ID";; "info --format") printf "restored-daemon\\n";; *) exit 1;; esac\n',
       );
       chmodSync(resolve(tools, "docker"), 0o755);
       const guard = resolve(REPO_ROOT, "tasks/_lib/ci/release-resume.mjs");
@@ -547,7 +547,7 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
         TRUSTED_SHA: trustedSha,
         CLOUDFLARE_ACCOUNT_ID: "b".repeat(32),
         CLOUDFLARE_API_TOKEN: "synthetic-cf-token",
-        MOCK_IMAGE_ID: imageId,
+        MOCK_IMAGE_ID: JSON.stringify([{ Id: imageId, Os: "linux", Architecture: "amd64" }]),
       };
       const packed = spawnSync("node", [guard, "pack"], { cwd: root, env, encoding: "utf8" });
       expect(packed.stderr).toBe("");
@@ -629,9 +629,13 @@ test("real Node restores native and legacy prepared bytes with exact artifact/im
       expect(run({ MOCK_TAMPER: "true" }).stderr.trim()).toBe("release_resume_artifact_digest");
       expect(readdirSync(temp).filter((entry) => entry.startsWith("release-resume-"))).toEqual([]);
       expect(run({ MOCK_FETCH_FAIL: "true" }).stderr.trim()).toBe("release_resume_artifact_fetch");
-      expect(run({ MOCK_IMAGE_ID: `sha256:${"a".repeat(64)}` }).stderr.trim()).toBe(
-        "release_resume_restored_image",
-      );
+      expect(
+        run({
+          MOCK_IMAGE_ID: JSON.stringify([
+            { Id: `sha256:${"a".repeat(64)}`, Os: "linux", Architecture: "amd64" },
+          ]),
+        }).stderr.trim(),
+      ).toBe("release_resume_restored_image");
       writeFileSync(resolve(root, target.path, "container/source.mjs"), "changed input");
       expect(run().stderr.trim()).toBe("release_resume_restored_image");
     } finally {
@@ -883,7 +887,11 @@ test("real Node capture waits for allocation visibility and rechecks proof befor
   const temp = mkdtempSync(resolve(tmpdir(), "kogane-publication-cli-"));
   try {
     const imageId = `sha256:${"f".repeat(64)}`;
-    const registryBytes = JSON.stringify({ config: { digest: imageId } });
+    const registryBytes = JSON.stringify({
+      schemaVersion: 2,
+      mediaType: "application/vnd.oci.image.manifest.v1+json",
+      config: { digest: imageId },
+    });
     const newImage = `registry.cloudflare.com/synthetic/${target.appName}@sha256:${createHash("sha256").update(registryBytes).digest("hex")}`;
     writeFileSync(
       resolve(temp, "container-baseline.json"),
@@ -979,6 +987,23 @@ test("real Node capture waits for allocation visibility and rechecks proof befor
       expect(result.stderr).toContain(code!);
       expect(readdirSync(temp)).not.toContain("resume-receipt.json");
     }
+    const manifestId = newImage.split("@")[1];
+    for (const [id, kind, success] of [
+      [manifestId, "manifest", true],
+      [imageId, "config", true],
+      [manifestId, undefined, false],
+      [imageId, "manifest", false],
+    ] as const) {
+      rmSync(saved, { force: true });
+      writeFileSync(
+        resolve(temp, "container-manifest.json"),
+        JSON.stringify([{ name: target.name, imageId: id, imageIdKind: kind, legacy: false }]),
+      );
+      const result = run("success");
+      expect(result.status).toBe(success ? 0 : 1);
+      expect(readdirSync(temp).includes("resume-receipt.json")).toBe(success);
+      if (!success) expect(result.stderr).toContain("registry_image_mismatch");
+    }
     expect(run("unstable", "verify-publication-baseline").stderr).toContain("rollout_pending");
     const original = readFileSync(resolve(temp, "container-baseline.json"));
     writeFileSync(
@@ -1021,9 +1046,15 @@ for (const phase of [
       const temp = mkdtempSync(resolve(tmpdir(), "kogane-postcheck-cli-"));
       try {
         const imageId = `sha256:${"f".repeat(64)}`;
-        const registryBytes = JSON.stringify({ config: { digest: imageId } });
+        const registryBytes = JSON.stringify({
+          schemaVersion: 2,
+          mediaType: "application/vnd.oci.image.manifest.v1+json",
+          config: { digest: imageId },
+        });
         const childDigest = `sha256:${createHash("sha256").update(registryBytes).digest("hex")}`;
         const indexBytes = JSON.stringify({
+          schemaVersion: 2,
+          mediaType: "application/vnd.oci.image.index.v1+json",
           manifests: [{ digest: childDigest, platform: { os: "linux", architecture: "amd64" } }],
         });
         const indexDigest = `sha256:${createHash("sha256").update(indexBytes).digest("hex")}`;
@@ -1088,7 +1119,23 @@ for (const phase of [
           writeFileSync(
             resolve(temp, "container-manifest.json"),
             JSON.stringify([
-              { name: target.name, imageId, legacy: mode === "legacy", registryImage: newImage },
+              {
+                name: target.name,
+                imageId:
+                  mode === "typed-manifest"
+                    ? childDigest
+                    : mode === "typed-index"
+                      ? indexDigest
+                      : imageId,
+                imageIdKind:
+                  mode === "typed-manifest"
+                    ? "manifest"
+                    : mode === "typed-index"
+                      ? "index"
+                      : undefined,
+                legacy: mode === "legacy",
+                registryImage: newImage,
+              },
             ]),
           );
           return spawnSync(
@@ -1114,7 +1161,7 @@ for (const phase of [
           );
         };
         for (const mode of phase === "success"
-          ? ["success", "delayed", "legacy", "final-active"]
+          ? ["success", "delayed", "legacy", "typed-manifest", "typed-index", "final-active"]
           : []) {
           const result = run(mode);
           expect(result.status).toBe(0);
