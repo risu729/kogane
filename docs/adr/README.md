@@ -74,4 +74,3 @@ for current behavior.
 - [ADR 0065: Collect native coverage by runtime, without a fabricated repository total](0065-native-test-coverage.md) — proposed; native measurements, no numerical threshold
 - [ADR 0067: Current economic-row evidence readiness before event writers](0067-economic-row-readiness.md) — proposed; internal read-only diagnostic, no writer activation
 - [ADR 0069: Retire collector-local public admin bearer entrypoints in bounded slices](0069-collector-admin-retirement.md)
-- [ADR 0070: Validate observed SBI Shinsei history offline before enabling acquisition](0070-sbi-shinsei-observed-history-boundary.md) — proposed; offline-only request and capture inspection, no history acquisition or publication
