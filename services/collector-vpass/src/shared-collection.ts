@@ -51,6 +51,7 @@ import {
   type VpassCardBinding,
 } from "./card-binding";
 import { providerCount } from "./provider-count";
+import { logStatementCountDiagnostic } from "./statement-count-diagnostic";
 
 export const SOURCE = "vpass";
 /** `collector-<collector id>`: the producer the Processor's route for this source names (ADR 0014). */
@@ -547,6 +548,7 @@ export async function persistCardRun(
 ): Promise<SharedRunOutcome> {
   const binding = await deriveVpassCardBinding(run);
   const outcome = await persist(bucket, await planFor(run, binding));
+  logStatementCountDiagnostic(run.months);
   const months = Object.keys(run.months).sort();
   const checks = months.map((month) => monthCheck(run.months[month]!));
   return {
