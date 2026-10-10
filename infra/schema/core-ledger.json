@@ -1135,6 +1135,12 @@
       "statementCount": 10,
       "insertStatements": [],
       "sha256": "2f77d555e0f64215837e4f6e70addcfe018a17a184986aea5a3272500f7a5980"
+    },
+    {
+      "file": "0078_maintenance_change_provenance.sql",
+      "statementCount": 4,
+      "insertStatements": [],
+      "sha256": "786ec712f3e9118c9dc5afc9fac258f197dc11c187bde2d7cacb1ee8de2a8d2e"
     }
   ],
   "tables": [
@@ -13862,6 +13868,27 @@
           "notNull": true,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "actor_kind",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "change_reason",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "decision_ref",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -13870,6 +13897,15 @@
       ],
       "foreignKeys": [],
       "indexes": [
+        {
+          "name": "maintenance_agent_writes",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "actor",
+            "created_at"
+          ]
+        },
         {
           "name": "maintenance_source",
           "unique": false,
@@ -13892,7 +13928,7 @@
         "maintenance_no_delete"
       ],
       "appendOnly": true,
-      "sqlSha256": "069618216f10aa80"
+      "sqlSha256": "eb2571a92dbe5f3e"
     },
     {
       "name": "publication_events",
@@ -21131,6 +21167,11 @@
       "sqlSha256": "621bbd1c45936b0d"
     },
     {
+      "name": "maintenance_agent_writes",
+      "table": "provider_maintenance_rules",
+      "sqlSha256": "cab3c1e216c7a262"
+    },
+    {
       "name": "maintenance_source",
       "table": "provider_maintenance_rules",
       "sqlSha256": "d640aeb09437edd1"
@@ -21415,7 +21456,7 @@
     "tableCount": 139,
     "viewCount": 44,
     "triggerCount": 517,
-    "explicitIndexCount": 143,
+    "explicitIndexCount": 144,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -21669,6 +21710,6 @@
       "0070_economic_commit_guard.sql",
       "0071_economic_event_command_kinds.sql"
     ],
-    "schemaSha256": "6c5e182b1a54f4843b19ba65588b38fdeb93fe2d76681e11d164b1964a5143ef"
+    "schemaSha256": "339280b496419e8e5088994123ae86ee7c18b341ac7ed245c570823d34efb7cb"
   }
 }

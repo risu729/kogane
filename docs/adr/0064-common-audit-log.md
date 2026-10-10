@@ -4,8 +4,10 @@
   [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)
   implements the table, the chokepoint for the existing `ui`, `agent-http` and
   `mcp` paths, the daily caps with their overflow aggregate and the operator's
-  `GET /api/v2/audit` ([audit log](../audit-log.md)); the `alarm` and `lane`
-  writers, the agent read and everything of ADR 0063 are not implemented.
+  `GET /api/v2/audit` ([audit log](../audit-log.md)); slice S4 (#564) adds the
+  maintenance read and revision to the catalogue, the revision on `mcp` only
+  as a recorded refusal. The `alarm` and `lane` writers, the agent read and
+  delegated execution (ADR 0063) are not implemented.
 - Date: 2026-10-09
 - Related: [ADR 0063](0063-delegated-ai-operation-path.md) (the delegated AI
   operation path, whose two-step confirmation and idempotency use this
@@ -37,7 +39,8 @@ What is recorded today (the plan's section 6.1 has the full table):
   mutable execution state.
 - **Settings** — `collection_schedule_revisions` (0065; written, never read),
   `provider_maintenance_rules` (0065; `actor_kind`, `change_reason`,
-  `decision_ref` on #564's 0067), `maintenance_survey_decisions` (0069) — carry
+  `decision_ref` on #564's 0067, renumbered 0078 in slice S4),
+  `maintenance_survey_decisions` (0069) — carry
   an actor. `collection_schedules`, `collection_schedule_occurrences` and
   `collection_execution_leases` are mutable; releasing a lease leaves no trace
   at all.

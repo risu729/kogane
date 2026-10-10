@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { parseJsonc } from "../../../scripts/jsonc.ts";
 import {
   AGENT_CAPABILITIES,
   grantAllows,
   grantAllowsRow,
+  grantAllowsScheduleSource,
   grantedSources,
   grantFor,
   parseGrants,
@@ -40,6 +43,7 @@ describe("grants are deny-by-default", () => {
       "records.read",
       "evidence.read",
       "interpretation.propose",
+      "schedules.read",
     ]);
     for (const capability of [
       "interpretation.accept",
@@ -49,6 +53,15 @@ describe("grants are deny-by-default", () => {
       "policy.admin",
       "retention.admin",
       "external-money-action",
+      // Maintenance windows are read only: a revision is delegated in
+      // MCP_DELEGATIONS (ADR 0063), never granted here, and there is no job
+      // edit, toggle, lease release or run.
+      "schedules.maintenance.update",
+      "schedules.update",
+      "schedules.enable",
+      "schedules.lease.release",
+      "schedules.collection.run",
+      "schedules.*",
     ])
       expect(validGrant({ ...grant(), capabilities: [capability] })).toBe(false);
   });
@@ -125,6 +138,126 @@ describe("scope arithmetic", () => {
   });
 });
 
+describe("maintenance-settings grants (ADR 0046, as amended by ADR 0063)", () => {
+  const maintenance = grant({
+    scopes: { sources: [], accounts: [], scheduleSources: ["fixture-a"] },
+    capabilities: ["schedules.read"],
+  });
+
+  test("the schedule scope is separate, optional and bounded like any scope", () => {
+    expect(validGrant(maintenance)).toBe(true);
+    expect(validGrant(grant())).toBe(true);
+    expect(
+      validGrant(grant({ scopes: { sources: "*", accounts: "*", scheduleSources: "*" } })),
+    ).toBe(true);
+    for (const scheduleSources of ["fixture-a", [1], ["dup", "dup"], Array(65).fill("x")])
+      expect(
+        validGrant({ ...grant(), scopes: { sources: "*", accounts: "*", scheduleSources } }),
+      ).toBe(false);
+    expect(
+      validGrant({ ...grant(), scopes: { sources: "*", accounts: "*", schedules: ["x"] } }),
+    ).toBe(false);
+  });
+
+  test("an absent schedule scope reaches no source, and financial scope never stands in", () => {
+    expect(grantAllowsScheduleSource(maintenance, "fixture-a")).toBe(true);
+    expect(grantAllowsScheduleSource(maintenance, "fixture-b")).toBe(false);
+    const financial = grant({ scopes: { sources: "*", accounts: "*" } });
+    expect(grantAllowsScheduleSource(financial, "fixture-a")).toBe(false);
+  });
+
+  test("no financial capability implies the schedule read, or the reverse", () => {
+    expect(grantAllows(grant(), "schedules.read")).toBe(false);
+    for (const capability of ["summary.read", "records.read", "evidence.read"] as const)
+      expect(grantAllows(maintenance, capability)).toBe(false);
+  });
+
+  test("a table naming the maintenance write is refused whole, so no agent grant can write", () => {
+    const entry = (capabilities: string[]) => ({
+      scopes: { sources: [], accounts: [], scheduleSources: ["fixture-a"] },
+      capabilities,
+      budget: { maxRows: 1, maxProposalTargets: 1, maxExplainDepth: 1 },
+    });
+    expect(parseGrants(JSON.stringify({ reader: entry(["schedules.read"]) })).size).toBe(1);
+    expect(
+      parseGrants(
+        JSON.stringify({
+          reader: entry(["schedules.read"]),
+          "mcp-client:writer": entry(["schedules.read", "schedules.maintenance.update"]),
+        }),
+      ).size,
+    ).toBe(0);
+  });
+
+  test("the report states the schedule scope and no write beyond proposals", () => {
+    const report = capabilitiesFor(maintenance, CENTRAL_STORE_CAPABILITIES, 65_536);
+    expect(report.intents).toEqual([]);
+    expect(report.scopes.scheduleSources).toEqual(["fixture-a"]);
+    expect(report.writes).toEqual({ proposals: false, adoption: false, externalActions: false });
+  });
+});
+
+describe("the committed agent-API grant table under this vocabulary (#640)", () => {
+  /** Every capability a grant may name that writes anything but an inert proposal: none. */
+  const writes = (table: Map<string, Grant>) =>
+    [...table.values()].flatMap((entry) =>
+      entry.capabilities.filter(
+        (capability) => capability !== "interpretation.propose" && !capability.endsWith(".read"),
+      ),
+    );
+  const assertParsedWhole = (configured: string) => {
+    const entries = Object.keys(JSON.parse(configured) as Record<string, unknown>).length;
+    const table = parseGrants(configured);
+    // Refusing an entry refuses the whole table, so a vocabulary change that
+    // removed a capability the shipped table names would empty it: it must not.
+    expect(entries).toBeGreaterThan(0);
+    expect(table.size).toBe(entries);
+    expect(writes(table)).toEqual([]);
+    for (const entry of table.values()) {
+      expect(grantAllows(entry, "schedules.maintenance.update" as never)).toBe(false);
+      expect(capabilitiesFor(entry, CENTRAL_STORE_CAPABILITIES, 65_536).writes).toEqual({
+        proposals: grantAllows(entry, "interpretation.propose"),
+        adoption: false,
+        externalActions: false,
+      });
+    }
+  };
+
+  test("a synthetic copy of the shipped entry's shape parses and grants no schedule write", () => {
+    assertParsedWhole(
+      JSON.stringify({
+        "mcp-client:owner-subject-synthetic": {
+          scopes: { sources: "*", accounts: "*" },
+          capabilities: ["summary.read", "records.read"],
+          budget: { maxRows: 100, maxProposalTargets: 3, maxExplainDepth: 3 },
+        },
+      }),
+    );
+  });
+
+  test("the committed App configuration's table parses whole and grants no schedule write", () => {
+    // Read at run time from the committed files; nothing of it is copied here.
+    const wrangler = parseJsonc(
+      readFileSync(new URL("../../../services/app/wrangler.jsonc", import.meta.url), "utf8"),
+      "services/app/wrangler.jsonc",
+    ) as { vars: Record<string, string> };
+    const configured = wrangler.vars["AGENT_API_GRANTS"]!;
+    const cloudflare = readFileSync(
+      new URL("../../../services/app/cloudflare.config.ts", import.meta.url),
+      "utf8",
+    );
+    const native = /AGENT_API_GRANTS:\s*bindings\.text\(\s*'([^']*)'/u.exec(cloudflare)?.[1];
+    // The two committed configurations ship the same table.
+    expect(native === configured).toBe(true);
+    if (configured.trim() === "") return;
+    assertParsedWhole(configured);
+    // The vocabulary itself can name no schedule write.
+    expect(AGENT_CAPABILITIES.filter((capability) => capability.startsWith("schedules."))).toEqual([
+      "schedules.read",
+    ]);
+  });
+});
+
 describe("capability report", () => {
   test("records.read alone does not carry evidence.read", () => {
     const records = grant({ capabilities: ["summary.read", "records.read"] });
@@ -142,6 +275,7 @@ describe("capability report", () => {
     expect(report.intents.map((entry) => entry.intent)).toEqual(["holdings", "coverage"]);
     expect(report.scopes.sources).toEqual(["fixture-a"]);
     expect(report.writes).toEqual({ proposals: false, adoption: false, externalActions: false });
+    expect(report.scopes.scheduleSources).toEqual([]);
     expect(report.proposalMethods).toEqual([]);
     // Nothing in the report names a source the principal cannot see.
     expect(JSON.stringify(report)).not.toContain("fixture-b");

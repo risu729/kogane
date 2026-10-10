@@ -10,15 +10,15 @@ confirmed, not the whole schema, and sets the rule this ledger exists to keep: *
 classified is kept** (`unclassified-keep`) and is out of scope for any cleanup — acceptance
 test G0-01.
 
-Schema digest: `6c5e182b1a54f4843b19ba65588b38fdeb93fe2d76681e11d164b1964a5143ef`
+Schema digest: `339280b496419e8e5088994123ae86ee7c18b341ac7ed245c570823d34efb7cb`
 
 ## Summary
 
-- Migrations applied: 72
+- Migrations applied: 73
 - Tables: 139 (all `STRICT`: yes)
 - Views: 44
 - Triggers: 517
-- Explicit indexes: 143
+- Explicit indexes: 144
 - `WITHOUT ROWID` tables: artifact_relations, artifact_transform_steps, fetch_run_annotations, ingest_client_producers, ingest_client_routes, origin_template_policies, producer_sources, run_inventory_items, source_external_ids
 
 | classification | count | tables |
@@ -152,7 +152,7 @@ active_releases, allocations, approvals, audit_overflow_counters, calculation_ru
 | `producers` | core-keep | sources, producers and routes | yes | no | no | — | — | 4 | 0 | 0 | 0 |
 | `projection_input_records` | core-keep | CORE: the fixed input a build was made from (05 §3), referenced by the job and kept with the evidence it names | yes | no | yes | projection_input_records_no_update | projection_input_records_no_delete | 9 | 0 | 1 | 3 |
 | `provider_maintenance_references` | operational-mutable | current public maintenance provenance | yes | no | no | — | — | 4 | 0 | 0 | 0 |
-| `provider_maintenance_rules` | core-keep | append-only public maintenance revisions | yes | no | yes | maintenance_no_update | maintenance_no_delete | 11 | 0 | 1 | 2 |
+| `provider_maintenance_rules` | core-keep | append-only public maintenance revisions | yes | no | yes | maintenance_no_update | maintenance_no_delete | 14 | 0 | 2 | 2 |
 | `publication_events` | core-keep | publication pointer and history | yes | no | yes | publication_events_no_update | publication_events_no_delete | 9 | 3 | 3 | 7 |
 | `published_parse_runs` | core-keep | publication pointer and history | yes | no | no | — | published_parse_runs_no_delete | 7 | 2 | 1 | 6 |
 | `raw_object_verification_events` | core-keep | inventories, seals and verification | yes | no | yes | raw_object_verification_events_no_update | raw_object_verification_events_no_delete | 9 | 2 | 1 | 5 |
@@ -279,4 +279,4 @@ rows, listed so that the config work of 06 §3 and the backfill work of 06 §4 s
 | `0070_economic_commit_guard.sql` | 53 | economic_identity_epochs |
 | `0071_economic_event_command_kinds.sql` | 34 | approvals_expanded, change_plans_expanded, decision_outbox_expanded, operation_receipts_expanded |
 
-Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql, 0068_ops_collector_dispatches.sql, 0069_maintenance_survey.sql, 0072_own_transfer_proposals.sql, 0075_audit_records.sql, 0077_reward_bucket_claims_v2.sql
+Migrations with no `INSERT`: 0001_initial.sql, 0004_exclude_synthetic_view.sql, 0018_identity.sql, 0019_identity_seal_provenance.sql, 0020_vpass_identity_binding.sql, 0021_vpass_binding_lookup_plan.sql, 0022_identity_current_run_plan.sql, 0023_account_connections.sql, 0028_parse_releases.sql, 0030_balance_read_model.sql, 0031_operations.sql, 0032_economic_events.sql, 0036_publication_event_guard.sql, 0037_unit_scope_eligibility.sql, 0040_operations_api.sql, 0041_reward_revision_triggers.sql, 0042_retire_legacy_projections.sql, 0048_reconciliation_scan_cursor.sql, 0049_processor_lane_ticks.sql, 0050_statement_fact_indexes.sql, 0052_sbi_shinsei_bank_debits.sql, 0055_vpass_collector_card_binding.sql, 0056_sbi_shinsei_exchange_rate_policy_version.sql, 0059_sbi_shinsei_exchange_rate_policy_version_1_0_2.sql, 0060_card_debit_account_statements.sql, 0061_scheduled_payment_observations.sql, 0068_ops_collector_dispatches.sql, 0069_maintenance_survey.sql, 0072_own_transfer_proposals.sql, 0075_audit_records.sql, 0077_reward_bucket_claims_v2.sql, 0078_maintenance_change_provenance.sql

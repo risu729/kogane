@@ -200,6 +200,24 @@ describe("the record builder", () => {
     expect(toolOperation("kogane.audit.overflow", "mcp")).toBeNull();
     expect(toolOperation("kogane.audit.search", "mcp")).toBeNull();
     expect(toolOperation("financial.query", "mcp")).toBeNull();
+    // The maintenance read is on both agent paths; the maintenance revision is
+    // a delegated operation on `mcp` only (ADR 0063), never on the HTTP agent
+    // route, which yields no delegation.
+    expect(toolOperation("kogane.schedules.maintenance.read", "agent-http")).toBe(
+      "schedules.maintenance.read",
+    );
+    expect(toolOperation("kogane.schedules.maintenance.read", "mcp")).toBe(
+      "schedules.maintenance.read",
+    );
+    expect(toolOperation("kogane.schedules.maintenance.update", "mcp")).toBe(
+      "schedules.maintenance.update",
+    );
+    expect(toolOperation("kogane.schedules.maintenance.update", "agent-http")).toBeNull();
+    expect(OPERATION_CATALOGUE["schedules.maintenance.update"]).toMatchObject({
+      risk: ["R1", "R3"],
+      delegation: "schedules.maintenance.update",
+    });
+    expect(OPERATION_CATALOGUE["schedules.maintenance.read"].risk).toEqual(["R0"]);
   });
 });
 

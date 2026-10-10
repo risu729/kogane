@@ -9,8 +9,9 @@ calls (`mcp`). It does not record the Processor's own `alarm` and `lane` work
 yet (plan S7); no call runs as a delegated principal and nothing prepares or
 confirms (ADR 0063, plan S3: the merged declaration core only parses
 `MCP_DELEGATIONS` and reports an inert status in an MCP client's
-`kogane.capabilities`, which is recorded as that tool's read); and agents
-cannot read it (plan S5/S8). The limits are listed at the
+`kogane.capabilities`, which is recorded as that tool's read, and the
+maintenance revision tool of slice S4 resolves a delegation only to refuse
+every call); and agents cannot read it (plan S5/S8). The limits are listed at the
 end.
 
 ## The record
@@ -72,16 +73,18 @@ authorization and service unchanged and records the outcome:
   before any batch, and the App records it once as `refused` under the
   command's operation.
 
-| Path         | Route or tool                                                                                                                                                                  | Operation                                                                                                                                                                                      | Effect record written by                                                                               |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `ui`         | `POST /api/command/v1/{plan,simulate,approve,commit,operation}`                                                                                                                | `command.plan`, `command.simulate`, `command.approve`, `command.commit`, `command.operation.get`                                                                                               | the Processor: `createPlan`, `approve` and `commit` batches                                            |
-| `ui`         | `POST /api/ops/v1/{collections,imports,replays,projections}`, `…/sessions/{source}/refresh`, `GET …/operations/{id}`                                                           | `ops.collection.request`, `ops.import.request`, `ops.replay.request`, `ops.projection.request`, `ops.session.refresh`, `ops.operation.get`                                                     | the App: the acceptance batch of `packages/application/src/operations/requests.ts`                     |
-| `ui`         | `POST /api/ops/v1/schedules/{job}`, `/maintenance`, `/proposals/{id}`, `/leases/{source}`                                                                                      | `schedules.job.update`, `schedules.maintenance.update`, `schedules.survey.decide`, `schedules.lease.release`                                                                                   | the Processor: `updateSchedule`, `updateMaintenance`, `decideSurveyProposal`, `releaseCollectionLease` |
-| `agent-http` | `POST /api/agent/v1/<tool>`                                                                                                                                                    | the tool name without `kogane.` (`capabilities`, `context.open`, `financial.query`, `explain`, `purchases.explain`, `instruments.candidates`, `reconstructed-state.read`, `reconcile.propose`) | the App: the proposal batch of `services/app/src/proposals.ts`                                         |
-| `mcp`        | `tools/call` on `/mcp` by an MCP client (`mcp-client:<sub>`, ADR 0047): the agent tools; the operations tools are refused (`actor_not_supported`) and that refusal is recorded | the same names; a refusal before any tool is named is `mcp.request`                                                                                                                            | as above                                                                                               |
+| Path         | Route or tool                                                                                                                                                                  | Operation                                                                                                                                                                                                                    | Effect record written by                                                                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `ui`         | `POST /api/command/v1/{plan,simulate,approve,commit,operation}`                                                                                                                | `command.plan`, `command.simulate`, `command.approve`, `command.commit`, `command.operation.get`                                                                                                                             | the Processor: `createPlan`, `approve` and `commit` batches                                            |
+| `ui`         | `POST /api/ops/v1/{collections,imports,replays,projections}`, `…/sessions/{source}/refresh`, `GET …/operations/{id}`                                                           | `ops.collection.request`, `ops.import.request`, `ops.replay.request`, `ops.projection.request`, `ops.session.refresh`, `ops.operation.get`                                                                                   | the App: the acceptance batch of `packages/application/src/operations/requests.ts`                     |
+| `ui`         | `POST /api/ops/v1/schedules/{job}`, `/maintenance`, `/proposals/{id}`, `/leases/{source}`                                                                                      | `schedules.job.update`, `schedules.maintenance.update`, `schedules.survey.decide`, `schedules.lease.release`                                                                                                                 | the Processor: `updateSchedule`, `updateMaintenance`, `decideSurveyProposal`, `releaseCollectionLease` |
+| `agent-http` | `POST /api/agent/v1/<tool>`                                                                                                                                                    | the tool name without `kogane.` (`capabilities`, `context.open`, `financial.query`, `explain`, `purchases.explain`, `instruments.candidates`, `reconstructed-state.read`, `reconcile.propose`, `schedules.maintenance.read`) | the App: the proposal batch of `services/app/src/proposals.ts`                                         |
+| `mcp`        | `tools/call` on `/mcp` by an MCP client (`mcp-client:<sub>`, ADR 0047): the agent tools; the operations tools are refused (`actor_not_supported`) and that refusal is recorded | the same names; `schedules.maintenance.update`, a delegated operation every call of which is refused today (below); a refusal before any tool is named is `mcp.request`                                                      | as above                                                                                               |
 
 The three schedule writers that were not one batch before are one now:
-a maintenance revision, its provenance update and its record; an accepted
+a maintenance revision, its provenance update and its record (all through the
+one writer `writeMaintenanceRevision(env, write, append)`, whose `append` adds
+the record; slice S4); an accepted
 survey proposal's revision, its decision row and its record (a proposal
 decided by someone else in between rolls the revision back with them); a lease
 release and its record, which is the only durable trace of a release. Alarm
@@ -101,6 +104,25 @@ the page, truncated when the total is larger; `reconstructed-state.read`: one
 when the answer carries a reconstruction, else none; the others one).
 Whole-store and multi-source reads carry no scope. A replay names the earlier
 effect by the id the service answered with.
+
+**Maintenance windows (plan slice S4).** A maintenance revision's record
+carries its closed reason as `reason_code`: `operator-edit` for the operator's
+edit, `maintenance-survey-proposal-accepted` for an accepted proposal.
+`schedules.maintenance.read` (R0) is one `read` record on whichever agent path
+served it. `schedules.maintenance.update` exists on `mcp` as well as on `ui`;
+there it is graded by the caller's delegation, not its grant, and since no
+delegation executes yet every call is one `refused` record (`failed` for
+`503 delegation_misconfigured`) with the delegation's or the schema's code,
+`principal_kind` `agent` and no `delegation_ref`: the builder admits no
+`delegated` record until slice S3, and nothing is relayed to the Processor.
+Its catalogue classes are R1 and, beyond the seven-day bound, R3; no record
+carries R3 today. A refused argument is not echoed: the record holds the code,
+never the reason text, URL or window the caller sent. The maintenance writer
+requires a delegated revision's decision reference to be
+`delegated-audit:<audit_id>`, naming the audit record that authorizes it, which
+slice S3 is to reserve before it calls the writer (the prepare record for an
+R2 confirm, the apply record for an R1 call); no such record or revision is
+written today ([schedules](schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3)).
 
 ### The envelope to the Processor
 
