@@ -1,10 +1,12 @@
+import { DurableObject } from "cloudflare:workers";
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
   scheduledFailure,
   scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
-import { Container, getContainer } from "@cloudflare/containers";
+import { ContainerController } from "../../../packages/collection/src/container-controller";
+import { getContainer } from "../../../packages/collection/src/container-stub";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
   createDiagnostics,
@@ -60,19 +62,42 @@ const RELAY_HOSTS = new Set([
 ]);
 const MAX_NDJSON_LINE_BYTES = 3 * 1024 * 1024;
 const CONTAINER_ID = "prestia-globalpass-read-only-v20";
-export class GlobalPassCollectorContainer extends Container<Env> {
-  override defaultPort = 8080;
-  override requiredPorts = [8080];
-  override sleepAfter = "30s";
-  override enableInternet = true;
-  override envVars = { TZ: "Asia/Tokyo" };
-  override onStart(): void {
+export class GlobalPassCollectorContainer extends DurableObject<Env> {
+  private readonly controller: ContainerController;
+  constructor(ctx: DurableObjectState, env: Env) {
+    super(ctx, env);
+    this.controller = new ContainerController(
+      ctx,
+      { TZ: "Asia/Tokyo" },
+      {
+        onStart: () => this.onStart(),
+        onStop: () => this.onStop(),
+        onError: (error) => this.onError(error),
+      },
+    );
+  }
+  startAndWaitForPorts(): Promise<void> {
+    return this.controller.startAndWaitForPorts();
+  }
+  destroy(): Promise<void> {
+    return this.controller.destroy();
+  }
+  stop(): Promise<void> {
+    return this.controller.stop();
+  }
+  override fetch(request: Request): Promise<Response> {
+    return this.controller.fetch(request);
+  }
+  override alarm(): Promise<void> {
+    return this.controller.alarm();
+  }
+  onStart(): void {
     console.log(JSON.stringify({ event: "globalpass-container-start" }));
   }
-  override onStop(): void {
+  onStop(): void {
     console.log(JSON.stringify({ event: "globalpass-container-stop" }));
   }
-  override onError(error: unknown): void {
+  onError(error: unknown): void {
     logEvent(
       "error",
       JSON.stringify({

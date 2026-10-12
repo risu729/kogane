@@ -1,3 +1,4 @@
+mock.module("cloudflare:workers", () => ({ DurableObject: class {} }));
 import { afterEach, describe, expect, mock, spyOn, test } from "bun:test";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import type { CollectionManifest } from "../src/model";
@@ -7,8 +8,7 @@ let container: {
   fetch(request: Request): Promise<Response>;
   destroy(): Promise<void>;
 };
-mock.module("@cloudflare/containers", () => ({
-  Container: class {},
+mock.module("../../../packages/collection/src/container-stub", () => ({
   getContainer: () => container,
 }));
 const { runCollection } = await import("../src/worker");

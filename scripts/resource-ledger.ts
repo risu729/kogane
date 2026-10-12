@@ -132,6 +132,15 @@ export const DISPOSITIONS: Readonly<Record<string, Disposition>> = {
     executionStatus: "EXECUTED_U04",
     planLiveResourceStatus: "NOT_VERIFIED",
   },
+  "experiments/container-api-verification": {
+    source: "ADR 0044 direct Container API runtime verification",
+    proposedAction: "isolated-as-experiment",
+    proposedTarget: "experiments/container-api-verification",
+    requiredVerification:
+      "synthetic SDK/native/exact-version rollback with unchanged identity, idle timing, streams and sentinels; approved temporary resources only",
+    executionStatus: "PREPARED_NOT_DEPLOYED",
+    planLiveResourceStatus: "NOT_VERIFIED",
+  },
   "experiments/cloudflare-runtime-probe": {
     source: "poc_disposition.csv (was poc/cloudflare-runtime-probe)",
     proposedAction: "isolate",

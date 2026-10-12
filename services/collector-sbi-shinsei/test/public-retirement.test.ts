@@ -1,4 +1,5 @@
 import { expect, mock, test } from "bun:test";
+mock.module("cloudflare:workers", () => ({ DurableObject: class {} }));
 mock.module("@cloudflare/containers", () => ({
   Container: class {},
   getContainer: () => {

@@ -1,3 +1,4 @@
+mock.module("cloudflare:workers", () => ({ DurableObject: class {} }));
 // U09 (G1-01, G1-02, G1-08, G1-09, G1-15, G3-07, G3-08, G3-11): the shared
 // DATA-bucket write path of the SBI Shinsei collector.
 //
@@ -248,8 +249,7 @@ describe("G1-01/G1-02 persisting a run", () => {
 
 // The end-to-end path: the Worker decides, the container is mocked away.
 let handoff = "";
-mock.module("@cloudflare/containers", () => ({
-  Container: class {},
+mock.module("../../../packages/collection/src/container-stub", () => ({
   getContainer: () => ({
     startAndWaitForPorts: async () => {},
     fetch: async () => new Response(handoff, { status: 200 }),

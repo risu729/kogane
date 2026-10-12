@@ -67,6 +67,7 @@ describe("safe SBI Shinsei diagnostics", () => {
       errorType: "Error",
       reason: "transport-disconnected",
     });
+    expect(containerStopDetails({ reason: "destroyed" })).toEqual({ reason: "destroyed" });
     expect(containerStopDetails({ exitCode: 137, reason: "runtime_signal" })).toEqual({
       exitCode: 137,
       reason: "runtime_signal",

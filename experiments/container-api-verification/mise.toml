@@ -1,0 +1,30 @@
+# ref: https://mise.jdx.dev/tasks/
+#:schema https://mise.jdx.dev/schema/mise.json
+
+[tasks.types]
+description = "Generate synthetic Container Worker types without remote access."
+run = "./node_modules/.bin/wrangler types --config wrangler.native.jsonc"
+
+[tasks.typecheck]
+depends = ["//experiments/container-api-verification:types"]
+run = "./node_modules/.bin/tsc --noEmit"
+
+[tasks.test]
+description = "Run synthetic local-server and driver predicate checks; no runtime claim."
+run = "node ../../tasks/_lib/coverage-run.mjs bun test ./test/*.test.ts"
+
+[tasks.dry-run]
+wait_for = ["//:ci:workspaces", "//:ci:remainder:workspaces", "//packages/storage-d1:test"]
+depends = ["//experiments/container-api-verification:types"]
+description = "Build both synthetic variants with Docker without uploading."
+run = [
+	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.sdk.jsonc",
+	"./node_modules/.bin/wrangler deploy --dry-run --config wrangler.native.jsonc",
+]
+
+[tasks.verify]
+description = "Run authenticated hosted synthetic checks only after separate temporary deployment approval."
+run = "node driver.mjs"
+
+[tasks.ci]
+depends = ["//experiments/container-api-verification:typecheck", "//experiments/container-api-verification:test"]

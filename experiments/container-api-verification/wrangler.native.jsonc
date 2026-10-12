@@ -1,0 +1,43 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "kogane-container-api-verification",
+  "main": "src/native.ts",
+  "compatibility_date": "2026-10-04",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": false
+  },
+  "vars": {
+    "HARNESS_REVISION": "native",
+    "HARNESS_MONITOR": "enabled"
+  },
+  "containers": [
+    {
+      "name": "kogane-container-api-verification-verificationcontainer",
+      "class_name": "VerificationContainer",
+      "image": "./Dockerfile",
+      "max_instances": 1,
+      "instance_type": "basic",
+      "scheduling_policy": "default",
+      "constraints": {
+        "regions": ["APAC"]
+      }
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "HARNESS",
+        "class_name": "VerificationContainer"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["VerificationContainer"]
+    }
+  ]
+}

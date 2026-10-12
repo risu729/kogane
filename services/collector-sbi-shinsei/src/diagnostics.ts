@@ -150,7 +150,8 @@ export function containerStopDetails(params: unknown): Record<string, string | n
   try {
     if (!params || typeof params !== "object") return details;
     const { reason, exitCode } = params as { reason?: unknown; exitCode?: unknown };
-    if (reason === "exit" || reason === "runtime_signal") details.reason = reason;
+    if (reason === "exit" || reason === "runtime_signal" || reason === "destroyed")
+      details.reason = reason;
     if (
       typeof exitCode === "number" &&
       Number.isInteger(exitCode) &&
