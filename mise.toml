@@ -13,7 +13,7 @@ lockfile = true
 [tools]
 bun = "1.4.2"
 node = "26.11.1"
-hk = "2.5.0"
+hk = "2.6.0"
 oxlint = "1.72.0"
 oxfmt = "0.71.0"
 jactionlint = "2.0.2"
