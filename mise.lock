@@ -161,20 +161,20 @@ url = "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellche
 url_api = "https://api.github.com/repos/koalaman/shellcheck/releases/assets/279056944"
 
 [[tools.tombi]]
-version = "1.8.3"
+version = "1.8.4"
 backend = "aqua:tombi-toml/tombi"
-specifiers = ["1.8.3"]
+specifiers = ["1.8.4"]
 
 [tools.tombi."platforms.linux-x64"]
-checksum = "sha256:659e05345d807f10093e82e20e65ed69c2334c10602df46fac0e1583c43419dd"
-url = "https://github.com/tombi-toml/tombi/releases/download/v1.8.3/tombi-cli-1.8.3-x86_64-unknown-linux-musl.tar.gz"
-url_api = "https://api.github.com/repos/tombi-toml/tombi/releases/assets/633323563"
+checksum = "sha256:597e08f9fa336b365c011c94387997dd3d2dadd904cde5b7dc55033d29680e5e"
+url = "https://github.com/tombi-toml/tombi/releases/download/v1.8.4/tombi-cli-1.8.4-x86_64-unknown-linux-musl.tar.gz"
+url_api = "https://api.github.com/repos/tombi-toml/tombi/releases/assets/633726039"
 provenance = "github-attestations"
 
 [tools.tombi."platforms.windows-x64"]
-checksum = "sha256:c62a90a60202deeef73f3bb6ea9590228ce62e2a6f6b91a374042bbafbcfa2f4"
-url = "https://github.com/tombi-toml/tombi/releases/download/v1.8.3/tombi-cli-1.8.3-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/tombi-toml/tombi/releases/assets/633323543"
+checksum = "sha256:11809d18477d7ac952110dc3e8423533ff480915f780add1e589e1d27493b61e"
+url = "https://github.com/tombi-toml/tombi/releases/download/v1.8.4/tombi-cli-1.8.4-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/tombi-toml/tombi/releases/assets/633726019"
 provenance = "github-attestations"
 
 [[tools.typos]]
