@@ -41,7 +41,7 @@
         "@cloudflare/puppeteer": "1.4.0",
       },
       "devDependencies": {
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "typescript": "7.0.2",
         "wrangler": "4.149.0",
       },
@@ -92,7 +92,7 @@
     "experiments/tamia-tcp-bridge": {
       "name": "@kogane/tamia-tcp-bridge",
       "devDependencies": {
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "typescript": "7.0.2",
         "wrangler": "4.149.0",
       },
@@ -201,7 +201,7 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.4.0",
         "@modelcontextprotocol/client": "2.3.1",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
@@ -218,7 +218,7 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.4.0",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
         "typescript": "6.0.3",
@@ -236,7 +236,7 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.4.0",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
@@ -253,7 +253,7 @@
         "@cloudflare/puppeteer": "1.4.0",
         "@cloudflare/vitest-plugin": "1.4.0",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
         "devtools-protocol": "0.0.1714151",
@@ -269,7 +269,7 @@
       },
       "devDependencies": {
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
         "wrangler": "4.149.0",
@@ -283,7 +283,7 @@
       },
       "devDependencies": {
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
         "wrangler": "4.149.0",
@@ -297,7 +297,7 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.4.0",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
@@ -310,7 +310,7 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.4.0",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
@@ -326,7 +326,7 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.4.0",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
@@ -340,7 +340,7 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.4.0",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
@@ -357,7 +357,7 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.4.0",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
@@ -369,7 +369,7 @@
       "name": "@kogane/poc-sony-bank-worker",
       "devDependencies": {
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
         "wrangler": "4.149.0",
@@ -383,7 +383,7 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.4.0",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
@@ -402,7 +402,7 @@
       "devDependencies": {
         "@cloudflare/workers-types": "5.20261009.1",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
         "wrangler": "4.149.0",
@@ -419,7 +419,7 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.4.0",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@types/set-cookie-parser": "2.4.10",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
@@ -433,7 +433,7 @@
       "devDependencies": {
         "@cloudflare/vitest-plugin": "1.4.0",
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "4.1.11",
         "cf": "1.0.0-beta.14",
         "typescript": "7.0.2",
@@ -450,7 +450,7 @@
       },
       "devDependencies": {
         "@types/bun": "1.4.2",
-        "@types/node": "26.6.4",
+        "@types/node": "26.6.5",
         "cf": "1.0.0-beta.14",
         "miniflare": "5.20260831.0-alpha",
         "typescript": "7.0.2",
@@ -900,7 +900,7 @@
 
     "@types/mdast": ["@types/mdast@4.0.4", "", { "dependencies": { "@types/unist": "*" } }, "sha512-kGaNbPh1k7AFzgpud/gMdvIm5xuECykRR+JnWKQno9TAXVa6WIVCGTPvYGekIDL4uwCZQSYbUxNBSb1aUo79oA=="],
 
-    "@types/node": ["@types/node@26.6.4", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-ldVPDCzj7fsaGZrLB0NuHuTvJcsNasysBAqMolr/cgxrLd1xbqxIr3XJiPnHHJUCxj5sNF1vnRj9aWnrVh5Jcg=="],
+    "@types/node": ["@types/node@26.6.5", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-uMzsv9stDdofIZBx4UGh4Z9ZgXnGC9seRDscilBcTHAeOFk67MZg/k9bWVfO+bk4qZmG+l52hRnLwUiH2LnJTg=="],
 
     "@types/react": ["@types/react@19.3.0", "", { "dependencies": { "csstype": "^3.2.2" } }, "sha512-N0rFCuH9YoxG9/m61l9MfpJKfmLOVU0em7ipIz6TRgSSkvReLB9vL85GB+yr8Bs5leqpvg96JSwF4ZS1s4viQg=="],
 
