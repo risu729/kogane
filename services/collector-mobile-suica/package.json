@@ -12,7 +12,7 @@
     "@types/node": "26.6.5",
     "@vitest/coverage-istanbul": "4.1.11",
     "cf": "1.0.0-beta.14",
-    "devtools-protocol": "0.0.1714151",
+    "devtools-protocol": "0.0.1716261",
     "typescript": "7.0.2",
     "vitest": "4.1.11",
     "wrangler": "4.149.0"
