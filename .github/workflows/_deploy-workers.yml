@@ -553,7 +553,7 @@ jobs:
       - name: Deploy the GlobalPass collector
         id: deploy-globalpass-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker') && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'globalpass-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-globalpass
@@ -563,7 +563,7 @@ jobs:
       - name: Deploy the GlobalPass collector with cf
         id: cf-deploy-globalpass-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'globalpass-worker') && contains(fromJson(steps.select.outputs.selected), 'globalpass-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'globalpass-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-globalpass
@@ -610,7 +610,7 @@ jobs:
       - name: Deploy the Mobile Suica collector
         id: deploy-mobile-suica-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mobile-suica-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'mobile-suica-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-mobile-suica
@@ -620,7 +620,7 @@ jobs:
       - name: Deploy the Mobile Suica collector with cf
         id: cf-deploy-mobile-suica-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mobile-suica-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'mobile-suica-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-mobile-suica
@@ -632,7 +632,7 @@ jobs:
       - name: Deploy the Money Forward collector
         id: deploy-moneyforward-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'moneyforward-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'moneyforward-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-moneyforward
@@ -642,7 +642,7 @@ jobs:
       - name: Deploy the Money Forward collector with cf
         id: cf-deploy-moneyforward-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'moneyforward-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'moneyforward-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-moneyforward
@@ -654,7 +654,7 @@ jobs:
       - name: Deploy the MyJCB collector
         id: deploy-myjcb-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'myjcb-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'myjcb-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-myjcb
@@ -664,7 +664,7 @@ jobs:
       - name: Deploy the MyJCB collector with cf
         id: cf-deploy-myjcb-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'myjcb-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'myjcb-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-myjcb
@@ -676,7 +676,7 @@ jobs:
       - name: Deploy the SBI Securities collector
         id: deploy-sbi-securities-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-securities-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'sbi-securities-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-sbi-securities
@@ -686,7 +686,7 @@ jobs:
       - name: Deploy the SBI Securities collector with cf
         id: cf-deploy-sbi-securities-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-securities-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-securities-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-sbi-securities
@@ -705,7 +705,7 @@ jobs:
       - name: Deploy the SBI Shinsei collector
         id: deploy-sbi-shinsei-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker') && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'sbi-shinsei-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-sbi-shinsei
@@ -715,7 +715,7 @@ jobs:
       - name: Deploy the SBI Shinsei collector with cf
         id: cf-deploy-sbi-shinsei-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'sbi-shinsei-worker') && contains(fromJson(steps.select.outputs.selected), 'sbi-shinsei-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-shinsei-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-sbi-shinsei
@@ -762,7 +762,7 @@ jobs:
       - name: Deploy the SBI VC Trade collector
         id: deploy-sbi-vc-trade-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-vc-trade-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'sbi-vc-trade-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-sbi-vc-trade
@@ -772,7 +772,7 @@ jobs:
       - name: Deploy the SBI VC Trade collector with cf
         id: cf-deploy-sbi-vc-trade-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sbi-vc-trade-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sbi-vc-trade-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-sbi-vc-trade
@@ -784,7 +784,7 @@ jobs:
       - name: Deploy the SMBC Direct collector
         id: deploy-smbc-direct-backfill-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'smbc-direct-backfill-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'smbc-direct-backfill-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-smbc-direct
@@ -794,7 +794,7 @@ jobs:
       - name: Deploy the SMBC Direct collector with cf
         id: cf-deploy-smbc-direct-backfill-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'smbc-direct-backfill-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'smbc-direct-backfill-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-smbc-direct
@@ -806,7 +806,7 @@ jobs:
       - name: Deploy the Mizuho collector
         id: deploy-mizuho-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mizuho-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'mizuho-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-mizuho
@@ -816,7 +816,7 @@ jobs:
       - name: Deploy the Mizuho collector with cf
         id: cf-deploy-mizuho-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'mizuho-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'mizuho-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-mizuho
@@ -828,7 +828,7 @@ jobs:
       - name: Deploy the Sony Bank collector
         id: deploy-sony-bank-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sony-bank-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'sony-bank-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-sony-bank
@@ -838,7 +838,7 @@ jobs:
       - name: Deploy the Sony Bank collector with cf
         id: cf-deploy-sony-bank-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'sony-bank-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'sony-bank-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-sony-bank
@@ -857,7 +857,7 @@ jobs:
       - name: Deploy the St.George collector
         id: deploy-st-george-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker') && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'st-george-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-st-george
@@ -867,7 +867,7 @@ jobs:
       - name: Deploy the St.George collector with cf
         id: cf-deploy-st-george-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && !contains(fromJson(steps.resume.outputs.published || '[]'), 'st-george-worker') && contains(fromJson(steps.select.outputs.selected), 'st-george-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'st-george-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-st-george
@@ -914,7 +914,7 @@ jobs:
       - name: Deploy the PRESTIA bank collector
         id: deploy-prestia-bank-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'prestia-bank-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'prestia-bank-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-prestia-bank
@@ -924,7 +924,7 @@ jobs:
       - name: Deploy the PRESTIA bank collector with cf
         id: cf-deploy-prestia-bank-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'prestia-bank-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'prestia-bank-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-prestia-bank
@@ -936,7 +936,7 @@ jobs:
       - name: Deploy the Vpass collector
         id: deploy-vpass-json
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpass-json') && !contains(fromJson(steps.select.outputs.cf-selected), 'vpass-json') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-vpass
@@ -946,7 +946,7 @@ jobs:
       - name: Deploy the Vpass collector with cf
         id: cf-deploy-vpass-json
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpass-json') && contains(fromJson(steps.select.outputs.cf-selected), 'vpass-json') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-vpass
@@ -958,7 +958,7 @@ jobs:
       - name: Deploy the V Point Pay collector
         id: deploy-vpoint-pay-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-pay-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-pay-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-vpoint-pay
@@ -968,7 +968,7 @@ jobs:
       - name: Deploy the V Point Pay collector with cf
         id: cf-deploy-vpoint-pay-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-pay-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-pay-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-vpoint-pay
@@ -980,7 +980,7 @@ jobs:
       - name: Deploy the V Point collector
         id: deploy-vpoint-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-worker') && !contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-worker') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-vpoint
@@ -990,7 +990,7 @@ jobs:
       - name: Deploy the V Point collector with cf
         id: cf-deploy-vpoint-worker
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'vpoint-worker') && contains(fromJson(steps.select.outputs.cf-selected), 'vpoint-worker') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/collector-vpoint
@@ -1004,7 +1004,7 @@ jobs:
         # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
         # from the job's `steps` context to record, per Worker, what happened.
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'processor') && !contains(fromJson(steps.select.outputs.cf-selected), 'processor') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/processor
@@ -1014,7 +1014,7 @@ jobs:
       - name: Deploy the Processor with cf
         id: cf-deploy-processor
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'processor') && contains(fromJson(steps.select.outputs.cf-selected), 'processor') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/processor
@@ -1028,7 +1028,7 @@ jobs:
         # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
         # from the job's `steps` context to record, per Worker, what happened.
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app') && !contains(fromJson(steps.select.outputs.cf-selected), 'app') }}
-        uses: risu729/wrangler-deploy-action@e943f9681fb250fa0d0a104bd95ea121c510d192 # v1.2.0
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/app
@@ -1040,7 +1040,7 @@ jobs:
         # `deploy-<ledger name>`: `release-ledger.mjs progress` reads this id
         # from the job's `steps` context to record, per Worker, what happened.
         if: ${{ steps.decide.outputs.proceed == 'true' && contains(fromJson(steps.select.outputs.selected), 'app') && contains(fromJson(steps.select.outputs.cf-selected), 'app') }}
-        uses: risu729/wrangler-deploy-action@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1
+        uses: risu729/wrangler-deploy-action@a9db854f3a31cdf3cdf28977e66f52f32fc9e8a0 # v2.2.2
         with:
           mode: production
           working-directory: services/app
