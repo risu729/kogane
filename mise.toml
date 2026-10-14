@@ -31,6 +31,7 @@ ruff = "0.17.0"
 [settings]
 experimental = true
 lockfile = true
+lockfile_mode = "generate"
 lockfile_platforms = ["linux-x64", "windows-x64"]
 
 [settings.npm]
