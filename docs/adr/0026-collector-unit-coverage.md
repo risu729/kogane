@@ -349,7 +349,7 @@ importer's path, or something else). It is recorded as unreconciled.
   `[p/Ppage]`. It logs them as `globalpass-activity-pages` with the month's
   position in the run (never the month). A page that states more than one
   page gets the failure `{operation: "pagination", errorType:
-"PaginationError", errorCode: "activity_pages_unwalked"}`; a page whose
+  "PaginationError", errorCode: "activity_pages_unwalked"}`; a page whose
   totals or pagers disagree gets `activity_pager_unreadable`. The page itself
   is still stored when the sanitizer accepts it, and the run is `partial`.
   A refused page gets both entries, sanitizer code first.

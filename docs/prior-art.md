@@ -212,7 +212,7 @@ before Kogane finalizes layers A to C:
   Original bytes, the parse configuration, and the typed rows, all retained —
   close to Kogane's A→B split.
 - `data_enrichments(enrichable_type, enrichable_id, source, attribute_name,
-value, metadata)`, unique per (record, source, attribute). Literally "source
+  value, metadata)`, unique per (record, source, attribute). Literally "source
   S claims attribute A of record R is V" — Kogane's layer-C origin tracking,
   implemented.
 - `entries.locked_attributes` records which fields a human overrode, so a later

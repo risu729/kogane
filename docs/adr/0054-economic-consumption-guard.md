@@ -46,7 +46,7 @@ Five platform facts constrain the design:
 4. SQLite does not push a correlated or trigger term into a `UNION` view: a
    trigger that reads such a view materializes every row of it.
 5. The 5-tuple key `json_array(source_id, producer_id, external_id_namespace,
-source_account, external_id)` names a row inside one collection path, not
+   source_account, external_id)` names a row inside one collection path, not
    an economic fact. A producer change ([ADR 0014](0014-collector-producer-ids.md)),
    a client-declared namespace, a parser release that changes id text, the
    0063 identity rewrite and mirrored sources give one fact several keys;
@@ -80,7 +80,7 @@ source_account, external_id)` names a row inside one collection path, not
   trigger from the cited observation and parse run, which it pins. A
   human-adopted writer also records an **alias class**:
   `json_array(source_id, provider identity components, resolved account id,
-alias rule version)`, computed from a registry-declared, versioned
+  alias rule version)`, computed from a registry-declared, versioned
   provider-identity function, never from the raw external id text, the
   producer or the namespace. One live holder per (book, key)
   (`economic_claim_held`) and per (book, alias class) (`alias_conflict`),
@@ -102,7 +102,7 @@ alias rule version)`, computed from a registry-declared, versioned
 - **Entry and finalization.** Statement 1 is the entry and carries every
   precondition (the reviewed receipt reservation, or a rule writer's decision
   insert). Every later statement is `WHERE EXISTS(entry) AND NOT EXISTS(own
-row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
+  row)`, so a stale batch is an all-0-rows no-op and a replay writes nothing.
   A rule writer's entry condition is "this decision exists", not "this batch
   wrote it" (`decisionEntry`), so a replay finds it and writes whatever it
   has not written yet. **Decision for G1b:** from G1b on, the card purchase

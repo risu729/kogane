@@ -304,7 +304,7 @@ revision is `instrument_unresolved`: the pin check is the safeguard.
   B7–B11 and the C side of B3 run on hand-built selections only.
 - The adapter and the query read; nothing is written, adopted or approved. No
   migration: the mapping reads use the 0018 key `UNIQUE(identifier_id,
-revision)` and the `instruments` primary key, and the identifier read passes
+  revision)` and the `instruments` primary key, and the identifier read passes
   over `instrument_mappings` once (its D1 cost is not measured).
 - The manifest holds amounts (the choices' quantities, and through the
   engine's manifest digest the inputs): like the engine's, it is a calculation

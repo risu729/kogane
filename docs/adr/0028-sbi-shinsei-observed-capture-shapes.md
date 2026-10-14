@@ -40,7 +40,7 @@ captures through the deployed parsers and reported structure and counts only
    the whole cause of the 29 rejections.
 2. **Board.** `responseParam.exchangeRateInformation.responseParam` holds
    `transactionTime` and 67 `exchangeRates` rows of `{currency,
-customerCategory, buyRate, sellRate, midRate}`: 13 currencies in 5
+   customerCategory, buyRate, sellRate, midRate}`: 13 currencies in 5
    `customerCategory` tiers each, CHF in one row, and one JPY row.
    `transactionTime` is 22 characters, `NNNN/NN/NN NN:NN:NN NN`: a
    19-character timestamp, a space and two more characters whose meaning
@@ -146,7 +146,7 @@ or per 100 units.
 - `packages/parsers`: the observed activity shape (slash `fromDate`, empty
   `toDate`, 10 one-sided rows with slash posting dates) parses to 10
   transactions, each activity observation marked `activityWindowEnd:
-"not-stated"`; a posting date before `fromDate`, an unstated or impossible
+  "not-stated"`; a posting date before `fromDate`, an unstated or impossible
   start, an absent or null `toDate` beside a stated start and a two-sided row
   still refuse; a stated `toDate` still bounds above. The observed board (13 × 5 + CHF + JPY, 22-character time) gives 198
   observations, complete, `expectedCount` 198, issues exactly the time and

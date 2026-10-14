@@ -143,7 +143,7 @@ review shaped the provisional input this PR uses.
 6. **Explanation.** Against the end figure in the same orientation: the
    remainder `reported − reconstructed` (exact whenever both are, never
    absorbed or written), late-recorded movements as `explainLate(baseline,
-now)`, a pure diff of two selections of one scope (the baseline is the cut
+   now)`, a pure diff of two selections of one scope (the baseline is the cut
    the adapter resolves for the end capture), pending shown apart and
    same-day boundary candidates. Statuses: `reconciled` only for a zero
    remainder with no gap and no boundary candidate;

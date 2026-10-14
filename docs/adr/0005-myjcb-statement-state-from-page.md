@@ -365,7 +365,7 @@ For the undiagnosable stops (finding 3):
   page is kept as `unknown` evidence with its relative or API period, no
   ledger is derived, no export is fetched, and the next month is read. The
   unread month is recorded as `unreadMonths: [{ position, code:
-"scheduled_payments_page" }]` on the summary and in the manifest, and is
+  "scheduled_payments_page" }]` on the summary and in the manifest, and is
   logged as `myjcb-credit-month-unread` with the position and the code only.
   A page that carries the third header beside another ledger is unread
   whole. An empty third-header ledger withholds nothing and is read as before.
@@ -572,7 +572,7 @@ months that were read whole.
   registration rule gives it a parser dataset: it is catalogued and sealed
   as evidence, and no parse job is created for it. The summary and the
   manifest record each schedule position as `schedulePages: [{ position,
-code }]` with a code from `SCHEDULE_PAGE_CODES`:
+  code }]` with a code from `SCHEDULE_PAGE_CODES`:
   `scheduled_payments_page` (stored) or `schedule_page_fetch` (the fetch or
   decoding failed; nothing stored; logged as
   `myjcb-credit-schedule-page-failed` with the position and code only), and

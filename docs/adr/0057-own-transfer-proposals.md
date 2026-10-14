@@ -93,8 +93,8 @@ no storage, no clock. Inputs are explicit:
   other state and a `self` without an account id are `ownership_unresolved`;
   nothing is guessed.
 - **Policy**: `OwnTransferPolicy` with `policyVersion`, `family:
-"bank-movement"`, `currencyRule: "same-currency"`, `window: {
-minDaysAfterDebit, maxDaysAfterDebit }` (inclusive, within ±31 days) and
+  "bank-movement"`, `currencyRule: "same-currency"`, `window: {
+  minDaysAfterDebit, maxDaysAfterDebit }` (inclusive, within ±31 days) and
   `difference`: `{ rule: "exact" }` or `{ rule: "fee-within", maxByCurrency }`
   (the debit's magnitude may exceed the credit by at most the stated amount of
   the pair's currency; a credit larger than the debit is never a fee). No field
@@ -351,7 +351,7 @@ Synthetic data only; nothing read from production.
 - `packages/domain/test/own-transfer-proposals.test.ts` (25 tests): no policy
   and every malformed or unversioned policy refused; the bound, epoch and
   ownership-version refusals; an SMBC-shaped row with `identityOrigin:
-provider-id` admitted with its alias class; an SBI-Shinsei-shaped row
+  provider-id` admitted with its alias class; an SBI-Shinsei-shaped row
   without an origin refused `identity_origin_unrecorded` (and an SMBC row
   without one too); fingerprints, other families, unresolved and foreign
   accounts, missing dates, inexact, zero and currency-less amounts; a held
