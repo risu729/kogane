@@ -247,7 +247,7 @@ AI, and not anonymous-agent power
   reference (the only decision reference the writer accepts). The writer
   answers `invalid_reason` for anything else, in place of `reason_required`.
 - **One writer, one batch, one record.** `writeMaintenanceRevision(env,
-write, append)` stays the only code that writes a maintenance revision; it
+  write, append)` stays the only code that writes a maintenance revision; it
   takes ADR 0050's `append` argument and sends the revision, its guarded
   provenance update and what the caller appends (the audit record of ADR
   0064, a survey acceptance row) as one D1 batch. The operator route and the
