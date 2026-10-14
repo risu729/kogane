@@ -225,12 +225,16 @@ describe("Renovate configuration", () => {
     groupName?: string;
     addLabels?: string[];
   }[];
-  test("extends the shared preset at the pinned tag and parses as JSON5", () => {
-    expect(renovate.extends).toEqual(["github>risu729/renovate-config#3.19.1"]);
+  test("extends the shared preset at a concrete version tag and parses as JSON5", () => {
+    // Renovate owns the tag; this guard owns the repository and stable version pin.
+    expect(renovate.extends).toHaveLength(1);
+    expect(renovate.extends[0]).toMatch(
+      /^github>risu729\/renovate-config#(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/,
+    );
     expect(rules.length).toBeGreaterThan(0);
   });
   test("the typescript group name matches the preset's, so the rules merge instead of competing", () => {
-    // risu729/renovate-config 3.19.1 declares `matchDepNames: ["typescript",
+    // risu729/renovate-config declares `matchDepNames: ["typescript",
     // "npm:typescript"], groupName: "typescript"`; a different local name would
     // split one update into two branches.
     const localGroup = rules.find((rule) =>
