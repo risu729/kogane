@@ -111,8 +111,11 @@ once; until then, everything degrades safely (see below).
    - install it **only** on `risu729/kogane`;
    - do **not** add it to any ruleset bypass list. The whole design depends on
      the app being subject to the same rules as a human.
-2. **Repository variable** `KOGANE_AUTOMATION_APP_ID` = the App ID (the number
-   on the App's settings page).
+2. **Repository variable** `KOGANE_AUTOMATION_APP_CLIENT_ID` = the Client ID
+   on the existing App's settings page, not its numeric App ID. Keep the same
+   App, installation, private key and repository permissions. If migrating an
+   existing setup, add this variable before removing the obsolete
+   `KOGANE_AUTOMATION_APP_ID` variable.
 3. **Repository secret** `KOGANE_AUTOMATION_APP_PRIVATE_KEY` = the contents of
    a generated private key `.pem` file, including the header and footer lines.
 4. **Label** (Issues → Labels): `automerge-approved` for owner-authorized
@@ -129,7 +132,7 @@ once; until then, everything degrades safely (see below).
 
 ### When it is not configured
 
-- No `KOGANE_AUTOMATION_APP_ID` variable: the first step of `automerge.yml`
+- No `KOGANE_AUTOMATION_APP_CLIENT_ID` variable: the first step of `automerge.yml`
   logs `automation app not configured` and the job ends successfully. Nothing
   else in the workflow runs, and no pull request is affected — merging stays
   manual.
@@ -168,9 +171,15 @@ is fetchable from this repository. A `workflow_dispatch` supplies the sha by
 hand and is held to the same test through the compare API, below.
 
 The called release job holds the concurrency group `production-deploy` with
-`cancel-in-progress: false`, so one production change runs at a time and a
-later merge waits instead of interrupting a migration (G5-13). The group is
-held by the called release job for the entire serial attempt, including a
+`cancel-in-progress: false` and `queue: max`, so one production change runs
+at a time and queued requests wait instead of interrupting a migration or
+replacing an earlier pending request (G5-13). The manual rollback caller has a
+separate `rollback-<sha>-<targets>-caller` group with the same queue policy;
+using a different key avoids deadlocking its called job. GitHub allows up to
+100 pending runs per concurrency group; further requests are canceled at that
+limit. Queue order follows when a run starts waiting, not dispatch order, so the
+existing release/rollback eligibility guards still run under the inner lock.
+The group is held by the called release job for the entire serial attempt, including a
 selected-job rerun. This is also why
 `environment: production` is declared inside `_deploy-workers.yml`: a job that
 calls a reusable workflow cannot declare an environment itself.
@@ -872,7 +881,7 @@ cannot be proven offline and is verified on the first live pull request.
 | G5-10      | Tests: no workflow declares an environment other than `production`, uses a preview mode or a preview alias. The deploy ledger carries no preview target.                                                                                                                                |
 | G5-11      | Tests: a changed lockfile, configuration, migration or bundle is reported by field name. The workflow re-verifies the manifest immediately before the first upload.                                                                                                                     |
 | G5-12      | Tests: a commit every Worker is already recorded at stops without deploying, a partial record resumes with the missing Workers only, a Worker at a newer commit is left alone, and a diverged history fails. Live: the Deployments API is the record it reads.                          |
-| G5-13      | `production-deploy` with `cancel-in-progress: false` on both callers, and a migration step that only a run holding that group can reach. Live only.                                                                                                                                     |
+| G5-13      | `production-deploy` with `cancel-in-progress: false` and `queue: max` on the called job. Tests assert the separate rollback caller queue; only the inner lock permits migrations. Live serialization remains a hosted check.                                                            |
 | G5-14      | Tests: explicit RPC dependencies are ordered and the workflow deploy steps follow them (ADR 0039).                                                                                                                                                                                      |
 | G5-15      | Tests: every ledger entry still carries the Wrangler `name` its configuration declares, so a directory move cannot create a new resource.                                                                                                                                               |
 | G5-16      | Tests: the trusted pre-checkout floor rejects pre-retirement targets and API failures; rollback also refuses a target that is not an ancestor or whose migration list is not a prefix; its record keeps the deployed migration list and is per target. No workflow restores a database. |

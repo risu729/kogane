@@ -45,6 +45,7 @@ jobs:
     concurrency:
       group: production-deploy
       cancel-in-progress: false
+      queue: max
     runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:

@@ -3,6 +3,10 @@
 // verified on the first live pull request; everything decidable offline is
 // decided by the pure modules under tasks/_lib/ci and tested here.
 import { describe, expect, test } from "bun:test";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   AUTOMERGE_LABEL,
   appBotLogin,
@@ -14,6 +18,49 @@ import {
 } from "../tasks/_lib/ci/automerge-policy.mjs";
 import { nextLink, paginate } from "../tasks/_lib/ci/github-api.mjs";
 import renovate from "../.github/renovate.json5";
+
+test("automation uses the existing App's Client ID and safely skips an unconfigured app", () => {
+  const workflow = readFileSync(
+    new URL("../.github/workflows/automerge.yml", import.meta.url),
+    "utf8",
+  );
+  expect(workflow).toContain("client-id: ${{ vars.KOGANE_AUTOMATION_APP_CLIENT_ID }}");
+  expect(workflow).not.toContain("app-id:");
+  expect(workflow).not.toContain("KOGANE_AUTOMATION_APP_ID");
+  expect(workflow).toContain(
+    "AUTOMATION_APP_CLIENT_ID: ${{ vars.KOGANE_AUTOMATION_APP_CLIENT_ID }}",
+  );
+  const script = workflow
+    .split("      - name: Check automation app configuration")[1]!
+    .split("      - name: Checkout the default branch")[0]!
+    .split("        run: |\n")[1]!
+    .split("\n")
+    .map((line) => line.replace(/^          /u, ""))
+    .join("\n");
+  const directory = mkdtempSync(join(tmpdir(), "kogane-app-config-"));
+  try {
+    for (const [clientId, configured] of [
+      ["", "false"],
+      ["synthetic-client-id", "true"],
+    ]) {
+      const output = join(directory, `output-${configured}`);
+      const summary = join(directory, `summary-${configured}`);
+      execFileSync("bash", ["-euo", "pipefail", "-c", script], {
+        env: {
+          PATH: process.env.PATH,
+          AUTOMATION_APP_CLIENT_ID: clientId,
+          GITHUB_OUTPUT: output,
+          GITHUB_STEP_SUMMARY: summary,
+        },
+      });
+      expect(readFileSync(output, "utf8")).toBe(`configured=${configured}\n`);
+      if (!clientId)
+        expect(readFileSync(summary, "utf8")).toContain("automation app not configured");
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 const OWNER = "risu729";
 const HEAD = "1111111111111111111111111111111111111111";

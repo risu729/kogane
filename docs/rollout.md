@@ -241,7 +241,7 @@ doing something partial. The authoritative text is
 - [ ] Install it **only** on `risu729/kogane`.
 - [ ] Do **not** add it to any ruleset bypass list. The design depends on the
       app being subject to the same rules as a human.
-- [ ] Repository **variable** `KOGANE_AUTOMATION_APP_ID` = the App ID.
+- [ ] Repository **variable** `KOGANE_AUTOMATION_APP_CLIENT_ID` = the existing App's Client ID, not its numeric App ID.
 - [ ] Repository **secret** `KOGANE_AUTOMATION_APP_PRIVATE_KEY` = the whole
       `.pem`, header and footer lines included.
 

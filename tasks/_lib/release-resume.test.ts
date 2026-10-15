@@ -372,12 +372,16 @@ describe("serial workflow resumes publication once without bypassing a Container
   const steps = workflowSteps(workflow);
   test("direct inner-job concurrency applies to releases, rollback and selected-job reruns", () => {
     expect(workflow).toContain(
-      "concurrency:\n      group: production-deploy\n      cancel-in-progress: false",
+      "concurrency:\n      group: production-deploy\n      cancel-in-progress: false\n      queue: max",
     );
     for (const caller of ["deploy.yml", "rollback.yml"])
       expect(readFileSync(resolve(REPO_ROOT, ".github/workflows", caller), "utf8")).not.toContain(
         "group: production-deploy",
       );
+    const rollback = readFileSync(resolve(REPO_ROOT, ".github/workflows/rollback.yml"), "utf8");
+    expect(rollback).toContain(
+      "concurrency:\n  group: rollback-${{ inputs.sha }}-${{ inputs.targets }}-caller\n  cancel-in-progress: false\n  queue: max",
+    );
     // Failed CI notifications must not queue ahead of eligible releases.
     expect(readFileSync(resolve(REPO_ROOT, ".github/workflows/deploy.yml"), "utf8")).not.toMatch(
       /^concurrency:/m,

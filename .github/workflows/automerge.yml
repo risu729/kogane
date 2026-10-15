@@ -36,9 +36,9 @@ jobs:
       - name: Check automation app configuration
         id: config
         env:
-          AUTOMATION_APP_ID: ${{ vars.KOGANE_AUTOMATION_APP_ID }}
+          AUTOMATION_APP_CLIENT_ID: ${{ vars.KOGANE_AUTOMATION_APP_CLIENT_ID }}
         run: |
-          if [[ -z ${AUTOMATION_APP_ID} ]]; then
+          if [[ -z ${AUTOMATION_APP_CLIENT_ID} ]]; then
             echo "automation app not configured; see docs/ci-cd.md" | tee -a "${GITHUB_STEP_SUMMARY}"
             echo "configured=false" >> "${GITHUB_OUTPUT}"
           else
@@ -66,7 +66,7 @@ jobs:
         if: ${{ steps.config.outputs.configured == 'true' }}
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
-          app-id: ${{ vars.KOGANE_AUTOMATION_APP_ID }}
+          client-id: ${{ vars.KOGANE_AUTOMATION_APP_CLIENT_ID }}
           # The repository-scoped automation app is documented in docs/ci-cd.md;
           # this trusted-base job must also run before a deployment is approved.
           # jactionlint ignore=secrets-outside-env
