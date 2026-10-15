@@ -781,7 +781,8 @@ contracts remain in the release and workflow tests.
 
 ## Renovate
 
-`.github/renovate.json5` extends `github>risu729/renovate-config#3.19.1`, which
+`.github/renovate.json5` pins a stable release of the shared
+`risu729/renovate-config` preset, which
 already pins versions, automerges minor and digest updates, and keeps
 `compatibility_date` in `wrangler.jsonc` in step with Miniflare. The shared preset
 also excludes independent updates to mise-generated dependency graphs, whose

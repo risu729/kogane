@@ -150,7 +150,7 @@ and Knip, including hosted partition coverage. Root `bundle` and `dry-run` compo
 Workers' bundle locations stay aligned with `infra/deploy-order.json`.
 
 Automation tasks under `tasks/automation/` call tested implementation modules in
-`tasks/_lib/ci/`. The release and auto-merge workflows use these mise tasks;
+`tasks/_lib/ci/`. Release workflows use these mise tasks;
 GitHub-specific triggers, permissions, credential scopes and upload actions
 remain in workflow YAML. See [CI/CD automation](ci-cd.md) for their safeguards.
 Operational tasks are not dependencies of the check graph.
@@ -186,7 +186,8 @@ forgot to add another Actions matrix row or root task-file include.
   page in the St.George experiment test keeps its curly apostrophes and is
   excluded from the smart-quote check.
 - Repository guards cover manifests, task coverage, infrastructure ledgers,
-  auto-merge and release decisions, publication gates and import boundaries.
+  Renovate configuration, shared GitHub API pagination, release decisions,
+  publication gates and import boundaries.
 - Knip checks unlisted dependencies and unresolved imports as build failures.
   Its broader unused-code report remains advisory because static analysis
   cannot prove every runtime entrypoint. The report and policy are documented
