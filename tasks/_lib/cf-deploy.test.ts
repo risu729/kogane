@@ -25,6 +25,22 @@ const camel = (value: unknown): any =>
       : value;
 
 describe("cf migration preserves the canonical Wrangler deployment contract", () => {
+  test("current cf deployments share one immutable v2 pin and historical rollback retains v1", () => {
+    const pins = new Set<string>();
+    for (const target of allTargets) {
+      const legacy = steps.find((step) => step.body.includes(`id: deploy-${target.name}\n`));
+      const cf = steps.find((step) => step.body.includes(`id: cf-deploy-${target.name}\n`));
+      expect(legacy?.body).toMatch(
+        /^\s*uses: risu729\/wrangler-deploy-action@[a-f0-9]{40} # v1\.\d+\.\d+$/mu,
+      );
+      const pin = /^\s*uses: (risu729\/wrangler-deploy-action@[a-f0-9]{40} # v2\.\d+\.\d+)$/mu.exec(
+        cf?.body ?? "",
+      );
+      expect(pin).not.toBeNull();
+      pins.add(pin![1]!);
+    }
+    expect(pins.size).toBe(1);
+  });
   test("code-only Workers keep the versions strategy", () => {
     expect(targets.map((worker) => worker.name)).toEqual([
       "mobile-suica-worker",
@@ -198,7 +214,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(cf?.body).toContain(
         `&& contains(fromJson(steps.select.outputs.cf-selected), '${target.name}')`,
       );
-      expect(cf?.body).toContain("@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1");
+      expect(cf?.body).toContain("mode: production");
       expect(cf?.body).toContain(`worker: ${target.worker}`);
       expect(cf?.body).toContain(
         `deploy-triggers: '${["processor", "prestia-bank-worker"].includes(target.name) ? "true" : "false"}'`,
