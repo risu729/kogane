@@ -1,17 +1,17 @@
 # CI/CD automation
 
-How a change reaches `main` without anyone pressing the merge button, how it
-reaches Cloudflare afterwards, and what stops it when it should.
+How dependency updates reach `main`, how a merged change reaches Cloudflare,
+and what stops it when it should.
 [Continuous integration](ci.md) covers the checks themselves; this document
 covers the automation around them and the deployment that follows.
 
 Automation implementations live in `tasks/_lib/ci/`; executable mise entrypoints
-live in `tasks/automation/`. Workflows call `mise run --no-deps automation:automerge`,
-`automation:release-ledger`, `automation:release-manifest` and `automation:release-sha`, passing their
+live in `tasks/automation/`. Workflows call `mise run --no-deps automation:release-ledger`,
+`automation:release-manifest` and `automation:release-sha`, passing their
 arguments and existing environment values unchanged. The dependency-free ledger
-and auto-merge stages select only the pinned Node tool with `MISE_ENABLE_TOOLS`.
-`--no-deps` prevents a package install before a release decision or while an
-automation token is in scope. These production/account-changing tasks never join
+stages select only the pinned Node tool with `MISE_ENABLE_TOOLS`.
+`--no-deps` prevents a package install before a release decision or while a
+release token is in scope. These production/account-changing tasks never join
 `hk check`; that command covers only the validation graph described in [CI](ci.md).
 For rollback commits that predate these tasks, the release workflow selects the
 legacy `.github/scripts/release-*.mjs` entrypoint from the same verified commit.
@@ -19,129 +19,26 @@ Selection is by file layout, never a fallback after a failed command; no release
 or rollback decision is skipped. The adapter remains until every supported
 rollback target contains the new tasks.
 
-## Auto-merge
+## Pull request merging
 
-`.github/workflows/automerge.yml` runs on `pull_request_target` and pushes
-to `main`. It uses a GitHub App installation token to register native
-auto-merge (squash) and update branches that are behind.
+Renovate registers GitHub's native auto-merge according to the shared preset
+and repository overrides. Other pull requests are merged manually, or the
+owner explicitly enables native auto-merge for that pull request. Required
+GitHub checks and reviews apply in either case.
 
-The workflow checks out only the repository default branch and runs its
-reviewed `tasks/_lib/ci/` code through the `automation:automerge` mise task. Pull request strings are passed as data
-through the environment, never interpolated into shell commands (G5-08).
-Node is installed from the trusted checkout's mise lockfile with caching off.
-
-Auto-merge never overrides a check. It registers GitHub's own auto-merge, so
-the branch ruleset — `CI Check`, code scanning, signed commits, linear history,
-squash only — stays in charge. The automation app is not a bypass actor, so a
-failed, cancelled or unexpectedly skipped required job blocks the merge exactly
-as it blocks a human (G5-01, G5-03).
-
-### Who may auto-merge
-
-`automerge.yml` re-reads the pull request from the API (the event payload can
-be stale) and enables auto-merge when all of the following hold:
-
-- the author is the repository owner, or `renovate[bot]` with account type
-  `Bot`; **or** the pull request carries the `automerge-approved` label whose
-  last `labeled` event was made by the repository owner;
-- the pull request is open, not merged and not a draft;
-- `mergeable_state` is not `dirty` (G5-04).
-
-`blocked`, `unstable` and `unknown` are deliberately not treated as failures:
-those are the ruleset's decision, and native auto-merge waits for it.
-
-When eligibility goes away (for example, the label is removed or the pull
-request becomes a draft), the script disables only auto-merge that the app
-itself enabled. An owner-enabled auto-merge is left alone. An external pull
-request becomes eligible when the owner adds `automerge-approved`; GitHub
-still enforces every configured review and check requirement.
-
-The label event log is read to the end. Exceeding the pagination limit fails
-instead of silently ignoring later label removals.
-
-### Keeping merges on the latest base (G5-02)
-
-The ruleset's **"Require branches to be up to date before merging" must be
-on**. With it, a pull request whose CI passed on an older base reports
-`mergeable_state: behind` and GitHub refuses to merge it until it is updated,
-so CI always runs on the base the merge commit will actually have.
-
-The update is the automation's job, in two places:
-
-- when a pull request event shows `behind`, the handler updates that pull
-  request right away;
-- after every push to `main` (a merge is one), the handler lists the open pull
-  requests in creation order and updates the **oldest** one that is armed,
-  eligible and behind. Only one is updated per push: updating them all would
-  run CI on every one and only the first to finish could merge. The merge of
-  that one is the next push, which brings the next one forward — a
-  one-at-a-time merge queue without the organization feature (plan 10 §4).
-
-Both call `PUT /repos/{owner}/{repo}/pulls/{number}/update-branch` with
-`expected_head_sha`, so a branch that moved meanwhile is never updated blindly.
-The update is made with the App installation token on purpose: an update pushed
-with `GITHUB_TOKEN` would not start a new workflow run, and the pull request
-would wait forever for a CI result that never arrives (G5-02, G5-06). For the
-same reason the eventual merge commit, pushed by the App, does start the CD
-chain on `main` (G5-07). A pull request from a fork cannot be updated by the
-app (it is not installed on the fork; the API answers 403) and waits for its
-author to update it.
-
-### Review policy
-
-Auto-merge does not require an approving owner review or inspect review history.
-The former Risk Gate workflow and path ledger are removed. CI and the existing
-GitHub branch rules decide whether a pull request can merge; this change adds
-no replacement approval requirement. The owner-applied label only selects
-external pull requests for automation.
-
-If another ruleset still requires the obsolete `Risk Gate` status check, remove
-that entry before merging this change so it does not wait for a deleted check.
+There is no repository workflow that enables auto-merge, updates pull request
+branches, or merges based on the author or a label. A dedicated automation App,
+its Client ID/private key, and an approval label are not required. See
+[ADR 0071](adr/0071-remove-custom-automerge.md).
 
 ## Required GitHub settings
 
-The integrator cannot change any of these. The repository owner must do them
-once; until then, everything degrades safely (see below).
+Keep `CI Check` and the existing CodeQL requirements enforced. Preserve squash
+merging, signed commits, linear history, native auto-merge, automatic head-branch
+deletion and branch updates. Remove any obsolete `Risk Gate` required-check entry.
 
-1. **Create a GitHub App** owned by the repository owner account, named for
-   example `kogane-automation`:
-   - repository permissions: `Contents: Read and write`,
-     `Pull requests: Read and write`, `Metadata: Read-only`;
-   - no webhook, no account permissions, no organization permissions;
-   - install it **only** on `risu729/kogane`;
-   - do **not** add it to any ruleset bypass list. The whole design depends on
-     the app being subject to the same rules as a human.
-2. **Repository variable** `KOGANE_AUTOMATION_APP_CLIENT_ID` = the Client ID
-   on the existing App's settings page, not its numeric App ID. Keep the same
-   App, installation, private key and repository permissions. If migrating an
-   existing setup, add this variable before removing the obsolete
-   `KOGANE_AUTOMATION_APP_ID` variable.
-3. **Repository secret** `KOGANE_AUTOMATION_APP_PRIVATE_KEY` = the contents of
-   a generated private key `.pem` file, including the header and footer lines.
-4. **Label** (Issues → Labels): `automerge-approved` for owner-authorized
-   external auto-merge. Renovate also uses `dependencies`, `workers` and `deployed`.
-5. **Ruleset** (`main`, id 21174448): keep `CI Check` required and turn on
-   "Require branches to be up to date before merging".
-   Do not add the automation app as a bypass actor. Remove any obsolete
-   `Risk Gate` required-check entry.
-6. **Repository settings** that must stay as they are: allow auto-merge, squash
-   merging only, automatically delete head branches, allow branch updates.
-7. **The `production` environment, its Cloudflare token and account id** — see
-   [Required GitHub and Cloudflare settings](#required-github-and-cloudflare-settings)
-   below. Without them merging keeps working and only the deployment fails.
-
-### When it is not configured
-
-- No `KOGANE_AUTOMATION_APP_CLIENT_ID` variable: the first step of `automerge.yml`
-  logs `automation app not configured` and the job ends successfully. Nothing
-  else in the workflow runs, and no pull request is affected — merging stays
-  manual.
-- A fork pull request: `automerge.yml` runs in the base repository context.
-  An external author requires an owner-applied `automerge-approved` label;
-  the app cannot update the fork branch, so the author must update it.
-- "Require branches to be up to date" still off: nothing breaks, but a pull
-  request whose CI passed on an older base merges without re-running CI on
-  the latest one, so G5-02 is not enforced until it is turned on.
+The `production` environment, Cloudflare token and account id are documented in
+[Required GitHub and Cloudflare settings](#required-github-and-cloudflare-settings).
 
 ## Continuous deployment
 
@@ -863,20 +760,14 @@ reachable, and that the `workflow_run` chain actually starts after a merge.
 
 ## Acceptance coverage
 
-`scripts/automerge.test.ts` (run by `mise run ci:root`) unit-tests the
-decision functions in `tasks/_lib/ci/automerge-policy.mjs` against fixtures. The workflow wiring itself
-cannot be proven offline and is verified on the first live pull request.
+`scripts/ci-configuration.test.ts` checks complete GitHub API pagination and
+Renovate's stable shared-preset pin and local grouping contracts. Deployment
+contracts remain in the release and workflow tests.
 
 | Acceptance | Covered by                                                                                                                                                                                                                                                                              |
 | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| G5-01      | Tests: pending/blocked states are left to the ruleset. Live: a failing `CI Check` keeps auto-merge waiting.                                                                                                                                                                             |
-| G5-02      | Tests: a `behind` branch stays eligible and requests an update; the sweep picks the oldest armed one. Live: strict up-to-date + update starts CI before the merge.                                                                                                                      |
-| G5-03      | Tests: owner and `renovate[bot]` eligibility. Live: the app merges without a bypass entry.                                                                                                                                                                                              |
-| G5-04      | Tests: draft, closed, merged and `dirty` pull requests are refused.                                                                                                                                                                                                                     |
-| G5-05      | The former owner-approval requirement is removed; no replacement approval gate is added.                                                                                                                                                                                                |
-| G5-06      | Live only: the App token update starts CI, no human approval loop. Not provable offline.                                                                                                                                                                                                |
 | G5-07      | Live only: the merge push starts `CI`, whose successful run on `main` starts `Deploy` (push event, this repository, `main`). Proven by the first merge after enabling CD.                                                                                                               |
-| G5-08      | Workflows pass pull request strings through `env` only; zizmor, ghalint and jactionlint enforce the shape. Tests: pagination fails closed.                                                                                                                                              |
+| G5-08      | Workflow inputs are passed as data; shared GitHub API pagination fails closed on incomplete or invalid collections.                                                                                                                                                                     |
 | G5-09      | CI runs the deploy Action in `dry-run` mode with no account or token, and the release job builds and dry-runs before any credential is in scope. Both asserted.                                                                                                                         |
 | G5-10      | Tests: no workflow declares an environment other than `production`, uses a preview mode or a preview alias. The deploy ledger carries no preview target.                                                                                                                                |
 | G5-11      | Tests: a changed lockfile, configuration, migration or bundle is reported by field name. The workflow re-verifies the manifest immediately before the first upload.                                                                                                                     |
@@ -890,7 +781,8 @@ cannot be proven offline and is verified on the first live pull request.
 
 ## Renovate
 
-`.github/renovate.json5` extends `github>risu729/renovate-config#3.19.1`, which
+`.github/renovate.json5` pins a stable release of the shared
+`risu729/renovate-config` preset, which
 already pins versions, automerges minor and digest updates, and keeps
 `compatibility_date` in `wrangler.jsonc` in step with Miniflare. The shared preset
 also excludes independent updates to mise-generated dependency graphs, whose

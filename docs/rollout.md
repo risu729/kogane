@@ -232,33 +232,17 @@ Until each is done the corresponding automation degrades safely rather than
 doing something partial. The authoritative text is
 [ci-cd.md](ci-cd.md#required-github-settings); this is the checklist form.
 
-### 6.1 GitHub App for auto-merge
+### 6.1 Pull request merging
 
-- [ ] Create a GitHub App owned by the owner account (e.g. `kogane-automation`)
-      with repository permissions `Contents: Read and write`,
-      `Pull requests: Read and write`, `Metadata: Read-only`; no webhook, no
-      account or organization permissions.
-- [ ] Install it **only** on `risu729/kogane`.
-- [ ] Do **not** add it to any ruleset bypass list. The design depends on the
-      app being subject to the same rules as a human.
-- [ ] Repository **variable** `KOGANE_AUTOMATION_APP_CLIENT_ID` = the existing App's Client ID, not its numeric App ID.
-- [ ] Repository **secret** `KOGANE_AUTOMATION_APP_PRIVATE_KEY` = the whole
-      `.pem`, header and footer lines included.
-
-_Not configured:_ `automerge.yml` logs `automation app not configured`, exits 0,
-and merging stays manual.
-
-### 6.2 Labels
-
-- [ ] `automerge-approved` — an owner-applied label that makes an external
-      pull request eligible for native auto-merge. GitHub enforces required reviews.
+Renovate handles its own native auto-merge under the shared preset. Merge other
+pull requests manually or explicitly enable native auto-merge per pull request.
+No dedicated GitHub App or approval label is required; see
+[ADR 0071](adr/0071-remove-custom-automerge.md).
 
 ### 6.3 Branch ruleset (`main`, id 21174448)
 
 - [ ] Keep `CI Check` required and remove any obsolete `Risk Gate` entry.
-- [ ] Turn on "Require branches to be up to date before merging" so CI runs
-      on the latest base; automation updates eligible branches one at a time.
-- [ ] Keep the automation app out of bypass lists. Preserve squash merging,
+- [ ] Preserve squash merging,
       signed commits, linear history, auto-merge and branch updates.
 
 These settings preserve CI enforcement. There is no owner-review prerequisite

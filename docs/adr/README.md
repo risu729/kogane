@@ -76,3 +76,4 @@ for current behavior.
 - [ADR 0068: Preserve provider expiry subsets apart from reward holdings](0068-provider-reward-expiry-subsets.md) — proposed; natural production reward capture verification pending
 - [ADR 0069: Retire collector-local public admin bearer entrypoints in bounded slices](0069-collector-admin-retirement.md)
 - [ADR 0070: Validate observed SBI Shinsei history offline before enabling acquisition](0070-sbi-shinsei-observed-history-boundary.md) — proposed; offline-only request and capture inspection, no history acquisition or publication
+- [ADR 0071: Let Renovate own dependency auto-merge](0071-remove-custom-automerge.md) — proposed; remove the unconfigured custom merge workflow

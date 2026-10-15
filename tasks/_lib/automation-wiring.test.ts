@@ -76,7 +76,7 @@ test("automation tasks cannot join legacy ci:* task discovery", () => {
   expect(result.exitCode).toBe(0);
   const tasks = JSON.parse(result.stdout.toString()) as { name: string }[];
   const names = tasks.map((task) => task.name.replace(/^\/\/:/u, ""));
-  for (const name of ["automerge", "release-ledger", "release-manifest", "release-sha"]) {
+  for (const name of ["release-ledger", "release-manifest", "release-sha"]) {
     expect(names).toContain(`automation:${name}`);
     expect(names).not.toContain(`ci:${name}`);
   }
