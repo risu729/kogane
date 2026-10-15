@@ -342,3 +342,23 @@ Synthetic tests exercise classic, manifest and index identities, wrong-kind and
 wrong-digest refusals, unknown metadata, platform ambiguity, child tampering,
 capture/bind/precheck, prepared restore, capture-publication and postcheck
 paths. Local tests do not establish a successful hosted release or recovery.
+
+## Amendment: retain pending manual rollback requests (2026-10-15)
+
+- Status: proposed
+
+The manual rollback caller now declares its own non-cancellable concurrency
+group keyed by SHA and targets. It never acquires `production-deploy` itself,
+so it cannot deadlock the called job. Both this outer group and the shared inner
+production group use `queue: max`: otherwise GitHub's default single pending
+slot would cancel an earlier pending request at either layer.
+
+[GitHub's concurrency queue](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
+retains up to 100 pending runs per group, then cancels additional requests.
+Ordering is by when a run starts waiting on each group, not dispatch time. The
+existing eligibility and supersession guards still run under the inner lock;
+queueing does not promise that an obsolete release or rollback will deploy.
+
+The workflow contract test asserts both queue policies, separate caller keys,
+and the unchanged shared inner lock for releases, rollback and selected-job
+reruns. No live rollback is invoked for this configuration change.

@@ -17,6 +17,12 @@ on:
         required: false
         default: ""
         type: string
+# This caller has its own key; sharing the inner production-deploy key would
+# deadlock the reusable job. Retain every queued manual request at both layers.
+concurrency:
+  group: rollback-${{ inputs.sha }}-${{ inputs.targets }}-caller
+  cancel-in-progress: false
+  queue: max
 permissions: {}
 jobs:
   rollback:
