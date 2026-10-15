@@ -8,6 +8,16 @@
   extends: ["github>risu729/renovate-config#3.19.1"],
   packageRules: [
     {
+      // Historical rollback checkouts without cf build output still require the
+      // Wrangler-based v1 API. Remove this limit when those rollback targets are
+      // no longer supported; the current cf/v2 deployment steps stay updatable.
+      matchManagers: ["github-actions"],
+      matchFileNames: [".github/workflows/_deploy-workers.yml"],
+      matchPackageNames: ["risu729/wrangler-deploy-action"],
+      matchCurrentValue: "/^v1\\./",
+      allowedVersions: "<2",
+    },
+    {
       // The Workers toolchain is version-coupled: wrangler, its runtime and the
       // test runtime have to move together or the dry runs disagree.
       matchPackageNames: ["wrangler", "miniflare", "@cloudflare/**"],

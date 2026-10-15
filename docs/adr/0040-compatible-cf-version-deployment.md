@@ -37,7 +37,15 @@ Canonical Wrangler configurations and their tests and dry runs remain; native
 configuration parity is checked against them. No Workers Previews are added.
 
 The exact target checkout selects the backend. Older commits with no cf marker
-use v1. A trusted workflow adapter maps actual cf-step outcomes onto the legacy
+use v1. Action maintenance keeps that fallback on the Wrangler-compatible v1
+API and updates only the current cf steps within v2. The local Renovate rule
+limits v1 references to versions below v2 until those older rollback targets
+are no longer supported; v2 references remain eligible for normal updates.
+Workflow contract checks require immutable SHA pins, the respective API major,
+a shared cf pin, and the existing Worker/strategy/trigger inputs. Pinact verifies
+that each SHA matches its annotated release tag.
+
+A trusted workflow adapter maps actual cf-step outcomes onto the legacy
 release helper's per-Worker identifiers, including failure and skipped steps.
 Release order, schema-prefix rollback guards, compatibility floor, serialized
 production concurrency, partial-release resume and authenticated health remain.
