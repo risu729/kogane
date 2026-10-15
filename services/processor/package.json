@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "chrono-node": "2.10.2",
+    "chrono-node": "2.10.3",
     "parse5": "8.0.1",
     "zod": "4.6.6"
   },
