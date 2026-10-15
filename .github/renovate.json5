@@ -5,7 +5,7 @@
   // updates, and keeps the Miniflare -> compatibility_date manager working for
   // wrangler.jsonc. Normal updates therefore reach main through CI Check and
   // native auto-merge without extra rules here.
-  extends: ["github>risu729/renovate-config#3.19.1"],
+  extends: ["github>risu729/renovate-config#3.21.3"],
   packageRules: [
     {
       // Historical rollback checkouts without cf build output still require the
