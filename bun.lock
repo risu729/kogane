@@ -5,7 +5,7 @@
     "": {
       "name": "kogane",
       "devDependencies": {
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "dependency-cruiser": "18.6.0",
         "istanbul-lib-coverage": "3.2.2",
         "knip": "6.41.0",
@@ -203,7 +203,7 @@
         "@modelcontextprotocol/client": "2.3.1",
         "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -220,7 +220,7 @@
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "6.0.3",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -238,7 +238,7 @@
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -255,7 +255,7 @@
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "devtools-protocol": "0.0.1717327",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
@@ -270,7 +270,7 @@
       "devDependencies": {
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "wrangler": "4.149.0",
       },
@@ -284,7 +284,7 @@
       "devDependencies": {
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "wrangler": "4.149.0",
       },
@@ -299,7 +299,7 @@
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -312,7 +312,7 @@
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -328,7 +328,7 @@
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -342,7 +342,7 @@
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -359,7 +359,7 @@
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -370,7 +370,7 @@
       "devDependencies": {
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "wrangler": "4.149.0",
       },
@@ -385,7 +385,7 @@
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -403,7 +403,7 @@
         "@cloudflare/workers-types": "5.20261013.1",
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "wrangler": "4.149.0",
       },
@@ -422,7 +422,7 @@
         "@types/node": "26.6.5",
         "@types/set-cookie-parser": "2.4.10",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -435,7 +435,7 @@
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
         "@vitest/coverage-istanbul": "5.0.3",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "typescript": "7.0.2",
         "vitest": "5.0.3",
         "wrangler": "4.149.0",
@@ -451,7 +451,7 @@
       "devDependencies": {
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
-        "cf": "1.0.0-beta.14",
+        "cf": "1.0.0-beta.16",
         "miniflare": "5.20260831.0-alpha",
         "typescript": "7.0.2",
         "undici": "8.11.2",
@@ -492,11 +492,11 @@
 
     "@clack/prompts": ["@clack/prompts@1.8.1", "", { "dependencies": { "@clack/core": "1.5.1", "fast-string-width": "^3.0.2", "fast-wrap-ansi": "^0.2.0", "sisteransi": "^1.0.5" } }, "sha512-dlT1m5e/0yUL0kRNcQn7yGLVThkgbB0Ga/1AmfDDC/8ik6AIiSf2QLQO2zPYvefsHP0aFgxO93cVLCCfDp7kzQ=="],
 
-    "@cloudflare/build-output-utils": ["@cloudflare/build-output-utils@0.9.0", "", { "dependencies": { "@cloudflare/config": "0.24.1" } }, "sha512-2FMA4XnVj5u7LYJE9j3uSJ+cU4Zn994WiyEOVhbMV7wh7pcwi1rIYafH6kiWaa+Y3Bjvf0ow7JgoDaO05qYVPg=="],
+    "@cloudflare/build-output-utils": ["@cloudflare/build-output-utils@0.9.1", "", { "dependencies": { "@cloudflare/config": "0.25.0" } }, "sha512-zTzHGwXD7dJ1+vWlVgvTWbg1k0x53+Wu1aR6MDWAflOwJD9KtHjz7Qqq6pnTbVxlR0m5GLlD6sshEuiKnB1KQA=="],
 
     "@cloudflare/codemods": ["@cloudflare/codemods@0.4.2", "", { "bin": { "cloudflare-codemods": "dist/bin.mjs" } }, "sha512-oHvDlfhQEIkdf8Mvz4SMgk+6evVlu9rrntRv5KQfRK3H4RkXUmawzYQ7+zdBG0wiWdp/Ku/PqNMWVYAs8T4jrQ=="],
 
-    "@cloudflare/config": ["@cloudflare/config@0.24.1", "", { "dependencies": { "zod": "4.6.5" } }, "sha512-tja1/oHB5sCgigiRrZrESYFUzNEgex1zW0GDWXNbpUVpB8zX7ZQKMYnZYX2zD2sy8dk9paDZDnPC1VSu7y8aZw=="],
+    "@cloudflare/config": ["@cloudflare/config@0.25.0", "", { "dependencies": { "zod": "4.6.5" } }, "sha512-h4tgL9/pmeoIdKfs/irfV/eCotbEpbadO2RGPbHwRij6Ek7q8Gqx4juSoDSb/fk9IclansgAHXF9b8rb3Kw4jg=="],
 
     "@cloudflare/containers": ["@cloudflare/containers@0.3.7", "", {}, "sha512-DM9dm3FnIBSyiSJ1FLavKwl/lk3oAmTaynCzZQ9pZR0ncRPquSxkxd8Nu2MFILxmDDsPkxKsSNEh9mHHMty4Fw=="],
 
@@ -504,7 +504,7 @@
 
     "@cloudflare/puppeteer": ["@cloudflare/puppeteer@1.4.0", "", { "dependencies": { "@puppeteer/browsers": "2.2.4", "debug": "^4.3.5", "devtools-protocol": "0.0.1299070", "ws": "^8.18.0" } }, "sha512-39lo96Y7ErOJFmu/KIJU1VLaOibhynx/BauKCZOW5+RVH/mG0jZrAEGJlqCdx5ZxLHyWppm78YX3jLNPCBB+fA=="],
 
-    "@cloudflare/runtime-types": ["@cloudflare/runtime-types@0.1.9", "", { "dependencies": { "miniflare": "5.20261006.1-alpha", "workerd": "1.20261006.1" } }, "sha512-T3LcgIUw2VMWCw/50deozY/Iqu9j1NN3xbYGTmYbLvGk1a8aNZHplwf/JknYmqSVHZU4eHqsFpkn8IID2W4W/A=="],
+    "@cloudflare/runtime-types": ["@cloudflare/runtime-types@0.1.10", "", { "dependencies": { "miniflare": "5.20261006.2-beta", "workerd": "1.20261006.1" } }, "sha512-OXEpo7VZ/ALsLGzKCX4n0Dknnf1w3W6wCWELiKyW6MUd7JRvd23KSTrUKIHLJaBpXR1hTKCqWBUWUHBn2wZbnQ=="],
 
     "@cloudflare/unenv-preset": ["@cloudflare/unenv-preset@2.16.2", "", { "peerDependencies": { "unenv": "2.0.0-rc.24", "workerd": ">1.20260305.0 <2.0.0-0" }, "optionalPeers": ["workerd"] }, "sha512-JBP1+Z7ZSNG/d4mRP+y8VC5dka3tZVMLEZRvS+rzQ4DGV1EoxRFQckcJTTkXbHSQiTj0DtNI01Zwb/V2fX0mvQ=="],
 
@@ -1020,7 +1020,7 @@
 
     "ccount": ["ccount@2.0.1", "", {}, "sha512-eyrF0jiFpY+3drT6383f1qhkbGsLSifNAjA61IUjZjmLCWjItY6LB9ft9YhoDgwfmclB2zhu51Lc7+95b8NRAg=="],
 
-    "cf": ["cf@1.0.0-beta.14", "", { "dependencies": { "@cloudflare/build-output-utils": "0.9.0", "@cloudflare/codemods": "0.4.2", "@cloudflare/config": "0.24.1", "@cloudflare/runtime-types": "0.1.9", "blake3-wasm": "2.1.5", "miniflare": "5.20261006.1-alpha", "minisearch": "7.2.0" }, "bin": { "cf": "./bin/cf", "cloudflare": "./bin/cf" } }, "sha512-CIDV5JAUIhJRTCPG3gR72BBzNbPH0NqpF/C3d6mPTXFd1LMbAgfAv6C0sg0MtLLb0blz1kFudDDd4azlKQ/p9A=="],
+    "cf": ["cf@1.0.0-beta.16", "", { "dependencies": { "@cloudflare/build-output-utils": "0.9.1", "@cloudflare/codemods": "0.4.2", "@cloudflare/config": "0.25.0", "@cloudflare/runtime-types": "0.1.10", "blake3-wasm": "2.1.5", "miniflare": "5.20261006.2-beta", "minisearch": "7.2.0" }, "bin": { "cf": "./bin/cf", "cloudflare": "./bin/cf" } }, "sha512-buY0XUHp+wAA0paOKxdUr5UgLKhO8xkeJL5Pn2Xt1UQLfqPFKrqTC3mKrGsrmOhf8Qyn4Omxc4F/8x37fa9kVA=="],
 
     "chai": ["chai@6.3.0", "", {}, "sha512-XWAtwJ6OHO+tj0EKCs0Y2UamnyOxseZWltU4x2U2wh8g4AigdjwvtUjvLP2tqkA/avxHEtzxNaqGq/YGNwckKg=="],
 
@@ -1574,7 +1574,7 @@
 
     "@cloudflare/puppeteer/devtools-protocol": ["devtools-protocol@0.0.1299070", "", {}, "sha512-+qtL3eX50qsJ7c+qVyagqi7AWMoQCBGNfoyJZMwm/NSXVqLYbuitrWEEIzxfUmTNy7//Xe8yhMmQ+elj3uAqSg=="],
 
-    "@cloudflare/runtime-types/miniflare": ["miniflare@5.20261006.1-alpha", "", { "dependencies": { "@cspotcode/source-map-support": "0.8.1", "sharp": "0.35.5", "undici": "7.29.1", "workerd": "1.20261006.1", "ws": "8.21.0", "youch": "4.1.0-beta.10" } }, "sha512-6ylv8tamkrspDI2R/cAYfv+YWmfGNdXe76Pi9TauEUWsFVXn3LNF9Yk8oduzf1a+TYsSRYTqlOE7+nGGRsMHdw=="],
+    "@cloudflare/runtime-types/miniflare": ["miniflare@5.20261006.2-beta", "", { "dependencies": { "@cspotcode/source-map-support": "0.8.1", "sharp": "0.35.5", "undici": "7.29.1", "workerd": "1.20261006.1", "ws": "8.21.0", "youch": "4.1.0-beta.10" } }, "sha512-agufWI3mXF8xGzry2/sOF8Im8AoYs04DWBCLDWDmd4QtMSGEo9IgrPmYOwsCmQA3K3MbLzsvr01GpWc8x3Duqw=="],
 
     "@cloudflare/vitest-plugin/miniflare": ["miniflare@5.20261006.1-alpha", "", { "dependencies": { "@cspotcode/source-map-support": "0.8.1", "sharp": "0.35.5", "undici": "7.29.1", "workerd": "1.20261006.1", "ws": "8.21.0", "youch": "4.1.0-beta.10" } }, "sha512-6ylv8tamkrspDI2R/cAYfv+YWmfGNdXe76Pi9TauEUWsFVXn3LNF9Yk8oduzf1a+TYsSRYTqlOE7+nGGRsMHdw=="],
 
@@ -1658,7 +1658,7 @@
 
     "acorn-walk/acorn": ["acorn@8.18.0", "", { "bin": { "acorn": "bin/acorn" } }, "sha512-lGq+9yr1/GuAWaVYIHRjvvySG5/4VfKIvC8EWxStPdcDh/Ka7FG3twP6v4d5BkravUilhIAsG4Qj83t02LWUPQ=="],
 
-    "cf/miniflare": ["miniflare@5.20261006.1-alpha", "", { "dependencies": { "@cspotcode/source-map-support": "0.8.1", "sharp": "0.35.5", "undici": "7.29.1", "workerd": "1.20261006.1", "ws": "8.21.0", "youch": "4.1.0-beta.10" } }, "sha512-6ylv8tamkrspDI2R/cAYfv+YWmfGNdXe76Pi9TauEUWsFVXn3LNF9Yk8oduzf1a+TYsSRYTqlOE7+nGGRsMHdw=="],
+    "cf/miniflare": ["miniflare@5.20261006.2-beta", "", { "dependencies": { "@cspotcode/source-map-support": "0.8.1", "sharp": "0.35.5", "undici": "7.29.1", "workerd": "1.20261006.1", "ws": "8.21.0", "youch": "4.1.0-beta.10" } }, "sha512-agufWI3mXF8xGzry2/sOF8Im8AoYs04DWBCLDWDmd4QtMSGEo9IgrPmYOwsCmQA3K3MbLzsvr01GpWc8x3Duqw=="],
 
     "cheerio/parse5": ["parse5@7.3.0", "", { "dependencies": { "entities": "^6.0.0" } }, "sha512-IInvU7fabl34qmi9gY8XOVxhYyMyuH2xUNpb2q8/Y+7552KlejkRvqvD19nMoUW/uQGGbqNpA6Tufu5FL5BZgw=="],
 
