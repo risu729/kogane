@@ -7,7 +7,7 @@
   },
   "devDependencies": {
     "@cloudflare/puppeteer": "1.4.0",
-    "@cloudflare/vitest-plugin": "1.4.1",
+    "@cloudflare/vitest-plugin": "1.4.2",
     "@types/bun": "1.4.3",
     "@types/node": "26.6.5",
     "@vitest/coverage-istanbul": "5.0.3",
@@ -15,6 +15,6 @@
     "devtools-protocol": "0.0.1718299",
     "typescript": "7.0.2",
     "vitest": "5.0.3",
-    "wrangler": "4.150.0"
+    "wrangler": "4.151.0"
   }
 }
