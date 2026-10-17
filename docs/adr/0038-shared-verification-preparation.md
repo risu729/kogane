@@ -89,3 +89,22 @@ release gates and production credential boundaries remain in force.
 See [CI measurements and limits](../ci.md#waiting-time-baseline-and-limits),
 [native mise tasks](https://mise.jdx.dev/tasks/task-configuration.html#wait_for)
 and [native Bun sharding](https://bun.com/docs/test/parallel#splitting-a-suite-across-ci-machines-with-shard).
+
+## Amendment: native browser preparation guard (2026-10-15)
+
+Status: proposed in this PR; effective upon merge.
+
+Use mise 2026.10.10 `skip_if` on `//apps/web:browser` to express its existing
+condition before the task body starts: skip when `CI` is not exactly `true`, or
+when `CHROMIUM_PATH` is nonempty. Otherwise run the same locked Playwright
+Chromium install with Linux system dependencies. The repository minimum and
+hosted CI already pin mise 2026.10.10. The web task config pins that release's
+official schema because the unversioned documentation schema did not yet
+recognize `skip_if` during validation.
+
+Keeping the shell `if` would preserve behavior but report a completed installer
+body even when no installation was needed. The native guard makes that decision
+visible as a skipped task, while retaining its successful dependency edge. Tests,
+typechecks and builds remain in the full graph; this does not cache test results
+or change browser provisioning policy. Verification exercises unset, false and
+true CI with empty and nonempty browser paths.

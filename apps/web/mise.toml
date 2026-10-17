@@ -1,5 +1,5 @@
 # ref: https://mise.jdx.dev/tasks/
-#:schema https://mise.jdx.dev/schema/mise.json
+#:schema https://raw.githubusercontent.com/jdx/mise/v2026.10.10/schema/mise.json
 
 [tasks."typecheck"]
 description = "Type-check the web client."
@@ -24,11 +24,8 @@ run = "./node_modules/.bin/vite"
 [tasks."browser"]
 description = "Install the locked Playwright Chromium in CI; never downloads locally."
 hide = true
-run = '''
-if [ "${CI:-}" = "true" ] && [ -z "${CHROMIUM_PATH:-}" ]; then
-  node node_modules/playwright/cli.js install --with-deps chromium
-fi
-'''
+skip_if = '[ "${CI:-}" != "true" ] || [ -n "${CHROMIUM_PATH:-}" ]'
+run = "node node_modules/playwright/cli.js install --with-deps chromium"
 
 [tasks."test"]
 description = "Run the web client's unit and browser tests."
