@@ -112,20 +112,20 @@ url = "https://github.com/oxc-project/oxc/releases/download/apps_v1.72.0/oxlint-
 url_api = "https://api.github.com/repos/oxc-project/oxc/releases/assets/461574845"
 
 [[tools.pinact]]
-version = "5.0.0"
+version = "5.0.1"
 backend = "aqua:suzuki-shunsuke/pinact"
-specifiers = ["5.0.0"]
+specifiers = ["5.0.1"]
 
 [tools.pinact."platforms.linux-x64"]
-checksum = "sha256:d005bbb85da80dacdc07816f24a5da723a9f6d1e9f3d3e7e73df33f9caa1358f"
-url = "https://github.com/suzuki-shunsuke/pinact/releases/download/v5.0.0/pinact_linux_amd64.tar.gz"
-url_api = "https://api.github.com/repos/suzuki-shunsuke/pinact/releases/assets/558638065"
+checksum = "sha256:12500c0fff5db94a0155e2e76ed959d1dc0e899056ee168d8fb7b4840e7c04f0"
+url = "https://github.com/suzuki-shunsuke/pinact/releases/download/v5.0.1/pinact_linux_amd64.tar.gz"
+url_api = "https://api.github.com/repos/suzuki-shunsuke/pinact/releases/assets/664460175"
 provenance = "github-attestations"
 
 [tools.pinact."platforms.windows-x64"]
-checksum = "sha256:df2f590f24c2bfe65a35010bffb4369ba0792c9afaf7fb324b2330895a37d19f"
-url = "https://github.com/suzuki-shunsuke/pinact/releases/download/v5.0.0/pinact_windows_amd64.zip"
-url_api = "https://api.github.com/repos/suzuki-shunsuke/pinact/releases/assets/558638100"
+checksum = "sha256:d679bfd3ecb489f3d4242e54016f57181948980bf0ca7b98c6003c8d256c27f2"
+url = "https://github.com/suzuki-shunsuke/pinact/releases/download/v5.0.1/pinact_windows_amd64.zip"
+url_api = "https://api.github.com/repos/suzuki-shunsuke/pinact/releases/assets/664460186"
 provenance = "github-attestations"
 
 [[tools.ruff]]
