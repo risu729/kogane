@@ -420,7 +420,7 @@
         "@cloudflare/vitest-plugin": "1.4.6",
         "@types/bun": "1.4.3",
         "@types/node": "26.6.5",
-        "@types/set-cookie-parser": "2.4.10",
+        "@types/set-cookie-parser": "3.1.0",
         "@vitest/coverage-istanbul": "5.0.5",
         "cf": "1.0.0-beta.20",
         "typescript": "7.0.2",
@@ -900,7 +900,7 @@
 
     "@types/react-dom": ["@types/react-dom@19.3.0", "", { "peerDependencies": { "@types/react": "^19.3.0" } }, "sha512-ZI7bU42mZXXKHn/qNLEw2IrbiINU7X5+vfgdixBHkCNpYWXjKgfQ/P+uyGb5CjOLB9UcnTeg3rylQtV2hym44Q=="],
 
-    "@types/set-cookie-parser": ["@types/set-cookie-parser@2.4.10", "", { "dependencies": { "@types/node": "*" } }, "sha512-GGmQVGpQWUe5qglJozEjZV/5dyxbOOZ0LHe/lqyWssB88Y4svNfst0uqBVscdDeIKl5Jy5+aPSvy7mI9tYRguw=="],
+    "@types/set-cookie-parser": ["@types/set-cookie-parser@3.1.0", "", { "dependencies": { "set-cookie-parser": "*" } }, "sha512-YC2fSFC6R/ggJG4B4hE+AO7EiuM8WsnSQ+/jX0ttrzZsHcmom1Ujb2jL+APB91qNA3R9OTRGXT9ckYDbMYydTw=="],
 
     "@types/unist": ["@types/unist@3.0.3", "", {}, "sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q=="],
 
