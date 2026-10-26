@@ -55,11 +55,13 @@ specifiers = ["2.8.1"]
 checksum = "sha256:8033ca42aaf88412e789c281f7e2766526e60e12f95a16c03574aeb0a2c7a657"
 url = "https://github.com/jdx/hk/releases/download/v2.8.1/hk-x86_64-unknown-linux-gnu.tar.gz"
 signer = "sigstore-oidc:https://github.com/jdx/hk/.github/workflows/release.yml"
+repository_ids = { repository = "922514152" }
 
 [tools.hk."platforms.windows-x64"]
 checksum = "sha256:411cbe34d53764162dd36d69fe5bf7ec39ccd2a8166890c92c3531284355487d"
 url = "https://github.com/jdx/hk/releases/download/v2.8.1/hk-x86_64-pc-windows-msvc.zip"
 signer = "sigstore-oidc:https://github.com/jdx/hk/.github/workflows/release.yml"
+repository_ids = { repository = "922514152" }
 
 [[tools.jactionlint]]
 version = "2.3.0"
