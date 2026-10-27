@@ -12,7 +12,7 @@
     "cf": "1.0.0-beta.21",
     "dependency-cruiser": "18.7.0",
     "istanbul-lib-coverage": "3.2.2",
-    "knip": "6.42.1",
+    "knip": "6.43.0",
     "lcov-parse": "1.0.0",
     "typescript": "6.0.3",
     "vitest": "5.0.5",
