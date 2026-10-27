@@ -133,20 +133,20 @@ url_api = "https://api.github.com/repos/suzuki-shunsuke/pinact/releases/assets/6
 provenance = "github-attestations"
 
 [[tools.ruff]]
-version = "0.17.2"
+version = "0.17.3"
 backend = "aqua:astral-sh/ruff"
-specifiers = ["0.17.2"]
+specifiers = ["0.17.3"]
 
 [tools.ruff."platforms.linux-x64"]
-checksum = "sha256:7b2e6a6e132ecf7b5fe726163b186d5d209befe93bb25f83767b2d97fbdf14e5"
-url = "https://github.com/astral-sh/ruff/releases/download/0.17.2/ruff-x86_64-unknown-linux-gnu.tar.gz"
-url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/666735382"
+checksum = "sha256:2b0890f5a55900af741f133918c2656919bbf18c2ab7741b4ca8403a90e647a9"
+url = "https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-x86_64-unknown-linux-gnu.tar.gz"
+url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/679956535"
 provenance = "github-attestations"
 
 [tools.ruff."platforms.windows-x64"]
-checksum = "sha256:6f4de58abd7c8de2e8702a89fc0f221e6ca858ad23e25c658c707d83a48c79a0"
-url = "https://github.com/astral-sh/ruff/releases/download/0.17.2/ruff-x86_64-pc-windows-msvc.zip"
-url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/666735367"
+checksum = "sha256:a84d9ac74af8ef5bac84a1888a1634df18e6e985e2f930d35c052beacd00e813"
+url = "https://github.com/astral-sh/ruff/releases/download/0.17.3/ruff-x86_64-pc-windows-msvc.zip"
+url_api = "https://api.github.com/repos/astral-sh/ruff/releases/assets/679956524"
 provenance = "github-attestations"
 
 [[tools.shellcheck]]
