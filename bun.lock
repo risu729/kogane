@@ -73,7 +73,7 @@
     "experiments/observation-pipeline-local": {
       "name": "@kogane/observation-pipeline-local",
       "dependencies": {
-        "hono": "4.13.13",
+        "hono": "4.13.14",
       },
       "devDependencies": {
         "@types/bun": "1.4.4",
@@ -194,7 +194,7 @@
       "name": "@kogane/evidence-browser",
       "dependencies": {
         "@modelcontextprotocol/server": "2.4.0",
-        "hono": "4.13.13",
+        "hono": "4.13.14",
         "jose": "6.2.13",
         "zod": "4.6.7",
       },
@@ -1172,7 +1172,7 @@
 
     "hast-util-whitespace": ["hast-util-whitespace@3.0.0", "", { "dependencies": { "@types/hast": "^3.0.0" } }, "sha512-88JUN06ipLwsnv+dVn+OIYOvAuvBMy/Qoi6O7mQHxdPXpjy+Cd6xRkWwux7DKO+4sYILtLBRIKgsdpS2gQc7qw=="],
 
-    "hono": ["hono@4.13.13", "", {}, "sha512-CQ46U0ZkAGmbT/4UxdzzGJpacP2IeKgY4a5/tOI9AABbpOMfK739wfDXmv1usCk+3RkKj1hQy4/fjhiwa2xlrA=="],
+    "hono": ["hono@4.13.14", "", {}, "sha512-yhRLQ21U6qa9Hsu2N7Qcbh8tE+WKEcoErjIo56LeSGiGXGp9sA7UpE86Ui9uexb61KakiGwuHMn2QdV7w6i6kQ=="],
 
     "html-void-elements": ["html-void-elements@3.0.0", "", {}, "sha512-bEqo66MRXsUGxWHV5IP0PUiAWwoEjba4VCzg0LjFJBpchPaTfyfCKTG6bc5F8ucKec3q5y6qOdGyYTSBEvhCrg=="],
 
