@@ -6,6 +6,6 @@
     "@types/bun": "1.4.4",
     "miniflare": "5.20260831.0-alpha",
     "typescript": "7.0.2",
-    "wrangler": "4.152.0"
+    "wrangler": "4.154.0"
   }
 }
