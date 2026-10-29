@@ -8,7 +8,7 @@
   "devDependencies": {
     "@types/bun": "1.4.4",
     "@types/node": "26.6.6",
-    "cf": "1.0.0-beta.24",
+    "cf": "1.0.0-beta.25",
     "typescript": "7.0.2",
     "wrangler": "4.155.0"
   }

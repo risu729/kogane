@@ -14,7 +14,7 @@
     "@types/node": "26.6.6",
     "@types/set-cookie-parser": "2.4.10",
     "@vitest/coverage-istanbul": "5.0.5",
-    "cf": "1.0.0-beta.24",
+    "cf": "1.0.0-beta.25",
     "typescript": "7.0.2",
     "vitest": "5.0.5",
     "wrangler": "4.155.0"
