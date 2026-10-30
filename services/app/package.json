@@ -9,13 +9,13 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "1.4.10",
+    "@cloudflare/vitest-plugin": "1.4.11",
     "@modelcontextprotocol/client": "2.4.0",
     "@types/node": "26.6.6",
     "@vitest/coverage-istanbul": "5.0.5",
     "cf": "1.0.0-beta.25",
     "typescript": "7.0.2",
     "vitest": "5.0.5",
-    "wrangler": "4.155.0"
+    "wrangler": "4.156.0"
   }
 }
