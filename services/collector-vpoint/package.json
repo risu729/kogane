@@ -6,7 +6,7 @@
     "cheerio": "1.2.0",
     "iconv-lite": "0.7.3",
     "postal-mime": "4.2.0",
-    "set-cookie-parser": "3.2.1"
+    "set-cookie-parser": "3.2.2"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.11",
