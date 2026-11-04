@@ -37,6 +37,140 @@ That dated success does not establish the current stored connection, refresh
 or any delegated operation. Preserve both records rather than treating the
 current failure as evidence that MCP has never worked.
 
+## Portal upstream credential and per-user authentication
+
+An earlier read-only Cloudflare MCP-server readback on 2026-11-04 identified the
+Kogane upstream selected by the portal and returned:
+
+| Field                                     | Observed value                                             |
+| ----------------------------------------- | ---------------------------------------------------------- |
+| Server status / authentication status     | `stale` / `stale`                                          |
+| Error                                     | `Authorization failed: needs_reauth`                       |
+| Error details                             | `status_code: 401`, `retryable: true`, `is_upstream: true` |
+| Cause                                     | `Preemptively needs reauth`                                |
+| Last sync (reported timestamp)            | `2026-11-04 11:01:20`                                      |
+| Last successful sync (reported timestamp) | `2026-10-10 17:26:41`                                      |
+
+This is evidence of an upstream authorization/synchronization problem. The
+preemptive cause does not prove that this failed attempt reached the Kogane
+Worker, and the two sync timestamps do not establish when a client last read
+data successfully. No credential value or identity is recorded here.
+
+Cloudflare's [portal guidance](https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/mcp-portals/#reauthenticate-the-mcp-server)
+provides a separate **administrator credential** recovery route: in the
+Cloudflare dashboard, open **Zero Trust > Access controls > MCP Portals**,
+then **MCP servers**, find the existing Kogane server and choose its three-dot
+menu's **Re-authenticate server** action. The owner completes upstream OAuth;
+the account used becomes that server's new admin credential.
+
+Admin synchronization and per-user OAuth are distinct. Cloudflare documents
+that a stale admin credential may coexist with working per-user tokens when
+**Require user auth** is enabled. Repairing the admin credential therefore
+requires a server-state readback and does not prove the active plugin's user
+connection works. Recheck both layers: server sync status, then the limited
+client calls below. Changing the portal's user-auth mode, policy or grants is
+not a substitute for either authentication flow.
+
+## Authorized server reauthentication attempt — 2026-11-04
+
+The owner authorized server reauthentication and checking its email one-time
+code. Two attempts used the Cloudflare dashboard's existing server recovery
+flow in Chrome. The Access page displayed `Log in to Kogane MCP origin`.
+After the authorized policy email was entered and `Send login code` selected,
+both attempts immediately showed `Unable to find your Access application!`
+with an invalid-URL explanation, before reaching the OTP step. The second
+attempt reproduced promptly; expiration of a long-idle page does not explain
+that observation. No email address, one-time code, login URL or OAuth state is
+recorded here. No completed authentication or new token was confirmed.
+
+At **11:56 UTC** the server readback was `status: waiting`,
+`authentication_status: required`, with an empty error field. Its last-sync
+and last-successful-sync timestamps were unchanged from the earlier table.
+`waiting` is not recovery: authenticated tools and refresh remain unverified.
+
+Read-only configuration checks found the expected self-hosted origin
+application/domain/audience, Managed OAuth and DCR enabled, and the current
+dashboard callback in the allowed redirect list. The origin owner's policy
+still requires the **Gateway** device-posture check. The local One Client was
+connected and reported an unstable network. The app's
+`allow_authenticate_via_warp` field was absent and the organization setting was
+true; Cloudflare's [API contract](https://developers.cloudflare.com/api/resources/zero_trust/subresources/access/subresources/applications/methods/update/)
+distinguishes this authentication setting from a policy's posture requirement.
+These read-only checks changed no policy, posture, redirect, grant or network
+setting.
+
+An explicitly authorized, origin-application-only trial set
+`allow_authenticate_via_warp: false` at **11:58 UTC**, preserving the existing
+owner-email allow rule, required Gateway posture and Managed OAuth settings.
+At approximately **12:02 UTC**, selecting `Send login code` again produced
+the same Access-application error before the OTP step. This trial did not
+complete code verification, token issuance or an authenticated MCP read.
+
+At **12:03:25 UTC**, the original omission of that application property was
+restored with an update. A subsequent readback confirmed the property was
+absent again, the OAuth configuration was identical, and the owner-email and
+Gateway posture requirements were unchanged. The trial's explicit `false` value is no longer configured. The failed trial leaves the proposed WARP/authentication-flow
+cause unproven: setting this flag alone did not recover the observed flow.
+No successful server reauthentication, code verification or client read is
+inferred from completing the configuration rollback.
+
+A later authorized diagnostic briefly disconnected WARP while starting a
+fresh dashboard authentication flow, with a timed reconnect safeguard. WARP
+was reconnected before selecting `Send login code`. The fresh flow's safe
+flags were `is_warp: false`, `is_gateway: false`, with `private_app_flow`
+absent. This time the form advanced to code entry instead of the
+Access-application error. No new code appeared in the checked inbox after
+approximately two minutes, and the queried Access-log window from 12:00 UTC
+contained no matching Kogane event. Neither successful code delivery nor
+verification was established. A policy-related refusal is a hypothesis, not
+an observed cause. WARP was connected afterward; the original application
+property omission and the required Gateway policy were preserved.
+
+A separately authorized, bounded policy trial ran from **12:14:28 UTC** to
+**12:16:42 UTC** (two minutes, fourteen seconds). It temporarily removed the
+origin owner's required Gateway condition while retaining the exact owner
+email allow rule. Authentication was started while WARP was disconnected,
+and WARP was reconnected before requesting the code. The page reached code
+entry, but no new code appeared in the checked inbox; one resend after about
+ninety seconds did not establish delivery or authentication success.
+
+The original policy was restored at **12:16:42 UTC**. Readback confirmed the
+Gateway requirement and owner-only rule were present, the app's WARP-auth
+property was absent, and OAuth configuration was identical. The automatic
+rollback safeguard was stopped only after the manual restore succeeded and
+was verified. No successful code verification or MCP read resulted. The
+required Gateway restriction is present in the restored configuration.
+
+A type-only application trial ran from **12:17:39 UTC** to **12:18:52 UTC**.
+The API accepted `type: mcp` on the existing application while retaining its
+public hostname-root destination, audience, owner-plus-Gateway policy and
+OAuth configuration. A fresh authentication flow with WARP connected still
+failed with the same Access-application error. The application was restored
+to `self_hosted`; readback confirmed the original audience, property omission,
+owner-plus-Gateway policy and OAuth configuration. This experiment supplied
+no successful code verification or authenticated MCP read.
+
+At approximately **12:25 UTC**, the preceding 24 hours of receiving email-routing
+activity showed only two Cloudflare OTP messages, at 11:20 and 11:21, both
+forwarded. No later trial message was found in that routing activity or the
+checked Gmail inbox. Routing was ready, catch-all forwarding was configured,
+and the queried suppression list was empty. These receiving-side observations
+do not identify a sender-side suppression or the precise delivery failure.
+
+The [Mikoto investigation](https://github.com/risu729/mikoto/issues/123)
+records a similar Managed OAuth/private-flow failure. Its merged
+[PR #143](https://github.com/risu729/mikoto/pull/143) moved the MCP handler to
+the hostname root and replaced a path-scoped Protected MCP server record.
+Kogane's origin Access destination already covers its hostname root. Mikoto's
+later merged [PR #222](https://github.com/risu729/mikoto/pull/222) records that
+the WARP-connected login failure persisted with separate hostnames, a root
+handler and `allow_authenticate_via_warp: false`; it also removed a redundant
+WARP-requiring policy attachment from Mikoto's MCP application. Mikoto's
+identity-only MCP policy differs from Kogane's required Gateway policy.
+No proven workaround preserving Kogane's policy was found in that evidence.
+The current state remains **reauthentication required**, with no successful
+end-to-end recovery.
+
 ## Reconnect the same client connection
 
 For the installed ChatGPT/Codex **plugin**, use the host's existing connection
