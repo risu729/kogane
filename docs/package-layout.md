@@ -241,9 +241,8 @@ them.
 older base was still high risk. U15 dropped it together with
 `services/raw-evidence/migrations/**`, which U05 had already emptied: both
 directories are gone, so the patterns could only have matched a file re-created
-at an abandoned path. `scripts/automerge.test.ts` keeps one negative case over
-exactly those two paths, so a rule set that started matching everything fails
-there.
+at an abandoned path. The custom author-based auto-merge workflow has also
+been removed; dependency updates use Renovate's own policy.
 
 The collector task short names (`<source>-worker`, `vpass-json`) and the npm
 package names (`@kogane/evidence-browser`, `@kogane/observation-pipeline`) are

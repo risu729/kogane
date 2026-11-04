@@ -49,7 +49,7 @@ What the stored rows are today, read from the code:
    unlogged for ever, so every card purchase with pre-G1b history would stay
    unplaceable after it is re-revised under the guard.
 2. **Read the current views (`live_consumption_claims`, `superseded_by IS
-NULL`) and filter by creation time.** Rejected by ADR 0054 (item 6):
+   NULL`) and filter by creation time.** Rejected by ADR 0054 (item 6):
    `created_at` is a writer clock, and the views only say what is live now.
 3. **Map the 0032 `effective_time_json` to a role per writer** (ADR 0052 held
    item 2 assumed settlements → `posting`). Rejected: 0070 forbids that

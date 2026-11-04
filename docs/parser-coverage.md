@@ -58,7 +58,7 @@ parse, or a parse whose parser has since been converted.
   from the artifact row, so a claim is matched by contract, not by text
   (`snapshot-policies.test.ts` proves the two agree).
 - `containerClaim({ artifact, issues, observedCount, expectedCount?,
-evidenceRefs })` builds the `complete-container` claim: complete with
+  evidenceRefs })` builds the `complete-container` claim: complete with
   complete membership when no issue reaches `membership` impact, otherwise
   partial with the first membership-breaking issue code as `failureCause`.
 
@@ -217,7 +217,7 @@ eligibility" below.
    Both are corrections, not regressions. Any other difference is a parser or
    policy bug to fix first.
 5. `UPDATE dataset_snapshot_policies SET policy_id = 'coverage-v1',
-updated_at_ms = ? WHERE parser_name = ? AND dataset = ?`. Old parse runs
+   updated_at_ms = ? WHERE parser_name = ? AND dataset = ?`. Old parse runs
    without claims stop being candidates for that dataset from that moment,
    which is the intended meaning of "no unfounded complete".
 
