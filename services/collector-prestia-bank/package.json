@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "parse5": "8.0.1"
+    "parse5": "8.1.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.11",
