@@ -6,12 +6,14 @@ import {
   d1CommandStore,
   ERROR_STATUS,
   auditPageFilters,
+  readEconomicRowReadinessForGrant,
 } from "../../../packages/application/src/index";
 import {
   readAuditForGrant,
   readAuditRecordForGrant,
 } from "../../../packages/application/src/audit/read.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
+import { ECONOMIC_ROW_READINESS_SCHEMA } from "../../../packages/domain/src/economic-row-readiness.ts";
 import { INSTRUMENT_IDENTIFIER_ID } from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import type { ToolResult } from "./agent-service";
@@ -21,6 +23,20 @@ import { parseRequest } from "./ops-api";
 const schemas = {
   "kogane.instruments.history": z.strictObject({
     identifierId: z.string().regex(INSTRUMENT_IDENTIFIER_ID),
+  }),
+  "kogane.economic-readiness.read": z.strictObject({
+    schema: z.literal(ECONOMIC_ROW_READINESS_SCHEMA),
+    family: z.enum(["bank-movement", "securities-execution"]),
+    rows: z
+      .array(
+        z.strictObject({
+          observationId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+          parseRunId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+        }),
+      )
+      .min(1)
+      .max(64),
+    knowledge: z.literal("current"),
   }),
   "kogane.audit.search": z.strictObject({
     filters: z.record(z.string(), z.string()).optional(),
@@ -45,14 +61,16 @@ export const READ_MCP_TOOLS = Object.entries(schemas).map(([name, schema]) => {
     description:
       name === "kogane.instruments.history"
         ? "Read the same append-only instrument history as the owner UI, under records.read and a whole-store read grant."
-        : "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
+        : name === "kogane.economic-readiness.read"
+          ? "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled."
+          : "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
     inputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   };
 });
 export function readMcpTools(grant: Grant) {
   return READ_MCP_TOOLS.filter((tool) =>
-    tool.name === "kogane.instruments.history"
+    tool.name === "kogane.instruments.history" || tool.name === "kogane.economic-readiness.read"
       ? grantAllows(grant, "records.read") &&
         grant.scopes.sources === "*" &&
         grant.scopes.accounts === "*"
@@ -77,6 +95,23 @@ export async function callReadTool(
         return outcome.ok
           ? { status: 200, body: outcome.history }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
+      case "kogane.economic-readiness.read": {
+        // The shared service grades scope before validation or database access.
+        const outcome = await readEconomicRowReadinessForGrant({
+          grant,
+          sql: d1Executor(env.DB),
+          request: body,
+        });
+        if (outcome.status === "refused")
+          return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+        if (outcome.status === "unavailable")
+          return {
+            status: 503,
+            body: outcome,
+            auditOutcome: { result: "failed", code: outcome.reason },
+          };
+        return { status: 200, body: outcome };
       }
       case "kogane.audit.search": {
         const input = parseRequest(schemas[name], body ?? {});

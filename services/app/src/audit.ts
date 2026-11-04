@@ -192,6 +192,10 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["entries"]) ? value["entries"].length : 0,
       truncated: false,
     };
+  if (operation === "economic-readiness.read") {
+    const manifest = value["manifest"] as { rows?: unknown } | undefined;
+    return { rows: Array.isArray(manifest?.rows) ? manifest.rows.length : 0, truncated: false };
+  }
   if (operation === "audit.search")
     return {
       rows: Array.isArray(value["records"]) ? value["records"].length : 0,

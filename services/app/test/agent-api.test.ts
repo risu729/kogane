@@ -583,6 +583,13 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
+        name: "kogane.economic-readiness.read",
+        required: ["schema", "family", "rows", "knowledge"],
+        closed: false,
+        properties: ["family", "knowledge", "rows", "schema"],
+        annotations: readOnly,
+      },
+      {
         name: "kogane.purchases.explain",
         required: [],
         closed: false,
@@ -631,6 +638,7 @@ describe("untrusted provider content (AT71)", () => {
     expect(listed.result.tools.map((tool) => tool.name)).toEqual([
       ...AGENT_TOOL_NAMES,
       "kogane.instruments.history",
+      "kogane.economic-readiness.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -709,6 +717,7 @@ describe("untrusted provider content (AT71)", () => {
     expect(listed.result.tools.map((tool) => tool.name)).toEqual([
       ...AGENT_TOOL_NAMES,
       "kogane.instruments.history",
+      "kogane.economic-readiness.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);

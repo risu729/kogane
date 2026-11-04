@@ -445,3 +445,8 @@ export {
   delegatedMaintenanceSchema,
   delegatedMaintenanceResultSchema,
 } from "./delegation/maintenance.ts";
+
+export {
+  readEconomicRowReadinessForGrant,
+  type EconomicRowReadinessReadOutcome,
+} from "./query/economic-row-readiness-read.ts";

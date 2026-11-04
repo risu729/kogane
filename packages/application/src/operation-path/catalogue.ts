@@ -222,6 +222,13 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  "economic-readiness.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "audit.search": {
     risk: ["R0"],
     effect: null,
