@@ -282,3 +282,47 @@ rewrite of
 [ADR 0030's amendment](0030-identity-crosswalk.md#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk)
 (2026-09-28; it replaced the crosswalk first decided there) puts the `v2`
 value in place of the `v1` value. The text above is left as it was decided.
+
+## Amendment 2026-11-04: captured-month ranges preserve gaps
+
+Status: proposed (until its PR merges)
+Issue: [#452](https://github.com/risu729/kogane/issues/452)
+
+### Context and options
+
+The shared run plan declared one minimum-to-maximum month interval for each
+account. A partial capture containing January and March thereby declared
+February inside its interval even when no February fragment was stored. The
+existing terminal and CORE contracts allow multiple ranges per account.
+Keeping the envelope would hide that gap; emitting one range per fragment
+would change every normal twelve-month terminal and consume more of the
+existing 1,000-range limit. Grouping only consecutive captured months is the
+chosen option.
+
+### Decision
+
+The plan sorts the distinct months named by its existing monthly artifact
+filename grammar, validates the calendar month, and groups adjacent months
+across year boundaries. One interval keeps its existing `months-<unit>` key;
+when gaps produce several intervals, each key includes that interval's start
+month. Units without a monthly fragment have no declared month range.
+Invalid month text is refused before persistence, with a closed code.
+
+Only new terminal metadata becomes more precise. Provider requests, raw
+artifacts and their hashes, account identities, outcome and coverage statuses,
+parser eligibility, financial currentness and publication are unchanged. No
+old terminal is rewritten. A range says which aggregator fragments were
+captured; it is not proof that the underlying provider was updated, that every
+expected month was fetched, or that provider retention is complete. No
+provider-updated timestamp contract is present in the collector's typed
+manifest, so freshness of that upstream data remains unconfirmed.
+
+### Consequences and verification
+
+Synthetic tests persist and read a sparse partial capture with separate
+accounts, a gap and a year boundary. They retain the original contiguous-range
+key and assert unchanged partial outcomes and object verification. Invalid
+calendar months are refused before any bucket write. CORE registration is
+checked with the collector's real plan. The existing range limit still fails
+closed; this amendment does not enlarge it. Authenticated provider observation
+and scoped production acceptance remain separate work in #452.
