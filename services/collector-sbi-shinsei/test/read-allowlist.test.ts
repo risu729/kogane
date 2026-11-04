@@ -2,8 +2,57 @@ import { describe, expect, test } from "bun:test";
 import { UnsafeReadRequestError, UnverifiedReadRouteError } from "../src/errors";
 import { assertReadAllowed, liveReadsEnabled, READ_ROUTE_CATALOG } from "../src/read-allowlist";
 import { SbiShinseiReadTransport } from "../src/transport";
+import type { ReadExecutionProfile } from "../src/types";
 
 describe("SBI Shinsei read allowlist", () => {
+  test("unapproved history and CSV candidates stop before session access or network", async () => {
+    const profiles: readonly ReadExecutionProfile[] = [
+      "worker-production",
+      "local-captured-validation",
+      "direct-http-diagnostic",
+    ];
+    const operations = ["account.casa-activity-specific-period", "csv.download"] as const;
+    for (const operation of operations) {
+      const route = READ_ROUTE_CATALOG.find((candidate) => candidate.operation === operation);
+      expect(route).toBeDefined();
+      expect(route?.evidence).toBe("public-login-bundle");
+      expect(route?.liveValidated).toBeFalse();
+      expect(route?.productionEnabled).toBeFalse();
+      expect(route?.responseSchema).toBe("unknown");
+      for (const executionProfile of profiles) {
+        let sessionReads = 0;
+        let tokenRotations = 0;
+        let fetches = 0;
+        const transport = new SbiShinseiReadTransport({
+          executionProfile,
+          session: {
+            getAuthorization: () => {
+              sessionReads += 1;
+              return "synthetic-authorization";
+            },
+            getCsrfToken: () => {
+              sessionReads += 1;
+              return "synthetic-token";
+            },
+            rotateCsrfToken: () => {
+              tokenRotations += 1;
+            },
+          },
+          fetch: async () => {
+            fetches += 1;
+            return new Response("{}");
+          },
+        });
+        await expect(transport.callWithRaw({ operation })).rejects.toBeInstanceOf(
+          UnverifiedReadRouteError,
+        );
+        expect(sessionReads).toBe(0);
+        expect(tokenRotations).toBe(0);
+        expect(fetches).toBe(0);
+      }
+    }
+  });
+
   test("only captured routes with strict schemas are production-enabled", () => {
     expect(READ_ROUTE_CATALOG.length).toBe(17);
     expect(liveReadsEnabled()).toBeTrue();

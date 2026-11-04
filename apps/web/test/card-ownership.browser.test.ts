@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { ownershipReview } from "../../../packages/application/test/card-ownership-fixture.ts";
+import {
+  readOwnershipDeclaration,
+  type OwnershipDeclarationReading,
+} from "../../../packages/domain/src/ownership-declaration.ts";
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
@@ -19,6 +23,7 @@ describe.if(runnable)("explicit card ownership review", () => {
   let action = "accept";
   let party = "party:本人A";
   let committed = false;
+  let declaration: OwnershipDeclarationReading = { kind: "absent" };
   const posted: { operation: string; body: Record<string, unknown> }[] = [];
   beforeEach(() => {
     review = ownershipReview();
@@ -27,6 +32,7 @@ describe.if(runnable)("explicit card ownership review", () => {
     action = "accept";
     party = "party:本人A";
     committed = false;
+    declaration = { kind: "absent" };
     posted.length = 0;
   });
   beforeAll(async () => {
@@ -61,6 +67,9 @@ describe.if(runnable)("explicit card ownership review", () => {
           if (operation === "plan") {
             action = String(body.kind).split(".")[1]!;
             party = (body.payload as { toRef: string }).toRef;
+            declaration = readOwnershipDeclaration(
+              (body.payload as { evidenceRefs: string[] }).evidenceRefs,
+            );
           }
           const side = review.sides[0]!;
           const subject = `relation:${side.role}|account:${side.accountId}|${party}`;
@@ -83,6 +92,7 @@ describe.if(runnable)("explicit card ownership review", () => {
                 : null,
           }));
           const simulation = {
+            ...(declaration.kind === "self-declared" ? { ownershipDeclaration: declaration } : {}),
             kind: `relation.${action}`,
             targets,
             before: { attributedObservations: 0, relations: 0 },
@@ -208,6 +218,63 @@ describe.if(runnable)("explicit card ownership review", () => {
     expect(committed).toBe(false);
     await page.close();
   });
+  test("self-declaration requires a separate role assertion and remains visibly unverified at confirmation", async () => {
+    const page = await open();
+    const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
+    await form.getByLabel("保有者の識別名", { exact: true }).fill("本人A");
+    await form.getByRole("checkbox").check();
+    await form.getByLabel("根拠の種類", { exact: true }).selectOption("self-declared");
+    expect(await form.getByRole("checkbox").isChecked()).toBe(false);
+    await form.getByLabel("本人申告の日付", { exact: true }).fill("2026-10-10");
+    await form
+      .getByLabel("本人申告の補足・判断の理由", { exact: true })
+      .fill("私個人の請求の支払義務を申告する");
+    expect(
+      await form.getByRole("button", { name: "この保有者の関係を確認", exact: true }).isDisabled(),
+    ).toBe(true);
+    await form.getByRole("checkbox", { name: /このカード請求の支払義務を私が負い/ }).check();
+    await form.getByRole("button", { name: "この保有者の関係を確認", exact: true }).click();
+    await page.getByText(/根拠は本人申告（名義未確認）、申告日は 2026-10-10/).waitFor();
+    const payload = posted.find((p) => p.operation === "plan")!.body.payload as {
+      evidenceRefs: string[];
+    };
+    expect(payload.evidenceRefs).toContain(
+      "ownership-declaration:sole-personal-v1:liable_party:2026-10-10",
+    );
+    expect(payload.evidenceRefs).toHaveLength(5);
+    expect(committed).toBe(false);
+    expect(await page.getByRole("button", { name: "承認する", exact: true }).isEnabled()).toBe(
+      true,
+    );
+    await page.close();
+  });
+  for (const blocker of ["contrary_evidence_recorded", "single_account_scope_unconfirmed"]) {
+    test(`${blocker} blocks self-declaration without disabling explicit evidence review`, async () => {
+      review.sides[0]!.selfDeclarationBlockers = [blocker];
+      const page = await open();
+      const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
+      await form.getByLabel("保有者の識別名", { exact: true }).fill("本人A");
+      await form.getByLabel("根拠の種類", { exact: true }).selectOption("self-declared");
+      await form.getByLabel("本人申告の補足・判断の理由", { exact: true }).fill("本人申告");
+      await form.getByRole("checkbox").check();
+      if (blocker === "single_account_scope_unconfirmed") {
+        expect(await form.innerText()).toContain("表示件数をカード枚数とみなさず");
+      }
+      expect(
+        await form
+          .getByRole("button", { name: "この保有者の関係を確認", exact: true })
+          .isDisabled(),
+      ).toBe(true);
+      await form.getByLabel("根拠の種類", { exact: true }).selectOption("reviewed");
+      expect(await form.getByRole("checkbox").isChecked()).toBe(false);
+      await form.getByRole("checkbox").check();
+      expect(
+        await form.getByRole("button", { name: "この保有者の関係を確認", exact: true }).isEnabled(),
+      ).toBe(true);
+      expect(posted).toEqual([]);
+      await page.close();
+    });
+  }
   test("missing mappings cannot be cured by typing a plausible owner and mobile evidence wraps", async () => {
     review.sides[0]!.blockers = ["account_mapping_unresolved"];
     review.sides[0]!.accountId = null;

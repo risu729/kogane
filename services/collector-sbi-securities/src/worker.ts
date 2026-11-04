@@ -10,7 +10,7 @@ import {
   safeErrorDetails,
 } from "../../../packages/collector-diagnostics/src/index";
 import { parseCredential } from "./auth";
-import { parseHandshakeKey, secretEquals } from "./crypto";
+import { parseHandshakeKey } from "./crypto";
 import { collectMainSiteArtifacts } from "./main-site";
 import { collectDomesticArtifacts, collectForeignArtifacts } from "./sbi";
 import { persistSbiRun, safeFailureCode, type SharedFailure } from "./shared-run";
@@ -58,32 +58,7 @@ export default {
         schemaVersion: env.COLLECTOR_SCHEMA_VERSION,
       });
     }
-    if (request.method !== "POST" || url.pathname !== "/trigger") {
-      return Response.json({ error: "Not found" }, { status: 404 });
-    }
-    if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    try {
-      const scope = parseScope(url.searchParams.get("scope"));
-      const window = parseWindow(url.searchParams.get("from"), url.searchParams.get("to"));
-      const result = await runCollection(env, scope, window);
-      const persisted = result.terminal.persisted;
-      // The discriminator is internal: the legacy response body stays exactly
-      // what it was, and the shared one is told apart by its `terminal`.
-      const { target: _target, ...body } = result;
-      return Response.json(body, {
-        status: result.status === "failed" || !persisted ? 502 : 200,
-      });
-    } catch (error) {
-      return Response.json(
-        {
-          error:
-            error instanceof Error ? redactError(error.message).slice(0, 300) : "Collection failed",
-        },
-        { status: 400 },
-      );
-    }
+    return Response.json({ error: "Not found" }, { status: 404 });
   },
   async scheduled(_controller, env): Promise<void> {
     await runCollection(env, "all");
@@ -252,39 +227,9 @@ function reasonCodeOf(result: PersistRunResult): string {
     ? result.reasonCode
     : "persisted";
 }
-function authorized(request: Request, expected: string | undefined): boolean {
-  const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
-  return Boolean(provided && expected && secretEquals(provided, expected));
-}
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
-}
-function parseScope(value: string | null): CollectionScope {
-  if (value === null || value === "all") return "all";
-  if (value === "domestic" || value === "foreign") return value;
-  throw new Error("scope must be all, domestic, or foreign");
-}
-function parseWindow(
-  from: string | null,
-  to: string | null,
-):
-  | {
-      from: string;
-      to: string;
-    }
-  | undefined {
-  if (from === null && to === null) return undefined;
-  if (!from || !to) throw new Error("from and to must be specified together");
-  if (!/^\d{4}-\d{2}-\d{2}$/u.test(from) || !/^\d{4}-\d{2}-\d{2}$/u.test(to) || from > to) {
-    throw new Error("from and to must be a valid YYYY-MM-DD range");
-  }
-  const days =
-    Math.floor(
-      (Date.parse(`${to}T00:00:00.000Z`) - Date.parse(`${from}T00:00:00.000Z`)) / 86400000,
-    ) + 1;
-  if (days > 90) throw new Error("a trigger window must not exceed 90 days");
-  return { from, to };
 }
 function failure(
   scope: "domestic" | "foreign",
@@ -298,13 +243,8 @@ function failure(
     message: JSON.stringify(safeErrorDetails(error)),
   };
 }
-function redactError(value: string): string {
-  return value
-    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+/giu, "Bearer [redacted]")
-    .replace(/(token|sid|cookie)=?[^\s,;]+/giu, "$1=[redacted]");
-}
 
-/** Private service-binding collection; public token/Access routes keep their checks. */
+/** Private service-binding collection; public HTTP cannot invoke collection. */
 export async function alarmCollection(
   env: Env,
   _cron: string,

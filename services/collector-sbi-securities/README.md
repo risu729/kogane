@@ -27,11 +27,10 @@ SBI証券の保存済みパスキーから毎回新しいsessionを作り、国�
 - 外国株式: `https://fstockapp.sbisec.co.jp`
 - メインサイト: `https://www.sbisec.co.jp`
 
-Worker secretは次の3つだけである。
+Worker secretは次の2つだけである。
 
 - `SBI_CREDENTIAL_JSON`: `rpId`、`origin`、`credentialId`、`keyValue`、任意の`userHandle`、`counter`だけを持つJSON
 - `SBI_HANDSHAKE_KEY_JSON`: SBIが返す一時tokenを復号するRSA-4096 transport key。口座認証鍵ではなく、ローカルで一度生成する
-- `ADMIN_TRIGGER_TOKEN`: 手動triggerのBearer token
 
 中央raw-evidenceのBearerやstorage fingerprint鍵はcollectorに置かない。旧source専用bucket、`kogane-collector-r2-importer`へのService Binding、`scripts/backfill-raw-evidence.sh`は2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
@@ -55,22 +54,7 @@ mise run //services/collector-sbi-securities:typecheck
 mise run //services/collector-sbi-securities:dry-run
 ```
 
-手動実行は`POST /trigger`だけを受け付ける。
-
-```text
-/trigger?scope=domestic&from=2026-06-01&to=2026-08-27
-/trigger?scope=foreign&from=2026-06-01&to=2026-08-27
-```
-
-ローカルの管理用tokenを表示せずに起動する場合は、`scripts/trigger.sh foreign`のようにscopeを渡す。`scripts/trigger.sh all`はCloudflare Cronと同じく、1 invocation内で国内、外国の順に収集する。
-
-`from`と`to`は同時指定し、1回の範囲はinclusiveで90日以下とする。現在値だけなら省略できる。raw responseは次の形で共有DATA bucketに保存する。
-
-初期取込は、指定期間を重複のない90日以下のwindowへ分けて国内・外国を順番に取得する。
-
-```sh
-scripts/backfill.sh 2024-08-28 2026-05-29
-```
+公開 `/trigger`、scope／任意期間指定、旧 `scripts/trigger.sh` と90日分割 `scripts/backfill.sh` は廃止した。既存のprivate RPCは通常の全scope収集だけを実行し、backfillと同等の機能は持たない。新しい認証経路や範囲overrideは追加しない。
 
 ```text
 objects/<2 hex>/<sha256>                       <dataset>.jsonごとのcontent-addressed object
@@ -89,7 +73,7 @@ Free planの実測では、個別の`scope=foreign`と`scope=domestic`は成功�
 
 2026-08-27にWorkers Paidへ移行したため、定期起動はWorker自身のCloudflare Cron Triggerへ統一した。毎日21:00 UTCの`scheduled()`が`scope=all`を直接実行し、国内と外国を同じinvocation内で直列収集する。日次Cronは1時間以上の間隔なので、Cloudflareの現行制限では最大15分のCPU timeと15分のwall timeが使える。このcollectorの実測（外国約7秒、国内約15秒）には十分である。
 
-Queue、dispatcher、GitHub Actions schedule、D1は使わない。Queueは再試行やscope単位の障害隔離が実際に必要になった場合だけ追加し、Paid化そのものを理由には導入しない。手動・バックフィル用の認証付き`POST /trigger`は残す。
+Queue、dispatcher、GitHub Actions schedule、D1は使わない。Queueは再試行やscope単位の障害隔離が実際に必要になった場合だけ追加し、Paid化そのものを理由には導入しない。公開手動・バックフィル入口は廃止し、通常収集のprivate RPCを維持する。
 
 ## 出典
 

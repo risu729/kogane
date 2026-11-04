@@ -25,7 +25,7 @@ env:
 jobs:
   checks:
     name: Checks
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
       contents: read # for checkout
@@ -35,9 +35,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Install mise
-        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
-          version: 2026.10.6
+          version: 2026.10.24
       - name: Verify bounded large-artifact restore
         timeout-minutes: 2
         run: mise exec -- node tasks/_lib/ci/release-resume.mjs resource-check
@@ -71,7 +71,7 @@ jobs:
           retention-days: 14
   processor:
     name: Processor (${{ matrix.shard }}/2)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 60
     permissions:
       contents: read # for checkout
@@ -85,9 +85,9 @@ jobs:
         with:
           persist-credentials: false
       - name: Install mise
-        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
         with:
-          version: 2026.10.6
+          version: 2026.10.24
       - name: Run the complete native processor shard
         run: mise run --continue-on-error "//services/processor:test-shard-${SHARD}"
         env:
@@ -117,7 +117,7 @@ jobs:
       - checks
       - processor
     if: ${{ always() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions: {}
     steps:
@@ -133,10 +133,10 @@ jobs:
     needs:
       - ci-check
     if: ${{ !cancelled() }}
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
       actions: read # Required by actions-timeline to read this workflow run's jobs.
     steps:
       - name: actions-timeline
-        uses: Kesin11/actions-timeline@57fc93f20c6da7fbc14063c6d24a2a5627c799ad # v3.2.0
+        uses: Kesin11/actions-timeline@460b1f8a750077029ad3589824d371b200e91dcf # v3.2.1

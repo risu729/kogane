@@ -16,7 +16,6 @@ depends = ["//services/collector-sbi-shinsei:types"]
 run = [
 	"node ../../tasks/_lib/coverage-run.mjs bun test ./test/*.test.ts",
 	"node ../../tasks/_lib/coverage-run.mjs vitest run",
-	"bash test/admin-token-sync.test.sh",
 	"node --test container/relay-lifecycle.node-test.mjs container/child-lifecycle.node-test.mjs",
 ]
 

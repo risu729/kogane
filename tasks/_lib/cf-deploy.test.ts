@@ -5,6 +5,7 @@ import { readDeployOrder, workflowSteps } from "./deploy-order.ts";
 import { REPO_ROOT } from "./repo-root.ts";
 import { releaseProgress } from "./ci/release-ledger.mjs";
 import { containerProgress } from "./ci/cf-container-release.mjs";
+import { grantAllows, parseGrants } from "../../packages/application/src/grants.ts";
 
 const order = readDeployOrder();
 const allTargets = order.workers.filter((worker) => worker.deployBackend === "cf");
@@ -24,6 +25,22 @@ const camel = (value: unknown): any =>
       : value;
 
 describe("cf migration preserves the canonical Wrangler deployment contract", () => {
+  test("current cf deployments share one immutable v2 pin and historical rollback retains v1", () => {
+    const pins = new Set<string>();
+    for (const target of allTargets) {
+      const legacy = steps.find((step) => step.body.includes(`id: deploy-${target.name}\n`));
+      const cf = steps.find((step) => step.body.includes(`id: cf-deploy-${target.name}\n`));
+      expect(legacy?.body).toMatch(
+        /^\s*uses: risu729\/wrangler-deploy-action@[a-f0-9]{40} # v1\.\d+\.\d+$/mu,
+      );
+      const pin = /^\s*uses: (risu729\/wrangler-deploy-action@[a-f0-9]{40} # v2\.\d+\.\d+)$/mu.exec(
+        cf?.body ?? "",
+      );
+      expect(pin).not.toBeNull();
+      pins.add(pin![1]!);
+    }
+    expect(pins.size).toBe(1);
+  });
   test("code-only Workers keep the versions strategy", () => {
     expect(targets.map((worker) => worker.name)).toEqual([
       "mobile-suica-worker",
@@ -90,6 +107,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
               "vpc_networks",
               "limits",
               "queues",
+              "routes",
             ].includes(key),
         ),
       ).toEqual([]);
@@ -114,6 +132,11 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(worker.compatibilityFlags).toEqual(old.compatibility_flags);
       expect(worker.workersDev).toBe(old.workers_dev);
       expect(worker.previewUrls).toBe(false);
+      expect(worker.domains ?? []).toEqual(
+        (old.routes ?? [])
+          .filter((route: any) => route.custom_domain)
+          .map((route: any) => route.pattern),
+      );
       expect(worker.observability).toEqual(camel(old.observability));
       for (const [key, value] of Object.entries(old.vars ?? {}))
         expect(worker.env[key]).toEqual({ type: "text", value });
@@ -191,7 +214,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(cf?.body).toContain(
         `&& contains(fromJson(steps.select.outputs.cf-selected), '${target.name}')`,
       );
-      expect(cf?.body).toContain("@6a93154ef1c550b760d8582bcf59d8d4a0710788 # v2.2.1");
+      expect(cf?.body).toContain("mode: production");
       expect(cf?.body).toContain(`worker: ${target.worker}`);
       expect(cf?.body).toContain(
         `deploy-triggers: '${["processor", "prestia-bank-worker"].includes(target.name) ? "true" : "false"}'`,
@@ -199,6 +222,25 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(steps.indexOf(cf!)).toBe(steps.indexOf(legacy!) + 1);
     });
   }
+  test("the configured MCP reader grants only the dedicated identity bounded structured reads", () => {
+    const old = parseJsonc(readFileSync(`${REPO_ROOT}/services/app/wrangler.jsonc`, "utf8"));
+    const grants = parseGrants(old.vars.AGENT_API_GRANTS);
+    const owner = JSON.parse(old.vars.OPERATOR_SUBJECTS)[0];
+    expect(grants.size).toBe(1);
+    expect(grants.has(owner)).toBe(false);
+    expect(grants.has("mcp-client:ungranted-synthetic-subject")).toBe(false);
+    const grant = grants.get(`mcp-client:${owner}`)!;
+    expect(grant).toBeDefined();
+    expect(grant.scopes).toEqual({ sources: "*", accounts: "*" });
+    expect(grantAllows(grant, "summary.read")).toBe(true);
+    expect(grantAllows(grant, "records.read")).toBe(true);
+    expect(grantAllows(grant, "evidence.read")).toBe(false);
+    expect(grantAllows(grant, "interpretation.propose")).toBe(false);
+    expect(grant.budget.maxRows).toBe(100);
+    expect(old.vars.ACCESS_MCP_AUDIENCE).not.toBe(old.vars.ACCESS_AUDIENCE);
+    expect(old.vars.AGENT_GRANTS).toBe("");
+    expect(old.vars.MCP_DELEGATIONS).toBe("");
+  });
   test("legacy lifecycle stays canonical and is checked around publication", () => {
     const history: Record<string, unknown[]> = {
       "sbi-vc-trade-worker": [{ tag: "v1", new_sqlite_classes: ["SbiVcSessionState"] }],

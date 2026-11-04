@@ -196,7 +196,7 @@ test("manual preflight stays on exact main and cannot displace production releas
     new URL("../../.github/workflows/container-preflight.yml", import.meta.url),
     "utf8",
   );
-  expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
+  expect(workflow).toContain("if: ${{ github.ref == 'refs/heads/main' }}");
   expect(workflow).toContain("ref: ${{ github.sha }}");
   expect(workflow).toContain("persist-credentials: false");
   expect(workflow).toContain("group: container-readonly-preflight");
@@ -574,7 +574,7 @@ test("workflow keeps the registry credential probe false by default and uses onl
   expect(workflow).toContain("default: false");
   expect(workflow).toContain("REGISTRY_CREDENTIAL_PROBE: ${{ inputs.registry-credential-probe }}");
   expect(workflow).toContain("run: node tasks/_lib/ci/container-preflight.mjs");
-  expect(workflow).toContain("if: github.ref == 'refs/heads/main'");
+  expect(workflow).toContain("if: ${{ github.ref == 'refs/heads/main' }}");
 });
 
 test("plain Node preflight CLI keeps default GET-only and never prints a minted credential", () => {

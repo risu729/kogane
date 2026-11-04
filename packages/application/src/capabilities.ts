@@ -36,7 +36,8 @@ export interface AgentCapabilitiesReport {
   capabilities: readonly AgentCapability[];
   /** Only the intents this grant can actually run. */
   intents: IntentDescription[];
-  scopes: { sources: ScopeSet; accounts: ScopeSet };
+  /** `scheduleSources` is `[]` when the grant names none. */
+  scopes: { sources: ScopeSet; accounts: ScopeSet; scheduleSources: ScopeSet };
   limits: {
     defaultQueryLimit: number;
     maxRows: number;
@@ -72,7 +73,11 @@ export function capabilitiesFor(
     principal: grant.principal,
     capabilities: [...grant.capabilities],
     intents,
-    scopes: { sources: grant.scopes.sources, accounts: grant.scopes.accounts },
+    scopes: {
+      sources: grant.scopes.sources,
+      accounts: grant.scopes.accounts,
+      scheduleSources: grant.scopes.scheduleSources ?? [],
+    },
     limits: {
       defaultQueryLimit: DEFAULT_QUERY_LIMIT,
       maxRows: grant.budget.maxRows,

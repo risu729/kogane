@@ -22,29 +22,21 @@ establish successful bank access.
 ## Operations
 
 - `GET /health` returns source and schema version, without account information.
-- `POST /trigger` requires `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>` and
-  `Content-Type: application/json`. Send exactly `{}` to sign in using the
-  configured Worker secrets. Customer numbers and passwords are never accepted
-  in the request body. Alternatively, its body can be a `MizuhoSession` object:
-  `origin`, `cookies`, `userAgent`, `referer`, and `form: {name, fields}`.
-  `extractMizuhoForm` builds the form state from the current authenticated DOM.
-  Keep this material in memory and submit it only to the controlled collector.
-  `.dev.vars.example` contains synthetic local values, never production credentials.
-  Provision `ADMIN_TRIGGER_TOKEN`, `MIZUHO_CUSTOMER_NUMBER`, and
-  `MIZUHO_LOGIN_PASSWORD` out of band before deployment. CI/CD does not
-  synchronize collector secrets or hold bank credentials or sessions.
-- For explicit-session requests, use a fresh session from the official bank browser after account/history
-  navigation. The accepted origin is an HTTPS `web` or `webN` host under
-  `ib.mizuhobank.co.jp`; requests can only target the observed account-list
-  and ordinary-history read routes. Password fields in supplied session state
-  and other collection routes are refused.
-- A successful response contains a run ID, status, artifact count and
-  persistence outcome. It contains no bank data or reusable session material.
-  HTTP 207 means incomplete coverage; HTTP 502 means acquisition or persistence
-  failure. A login challenge requires completing the bank's authentication
-  separately; an explicit fresh browser session remains available as a fallback.
-- Scheduled runs log only a run ID, status, artifact count and persistence
-  outcome. A login or storage failure fails the scheduled invocation after
+- Public `POST /trigger` is retired (404), including supplied-session injection.
+  Normal collection uses the existing fixed-action private Service Binding and
+  scheduled handler with configured credentials; no replacement HTTP credential
+  transport is added. Provision `MIZUHO_CUSTOMER_NUMBER` and
+  `MIZUHO_LOGIN_PASSWORD` out of band. CI/CD does not synchronize bank credentials.
+- A login challenge remains human-required; this slice does not invent a new
+  authentication recovery path or bypass it.
+- Every entrypoint (including the production service-binding alarm) logs
+  closed configuration/login/collection/persistence phases and one result.
+  The result distinguishes provider outcome, run coverage and persistence,
+  with account/history/failed-unit counts and deduplicated allowlisted issue
+  codes. Unknown issue text becomes `unclassified-collection-issue`; neither
+  exception text nor private identifiers are logged. Logging is best effort:
+  a failed log sink cannot prevent collection, retry a storage write, or turn
+  an already-persisted run into a failure. A login or storage failure fails the scheduled invocation after
   recording safe acquisition failure evidence where storage is available.
 
 The configured Processor route is `mizuho-bank` / `collector-mizuho-bank` in
@@ -79,6 +71,15 @@ remain separate; identity across unobserved pagination is not established.
 The latest published complete account list replaces current balance membership;
 accounts absent from that list retain their transaction history without retaining
 their old balances as current.
+
+A successful first-page read with no visible further page still has run
+coverage `unknown` (`first-page-scope-unverified` in the operational log): the
+page unit is complete, but the run has not established an all-history or date
+range boundary. This is not an acquisition failure. `history-pagination-unverified`
+means visible additional history was not traversed. `collection-incomplete`
+instead means at least one requested account failed; the allowlisted issue
+codes identify the failure class. None of these diagnostics changes stored
+coverage, retries a login, or widens the observed read protocol.
 
 ## Verification
 

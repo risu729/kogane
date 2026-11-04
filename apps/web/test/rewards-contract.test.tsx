@@ -303,3 +303,71 @@ test("READ expiry displays unclassified dated and undated quantities with the co
     }),
   ).toBe(false);
 });
+
+test("provider subset sections render separately, including not-displayed and unknown state", () => {
+  const section = {
+    programId: "program:j-point",
+    holdingRef: "holding:conn",
+    parentBucketRef: "total",
+    unitRef: "points:j-point",
+    observedAt: { kind: "unknown" as const, reasonCode: "synthetic_time" },
+    sourceFactRefs: ["balance:1"],
+    coverage: "observed" as const,
+    reasonCode: null,
+    displays: [
+      {
+        displayRef: "portion",
+        scope: "holding-subset" as const,
+        quantity: {
+          unitRef: "points:j-point",
+          value: {
+            status: "exact" as const,
+            value: { coefficient: "200", scale: 0 },
+            normalizationVersion: "decimal-v1",
+          },
+        },
+        expires: {
+          kind: "local-date" as const,
+          value: "2099-12-31",
+          zone: "Asia/Tokyo",
+          basis: "provider" as const,
+        },
+        rawLocator: "json:$.total.expiry",
+      },
+    ],
+  };
+  const displayPage: RewardReadExpiryPage = {
+    ...page,
+    rows: [],
+    providerDisplaySections: [section],
+  };
+  expect(validApiResponse("/api/v2/rewards/expiry", displayPage)).toBe(true);
+  const html = renderToStaticMarkup(<RewardExpiryResults data={displayPage} />);
+  expect(html).toContain("失効予定の部分量");
+  expect(html).toContain("200");
+  expect(html).toContain("2099-12-31");
+  expect(html).toContain("保有ポイントのうち、取得元が失効予定として表示した分です");
+  expect(html).toContain("合計残高へは加算しません");
+  expect(html).toContain("J-POINT");
+  expect(html).not.toContain("1200");
+  for (const coverage of ["not-displayed", "unknown"] as const) {
+    const response = {
+      ...displayPage,
+      providerDisplaySections: [
+        {
+          ...section,
+          coverage,
+          reasonCode:
+            coverage === "not-displayed"
+              ? ("provider_expiry_not_displayed" as const)
+              : ("provider_expiry_unavailable" as const),
+          displays: [],
+        },
+      ],
+    };
+    expect(validApiResponse("/api/v2/rewards/expiry", response)).toBe(true);
+    const absent = renderToStaticMarkup(<RewardExpiryResults data={response} />);
+    expect(absent).toContain("期限未確認");
+    expect(absent).not.toContain("有効期限なし");
+  }
+});

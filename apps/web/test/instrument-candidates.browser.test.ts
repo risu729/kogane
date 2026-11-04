@@ -284,6 +284,39 @@ describe.if(runnable)("instrument candidate review", () => {
     await tab.close();
   });
 
+  test("history renders persisted delegated origin without an actor or an approval request", async () => {
+    store = await world();
+    const id = ids(store).broker9001;
+    const mapping = store.db
+      .query("SELECT * FROM current_instrument_mappings WHERE identifier_id=?")
+      .get(id) as { instrument_id: string };
+    store.db
+      .query(
+        "INSERT INTO instrument_mappings VALUES ('origin-browser-mapping',?,2,?,'manual','synthetic delegate',1,'2100','synthetic','identified')",
+      )
+      .run(id, mapping.instrument_id);
+    store.db
+      .query(
+        "INSERT INTO decision_operations VALUES ('origin-browser-operation','mcp-client:synthetic-private-browser','server','assign',?,'{}','2100')",
+      )
+      .run("0".repeat(64));
+    store.db
+      .query(
+        "INSERT INTO decision_revisions VALUES ('origin-browser-decision','instrument_mapping',?,2,'assign','manual','mcp-client:synthetic-private-browser','origin-browser-operation','synthetic delegate','[]',1,NULL,'2100')",
+      )
+      .run(id);
+    const tab = await open();
+    // This fixture's existing candidate still names the identifier; the UI only reads history.
+    const button = tab.getByRole("button", { name: "訂正履歴を見る", exact: true }).first();
+    await button.click();
+    await tab.getByText("委任された操作 · identified", { exact: true }).waitFor();
+    const text = await tab.locator("main").innerText();
+    expect(text).not.toContain("synthetic-private-browser");
+    expect(text).not.toContain("mcp-client:");
+    expect(posted).toEqual([]);
+    await tab.close();
+  });
+
   test("an anchor re-confirmed onto the same instrument still stops the plan", async () => {
     store = await world();
     const tab = await open();

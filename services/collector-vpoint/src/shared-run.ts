@@ -28,6 +28,8 @@ import type { RawArtifact } from "./types";
 import type { PreparedVPointPayEmail } from "./vpoint-pay-email";
 
 export const VPOINT_SOURCE = "v-point";
+/** Local identity distinguishes only writer exceptions, never provider text. */
+export class TerminalPersistenceError extends Error {}
 export const VPOINT_PAY_EMAIL_SOURCE = "v-point-pay-email";
 /**
  * One producer per source, `collector-<collector id>`, as the Processor's
@@ -152,7 +154,10 @@ export async function persistVPointRun(
   bucket: R2BucketLike,
   run: VPointSharedRun,
 ): Promise<PersistRunResult> {
-  return await persistRun(bucket, await vPointRunPlan(run));
+  const plan = await vPointRunPlan(run);
+  return await persistRun(bucket, plan).catch(() => {
+    throw new TerminalPersistenceError("terminal_persistence_failed");
+  });
 }
 
 /**

@@ -187,6 +187,17 @@ export async function auditedRoute(
 /** How many rows an agent tool's answer carried, and whether more exist: a count, never data. */
 function toolRows(operation: OperationName, body: unknown): { rows: number; truncated: boolean } {
   const value = (body ?? {}) as Record<string, unknown>;
+  if (operation === "instruments.history")
+    return {
+      rows: Array.isArray(value["entries"]) ? value["entries"].length : 0,
+      truncated: false,
+    };
+  if (operation === "audit.search")
+    return {
+      rows: Array.isArray(value["records"]) ? value["records"].length : 0,
+      truncated: typeof value["cursor"] === "string",
+    };
+  if (operation === "audit.get") return { rows: value["record"] ? 1 : 0, truncated: false };
   if (operation === "financial.query") {
     const result = (value["result"] ?? {}) as Record<string, unknown>;
     const coverage = (result["coverage"] ?? {}) as Record<string, unknown>;
@@ -241,6 +252,7 @@ export async function auditedTool(
   return executeOperation(context, operation, run, {
     value: (result) => {
       if (result === null) return { result: "skip" };
+      if (result.auditOutcome) return result.auditOutcome;
       if (result.status >= 200 && result.status < 300) {
         // A write tool whose writer recorded nothing answered an earlier
         // effect: an operations request re-sent under its key, named by the

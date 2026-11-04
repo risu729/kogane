@@ -134,12 +134,23 @@ deployment ledger and existing operational instructions working. Workspace
 checks use native names; `ci:<short>` aliases are not retained. New code and docs
 should use `//<workspace>:<task>`.
 
+Test schema setup batches the statements of each migration file through D1
+using `services/processor/test/migration-setup.ts`, preserving order and file
+boundaries. Sending the growing CORE schema statement by statement took about
+26–28 seconds before worker bundling and fixture work, breaching existing
+30-second hooks; per-file batches reduced the measured setup to about 7–9
+seconds. Native differential tests compare complete schema and seeded data,
+foreign keys, append-only trigger refusal and a failed file's rollback.
+Explicit upgrade tests still choose the migration subset and apply later files
+at their own boundary. Production migrations, statement text and existing hook deadlines are not
+changed.
+
 `ci:root` owns manifest/task coverage, repository tests, import-boundary checks
 and Knip, including hosted partition coverage. Root `bundle` and `dry-run` compose workspace tasks. Deployable
 Workers' bundle locations stay aligned with `infra/deploy-order.json`.
 
 Automation tasks under `tasks/automation/` call tested implementation modules in
-`tasks/_lib/ci/`. The release and auto-merge workflows use these mise tasks;
+`tasks/_lib/ci/`. Release workflows use these mise tasks;
 GitHub-specific triggers, permissions, credential scopes and upload actions
 remain in workflow YAML. See [CI/CD automation](ci-cd.md) for their safeguards.
 Operational tasks are not dependencies of the check graph.
@@ -166,7 +177,7 @@ forgot to add another Actions matrix row or root task-file include.
 ## Checks and coverage
 
 - Oxlint, Oxfmt, Tombi, yamllint and yamlfmt check source and configuration.
-- Actionlint, ShellCheck, ghalint, pinact and zizmor check workflow syntax,
+- Jactionlint, ShellCheck, ghalint, pinact and zizmor check workflow syntax,
   permissions, action pins, shell code and unsafe workflow patterns.
 - Ruff checks Python without executing probes; typos and hk-config's whole
   `hygiene` group cover spelling, whitespace, line endings, byte-order marks,
@@ -175,7 +186,8 @@ forgot to add another Actions matrix row or root task-file include.
   page in the St.George experiment test keeps its curly apostrophes and is
   excluded from the smart-quote check.
 - Repository guards cover manifests, task coverage, infrastructure ledgers,
-  auto-merge and release decisions, publication gates and import boundaries.
+  Renovate configuration, shared GitHub API pagination, release decisions,
+  publication gates and import boundaries.
 - Knip checks unlisted dependencies and unresolved imports as build failures.
   Its broader unused-code report remains advisory because static analysis
   cannot prove every runtime entrypoint. The report and policy are documented

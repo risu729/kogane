@@ -76,6 +76,16 @@ export async function scheduleBootstrapApi(
   if (tokens === null) throw new HttpError(503, "grants_misconfigured");
   if (!identity.serviceToken || !tokens.includes(identity.serviceToken))
     throw new HttpError(403, "deployment_token_required");
+  // Capture the deployment identity after service-token authorization. This
+  // refusal is before bootstrap writes; only this closed code may be retried.
+  const appSha = env.RELEASE_SHA;
+  const expectedSha = request.headers.get("x-kogane-release-sha");
+  if (typeof appSha !== "string" || !/^[0-9a-f]{40}$/u.test(appSha))
+    throw new HttpError(503, "scheduling_unavailable");
+  if (expectedSha !== null) {
+    if (!/^[0-9a-f]{40}$/u.test(expectedSha)) throw new HttpError(400, "invalid_request");
+    if (expectedSha !== appSha) throw new HttpError(503, "release_mismatch");
+  }
   // An older App must not initialize a newer Processor (or the reverse).
   let health: Response;
   try {
@@ -95,11 +105,39 @@ export async function scheduleBootstrapApi(
   }
   if (
     health.status !== 200 ||
-    !/^[0-9a-f]{40}$/u.test(env.RELEASE_SHA) ||
-    value.releaseSha !== env.RELEASE_SHA
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    typeof value.releaseSha !== "string" ||
+    !/^[0-9a-f]{40}$/u.test(value.releaseSha)
   )
-    throw new HttpError(503, "release_mismatch");
-  return relay(request, env, "/bootstrap");
+    throw new HttpError(503, "scheduling_unavailable");
+  if (value.releaseSha !== appSha) throw new HttpError(503, "release_mismatch");
+  const upstream = await relay(request, env, "/bootstrap", undefined, undefined, {
+    "x-kogane-release-sha": appSha,
+  });
+  if (upstream.status !== 200) return upstream;
+  // Identity comes from the POST that actually reconciled reservations, never
+  // the earlier health GET. A lost/malformed postwrite answer is not replayable.
+  let result: unknown;
+  try {
+    result = await upstream.json();
+  } catch {
+    throw new HttpError(503, "scheduling_unavailable");
+  }
+  if (
+    !result ||
+    typeof result !== "object" ||
+    Array.isArray(result) ||
+    !("releaseSha" in result) ||
+    result.releaseSha !== appSha ||
+    !("status" in result) ||
+    result.status !== "armed" ||
+    !("reservations" in result) ||
+    !Array.isArray(result.reservations)
+  )
+    throw new HttpError(503, "scheduling_unavailable");
+  return Response.json({ ...result, releaseSha: appSha, processorReleaseSha: result.releaseSha });
 }
 async function boundedBody(request: Request): Promise<string> {
   if (request.headers.get("content-type")?.split(";", 1)[0] !== "application/json")

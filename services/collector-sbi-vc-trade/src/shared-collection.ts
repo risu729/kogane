@@ -48,6 +48,9 @@ export const SESSION_UNHEALTHY_CODE = "session_unhealthy";
 
 const encoder = new TextEncoder();
 
+/** Local marker, consumed inside the DO before RPC serializes exceptions. */
+export class TerminalPersistenceError extends Error {}
+
 /** One already-sanitized gateway response, as it was staged. */
 export interface SharedCapture {
   readonly dataset: string;
@@ -123,6 +126,8 @@ export function waitingForHuman(health: HealthState): boolean {
 
 /** The safe code for a run that never started because the session was unusable. */
 export function blockedErrorCode(health: HealthState): string {
+  if (health.lastReauthErrorCode === "manual_agreement_required")
+    return "manual_agreement_required";
   return waitingForHuman(health) ? HUMAN_REQUIRED_CODE : SESSION_UNHEALTHY_CODE;
 }
 
@@ -267,8 +272,12 @@ export async function persistSharedRun(
   options: { readonly waitingForHuman?: boolean } = {},
 ): Promise<SharedRunSummary> {
   const plan = await buildSharedRunPlan(input);
-  const result = await persistRun(bucket, plan);
+  const result = await persistRun(bucket, plan).catch(() => {
+    // Only the writer boundary is classified; planning/session failures are not.
+    throw new TerminalPersistenceError("terminal_persistence_failed");
+  });
   return {
+    runId: input.manifest.runId,
     target: "shared",
     outcome: result.outcome,
     terminalKey: result.terminalKey,

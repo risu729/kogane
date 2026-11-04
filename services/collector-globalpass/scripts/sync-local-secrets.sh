@@ -8,7 +8,6 @@ fi
 
 credential_file=$1
 token_directory=${2:-"${credential_file%/*}"}
-admin_token_file="$token_directory/globalpass-worker-admin-token"
 relay_token_file="$token_directory/globalpass-worker-relay-token"
 worker_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 
@@ -26,17 +25,14 @@ fi
 
 mkdir -p "$token_directory"
 chmod 700 "$token_directory"
-for token_file in "$admin_token_file" "$relay_token_file"; do
-  if [[ ! -s $token_file ]]; then
-    umask 077
-    openssl rand -hex 32 > "$token_file"
-  fi
-done
+if [[ ! -s $relay_token_file ]]; then
+  umask 077
+  openssl rand -hex 32 > "$relay_token_file"
+fi
 
 cd "$worker_dir"
 jq -jr '.username' "$credential_file" | bunx wrangler secret put GLOBALPASS_ID
 jq -jr '.password' "$credential_file" | bunx wrangler secret put GLOBALPASS_PASSWORD
-tr -d '\r\n' < "$admin_token_file" | bunx wrangler secret put ADMIN_TRIGGER_TOKEN
 tr -d '\r\n' < "$relay_token_file" | bunx wrangler secret put RELAY_TOKEN
 
 echo "Worker secrets updated without printing secret values"

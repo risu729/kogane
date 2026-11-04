@@ -587,7 +587,7 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
       (await recordsOf(ungranted.requestId)).map((row) => [row["operation"], row["result_code"]]),
     ).toEqual([["capabilities", "agent_api_not_configured"]]);
     // A path no tool serves is not an operation.
-    const unknown = await call("/api/agent/v1/audit.search", { subject: AGENT, body: {} });
+    const unknown = await call("/api/agent/v1/not-served", { subject: AGENT, body: {} });
     expect(unknown.response.status).toBe(404);
     expect(await recordsOf(unknown.requestId)).toEqual([]);
   });
@@ -666,7 +666,7 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
         principalKind: "agent",
         operation: "ops.import.request",
         result: "refused",
-        resultCode: "actor_not_supported",
+        resultCode: "delegation_not_configured",
       },
     ]);
     expect(

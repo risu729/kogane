@@ -28,7 +28,7 @@ JST当月までをinclusiveに走査し、想定外応答に対して120か月�
 app API collectorは停止している。Cronはなく、手動の`/trigger`、`/probe`、
 `/reset-credentials`はHTTP 410を返す。遅延配送されたscheduled eventも収集しない。
 `/health`は`collectionEnabled: false`と`status: "disabled"`を返す。
-Durable Objectと既存secretsは保持する。旧source専用bucketのR2原本は2026-09-13に中央DATAへ
+Durable Objectとapp credential secretsは保持する。管理tokenだけが廃止対象である。旧source専用bucketのR2原本は2026-09-13に中央DATAへ
 コピー・検証した後に削除した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。VポイントPay通知メールは
 `services/collector-vpoint/`で引き続き収集する。以下の認証・デプロイ説明は研究記録である。
 
@@ -41,10 +41,7 @@ endpointは対象にしない。email source、app API source、Vポイント本
 APIの認証には同じセッション由来の実UUIDとrefresh tokenが必要で、仮UUIDでは代用しない。
 端末アプリとの同時利用やtoken更新の競合は未検証であり、自動的な再登録・端末移行は行わない。
 
-管理token付き`POST /credential-status`は、実行時に選ばれる認証元、欠けた項目、
-UUID形式の不備だけを返す。値は返さず、Durable Objectへの書き込みやAPI呼び出し、
-token更新も行わない。`structurallyReady: true`は形式確認だけで、認証成功を意味しない。
-停止中の`/trigger`は認証状態によらずHTTP 410で拒否する。
+公開 `/credential-status` は廃止（404）し、状態・credentialを読まない。停止中の `/trigger`、`/probe`、`/reset-credentials` は引き続き410で、DOとapp credential自体は変更しない。
 
 ## 認証とWorker化
 
@@ -89,12 +86,9 @@ mise run //services/collector-vpoint-pay:dry-run
 - SQLite Durable Object: `VPointPayCredentialState`
 - secret: `VPOINT_PAY_REFRESH_TOKEN`
 - secret: `VPOINT_PAY_DEVICE_UUID`
-- secret: `ADMIN_TRIGGER_TOKEN`
-- Cron: `30 21 * * *`（毎日06:30 JST）
+- Cron: なし（app API collector停止）
 
-manual collectionは`POST /trigger`。`GET /health`は秘密値・口座データを返さない。
-管理token付き`POST /probe`は、認証不要の`common_settings`だけを呼び、標準Workers
-`fetch()`からfirst-party app originへ到達できるかを応答内容を返さず確認する。
+公開manual collectionはない。`GET /health` は停止状態だけを返す。
 
 検証環境を削除するときは次を一組で削除する。
 

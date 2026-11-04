@@ -1,7 +1,9 @@
+import { isDecisionOrigin } from "./decision-origin-contract.ts";
 import {
   INSTRUMENT_HISTORY_PATH,
   validInstrumentHistoryRead,
 } from "./instrument-history-contract.ts";
+import { validRewardProviderExpirySection } from "../../domain/src/reward-expiry-observations.ts";
 import { validQuantity } from "../../domain/src/values.ts";
 import { validTemporalValue, validInstantText, validLocalDateText } from "../../domain/src/time.ts";
 import type {
@@ -123,6 +125,7 @@ const organizationAccountFields = {
   status: literal("identified", "provider-local", "aggregate", "unresolved"),
   revision: (value: unknown): value is number => identifier(value) && value > 0,
   method: literal("rule", "manual"),
+  decisionOrigin: optional(isDecisionOrigin),
   reason: text,
 } satisfies Shape<Omit<OrganizedAccount, "connection">>;
 const organizationShape = object<ObservationOrganization>({
@@ -147,6 +150,7 @@ const organizationShape = object<ObservationOrganization>({
       nameEvidence: optional(
         object<NonNullable<OrganizedInstrument["nameEvidence"]>>({
           reason: literal("manual", "provider-current", "observed-japanese-script"),
+          decisionOrigin: optional(isDecisionOrigin),
           origin: nullable(object({ kind: observationKind, id: identifier })),
         }),
       ),
@@ -685,6 +689,7 @@ const rewardReadExpiry = object<RewardReadExpiryRow>({
   expiryBasis: optional(nullable(validRewardExpiryBasis)),
 });
 const rewardReadPage = object<RewardReadExpiryPage>({
+  providerDisplaySections: optional(array(validRewardProviderExpirySection)),
   rows: array(rewardReadExpiry),
   page: object<RewardReadExpiryPage["page"]>({
     limit: identifier,

@@ -8,7 +8,7 @@
   "workers_dev": true,
   "preview_urls": false,
   "secrets": {
-    "required": ["ADMIN_TRIGGER_TOKEN", "PRESTIA_BANK_USER_ID", "PRESTIA_BANK_PASSWORD"]
+    "required": ["PRESTIA_BANK_USER_ID", "PRESTIA_BANK_PASSWORD"]
   },
   "triggers": { "crons": [] },
   "observability": { "enabled": true },

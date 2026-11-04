@@ -21,7 +21,6 @@ export default defineConfig({
       COLLECTOR_SCHEMA_VERSION: bindings.text("vpoint-pay-worker-poc-v1"),
       VPOINT_PAY_REFRESH_TOKEN: bindings.secret(),
       VPOINT_PAY_DEVICE_UUID: bindings.secret(),
-      ADMIN_TRIGGER_TOKEN: bindings.secret(),
       DATA: bindings.r2({
         name: "kogane-raw-evidence",
       }),

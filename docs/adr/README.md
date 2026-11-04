@@ -54,6 +54,7 @@ for current behavior.
 - [ADR 0041: Separate maintained documentation from historical records](0041-documentation-scope.md)
 - [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — proposed; production verification pending
 - [ADR 0045: Collection quality is a per-request read of stored stage states, in closed codes](0045-collection-quality-read.md) — accepted
+- [ADR 0046: Maintenance windows as a separately granted agent capability](0046-agent-maintenance-windows.md) — proposed; amended 2026-10-09 by ADR 0063 (the revision is a delegated operation, refused until delegated execution exists)
 - [ADR 0047: Connect MCP clients through Cloudflare Access Managed OAuth, as an agent-only principal](0047-mcp-client-connection.md) — proposed; no client has connected to a deployment
 - [ADR 0048: Run an accepted collection or session refresh once through the named collector RPC](0048-operation-collector-dispatch.md) — accepted; production dispatch unverified
 - [ADR 0049: Keep the displayed and the computed reward expiry apart, each with its basis](0049-reward-expiry-basis.md) — accepted
@@ -71,3 +72,8 @@ for current behavior.
 - [ADR 0063: The AI is a delegated operation path: a verified MCP principal the owner names may apply operations within capability, scope, confirmation and audit](0063-delegated-ai-operation-path.md) — proposed; nothing implemented, no delegation exists
 - [ADR 0064: One append-only audit record per operation, for the human UI and the AI alike, referencing the existing logs](0064-common-audit-log.md) — proposed; no table yet, migration number not fixed
 - [ADR 0065: Collect native coverage by runtime, without a fabricated repository total](0065-native-test-coverage.md) — proposed; native measurements, no numerical threshold
+- [ADR 0067: Current economic-row evidence readiness before event writers](0067-economic-row-readiness.md) — proposed; internal read-only diagnostic, no writer activation
+- [ADR 0068: Preserve provider expiry subsets apart from reward holdings](0068-provider-reward-expiry-subsets.md) — proposed; natural production reward capture verification pending
+- [ADR 0069: Retire collector-local public admin bearer entrypoints in bounded slices](0069-collector-admin-retirement.md)
+- [ADR 0070: Validate observed SBI Shinsei history offline before enabling acquisition](0070-sbi-shinsei-observed-history-boundary.md) — proposed; offline-only request and capture inspection, no history acquisition or publication
+- [ADR 0071: Let Renovate own dependency auto-merge](0071-remove-custom-automerge.md) — proposed; remove the unconfigured custom merge workflow

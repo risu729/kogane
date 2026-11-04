@@ -14,7 +14,6 @@ export default defineConfig({
     },
     env: {
       COLLECTOR_SCHEMA_VERSION: bindings.text("mizuho-collector-v1"),
-      ADMIN_TRIGGER_TOKEN: bindings.secret(),
       MIZUHO_CUSTOMER_NUMBER: bindings.secret(),
       MIZUHO_LOGIN_PASSWORD: bindings.secret(),
       SCHEDULE_DB: bindings.d1({

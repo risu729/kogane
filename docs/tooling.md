@@ -21,7 +21,8 @@ fixed toolchain:
   each workspace owns a `mise.toml`, discovered through native mise monorepo
   config roots and addressed as `//<workspace>:<task>`. Dependencies are installed by the `bun` deps provider
   (`bun install --frozen-lockfile`), never by a task that downloads a tool on
-  demand.
+  demand. Tool lockfiles use format version 3 and `lockfile_mode = "generate"`,
+  which rebuilds them from current requests while reusing unchanged artifacts.
 - **Bun** is the package manager and the test runner for pure TypeScript. The
   repository is one Bun workspace with a single root `bun.lock` and
   `linker = "isolated"`, so a workspace sees only what it declares and

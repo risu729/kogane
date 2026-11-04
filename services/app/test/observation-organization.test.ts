@@ -1,3 +1,16 @@
+import { organizationSql } from "../../../packages/read-model/src/organization.ts";
+import {
+  LEGACY_ORGANIZATION_SQL,
+  LEGACY_PREFERRED_INSTRUMENT_NAMES_SQL,
+} from "../../../packages/read-model/test/decision-origin-legacy-sql.ts";
+import {
+  originDecisionFixture,
+  ORIGIN_CASES,
+} from "../../../packages/read-model/test/decision-origin-fixture.ts";
+import {
+  preferredInstrumentNames,
+  PREFERRED_INSTRUMENT_NAMES_SQL,
+} from "../src/preferred-instrument-names";
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it, vi } from "vitest";
 import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
@@ -432,4 +445,132 @@ it("rejects an oversized distinct-reference result even for one raw filter group
   } finally {
     vi.restoreAllMocks();
   }
+});
+
+it("classifies the exact mapping assignment, preserves read modes and equals frozen SQL on scaled stores", async () => {
+  const refs: { kind: (typeof kinds)[number]; id: number }[] = [];
+  const expectedOrigins: string[] = [];
+  const nameIdentifiers: string[] = [];
+  let random = 41;
+  for (let n = 0; n < 28; n++) {
+    random = (Math.imul(random, 1664525) + 1013904223) >>> 0;
+    const caseIndex = random % ORIGIN_CASES.length;
+    expectedOrigins.push(ORIGIN_CASES[caseIndex]!.origin);
+    const seeded = await seed("origin-scaled-" + n);
+    refs.push(...seeded.refs);
+    const source = await seeded
+      .prepare("SELECT id FROM source_accounts WHERE id='ref'")
+      .first<{ id: string }>();
+    const instrument = await seeded
+      .prepare("SELECT id FROM instrument_identifiers WHERE id='identifier'")
+      .first<{ id: string }>();
+    nameIdentifiers.push(instrument!.id);
+    for (const [kind, ref] of [
+      ["account_mapping", source!.id],
+      ["instrument_mapping", instrument!.id],
+    ] as const) {
+      await seeded
+        .prepare(
+          kind === "account_mapping"
+            ? "INSERT INTO account_mappings VALUES ('am2','ref',2,'account','manual','synthetic',1,'2100','synthetic','identified')"
+            : "INSERT INTO instrument_mappings VALUES ('im2','identifier',2,'instrument','manual','synthetic',1,'2100','synthetic','identified')",
+        )
+        .run();
+      const fixture = originDecisionFixture(kind, ref, 2, caseIndex, kind + n);
+      await env.DB.batch(
+        fixture.writes.map((write) => env.DB.prepare(write.sql).bind(...write.args)),
+      );
+    }
+  }
+  const nameArgs = JSON.stringify([...nameIdentifiers, nameIdentifiers[0]!]);
+  const nameRows = (
+    await env.DB.prepare(PREFERRED_INSTRUMENT_NAMES_SQL)
+      .bind(nameArgs)
+      .all<Record<string, unknown>>()
+  ).results;
+  expect(nameRows.map(({ decisionOrigin: _origin, ...old }) => old)).toEqual(
+    (await env.DB.prepare(LEGACY_PREFERRED_INSTRUMENT_NAMES_SQL).bind(nameArgs).all()).results,
+  );
+  expect(nameRows.map((row) => row["decisionOrigin"])).toEqual([
+    ...expectedOrigins,
+    expectedOrigins[0],
+  ]);
+  const args = JSON.stringify([...refs, refs[0]!]);
+  for (const mode of ["latest", "as-recorded"] as const) {
+    const sql = organizationSql(mode);
+    const current = (await env.DB.prepare(sql).bind(args).all<Record<string, unknown>>()).results;
+    const legacy = (await env.DB.prepare(LEGACY_ORGANIZATION_SQL[mode]).bind(args).all()).results;
+    expect(
+      current.map(
+        ({ account_decision_origin: _account, instrument_decision_origin: _instrument, ...old }) =>
+          old,
+      ),
+    ).toEqual(legacy);
+    const rows = await observationOrganizations(env.DB, refs, mode);
+    for (const [n, ref] of refs.entries()) {
+      const expected = mode === "as-recorded" ? "automatic" : expectedOrigins[Math.floor(n / 4)];
+      const value = rows.get(ref.kind + ":" + ref.id)!;
+      expect(value.account!.decisionOrigin).toBe(expected);
+      expect(value.instruments[0]!.decisionOrigin).toBe(expected);
+      // Display names are always current, even when mapping attribution is as-recorded.
+      expect(value.instruments[0]!.nameEvidence!.decisionOrigin).toBe(
+        expectedOrigins[Math.floor(n / 4)],
+      );
+      expect(JSON.stringify(value)).not.toContain("mcp-client:");
+    }
+    const plan = (
+      await env.DB.prepare("EXPLAIN QUERY PLAN " + sql)
+        .bind(args)
+        .all<{ detail: string }>()
+    ).results;
+    expect(plan.some((row) => /SCAN (origin_d|origin_op)\b/u.test(row.detail))).toBe(false);
+    expect(plan.some((row) => row.detail.includes("decision_revisions_subject"))).toBe(true);
+    expect(plan.some((row) => row.detail.includes("sqlite_autoindex_decision_operations"))).toBe(
+      true,
+    );
+  }
+}, 30000);
+
+it("a current delegated name overlay never inherits the actor of the as-recorded mapping", async () => {
+  const { refs, prepare } = await seed("synthetic-name-origin");
+  const identifier = await prepare(
+    "SELECT id FROM instrument_identifiers WHERE id='identifier'",
+  ).first<{ id: string }>();
+  await prepare(
+    "INSERT INTO instrument_mappings VALUES ('im2','identifier',2,'instrument','manual','synthetic',1,'2100','delegated current name','identified')",
+  ).run();
+  const fixture = originDecisionFixture(
+    "instrument_mapping",
+    identifier!.id,
+    2,
+    0,
+    "current-name-overlay",
+  );
+  await env.DB.batch(fixture.writes.map((write) => env.DB.prepare(write.sql).bind(...write.args)));
+  const recorded = await observationOrganizations(env.DB, refs, "as-recorded");
+  for (const value of recorded.values()) {
+    expect(value.instruments[0]).toMatchObject({
+      revision: 1,
+      method: "rule",
+      decisionOrigin: "automatic",
+      label: "delegated current name",
+      nameEvidence: { reason: "manual", decisionOrigin: "delegated", origin: null },
+    });
+    expect(JSON.stringify(value)).not.toContain(fixture.actor);
+  }
+  const args = JSON.stringify([identifier!.id, identifier!.id]);
+  const current = (
+    await env.DB.prepare(PREFERRED_INSTRUMENT_NAMES_SQL).bind(args).all<Record<string, unknown>>()
+  ).results;
+  expect(current.map(({ decisionOrigin: _origin, ...old }) => old)).toEqual(
+    (await env.DB.prepare(LEGACY_PREFERRED_INSTRUMENT_NAMES_SQL).bind(args).all()).results,
+  );
+  const plan = (
+    await env.DB.prepare("EXPLAIN QUERY PLAN " + PREFERRED_INSTRUMENT_NAMES_SQL)
+      .bind(args)
+      .all<{ detail: string }>()
+  ).results;
+  expect(plan.some((row) => /SCAN (origin_d|origin_op)\b/u.test(row.detail))).toBe(false);
+  const names = await preferredInstrumentNames(env.DB, [identifier!.id]);
+  expect(names.get(identifier!.id)!.decisionOrigin).toBe("delegated");
 });

@@ -80,7 +80,7 @@ listenしていない。relay tokenはstdinからmemoryへ渡し、`bots`のfile
 - Workerの公開診断endpoint `/egress`。既存Worker以外のresourceは作らず、Worker削除に従って消える。
 - npm依存の`patchright`。別serviceや別registry resourceは作っていないため、repo/Container imageの削除だけで除去される。
 - private R2 bucket `kogane-globalpass-collector-poc`。削除前にfailure manifestを残す必要がないことを確認する。
-- Worker secrets `GLOBALPASS_ID`、`GLOBALPASS_PASSWORD`、`ADMIN_TRIGGER_TOKEN`、`RELAY_TOKEN`。
+- Worker secrets `GLOBALPASS_ID`、`GLOBALPASS_PASSWORD`、`RELAY_TOKEN`。
 - Worker config内のBrowser Run binding `BROWSER`とTAMIA VPC binding。bindingを外すだけで、接続先Tunnel自体は削除しない。
 - Cloudflareが保持するPoC Workerのversion/deployment history。Worker全体の削除に従わせ、個別versionを無理に消さない。
 

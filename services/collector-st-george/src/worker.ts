@@ -1,11 +1,12 @@
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
   scheduledFailure,
-  scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
 import { Container, getContainer } from "@cloudflare/containers";
 import { DurableObject } from "cloudflare:workers";
+import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
+import { logStGeorgeResult, stGeorgeScheduledResult } from "./result";
 import type { R2BucketLike } from "../../../packages/collection/src/index";
 import { persistSharedRun } from "./shared-collection";
 import { startTcpRelay } from "./tcp-relay";
@@ -39,7 +40,7 @@ export class StGeorgeCollectionState extends DurableObject<Env> {
     super(ctx, env);
     this.coordinator = new CollectionCoordinator(
       ctx.storage as unknown as StateStorage,
-      () => withCollectionLease(env, "st-george", () => collect(env)),
+      (runId) => withCollectionLease(env, "st-george", () => collect(env, runId)),
       (run) => persistSharedRun(env.DATA as unknown as R2BucketLike, run),
     );
   }
@@ -50,6 +51,7 @@ export class StGeorgeCollectionState extends DurableObject<Env> {
     try {
       const result =
         path === "/resume" ? await this.coordinator.resume() : await this.coordinator.trigger();
+      logStGeorgeResult(result);
       return Response.json(result, {
         status:
           result.status === "busy" || result.status === "blocked"
@@ -60,6 +62,7 @@ export class StGeorgeCollectionState extends DurableObject<Env> {
       });
     } catch {
       // Never forward provider text, exception details, or credentials to the caller.
+      logStGeorgeResult({ status: "failed", reason: "state-unavailable" });
       return Response.json({ status: "failed", reason: "state-unavailable" }, { status: 503 });
     }
   }
@@ -116,7 +119,7 @@ async function hasRequestBytes(request: Request): Promise<boolean> {
   }
 }
 
-async function collect(env: Env): Promise<CollectionOutput> {
+function collectionConfiguration(env: Env) {
   const credential = parseCredential(env.ST_GEORGE_CREDENTIAL_JSON);
   const egress: string = env.EGRESS_MODE;
   if (egress !== "direct" && egress !== "tamia") throw new Error("invalid-configuration");
@@ -143,25 +146,47 @@ async function collect(env: Env): Promise<CollectionOutput> {
       throw new Error("invalid-configuration");
     relay = { relayUrl: url.href, relayToken: env.RELAY_TOKEN };
   }
+  return { credential, egress, relay };
+}
+
+async function collect(env: Env, runId: string): Promise<CollectionOutput> {
+  const diagnostic = createDiagnostics("st-george", runId);
+  const { credential, egress, relay } = await diagnostic.step("configuration", () =>
+    collectionConfiguration(env),
+  );
   const container = getContainer(env.COLLECTOR_CONTAINER, `run-${crypto.randomUUID()}`);
   try {
-    await container.startAndWaitForPorts();
-    const response = await container.fetch(
-      new Request("http://container/collect", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ credential, egress, ...relay }),
-      }),
+    await diagnostic.step("container-start", () => container.startAndWaitForPorts());
+    const response = await diagnostic.step("container-request", () =>
+      container.fetch(
+        new Request("http://container/collect", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ credential, egress, ...relay }),
+        }),
+      ),
     );
-    const output = parseCollectionOutput(await readBoundedJson(response));
+    const output = await diagnostic.step("browser-collection", async () =>
+      parseCollectionOutput(await readBoundedJson(response)),
+    );
     if (!response.ok && output.status === "success") throw new Error("container-failed");
+    if (output.status === "failed")
+      diagnostic.failure("browser-collection", new Error(output.reason));
+    diagnostic.finish(output.status);
     return output;
+  } catch (error) {
+    diagnostic.finish("failed");
+    throw error;
   } finally {
     // The process owns the credentials and ephemeral browser; tear it down on every path.
     try {
-      await container.destroy();
+      await diagnostic.step("container-destroy", () => container.destroy());
     } catch {
-      console.warn(JSON.stringify({ event: "st-george-container-destroy-failed" }));
+      try {
+        console.warn(JSON.stringify({ event: "st-george-container-destroy-failed" }));
+      } catch {
+        /* Logging cannot replace a collected result or original error. */
+      }
     }
   }
 }
@@ -219,7 +244,7 @@ export async function alarmCollection(
   try {
     const state = env.SESSION_STATE.get(env.SESSION_STATE.idFromName("st-george"));
     const response = await state.fetch(new Request("https://state/trigger", { method: "POST" }));
-    return scheduledResult(await response.json());
+    return stGeorgeScheduledResult(await response.json());
   } catch (error) {
     return scheduledFailure(error);
   }

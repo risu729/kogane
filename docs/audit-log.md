@@ -6,32 +6,31 @@ What the code records today about who did what, through which path
 The log covers the operations that exist today on three paths — the
 operator's routes (`ui`), the agent HTTP routes (`agent-http`) and MCP tool
 calls (`mcp`). It does not record the Processor's own `alarm` and `lane` work
-yet (plan S7); no call runs as a delegated principal and nothing prepares or
-confirms (ADR 0063, plan S3: the merged declaration core only parses
-`MCP_DELEGATIONS` and reports an inert status in an MCP client's
-`kogane.capabilities`, which is recorded as that tool's read); and agents
-cannot read it (plan S5/S8). The limits are listed at the
-end.
+yet (plan S7). S3 execution integration adds delegated calls for installed
+adapters and common preparation/confirmation primitives; actual schedule
+adapters remain incomplete. The checked-in delegation configuration is still
+empty. Agent HTTP and MCP can read scoped records under `audit.read`.
+The limits are listed at the end.
 
 ## The record
 
 CORE `audit_records` (migration 0075), one row per operation call:
 
-| Column                                                                               | Holds                                                                                                                                                                                                                                        |
-| ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `audit_id`, `recorded_at`                                                            | `aud_` + UUID; canonical UTC milliseconds                                                                                                                                                                                                    |
-| `path`                                                                               | `ui`, `agent-http`, `mcp` (the table also admits `alarm` and `lane`, which nothing writes yet)                                                                                                                                               |
-| `subject`, `principal`, `principal_kind`                                             | the verified Access subject; what it was graded as; `human` (the operator) or `agent` (the table also admits `delegated` and `automatic`)                                                                                                    |
-| `delegation_ref`                                                                     | always NULL today                                                                                                                                                                                                                            |
-| `operation`, `risk_class`, `step`                                                    | a name from `OPERATION_CATALOGUE` (`packages/application/src/operation-path/catalogue.ts`), its ADR 0063 risk class, and `call`                                                                                                              |
-| `scope_namespace`, `scope_source`                                                    | the one server-resolved source the target belongs to, or both NULL                                                                                                                                                                           |
-| `target_ref`                                                                         | the target, as an id the existing logs hold (`plan:<id>`, `op_<id>`, `schedule:<id>`, …); NULL on a refusal                                                                                                                                  |
-| `result`, `result_code`, `reason_code`                                               | `applied` / `accepted` / `read` / `replayed` / `refused` / `failed` / `overflow`; the closed code of a refusal or failure; a closed reason                                                                                                   |
-| `correlation_id`                                                                     | the App's request id (`x-request-id` of the answer), forwarded to the Processor                                                                                                                                                              |
-| `idempotency_key`, `payload_digest`                                                  | the caller's key (a commit's `operationId`, an operations request's key); the digest of the validated payload, never the payload                                                                                                             |
-| `confirmation_digest`, `confirm_expires_at`, `confirms_audit_id`, `reverts_audit_id` | always NULL today (two-step confirmation and reverting operations are ADR 0063's later slices); the table requires `confirms_audit_id` only on an applied or accepted confirm, so a refused confirm with no matching prepare can be recorded |
-| `refs_json`                                                                          | at most 16 references into the existing logs (`approval:<id>`, `operation:<id>`, `decision:<id>`, `schedule:<id>@<rev>`, `field:<path>`)                                                                                                     |
-| `diff_json`                                                                          | one closed shape per kind: `revision` (from, to, changed field names), `decision` (counts), `request` (status), `read` (row count), `release`, `overflow`, `none`                                                                            |
+| Column                                                                               | Holds                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audit_id`, `recorded_at`                                                            | `aud_` + UUID; canonical UTC milliseconds                                                                                                                                                                                                               |
+| `path`                                                                               | `ui`, `agent-http`, `mcp` (the table also admits `alarm` and `lane`, which nothing writes yet)                                                                                                                                                          |
+| `subject`, `principal`, `principal_kind`                                             | the verified Access subject; what it was graded as; `human` (the operator), `agent`, or `delegated` (the table also admits `automatic`)                                                                                                                 |
+| `delegation_ref`                                                                     | the canonical `dlg_` reference for delegated calls, NULL otherwise                                                                                                                                                                                      |
+| `operation`, `risk_class`, `step`                                                    | a name from `OPERATION_CATALOGUE` (`packages/application/src/operation-path/catalogue.ts`), its ADR 0063 risk class, and `call`, `prepare` or `confirm`                                                                                                 |
+| `scope_namespace`, `scope_source`                                                    | the one server-resolved source the target belongs to, or both NULL                                                                                                                                                                                      |
+| `target_ref`                                                                         | the target, as an id the existing logs hold (`plan:<id>`, `op_<id>`, `schedule:<id>`, …); NULL on a refusal                                                                                                                                             |
+| `result`, `result_code`, `reason_code`                                               | `applied` / `accepted` / `prepared` / `read` / `replayed` / `refused` / `failed` / `overflow`; the closed code of a refusal or failure; a closed reason                                                                                                 |
+| `correlation_id`                                                                     | the App's request id (`x-request-id` of the answer), forwarded to the Processor                                                                                                                                                                         |
+| `idempotency_key`, `payload_digest`                                                  | the caller's key (a commit's `operationId`, an operations request's key); the digest of the validated payload, never the payload                                                                                                                        |
+| `confirmation_digest`, `confirm_expires_at`, `confirms_audit_id`, `reverts_audit_id` | preparation digest/expiry and confirmed-preparation link for two-step helpers; revert links remain unused; the table requires `confirms_audit_id` only on an applied or accepted confirm, so a refused confirm with no matching prepare can be recorded |
+| `refs_json`                                                                          | at most 16 references into the existing logs (`approval:<id>`, `operation:<id>`, `decision:<id>`, `schedule:<id>@<rev>`, `field:<path>`)                                                                                                                |
+| `diff_json`                                                                          | one closed shape per kind: `revision` (from, to, changed field names), `decision` (counts), `request` (status), `read` (row count), `release`, `overflow`, `none`                                                                                       |
 
 The table is append-only (no update, delete or replace), `STRICT`,
 `core-keep`, never pruned, and listed in `REVISION_EXCLUDED_TABLES`, so an
@@ -72,16 +71,18 @@ authorization and service unchanged and records the outcome:
   before any batch, and the App records it once as `refused` under the
   command's operation.
 
-| Path         | Route or tool                                                                                                                                                                  | Operation                                                                                                                                                                                      | Effect record written by                                                                               |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `ui`         | `POST /api/command/v1/{plan,simulate,approve,commit,operation}`                                                                                                                | `command.plan`, `command.simulate`, `command.approve`, `command.commit`, `command.operation.get`                                                                                               | the Processor: `createPlan`, `approve` and `commit` batches                                            |
-| `ui`         | `POST /api/ops/v1/{collections,imports,replays,projections}`, `…/sessions/{source}/refresh`, `GET …/operations/{id}`                                                           | `ops.collection.request`, `ops.import.request`, `ops.replay.request`, `ops.projection.request`, `ops.session.refresh`, `ops.operation.get`                                                     | the App: the acceptance batch of `packages/application/src/operations/requests.ts`                     |
-| `ui`         | `POST /api/ops/v1/schedules/{job}`, `/maintenance`, `/proposals/{id}`, `/leases/{source}`                                                                                      | `schedules.job.update`, `schedules.maintenance.update`, `schedules.survey.decide`, `schedules.lease.release`                                                                                   | the Processor: `updateSchedule`, `updateMaintenance`, `decideSurveyProposal`, `releaseCollectionLease` |
-| `agent-http` | `POST /api/agent/v1/<tool>`                                                                                                                                                    | the tool name without `kogane.` (`capabilities`, `context.open`, `financial.query`, `explain`, `purchases.explain`, `instruments.candidates`, `reconstructed-state.read`, `reconcile.propose`) | the App: the proposal batch of `services/app/src/proposals.ts`                                         |
-| `mcp`        | `tools/call` on `/mcp` by an MCP client (`mcp-client:<sub>`, ADR 0047): the agent tools; the operations tools are refused (`actor_not_supported`) and that refusal is recorded | the same names; a refusal before any tool is named is `mcp.request`                                                                                                                            | as above                                                                                               |
+| Path         | Route or tool                                                                                                                                                                  | Operation                                                                                                                                                                                                                    | Effect record written by                                                                               |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `ui`         | `POST /api/command/v1/{plan,simulate,approve,commit,operation}`                                                                                                                | `command.plan`, `command.simulate`, `command.approve`, `command.commit`, `command.operation.get`                                                                                                                             | the Processor: `createPlan`, `approve` and `commit` batches                                            |
+| `ui`         | `POST /api/ops/v1/{collections,imports,replays,projections}`, `…/sessions/{source}/refresh`, `GET …/operations/{id}`                                                           | `ops.collection.request`, `ops.import.request`, `ops.replay.request`, `ops.projection.request`, `ops.session.refresh`, `ops.operation.get`                                                                                   | the App: the acceptance batch of `packages/application/src/operations/requests.ts`                     |
+| `ui`         | `POST /api/ops/v1/schedules/{job}`, `/maintenance`, `/proposals/{id}`, `/leases/{source}`                                                                                      | `schedules.job.update`, `schedules.maintenance.update`, `schedules.survey.decide`, `schedules.lease.release`                                                                                                                 | the Processor: `updateSchedule`, `updateMaintenance`, `decideSurveyProposal`, `releaseCollectionLease` |
+| `agent-http` | `POST /api/agent/v1/<tool>`                                                                                                                                                    | the tool name without `kogane.` (`capabilities`, `context.open`, `financial.query`, `explain`, `purchases.explain`, `instruments.candidates`, `reconstructed-state.read`, `reconcile.propose`, `schedules.maintenance.read`) | the App: the proposal batch of `services/app/src/proposals.ts`                                         |
+| `mcp`        | `tools/call` on `/mcp` by an MCP client (`mcp-client:<sub>`, ADR 0047): the agent tools; the operations tools are refused (`actor_not_supported`) and that refusal is recorded | the same names; `schedules.maintenance.update`, a delegated operation every call of which is refused today (below); a refusal before any tool is named is `mcp.request`                                                      | as above                                                                                               |
 
 The three schedule writers that were not one batch before are one now:
-a maintenance revision, its provenance update and its record; an accepted
+a maintenance revision, its provenance update and its record (all through the
+one writer `writeMaintenanceRevision(env, write, append)`, whose `append` adds
+the record; slice S4); an accepted
 survey proposal's revision, its decision row and its record (a proposal
 decided by someone else in between rolls the revision back with them); a lease
 release and its record, which is the only durable trace of a release. Alarm
@@ -101,6 +102,25 @@ the page, truncated when the total is larger; `reconstructed-state.read`: one
 when the answer carries a reconstruction, else none; the others one).
 Whole-store and multi-source reads carry no scope. A replay names the earlier
 effect by the id the service answered with.
+
+**Maintenance windows (plan slice S4).** A maintenance revision's record
+carries its closed reason as `reason_code`: `operator-edit` for the operator's
+edit, `maintenance-survey-proposal-accepted` for an accepted proposal.
+`schedules.maintenance.read` (R0) is one `read` record on whichever agent path
+served it. `schedules.maintenance.update` exists on `mcp` as well as on `ui`;
+there it is graded by the caller's delegation, not its grant, and since no
+delegation executes yet every call is one `refused` record (`failed` for
+`503 delegation_misconfigured`) with the delegation's or the schema's code,
+`principal_kind` `agent` and no `delegation_ref`: the builder admits no
+`delegated` record until slice S3, and nothing is relayed to the Processor.
+Its catalogue classes are R1 and, beyond the seven-day bound, R3; no record
+carries R3 today. A refused argument is not echoed: the record holds the code,
+never the reason text, URL or window the caller sent. The maintenance writer
+requires a delegated revision's decision reference to be
+`delegated-audit:<audit_id>`, naming the audit record that authorizes it, which
+slice S3 is to reserve before it calls the writer (the prepare record for an
+R2 confirm, the apply record for an R1 call); no such record or revision is
+written today ([schedules](schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3)).
 
 ### The envelope to the Processor
 
@@ -150,8 +170,12 @@ Query parameters, each at most once: `operation`, `path`, `principalKind`,
 `400 invalid_query`. The filters are in the SQL `WHERE` before the `LIMIT`, no
 total is computed, and the cursor binds the filters it was issued under (a
 cursor presented with other filters is `409 stale_context`). Reading the log is
-a page load and is not recorded. No page shows it yet (plan S8), and no agent
-route serves it (`audit.read` is a later slice).
+a page load and is not recorded. No page shows it yet (plan S8). Agent routes `POST /api/agent/v1/audit.search` and `/audit.get`, also served as
+`kogane.audit.search` and `kogane.audit.get`, require `audit.read` and whole
+account scope. Their source predicates precede the page window and cursor,
+with financial and schedule source scopes separate. Null-source records
+require whole scope on both axes. Other subjects are pseudonymized; details
+outside scope and absent details return the same refusal.
 
 ## Cost
 
@@ -212,10 +236,12 @@ and by the caps above.
 - With one principal on several paths (the owner's subject on `ui` and on the
   browser-audience agent routes), the overflow aggregate is one record per
   path and capped result per day.
-- No delegated execution, prepare, confirm, idempotent replay of schedule
-  writes, rollback reference or agent read exists yet (ADR 0063, plan S3–S6);
-  the delegation declaration core resolves a declaration but nothing executes
-  under it, so no record is `delegated`.
+- Delegated execution, bounded preparation/confirmation, exact schedule
+  replay and scoped audit reads use the common record. Command/job reversal
+  references are checked against their original native effect. Maintenance
+  uses its prepared/effect references and does not accept a caller-supplied
+  reversal reference. S6 survey acceptance remains unavailable. Empty checked-in
+  delegations enable no production delegated effects.
 
 Tests: `packages/storage-d1/test/audit-records-migration.test.ts` (the table's
 guards), `packages/application/test/audit.test.ts` (builder, effect statement,
@@ -225,3 +251,58 @@ caps, overflow, chokepoint, page and plans),
 its envelope), `services/app/test/audit.test.ts` (every path end to end, the
 lost answer, the caps, the operator's read and a deep scan for provider text,
 a token-shaped value and an amount).
+
+## S3 maintenance execution and confirmation (2026-10-10)
+
+Status: proposed until the integration PR merges. The implementation reuses
+the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
+against main `c0c4088a`; #652's temporal refusal and #643's release guard are
+preserved. The [integration plan](plans/2026-10-mcp-maintenance-followups.md)
+records the publication and activation boundaries. No grant or deployment is
+implied by this implementation.
+
+The closed MCP payload accepts `apply`, `prepare` and `confirm` plus an
+idempotency key. R1 apply keeps the seven-day joined-deferral bound. R2
+prepare validates with the trusted 31-day bound and records a capped,
+expiring preparation; only a matching confirmation may use that bound to
+write. A newly caused, moved or extended joined deferral over 31 days is
+refused; pre-existing longer operator windows may remain unchanged or shorten.
+A caller cannot supply `decisionRef`,
+`deferralBound` or a rollback audit reference. The R1 rule references its
+reserved effect audit id; the R2 rule references the verified preparation
+audit id, and its effect record links the same preparation.
+
+Current delegation capability and source scope are checked before looking
+up a replay receipt. Exact retries return the original saved id/revision
+without another writer call or alarm reconciliation. Changed payloads do not
+reuse a receipt. Fresh writes revalidate at the private Processor adapter.
+The common applied/accepted-effect audit count enforces the actual delegation's
+`writesPerDay` across operation kinds and delegation-reference changes. It
+shares one D1 batch with the native writer's 30-per-principal rolling-day cap,
+revision guard, domain write and audit append; failure rolls back the batch.
+Preparation reports the lesser remaining budget. It grants no authority by
+itself.
+
+The native writer captures the source's append-only revision count before
+reading joined windows. Its delegated INSERT checks that count again inside
+the batch, so concurrent edits to different rules cannot jointly exceed the
+deferral bound. The count uses the existing covering maintenance source
+index and scales with that source's history, not constant time. The immediate
+provenance update also requires that INSERT to have changed a row, and the
+append guard binds the decision reference: a same-millisecond losing retry
+cannot replace a winner's official URL or append an effect.
+
+The write result distinguishes `saved` from reconciliation `completed` or
+`pending`; a replay returns reconciliation `null`. None asserts that a
+reservation is armed. The maintenance read tool supplies the reservation and
+next-run state. Audit rows keep digests, closed codes and references, not the
+official URL or other provider text.
+
+The tests use synthetic local D1 data and synthetic Access keys. They cover
+signed MCP entry, revocation and scope-before-replay, both hard bounds,
+prepare/effect linkage, shared daily budget, rollback, exact retries,
+concurrent joined windows and losing-provenance writes. Production migration
+state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
+the committed MCP financial-reader grant receives no schedule authority.
+S6 survey acceptance remains unavailable pending the separate owner decision;
+no survey grammar, grants, Access, authentication or deployment is changed.

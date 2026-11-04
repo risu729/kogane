@@ -13,14 +13,84 @@
 
 The additive `selectInstrumentTemporal` domain module now implements the
 supplied-snapshot selector/manifest with synthetic tests. The scenarios below
-remain the full acceptance matrix. B14/B15/B16/B20 have only pure malformed
-member and input-preservation checks; command provenance, database atomic
-races, additive migrations and race-safe loaders remain pending. B21 checks
+remain the full acceptance matrix. The original selector slice supplied only
+pure malformed-member and input-preservation checks for B14/B15/B16/B20;
+the local journal and refusal slices below add their bounded coverage. B21 checks
 only unsupported reference/basis refusal; listing, quote units, currency and
-exact quantity adapters remain pending. No SQL or current-view replacement
-has been made. Real second-source evidence, storage, transport and financial
-consumer gates are still open. See the
+exact quantity adapters remain pending. The additive journal leaves all
+current-view SQL unchanged. Real second-source evidence, a registered temporal
+command, transport and financial consumer gates remain open. See the
 [implementation amendment](../adr/0055-instrument-candidates.md#amendment-2026-10-09-pure-temporal-selector).
+
+## Local journal primitive slice (2026-10-10)
+
+CORE 0079 and `storage-d1/src/core/instrument-temporal.ts` now provide sealed
+journal members, a typed mutation-write builder and a bounded coherent loader.
+Local SQLite/native D1 tests cover the common receipt/approval batch, racing
+reservations, rollback for missing membership/seal, nondecreasing global clock,
+legacy preservation and refusal instead of mixed reads. This is partial
+B15/B16/B17/B20 coverage, not a registered temporal command or production proof.
+The next slice must add a closed payload and common planner that validates
+immutable temporal provenance, binds all series/legacy revisions and produces
+the actual decision/audit in the same batch. Shared guarded transport and
+financial consumers remain later gates. Do not bypass the separately reviewed
+B14 temporal-to-current refusal or reinterpret a current mapping command.
+
+## B14 refusal slice and the next storage connection (2026-10-10)
+
+The selector now returns an additive labelled `contextRef`, and common
+commands refuse explicit temporal provenance rather than applying a current
+assignment/release/relation. The Processor no longer defaults a malformed
+explicit context to current. This proves only a refusal path, not the
+positive prepare/simulate/approve/commit requirements in B14.
+No journal, temporal writer, migration, loader, temporal transport or
+price/quantity/cost consumer is delivered by the B14 refusal slice itself.
+The local journal primitive slice above now provides the additive journal
+and bounded loader in items 1 and 3 below; their common-command integration
+and transport/consumer gates remain open. Both slices are combined locally,
+with no positive temporal command enabled.
+
+The complete connection still requires these concrete ports:
+
+1. **Additive CORE journal and sealed membership.** Reuse `core_source_revision`
+   epoch identity and the acceptance-order pattern from CORE 0070, not the
+   common audit as a substitute journal. Allocate one sequence and
+   nondecreasing server acceptance time for a complete mapping/relation
+   bundle; enforce exact members and one successor per series. Preserve
+   legacy rows without manufacturing interval or acceptance metadata.
+   The local primitive uses 0079 after integration with main
+   `f761630da082d879b331402127d898948792daf1`: CORE 0078 now belongs to
+   maintenance change provenance. The B14 refusal slice itself reserves no
+   number. Schema ledger/table classifications and the Processor lane
+   migration pin include both migrations; recheck numbering before publication.
+2. **Common command and atomic writer.** Add a closed temporal payload and
+   planner to `packages/application/src/command/contract.ts` and
+   `operations/targets.ts`, with explicit contract, interval bundle,
+   expected set/member/series revision and server-verified context binding.
+   Reuse `commit.ts`, storage `atomic/decision-commit.ts` receipt reservation,
+   and Processor `changeMutationPlanners`; append the journal, versions,
+   decision, receipt and existing common audit in the same guarded batch.
+   The actor and prepared payload cannot supply accepted server time/sequence.
+   A losing concurrent correction must leave no effect or approval consumption.
+   Do not open the current command through a prefix exception.
+3. **Coherent bounded loader.** Capture the common journal head once and load
+   immutable complete membership/version rows through that sequence for
+   `selectInstrumentTemporal`. Bound all rows before returning; concurrent
+   append must yield the captured cut or refuse, never mixed series. Legacy
+   coverage requires an equally coherent snapshot/revision check. Preserve
+   current-view SQL and prove it unchanged; test B16/B17/B20 on real SQLite
+   and the native Worker D1 path, not supplied-array tests alone.
+4. **Shared service, transport and consumers.** Follow the grant-graded
+   `readInstrumentHistoryForGrant` pattern, with exact request validation and
+   common HTTP/MCP/UI service. Add no grant by configuration. Integrate #638/
+   #641's delegated family, confirmation, audit and reversal checks rather
+   than overwriting them; completed exact replay stays ahead of fresh-effect
+   checks. Only a later independently reviewed consumer may use the manifest
+   for listing/unit/price/quantity/cost; all missing semantics remain unknown.
+
+Second-provider evidence is still limited to the inventory in section 4.
+No new provider, login, acquisition or production financial write is needed
+or authorized by these local implementation steps.
 
 ## 1. Shipped and remaining are distinct
 

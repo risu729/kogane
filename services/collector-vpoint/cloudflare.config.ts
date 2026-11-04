@@ -23,7 +23,6 @@ export default defineConfig({
       VPOINT_MEMBER_NUMBER: bindings.secret(),
       VPOINT_EMAIL_RECIPIENT: bindings.secret(),
       VPOINT_EMAIL_FORWARD_TO: bindings.secret(),
-      ADMIN_TRIGGER_TOKEN: bindings.secret(),
       SCHEDULE_DB: bindings.d1({
         name: "kogane-raw-evidence",
         id: "b335a887-250d-45c9-bd72-af83f35fdc60",

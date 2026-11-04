@@ -41,7 +41,6 @@ mise run //services/collector-moneyforward:test
 mise run //services/collector-moneyforward:typecheck
 ./scripts/sync-local-secrets.sh
 ./node_modules/.bin/wrangler deploy
-./scripts/trigger.sh https://kogane-moneyforward-collector-poc.takuanimal.workers.dev
 ```
 
 Cronは毎日 `21:15 UTC`（日本時間06:15）です。GitHub Actionsはスケジューラに使いません。Money Forward側の銀行・カード更新を要求する処理はなく、最後にMoney Forwardへ同期済みの内容だけを保存します。
@@ -63,7 +62,7 @@ Processorがterminalをin-processで登録します（[processor.md](../../docs/
 - ローカル収集: 4詳細、月別48 fragment、合計53成果物、失敗0
 - Worker収集: 4詳細、月別48 fragment、合計53成果物、失敗0
 - R2: manifestの53件すべてにbyte数とSHA-256があり、サンプル本文を再取得してSHA-256一致を確認
-- `/health`: 200、tokenなし `/trigger`: 401、tokenあり `/trigger`: success
+- 当時の検証: `/health`: 200、旧認証付きtrigger: success。公開triggerは2026-10-10に廃止（404）し、既存の固定action private RPCを通常収集経路として維持する。
 
 切り分け中に正しいMFIDへKogane専用パスキーを一時登録したが、Bitwarden内の正しい既存パスキーを特定した後に登録解除した。登録数が2件から1件へ戻り、credential IDが消えたことを確認済み。専用秘密鍵のWindows/WSLコピーも削除済みで、Worker secretはBitwarden由来のパスキーへ差し替えてある。
 
@@ -104,12 +103,11 @@ Oliveデビットは、銀行連携だけでは加盟店単位の利用履歴を
 PoCを廃止するときは次をまとめて削除します。
 
 - Worker: `kogane-moneyforward-collector-poc`
-- Worker secrets: `MONEYFORWARD_CREDENTIAL_JSON`、`ADMIN_TRIGGER_TOKEN`（account unit の
+- Worker secrets: `MONEYFORWARD_CREDENTIAL_JSON`（account unit の
   identity は secret なしで導出する、[ADR 0029](../../docs/adr/0029-data-classification-and-unkeyed-identity.md)。
   以前に設定した `MONEYFORWARD_ACCOUNT_IDENTITY_KEY` は読まれないので
   `wrangler secret delete MONEYFORWARD_ACCOUNT_IDENTITY_KEY --name kogane-moneyforward-collector-poc` で削除できる）
 - Cron: `15 21 * * *`
-- ローカル管理token: `/home/risu/.local/state/kogane/moneyforward-worker-admin-token`
 - ローカル照合metadata: `/home/risu/.local/state/kogane/moneyforward-bitwarden-match.json`
 
 共有DATA bucket（`kogane-raw-evidence`）は他のcollectorとProcessorも使うため削除しません。旧source専用bucket `kogane-moneyforward-collector-poc`は2026-09-13に削除済みです。

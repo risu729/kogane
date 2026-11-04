@@ -290,3 +290,75 @@ budgets, final identity drift, resumed final pending state without clock reset,
 legacy image proof, serial ordering and unchanged capture/artifact trust. The
 successful same-run proof recorded above exercised the earlier 180-second guard;
 it does not establish live success for this new deadline policy.
+
+## Amendment: type Docker image identities before publication (2026-10-10)
+
+- Status: proposed
+
+The registry guard assumed Docker inspect `.Id` was always a config digest.
+The containerd image store instead returns its target descriptor digest
+([Docker implementation](https://github.com/moby/moby/blob/master/daemon/containerd/image_inspect.go)),
+which can identify a manifest or index. In
+[Deploy 38021451233](https://github.com/risu729/kogane/actions/runs/38021451233),
+the captured image ID and published immutable image matched the build's exported
+manifest digest, while the build's exported config digest was different.
+Publication succeeded and receipt capture refused the mismatched identity types.
+No authenticated registry config read is claimed by this diagnosis.
+
+Do not accept either digest opportunistically, change registry/image identity
+guards, or reinterpret old receipts using the current registry response.
+Capture a typed identity from Docker before publication: an omitted or null
+descriptor denotes the classic config ID; a descriptor must match the returned ID
+and use an admitted OCI/Docker manifest or index media type. Refuse malformed,
+unknown, contradictory descriptors and non-linux/amd64 local images.
+
+Use Docker's standard raw JSON inspect output and require exactly one image
+object. Go template field names differ from JSON names, and a missing optional
+Descriptor can make the CLI's raw-template fallback fail before classic identity
+handling. Parse the omitted field explicitly, never infer its type by consulting
+the registry, and never print unrelated image metadata. Native CLI fixtures
+check the exact invocation and raw omitted-Descriptor response shape.
+
+Bind `imageIdKind` alongside `imageId` in the existing immutable Container
+manifest. Every tag recheck, prepared-image restore and legacy preparation checks
+both fields. Registry verification hashes the exact immutable manifest bytes.
+Config identities require the selected manifest's config digest; manifest
+identities require the selected manifest digest; index identities require the
+root index digest. Index traversal still requires exactly one linux/amd64 entry
+without a variant and independently verifies that child's bytes. Typed
+manifest/index records also require the corresponding schema/media types and a
+valid selected config digest. These are disjoint proofs selected by the original
+record, never an OR of matching digest values.
+
+An omitted kind retains only the earlier config interpretation; explicit unknown
+kinds are refused. Restoration cannot turn an untyped manifest ID into a typed
+one. No old artifact, trusted workflow, receipt or failed run is patched or
+adopted. An image-store change that changes the digest or kind refuses resume
+and needs a separate release decision. Existing publication UUID, app version,
+registry namespace, deadlines, final rereads, serial gates and ledger rules
+remain unchanged. No new remote mutation or collector call is introduced.
+
+Synthetic tests exercise classic, manifest and index identities, wrong-kind and
+wrong-digest refusals, unknown metadata, platform ambiguity, child tampering,
+capture/bind/precheck, prepared restore, capture-publication and postcheck
+paths. Local tests do not establish a successful hosted release or recovery.
+
+## Amendment: retain pending manual rollback requests (2026-10-15)
+
+- Status: proposed
+
+The manual rollback caller now declares its own non-cancellable concurrency
+group keyed by SHA and targets. It never acquires `production-deploy` itself,
+so it cannot deadlock the called job. Both this outer group and the shared inner
+production group use `queue: max`: otherwise GitHub's default single pending
+slot would cancel an earlier pending request at either layer.
+
+[GitHub's concurrency queue](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
+retains up to 100 pending runs per group, then cancels additional requests.
+Ordering is by when a run starts waiting on each group, not dispatch time. The
+existing eligibility and supersession guards still run under the inner lock;
+queueing does not promise that an obsolete release or rollback will deploy.
+
+The workflow contract test asserts both queue policies, separate caller keys,
+and the unchanged shared inner lock for releases, rollback and selected-job
+reruns. No live rollback is invoked for this configuration change.

@@ -4,7 +4,6 @@ import {
   scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
-import { timingSafeEqual } from "node:crypto";
 import { logEvent, logFailure, logStage, type Stage } from "./diagnostics";
 import { collectMoneyForward } from "./moneyforward";
 import { persistSharedRun, sharedBucket, sharedRunDiagnostic } from "./shared-collection";
@@ -23,19 +22,7 @@ export default {
         { headers: { "cache-control": "no-store" } },
       );
     }
-    if (request.method !== "POST" || url.pathname !== "/trigger") {
-      return Response.json({ error: "Not found" }, { status: 404 });
-    }
-    if (!authorized(request, env.ADMIN_TRIGGER_TOKEN)) {
-      return Response.json({ error: "Unauthorized" }, { status: 401 });
-    }
-    {
-      const shared = await runSharedCollection(env);
-      return Response.json(shared, {
-        status: sharedRunFailed(shared) ? 502 : 200,
-        headers: { "cache-control": "no-store" },
-      });
-    }
+    return Response.json({ error: "Not found" }, { status: 404 });
   },
   async scheduled(_controller, env): Promise<void> {
     {
@@ -70,7 +57,8 @@ function sharedRunFailed(result: SharedResult): boolean {
  * written last. The per-source bucket is not written and the importer is not
  * called, so the run's bytes exist once (G1-15).
  */
-async function runSharedCollection(env: Env): Promise<SharedResult> {
+/** Module-only executor; the entrypoint exposes it solely through validated private RPC. */
+export async function runSharedCollection(env: Env): Promise<SharedResult> {
   return withCollectionLease(env, "moneyforward-me", async () => {
     const startedAt = new Date().toISOString();
     const runId = crypto.randomUUID();
@@ -125,13 +113,6 @@ async function runSharedCollection(env: Env): Promise<SharedResult> {
     };
   });
 }
-function authorized(request: Request, expected: string | undefined): boolean {
-  const provided = request.headers.get("authorization")?.match(/^Bearer\s+(.+)$/iu)?.[1];
-  if (!provided || !expected) return false;
-  const left = new TextEncoder().encode(provided);
-  const right = new TextEncoder().encode(expected);
-  return left.byteLength === right.byteLength && timingSafeEqual(left, right);
-}
 function requiredSecret(value: string | undefined, name: string): string {
   if (!value) throw new Error(`Missing Worker secret: ${name}`);
   return value;
@@ -146,7 +127,7 @@ function failure(
   return { operation, ...detail, message: detail.failureCode, stage };
 }
 
-/** Private service-binding collection; public token/Access routes keep their checks. */
+/** Private service-binding collection; public HTTP cannot invoke collection. */
 export async function alarmCollection(
   env: Env,
   _cron: string,

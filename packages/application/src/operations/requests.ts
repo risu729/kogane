@@ -453,8 +453,8 @@ export async function requestCollection(
   input: OperationContext & { request: CollectionRequest },
 ): Promise<CommandResult<AcceptedOperation>> {
   const { request } = input;
-  if (!(await declaredSource(input.store, request.source)))
-    return commandError("target_missing", ["source"]);
+  const preview = await previewProviderOperation(input, "collection");
+  if (!preview.ok) return preview;
   return accept({
     ...input,
     kind: "collection",
@@ -574,9 +574,9 @@ export async function requestSessionRefresh(
   },
 ): Promise<CommandResult<AcceptedOperation>> {
   const { request } = input;
-  if (!(await declaredSource(input.store, request.source)))
-    return commandError("target_missing", ["source"]);
-  const human = input.policy(request.source) === "human";
+  const preview = await previewProviderOperation(input, "session-refresh", input.policy);
+  if (!preview.ok) return preview;
+  const human = preview.policy === "human";
   return accept({
     ...input,
     kind: "session-refresh",
@@ -775,4 +775,29 @@ export async function recordOperationStage(input: StageReport): Promise<void> {
           },
         ]),
   ]);
+}
+
+/** The existing provider request's read-only validation and identity, shared with R2 preparation. */
+export async function previewProviderOperation(
+  input: OperationContext & { request: CollectionRequest | SessionRefreshRequest },
+  kind: "collection" | "session-refresh",
+  policy?: (source: string) => SessionRefreshMode,
+): Promise<
+  CommandResult<{ operationId: string; status: OperationStatus; policy: SessionRefreshMode | null }>
+> {
+  if (!(await declaredSource(input.store, input.request.source)))
+    return commandError("target_missing", ["source"]);
+  if (kind === "collection") {
+    const request = input.request as CollectionRequest;
+    if (!request.requestedScope || request.requestedScope.from > request.requestedScope.to)
+      return commandError("invalid_command");
+  }
+  const mode = kind === "session-refresh" ? (policy?.(input.request.source) ?? "human") : null;
+  const key = input.request.idempotencyKey ?? (await operationPayloadDigest(kind, input.request));
+  return {
+    ok: true,
+    operationId: await operationIdFor(kind, input.principal.id, key),
+    status: mode === "human" ? "waiting_for_human" : "accepted",
+    policy: mode,
+  };
 }

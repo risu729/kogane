@@ -21,6 +21,7 @@ import {
 import { resolveAndSimulate } from "../operations/targets.ts";
 import { planDigestOf } from "./plan.ts";
 import { instrumentCandidatePlanIsPinned } from "../operations/instrument-candidate-context.ts";
+import { instrumentTemporalContextRequested } from "../../../domain/src/instrument-temporal.ts";
 
 export interface SimulationReport {
   planId: string;
@@ -51,6 +52,8 @@ export async function simulate(
   store: CommandStore,
 ): Promise<CommandResult<{ report: SimulationReport }>> {
   if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
+  if (instrumentTemporalContextRequested(plan.baseContextId))
+    return commandError("unsupported_semantics");
   const resolution = await resolveAndSimulate(store, plan.kind, plan.payload);
   if (!resolution.ok) return resolution;
   const { expectedRevisions, simulation, targets } = resolution.resolved;

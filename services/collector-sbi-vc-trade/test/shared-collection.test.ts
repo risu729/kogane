@@ -113,6 +113,7 @@ describe("G3-10/G3-11 a session only a person can fix", () => {
       { waitingForHuman: true },
     );
     expect(summary.outcome).toBe("persisted");
+    expect(summary.runId).toBe(RUN_ID);
     expect(summary.waitingForHuman).toBe(true);
     const read = await readTerminal(bucket, "sbi-vc-trade", RUN_ID);
     if (read.outcome !== "found") throw new Error("unreachable");

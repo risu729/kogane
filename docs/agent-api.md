@@ -7,10 +7,13 @@ the MCP adapter and the Overview page are adapters over it.
 
 This implements A08 and review findings AR13, AR14 and D14 (agent side).
 It is the MVP gate of `architecture-addendum/10_agent_api_and_permissions.md`
-§10: summary, query, explain and propose — and nothing else. There is no
-acceptance, no simulation, no commit, no calculation job, no collection
-request, no export, and no external money action in _this_ API. Those
-capabilities are not disabled by a flag; they have no name in the grant type.
+§10: summary, query, explain and propose — plus, under its own capability,
+reading public maintenance windows
+([ADR 0046](adr/0046-agent-maintenance-windows.md), [below](#maintenance-windows))
+— and nothing else. There is no acceptance, no simulation, no commit, no
+calculation job, no collection request, no export, and no external money action
+in _this_ API. Those capabilities are not disabled by a flag; they have no name
+in the grant type.
 
 The operations API ([ops-api.md](ops-api.md)) is not served over `/mcp`:
 `/mcp` has only agent-only callers
@@ -18,16 +21,22 @@ The operations API ([ops-api.md](ops-api.md)) is not served over `/mcp`:
 change lifecycle's operator capability, which no capability in the table
 below reaches.
 
-**Agent access is not configured in the committed deployment.**
-`AGENT_API_GRANTS` and `AGENT_GRANTS` are empty. With an absent or empty
-agent-API grant map, every agent route and the shared `/mcp` transport answers
-403 after authentication. An enabled operations flag does not bypass that
-transport gate. How a real MCP client connects — Cloudflare Access Managed
-OAuth on a dedicated MCP application, bound to an agent-only principal — and
-the owner's steps to get there are in
-[Connecting an MCP client](#connecting-an-mcp-client); none of them has been
-taken. Schedule/maintenance settings currently have an operator HTTP
-API but no MCP tool; see [schedules](schedules.md#settings-api).
+**The committed production configuration enables one MCP reader.**
+The owner's dedicated `mcp-client:<sub>` entry grants `summary.read` and
+`records.read` across sources and accounts, with a 100-row read budget
+including cursor offset and pagination lookahead.
+`AGENT_GRANTS` and `MCP_DELEGATIONS` remain empty: this configuration grants
+no proposals, raw evidence or delegated operations. The MCP audience is
+separate from the browser audience. The dedicated `kogane-mcp.takuk.me`
+hostname must be attached to the App Worker independently, because the
+current version deployment does not synchronize App triggers. Configuration
+and deployment are not evidence that a client connected; the ordered live
+checks in [Connecting an MCP client](#connecting-an-mcp-client) still apply.
+That entry names no schedule capability, so it reads no maintenance window.
+Maintenance windows can be read under their own capability (`schedules.read`);
+revising one is an operation the owner may delegate (ADR 0063), which no
+delegation can execute yet ([below](#maintenance-windows)). Job settings and
+lease release stay operator-only ([schedules](schedules.md#settings-api)).
 
 ## Why the application service exists
 
@@ -63,6 +72,7 @@ token with no grant is still refused.
 | `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
 | `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                       | A separate grant; raw bytes are still a different route |
 | `interpretation.propose` | `reconcile.propose`                                                                                                               | Proposals only; never adoption                          |
+| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                         | Not a financial read; implied by no other capability    |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
 exist in this vocabulary: `interpretation.accept`, `calculation.run`,
@@ -109,7 +119,8 @@ it is looked up by.
 `AGENT_API_GRANTS` is a wrangler `var` on `services/app` holding
 the JSON object above (principal → grant, without the `principal` field, which
 the server fills in from the key; an entry with a `principal` field rejects
-the whole table). It ships as `""`.
+the whole table). The production text variable now names the dedicated owner
+MCP reader described above; unconfigured deployments still deny by default.
 
 To enable a grant, set the variable for the deployment — as a secret if the
 principal names should not sit in the repository:
@@ -141,11 +152,11 @@ check — and a conformance test asserts it.
 
 Three variables, two vocabularies, deliberately not merged:
 
-| Variable            | Shape                              | Means                                                                                                             |
-| ------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `AGENT_API_GRANTS`  | JSON **object**, principal → grant | what this API lets a principal _read_, and whether it may propose                                                 |
-| `AGENT_GRANTS`      | JSON **array** of subjects         | which subjects the change lifecycle treats as _agents_, so they may plan and simulate but never approve or commit |
-| `OPERATOR_SUBJECTS` | JSON **array** of subjects         | which subjects the change lifecycle treats as the _human operator_, so they may approve and commit                |
+| Variable            | Shape                              | Means                                                                                                              |
+| ------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `AGENT_API_GRANTS`  | JSON **object**, principal → grant | what this API lets a principal _read_ (maintenance windows included) and whether it may propose; it names no write |
+| `AGENT_GRANTS`      | JSON **array** of subjects         | which subjects the change lifecycle treats as _agents_, so they may plan and simulate but never approve or commit  |
+| `OPERATOR_SUBJECTS` | JSON **array** of subjects         | which subjects the change lifecycle treats as the _human operator_, so they may approve and commit                 |
 
 All three are allow-lists, so all three deny by default, and each parser
 rejects the others' shape. That used to be dangerous: putting the grant object
@@ -170,18 +181,23 @@ and it belongs in its own change.
 
 Six tools, plus a seventh while the deployment serves card purchase
 recognition and an eighth while it serves the reconstructed state, one
-implementation each (`src/agent-service.ts`), reachable two ways.
+implementation each (`src/agent-service.ts`), reachable two ways. The two
+maintenance tools (`src/schedule-tools.ts`) exist while `SCHEDULES_ENABLED` is
+on: the read is reachable both ways, the revision on `/mcp` only and listed to
+nobody ([below](#maintenance-windows)).
 
-| Tool                              | HTTP                                          | MCP `tools/call`                  | Requires                                                                                                                      |
-| --------------------------------- | --------------------------------------------- | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| `kogane.capabilities`             | `POST /api/agent/v1/capabilities`             | `kogane.capabilities`             | any grant                                                                                                                     |
-| `kogane.context.open`             | `POST /api/agent/v1/context.open`             | `kogane.context.open`             | any grant                                                                                                                     |
-| `kogane.financial.query`          | `POST /api/agent/v1/financial.query`          | `kogane.financial.query`          | per intent (table below)                                                                                                      |
-| `kogane.explain`                  | `POST /api/agent/v1/explain`                  | `kogane.explain`                  | `summary.read`                                                                                                                |
-| `kogane.reconcile.propose`        | `POST /api/agent/v1/reconcile.propose`        | `kogane.reconcile.propose`        | `interpretation.propose`                                                                                                      |
-| `kogane.instruments.candidates`   | `POST /api/agent/v1/instruments.candidates`   | `kogane.instruments.candidates`   | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                |
-| `kogane.purchases.explain`        | `POST /api/agent/v1/purchases.explain`        | `kogane.purchases.explain`        | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation)) |
-| `kogane.reconstructed-state.read` | `POST /api/agent/v1/reconstructed-state.read` | `kogane.reconstructed-state.read` | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))      |
+| Tool                                  | HTTP                                            | MCP `tools/call`                      | Requires                                                                                                                                                       |
+| ------------------------------------- | ----------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.capabilities`                 | `POST /api/agent/v1/capabilities`               | `kogane.capabilities`                 | any grant                                                                                                                                                      |
+| `kogane.context.open`                 | `POST /api/agent/v1/context.open`               | `kogane.context.open`                 | any grant                                                                                                                                                      |
+| `kogane.financial.query`              | `POST /api/agent/v1/financial.query`            | `kogane.financial.query`              | per intent (table below)                                                                                                                                       |
+| `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                                                 |
+| `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                                       |
+| `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                 |
+| `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                                  |
+| `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                                       |
+| `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                              |
+| `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | a delegation (`MCP_DELEGATIONS`) holding `schedules.maintenance.update`; no delegation executes yet, so it is listed to nobody ([below](#maintenance-windows)) |
 
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
@@ -464,6 +480,76 @@ effects, 5,000 commits and subjects, 1,000 pins), the fold's
 `RECONSTRUCTION_BUDGET` (5,000 revisions, 20,000 legs, 5,000 reported rows a
 side, 1,000 coverage rows) and the reported state's 5,000 rows a read.
 
+### Maintenance windows
+
+[ADR 0046](adr/0046-agent-maintenance-windows.md), as amended by
+[ADR 0063](adr/0063-delegated-ai-operation-path.md) (item 8) in slice S4 of
+the [AI operation path plan](plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
+Both tools exist while `SCHEDULES_ENABLED` is on; otherwise their names are
+`unknown_tool`. Each call is recorded once through the common chokepoint
+([audit log](audit-log.md)).
+
+**Reading** (`kogane.schedules.maintenance.read`, operation
+`schedules.maintenance.read`, R0). Graded by this API's grant:
+`schedules.read`, with the sources it reaches in a separate
+`scopes.scheduleSources` (source ids of `config/alarm-jobs.json`; absent means
+none), so financial scope and maintenance scope never stand in for each other:
+
+```jsonc
+{
+  "mcp-client:owner-subject-0001": {
+    "scopes": { "sources": [], "accounts": [], "scheduleSources": ["sony-bank"] },
+    "capabilities": ["schedules.read"],
+    "budget": { "maxRows": 1, "maxProposalTargets": 1, "maxExplainDepth": 1 },
+  },
+}
+```
+
+It is listed on `/mcp` to a grant holding `schedules.read`, after the other
+tools, and served on `POST /api/agent/v1/schedules.maintenance.read` as well:
+one function answers both, so the two return the same object, each recorded as
+a `read` on its own path. Without the capability it is `403 unauthorized`; a
+source outside `scheduleSources`, existing or not, is
+`403 source_not_granted`. What it reads back is in
+[schedules](schedules.md#agent-maintenance-tools). `kogane.capabilities`
+reports `scopes.scheduleSources`.
+
+**Revising** (`kogane.schedules.maintenance.update`, operation
+`schedules.maintenance.update`). Not an agent-API capability: a grant table
+naming `schedules.maintenance.update` is refused whole, so `/mcp` answers
+`403 agent_api_not_configured`. It is an operation the owner may delegate to
+their own MCP identity in `MCP_DELEGATIONS` (ADR 0063; the `maintainer` role
+holds it), with the source in the delegation's `scopes.scheduleSources`, which
+must lie inside the read grant's. It has no `/api/agent/v1` route: a browser
+session yields no delegation. On `/mcp` it is advertised only when the
+current resolved delegation permits the operation. Checked-in delegations are
+empty, so the existing financial-reader client gains no maintenance authority.
+
+The App checks the current delegation, capability, closed arguments and source
+scope before looking up a completed receipt. Missing/invalid/early/expired
+delegations retain the resolver's closed codes; a missing capability is
+`delegation_capability_denied`, invalid arguments are `invalid_request`, and
+an out-of-scope source is `source_not_granted` whether or not it exists.
+
+Arguments include `step` (`apply`, `prepare`, `confirm`) and `idempotencyKey`;
+confirmation also requires `confirmationDigest`. Reasons remain the closed
+codes `official-notice-added`, `official-notice-changed`,
+`official-notice-withdrawn`, `outage-observed`, `owner-instructed`, `correction`.
+The caller cannot set a decision audit reference or trusted deferral bound.
+
+R1 applies within the seven-day joined-window envelope. R2 prepares and
+confirms within the 31-day envelope. Existing longer operator windows may
+remain unchanged or shorten, but new/moved/extended over-bound unions are
+refused. Both reuse the Processor's single writer, expected revision, source
+and provenance validation and 30/day native cap. The actual delegation's
+shared daily budget and effect audit append are guarded in the same batch.
+
+Exact retries return the saved rule id/revision without another write or
+alarm reconciliation. A fresh result reports reconciliation `completed` or
+`pending`; a replay reports `null`. Read the maintenance tool for the current
+reservation/alarm instead of assuming that a saved revision is armed.
+See [the writer contract](schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3).
+
 ## Contexts, cursors and hand-off
 
 `context.open` pins the identity release, the metric registry release, the
@@ -611,9 +697,11 @@ Requests are bounded at 64 KiB; a larger body is 413 before it reaches a tool.
 This section is the connection design of
 [ADR 0047](adr/0047-mcp-client-connection.md). The Worker code is in this
 repository and tested with synthetic keys, audiences and principals.
-**Every step marked _owner_ is executed by the owner outside the repository;
-none has been taken and none is verified against production.** Placeholders:
-`<app-host>` is the App Worker's hostname, `<mcp-aud>` the AUD tag of the MCP
+**Configuration, deployment, domain attachment, OAuth registration and
+successful tool calls are separate evidence.** The approved production
+configuration names one MCP reader; its deployment and a real client
+connection still require the live checks below. Placeholders:
+`<app-host>` is the dedicated MCP hostname `kogane-mcp.takuk.me`, `<mcp-aud>` the AUD tag of the MCP
 Access application, `<owner-sub>` the owner's Access user id (the UUID
 `OPERATOR_SUBJECTS` already names), `<source-id>` a CORE source id. No real
 value belongs in this file.
@@ -643,7 +731,7 @@ attenuates it.
 | both audiences in one assertion                                          | `401 authentication_required`              | `401 authentication_required`                  |
 | service token (no `sub`)                                                 | `401 authentication_required`              | unchanged (health and bootstrap only)          |
 | subject starting `mcp-client:`                                           | `401 authentication_required`              | `403 actor_not_supported` on `/api/agent/v1/*` |
-| `ACCESS_MCP_AUDIENCE` unset or `""` (committed)                          | `401 authentication_required` for everyone | as before                                      |
+| `ACCESS_MCP_AUDIENCE` unset or `""` (disabled)                           | `401 authentication_required` for everyone | as before                                      |
 | `ACCESS_MCP_AUDIENCE` = `ACCESS_AUDIENCE`, padded or over 256 characters | `503 auth_not_configured`                  | as before (ignored)                            |
 
 **Agent-only attenuation.** The boundary turns the assertion into an
@@ -715,90 +803,109 @@ mapping, the grant shape and the local checks are the same for all of them.
 
 ### Owner hand-off, in order
 
-Each step is **owner-executed and production-unverified**; the label says what
-kind of change it is. Steps 1–2 open nothing.
+This is the current activation recipe for the approved read grant. The
+initial empty-audience/empty-grant staging and one-source summary-only grant
+in ADR 0047 are historical; the activation amendment replaces those initial
+values. These steps do not assert that production or any client has passed.
 
-1. _Code_ — review and merge this change. With `ACCESS_MCP_AUDIENCE` unset
-   and the grants empty, the deployment opens nothing new.
-2. _Local check_ — on the commit to be deployed, run the
-   [local checks](#local-checks-before-any-production-change).
-3. _Production permission change_ — create the MCP Access application: Zero
-   Trust → Access controls → Applications → Add → Self-hosted, destination
-   `<app-host>/mcp`, the same identity provider as the browser application.
-   Do not edit the browser application or its policies.
-4. _Production permission change_ — give it one Allow policy that includes
-   only the owner's identity. It cannot reuse the browser application's
-   device-posture requirement, because the clients call from their own
-   clouds; restricting it to the clients' published egress ranges is
-   optional.
-5. _Production permission change_ — turn on Managed OAuth on that
-   application (Advanced settings; API `oauth_configuration.enabled`). Allowed
-   redirect URIs for dynamically registered clients:
-   `https://claude.ai/api/mcp/auth_callback`,
+1. _Code and local checks_ — review the activation configuration and run
+   the [local checks](#local-checks-before-any-production-change) on the
+   exact commit to be deployed. It enables MCP reads after deployment; it
+   does not keep an empty grant.
+2. _Access configuration readback_ — confirm the dedicated self-hosted MCP
+   Access application covers `kogane-mcp.takuk.me`, has its own audience,
+   the approved owner identity and approved posture requirements. The
+   browser application's audience and policies remain unchanged. Current
+   [portal policy documentation][cf-mcp-portal-policy] says Device Posture
+   Checks are enforced; verify the actual upstream OAuth and refresh path
+   under those requirements instead of removing them.
+3. _Managed OAuth readback_ — confirm it is enabled on the MCP application
+   (API `oauth_configuration.enabled`) with approved redirect URIs for the
+   intended clients: `https://claude.ai/api/mcp/auth_callback`,
    `https://chatgpt.com/connector_platform_oauth_redirect` and
-   `https://chatgpt.com/connector/oauth/*`; allow localhost and loopback
-   clients only for Codex or Claude Code. Access token lifetime 5–15 minutes,
-   grant session 1–2 weeks, as the page recommends.
-6. _Live check, nothing granted yet_ — `curl -si -X POST https://<app-host>/mcp`
-   without credentials must answer `401` with a `WWW-Authenticate` header.
-   Fetch the metadata it names and record: does `resource` equal
-   `https://<app-host>/mcp`; does the authorization server metadata list
-   `registration_endpoint`, `S256` in `code_challenge_methods_supported`,
+   `https://chatgpt.com/connector/oauth/*`; allow localhost and loopback only
+   for approved Codex/Claude Code clients. Read back the configured access
+   token and grant-session lifetimes; do not infer them from defaults.
+4. _Normal deployment and domain attachment_ — deploy the reviewed commit
+   through the ordinary pipeline and verify the live App bindings agree
+   with both production configs: the dedicated `ACCESS_MCP_AUDIENCE` is
+   distinct from `ACCESS_AUDIENCE`; exactly `mcp-client:<owner-sub>` has
+   `summary.read` and `records.read`, sources/accounts `"*"`, and budgets
+   `maxRows: 100`, `maxProposalTargets: 3`, `maxExplainDepth: 3`.
+   `AGENT_GRANTS` and `MCP_DELEGATIONS` stay empty. The App's version
+   publication does not synchronize triggers: attach the approved custom
+   domain once through the Cloudflare API and verify its destination is
+   `kogane-evidence-browser`. A domain declaration is not that attachment.
+5. _Unauthenticated discovery_ — a POST to
+   `https://kogane-mcp.takuk.me/mcp` without credentials must answer `401`
+   with `WWW-Authenticate`. Fetch the metadata it names and record whether
+   `resource` equals that exact MCP URL; inspect
+   `registration_endpoint`, `code_challenge_methods_supported` (`S256`),
    `client_id_metadata_document_supported` and
-   `authorization_response_iss_parameter_supported`. If `resource` is not the
-   MCP URL, or the discovery paths answer from the browser application, stop
-   and decide the dedicated-hostname question below before going on.
-7. _Configuration change (a PR)_ — set `ACCESS_MCP_AUDIENCE` to `<mcp-aud>`
-   in both `services/app/wrangler.jsonc` and
-   `services/app/cloudflare.config.ts` (the configuration parity guard requires
-   both; an AUD tag is not a secret, and `ACCESS_AUDIENCE` is already
-   committed). Deployed, `/mcp` then answers `403 agent_api_not_configured`.
-8. _Grant addition (a PR)_ — set `AGENT_API_GRANTS` in both files to the
-   JSON string of
+   `authorization_response_iss_parameter_supported` in authorization-server
+   metadata. Discovery must belong to the dedicated MCP application.
+6. _Client registration_ — add the intended connector/app/server using the
+   table above and `https://kogane-mcp.takuk.me/mcp`, signing in as the owner.
+   Registration and an OAuth login alone do not prove a tool works.
+7. _Fresh-session calls_ — in each intended client, start a new conversation
+   with only this connector enabled and perform these existing tool calls:
+   - `kogane.capabilities` with `{}`: the result must report
+     `principal: "mcp-client:<owner-sub>"`, exactly `summary.read` and
+     `records.read`, whole-store source/account scope and the configured
+     100-row read budget. The bare owner subject is not an alternative identity.
+   - On the first page (no cursor), `kogane.financial.query` with
+     `{"intent":"coverage","limit":50}` and with
+     `{"intent":"activity","limit":50}`: both must return
+     `schemaVersion: "kogane-query-response-v1"` rather than a capability
+     refusal. Preserve their actual completeness and gap reasons; a missing
+     projection or empty data is not proof of a complete financial result.
+     `maxRows` is a read budget, not a returned-page size: the shared query
+     requires `offset + limit + 1 <= maxRows` for lookahead. On the first page,
+     99 is the largest allowed limit; an omitted limit defaults to 100 and is
+     refused under this grant. Later cursors consume the same budget.
+   - The same activity query with `limit: 101`: expect a tool error with
+     `code: "budget_exceeded"`, not silent truncation or a widened grant.
+   - Raw evidence remains ungranted: `kogane.explain` on an observation ref
+     returned by a structured read must list `evidence.read` as restricted
+     and expose no raw-locator node. If no observation ref is available,
+     record this check as not checked; do not invent a production locator.
+   - `kogane.reconcile.propose` must receive a schema- and budget-valid
+     negative probe: distinct `from`/`to` and exactly one `evidenceRefs`
+     entry, so two targets plus one evidence ref fit `maxProposalTargets: 3`.
+     This synthetic shape matches the existing parser and names no financial
+     account:
 
-   ```jsonc
-   {
-     "mcp-client:<owner-sub>": {
-       "scopes": { "sources": ["<source-id>"], "accounts": "*" },
-       "capabilities": ["summary.read"],
-       "budget": { "maxRows": 200, "maxProposalTargets": 3, "maxExplainDepth": 3 },
-     },
-   }
-   ```
+     ```json
+     {
+       "kind": "same_account",
+       "from": "source_account:synthetic-from",
+       "to": "source_account:synthetic-to",
+       "evidenceRefs": ["fetch_artifact:1"],
+       "reason": "synthetic denied capability probe",
+       "method": "ai"
+     }
+     ```
 
-   and leave `AGENT_GRANTS` and `OPERATOR_SUBJECTS` as they are. Listing
-   `mcp-client:<owner-sub>` there has no effect, and listing the bare
-   `<owner-sub>` in `AGENT_GRANTS` would overlap `OPERATOR_SUBJECTS` and stop
-   every command surface with `503 grants_misconfigured`.
-
-9. _Client registration_ — add the connector in claude.ai, the app in
-   ChatGPT, and the server in Codex, as the table above says, signing in at
-   Access's login as the owner.
-10. _Live check, and the evidence that a client really connected_ — in
-    each client (claude.ai, ChatGPT, Codex), in a fresh conversation with
-    only this connector enabled, ask for these four calls and keep what each
-    shows:
-    - `kogane.capabilities` — evidence: the tool result shows
-      `"principal": "mcp-client:<owner-sub>"`, `"capabilities": ["summary.read"]`
-      and the listed source;
-    - `kogane.financial.query` with `{"intent":"coverage"}` — evidence: a
-      result with `"schemaVersion": "kogane-query-response-v1"`;
-    - the same with `filters.source` set to a source outside the grant —
-      evidence: `isError` with `"code": "evidence_restricted"`;
-    - `{"intent":"activity"}` — evidence: `"code": "unauthorized"` with
-      `capability:records.read`.
-      Corroborate each client from the server side for the same minutes: the
-      Access log of the MCP application shows the owner's sign-in and the
-      requests, and the Worker's request log shows
-      `"route":"mcp","status":200` lines (codes only; it never logs a
-      principal). A client that only lists tools, or a request made with the
-      browser's cookie, is not evidence. Before sharing any of it, replace the
-      owner's subject with `<owner-sub>`. The browser UI and the operator's
-      routes must behave as before.
-11. _Grant additions, later, one release each_ — `records.read`; then
-    `interpretation.propose` (ChatGPT asks for confirmation before a tool
-    without `readOnlyHint`; a proposal stays `proposed` until the operator
-    decides); `evidence.read` only as a separate decision.
+     Expect `code: "unauthorized"` and
+     `capability:interpretation.propose`; the capability refusal occurs before
+     target/evidence resolution. Two evidence refs would instead exceed the
+     parser's target budget and would not test that capability gate.
+     Operator/write tools remain unpublished; attempts cannot approve,
+     commit, change settings or trigger collection. Use only the existing
+     tool schemas and record refusals without copying financial values.
+     There is no source outside this grant: all sources and accounts are in
+     scope, so an outside-source refusal is not this activation's acceptance
+     test. Corroborate the session with the MCP application's Access logs and
+     the Worker's closed-code request logs. Also verify a browser-audience
+     assertion is refused on `/mcp`, and an MCP-audience assertion is refused
+     on browser/operator routes. The browser UI must still work as before.
+     Share only sanitized counts, codes and scope/budget evidence; replace the
+     owner subject with `<owner-sub>` and omit tokens and financial values.
+8. _Refresh and subsequent session_ — verify the actual OAuth refresh under
+   the approved posture policy and repeat a read in a fresh client session.
+   Record registration, login, initial tool call and refresh separately.
+   Proposals, raw evidence and delegated writes require separate reviewed
+   grants/implementation; this activation grants none of them.
 
 Revocation, fastest first: remove the owner from the MCP application's policy
 (Access refuses at the next refresh, at most one access-token lifetime
@@ -810,29 +917,27 @@ later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
 - **Protected-resource `resource`.** claude.ai requires the metadata's
   `resource` to equal the URL entered, path included ([Claude][claude-auth]);
   the Managed OAuth page does not say what Access publishes. _Question:_
-  what does step 6 show?
-- **Path-scoped application.** The Managed OAuth page describes discovery at
-  the application's domain (`/.well-known/oauth-authorization-server`); it
-  does not say how a path-scoped application on a hostname whose root belongs
-  to another application serves it. _Question:_ if step 6 fails, is a
-  dedicated hostname for the MCP endpoint (a custom domain on this Worker)
-  acceptable?
+  what does step 5 show?
+- **Dedicated hostname.** The approved configuration selects a dedicated
+  hostname. Its attachment to the Worker and its actual discovery/resource
+  metadata still require steps 4–5; the declaration alone proves neither.
 - **CIMD and `iss`.** The page documents DCR only. Without CIMD, claude.ai
   and Codex use DCR; without `iss`, ChatGPT uses the per-callback redirect
-  URI, which the `/*` allow-list entry covers. Nothing to decide unless step 6
+  URI, which the `/*` allow-list entry covers. Nothing to decide unless step 5
   shows no `registration_endpoint`, in which case no target client can
   register and the question goes back to Cloudflare.
 - **Assertion claims.** The page says the origin sees a request "the same
   as a browser-authenticated" one and does not list claims; the Worker
   requires `sub` and refuses an assertion without it.
-- **Device posture.** The MCP application's policy is identity-based by
-  necessity. _Question:_ is that acceptable for this endpoint, with the
-  attenuation above as the compensating control?
+- **Device posture.** Preserve the approved identity and posture policy.
+  Current Portal documentation supports posture checks; actual upstream
+  OAuth requests and refresh under that policy remain live checks.
 - **Plans.** ChatGPT developer mode is documented for paid plans on the web,
   with conflicting statements about write actions on personal plans; the
-  only write here is a proposal. _Question:_ which ChatGPT plan will be used?
+  configured grant here is read-only. Verify registration and actual reads
+  on the owner's intended plan; do not infer connection support from a plan name.
 - **Tool names with dots.** Allowed by the 2025-11-25 naming guidance;
-  whether claude.ai and ChatGPT accept them is seen at step 10.
+  whether claude.ai and ChatGPT accept them is seen at step 7.
 
 ### Contract for tools on `/mcp`
 
@@ -966,7 +1071,99 @@ writes; this change adds no migration.
    accounts. Granting that is a deliberate decision to show the agent every
    recognised card purchase, its statement and its bank debit.
 
-Rollback: set `AGENT_API_GRANTS` to `""` (immediate, no redeploy of code needed if
-it is a secret), or deploy a compatible build under the current rollback floor. Proposals already
+Rollback: set `AGENT_API_GRANTS` to `""` in both production configuration
+files and deploy, or deploy a compatible build under the current rollback
+floor. This deployment declares it as a text variable, not a secret. Proposals already
 written stay as `proposed` rows; they are inert, and removing the capability
 does not need to remove them.
+
+[cf-mcp-portal-policy]: https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/mcp-portals/#policy-limitations
+
+## Delegated execution integration and shared history reads (S3, 2026-10-10)
+
+The deployment configuration remains empty: this code change creates no grant,
+MCP delegation or authentication resource. An explicitly configured owner MCP
+delegation can use only the adapters reported ready by `kogane.capabilities`.
+Installed operations are persisted-run import, parser replay, whole-store
+projection, own-operation status, and inert command planning/simulation.
+They reuse the operator's existing application services and Processor planner.
+They cannot approve or commit a financial decision, contact a provider, release
+a collection lease, or change authority. The operation's delegated effect and
+its audit record share a batch with a strict rolling-day budget; a retry under
+the same key does not spend a second write.
+
+`POST /api/agent/v1/instruments.history` and
+`kogane.instruments.history` use the same reader as
+`GET /api/identity/instrument-history?identifierId=...`: `records.read`,
+whole source/account scope, and the grant's row budget. They return the same
+history contract and do not write a mapping or decision.
+
+`POST /api/agent/v1/audit.search` / `audit.get` and the corresponding
+`kogane.audit.search` / `kogane.audit.get` require `audit.read`.
+Search accepts the common closed filters plus an opaque cursor; detail accepts
+an `auditId`. Source scope is applied in SQL before the page window, account
+scope must be whole-store, and other subjects are pseudonymized. Schedule
+sources use their own `scheduleSources` axis; null-source records need both
+source axes whole-store. An absent detail and an out-of-scope detail are
+indistinguishable.
+
+Synthetic tests verify these paths and their authority boundaries. Real
+client authentication, delegation activation, and production operation remain
+unverified. A preparation helper alone is not a completed settings adapter;
+the remaining #564 writer integration and other schedule operations stay
+unavailable until implemented and independently reviewed.
+
+## S3 maintenance execution and confirmation (2026-10-10)
+
+Status: proposed until the integration PR merges. The implementation reuses
+the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
+against main `c0c4088a`; #652's temporal refusal and #643's release guard are
+preserved. The [integration plan](plans/2026-10-mcp-maintenance-followups.md)
+records the publication and activation boundaries. No grant or deployment is
+implied by this implementation.
+
+The closed MCP payload accepts `apply`, `prepare` and `confirm` plus an
+idempotency key. R1 apply keeps the seven-day joined-deferral bound. R2
+prepare validates with the trusted 31-day bound and records a capped,
+expiring preparation; only a matching confirmation may use that bound to
+write. A newly caused, moved or extended joined deferral over 31 days is
+refused; pre-existing longer operator windows may remain unchanged or shorten.
+A caller cannot supply `decisionRef`,
+`deferralBound` or a rollback audit reference. The R1 rule references its
+reserved effect audit id; the R2 rule references the verified preparation
+audit id, and its effect record links the same preparation.
+
+Current delegation capability and source scope are checked before looking
+up a replay receipt. Exact retries return the original saved id/revision
+without another writer call or alarm reconciliation. Changed payloads do not
+reuse a receipt. Fresh writes revalidate at the private Processor adapter.
+The common applied/accepted-effect audit count enforces the actual delegation's
+`writesPerDay` across operation kinds and delegation-reference changes. It
+shares one D1 batch with the native writer's 30-per-principal rolling-day cap,
+revision guard, domain write and audit append; failure rolls back the batch.
+Preparation reports the lesser remaining budget. It grants no authority by
+itself.
+
+The native writer captures the source's append-only revision count before
+reading joined windows. Its delegated INSERT checks that count again inside
+the batch, so concurrent edits to different rules cannot jointly exceed the
+deferral bound. The count uses the existing covering maintenance source
+index and scales with that source's history, not constant time. The immediate
+provenance update also requires that INSERT to have changed a row, and the
+append guard binds the decision reference: a same-millisecond losing retry
+cannot replace a winner's official URL or append an effect.
+
+The write result distinguishes `saved` from reconciliation `completed` or
+`pending`; a replay returns reconciliation `null`. None asserts that a
+reservation is armed. The maintenance read tool supplies the reservation and
+next-run state. Audit rows keep digests, closed codes and references, not the
+official URL or other provider text.
+
+The tests use synthetic local D1 data and synthetic Access keys. They cover
+signed MCP entry, revocation and scope-before-replay, both hard bounds,
+prepare/effect linkage, shared daily budget, rollback, exact retries,
+concurrent joined windows and losing-provenance writes. Production migration
+state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
+the committed MCP financial-reader grant receives no schedule authority.
+S6 survey acceptance remains unavailable pending the separate owner decision;
+no survey grammar, grants, Access, authentication or deployment is changed.

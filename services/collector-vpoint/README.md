@@ -118,12 +118,9 @@ mise run //services/collector-vpoint:dry-run
 - secret: `VPOINT_MEMBER_NUMBER`
 - secret: `VPOINT_EMAIL_RECIPIENT`
 - secret: `VPOINT_EMAIL_FORWARD_TO`
-- secret: `ADMIN_TRIGGER_TOKEN`
 - Cron: `15 21 * * *`（毎日06:15 JST）
 
-manual triggerは`POST /trigger`に`Authorization: Bearer <ADMIN_TRIGGER_TOKEN>`を付ける。
-認証メール待ちはHTTP 202と`reauthenticationPending: true`、通常収集はHTTP 200、実エラーは
-HTTP 502を返す。`GET /health`は秘密値や口座データを返さない。
+公開manual triggerは廃止（404）。既存のprivate RPC、認証メール受信、VポイントPay通知メール保存と転送を維持する。`GET /health` は秘密値や口座データを返さない。
 
 旧source bucketのhistorical outbox（Vポイント本体のmanifestとVポイントPay通知メールのpair）は、2026-09-13に中央DATAへコピー・検証した後に削除した。`backfill-raw-evidence.sh`と`backfill-vpoint-pay-email-raw-evidence.sh`が呼んでいたroute、通知保存後に`waitUntil`から呼んでいたService Binding、`services/collector-r2-importer`の監査scriptも同時に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。両scriptも削除済みである。
 

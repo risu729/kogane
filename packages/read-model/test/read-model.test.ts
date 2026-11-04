@@ -306,9 +306,39 @@ describe("named concepts in the final SQL", () => {
     // The legacy adapter remains, confined to the ELSE branch.
     expect(ctes).toContain("json_each(complete_parse.warnings_json)");
     const db = migratedDatabase();
-    expect(db.query("SELECT count(*) AS n FROM dataset_snapshot_policies").get()).toEqual({
+    expect(
+      db
+        .query("SELECT count(*) AS n FROM dataset_snapshot_policies WHERE snapshot_selection = 1")
+        .get(),
+    ).toEqual({
       n: SNAPSHOT_DATASETS.length,
     });
+    expect(
+      db
+        .query(
+          "SELECT parser_name,dataset FROM dataset_snapshot_policies WHERE snapshot_selection=1 ORDER BY parser_name,dataset",
+        )
+        .all(),
+    ).toEqual(
+      SNAPSHOT_DATASETS.map(([parser_name, dataset]) => ({ parser_name, dataset })).sort((a, b) =>
+        `${a.parser_name}:${a.dataset}` < `${b.parser_name}:${b.dataset}` ? -1 : 1,
+      ),
+    );
+    expect(
+      db
+        .query(
+          "SELECT source_id,parser_name,dataset,unit_scope,snapshot_selection FROM dataset_snapshot_policies WHERE snapshot_selection<>1 OR unit_scope<>'run' ORDER BY parser_name,dataset",
+        )
+        .all(),
+    ).toEqual([
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-jpoint-balance",
+        dataset: "jpoint-balance",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+    ]);
     expect(
       db
         .query(
@@ -372,8 +402,8 @@ describe("named concepts in the final SQL", () => {
     expect(db.query(`SELECT ${economicallySummable.predicate()} AS summable`).get()).toEqual({
       summable: 0,
     });
-    // The unit scope compiles on the production schema and is inert: every
-    // seeded policy row is `run`, so no artifact is admitted by it (D13).
+    // Prior snapshot policies keep the run scope. The sole new eligibility-only
+    // J-POINT policy uses the unit scope; this fixture has no reward-unit artifact.
     expect(
       db
         .query(
@@ -385,14 +415,26 @@ describe("named concepts in the final SQL", () => {
     ).toEqual({ n: 0 });
     expect(
       db
-        .query("SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE unit_scope <> 'run'")
+        .query(
+          "SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE snapshot_selection=1 AND unit_scope<>'run'",
+        )
         .get(),
     ).toEqual({ n: 0 });
     expect(
       db
-        .query("SELECT COUNT(*) AS n FROM dataset_snapshot_policies WHERE snapshot_selection <> 1")
-        .get(),
-    ).toEqual({ n: 0 });
+        .query(
+          "SELECT source_id,parser_name,dataset,unit_scope,snapshot_selection FROM dataset_snapshot_policies WHERE snapshot_selection<>1 OR unit_scope<>'run' ORDER BY parser_name,dataset",
+        )
+        .all(),
+    ).toEqual([
+      {
+        source_id: "myjcb",
+        parser_name: "myjcb-jpoint-balance",
+        dataset: "jpoint-balance",
+        unit_scope: "unit",
+        snapshot_selection: 0,
+      },
+    ]);
   });
 
   test("the publication gate decides every current read and every recorded read", () => {

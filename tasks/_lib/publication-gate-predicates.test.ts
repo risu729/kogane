@@ -82,6 +82,11 @@ const OK_STATUS_ALLOW_LIST: Record<string, number> = {
   // Decorates published and superseded runs; adoption comes from the LEFT JOIN
   // on the projection, not from this status test (which only drops pending runs).
   "packages/read-model/src/organization.ts": 1,
+  // Internal current-readiness diagnostic over explicitly named observations:
+  // this one execution predicate excludes pending/failed parses, not unpublished
+  // successful ones. The separate LEFT JOIN on published_parse_runs is the
+  // only currentness authority; unpublished successes are evidence_not_current.
+  "packages/read-model/src/economic-row-readiness.ts": 1,
   // The keyed form of `current_identity_observations`' candidates: publication
   // comes from its join on the projection; the status test is the view's own
   // (migration 0026), kept so the keyed owners equal the view's.

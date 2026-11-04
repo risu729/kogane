@@ -26,7 +26,10 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
 import { publishParse, seedRegistry } from "./fixtures";
-import { runRewardReadProjection } from "../../processor/src/reward-read-projection";
+import {
+  captureRewardInput,
+  runRewardReadProjection,
+} from "../../processor/src/reward-read-projection";
 import { decodeReadCursor, encodeReadCursor } from "../../../packages/storage-d1/src/read/index";
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
@@ -110,15 +113,31 @@ beforeAll(async () => {
   )
     .bind(run.artifacts[0]!.id)
     .first<{ id: number }>();
-  await publishParse(parse!.id);
-  const claim = (
+  const claim = async (
     digest: string,
     bucket: string,
     kind: string,
     amount: string,
     expiry: string | null,
-  ) =>
-    env.DB.prepare(
+  ) => {
+    // Every synthetic claim references its own real parent fact. Invented IDs
+    // would collide with later observations and the promotion anti-join.
+    const fact = (await env.DB.prepare(
+      `INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_text,amount_scale,instrument,observed_at,raw_locator,extra_json)
+       VALUES(?,?,'available_point_bucket',?,0,'V_POINT','2026-09-08T00:00:00.000Z','synthetic:reward-read',?) RETURNING id`,
+    )
+      .bind(
+        parse!.id,
+        bucket,
+        amount,
+        JSON.stringify({
+          _kogane: {
+            expiration: expiry === null ? null : (JSON.parse(expiry) as { value: string }).value,
+          },
+        }),
+      )
+      .first<{ id: number }>())!.id;
+    return env.DB.prepare(
       `INSERT INTO reward_bucket_claims_v2(claim_digest,parse_run_id,source_fact_kind,source_fact_id,
         program_id,holding_ref,bucket_ref,bucket_kind,restriction_refs_json,unit_ref,
         quantity_coefficient,quantity_scale,quantity_status,observed_expiry_json,observed_at,
@@ -126,8 +145,9 @@ beforeAll(async () => {
        VALUES(?1,?2,'balance',?3,'program:v-point','program:v-point:member',?4,?5,'[]',
          'points:v-point',?6,0,'exact',?7,'2026-09-08T00:00:00.000Z','reward-promotion-v2',
          '2026-09-09T00:00:00.000Z')`,
-    ).bind(digest, parse!.id, Number(digest.slice(-2)), bucket, kind, amount, expiry);
-  await env.DB.batch([
+    ).bind(digest, parse!.id, fact, bucket, kind, amount, expiry);
+  };
+  const claims = await Promise.all([
     claim(
       "reward-read-claim-01",
       "program:v-point:slot-a",
@@ -152,6 +172,10 @@ beforeAll(async () => {
         null,
       ),
     ),
+  ]);
+  await publishParse(parse!.id);
+  await env.DB.batch([
+    ...claims,
     env.DB.prepare(
       `INSERT INTO conversion_offers(offer_id,version,source_program_ref,destination_program_ref,
         from_unit_ref,to_unit_ref,ratio_numerator,ratio_denominator,minimum_coefficient,
@@ -394,9 +418,9 @@ describe("corrected bucket interpretation", () => {
       ...row!,
       snapshot_id: id,
       content_key: "8".repeat(64),
-      contract_version: "reward-projection-input-v1",
-      claims_release: "reward-promotion-v1",
-      policy_release: "reward-projection-v2",
+      contract_version: "reward-projection-input-v2",
+      claims_release: "reward-promotion-v2",
+      policy_release: "reward-projection-v4",
     };
     await env.READ.prepare(
       `INSERT INTO reward_expiry_snapshots(${Object.keys(legacy).join(",")}) VALUES(${Object.keys(
@@ -421,5 +445,79 @@ describe("corrected bucket interpretation", () => {
     const continued = await call(`/api/v2/rewards/expiry?limit=25&cursor=${legacyCursor}`);
     expect(continued.status).toBe(410);
     expect(await continued.json()).toMatchObject({ error: "context_expired" });
+  });
+});
+
+describe("provider-only expiry companion on the READ route", () => {
+  it("returns same-snapshot sections when no computed rule rows exist and filters by program", async () => {
+    const run = await seedRewardCapture("myjcb", ["jpoint-balance"], "synthetic-api");
+    const parse = (await env.DB.prepare(
+      "INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,'myjcb-jpoint-balance','1.0.0','2099-01-01T00:00:00.000Z','ok','[]') RETURNING id",
+    )
+      .bind(run.artifacts[0]!.id)
+      .first<{ id: number }>())!.id;
+    const metadata = {
+      coverage: "not-displayed",
+      reasonCode: "provider_expiry_not_displayed",
+      displays: [],
+    };
+    const fact = (await env.DB.prepare(
+      "INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_text,amount_scale,instrument,observed_at,raw_locator,extra_json) VALUES(?,'myjcb:synthetic-api:j-point:total','displayed_jpoint_total','1000',0,'J_POINT','2099-01-01T00:00:00.000Z','json:$.total',?) RETURNING id",
+    )
+      .bind(parse, JSON.stringify({ _kogane: { rewardExpiryDisplays: metadata } }))
+      .first<{ id: number }>())!.id;
+    await publishParse(parse);
+    const { promoteRewardClaims } = await import("../../processor/src/reward-claims-job.ts");
+    const promotion = await promoteRewardClaims(env.DB as never);
+    expect(promotion).toMatchObject({ scanned: 1, promoted: 1, skipped: 0 });
+    const admitted = await env.DB.prepare(
+      `SELECT parse_run_id,source_fact_id,program_id,holding_ref,bucket_kind,quantity_status,observed_expiry_json
+       FROM reward_bucket_claims_v2 WHERE source_fact_kind='balance' AND source_fact_id=? AND promotion_release='reward-promotion-v2'`,
+    )
+      .bind(fact)
+      .all();
+    expect(admitted.results).toEqual([
+      {
+        parse_run_id: parse,
+        source_fact_id: fact,
+        program_id: "program:j-point",
+        holding_ref: "program:j-point:myjcb:synthetic-api:j-point:total",
+        bucket_kind: "unclassified",
+        quantity_status: "exact",
+        observed_expiry_json: null,
+      },
+    ]);
+    const captured = await captureRewardInput(env.DB as never, {
+      now: () => "2099-02-01T00:00:00.000Z",
+    });
+    expect(captured.ok).toBe(true);
+    if (!captured.ok) throw new Error("Synthetic provider input was not captured");
+    expect(captured.captured.input.content.providerSections).toEqual([
+      expect.objectContaining({ ...metadata, sourceFactRefs: [`balance:${fact}`] }),
+    ]);
+    const built = await build("2099-02-01T00:00:00.000Z");
+    expect(built.status).toBe("complete");
+    const response = await call("/api/v2/rewards/expiry?program=program%3Aj-point");
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as ExpiryPage & { providerDisplaySections: unknown[] };
+    expect(body.snapshot.snapshotId).toBe(built.snapshotId);
+    expect(body.rows).toEqual([]);
+    expect(body.providerDisplaySections).toEqual([
+      expect.objectContaining({
+        programId: "program:j-point",
+        coverage: "not-displayed",
+        reasonCode: "provider_expiry_not_displayed",
+        displays: [],
+        sourceFactRefs: [`balance:${fact}`],
+      }),
+    ]);
+    expect(validApiResponse("/api/v2/rewards/expiry", body)).toBe(true);
+    expect(await (await call("/api/v2/rewards/expiry?program=program%3Aj-point")).json()).toEqual(
+      body,
+    );
+    const other = (await (
+      await call("/api/v2/rewards/expiry?program=program%3Av-point")
+    ).json()) as { providerDisplaySections: unknown[] };
+    expect(other.providerDisplaySections).toEqual([]);
   });
 });

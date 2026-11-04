@@ -261,6 +261,7 @@ export interface HistoryEntry {
   revision: number;
   createdAt: string;
   method: string;
+  decisionOrigin: InstrumentHistoryRow["decisionOrigin"];
   decisionKind: string | null;
   reason: string;
   instrumentId: string | null;

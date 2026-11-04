@@ -34,6 +34,7 @@ export async function resolveDelegation(input: {
       capabilities: effectiveDelegationCapabilities(entry),
       scopes: entry.scopes,
       notAfter: entry.notAfter,
+      budget: entry.budget,
       delegationRef: `dlg_${await canonicalDigest(entry)}`,
     },
   };

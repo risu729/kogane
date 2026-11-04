@@ -58,6 +58,14 @@ interface ClassificationEntry {
  * them on purpose.
  */
 export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
+  instrument_temporal_acceptances: {
+    classification: "core-keep",
+    planRow: "append-only temporal identity acceptance journal (ADR 0055)",
+  },
+  instrument_temporal_versions: {
+    classification: "core-keep",
+    planRow: "sealed append-only temporal identity version members (ADR 0055)",
+  },
   collection_schedules: {
     classification: "operational-mutable",
     planRow: "alarm configuration and reservations",
@@ -433,6 +441,15 @@ export const CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
  * reported, and nothing in it is the record of a decision (04 §1, §3).
  */
 export const READ_CLASSIFICATION: Readonly<Record<string, ClassificationEntry>> = {
+  reward_provider_expiry_sections: {
+    classification: "read-projection",
+    planRow:
+      "READ: non-additive provider expiry display sections of one fixed reward snapshot (ADR 0068)",
+  },
+  reward_provider_display_checkpoints: {
+    classification: "read-operational",
+    planRow: "READ: bounded provider display stream progress committed with its chunk (ADR 0068)",
+  },
   balance_read_snapshots: {
     classification: "read-projection",
     planRow: "READ: one build of the projection, keyed by content and attempt (05 §4)",

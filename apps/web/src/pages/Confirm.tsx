@@ -150,12 +150,16 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
   const ownershipSide = ownership.data?.sides.find(
     (side) => side.role === ownershipMatch?.[1] && side.accountId === ownershipMatch?.[2],
   );
+  const ownershipDeclaration = report.data?.simulation.ownershipDeclaration;
   const ownershipReady =
     !requiresOwnership ||
     (features.cardOwnershipReview &&
       ownership.data !== undefined &&
       ownershipSide !== undefined &&
       ownershipSide.blockers.length === 0 &&
+      (!ownershipDeclaration ||
+        (ownershipDeclaration.role === ownershipSide.role &&
+          ownershipSide.selfDeclarationBlockers.length === 0)) &&
       ownershipMatch !== null &&
       ownership.data.revision ===
         report.data?.expectedRevisions[`card-settlement:${ownershipProposalId}`] &&
@@ -360,8 +364,15 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                               {data.simulation.kind === "relation.reject" ? "却下" : "採用"}します。
                             </p>
                             <CardOwnershipDetails side={ownershipSide} />
+                            {ownershipDeclaration ? (
+                              <Notice tone="warn" inline role="note">
+                                根拠は本人申告（名義未確認）、申告日は{" "}
+                                {ownershipDeclaration.declaredOn} です。
+                                入力した識別名が本人であるという申告を記録します。銀行・カード会社が名義や法的本人性を確認した証明ではありません。
+                              </Notice>
+                            ) : null}
                             <p>
-                              選択した原本・解析版・口座の対応を根拠として、期間を限定しない関係を記録します。識別名だけで保有者を証明するものではありません。
+                              選択した原本・解析版・口座の対応に結び付けて、期間を限定しない関係を記録します。申告日は過去の保有期間の証明ではなく、識別名だけで保有者を証明するものでもありません。
                             </p>
                           </>
                         ) : (

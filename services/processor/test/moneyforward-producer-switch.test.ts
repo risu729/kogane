@@ -1,3 +1,4 @@
+import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
 // ADR 0027 and ADR 0029: the producer switch from the retired importer to the
 // collector, for one MoneyForward account-month captured by both (INV06).
 //
@@ -31,7 +32,6 @@ import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
   CORE_MIGRATIONS_URL,
-  applyReadMigrations,
   migrationFiles,
   migrationSql,
   splitSqlStatements,
@@ -108,14 +108,13 @@ async function store(before = "9999"): Promise<Env> {
   const db = await mf.getD1Database("DB");
   const read = await mf.getD1Database("READ");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL).filter((name) => name < before))
-    for (const sql of splitSqlStatements(migrationSql(CORE_MIGRATIONS_URL, file)))
-      await db.prepare(sql).run();
+    await applyTestSql(db, migrationSql(CORE_MIGRATIONS_URL, file));
   const bootstrap = readFileSync(
     new URL("../../../infra/bootstrap/ingest-clients.sql", import.meta.url),
     "utf8",
   );
-  for (const sql of splitSqlStatements(bootstrap)) await db.prepare(sql).run();
-  await applyReadMigrations(read);
+  await applyTestSql(db, bootstrap);
+  await applyTestReadMigrations(read);
   return {
     DB: db,
     READ: read,

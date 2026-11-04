@@ -33,6 +33,7 @@ const baseOrganization: ObservationOrganization = {
     status: "provider-local",
     revision: 2,
     method: "manual",
+    decisionOrigin: "operator",
     reason: "synthetic-manual-evidence",
   },
   instruments: [
@@ -305,6 +306,73 @@ describe.if(runnable)("organized observation labels", () => {
     );
     expect(await page.locator("main").innerText()).toContain("これは旧解析の記録です");
     await page.close();
+  });
+
+  test("delegated and unrecorded manual origins never claim operator authorship", async () => {
+    const page = await browser.newPage();
+    try {
+      for (const decisionOrigin of ["delegated", "legacy", "unknown", undefined] as const) {
+        const { decisionOrigin: _priorOrigin, ...account } = baseOrganization.account!;
+        organization = {
+          ...baseOrganization,
+          account: { ...account, ...(decisionOrigin === undefined ? {} : { decisionOrigin }) },
+        };
+        await page.goto(`${origin}/observations/position/${position.id}`);
+        const panel = page.locator('section[aria-labelledby="organization"]');
+        await panel.waitFor();
+        const text = await panel.innerText();
+        expect(text).toContain(
+          decisionOrigin === "delegated"
+            ? "委任された操作 · 改訂 2"
+            : decisionOrigin === "legacy"
+              ? "旧記録の判断 · 改訂 2"
+              : "判断（実行者の記録なし） · 改訂 2",
+        );
+        expect(text).not.toContain("手動で整理");
+        expect(text).not.toContain("mcp-client:");
+        if (decisionOrigin === "delegated") {
+          for (const route of ["/transactions", "/balances", "/positions"]) {
+            await page.goto(origin + route);
+            await page.getByText("委任された操作", { exact: true }).first().waitFor();
+            expect(await page.locator("main").innerText()).not.toContain("手動操作");
+          }
+        }
+      }
+    } finally {
+      organization = baseOrganization;
+      await page.close();
+    }
+  });
+
+  test("as-recorded mapping and current name show their independent origins", async () => {
+    const page = await browser.newPage();
+    try {
+      for (const selectedOrigin of ["automatic", "operator"] as const) {
+        organization = {
+          ...baseOrganization,
+          instruments: baseOrganization.instruments.map((item) =>
+            item.role === "security"
+              ? {
+                  ...item,
+                  method: selectedOrigin === "automatic" ? "rule" : "manual",
+                  decisionOrigin: selectedOrigin,
+                  nameEvidence: { reason: "manual", origin: null, decisionOrigin: "delegated" },
+                }
+              : item,
+          ),
+        };
+        await page.goto(`${origin}/observations/position/${position.id}?identityMode=as-recorded`);
+        const panel = page.locator('section[aria-labelledby="organization"]');
+        await panel.waitFor();
+        const text = await panel.innerText();
+        expect(text).toContain("名称の根拠: 委任された操作で指定した名称");
+        expect(text).not.toContain("名称の根拠: 手動で指定した名称");
+        expect(text).not.toContain("規則による判断で指定した名称");
+      }
+    } finally {
+      organization = baseOrganization;
+      await page.close();
+    }
   });
 
   test("missing and unavailable interpretations retain raw detail and make no identity claim", async () => {

@@ -271,11 +271,7 @@ describe("consumers deploy before producers (G5-14)", () => {
       secrets?: { required?: string[] };
     };
     expect(config.triggers?.crons).toEqual([]);
-    expect(config.secrets?.required).toEqual([
-      "ADMIN_TRIGGER_TOKEN",
-      "MIZUHO_CUSTOMER_NUMBER",
-      "MIZUHO_LOGIN_PASSWORD",
-    ]);
+    expect(config.secrets?.required).toEqual(["MIZUHO_CUSTOMER_NUMBER", "MIZUHO_LOGIN_PASSWORD"]);
     expect(deployWorkflow).not.toContain("MIZUHO_CUSTOMER_NUMBER");
     expect(deployWorkflow).not.toContain("MIZUHO_LOGIN_PASSWORD");
     expect(deploySteps(deployWorkflow).some((step) => step.workingDirectory === mizuho!.path)).toBe(

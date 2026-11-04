@@ -6,7 +6,7 @@ import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 // Reads Miniflare's synchronous proxy replies only once they are queued; also
 // preloaded for every test file by bunfig.toml.
 import "./miniflare-sync-proxy.ts";
-import { applyReadMigrations } from "../../../packages/storage-d1/src/migrations.ts";
+import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
 
 export const migrationDir = new URL(
   "../../../packages/storage-d1/migrations/core/",
@@ -64,10 +64,9 @@ export function layerBMigrations(): string[] {
   );
 }
 
-/** Apply one migration file through D1, statement by statement. */
+/** Apply one migration file as a D1 batch; upgrade tests keep file boundaries. */
 export async function applyMigration(db: D1Database, name: string): Promise<void> {
-  for (const sql of splitSql(readFileSync(new URL(name, migrationDir), "utf8")))
-    await db.prepare(sql).run();
+  await applyTestSql(db, readFileSync(new URL(name, migrationDir), "utf8"));
 }
 
 /** `migrations` defaults to every Layer B migration; an upgrade test passes
@@ -106,7 +105,7 @@ export async function startPipeline(
   const data = await mf.getR2Bucket("DATA");
   await db.exec(LAYER_A_SQL);
   for (const name of migrations) await applyMigration(db, name);
-  await applyReadMigrations(read);
+  await applyTestReadMigrations(read);
   // Miniflare and generated Workers types use distinct platform declarations;
   // validate the runtime proxy at this test boundary instead of double casts.
   const bindings: unknown = { DB: db, READ: read, EVIDENCE: bucket, DATA: data, ...vars };

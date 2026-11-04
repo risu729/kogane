@@ -861,7 +861,7 @@ remain unreachable. See the PoC's
 for the evidence boundary and enablement checklist.
 
 The deployed schedule is `0 21 * * *`. Teardown inventory is the active Worker,
-the SBI credential/admin-trigger/relay secrets, the R2 bucket containing the
+the SBI credential and relay secrets (the public admin trigger is retired), the R2 bucket containing the
 success and retained failure manifests/artifacts, the Container application and
 image revisions, and the explicit-tunnel VPC binding configuration. The local
 Docker test Container/image should be removed after validation; the cloud
@@ -969,7 +969,7 @@ per tier, and a JPY row was present.
   the board; any other unrecognised form still does. For that shape the
   observations carry no provider time, so readers use the fetch instant
   marked as the collector's; each records `_kogane.providerTimeBasis:
-"unrecognized"`, the text stays verbatim in its provider context, and one
+  "unrecognized"`, the text stays verbatim in its provider context, and one
   `info` `unknown_fields_preserved` issue names the field without its value.
   The trailing characters are never read.
 - A row's identity is `(currency, customerCategory)`: every tier gives its own

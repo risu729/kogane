@@ -28,7 +28,7 @@ export type SubjectPath = (typeof SUBJECT_PATHS)[number];
  * builder refuses it, and `automatic` is the Processor's own principal on its
  * `alarm` and `lane` paths.
  */
-export const AUDIT_PRINCIPAL_KINDS = ["human", "agent", "automatic"] as const;
+export const AUDIT_PRINCIPAL_KINDS = ["human", "agent", "delegated", "automatic"] as const;
 export type AuditPrincipalKind = (typeof AUDIT_PRINCIPAL_KINDS)[number];
 /** The kinds a subject on `ui`, `agent-http` or `mcp` is graded as today. */
 export type SubjectPrincipalKind = Exclude<AuditPrincipalKind, "automatic">;
@@ -50,7 +50,9 @@ export type AuditResult = (typeof AUDIT_RESULTS)[number];
 // records `read`, `replayed`, `refused` and `failed` after the answer, never
 // inside a writer's batch; the Processor's daily aggregate is `overflow`.
 
-const AUDIT_STEPS = ["call", "prepare", "confirm"] as const;
+export const AUDIT_DELEGATION_REF = /^dlg_[0-9a-f]{64}$/u;
+export const AUDIT_CONFIRMATION_DIGEST = /^cfm_[0-9a-f]{64}$/u;
+export const AUDIT_STEPS = ["call", "prepare", "confirm"] as const;
 export type AuditStep = (typeof AUDIT_STEPS)[number];
 
 /** ADR 0063's risk classes; the catalogue gives each operation its own. */

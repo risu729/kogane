@@ -7,7 +7,7 @@ import {
   safeFailure,
 } from "../src/diagnostics";
 import { collectMoneyForward } from "../src/moneyforward";
-import worker from "../src/worker";
+import { runSharedCollection } from "../src/worker";
 import type { MoneyForwardCredential } from "../src/types";
 
 afterEach(() => mock.restore());
@@ -29,15 +29,8 @@ function captureLogs() {
   });
   return lines;
 }
-function trigger() {
-  return new Request("https://collector.test/trigger", {
-    method: "POST",
-    headers: { authorization: "Bearer test-admin" },
-  }) as Parameters<typeof worker.fetch>[0];
-}
 function fixture(secret: string, data: FakeR2Bucket) {
   return Object.assign({} as Env, {
-    ADMIN_TRIGGER_TOKEN: "test-admin",
     MONEYFORWARD_CREDENTIAL_JSON: secret,
     COLLECTOR_SCHEMA_VERSION: "test",
     DATA: data,
@@ -140,9 +133,9 @@ describe("Money Forward safe stage diagnostics", () => {
     spyOn(console, "error").mockImplementation(() => {
       throw new Error(PRIVATE);
     });
-    const response = await worker.fetch(trigger(), fixture(PRIVATE, data));
-    expect(response.status).toBe(502);
-    const result = (await response.json()) as { terminalKey: string; persistence: string };
+    const response = await runSharedCollection(fixture(PRIVATE, data));
+    expect(response.status).not.toBe("success");
+    const result = response as { terminalKey: string; persistence: string };
     expect(result.persistence).toBe("persisted");
     const terminal = data.entries.get(result.terminalKey);
     expect(JSON.parse(new TextDecoder().decode(terminal!.bytes)).providerOutcome).toBe("failed");
@@ -160,9 +153,9 @@ describe("Money Forward safe stage diagnostics", () => {
         throw new Error(PRIVATE);
       },
     });
-    const response = await worker.fetch(trigger(), fixture(PRIVATE, data));
-    expect(response.status).toBe(502);
-    const result = (await response.json()) as { persistence: string };
+    const response = await runSharedCollection(fixture(PRIVATE, data));
+    expect(response.status).not.toBe("success");
+    const result = response as { persistence: string };
     expect(result.persistence).toBe("incomplete");
     expect([...data.entries.keys()].some((key) => key.endsWith("/terminal.json"))).toBe(false);
     expect(logs.join()).not.toContain(PRIVATE);

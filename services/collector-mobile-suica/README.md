@@ -99,13 +99,12 @@ unset BW_SESSION
 
 `bw:sync`はRP ID `id.jreast.co.jp`に完全一致するcredentialが1件だけであることを
 確認してから、`wrangler secret put JRE_ID_CREDENTIAL_JSON`を実行する。Vault全体や
-master passwordは送らない。同期後は`POST /credential-check`で秘密値を返さずに
-Worker側の署名検査ができる。
+master passwordは送らない。署名検査はローカルの `bw:verify` を使う。旧公開 `/credential-check` と browser 診断入口は404であり、認証情報の状態を公開しない。
 
 ## 実行
 
 日次Cronは21:10 UTC（日本時間06:10）で、サービス停止時間00:50〜05:00 JSTを
-避ける。手動実行はBearer認証付きの`POST /trigger?asOf=YYYY-MM-DD`である。
+避ける。通常収集は既存の固定action private RPC／schedule経路のみ。旧 `/trigger?asOf=YYYY-MM-DD` は404で、任意日付指定は廃止した。
 
 ```sh
 bun install --frozen-lockfile
@@ -115,8 +114,7 @@ mise run //services/collector-mobile-suica:dry-run
 ./node_modules/.bin/wrangler deploy
 ```
 
-`ADMIN_TRIGGER_TOKEN`はデプロイ完了後に設定する。Secret変更とcode deployは別version
-として反映されるため、診断・手動実行に使うローカル値とWorker側の値を最後に揃える。
+管理用Bearerは不要。登録済みadmin secretの削除は、対応codeの本番反映と残存依存ゼロの確認後に限る。
 
 ## resourceとcleanup
 
@@ -124,7 +122,7 @@ mise run //services/collector-mobile-suica:dry-run
 - Browser binding: `BROWSER`
 - R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
 - Cron: `10 21 * * *`
-- Secrets: `ADMIN_TRIGGER_TOKEN`, `JRE_ID_CREDENTIAL_JSON`
+- Secrets: `JRE_ID_CREDENTIAL_JSON`
 
 旧`MOBILE_SUICA_SESSION_JSON`、`JRE_ID_FINGERPRINT`、TAMIA VPC bindingは実行に不要で
 ある。削除時はWorkerだけを削除する。共有DATA bucketは他のcollectorとProcessorも使うため

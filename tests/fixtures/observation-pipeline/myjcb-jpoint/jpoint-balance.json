@@ -1,0 +1,32 @@
+{
+  "jsonrpc": "2.0",
+  "id": "200100101",
+  "result": {
+    "errId": "",
+    "errMessage": "",
+    "pointJsonInfo": {
+      "pointHyoujiTanniName": "ポイント",
+      "normalPointInfo": {
+        "point": "800",
+        "pointDispFlag": true,
+        "expirePoint": "160",
+        "expirePointDate": "2030年6月30日(日)",
+        "expirePointDispFlag": true
+      },
+      "specialPointInfo": {
+        "point": "200",
+        "pointDispFlag": true,
+        "expirePoint": "40",
+        "expirePointDate": "2030年6月30日(日)",
+        "expirePointDispFlag": true
+      },
+      "totalPointInfo": {
+        "point": "1,000",
+        "pointDispFlag": true,
+        "expirePoint": "200",
+        "expirePointDate": "2030年6月30日(日)",
+        "expirePointDispFlag": true
+      }
+    }
+  }
+}

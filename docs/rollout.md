@@ -123,7 +123,7 @@ below is read by a migration.
 | `REWARD_CLAIMS_ENABLED`              | processor | `"false"`               | The `reward_claims_sweep` lane promotes published balance observations to typed reward claims for the three sources with recorded units                                                                                                                                                                                      | CORE `0033`                                                                                                                                                         | Set `"false"`. The lane and its log line disappear                                                                                                               |
 | `REPORTS_ENABLED`                    | processor | `"false"`               | The report stage joins the stage list and report artifacts are written                                                                                                                                                                                                                                                       | CORE `0034`                                                                                                                                                         | Set `"false"`. Existing artifacts stay readable — a stored report keeps its fixed body                                                                           |
 | `COMMANDS_ENABLED`                   | app       | `""`                    | The command paths stop answering `403 commands_disabled`; `/api/meta` advertises `commands`. Display capability, not an authorization decision                                                                                                                                                                               | CORE `0031` (needs `0029` applied)                                                                                                                                  | Unset. The command paths close immediately; receipts and outbox rows are additive and are never deleted                                                          |
-| `AGENT_API_GRANTS`                   | app       | `""`                    | A JSON **object**, principal → grant: what the agent API lets that principal read, and whether it may propose. The grant table is the feature flag                                                                                                                                                                           | none                                                                                                                                                                | Set `""` and redeploy. There is no per-route switch                                                                                                              |
+| `AGENT_API_GRANTS`                   | app       | `""`                    | A JSON **object**, principal → grant: what the agent API lets that principal read (public maintenance windows included, ADR 0046) and whether it may propose; it can name no write. The grant table is the feature flag                                                                                                      | none                                                                                                                                                                | Set `""` and redeploy. There is no per-route switch                                                                                                              |
 | `OPERATOR_SUBJECTS`                  | app       | `""`                    | A JSON **array** of verified subjects the change lifecycle treats as the human operator: the only subjects that may approve, commit and request an operation. Empty means nobody; the committed configuration names an operator. Empty configuration refuses every command and operations request with `subject_not_granted` | none                                                                                                                                                                | Set `""`. The command and operations paths stay open and refuse everyone; nothing already accepted is undone                                                     |
 | `AGENT_GRANTS`                       | app       | `""`                    | A JSON **array** of subjects the change lifecycle treats as agents: they may plan and simulate, never approve or commit                                                                                                                                                                                                      | none                                                                                                                                                                | Set `""`. **Do not** put the object shape here, and never list a subject in both arrays: either makes the deployment `grants_misconfigured` and refuses everyone |
 | `OPS_API_ENABLED`                    | app       | `""`                    | The six `/api/ops/v1/*` routes are served (no `/mcp` caller is offered or accepted for them, ADR 0047); `/api/meta` reports `opsApi`                                                                                                                                                                                         | CORE `0040`                                                                                                                                                         | Set `""` (no code deploy needed). Accepted operations stay in `ops_requests` and are inert while nothing dispatches them                                         |
@@ -213,6 +213,18 @@ Removing ScheduleAlarm requires a separate retirement migration; do not use
 historical component rollback recipes to restore old Cron triggers.
 Repair READ using [the rebuild runbook](read-rebuild-runbook.md).
 
+**A migration numbered below an applied one.** A release applies every CORE
+migration it knows that the database lacks (`wrangler d1 migrations apply`),
+whatever its number, so such a migration still applies forward. But a
+release's record keeps its sorted CORE migration list, and a rollback is
+refused when the target's list is not a prefix of the deployed one
+(`isMigrationPrefix` in `tasks/_lib/ci/release-manifest.mjs`, the "Refuse an
+incompatible rollback" step of `_deploy-workers.yml`). A migration that lands
+below an already-applied one therefore puts every commit between the
+higher-numbered release and its own out of rollback's reach. For that reason
+#564's migration took 0078, above main's 0077, and not 0076. 0073 and 0074,
+held for UI work, will carry the same limit when they land.
+
 ## 6. One-time GitHub and Cloudflare settings
 
 These settings are maintained in the repository owner's GitHub and Cloudflare accounts.
@@ -220,33 +232,17 @@ Until each is done the corresponding automation degrades safely rather than
 doing something partial. The authoritative text is
 [ci-cd.md](ci-cd.md#required-github-settings); this is the checklist form.
 
-### 6.1 GitHub App for auto-merge
+### 6.1 Pull request merging
 
-- [ ] Create a GitHub App owned by the owner account (e.g. `kogane-automation`)
-      with repository permissions `Contents: Read and write`,
-      `Pull requests: Read and write`, `Metadata: Read-only`; no webhook, no
-      account or organization permissions.
-- [ ] Install it **only** on `risu729/kogane`.
-- [ ] Do **not** add it to any ruleset bypass list. The design depends on the
-      app being subject to the same rules as a human.
-- [ ] Repository **variable** `KOGANE_AUTOMATION_APP_ID` = the App ID.
-- [ ] Repository **secret** `KOGANE_AUTOMATION_APP_PRIVATE_KEY` = the whole
-      `.pem`, header and footer lines included.
-
-_Not configured:_ `automerge.yml` logs `automation app not configured`, exits 0,
-and merging stays manual.
-
-### 6.2 Labels
-
-- [ ] `automerge-approved` — an owner-applied label that makes an external
-      pull request eligible for native auto-merge. GitHub enforces required reviews.
+Renovate handles its own native auto-merge under the shared preset. Merge other
+pull requests manually or explicitly enable native auto-merge per pull request.
+No dedicated GitHub App or approval label is required; see
+[ADR 0071](adr/0071-remove-custom-automerge.md).
 
 ### 6.3 Branch ruleset (`main`, id 21174448)
 
 - [ ] Keep `CI Check` required and remove any obsolete `Risk Gate` entry.
-- [ ] Turn on "Require branches to be up to date before merging" so CI runs
-      on the latest base; automation updates eligible branches one at a time.
-- [ ] Keep the automation app out of bypass lists. Preserve squash merging,
+- [ ] Preserve squash merging,
       signed commits, linear history, auto-merge and branch updates.
 
 These settings preserve CI enforcement. There is no owner-review prerequisite

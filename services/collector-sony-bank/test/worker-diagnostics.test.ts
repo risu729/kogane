@@ -1,6 +1,6 @@
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import { describe, expect, spyOn, test } from "bun:test";
-import worker from "../src/worker";
+import { runSharedCollection } from "../src/worker";
 
 async function trigger(manifestWriteFails = false) {
   const unavailable = () => {
@@ -18,13 +18,8 @@ async function trigger(manifestWriteFails = false) {
   };
   let imports = 0;
   try {
-    const response = await worker.fetch(
-      new Request("https://worker.invalid/trigger", {
-        method: "POST",
-        headers: { authorization: "Bearer synthetic-admin" },
-      }) as Request<unknown, IncomingRequestCfProperties>,
+    const response = await runSharedCollection(
       {
-        ADMIN_TRIGGER_TOKEN: "synthetic-admin",
         COLLECTOR_SCHEMA_VERSION: "sony-bank-worker-poc-v2",
         // Missing credential deliberately fails before any provider request.
         DATA: data,
@@ -40,10 +35,11 @@ async function trigger(manifestWriteFails = false) {
           },
         },
       } as unknown as Env,
+      { from: "2099-01-01", to: "2099-01-02" },
     );
     return {
       response,
-      result: (await response.json()) as { status?: string; error?: string },
+      result: response as { status?: string; error?: string },
       storedManifest: [...data.entries.values()]
         .map((entry) => new TextDecoder().decode(entry.bytes))
         .join("\n"),
@@ -57,7 +53,7 @@ async function trigger(manifestWriteFails = false) {
 describe("Sony logging remains best effort", () => {
   test("logger errors preserve collection failure and allow manifest storage/import", async () => {
     const { response, result, storedManifest, imports } = await trigger();
-    expect(response.status).toBe(502);
+    expect(response.status).not.toBe("success");
     expect(result.status).toBe("failed");
     expect(imports).toBe(0);
     expect(JSON.parse(storedManifest).safeErrorCode).toBe("collector_failed");
@@ -66,7 +62,7 @@ describe("Sony logging remains best effort", () => {
 
   test("logger errors cannot replace the manifest write failure", async () => {
     const { response, result, imports } = await trigger(true);
-    expect(response.status).toBe(502);
+    expect(response.status).not.toBe("success");
     expect(result.status).toBe("failed");
     expect(imports).toBe(0);
   });

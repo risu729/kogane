@@ -100,8 +100,17 @@ export function normalizeContainerRollback(target, config) {
   };
 }
 
-/** Docker failures never surface child stdout/stderr or its command. */
-export function dockerImageId(tag, execImpl = execFileSync) {
+const manifestTypes = new Set([
+  "application/vnd.oci.image.manifest.v1+json",
+  "application/vnd.docker.distribution.manifest.v2+json",
+]);
+const indexTypes = new Set([
+  "application/vnd.oci.image.index.v1+json",
+  "application/vnd.docker.distribution.manifest.list.v2+json",
+]);
+
+/** Capture the daemon's declared identity, never infer its kind from registry matches. */
+export function dockerImageIdentity(tag, execImpl = execFileSync) {
   if (
     typeof tag !== "string" ||
     !/^(?:cloudflare-build\/[a-f0-9]{12}\/[a-z0-9._-]+:[a-f0-9]{12}|kogane-[a-z0-9-]+:rollback-[a-f0-9]{12})$/u.test(
@@ -111,18 +120,56 @@ export function dockerImageId(tag, execImpl = execFileSync) {
     fail("local_tag_invalid");
   let value;
   try {
-    value = execImpl("docker", ["image", "inspect", "--format", "{{.Id}}", tag], {
+    // Raw JSON avoids Go field-name/template fallback differences (.ID vs .Id).
+    // Never print this response: it may contain unrelated image metadata.
+    value = execImpl("docker", ["image", "inspect", tag], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     }).trim();
   } catch {
     fail("local_image_unavailable");
   }
-  if (!digestPattern.test(value)) fail("local_image_invalid");
-  return value;
+  let fields;
+  try {
+    fields = JSON.parse(value);
+  } catch {
+    fail("local_image_invalid");
+  }
+  if (
+    !Array.isArray(fields) ||
+    fields.length !== 1 ||
+    !fields[0] ||
+    typeof fields[0] !== "object" ||
+    Array.isArray(fields[0])
+  )
+    fail("local_image_invalid");
+  const { Id: imageId, Descriptor: descriptor, Os: os, Architecture: architecture } = fields[0];
+  if (!digestPattern.test(imageId) || os !== "linux" || architecture !== "amd64")
+    fail("local_image_invalid");
+  if (descriptor === undefined || descriptor === null) return { imageId, imageIdKind: "config" };
+  if (!descriptor || descriptor.digest !== imageId) fail("local_image_invalid");
+  const imageIdKind = manifestTypes.has(descriptor.mediaType)
+    ? "manifest"
+    : indexTypes.has(descriptor.mediaType)
+      ? "index"
+      : null;
+  if (!imageIdKind) fail("local_image_invalid");
+  return { imageId, imageIdKind };
 }
 
-export function localContainerImages(root, target, inspect = dockerImageId) {
+/** Retained for callers requiring only the digest; release guards compare both fields. */
+export function dockerImageId(tag, execImpl = execFileSync) {
+  return dockerImageIdentity(tag, execImpl).imageId;
+}
+
+export function sameDockerImageIdentity(recorded, actual) {
+  return (
+    recorded.imageId === actual.imageId &&
+    (recorded.imageIdKind === undefined ? "config" : recorded.imageIdKind) === actual.imageIdKind
+  );
+}
+
+export function localContainerImages(root, target, inspect = dockerImageIdentity) {
   const directory = resolve(root, target.path, ".cloudflare/output/v0/containers");
   let entries;
   try {
@@ -160,12 +207,21 @@ export function localContainerImages(root, target, inspect = dockerImageId) {
     appId: target.appId,
     appName: target.appName,
     localTag: tag,
-    imageId: inspect(tag),
+    ...inspect(tag),
   };
 }
 
 export function verifyLocalContainerImages(recorded, actual) {
-  if (!same(recorded, actual)) fail("local_image_changed");
+  if (
+    !same(
+      {
+        ...recorded,
+        imageIdKind: recorded.imageIdKind === undefined ? "config" : recorded.imageIdKind,
+      },
+      actual,
+    )
+  )
+    fail("local_image_changed");
 }
 
 /** GET applications expands the documented basic preset into these exact quantities. */
@@ -391,6 +447,7 @@ export async function verifyRegistryImage({
   target,
   image,
   imageId,
+  imageIdKind = "config",
   registryNamespace,
   username,
   password,
@@ -406,6 +463,7 @@ export async function verifyRegistryImage({
     !password
   )
     fail("registry_credentials_invalid");
+  if (!["config", "manifest", "index"].includes(imageIdKind)) fail("registry_identity_invalid");
   const ref = registryImage(target, image, registryNamespace);
   const authorization = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
   const manifest = async (digest) => {
@@ -465,7 +523,14 @@ export async function verifyRegistryImage({
     }
   };
   let found = await manifest(ref.digest);
-  if (Array.isArray(found.manifests)) {
+  let selectedDigest = ref.digest;
+  const isIndex = Array.isArray(found?.manifests);
+  if (
+    imageIdKind !== "config" &&
+    (found?.schemaVersion !== 2 || !(isIndex ? indexTypes : manifestTypes).has(found?.mediaType))
+  )
+    fail("registry_identity_invalid");
+  if (isIndex) {
     const platform = found.manifests.filter(
       (entry) =>
         entry.platform?.os === "linux" &&
@@ -473,9 +538,27 @@ export async function verifyRegistryImage({
         !entry.platform.variant,
     );
     if (platform.length !== 1) fail("registry_platform_unknown");
-    found = await manifest(platform[0].digest);
+    selectedDigest = platform[0].digest;
+    found = await manifest(selectedDigest);
   }
-  if (found.config?.digest !== imageId) fail("registry_image_mismatch");
+  if (
+    imageIdKind !== "config" &&
+    (found?.schemaVersion !== 2 ||
+      !manifestTypes.has(found?.mediaType) ||
+      Array.isArray(found?.manifests) ||
+      !digestPattern.test(found?.config?.digest))
+  )
+    fail("registry_identity_invalid");
+  // The prepublication record chooses exactly one proof, not an OR of digest matches.
+  const expected =
+    imageIdKind === "config"
+      ? found?.config?.digest
+      : imageIdKind === "manifest"
+        ? selectedDigest
+        : isIndex
+          ? ref.digest
+          : null;
+  if (expected !== imageId) fail("registry_image_mismatch");
 }
 
 /** Only the files these three Dockerfiles consume. Symlinks are refused. */
@@ -823,7 +906,7 @@ async function main() {
           appId: target.appId,
           appName: target.appName,
           localTag,
-          imageId: dockerImageId(localTag),
+          ...dockerImageIdentity(localTag),
           legacy: true,
         };
       } else image = { ...localContainerImages(root, target), legacy: false };
@@ -850,7 +933,7 @@ async function main() {
     for (const image of images.filter((entry) => entry.legacy)) {
       const target = targets.find((entry) => entry.name === image.name);
       if (
-        dockerImageId(image.localTag) !== image.imageId ||
+        !sameDockerImageIdentity(image, dockerImageIdentity(image.localTag)) ||
         containerInputDigest(root, target) !== image.inputs
       )
         fail("local_image_changed");
@@ -890,6 +973,7 @@ async function main() {
         target,
         image: found[0],
         imageId: image.imageId,
+        imageIdKind: image.imageIdKind,
         registryNamespace,
         ...credentials,
       });
@@ -922,7 +1006,7 @@ async function main() {
         !target ||
         (process.env.CONTAINER_RESTORED_DAEMON ?? image.daemonId) !==
           quietExec("docker", ["info", "--format", "{{.ID}}"]).trim() ||
-        image.imageId !== dockerImageId(image.localTag) ||
+        !sameDockerImageIdentity(image, dockerImageIdentity(image.localTag)) ||
         image.inputs !== containerInputDigest(root, target)
       )
         fail("local_image_changed");
@@ -987,6 +1071,7 @@ async function main() {
           target,
           image: current.image,
           imageId: image.imageId,
+          imageIdKind: image.imageIdKind,
           registryNamespace,
           deadline,
           ...credentials,

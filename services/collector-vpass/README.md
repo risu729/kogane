@@ -123,6 +123,15 @@ output/<timestamp>/
 
 ## Known limitations
 
+- Normal hosted card persistence also emits a bounded, counts-only
+  `vpass-statement-count-shapes` diagnostic from pages already captured.
+  It adds no provider or storage request and exposes no card, run or month
+  identifier. It distinguishes response families and row-shape/count
+  relations without changing coverage. `unavailable` means no diagnostic
+  evidence, not zero rows. Even a matching recognized-detail count does not
+  prove provider count semantics or make a partial card complete; see the
+  [ADR 0023 amendment](../../docs/adr/0023-vpass-collector-card-binding.md#counts-only-shape-diagnostic-amendment-2026-10-10).
+
 - The Android API authentication, all-card selection, available-month discovery,
   finalized statements, and unsettled statements were live validated with a
   fresh session. Account-specific response data and counts are not committed.

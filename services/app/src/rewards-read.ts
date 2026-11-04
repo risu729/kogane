@@ -18,6 +18,8 @@
 // over one fixed snapshot. Nothing in it is trusted and none of it is an
 // authorisation — every continuation is authenticated and re-scoped like the
 // first request.
+import { rewardProviderSections } from "../../../packages/storage-d1/src/read/reward-provider-expiry.ts";
+import { REWARD_PROJECTION_CONTRACT_VERSION } from "../../../packages/read-model/src/reward-projection.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import {
   activeRewardSnapshot,
@@ -93,6 +95,7 @@ async function snapshotRefusal(
   // The old snapshot classified common V Point by expiry display. It is
   // retained as history, never served as the current corrected contract.
   if (
+    snapshot.contract_version !== REWARD_PROJECTION_CONTRACT_VERSION ||
     snapshot.policy_release !== REWARD_PROJECTION_RELEASE ||
     snapshot.claims_release !== REWARD_READ_RELEASE
   )
@@ -157,6 +160,7 @@ async function continuation(
   if (
     rejection !== null ||
     named === null ||
+    named.contract_version !== REWARD_PROJECTION_CONTRACT_VERSION ||
     named.policy_release !== REWARD_PROJECTION_RELEASE ||
     named.claims_release !== REWARD_READ_RELEASE
   )
@@ -284,6 +288,11 @@ export async function rewardExpiryFromRead(
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
   return json({
+    providerDisplaySections: await rewardProviderSections(
+      context.read,
+      resolved.snapshot.snapshot_id,
+      program,
+    ),
     rows: page.map(estimateDto),
     page: {
       limit,

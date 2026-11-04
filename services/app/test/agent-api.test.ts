@@ -576,6 +576,13 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
+        name: "kogane.instruments.history",
+        required: ["identifierId"],
+        closed: false,
+        properties: ["identifierId"],
+        annotations: readOnly,
+      },
+      {
         name: "kogane.purchases.explain",
         required: [],
         closed: false,
@@ -623,6 +630,7 @@ describe("untrusted provider content (AT71)", () => {
     };
     expect(listed.result.tools.map((tool) => tool.name)).toEqual([
       ...AGENT_TOOL_NAMES,
+      "kogane.instruments.history",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -700,6 +708,7 @@ describe("untrusted provider content (AT71)", () => {
     // that route is served.
     expect(listed.result.tools.map((tool) => tool.name)).toEqual([
       ...AGENT_TOOL_NAMES,
+      "kogane.instruments.history",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);

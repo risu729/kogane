@@ -32,7 +32,8 @@ import {
   verifyApplicationBaseline,
   verifyRegistryImage,
   registryImage,
-  dockerImageId,
+  dockerImageIdentity,
+  sameDockerImageIdentity,
   containerInputDigest,
   currentRegistryNamespace,
 } from "./cf-container-release.mjs";
@@ -597,7 +598,7 @@ async function main() {
         const target = CONTAINER_TARGETS.find((t) => t.name === image.name);
         if (
           !target ||
-          dockerImageId(image.localTag) !== image.imageId ||
+          !sameDockerImageIdentity(image, dockerImageIdentity(image.localTag)) ||
           containerInputDigest(root, target) !== image.inputs
         )
           fail("restored_image");
@@ -701,6 +702,7 @@ async function main() {
       target,
       image: candidate.configuration.image,
       imageId: image.imageId,
+      imageIdKind: image.imageIdKind,
       registryNamespace,
       ...credentials,
       deadline,

@@ -10,6 +10,12 @@ import type {
 } from "../../../domain/src/card-ownership-review.ts";
 import { cardSettlementReadinessCtes } from "../../../read-model/src/card-settlement-readiness.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
+import {
+  OWNERSHIP_DECLARATION_CONTEXT_SQL,
+  ownershipDeclarationContextBinds,
+  ownershipDeclarationBlockers,
+  type OwnershipDeclarationContext,
+} from "../../../read-model/src/ownership-declaration.ts";
 
 interface Candidate {
   id: string;
@@ -98,6 +104,18 @@ export async function queryCardOwnership(
           [role, mapping.account_id, mapping.last_row],
         )
       : [];
+    const evidenceRefs = mapping ? ownershipReviewEvidenceRefs(row.id, fact.ref, mapping.id) : [];
+    const declarationContext = mapping
+      ? await sql.first<OwnershipDeclarationContext>(
+          OWNERSHIP_DECLARATION_CONTEXT_SQL,
+          ownershipDeclarationContextBinds(
+            mapping.account_id,
+            mapping.source_account_id,
+            evidenceRefs,
+            role,
+          ),
+        )
+      : null;
     sides.push({
       role,
       sourceId: fact.sourceId,
@@ -108,8 +126,14 @@ export async function queryCardOwnership(
       mappingId: mapping?.id ?? null,
       mappingRevision: mapping?.revision ?? 0,
       ownershipRevision: mapping?.ownership_revision ?? 0,
-      evidenceRefs: mapping ? ownershipReviewEvidenceRefs(row.id, fact.ref, mapping.id) : [],
+      evidenceRefs,
       blockers,
+      selfDeclarationBlockers: [
+        ...blockers,
+        ...(declarationContext
+          ? ownershipDeclarationBlockers(declarationContext)
+          : ["account_mapping_unresolved"]),
+      ],
       claims: claims.slice(0, 50).map((claim) => {
         const evidence: unknown = JSON.parse(claim.evidence_refs_json);
         if (!Array.isArray(evidence) || !evidence.every((ref) => typeof ref === "string"))

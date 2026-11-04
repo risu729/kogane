@@ -24,7 +24,7 @@ import {
   sonyBankRunPlan,
   type SharedRunInput,
 } from "../src/shared-collection";
-import worker from "../src/worker";
+import { runSharedCollection } from "../src/worker";
 
 const runId = "123e4567-e89b-42d3-a456-426614174000";
 const schemaVersion = "sony-bank-worker-poc-v2";
@@ -331,13 +331,8 @@ describe("G1-15 shared mode writes once", () => {
       ),
     ];
     try {
-      const response = await worker.fetch(
-        new Request("https://worker.invalid/trigger", {
-          method: "POST",
-          headers: { authorization: "Bearer synthetic-admin" },
-        }) as Request<unknown, IncomingRequestCfProperties>,
+      const response = await runSharedCollection(
         {
-          ADMIN_TRIGGER_TOKEN: "synthetic-admin",
           COLLECTOR_SCHEMA_VERSION: schemaVersion,
           COLLECTION_TARGET: "shared",
           // Missing credential deliberately fails before any provider request.
@@ -355,9 +350,10 @@ describe("G1-15 shared mode writes once", () => {
             },
           },
         } as unknown as Env,
+        { from: "2099-01-01", to: "2099-01-02" },
       );
-      const body = (await response.json()) as { status: string; persistence: string };
-      expect(response.status).toBe(502);
+      const body = response as { status: string; persistence: string };
+      expect(response.status).not.toBe("success");
       expect(body.status).toBe("failed");
       expect(body.persistence).toBe("persisted");
       expect(legacyWrites).toBe(0);

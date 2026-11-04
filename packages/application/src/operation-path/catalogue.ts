@@ -13,6 +13,7 @@
 //
 // The operation name of an agent tool is the tool name without `kogane.`.
 import type { RiskClass, SubjectPath } from "../audit/vocabulary.ts";
+import type { DelegationCapability } from "../delegation/contract.ts";
 
 export interface CatalogueEntry {
   /** The risk classes this operation may be recorded under; the first is the default. */
@@ -23,11 +24,18 @@ export interface CatalogueEntry {
   quiet: "read" | "replayed";
   /** The capability that grades the operation today (the change lifecycle's or the agent API's). */
   capability: string;
+  /**
+   * The capability an owner's delegation must hold for this operation on
+   * `mcp` (ADR 0063). Nothing executes under a delegation yet (plan slice
+   * S3): a call on `mcp` is refused at the delegation gate and recorded.
+   */
+  delegation?: DelegationCapability;
   /** The paths the operation exists on today. */
   paths: readonly SubjectPath[];
 }
 
 const UI: readonly SubjectPath[] = ["ui"];
+const UI_MCP: readonly SubjectPath[] = ["ui", "mcp"];
 const AGENT: readonly SubjectPath[] = ["agent-http", "mcp"];
 // The operations tools of docs/ops-api.md are never served on `/mcp` now: its
 // only caller is an MCP client, which is agent-only (ADR 0047), so the tools
@@ -43,35 +51,35 @@ export const OPERATION_CATALOGUE = {
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.propose",
-    paths: UI,
+    paths: UI_MCP,
   },
   "command.simulate": {
     risk: ["R0"],
     effect: null,
     quiet: "read",
     capability: "interpretation.propose",
-    paths: UI,
+    paths: UI_MCP,
   },
   "command.approve": {
     risk: ["R2"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: UI_MCP,
   },
   "command.commit": {
     risk: ["R2"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: UI_MCP,
   },
   "command.operation.get": {
     risk: ["R0"],
     effect: null,
     quiet: "read",
     capability: "interpretation.propose",
-    paths: UI,
+    paths: UI_MCP,
   },
   // ── operations requests (H2–H7) ────────────────────────────────────────
   "ops.collection.request": {
@@ -122,14 +130,18 @@ export const OPERATION_CATALOGUE = {
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: UI_MCP,
   },
+  // Maintenance: delegated R1 within seven days; R2 prepare/confirm within
+  // 31 days. The wider option is private to the confirmed Processor adapter.
+  // R3 remains reserved for the operator beyond the delegated envelope.
   "schedules.maintenance.update": {
-    risk: ["R1"],
+    risk: ["R1", "R2", "R3"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    delegation: "schedules.maintenance.update",
+    paths: ["ui", "mcp"],
   },
   // Accepting a proposal changes a rule (R2); rejecting records a decision
   // only (R1). One route, so one operation recorded under either class.
@@ -192,6 +204,36 @@ export const OPERATION_CATALOGUE = {
     effect: null,
     quiet: "read",
     capability: "records.read",
+    paths: AGENT,
+  },
+  // The maintenance settings of the granted schedule sources (ADR 0046, plan
+  // D15), served while the settings routes are.
+  "schedules.maintenance.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "schedules.read",
+    paths: AGENT,
+  },
+  "instruments.history": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  "audit.search": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "audit.read",
+    paths: AGENT,
+  },
+  "audit.get": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "audit.read",
     paths: AGENT,
   },
   // An inert proposal (H8); acceptance is the operator's.

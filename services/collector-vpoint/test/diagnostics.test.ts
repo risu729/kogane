@@ -4,7 +4,7 @@ import { logAuthTrace, safeFailure } from "../src/diagnostics";
 import { collectVPoint } from "../src/vpoint";
 
 mock.module("cloudflare:workers", () => ({ DurableObject: class {} }));
-const { default: worker } = await import("../src/worker");
+const { default: worker, runCollection } = await import("../src/worker");
 const PRIVATE = "test-secret-cookie-phone-email-provider-body";
 afterEach(() => mock.restore());
 
@@ -20,16 +20,9 @@ function captureLogs() {
 }
 function fixture(session: object, data: FakeR2Bucket) {
   return Object.assign({} as Env, {
-    ADMIN_TRIGGER_TOKEN: "admin-test-only",
     COLLECTOR_SCHEMA_VERSION: "test",
     VPOINT_SESSION: { idFromName: () => "test-id", get: () => session },
     DATA: data,
-  });
-}
-function trigger() {
-  return new Request<unknown, IncomingRequestCfProperties>("https://collector.test/trigger", {
-    method: "POST",
-    headers: { authorization: "Bearer admin-test-only" },
   });
 }
 
@@ -108,9 +101,9 @@ describe("V Point safe diagnostics", () => {
         },
         data,
       );
-      const response = await worker.fetch(trigger(), env);
-      expect(response.status).toBe(502);
-      const result = (await response.json()) as {
+      const response = await runCollection(env);
+      expect(response.manifest.status).not.toBe("success");
+      const result = response as {
         terminal: { persisted: boolean; terminalKey: string };
       };
       expect(result.terminal.persisted).toBe(!uploadFails);

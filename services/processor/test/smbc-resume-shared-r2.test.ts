@@ -1,3 +1,4 @@
+import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
 // ADR 0044: partial SMBC catalogs are evidence, but do not produce parse jobs.
 // A resumed success must expose their earlier months in its eligible snapshot.
 // Everything below is synthetic; no bank or production service is contacted.
@@ -6,10 +7,8 @@ import { readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import {
   CORE_MIGRATIONS_URL,
-  applyReadMigrations,
   migrationFiles,
   migrationSql,
-  splitSqlStatements,
 } from "../../../packages/storage-d1/src/migrations.ts";
 import { readTerminal, terminalKey } from "../../../packages/collection/src/index.ts";
 import {
@@ -39,14 +38,13 @@ beforeAll(async () => {
   const db = await mf.getD1Database("DB");
   const read = await mf.getD1Database("READ");
   for (const file of migrationFiles(CORE_MIGRATIONS_URL))
-    for (const sql of splitSqlStatements(migrationSql(CORE_MIGRATIONS_URL, file)))
-      await db.prepare(sql).run();
+    await applyTestSql(db, migrationSql(CORE_MIGRATIONS_URL, file));
   const bootstrap = readFileSync(
     new URL("../../../infra/bootstrap/ingest-clients.sql", import.meta.url),
     "utf8",
   );
-  for (const sql of splitSqlStatements(bootstrap)) await db.prepare(sql).run();
-  await applyReadMigrations(read);
+  await applyTestSql(db, bootstrap);
+  await applyTestReadMigrations(read);
   env = {
     DB: db,
     READ: read,

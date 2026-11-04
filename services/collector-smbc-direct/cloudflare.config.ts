@@ -18,7 +18,6 @@ export default defineConfig({
     env: {
       SMBC_CREDENTIAL_JSON: bindings.secret(),
       SESSION_ENCRYPTION_KEY: bindings.secret(),
-      ADMIN_TRIGGER_TOKEN: bindings.secret(),
 
       COLLECTOR_SCHEMA_VERSION: bindings.text("smbc-direct-backfill-worker-poc-v2"),
       SMBC_DIRECT_BASE_URL: bindings.text("https://direct3.smbc.co.jp"),

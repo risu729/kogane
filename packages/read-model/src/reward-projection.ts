@@ -19,6 +19,7 @@
 // unsupported rule still yields rows — under an unknown deadline — instead of
 // silently claiming "no expiry".
 
+import type { RewardProviderExpirySection } from "../../domain/src/reward-expiry-observations.ts";
 import { canonicalDigest, sha256Hex } from "../../domain/src/context.ts";
 import {
   CONVERSION_SEARCH_RELEASE,
@@ -51,7 +52,7 @@ import {
 } from "./rewards.ts";
 
 /** The shape of a stored reward input; a change of shape is a new identity. */
-export const REWARD_PROJECTION_CONTRACT_VERSION = "reward-projection-input-v2";
+export const REWARD_PROJECTION_CONTRACT_VERSION = "reward-projection-input-v3";
 
 /**
  * Bump to rebuild every estimate under new projection rules. v2: every row
@@ -61,7 +62,7 @@ export const REWARD_PROJECTION_CONTRACT_VERSION = "reward-projection-input-v2";
  * bucket inputs are confined to the latest eligible published fetch run.
  * Even without a CORE revision change, a v2 snapshot must be rebuilt.
  */
-export const REWARD_PROJECTION_RELEASE = "reward-projection-v3";
+export const REWARD_PROJECTION_RELEASE = "reward-projection-v4";
 
 /**
  * How the fixed instant becomes the calendar day the rules are evaluated on:
@@ -131,6 +132,7 @@ export interface RewardProjectionManifest {
 /** Everything one build is allowed to read, exactly as it was read. */
 export interface RewardProjectionInputContent {
   manifest: RewardProjectionManifest;
+  providerSections?: RewardProviderExpirySection[];
   rules: ExpiryRuleSqlRow[];
   buckets: RewardBucketSqlRow[];
   membership: MembershipSqlRow[];

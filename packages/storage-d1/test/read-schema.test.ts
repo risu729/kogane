@@ -27,6 +27,7 @@ describe("the READ baseline", () => {
       "0002_reward_read.sql",
       "0003_reward_expiry_basis.sql",
       "0004_reward_unclassified_buckets.sql",
+      "0005_reward_provider_expiry_sections.sql",
     ]);
     expect(READ_MIGRATIONS_PATH).toBe("packages/storage-d1/migrations/read");
   });
@@ -49,6 +50,8 @@ describe("the READ baseline", () => {
       "reward_expiry_estimates",
       "reward_expiry_estimates_v2",
       "reward_expiry_snapshots",
+      "reward_provider_display_checkpoints",
+      "reward_provider_expiry_sections",
       "reward_snapshot_input_refs",
       "reward_snapshot_pointer",
       "scope_relations",

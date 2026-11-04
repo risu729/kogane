@@ -94,6 +94,14 @@ const SAMPLES: readonly Sample[] = [
     mediaType: json,
     dataset: null,
   },
+  {
+    source: "myjcb",
+    artifactKey: "conn-a/jpoint-balance.json",
+    role: "provider_response",
+    mediaType: json,
+    dataset: "jpoint-balance",
+    unitKey: "conn-a:j-point",
+  },
   // services/collector-myjcb/src/shared-collection.ts (`<connectionId>/<filename>`)
   {
     source: "myjcb",
@@ -597,6 +605,7 @@ const REQUIRED_DATASETS: Readonly<Record<string, readonly string[]>> = {
   "mobile-suica": ["sf-history"],
   "moneyforward-me": ["accounts-index", "account-detail", "monthly-transactions"],
   myjcb: [
+    "jpoint-balance",
     "credit-ledger",
     "credit-past-months",
     "credit-detail",

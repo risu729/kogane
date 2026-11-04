@@ -69,7 +69,17 @@ export interface StoredArtifact {
   readonly period?: string;
 }
 
+export const JPOINT_COLLECTION_CODES = [
+  "collected",
+  "unsupported",
+  "stopped",
+  "unavailable",
+] as const;
+export type JPointCollectionCode = (typeof JPOINT_COLLECTION_CODES)[number];
+
 export interface ConnectionSummary {
+  /** Independent reward unit: this outcome does not change statement-history coverage. */
+  readonly jpointCode?: JPointCollectionCode;
   readonly connectionId: string;
   readonly bootstrapMode: MyJcbCredential["bootstrapMode"];
   readonly status: "success" | "partial" | "failed" | "human-required";

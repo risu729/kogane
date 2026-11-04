@@ -18,6 +18,8 @@ import {
   ownershipReviewPartyRef,
 } from "../../../packages/domain/src/ownership-review.ts";
 import type { CardSettlementFacts } from "../../../packages/domain/src/card-settlement.ts";
+import { ownershipDeclarationRef } from "../../../packages/domain/src/ownership-declaration.ts";
+import { queryCardOwnership } from "../../../packages/application/src/query/card-ownership.ts";
 
 let mf: Miniflare,
   env: Env,
@@ -41,7 +43,7 @@ const resolver: IdentityResolver = (input) => ({
   account: {
     key: [input.sourceAccount],
     label: "synthetic",
-    role: "deposit",
+    role: input.sourceId === "myjcb" ? "card-statement" : "deposit",
     status: "provider-local",
     reason: "test",
   },
@@ -55,7 +57,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await mf?.dispose();
 });
-async function candidate() {
+async function candidate(accountResolver: IdentityResolver = resolver) {
   const statement = ++next,
     bank = ++next,
     amount = statement * 10;
@@ -118,7 +120,7 @@ async function candidate() {
         producer_id: "collector-r2-importer",
         fetch_run_id: id,
       },
-      resolver,
+      accountResolver,
     );
   }
   await cardSettlementSweep(db);
@@ -148,10 +150,14 @@ async function candidate() {
   };
   return { proposalId: c.id, payload, statement, bank, mapping, facts };
 }
-async function planned(payload: RelationPayload, actor = human) {
+async function planned(
+  payload: RelationPayload,
+  actor = human,
+  kind: "relation.accept" | "relation.reject" = "relation.accept",
+) {
   const store = d1CommandStore(db);
   const p = await createPlan(
-    "relation.accept",
+    kind,
     payload,
     { actor, baseContextId: "identity-current-v1", now, ttlSeconds: 600 },
     store,
@@ -159,9 +165,12 @@ async function planned(payload: RelationPayload, actor = human) {
   if (!p.ok) throw new Error(JSON.stringify(p));
   return p.plan;
 }
-async function prepared(payload: RelationPayload) {
+async function prepared(
+  payload: RelationPayload,
+  kind: "relation.accept" | "relation.reject" = "relation.accept",
+) {
   const store = d1CommandStore(db),
-    plan = await planned(payload);
+    plan = await planned(payload, human, kind);
   const a = await approve(store, {
     planId: plan.planId,
     planDigest: plan.planDigest,
@@ -231,6 +240,228 @@ test("explicit Unicode party and evidence pass human lifecycle without accepting
     (await db.prepare("SELECT count(*) AS n FROM allocations").first<{ n: number }>())!.n,
   ).toBe(0);
 });
+
+test("sole-personal declarations retain provenance for each role, replay safely and withdraw append-only", async () => {
+  const c = await candidate(),
+    store = d1CommandStore(db);
+  const review = (await queryCardOwnership(store, c.proposalId))!;
+  for (const side of review.sides) {
+    const marker = ownershipDeclarationRef(side.role, "2026-10-10")!;
+    const payload: RelationPayload = {
+      ...c.payload,
+      relationKind: side.role,
+      fromRef: "account:" + side.accountId,
+      evidenceRefs: [...side.evidenceRefs, marker],
+      reason: "Synthetic sole-personal declaration; provider name unverified",
+    };
+    const p = await prepared(payload);
+    expect(p.plan.simulation.ownershipDeclaration).toEqual({
+      kind: "self-declared",
+      scope: "sole-personal",
+      role: side.role,
+      declaredOn: "2026-10-10",
+      providerNameVerified: false,
+    });
+    const first = await p.run();
+    expect(first.ok).toBe(true);
+    if (!first.ok) throw new Error("synthetic declaration commit failed");
+    expect(await p.run()).toEqual({ ...first, replayed: true });
+    const saved = (await queryCardOwnership(store, c.proposalId))!.sides.find(
+      (s) => s.role === side.role,
+    )!;
+    expect(saved.claims[0]!.evidenceRefs).toContain(marker);
+    expect(saved.selfDeclarationBlockers).toContain("ownership_claims_require_review");
+    const corrected = await prepared(
+      {
+        ...payload,
+        evidenceRefs: side.evidenceRefs,
+        reason: "Withdraw synthetic declaration after review",
+      },
+      "relation.reject",
+    );
+    expect((await corrected.run()).ok).toBe(true);
+    const history = await db
+      .prepare(
+        "SELECT status,evidence_refs_json FROM entity_relations WHERE kind=? AND from_ref=? ORDER BY rowid",
+      )
+      .bind(side.role, payload.fromRef)
+      .all<{ status: string; evidence_refs_json: string }>();
+    expect(history.results.map((r) => r.status)).toEqual(["accepted", "rejected"]);
+    expect(JSON.parse(history.results[0]!.evidence_refs_json)).toContain(marker);
+    expect(
+      (await queryCardOwnership(store, c.proposalId))!.sides.find((s) => s.role === side.role)!
+        .selfDeclarationBlockers,
+    ).toContain("ownership_claims_require_review");
+  }
+  expect(
+    (await db
+      .prepare("SELECT status FROM card_settlement_reviews WHERE id=?")
+      .bind(c.proposalId)
+      .first<{ status: string }>())!.status,
+  ).toBe("proposed");
+  expect(
+    (await db.prepare("SELECT count(*) AS n FROM allocations").first<{ n: number }>())!.n,
+  ).toBe(0);
+});
+
+test("declarations require exact candidate context and role, and do not grant agents approval", async () => {
+  const c = await candidate(),
+    store = d1CommandStore(db);
+  const marker = ownershipDeclarationRef("liable_party", "2026-10-10")!;
+  const payload = { ...c.payload, evidenceRefs: [...c.payload.evidenceRefs, marker] };
+  const plan = await planned(payload, agent);
+  expect(
+    (
+      await createPlan(
+        "relation.reject",
+        payload,
+        { actor: human, baseContextId: "synthetic", now, ttlSeconds: 600 },
+        store,
+      )
+    ).ok,
+  ).toBe(false);
+  expect(
+    (
+      await approve(store, {
+        planId: plan.planId,
+        planDigest: plan.planDigest,
+        actor: agent,
+        scope: [],
+        ttlSeconds: 600,
+        now,
+      })
+    ).ok,
+  ).toBe(false);
+  for (const refs of [
+    [marker],
+    [...c.payload.evidenceRefs, marker.replace("liable_party", "beneficial_owner")],
+    [...c.payload.evidenceRefs, marker.replace("sole-personal-v1", "joint-v1")],
+    [...c.payload.evidenceRefs, marker, ownershipDeclarationRef("liable_party", "2026-10-11")!],
+    [...c.payload.evidenceRefs, marker, "provider:invented"],
+  ]) {
+    expect(
+      (
+        await createPlan(
+          "relation.accept",
+          { ...payload, evidenceRefs: refs },
+          { actor: human, baseContextId: "synthetic", now, ttlSeconds: 600 },
+          store,
+        )
+      ).ok,
+    ).toBe(false);
+  }
+});
+
+test("an aggregate or unresolved connection root requires explicit scope review, not a declaration", async () => {
+  for (const status of ["aggregate", "unresolved"] as const) {
+    const c = await candidate((input) => ({
+      account: {
+        key: [input.sourceAccount],
+        label: "synthetic",
+        reason: "synthetic-root-scope",
+        role: input.sourceId === "myjcb" ? "card-statement-aggregate" : "deposit",
+        status: input.sourceId === "myjcb" ? status : "provider-local",
+      },
+      instruments: [],
+      issues: [],
+    }));
+    const store = d1CommandStore(db);
+    const side = (await queryCardOwnership(store, c.proposalId))!.sides[0]!;
+    expect(side.blockers).toEqual([]);
+    expect(side.selfDeclarationBlockers).toContain("single_account_scope_unconfirmed");
+    const declaration = {
+      ...c.payload,
+      evidenceRefs: [
+        ...c.payload.evidenceRefs,
+        ownershipDeclarationRef("liable_party", "2026-10-10")!,
+      ],
+    };
+    expect(
+      (
+        await createPlan(
+          "relation.accept",
+          declaration,
+          { actor: human, baseContextId: "synthetic", now, ttlSeconds: 600 },
+          store,
+        )
+      ).ok,
+    ).toBe(false);
+    // The existing, explicit evidence review remains available; this test
+    // plans it but never represents its aggregate as an individual card.
+    expect((await planned(c.payload)).simulation.ownershipDeclaration).toBeUndefined();
+    expect(
+      (await db
+        .prepare("SELECT count(*) AS n FROM entity_relations WHERE from_ref=?")
+        .bind(c.payload.fromRef)
+        .first<{ n: number }>())!.n,
+    ).toBe(0);
+  }
+});
+
+for (const conflictKind of ["beneficial_owner", "contradicts"] as const) {
+  test(`a ${conflictKind} judgement arriving inside commit blocks self-declaration atomically`, async () => {
+    const c = await candidate(),
+      store = d1CommandStore(db);
+    const payload = {
+      ...c.payload,
+      evidenceRefs: [
+        ...c.payload.evidenceRefs,
+        ownershipDeclarationRef("liable_party", "2026-10-10")!,
+      ],
+    };
+    const p = await prepared(payload);
+    // Neither a different role nor a contradiction advances the old role-specific
+    // ownership pin; the new in-batch context guard must catch both.
+    const other = await prepared({
+      ...c.payload,
+      relationKind: conflictKind,
+      evidenceRefs: ["synthetic:reviewed-third-party"],
+      toRef: "party:third-party",
+    });
+    const receipts = (await db
+      .prepare("SELECT count(*) AS n FROM operation_receipts")
+      .first<{ n: number }>())!.n;
+    let injected = false;
+    const racing: CommandStore = {
+      ...store,
+      batch: async (writes) => {
+        if (!injected) {
+          injected = true;
+          expect((await other.run()).ok).toBe(true);
+        }
+        return store.batch(writes);
+      },
+    };
+    expect((await p.run(racing)).ok).toBe(false);
+    expect(
+      (await db.prepare("SELECT count(*) AS n FROM operation_receipts").first<{ n: number }>())!.n,
+    ).toBe(receipts + 1);
+    expect(
+      (await db
+        .prepare("SELECT uses_remaining FROM approvals WHERE approval_id=?")
+        .bind(p.approvalId)
+        .first<{ uses_remaining: number }>())!.uses_remaining,
+    ).toBe(1);
+    expect(
+      (await db
+        .prepare(
+          "SELECT count(*) AS n FROM entity_relations WHERE kind='liable_party' AND from_ref=?",
+        )
+        .bind(c.payload.fromRef)
+        .first<{ n: number }>())!.n,
+    ).toBe(0);
+    expect(
+      (
+        await createPlan(
+          "relation.accept",
+          payload,
+          { actor: human, baseContextId: "synthetic", now, ttlSeconds: 600 },
+          store,
+        )
+      ).ok,
+    ).toBe(false);
+  });
+}
 test("agent may propose but cannot approve ownership; missing/spoofed proof or account is rejected", async () => {
   const c = await candidate(),
     plan = await planned(c.payload, agent),

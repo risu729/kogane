@@ -105,7 +105,7 @@ For how the decision is recorded:
   runs one SELECT (`CROSSWALK_PROPOSALS_SQL`) through
   `wrangler.diagnostic.jsonc` and prints one JSON line per (new value, old
   candidate): `{source, newKeyRef, oldKeyRef, sharedRows, newOnlyRows,
-oldOnlyRows, months, verdict}`, then `{summary}` with a count per verdict.
+  oldOnlyRows, months, verdict}`, then `{summary}` with a count per verdict.
   The rows compared are the current transaction observations
   (`current_identity_observations`, published parses of successful runs)
   that the identity layer filed under a value: `["vpass:card", <token>]` or
@@ -123,7 +123,7 @@ oldOnlyRows, months, verdict}`, then `{summary}` with a count per verdict.
   listed. Only identity values (opaque hashes) and counts leave the SQL.
 - **Command.** `identity.crosswalk.accept` with payload
   `{source, fromRef, toRef, sharedRows, newOnlyRows, oldOnlyRows, months,
-reason}` (`fromRef` the old value, `toRef` the new; both values of the
+  reason}` (`fromRef` the old value, `toRef` the new; both values of the
   source's shape; `sharedRows` and `months` at least 1; no other key). The
   plan recomputes the pair (`CROSSWALK_PAIR_SQL`) and refuses:
   `target_ambiguous` when either value is already in a crosswalk, or the pair
@@ -343,7 +343,7 @@ What the value is inside the store decides how it can be rewritten:
 - **Two migrations and a staging table.** Migration 0062:
   1. aborts if `account_identity_crosswalk` holds any row;
   2. creates `identity_value_rewrites(source_id, old_value, new_value,
-basis)`: source `vpass` or `moneyforward-me`; `old_value` of the `v1`
+     basis)`: source `vpass` or `moneyforward-me`; `old_value` of the `v1`
      shape and `new_value` of the `v2` shape of that source (prefix and 64
      lowercase hex); `basis` `shared-rows` or `owner-recomputed`; UNIQUE per
      (source, old) and per (source, new); classified `operational-mutable`;

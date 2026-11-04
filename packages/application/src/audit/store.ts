@@ -6,6 +6,7 @@
 // written here is everything else — a read, a replay, a refusal, a failure —
 // once, after the answer, and an audit write never changes the answer: the
 // caller swallows a failure and the request log carries `audit_write_failed`.
+import type { ScopeSet } from "../grants.ts";
 import type { CommandStore } from "../command/contract.ts";
 import type { SqlWrite } from "../../../storage-d1/src/core/operations.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
@@ -93,7 +94,8 @@ export async function appendAnswerRecord(
       row.path,
       row.result,
       row.subject,
-      row.principal_kind,
+      // The aggregate spans delegation revisions and asserts no execution grant.
+      row.principal_kind === "delegated" ? "agent" : row.principal_kind,
       ...countBinds,
       cap,
     ],
@@ -279,11 +281,11 @@ export const AUDIT_PAGE_SQL = `SELECT ${AUDIT_COLUMNS.join(",")} FROM audit_reco
     AND (?7 IS NULL OR +recorded_at<?7 OR audit_id<?8)
   ORDER BY recorded_at DESC, audit_id DESC LIMIT ?9`;
 
-async function filtersDigest(filters: AuditPageFilters): Promise<string> {
-  return (await canonicalDigest({ v: "kogane-audit-cursor-v1", perimeter: "*", filters })).slice(
-    0,
-    32,
-  );
+async function filtersDigest(
+  filters: AuditPageFilters,
+  perimeter: AuditReadPerimeter | "*" = "*",
+): Promise<string> {
+  return (await canonicalDigest({ v: "kogane-audit-cursor-v1", perimeter, filters })).slice(0, 32);
 }
 
 function encodeCursor(value: { at: string; id: string; f: string }): string {
@@ -313,7 +315,7 @@ function decodeCursor(text: string): { at: string; id: string; f: string } | nul
   }
 }
 
-function view(row: AuditRow): AuditRecordView {
+export function auditRecordView(row: AuditRow): AuditRecordView {
   return {
     auditId: row.audit_id,
     recordedAt: row.recorded_at,
@@ -351,8 +353,9 @@ export async function readAuditPage(
   filters: AuditPageFilters,
   cursor: string | null,
   pageSize: number = AUDIT_PAGE_SIZE,
+  perimeter?: AuditReadPerimeter,
 ): Promise<AuditPageOutcome> {
-  const digest = await filtersDigest(filters);
+  const digest = await filtersDigest(filters, perimeter);
   let after: { at: string; id: string } | null = null;
   if (cursor !== null) {
     const decoded = decodeCursor(cursor);
@@ -360,7 +363,10 @@ export async function readAuditPage(
     if (decoded.f !== digest) return { ok: false, code: "stale_context" };
     after = decoded;
   }
-  const rows = await store.all<AuditRow>(AUDIT_PAGE_SQL, [
+  const { sql, scopeBinds } = perimeter
+    ? scopedAuditPageSql(perimeter)
+    : { sql: AUDIT_PAGE_SQL, scopeBinds: [] };
+  const rows = await store.all<AuditRow>(sql, [
     filters.operation ?? null,
     filters.path ?? null,
     filters.principalKind ?? null,
@@ -370,15 +376,60 @@ export async function readAuditPage(
     after?.at ?? null,
     after?.id ?? null,
     pageSize + 1,
+    ...scopeBinds,
   ]);
   const page = rows.slice(0, pageSize);
   const last = page.at(-1);
   return {
     ok: true,
-    records: page.map(view),
+    records: page.map(auditRecordView),
     cursor:
       rows.length > pageSize && last
         ? encodeCursor({ at: last.recorded_at, id: last.audit_id, f: digest })
         : null,
+  };
+}
+
+export interface AuditReadPerimeter {
+  sources: ScopeSet;
+  scheduleSources: ScopeSet;
+  unscoped: boolean;
+}
+/** Scope is placed in each indexed branch before the common page window. */
+export function scopedAuditPageSql(perimeter: AuditReadPerimeter): {
+  sql: string;
+  scopeBinds: unknown[];
+} {
+  const base = AUDIT_PAGE_SQL.slice(0, AUDIT_PAGE_SQL.indexOf("  ORDER BY")).replace(
+    "FROM audit_records",
+    "FROM audit_records INDEXED BY audit_records_by_scope",
+  );
+  const scopeBinds: unknown[] = [];
+  const branches: string[] = [];
+  for (const [namespace, sources] of [
+    ["core-source", perimeter.sources],
+    ["schedule-source", perimeter.scheduleSources],
+  ] as const) {
+    if (sources === "*") {
+      const i = 10 + scopeBinds.length;
+      scopeBinds.push(namespace);
+      branches.push(base.replace("WHERE ", `WHERE scope_namespace=?${i} AND `));
+    } else if (sources.length) {
+      const i = 10 + scopeBinds.length;
+      scopeBinds.push(namespace, JSON.stringify([...sources].sort()));
+      branches.push(
+        base.replace(
+          "WHERE ",
+          `WHERE scope_namespace=?${i} AND scope_source IN (SELECT atom FROM json_each(?${i + 1})) AND `,
+        ),
+      );
+    }
+  }
+  if (perimeter.unscoped)
+    branches.push(base.replace("WHERE ", "WHERE scope_namespace IS NULL AND "));
+  if (!branches.length) branches.push(base.replace("WHERE ", "WHERE 0 AND "));
+  return {
+    sql: `${branches.join(" UNION ALL ")} ORDER BY recorded_at DESC,audit_id DESC LIMIT ?9`,
+    scopeBinds,
   };
 }

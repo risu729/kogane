@@ -13,7 +13,7 @@
 | [MyJCB](../services/collector-myjcb/README.md)                    | `kogane-myjcb-collector-poc`      | **ログインのみ** | **Browser Run binding** + Worker `fetch`       | 動的login protection scriptとNNL WebAuthn `result`を公式page内で実行し、mypage sessionを作る | login後のmenu、月列挙、明細HTML/export、R2        |
 | [PRESTIA GLOBAL PASS](../services/collector-globalpass/README.md) | `kogane-globalpass-collector-poc` | **全収集区間**   | **Container Playwright Google Chrome**         | Turnstile、JavaScript login、server-rendered明細、月selectorを実ブラウザで処理する           | Worker orchestration、TAMIA relay、NDJSON受信、R2 |
 
-GLOBAL PASSのWorkerには別にBrowser Run bindingがあるが、これは認証付き`/browser-probe`専用で、通常のdaily/backfill collectorはContainer Chromeを使う。MyJCBは逆に、Browser Runをsession bootstrap直後に閉じ、それ以降は通常のWorker `fetch`だけを使う。
+GLOBAL PASSのWorkerには別にBrowser Run bindingがあるが、旧`/browser-probe`入口は廃止済みでbindingは未使用である。通常のdaily collectorはContainer Chromeを使う。MyJCBは逆に、Browser Runをsession bootstrap直後に閉じ、それ以降は通常のWorker `fetch`だけを使う。
 
 ## 新しいcollectorで必ず明記する項目
 

@@ -14,7 +14,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { chromium, type Browser } from "playwright";
+import { chromium, type Browser, type Page } from "playwright";
 import { createApi } from "../src/api.ts";
 import { insertObservation, insertParseRun, publishParseRun } from "../src/store.ts";
 import { buildFixture, RETIRED_DESCRIPTION } from "./fixture.ts";
@@ -135,36 +135,95 @@ describe.if(runnable)("evidence browser in a real browser", () => {
     server?.stop(true);
   });
 
-  async function open(path: string): Promise<{ text: string; xss: boolean }> {
-    const page = await browser.newPage();
+  const views: Record<string, string> = {
+    "/": "#sources",
+    "/transactions": "#transactions",
+    "/balances": "#latest-balances",
+    "/positions": 'section[aria-label="保有資産の表示条件"]',
+    "/artifacts": "#artifacts",
+    [`/artifacts/${fixture.artifactId}`]: "#parse-runs",
+    "/observations/transaction/1": "#stored-row",
+    "/no-such-view": "main h1",
+  };
+
+  async function open(path: string, preparedPage?: Page): Promise<{ text: string; xss: boolean }> {
+    const selector = views[path];
+    if (!selector) throw new Error(`No readiness marker for ${path}`);
+    const page = preparedPage ?? (await browser.newPage());
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(`${path}: ${message.text()}`);
     });
     page.on("pageerror", (error) => consoleErrors.push(`${path}: ${error.message}`));
-    await page.goto(baseUrl + path, { waitUntil: "networkidle" });
-    const text = await page.locator("body").innerText();
-    const xss = await page.evaluate(() => (globalThis as { __xss?: boolean }).__xss === true);
-    await page.close();
-    return { text, xss };
+    try {
+      await page.goto(baseUrl + path, { waitUntil: "networkidle" });
+      // An idle network can precede even the metadata fetch. These existing
+      // markers are inside each view's data boundary (or the static 404 view).
+      await page.locator(selector).waitFor({ state: "visible", timeout: 10_000 });
+      const text = await page.locator("body").innerText();
+      const xss = await page.evaluate(() => (globalThis as { __xss?: boolean }).__xss === true);
+      return { text, xss };
+    } finally {
+      await page.close();
+    }
   }
 
   test(
     "every view renders without a console error",
     async () => {
-      for (const path of [
-        "/",
-        "/transactions",
-        "/balances",
-        "/positions",
-        "/artifacts",
-        `/artifacts/${fixture.artifactId}`,
-        "/observations/transaction/1",
-        "/no-such-view",
-      ]) {
+      for (const path of Object.keys(views)) {
         const { text } = await open(path);
         expect(text.length).toBeGreaterThan(100);
       }
       expect(consoleErrors).toEqual([]);
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "open waits for rendered views when API requests start after network idle",
+    async () => {
+      for (const path of Object.keys(views)) {
+        const page = await browser.newPage();
+        await page.addInitScript(() => {
+          let release!: () => void;
+          const gate = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          Object.assign(globalThis, { releaseSyntheticApiStart: release });
+          const originalFetch = globalThis.fetch;
+          globalThis.fetch = Object.assign(async (...args: Parameters<typeof fetch>) => {
+            if (typeof args[0] === "string" && args[0].startsWith("/api/")) await gate;
+            return originalFetch(...args);
+          }, originalFetch);
+        });
+        // Exercise the same helper as the current/retired/XSS assertions, not
+        // a second implementation of its readiness wait.
+        const snapshot = open(path, page);
+        try {
+          await page.waitForURL(baseUrl + path, { waitUntil: "networkidle" });
+          expect(await page.locator("body").innerText()).toContain("接続情報を読み込んでいます");
+          expect(await page.locator(views[path]!).count()).toBe(0);
+          await page.evaluate(() => {
+            (
+              globalThis as typeof globalThis & { releaseSyntheticApiStart(): void }
+            ).releaseSyntheticApiStart();
+          });
+          const result = await snapshot;
+          expect(result.text).not.toContain("接続情報を読み込んでいます");
+          expect(result.xss).toBe(false);
+          if (path === "/transactions") {
+            expect(result.text).toContain("BROWSER_FRESH");
+            expect(result.text).toContain("<script>window.__xss = true</script>");
+            expect(result.text).not.toContain(RETIRED_DESCRIPTION);
+          } else if (path === `/artifacts/${fixture.artifactId}`) {
+            expect(result.text).toContain(RETIRED_DESCRIPTION);
+            expect(result.text).toContain("旧");
+          }
+        } finally {
+          await page.close();
+          await snapshot.catch(() => undefined);
+        }
+      }
     },
     TIMEOUT_MS,
   );

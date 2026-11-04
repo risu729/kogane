@@ -5,6 +5,7 @@
 // store is structural (`{ sql, binds }` in, row objects out) so the same code
 // runs against D1 in a Worker and against a test double.
 import { isOneOf, isRecord, isText } from "../../../domain/src/guards.ts";
+import type { OwnershipSelfDeclaration } from "../../../domain/src/ownership-declaration.ts";
 import { RELATION_KINDS, type RelationKind } from "../../../domain/src/decisions.ts";
 import {
   CARD_PURCHASE_EXCLUSION_REASONS,
@@ -294,7 +295,7 @@ export function isChangeKind(value: unknown): value is ChangeKind {
 export const COMMAND_CAPABILITIES = ["interpretation.propose", "interpretation.accept"] as const;
 export type CommandCapability = (typeof COMMAND_CAPABILITIES)[number];
 
-export const PRINCIPAL_KINDS = ["human", "agent"] as const;
+export const PRINCIPAL_KINDS = ["human", "agent", "delegated"] as const;
 export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number];
 
 /** Always built from a server-verified identity, never from a request body. */
@@ -403,6 +404,8 @@ export interface Simulation {
   affectedParseRuns: number;
   /** Outbox targets a commit of this plan would enqueue. */
   outboxTargets: OutboxTarget[];
+  /** Explicit provenance of a card-ownership review; never a provider proof. */
+  ownershipDeclaration?: OwnershipSelfDeclaration;
 }
 
 export const OUTBOX_TARGETS = [

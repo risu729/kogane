@@ -1,4 +1,5 @@
 import type { SourceFactRef } from "./events.ts";
+import { ownershipDeclarationRequested } from "./ownership-declaration.ts";
 /** Explicit operator identity, never derived from the authenticated principal. */
 export function ownershipReviewPartyRef(value: unknown): value is string {
   if (typeof value !== "string" || !value.startsWith("party:")) return false;
@@ -18,7 +19,10 @@ export function ownershipReviewEvidenceRefs(
   return ["card-settlement:" + proposalId, fact.id, fact.revision, "account_mapping:" + mappingId];
 }
 export function ownershipReviewRequested(evidenceRefs: readonly string[]): boolean {
-  return evidenceRefs.some((ref) => ref.startsWith("card-settlement:"));
+  return (
+    evidenceRefs.some((ref) => ref.startsWith("card-settlement:")) ||
+    ownershipDeclarationRequested(evidenceRefs)
+  );
 }
 export function ownershipRevisionRef(
   role: "liable_party" | "beneficial_owner",

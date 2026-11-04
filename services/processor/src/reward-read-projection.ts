@@ -1,3 +1,10 @@
+import { captureProviderExpirySections } from "../../../packages/read-model/src/reward-provider-expiry.ts";
+import {
+  rewardProviderSectionRows,
+  rewardProviderCheckpoint,
+  writeRewardProviderSectionChunk,
+  writtenRewardProviderSectionsMatch,
+} from "../../../packages/storage-d1/src/read/reward-provider-expiry.ts";
 import { rewardPromotionPending } from "./reward-claims-job";
 // The reward second stage: expiry estimates and replayed simulations built
 // into the READ database from a fixed evaluation input (unified plan 04 §2,
@@ -243,6 +250,7 @@ export async function captureRewardInput(
     // set is refused rather than projected as if it were everything.
     if (buckets.length > REWARD_PAGE_LIMIT)
       return { ok: false, status: "refused", code: "claim_set_too_large" };
+    const providerSections = await captureProviderExpirySections(sql, buckets);
     const membership = await sql.all<MembershipSqlRow>(MEMBERSHIP_SQL, [null]);
     const offers = await sql.all<ConversionOfferSqlRow>(CONVERSION_OFFERS_SQL, [null, 0]);
     if (offers.length > OFFER_BOUND)
@@ -277,6 +285,7 @@ export async function captureRewardInput(
       },
       rules,
       buckets,
+      providerSections,
       membership,
       offers,
       simulations,
@@ -351,7 +360,12 @@ export async function rewardInputRefs(
       // exact rows the capture read.
       kind: "promotion_release",
       id: `${content.manifest.promotionRelease}@${String(content.manifest.claimsHighWater)}`,
-      digest: await sha256Hex(canonicalJson(content.buckets)),
+      digest: await sha256Hex(
+        canonicalJson({
+          buckets: content.buckets,
+          providerSections: content.providerSections ?? [],
+        }),
+      ),
     },
     {
       kind: "membership_claim",
@@ -620,6 +634,7 @@ async function rewardBuildStep(
   const simulations: { row: RewardSimulationProjectionRow; digest: string }[] = [];
   for (const row of projection.simulations)
     simulations.push({ row, digest: await rewardSimulationDigest(row) });
+  const providerRows = await rewardProviderSectionRows(build.input.content.providerSections ?? []);
   const fence = await rewardWriterFence(read, build.snapshotId, lease);
   if (fence === null) return halted("retryable", "writer_lease_lost", build.snapshotId);
 
@@ -678,7 +693,34 @@ async function rewardBuildStep(
   }
   if (simulationSlice.length < pendingSimulations.length) return building(written);
 
-  // 3. Verify what was written, then seal and switch the pointer in one batch.
+  const providerFrom = await rewardProviderCheckpoint(read, build.snapshotId);
+  const pendingProviders = providerRows.filter((row) => row.rowSeq > providerFrom);
+  const providerSlice = pendingProviders.slice(0, Math.max(budget - written, 0));
+  let providerWritten = 0;
+  for (let start = 0; start < providerSlice.length; start += WRITE_CHUNK) {
+    const chunk = providerSlice.slice(start, start + WRITE_CHUNK);
+    if (
+      (await writeRewardProviderSectionChunk(read, build.snapshotId, chunk, {
+        lease,
+        fence,
+        now,
+        rowsWritten: providerFrom + 1 + providerWritten,
+      })) === "lease_lost"
+    )
+      return halted("retryable", "writer_lease_lost", build.snapshotId, written);
+    providerWritten += chunk.length;
+    written += chunk.length;
+  }
+  if (providerSlice.length < pendingProviders.length) return building(written);
+  if (
+    !(await writtenRewardProviderSectionsMatch(
+      read,
+      build.snapshotId,
+      providerRows.map((row) => row.digest),
+    ))
+  )
+    return halted("retryable", "reward_rows_unverified", build.snapshotId, written);
+  // 3. Verify every stream before sealing and switching the pointer in one batch.
   if (
     !(await writtenRewardRowsMatch(read, build.snapshotId, {
       estimates: estimates.map((entry) => entry.digest),
@@ -699,7 +741,9 @@ async function rewardBuildStep(
     {
       estimateCount: estimates.length,
       simulationCount: simulations.length,
+      providerSectionCount: providerRows.length,
       rowDigests: [
+        ...providerRows.map((entry) => entry.digest),
         ...estimates.map((entry) => entry.digest),
         ...simulations.map((entry) => entry.digest),
       ],

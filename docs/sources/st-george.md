@@ -403,7 +403,7 @@ integrity/attestation は未確定である。third-party APK mirror を current
    install/update する。Quick Logon 登録済み端末では app data clear/reinstall/device migration
    を行わない。
 2. 本人同意下で USB debugging を一時的に有効化し、`adb shell dumpsys package
-org.stgeorge.bank` から versionName/versionCode、installer、split 名のみを採る。
+   org.stgeorge.bank` から versionName/versionCode、installer、split 名のみを採る。
    `adb shell pm path org.stgeorge.bank` が通常権限で返す全 base/split を private work area
    へ pull する。
 3. 全 split の SHA-256 と `apksigner verify --print-certs` の signer digest を確認する。

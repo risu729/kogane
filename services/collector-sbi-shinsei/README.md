@@ -49,11 +49,11 @@ TAMIA経路のCloudflare live run `0e999a32-6994-450e-a495-2daff0e7aeb1` は `st
 
 ## Worker surface
 
-| Trigger           | Behavior                                                                                                                                                         |
-| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health`     | schema version、source、live-read readiness のみ返す。                                                                                                           |
-| `POST /trigger`   | `Authorization: Bearer <ADMIN_TRIGGER_TOKEN>` 必須。実行時点のsnapshotを1回収集し、validated artifactとmanifestを共有DATA bucketへ保存。期間指定は受け付けない。 |
-| Cron `0 21 * * *` | 毎日 06:00 JSTに同じContainer収集を1回実行。全失敗はfailure manifestを保存した上でinvocationを失敗させ、部分取得はpartial evidenceとして保存する。               |
+| Trigger                           | Behavior                                                                                                                                           |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`                     | schema version、source、live-read readiness のみ返す。                                                                                             |
+| Private `ScheduledCollection` RPC | 既存の固定actionで現在snapshotを収集する。公開 `/trigger` は404。                                                                                  |
+| Cron `0 21 * * *`                 | 毎日 06:00 JSTに同じContainer収集を1回実行。全失敗はfailure manifestを保存した上でinvocationを失敗させ、部分取得はpartial evidenceとして保存する。 |
 
 R2 key（共有DATA bucket `kogane-raw-evidence`）:
 
@@ -66,6 +66,10 @@ unknown response や authentication response body は R2 に保存しません�
 
 現在の4 readはtop page由来のsnapshotです。manifestの`startedAt` / `completedAt`は実行時刻を表し、過去期間を取得済みとは記録しません。期間履歴を追加する場合は、期間を実際に送るread routeと取得範囲を別途検証してから導入します。
 
+期間指定履歴とCSVはcatalog上で未承認の候補routeで、全execution profileでsession参照・通信前に拒否します。2026-10-10の通常UI観測を基に、`src/local/history-observation.ts`は円普通預金の明示期間request（最大31日というローカル制限）と、取得済みJSON/CSVの**オフライン検証だけ**を提供します。JSONの正常明細・providerが空と報告した応答・未確認errorを区別し、期間/口座contextとCSVの全6列を照合します。CSVは`Shift_JIS`宣言付きのブラウザー復号済みtextであり、元bytesやdownload保存の確認ではありません。全結果は`coverageStatus: unknown`のままです。
+
+このmoduleはWorker/Container/既存parserから呼ばれず、通信・保存・採用・本番有効化を行いません。既存4 raw + 1 normalized snapshotは不変です。CSV用session tokenの取得/rotation、原本byte保存、paging/上限/`purgeflag`の意味、電子お取引レポートのroute/schemaは未確認です。[ADR 0070](../../docs/adr/0070-sbi-shinsei-observed-history-boundary.md)と[次の取得sliceの計画](../../docs/plans/2026-10-sbi-shinsei-history-first-slice.md)に、本番の取得拡張までの残条件を記載しています。
+
 runは`packages/collection`で共有DATA bucketへ直接書き、4件のprovider responseとnormalized snapshotはterminalを書くまでmemoryに保持する。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。private Service Bindingによる中央importer呼出し、`POST /backfill-raw-evidence`、`scripts/backfill-raw-evidence.sh`、source専用bucketは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 Kuebiko capture で得た core response の field-name topology は synthetic fixture と strict validator に反映済みです。1 sample だけなので known field を optional として扱う箇所がありますが、unknown field、unknown nested item、unknown schema は拒否します。validator実装だけでは route を有効化せず、exact request builder とaccepted browser-contextでの実行成功も必要です。
@@ -76,26 +80,9 @@ Cloudflare secret として設定します。値を repository、`.dev.vars`、l
 
 - `SBI_SHINSEI_CREDENTIAL_JSON`
   - `{ "branchNumber": "...", "accountNumber": "...", "powerDirectPassword": "..." }`
-- `ADMIN_TRIGGER_TOKEN`
 - `RELAY_TOKEN`
 
-`ADMIN_TRIGGER_TOKEN`はCloudflareから値を読み戻せないため、collector専用スクリプトでローカルfileとWorker secretを同じ値へ同期する。初回作成またはrotationは次を実行する。このスクリプトは32-byteの乱数を生成し、current user所有・mode 0600のregular non-symlink fileだけを使用する。token値はstdout、stderr、Wrangler引数へ出さない。
-
-```bash
-bash services/collector-sbi-shinsei/scripts/sync-admin-trigger-token.sh --rotate
-```
-
-rotationは保護されたtemporary fileから同じdirectoryの`.pending`を原子的に作り、その値をstdinで`ADMIN_TRIGGER_TOKEN`へ同期する。Wrangler成功後だけ`.pending`を既定pathへatomic renameする。同期結果が不明または失敗した場合は、既存のlocal tokenを変更せず`.pending`を残す。新しいtokenを生成せず、次で同じ値を再送して回復する。
-
-```bash
-bash services/collector-sbi-shinsei/scripts/sync-admin-trigger-token.sh --resume
-```
-
-既存local tokenをrotationせずWorkerへ再同期する場合だけ`--sync`を使う。`.pending`が存在する間は`--sync`と新しい`--rotate`を拒否する。成功出力はsecret名とlocal pathだけである。以前canaryに使った`backfill-raw-evidence.sh`はrouteとともに廃止した。
-
-```bash
-bash services/collector-sbi-shinsei/scripts/sync-admin-trigger-token.sh --sync
-```
+公開admin入口と専用token同期scriptは廃止した。`RELAY_TOKEN` と銀行資格情報は変更しない。
 
 ローカルCLIは次の順でcredentialを読みます。
 

@@ -26,6 +26,12 @@
       "statementCount": 9,
       "insertStatements": [],
       "sha256": "d7c032073e081efcbc7802ef8599665708eeea58ed99596e783206934a4f2a9d"
+    },
+    {
+      "file": "0005_reward_provider_expiry_sections.sql",
+      "statementCount": 12,
+      "insertStatements": [],
+      "sha256": "8f25ab60e89516f87418851c4c1dca5de82e47fedebf7d5f8438fd3835d173b9"
     }
   ],
   "tables": [
@@ -1652,6 +1658,13 @@
           "notNull": false,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "provider_section_count",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": "0",
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -1680,12 +1693,182 @@
       ],
       "triggers": [
         "reward_expiry_snapshots_instance",
-        "reward_expiry_snapshots_transition"
+        "reward_expiry_snapshots_transition",
+        "reward_provider_section_count_sealed"
       ],
       "noUpdateTriggers": [],
       "noDeleteTriggers": [],
       "appendOnly": false,
-      "sqlSha256": "5f5430ebf252f7d4"
+      "sqlSha256": "ec45b2556c5006ce"
+    },
+    {
+      "name": "reward_provider_display_checkpoints",
+      "classification": "read-operational",
+      "planRow": "READ: bounded provider display stream progress committed with its chunk (ADR 0068)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "position",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "rows_written",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_lease",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "writer_fence",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "updated_at",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "reward_expiry_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [],
+      "triggers": [
+        "reward_provider_checkpoint_building",
+        "reward_provider_checkpoint_forward"
+      ],
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
+      "sqlSha256": "232d70db7b6fbc1b"
+    },
+    {
+      "name": "reward_provider_expiry_sections",
+      "classification": "read-projection",
+      "planRow": "READ: non-additive provider expiry display sections of one fixed reward snapshot (ADR 0068)",
+      "strict": true,
+      "withoutRowid": false,
+      "columns": [
+        {
+          "name": "snapshot_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 1
+        },
+        {
+          "name": "row_key",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 2
+        },
+        {
+          "name": "row_seq",
+          "type": "INTEGER",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "program_id",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "payload_json",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        },
+        {
+          "name": "row_digest",
+          "type": "TEXT",
+          "notNull": true,
+          "default": null,
+          "pk": 0
+        }
+      ],
+      "primaryKey": [
+        "snapshot_id",
+        "row_key"
+      ],
+      "foreignKeys": [
+        {
+          "column": "snapshot_id",
+          "references": "reward_expiry_snapshots(snapshot_id)",
+          "onDelete": "NO ACTION",
+          "onUpdate": "NO ACTION"
+        }
+      ],
+      "indexes": [
+        {
+          "name": "reward_provider_expiry_sections_order",
+          "unique": true,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "row_seq"
+          ]
+        },
+        {
+          "name": "reward_provider_expiry_sections_program",
+          "unique": false,
+          "partial": false,
+          "columns": [
+            "snapshot_id",
+            "program_id",
+            "row_seq"
+          ]
+        }
+      ],
+      "triggers": [
+        "reward_provider_sections_building",
+        "reward_provider_sections_conflict",
+        "reward_provider_sections_no_update",
+        "reward_provider_sections_sealed_no_delete"
+      ],
+      "noUpdateTriggers": [
+        "reward_provider_sections_no_update"
+      ],
+      "noDeleteTriggers": [
+        "reward_provider_sections_sealed_no_delete"
+      ],
+      "appendOnly": true,
+      "sqlSha256": "50a9b530bbec7bb2"
     },
     {
       "name": "reward_snapshot_input_refs",
@@ -2296,6 +2479,55 @@
       "sqlSha256": "437293ec16093e89"
     },
     {
+      "name": "reward_provider_checkpoint_building",
+      "table": "reward_provider_display_checkpoints",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "4a2cbeec7c52bbbd"
+    },
+    {
+      "name": "reward_provider_checkpoint_forward",
+      "table": "reward_provider_display_checkpoints",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "b9a0292518d6c555"
+    },
+    {
+      "name": "reward_provider_section_count_sealed",
+      "table": "reward_expiry_snapshots",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "3cccff26ab5455a3"
+    },
+    {
+      "name": "reward_provider_sections_building",
+      "table": "reward_provider_expiry_sections",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "9b9472d7f6cfbd1b"
+    },
+    {
+      "name": "reward_provider_sections_conflict",
+      "table": "reward_provider_expiry_sections",
+      "timing": "BEFORE",
+      "event": "INSERT",
+      "sqlSha256": "a9c55763c1a9c030"
+    },
+    {
+      "name": "reward_provider_sections_no_update",
+      "table": "reward_provider_expiry_sections",
+      "timing": "BEFORE",
+      "event": "UPDATE",
+      "sqlSha256": "7b6d8a1661998dbd"
+    },
+    {
+      "name": "reward_provider_sections_sealed_no_delete",
+      "table": "reward_provider_expiry_sections",
+      "timing": "BEFORE",
+      "event": "DELETE",
+      "sqlSha256": "f1a41eb15d41d64d"
+    },
+    {
       "name": "reward_snapshot_input_refs_building_only",
       "table": "reward_snapshot_input_refs",
       "timing": "BEFORE",
@@ -2464,6 +2696,16 @@
       "sqlSha256": "011ae76d61699158"
     },
     {
+      "name": "reward_provider_expiry_sections_order",
+      "table": "reward_provider_expiry_sections",
+      "sqlSha256": "4b75cc882af04a75"
+    },
+    {
+      "name": "reward_provider_expiry_sections_program",
+      "table": "reward_provider_expiry_sections",
+      "sqlSha256": "0045ac2a92d75d11"
+    },
+    {
       "name": "reward_snapshot_input_refs_kind",
       "table": "reward_snapshot_input_refs",
       "sqlSha256": "f8759c992790bebe"
@@ -2480,10 +2722,10 @@
     }
   ],
   "summary": {
-    "tableCount": 14,
+    "tableCount": 16,
     "viewCount": 0,
-    "triggerCount": 46,
-    "explicitIndexCount": 18,
+    "triggerCount": 53,
+    "explicitIndexCount": 20,
     "byClassification": {
       "read-projection": [
         "balance_read_snapshots",
@@ -2492,6 +2734,7 @@
         "reward_expiry_estimates",
         "reward_expiry_estimates_v2",
         "reward_expiry_snapshots",
+        "reward_provider_expiry_sections",
         "reward_snapshot_input_refs",
         "scope_relations",
         "snapshot_input_refs"
@@ -2501,6 +2744,7 @@
         "read_build_checkpoints",
         "read_instance",
         "reward_build_checkpoints",
+        "reward_provider_display_checkpoints",
         "reward_snapshot_pointer"
       ]
     },
@@ -2511,11 +2755,12 @@
       "read_instance",
       "reward_build_checkpoints",
       "reward_expiry_snapshots",
+      "reward_provider_display_checkpoints",
       "reward_snapshot_pointer"
     ],
     "nonStrictTables": [],
     "withoutRowidTables": [],
     "migrationsWithInserts": [],
-    "schemaSha256": "c8611107f13960944fee4ae91b452a9d4acf166227f2de4be0c182cada249fdc"
+    "schemaSha256": "8fa09c72e7bdc5b392582048e5e7a7f76e8daed529b5572b183f4afb0b586508"
   }
 }
