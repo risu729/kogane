@@ -584,6 +584,8 @@ it("real MCP R2 owner decision prepares, confirms through the existing writer, a
       JSON.stringify({
         [PRINCIPAL]: {
           ...DECLARATION,
+          issuedAt: new Date(Date.now() - 60_000).toISOString(),
+          notAfter: new Date(Date.now() + 3_600_000).toISOString(),
           role: "operator-delegate",
           scopes: { sources: "*", accounts: "*", scheduleSources: [] },
         },
@@ -766,6 +768,8 @@ it("provider-contact requests use R2, pin human session policy, refuse expired p
     .first<{ n: number }>();
   const declaration = {
     ...DECLARATION,
+    issuedAt: new Date(Date.now() - 60_000).toISOString(),
+    notAfter: new Date(Date.now() + 3_600_000).toISOString(),
     role: "operator-delegate",
     scopes: { sources: ["sony-bank"], accounts: "*", scheduleSources: [] },
     capabilities: undefined,
@@ -907,6 +911,8 @@ it("MCP schedule job tools are installed only for a resolved grant and write onl
       JSON.stringify({
         [PRINCIPAL]: {
           ...DECLARATION,
+          issuedAt: new Date(Date.now() - 60_000).toISOString(),
+          notAfter: new Date(Date.now() + 3_600_000).toISOString(),
           capabilities: ["schedules.job.update"],
           scopes: { sources: "*", accounts: "*", scheduleSources: ["vpass"] },
         },
