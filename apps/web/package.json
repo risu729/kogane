@@ -8,7 +8,7 @@
     "jsonc-parser": "3.3.1",
     "react": "19.3.1",
     "react-dom": "19.3.1",
-    "shiki": "4.5.0"
+    "shiki": "4.6.0"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",
