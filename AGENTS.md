@@ -51,10 +51,11 @@ before merge. The PR body states what the review checked.
   with an audit record. Grants, Access, delegations, secrets and deployment
   are never delegated
   ([ADR 0063](docs/adr/0063-delegated-ai-operation-path.md),
-  [ADR 0064](docs/adr/0064-common-audit-log.md)). Effective when those ADRs
-  merge; until the delegation resolver ships (slice S3 of the
-  [plan](docs/plans/2026-10-ai-operation-path.md)) no delegation exists,
-  so in practice no agent approves, commits or changes a setting.
+  [ADR 0064](docs/adr/0064-common-audit-log.md)). The resolver and delegated
+  command, provider-request and schedule adapters are implemented; the
+  checked-in `MCP_DELEGATIONS` remains empty. Installed code does not grant
+  authority or prove real-client execution
+  ([current boundaries](docs/agent-api.md#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)).
 - Amounts are exact decimals added in `packages/domain` (`sumQuantities` and
   friends refuse mixed units and inexact values, INV03), not summed in SQL
   ([domain contracts](docs/domain-contracts.md)).

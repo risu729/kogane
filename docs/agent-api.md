@@ -10,16 +10,17 @@ It is the MVP gate of `architecture-addendum/10_agent_api_and_permissions.md`
 §10: summary, query, explain and propose — plus, under its own capability,
 reading public maintenance windows
 ([ADR 0046](adr/0046-agent-maintenance-windows.md), [below](#maintenance-windows))
-— and nothing else. There is no acceptance, no simulation, no commit, no
-calculation job, no collection request, no export, and no external money action
-in _this_ API. Those capabilities are not disabled by a flag; they have no name
-in the grant type.
+— through the read/proposal grant vocabulary. That grant has no approval,
+commit, collection-request or settings-write capability.
 
-The operations API ([ops-api.md](ops-api.md)) is not served over `/mcp`:
-`/mcp` has only agent-only callers
-([ADR 0047](adr/0047-mcp-client-connection.md)), and an operation needs the
-change lifecycle's operator capability, which no capability in the table
-below reaches.
+The same `/mcp` transport also has separately authorized delegated adapters
+([ADR 0063](adr/0063-delegated-ai-operation-path.md)). A named, current
+`MCP_DELEGATIONS` entry is required in addition to the read grant; no read
+capability promotes an MCP caller into the human operator. Installed
+adapters include command decisions, provider requests and schedule updates
+under their own scope, confirmation, budget and audit controls
+([current integration](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)).
+The committed configuration activates none of them.
 
 **The committed production configuration enables one MCP reader.**
 The owner's dedicated `mcp-client:<sub>` entry grants `summary.read` and
@@ -34,9 +35,10 @@ and deployment are not evidence that a client connected; the ordered live
 checks in [Connecting an MCP client](#connecting-an-mcp-client) still apply.
 That entry names no schedule capability, so it reads no maintenance window.
 Maintenance windows can be read under their own capability (`schedules.read`);
-revising one is an operation the owner may delegate (ADR 0063), which no
-delegation can execute yet ([below](#maintenance-windows)). Job settings and
-lease release stay operator-only ([schedules](schedules.md#settings-api)).
+revising one and updating a job are implemented delegated operations (ADR
+0063), with no configured delegation ([below](#maintenance-windows)). The
+HTTP settings API and lease release remain operator-only
+([schedules](schedules.md#settings-api)).
 
 ## Why the application service exists
 
@@ -66,13 +68,14 @@ here parses the token a second time and nothing reads an actor from a request
 body or header, which is the same rule the change lifecycle follows. A valid
 token with no grant is still refused.
 
-| Capability               | Allows                                                                                                                            | Notes                                                   |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                | The first capability an agent should get                |
-| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                       | A separate grant; raw bytes are still a different route |
-| `interpretation.propose` | `reconcile.propose`                                                                                                               | Proposals only; never adoption                          |
-| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                         | Not a financial read; implied by no other capability    |
+| Capability               | Allows                                                                                                                            | Notes                                                                                                          |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                | The first capability an agent should get                                                                       |
+| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                                                                                  |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                       | A separate grant; raw bytes are still a different route                                                        |
+| `interpretation.propose` | `reconcile.propose`                                                                                                               | Proposals only; never adoption                                                                                 |
+| `audit.read`             | `audit.search` and `audit.get`, within the separately checked audit scope                                                         | No write authority ([shared history](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)) |
+| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                         | Not a financial read; implied by no other capability                                                           |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
 exist in this vocabulary: `interpretation.accept`, `calculation.run`,
@@ -179,25 +182,27 @@ and it belongs in its own change.
 
 ## Tools
 
-Six tools, plus a seventh while the deployment serves card purchase
-recognition and an eighth while it serves the reconstructed state, one
-implementation each (`src/agent-service.ts`), reachable two ways. The two
-maintenance tools (`src/schedule-tools.ts`) exist while `SCHEDULES_ENABLED` is
-on: the read is reachable both ways, the revision on `/mcp` only and listed to
-nobody ([below](#maintenance-windows)).
+The table lists the core financial tools and maintenance tools. The financial
+service (`src/agent-service.ts`) is shared by HTTP and MCP. The additional
+instrument-history and audit reads, plus separately delegated operation
+adapters, are described in the
+[integration section](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10).
+Maintenance reads require `SCHEDULES_ENABLED`; delegated schedule writes also
+require the private Processor binding and a current named delegation. The
+committed configuration lists no delegated write tool.
 
-| Tool                                  | HTTP                                            | MCP `tools/call`                      | Requires                                                                                                                                                       |
-| ------------------------------------- | ----------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kogane.capabilities`                 | `POST /api/agent/v1/capabilities`               | `kogane.capabilities`                 | any grant                                                                                                                                                      |
-| `kogane.context.open`                 | `POST /api/agent/v1/context.open`               | `kogane.context.open`                 | any grant                                                                                                                                                      |
-| `kogane.financial.query`              | `POST /api/agent/v1/financial.query`            | `kogane.financial.query`              | per intent (table below)                                                                                                                                       |
-| `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                                                 |
-| `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                                       |
-| `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                 |
-| `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                                  |
-| `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                                       |
-| `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                              |
-| `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | a delegation (`MCP_DELEGATIONS`) holding `schedules.maintenance.update`; no delegation executes yet, so it is listed to nobody ([below](#maintenance-windows)) |
+| Tool                                  | HTTP                                            | MCP `tools/call`                      | Requires                                                                                                                                                                        |
+| ------------------------------------- | ----------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.capabilities`                 | `POST /api/agent/v1/capabilities`               | `kogane.capabilities`                 | any grant                                                                                                                                                                       |
+| `kogane.context.open`                 | `POST /api/agent/v1/context.open`               | `kogane.context.open`                 | any grant                                                                                                                                                                       |
+| `kogane.financial.query`              | `POST /api/agent/v1/financial.query`            | `kogane.financial.query`              | per intent (table below)                                                                                                                                                        |
+| `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                                                                  |
+| `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                                                        |
+| `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                                  |
+| `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                                                   |
+| `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                                                        |
+| `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                                               |
+| `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | a current delegation (`MCP_DELEGATIONS`) holding `schedules.maintenance.update`, scheduling enabled and a Processor binding; none is configured ([below](#maintenance-windows)) |
 
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
@@ -223,10 +228,11 @@ grant checks every agent path makes. `kogane.reconstructed-state.read` follows
 `GET /api/v2/reconstructed-state` the same way: listed after them while
 `/api/meta` reports `reconstructedStateOnDate: true` (the store has the
 reported state's views), otherwise `unknown_tool` and `404 not_found`. The six
-`kogane.ops.*` tools of [ops-api.md](ops-api.md) are never published on
-`/mcp`, whose callers are all agent-only: with `OPS_API_ENABLED` off an
-operations tool name is `unknown_tool`, and with it on `callOpsTool` refuses
-the call from the caller object (`actor_not_supported`) before any grader runs.
+`kogane.ops.*` tools of [ops-api.md](ops-api.md) use `callDelegatedOpsTool`
+on `/mcp`: `OPS_API_ENABLED` and the resolved delegation determine listing
+and execution. With the flag off the tool is `unknown_tool`; without a valid
+delegation it is refused. The operator-only `callOpsTool` remains separate
+and refuses an MCP caller object (`actor_not_supported`).
 
 ### Intents
 
@@ -345,7 +351,9 @@ no grant here can hold `interpretation.accept`, so no caller of this tool is
 ever offered one, and `decisions: "operator-only"` says so in every answer.
 An agent that finds a link worth reviewing names its `proposalId` to the
 operator. This tool hands it no payload to plan with, and the change lifecycle
-refuses an agent's approval and commit of a link review in any case.
+refuses approval or commit from an ordinary agent without a matching explicit
+delegation. Separate delegated decision adapters do not change this read tool's
+payload or its grant.
 
 Authorization, in order, after the Access check and the grant lookup every
 agent path makes:
@@ -744,10 +752,10 @@ refuses an `mcp-client` caller with `403 actor_not_supported` before
 published on `/mcp`; `principalFor` also refuses the `mcp-client:` name as a
 string, even when `<sub>` is the operator. It reaches no other route. It can
 record an inert proposal (actor `mcp-client:<sub>`) under
-`interpretation.propose`, and nothing approves or commits. The same person
-keeps the operator's rights over the browser application, whose audience and
-routes are unchanged — and only there: no caller can request an operation
-over MCP.
+`interpretation.propose`. Operations use the separate delegation resolver and
+adapters; they never fall back to the bare owner's operator rights. The same
+person keeps their operator rights over the browser application. The empty
+committed delegation table authorizes no MCP operation.
 
 ### Endpoint and transport
 
@@ -768,31 +776,33 @@ over MCP.
 
 ### Refusals a client sees
 
-| Failure                                                                                                                                                           | Answered by                           | HTTP / result                                                                          |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------- |
-| no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access                     | Access's own `401` (Managed OAuth) — not this Worker                                   |
-| assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                                | `401 authentication_required`                                                          |
-| Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                                | `503 identity_keys_unavailable` / `503 auth_not_configured`                            |
-| an unexpected failure inside a tool or the tool list (the store, a bug)                                                                                           | Worker                                | `500 internal_error`; the exception text never reaches the client or the log           |
-| `Origin` of another site                                                                                                                                          | Worker                                | `403 origin_not_allowed`                                                               |
-| principal not in `AGENT_API_GRANTS` (empty or unreadable table included)                                                                                          | Worker                                | `403 agent_api_not_configured`                                                         |
-| `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                | `405 method_not_allowed` / `400 invalid_query`                                         |
-| media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                   | `415` / `406` / `400` / `400` / `413`                                                  |
-| unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                      | JSON-RPC `-32601`; `-32602 unknown_tool`                                               |
-| an operations tool, while the operations API is on                                                                                                                | `callOpsTool`, from the caller object | `isError: true`, `{"error":"actor_not_supported"}`; nothing written                    |
-| capability not granted                                                                                                                                            | tool                                  | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                   |
-| source, account or row outside the scope                                                                                                                          | tool                                  | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`) |
-| raw evidence without `evidence.read`                                                                                                                              | tool                                  | not an error: `explain` has no raw-locator node, `restricted: ["evidence.read"]`       |
-| page or proposal beyond the budget                                                                                                                                | tool                                  | `isError: true`, `code: budget_exceeded`, `refs: ["budget:…"]`                         |
-| approve, commit                                                                                                                                                   | —                                     | no such tool; every command route is `401` for an MCP token                            |
+| Failure                                                                                                                                                           | Answered by               | HTTP / result                                                                                                                      |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access         | Access's own `401` (Managed OAuth) — not this Worker                                                                               |
+| assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                    | `401 authentication_required`                                                                                                      |
+| Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                    | `503 identity_keys_unavailable` / `503 auth_not_configured`                                                                        |
+| an unexpected failure inside a tool or the tool list (the store, a bug)                                                                                           | Worker                    | `500 internal_error`; the exception text never reaches the client or the log                                                       |
+| `Origin` of another site                                                                                                                                          | Worker                    | `403 origin_not_allowed`                                                                                                           |
+| principal not in `AGENT_API_GRANTS` (empty or unreadable table included)                                                                                          | Worker                    | `403 agent_api_not_configured`                                                                                                     |
+| `GET` / `DELETE`; a query string                                                                                                                                  | Worker                    | `405 method_not_allowed` / `400 invalid_query`                                                                                     |
+| media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                       | `415` / `406` / `400` / `400` / `413`                                                                                              |
+| unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher          | JSON-RPC `-32601`; `-32602 unknown_tool`                                                                                           |
+| an operations tool, while the operations API is on, without a valid MCP delegation                                                                                | `callDelegatedOpsTool`    | `isError: true` with the delegation resolver's closed refusal; nothing written                                                     |
+| capability not granted                                                                                                                                            | tool                      | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                                                               |
+| source, account or row outside the scope                                                                                                                          | tool                      | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`)                                             |
+| raw evidence without `evidence.read`                                                                                                                              | tool                      | not an error: `explain` has no raw-locator node, `restricted: ["evidence.read"]`                                                   |
+| page or proposal beyond the budget                                                                                                                                | tool                      | `isError: true`, `code: budget_exceeded`, `refs: ["budget:…"]`                                                                     |
+| approve, commit without the required delegation                                                                                                                   | delegated command adapter | not listed; an attempted call is refused by current delegation/capability checks. Browser command routes still reject an MCP token |
 
 A tool's refusal is the same financial error object its HTTP route answers,
 in `structuredContent`; `content[0].text` is that object serialised.
 
 ### Which client connects, and how
 
-Every row is owner-executed and production-unverified. The Worker-side
+Every row describes an owner-executed connection flow. The Worker-side
 mapping, the grant shape and the local checks are the same for all of them.
+Current plugin recovery evidence is recorded [separately](mcp-recovery.md);
+a result in one client does not establish the other clients or refresh.
 
 | Client                                          | Flow it presents ([Claude][claude-auth], [ChatGPT][openai-auth], [Codex][codex-mcp])                                                                                                                                                                      | Owner creates in Cloudflare                                                                  | Worker mapping           | Grants                                                                                                  | Client-side registration                                                                                       |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -956,13 +966,15 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   `kind: "mcp-client"`.
 - **Capability.** A tool graded by the agent API declares the
   `AgentCapability` it needs and checks it with `grantAllows` on that `Grant`
-  (scope and budget likewise). A tool that would need an operator must refuse
-  an `mcp-client` caller from the caller object before any grader runs, as
-  `callOpsTool` does, and is not published to one.
+  (scope and budget likewise). An operator-only adapter still refuses an
+  `mcp-client` caller, as `callOpsTool` does. Delegated adapters instead resolve
+  the current named delegation, attenuate it to the operation and reuse the
+  common command, confirmation and audit paths; a read grant is insufficient.
 - **Result.** Return a `ToolResult` (`status`, `body`): a 4xx status with a
   closed code reaches the client as `isError: true` with the same object the
-  HTTP route answers. No tool approves or commits for an agent-only
-  principal; a tool that writes appends a proposal.
+  HTTP route answers. Read/proposal tools adopt no financial state. A delegated
+  write requires its own capability, scope, confirmation class and atomic
+  effect/audit budget checks; an ordinary read grant cannot authorize it.
 
 ### Local checks before any production change
 
@@ -1041,11 +1053,12 @@ eras returning deep-equal objects with the same gap reasons.
 `@modelcontextprotocol/client` in `legacy` (2025-11-25) and `auto`
 (2026-07-28) negotiation.
 
-Not verified: no deployed instance, no MCP Access application, Managed OAuth
-setting or policy, no real provider data, and no MCP client has connected to
-`/mcp` — every step in [Connecting an MCP client](#connecting-an-mcp-client)
-is unexercised against production. Passing a client's connection check is
-not a completion criterion (addendum 10 §10).
+Those synthetic component checks did not verify a deployed instance, an MCP
+Access application, Managed OAuth settings/policy, real provider data or a
+real MCP client. They cannot establish the current production state. The
+[recovery record](mcp-recovery.md) distinguishes the older successful read-only
+client evidence from the current host reauthentication failure. Passing a
+client's connection check alone is not a completion criterion (addendum 10 §10).
 
 ## Deploy order and rollback
 
@@ -1081,14 +1094,18 @@ does not need to remove them.
 
 ## Delegated execution integration and shared history reads (S3, 2026-10-10)
 
-The deployment configuration remains empty: this code change creates no grant,
-MCP delegation or authentication resource. An explicitly configured owner MCP
+The checked-in MCP delegation table remains empty; the read grant described
+above is configured separately. Installed execution code creates no delegation
+or authentication resource. An explicitly configured owner MCP
 delegation can use only the adapters reported ready by `kogane.capabilities`.
-Installed operations are persisted-run import, parser replay, whole-store
-projection, own-operation status, and inert command planning/simulation.
-They reuse the operator's existing application services and Processor planner.
-They cannot approve or commit a financial decision, contact a provider, release
-a collection lease, or change authority. The operation's delegated effect and
+Installed adapters cover persisted-run import, parser replay, whole-store
+projection, own-operation status, inert command planning/simulation,
+card-settlement/relation/identity decisions, collection/session-refresh requests,
+and job/maintenance updates. Decisions and provider-contact requests require
+prepare/confirm; maintenance also permits bounded R1 apply. They reuse the
+operator's existing services and writers. A requested collection is still not
+proof of dispatch or publication. No adapter grants authority changes, lease
+release or external money actions; S6 survey acceptance remains unavailable. The operation's delegated effect and
 its audit record share a batch with a strict rolling-day budget; a retry under
 the same key does not spend a second write.
 
@@ -1107,15 +1124,17 @@ sources use their own `scheduleSources` axis; null-source records need both
 source axes whole-store. An absent detail and an out-of-scope detail are
 indistinguishable.
 
-Synthetic tests verify these paths and their authority boundaries. Real
-client authentication, delegation activation, and production operation remain
-unverified. A preparation helper alone is not a completed settings adapter;
-the remaining #564 writer integration and other schedule operations stay
-unavailable until implemented and independently reviewed.
+Synthetic tests verify these paths and their authority boundaries. This
+audit did not establish current client authentication, delegation activation
+or production operation. Job and maintenance adapters are implemented through the native
+writers; configured delegation, deployment and real-client acceptance remain
+separate gates. See [connection recovery](mcp-recovery.md) when the host
+connection requires reauthentication.
 
 ## S3 maintenance execution and confirmation (2026-10-10)
 
-Status: proposed until the integration PR merges. The implementation reuses
+Status: implemented on main by [#660](https://github.com/risu729/kogane/pull/660)
+(merge `79ae82d`). The implementation reuses
 the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
 against main `c0c4088a`; #652's temporal refusal and #643's release guard are
 preserved. The [integration plan](plans/2026-10-mcp-maintenance-followups.md)
