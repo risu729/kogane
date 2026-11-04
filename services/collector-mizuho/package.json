@@ -4,7 +4,7 @@
   "type": "module",
   "dependencies": {
     "iconv-lite": "0.7.3",
-    "parse5": "8.0.1"
+    "parse5": "8.1.0"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.4.11",
