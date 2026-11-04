@@ -4,7 +4,7 @@
   "type": "module",
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",
-    "hono": "4.13.14",
+    "hono": "4.13.16",
     "jose": "6.2.14",
     "zod": "4.6.7"
   },
