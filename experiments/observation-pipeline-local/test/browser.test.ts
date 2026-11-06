@@ -18,6 +18,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { createApi } from "../src/api.ts";
 import { insertObservation, insertParseRun, publishParseRun } from "../src/store.ts";
 import { buildFixture, RETIRED_DESCRIPTION } from "./fixture.ts";
+import { auditPage, openDisclosures, tabWalk } from "../../../apps/web/test/a11y-audit.ts";
 
 const CLIENT_DIR = join(import.meta.dir, "..", "..", "..", "apps", "web", "dist");
 
@@ -175,6 +176,37 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         expect(text.length).toBeGreaterThan(100);
       }
       expect(consoleErrors).toEqual([]);
+    },
+    TIMEOUT_MS,
+  );
+
+  test(
+    "every view passes the accessibility audit at desktop and phone widths",
+    async () => {
+      const findings: string[] = [];
+      for (const [width, mobile] of [
+        [1280, false],
+        [390, true],
+      ] as const) {
+        const page = await browser.newPage({ viewport: { width, height: 900 } });
+        try {
+          for (const [path, selector] of Object.entries(views)) {
+            await page.goto(baseUrl + path, { waitUntil: "networkidle" });
+            await page.locator(selector).waitFor({ state: "visible", timeout: 10_000 });
+            await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+            const prefix = `${String(width)}px ${path}: `;
+            for (const finding of await auditPage(page, { mobile }))
+              findings.push(prefix + finding);
+            for (const finding of await tabWalk(page)) findings.push(prefix + finding);
+            await openDisclosures(page);
+            for (const finding of await auditPage(page, { mobile }))
+              findings.push(`${prefix}(disclosures open) ${finding}`);
+          }
+        } finally {
+          await page.close();
+        }
+      }
+      expect(findings).toEqual([]);
     },
     TIMEOUT_MS,
   );

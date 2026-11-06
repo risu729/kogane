@@ -280,6 +280,7 @@
 }
 
 .field input,
+.field select,
 .field textarea {
   display: block;
   width: 100%;

@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import jobs from "../../../config/alarm-jobs.json";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema";
 import type { ScheduleSnapshot } from "../../../packages/collection/src/schedule-model";
@@ -599,4 +600,17 @@ describe.if(runnable)("operator schedule administration", () => {
     ]);
     await page.close();
   }, 30000);
+
+  test("the schedules and the maintenance editor pass the accessibility audit", async () => {
+    snapshot.leases = [];
+    const page = await browser.newPage({ viewport: { width: 1280, height: 960 } });
+    await page.goto(`${origin}/schedules`);
+    await page.getByRole("heading", { name: "収集スケジュール", exact: true }).waitFor();
+    await page.locator(".schedule-card").first().waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page.getByRole("button", { name: "停止時間を追加", exact: true }).click();
+    await page.locator(".maintenance-editor").waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 });

@@ -15,6 +15,7 @@ import {
 import { AccountConnectionDetails, AccountConnectionInventory } from "../account-connection.tsx";
 import { IdentityStatusBadge } from "../organization.tsx";
 import { Link } from "../router.tsx";
+import { Pagination } from "../pagination.tsx";
 import { IDENTIFIER_STATE_LABELS } from "../instrument-candidate-display.tsx";
 import { IDENTIFIER_RESOLUTION_STATES } from "../../../../packages/domain/src/instrument-candidates.ts";
 export function IdentitiesPage(): ReactNode {
@@ -151,6 +152,7 @@ export function IdentitiesPage(): ReactNode {
                 </div>
               )}
               <Pages
+                label="整理状況のページ"
                 offset={coverageOffset}
                 next={data.coverage.nextOffset}
                 change={setCoverageOffset}
@@ -340,7 +342,12 @@ function Accounts({
               ))}
             </div>
           )}
-          <Pages offset={offset} next={data.coverage.nextOffset} change={change} />
+          <Pages
+            label="一覧のページ"
+            offset={offset}
+            next={data.coverage.nextOffset}
+            change={change}
+          />
         </>
       )}
     </QueryBoundary>
@@ -395,43 +402,46 @@ function Instruments({
               ))}
             </div>
           )}
-          <Pages offset={offset} next={data.coverage.nextOffset} change={change} />
+          <Pages
+            label="一覧のページ"
+            offset={offset}
+            next={data.coverage.nextOffset}
+            change={change}
+          />
         </>
       )}
     </QueryBoundary>
   );
 }
-/** The same markup as `Pager` in ViewControls, for lists paged by offset in memory. */
+/** The shared pagination row, for lists paged by offset in memory. */
 function Pages({
+  label,
   offset,
   next,
   change,
 }: {
+  /** Names the list paged: the page shows the coverage and a list at once. */
+  label: string;
   offset: number;
   next: number | null;
   change: (n: number) => void;
 }) {
   return (
-    <div className="pagination" aria-label="表示ページ">
-      <span role="status" aria-live="polite">
-        {offset + 1}件目から
-      </span>
-      <button
-        type="button"
-        className="button"
-        disabled={offset === 0}
-        onClick={() => change(Math.max(0, offset - IDENTITY_PAGE_LIMIT))}
-      >
-        前の{IDENTITY_PAGE_LIMIT}件
-      </button>
-      <button
-        type="button"
-        className="button"
-        disabled={next === null}
-        onClick={() => next !== null && change(next)}
-      >
-        次の{IDENTITY_PAGE_LIMIT}件
-      </button>
-    </div>
+    <Pagination
+      label={label}
+      status={<>{offset + 1}件目から</>}
+      previous={{
+        label: `前の${String(IDENTITY_PAGE_LIMIT)}件`,
+        disabled: offset === 0,
+        onClick: () => change(Math.max(0, offset - IDENTITY_PAGE_LIMIT)),
+      }}
+      next={{
+        label: `次の${String(IDENTITY_PAGE_LIMIT)}件`,
+        disabled: next === null,
+        onClick: () => {
+          if (next !== null) change(next);
+        },
+      }}
+    />
   );
 }
