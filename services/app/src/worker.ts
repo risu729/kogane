@@ -26,6 +26,10 @@ import {
 } from "./card-settlements-api";
 import { cardPurchasesApi, CARD_PURCHASES_PATH } from "./card-purchases-api";
 import { reportedStateApi, REPORTED_STATE_PATH } from "./reported-state-api";
+import {
+  reportedHoldingsChangeApi,
+  REPORTED_HOLDINGS_CHANGE_PATH,
+} from "./reported-holdings-change-api";
 import { reconstructedStateApi, RECONSTRUCTED_STATE_PATH } from "./reconstructed-state-api";
 import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
@@ -47,6 +51,7 @@ function classify(path: string): string {
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
   if (path === REPORTED_STATE_PATH) return "reported_state";
+  if (path === REPORTED_HOLDINGS_CHANGE_PATH) return "reported_holdings_change";
   if (path === RECONSTRUCTED_STATE_PATH) return "reconstructed_state";
   if (path === "/api/collection-quality" || path.startsWith("/api/collection-quality/"))
     return "collection_quality";
@@ -116,6 +121,11 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // joins (docs/reported-state.md).
   const reportedStateResponse = await catalogue(() => reportedStateApi(request, env, url, subject));
   if (reportedStateResponse) return reportedStateResponse;
+  // Two dates of the same reported state, side by side; served where it is (ADR 0075).
+  const holdingsChangeResponse = await catalogue(() =>
+    reportedHoldingsChangeApi(request, env, url, subject),
+  );
+  if (holdingsChangeResponse) return holdingsChangeResponse;
   const reconstructedResponse = await catalogue(() =>
     reconstructedStateApi(request, env, url, subject),
   );

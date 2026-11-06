@@ -11,6 +11,9 @@
 - Carried by: `packages/domain/src/holdings-change.ts`,
   `packages/read-model/src/dated-state.ts` (`DATED_SNAPSHOT_UNITS_SQL`),
   `packages/application/src/query/holdings-change.ts`,
+  `services/app/src/reported-holdings-change-api.ts`,
+  `packages/observation-shared/src/reported-holdings-change-contract.ts`,
+  `apps/web/src/pages/ReportedHoldingsChange.tsx`,
   [reported state](../reported-state.md#holdings-changes-between-two-dates)
 
 ## Context
@@ -113,10 +116,11 @@ result. What exists, read from the code on main at `f33b121`:
    `to` after the caller's date is `date_in_future`, and a named source or
    account that does not exist is `unknown_source` or `unknown_account`, each
    decided before the reads it guards.
-8. **Exposure.** An application query only (`queryHoldingsChange`). No
-   route, agent tool or page in this decision; they follow the reported
-   state's own exposure (`GET /api/v2/reported-state`, reader authority, a
-   wire contract and the `/state` page) in a later pull request.
+8. **Exposure.** An application query (`queryHoldingsChange`), served as
+   the reported state is: a route, a wire contract and a panel of the `/state`
+   page, decided in the [amendment below](#amendment-route-contract-and-page-2026-11-06),
+   which replaces this decision's earlier "no route, agent tool or page yet".
+   No agent tool, since the reported state on a date has none.
 
 ## Consequences
 
@@ -153,7 +157,8 @@ result. What exists, read from the code on main at `f33b121`:
   shared machine). The statement-scale store holds no
   position container (see [reported state](../reported-state.md#cost)); not
   measured on workerd or D1.
-- No route, agent tool or page yet (decision 8).
+- No agent tool: the reported state on a date has none to mirror
+  (amendment below).
 
 ## Verification
 
@@ -188,3 +193,108 @@ Synthetic data only; no production data, D1 or Workers.
   of one answer on the scaled store has no whole scan beyond what
   `dated-state-scale.test.ts` accepts for the same statement, and the timing
   above.
+
+## Amendment: Route, contract and page (2026-11-06)
+
+- Status: proposed (accepted when its pull request merges)
+- Date: 2026-11-06
+- Issue: #550 and #551, the exposure of the comparison above
+- Replaces: decision 8's "no route, agent tool or page in this decision"
+- Carried by: `services/app/src/reported-holdings-change-api.ts`,
+  `packages/observation-shared/src/reported-holdings-change-contract.ts`,
+  `apps/web/src/reported-holdings-change-api.ts`,
+  `apps/web/src/pages/ReportedHoldingsChange.tsx`,
+  [reported state](../reported-state.md#http-contract-and-page)
+
+### Context
+
+Decision 8 left `queryHoldingsChange` without a caller and said its exposure
+would follow the reported state's own: `GET /api/v2/reported-state` under the
+reader authority, a strict wire contract checked by the browser, and the
+`/state` page. The reported state on a date has no agent tool (the shared
+query's `reported-state` intent reads the latest balances, not a dated state),
+so there is none to mirror.
+
+### Options considered
+
+1. **A sibling page** (`/state/changes`). Rejected: the comparison ends on a
+   date the `/state` page already asks for, and a second page would repeat its
+   date form and its capability.
+2. **A panel of the `/state` page that compares a chosen start date with the
+   page's date.** Chosen. It asks nothing until a start date is chosen, so the
+   page's own request and cost are unchanged.
+3. **An agent tool now.** Rejected: the reported state has none, and the
+   owner's direction is to mirror its exposure; a tool would need its own
+   grant, listing and audit decision.
+
+### Decision
+
+- **Route.** `GET /api/v2/reported-holdings-change?from=YYYY-MM-DD&to=YYYY-MM-DD[&source=…][&account=…]`,
+  GET and HEAD only, under the reader authority (the same `summary.read`
+  check of `readerGrant` as the reported state), served exactly where the
+  reported state is (`reportedStateAvailable`), otherwise `404 not_found`.
+  The parameter shapes are the reported state's. Closed answers: `400
+  invalid_query` for any other, repeated or empty parameter and a malformed
+  source or account; `400 invalid_date` for a missing, malformed or
+  impossible `from` or `to`; `400 invalid_range` when `from` is not before
+  `to`; `400 date_in_future` when `to` is after today in Tokyo; `404
+  unknown_source` and `404 unknown_account` (the query's own refusals); `413
+  result_limit_exceeded` with `refs` naming `holding_limit_exceeded` or
+  `dated_state_limit_exceeded`, never a cut answer. The body is
+  `{ apiVersion: 2, …HoldingsChange }`; the request class is
+  `reported_holdings_change`.
+- **Contract.** `validReportedHoldingsChange`, wired into `validApiResponse`:
+  exact keys at every level; closed schema, policy, zone, statuses, reasons
+  (each once, in the domain's order) and side states; each side's own reason
+  present exactly when its state gives one; a change only for `compared`, an
+  exact decimal-v1 quantity (decimal strings) in the holding's unit, and
+  `null` for `listed_at_*_only` and `not_comparable`, the one-date statuses
+  facing a `not_listed` side; counts equal to the holdings; `total` and
+  `valuation` `"not-computed"`; the manifest's dates, policy and length
+  matching the body. The lists are imported from `packages/domain`, which the
+  client already bundles; the client recalculates nothing.
+- **Page.** A panel `保有数量の変化` on the `/state` page (shown while
+  `reportedStateOnDate` is; no new capability, since the route is served on
+  the same condition), with a start date `比較の開始日` before the page's
+  基準日. Compared rows show the server's change with its sign through the
+  shared display module (`QuantityChange` beside `SettlementQuantity`); a
+  holding listed on one date shows the provider's text on that side, `記載なし`
+  on the other, and `数値なし` in the change column; `not_comparable` rows
+  show their reasons in words. No total, valuation or sum of changes is shown.
+- **Agent.** No tool, no MCP listing change.
+
+### Consequences
+
+- No migration, no new statement, no new capability field.
+- The route adds one GET path to the Worker; an MCP-application token is
+  refused there like on every ordinary route.
+
+### Limits
+
+- No agent read; one would follow an agent read of the reported state on a
+  date.
+- The page compares only up to its own 基準日, and does not offer the
+  `source` or `account` filters the route takes.
+
+### Verification
+
+- `services/app/test/reported-holdings-change-api.test.ts`: two captures of
+  one position container recorded on two days through the in-process ingest
+  (the clock faked while each is recorded); the validated answer (compared,
+  start-only and end-only rows, and a missing start capture as a reason),
+  nothing written, any signed-in subject served and an anonymous one refused,
+  GET-only, every closed refusal and its status, the 413 on a dated read past
+  its bound, and absence where the views are missing.
+- `services/app/test/mcp-client.test.ts`: an MCP-application token is refused
+  on the route.
+- `apps/web/test/reported-holdings-change-contract.test.ts`: the query's own
+  answers pass on four ranges, and a total, a valuation, a figure on a
+  one-date or not-comparable row, a missing or out-of-order reason, an unknown
+  status or side state, a change in another unit or not exact, wrong counts, a
+  dropped holding or coverage and a mismatched manifest are refused.
+- `apps/web/test/reported-holdings-change.browser.test.ts`: in the production
+  client, nothing is asked before a start date is chosen; the request carries
+  `from` and the page's date; compared rows show `+2.5`, `±0` and `-3.5`, the
+  other rows `数値なし` with their status and reasons; no sum appears; a start
+  date on or after the 基準日 cannot be asked; a 413 says so; and the page
+  has no sideways scroll at desktop and phone widths.

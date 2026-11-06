@@ -676,6 +676,23 @@
   min-width: 44rem;
 }
 
+/* Holdings change between two dates: each side's capture date and the
+ * holding's provider key sit on their own line under the figure. */
+.holdings-change-table {
+  min-width: 52rem;
+}
+
+.holdings-change-capture {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: normal;
+}
+
+/* A side's capture date and its original link stay on one line. */
+.holdings-change-table td .holdings-change-capture {
+  white-space: nowrap;
+}
+
 /* ── reconstructed state ───────────────────────────────────────────── */
 
 /* Reported, reconstructed, reported and the difference side by side: the
