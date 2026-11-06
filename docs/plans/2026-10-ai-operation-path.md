@@ -1,7 +1,8 @@
 # Plan: AI as a delegated operation path, with a common audit log
 
 - Status: **in progress**. Slice S1 (section 8) and S3 declaration core (#628)
-  are implemented on main. This S3 execution slice implements delegated R1
+  are implemented on main; slice S7 (the `alarm` and `lane` audit writers) is
+  implemented in its own pull request. This S3 execution slice implements delegated R1
   operations, bounded preparation machinery and shared history/audit reads;
   a separate R2 slice adds command and provider-request adapters, and a
   settings slice adds job prepare/confirm with linked reversal. The integrated
@@ -1061,6 +1062,12 @@ acceptance and concrete client delegation remain separate owner decisions.
 
 **S7 — `alarm` and `lane` writers** (after S1).
 
+- Status (2026-11-06): implemented in its own pull request, pending its
+  independent review and merge; the details this plan left open are in
+  [ADR 0064's S7 amendment](../adr/0064-common-audit-log.md#amendment-the-alarm-and-lane-writers-slice-s7-2026-11-06)
+  and [the audit log](../audit-log.md#the-processors-own-records-alarm-and-lane).
+  The lane record is written after the lane rather than in its batches, a
+  limit the amendment records.
 - What: one record per claimed `collection`-kind occurrence; one per lane
   tick that wrote decisions, proposals or settings, carrying refs only.
 - ADR: 0064. Migration: none.
