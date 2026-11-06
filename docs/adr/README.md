@@ -77,3 +77,4 @@ for current behavior.
 - [ADR 0069: Retire collector-local public admin bearer entrypoints in bounded slices](0069-collector-admin-retirement.md)
 - [ADR 0070: Validate observed SBI Shinsei history offline before enabling acquisition](0070-sbi-shinsei-observed-history-boundary.md) — proposed; offline-only request and capture inspection, no history acquisition or publication
 - [ADR 0071: Let Renovate own dependency auto-merge](0071-remove-custom-automerge.md) — proposed; remove the unconfigured custom merge workflow
+- [ADR 0075: Reported holdings change between two dates, per provider holding key, never totalled](0075-reported-holdings-change-between-dates.md) — proposed; an application query only, no route or page yet
