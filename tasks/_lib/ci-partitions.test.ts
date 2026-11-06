@@ -25,10 +25,19 @@ function nonemptyShards(directory: string): boolean {
   return defaultFiles(directory).length >= 2;
 }
 
-function native(command: string[], cwd = REPO_ROOT): string {
+// The hard bound on each native process. Ten seconds suits the task listing
+// and the small Bun fixture.
+const DEFAULT_PROCESS_TIMEOUT = 10_000;
+// A dry run of the repository graph is slower: mise reloads every task
+// definition for each task it plans (about 200 tasks, 274 definitions). It
+// takes about 8 seconds alone on a four-CPU machine and was measured at 17
+// seconds beside the processor suite, so ten seconds killed it under load.
+const PLAN_PROCESS_TIMEOUT = 60_000;
+
+function native(command: string[], cwd = REPO_ROOT, timeout = DEFAULT_PROCESS_TIMEOUT): string {
   const result = Bun.spawnSync(command, {
     cwd,
-    timeout: 10_000,
+    timeout,
     killSignal: "SIGKILL",
     env: { ...process.env, NO_COLOR: "1", MISE_TASK_SHOW_FULL_CMD: "true" },
   });
@@ -37,52 +46,63 @@ function native(command: string[], cwd = REPO_ROOT): string {
   return result.stdout.toString() + result.stderr.toString();
 }
 
-test("hosted partitions cover exactly the executable leaves of local full verification", () => {
-  const tasks = JSON.parse(
-    native(["mise", "tasks", "ls", "--all", "--json", "--hidden"]),
-  ) as TaskRecord[];
-  const byName = new Map(tasks.map((task) => [task.name, task]));
-  const leaves = (root: string) =>
-    [...dependencyClosure(root, byName)].filter((name) => (byName.get(name)?.run?.length ?? 0) > 0);
-  const processor = `${REPO_ROOT}/services/processor`;
-  // An empty Bun shard returns success by default. Required coverage validation
-  // rejects that state before the aggregate can accept the two shard results.
-  expect(nonemptyShards(processor)).toBe(true);
-  const config = Bun.TOML.parse(readFileSync(`${processor}/bunfig.toml`, "utf8")) as {
-    test?: Record<string, unknown>;
-  };
-  for (const key of ["root", "pathIgnorePatterns", "onlyFailures"])
-    expect(config.test?.[key]).toBeUndefined();
-  const full = leaves("//:checks").sort();
-  const remainder = leaves("//:ci:remainder");
-  expect(remainder).not.toContain("//services/processor:test");
-  expect(remainder).toContain("//packages/storage-d1:test");
-  const combined = new Set(remainder);
-  for (const index of [1, 2]) {
-    const name = `//services/processor:test-shard-${index}`;
-    const task = byName.get(name);
-    expect(task?.run).toEqual([
-      `node ../../tasks/_lib/coverage-run.mjs bun test --shard=${index}/2`,
+test(
+  "hosted partitions cover exactly the executable leaves of local full verification",
+  () => {
+    const tasks = JSON.parse(
+      native(["mise", "tasks", "ls", "--all", "--json", "--hidden"]),
+    ) as TaskRecord[];
+    const byName = new Map(tasks.map((task) => [task.name, task]));
+    const leaves = (root: string) =>
+      [...dependencyClosure(root, byName)].filter(
+        (name) => (byName.get(name)?.run?.length ?? 0) > 0,
+      );
+    const processor = `${REPO_ROOT}/services/processor`;
+    // An empty Bun shard returns success by default. Required coverage validation
+    // rejects that state before the aggregate can accept the two shard results.
+    expect(nonemptyShards(processor)).toBe(true);
+    const config = Bun.TOML.parse(readFileSync(`${processor}/bunfig.toml`, "utf8")) as {
+      test?: Record<string, unknown>;
+    };
+    for (const key of ["root", "pathIgnorePatterns", "onlyFailures"])
+      expect(config.test?.[key]).toBeUndefined();
+    const full = leaves("//:checks").sort();
+    const remainder = leaves("//:ci:remainder");
+    expect(remainder).not.toContain("//services/processor:test");
+    expect(remainder).toContain("//packages/storage-d1:test");
+    const combined = new Set(remainder);
+    for (const index of [1, 2]) {
+      const name = `//services/processor:test-shard-${index}`;
+      const task = byName.get(name);
+      expect(task?.run).toEqual([
+        `node ../../tasks/_lib/coverage-run.mjs bun test --shard=${index}/2`,
+      ]);
+      expect(task?.dir).toBe(`${REPO_ROOT}/services/processor`);
+      for (const leaf of leaves(name))
+        combined.add(leaf === name ? "//services/processor:test" : leaf);
+    }
+    expect([...combined].sort()).toEqual(full);
+    expect(byName.get("//services/processor:test")?.run).toEqual([
+      "node ../../tasks/_lib/coverage-run.mjs bun test",
     ]);
-    expect(task?.dir).toBe(`${REPO_ROOT}/services/processor`);
-    for (const leaf of leaves(name))
-      combined.add(leaf === name ? "//services/processor:test" : leaf);
-  }
-  expect([...combined].sort()).toEqual(full);
-  expect(byName.get("//services/processor:test")?.run).toEqual([
-    "node ../../tasks/_lib/coverage-run.mjs bun test",
-  ]);
 
-  const plan = native(["mise", "run", "--dry-run", "--jobs", "1", "ci:remainder"]);
-  const commands = plan.split("\n").filter((line) => line.includes("] $ "));
-  const storage = commands.findIndex((line) => line.includes("[//packages/storage-d1:test]"));
-  expect(storage).toBeGreaterThan(0);
-  // Storage is the last workspace command; only the four Docker bodies follow.
-  expect(commands.slice(storage + 1)).toHaveLength(4);
-  for (const line of commands.slice(storage + 1))
-    expect(line).toContain("$ ./node_modules/.bin/wrangler deploy --dry-run");
-  expect(plan).not.toContain("[//services/processor:test]");
-}, 30_000);
+    const plan = native(
+      ["mise", "run", "--dry-run", "--jobs", "1", "ci:remainder"],
+      REPO_ROOT,
+      PLAN_PROCESS_TIMEOUT,
+    );
+    const commands = plan.split("\n").filter((line) => line.includes("] $ "));
+    const storage = commands.findIndex((line) => line.includes("[//packages/storage-d1:test]"));
+    expect(storage).toBeGreaterThan(0);
+    // Storage is the last workspace command; only the four Docker bodies follow.
+    expect(commands.slice(storage + 1)).toHaveLength(4);
+    for (const line of commands.slice(storage + 1))
+      expect(line).toContain("$ ./node_modules/.bin/wrangler deploy --dry-run");
+    expect(plan).not.toContain("[//services/processor:test]");
+    // The listing and the plan, each within its own process bound.
+  },
+  DEFAULT_PROCESS_TIMEOUT + PLAN_PROCESS_TIMEOUT + 10_000,
+);
 
 test("native Bun shards discover every default test suffix with a disjoint complete union", () => {
   const directory = mkdtempSync(join(tmpdir(), "kogane-bun-shards-"));

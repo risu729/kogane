@@ -1,8 +1,11 @@
--- Frozen from d6753e38 before the identity sweep cost rewrite.
+-- Frozen from d6753e38 before the identity sweep cost rewrite. The query
+-- structure is frozen; the required-policy CASE follows the shipped policy
+-- expression (SBI Shinsei branch added by ADR 0076).
 SELECT p.id,a.id AS artifact_id,a.source_id,r.producer_id,a.fetch_run_id,
       CASE WHEN a.source_id='vpass' AND EXISTS(
     SELECT 1 FROM trusted_vpass_card_bindings binding WHERE binding.financial_artifact_id=a.id)
     THEN 2 WHEN a.source_id='mizuho-bank'
+    THEN 2 WHEN a.source_id='sbi-shinsei-bank'
     THEN 2 ELSE 1 END AS required_policy,
       (NOT EXISTS(SELECT 1 FROM transaction_observations empty_row WHERE empty_row.parse_run_id=p.id) AND NOT EXISTS(SELECT 1 FROM balance_observations empty_row WHERE empty_row.parse_run_id=p.id) AND NOT EXISTS(SELECT 1 FROM position_observations empty_row WHERE empty_row.parse_run_id=p.id) AND NOT EXISTS(SELECT 1 FROM valuation_observations empty_row WHERE empty_row.parse_run_id=p.id)) AS is_empty
     FROM parse_runs p JOIN observation_fetch_artifacts a ON a.id=p.fetch_artifact_id JOIN financial_fetch_runs r ON r.id=a.fetch_run_id
@@ -12,5 +15,6 @@ SELECT p.id,a.id AS artifact_id,a.source_id,r.producer_id,a.fetch_run_id,
       WHERE i.parse_run_id=p.id AND i.policy_version>=CASE WHEN a.source_id='vpass' AND EXISTS(
     SELECT 1 FROM trusted_vpass_card_bindings binding WHERE binding.financial_artifact_id=a.id)
     THEN 2 WHEN a.source_id='mizuho-bank'
+    THEN 2 WHEN a.source_id='sbi-shinsei-bank'
     THEN 2 ELSE 1 END)
     ORDER BY NOT EXISTS(SELECT 1 FROM published_parse_runs pub WHERE pub.parse_run_id=p.id),p.id LIMIT ?2;

@@ -19,7 +19,7 @@ for current behavior.
 - [ADR 0006: Keep the reconciliation lane to provider identifiers and the matching window](0006-reconciliation-lane-scope.md)
 - [ADR 0007: Key MyJCB confirmed statements by the payment month the page names](0007-myjcb-statement-identity.md)
 - [ADR 0008: Run 28 repair jobs and 40 identity runs a tick, with the D1 call risk documented](0008-repair-lane-throughput.md)
-- [ADR 0009: Lane tick records are bounded operational state](0009-lane-tick-records.md)
+- [ADR 0009: Lane tick records are bounded operational state](0009-lane-tick-records.md) — accepted; amended 2026-11-06 (proposed: the settlement sweep counts its unmatched statements)
 - [ADR 0010: Bound terminal registration by a per-invocation operation budget](0010-terminal-registration-budget.md)
 - [ADR 0011: Resolve settlement ownership through keyed CTEs, keep the 0044 views as the contract](0011-keyed-ownership-ctes.md)
 - [ADR 0012: Map Mizuho ordinary deposits under identity policy version 2](0012-mizuho-identity-policy-v2.md)
@@ -57,7 +57,7 @@ for current behavior.
 - [ADR 0046: Maintenance windows as a separately granted agent capability](0046-agent-maintenance-windows.md) — proposed; amended 2026-10-09 by ADR 0063 (the revision is a delegated operation, refused until delegated execution exists)
 - [ADR 0047: Connect MCP clients through Cloudflare Access Managed OAuth, as an agent-only principal](0047-mcp-client-connection.md) — proposed; no client has connected to a deployment
 - [ADR 0048: Run an accepted collection or session refresh once through the named collector RPC](0048-operation-collector-dispatch.md) — accepted; production dispatch unverified
-- [ADR 0049: Keep the displayed and the computed reward expiry apart, each with its basis](0049-reward-expiry-basis.md) — accepted
+- [ADR 0049: Keep the displayed and the computed reward expiry apart, each with its basis](0049-reward-expiry-basis.md) — accepted; offer simulation amended 2026-11-06 (proposed): offer-set bound, caller-named version, reported search stops
 - [ADR 0050: Re-survey official maintenance pages as proposals an operator accepts](0050-maintenance-survey-proposals.md) — accepted; no page enabled until the owner confirms it
 - [ADR 0051: A pure lot engine over a provisional input contract](0051-provisional-lot-engine.md) — accepted; its adapter is ADR 0059
 - [ADR 0052: Reconstructed state is a pure fold over a provisional adopted-event input, compared with reported snapshots](0052-reconstructed-state-fold.md) — accepted; amended by ADR 0058
@@ -78,6 +78,8 @@ for current behavior.
 - [ADR 0070: Validate observed SBI Shinsei history offline before enabling acquisition](0070-sbi-shinsei-observed-history-boundary.md) — proposed; offline-only request and capture inspection, no history acquisition or publication
 - [ADR 0071: Let Renovate own dependency auto-merge](0071-remove-custom-automerge.md) — proposed; remove the unconfigured custom merge workflow
 - [ADR 0072: List and re-display fixed report artifacts in the web UI](0072-report-artifact-pages.md) — proposed; catalogue route, `reportArtifacts` capability and read-only 評価レポート pages; amended (proposed, 2026-11-06): export link, no agent report read yet
+- [ADR 0073: Count each source's instrument identifiers by their candidate state, in a read beside the account coverage](0073-instrument-coverage-per-source.md) — proposed; `GET /api/identity/instrument-coverage` and the `銘柄の整理状況` panel
 - [ADR 0074: A pure planner states multi-debit allocations of a card statement and answers unsupported for partial payments and excesses](0074-card-statement-allocation-planner.md) — proposed; nothing calls it, no policy, no writer
 - [ADR 0075: Reported holdings change between two dates, per provider holding key, never totalled](0075-reported-holdings-change-between-dates.md) — proposed; an application query, served by a route, a wire contract and a panel of the `/state` page (2026-11-06 amendment), no agent tool
+- [ADR 0076: Classify SBI Shinsei's FX board and stage references as non-account statements under identity policy version 2](0076-sbi-shinsei-non-account-identity.md) — proposed; the sweep re-identifies SBI Shinsei parses append-only after deployment
 - [ADR 0079: Index pending parse runs so the sweep's maintenance reads only them](0079-pending-parse-run-index.md) — proposed; additive partial index, migration 0081

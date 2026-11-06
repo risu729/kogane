@@ -335,6 +335,12 @@ describe("the reward routes over the READ database", () => {
     expect((await call("/api/v2/rewards/expiry?cursor=zzz")).status).toBe(400);
     // A limit the contract does not offer is refused.
     expect((await call("/api/v2/rewards/expiry?limit=7")).status).toBe(400);
+    // So is one that only Number() reads as an offered size.
+    for (const limit of ["0x19", "2.5e1", "25.0", "+25", "%2025"]) {
+      const odd = await call(`/api/v2/rewards/expiry?limit=${limit}`);
+      expect(odd.status).toBe(400);
+      expect(((await odd.json()) as { error: string }).error).toBe("invalid_limit");
+    }
   });
 
   it("a later evaluation publishes a new snapshot and the page follows it", async () => {

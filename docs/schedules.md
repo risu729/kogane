@@ -74,6 +74,14 @@ Scheduling/storage failures reserve a one-minute bookkeeping wakeup rather than
 exhausting only native alarm retries. Receipts still in `started` after one hour
 are reported as uncertain; this neither expires leases nor repeats collection.
 
+Claiming an occurrence of a `collection`-kind job also appends one `alarm`
+audit record (`alarm.occurrence.claim`, principal `alarm:<job id>`) as the
+last statement of the claim batch, joined to the occurrence row it inserted;
+a claim whose record cannot be written is rolled back with it and retried by
+the same bookkeeping wakeup. The outcome stays in the occurrence row. The
+`processor-tick` and `sbi-vc-keepalive` occurrences record nothing
+([audit log](audit-log.md#the-processors-own-records-alarm-and-lane)).
+
 The trusted workflow refuses pre-alarm release/rollback targets before checkout
 and before any production mutation. Removing the ScheduleAlarm class requires a
 separate retirement migration; it is not an ordinary old-commit rollback.
@@ -154,9 +162,15 @@ all. The page's `GET` is not recorded.
 
 These routes require the configured human Access operator. Writes require
 same-origin JSON, `x-kogane-settings: 1` and strict payload validation
-(maximum 16 KiB). They are not agent grants, service-token edit routes or MCP
-tools. The separately allowlisted, bodyless deployment `/bootstrap` route
+(maximum 16 KiB). They are not agent grants, service-token edit routes or
+MCP tools. The separately allowlisted, bodyless deployment `/bootstrap` route
 only reconciles reservations after release identity checks.
+
+The Processor's private `/internal/schedules` writes, its agent read and its
+delegated job and maintenance adapters bound their bodies again at 16 KiB in
+bytes while reading them: past the limit they stop reading, cancel the stream
+and answer `413 request_too_large`, with or without a content-length
+(`services/processor/src/bounded-body.ts`).
 
 Maintenance changes are made from the management screen using this HTTP API.
 An agent can read maintenance windows through the tool below; revising one

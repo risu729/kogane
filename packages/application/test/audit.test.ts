@@ -8,6 +8,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import {
   aggregateAuditOverflow,
+  alarmClaimWrite,
   appendAnswerRecord,
   AUDIT_DAILY_CAPS,
   AUDIT_PAGE_SQL,
@@ -16,6 +17,8 @@ import {
   auditPageFilters,
   buildAuditRecord,
   executeOperation,
+  laneTickRecord,
+  type LaneWrites,
   OPERATION_CATALOGUE,
   OperationCall,
   readAuditPage,
@@ -219,6 +222,227 @@ describe("the record builder", () => {
       delegation: "schedules.maintenance.update",
     });
     expect(OPERATION_CATALOGUE["schedules.maintenance.read"].risk).toEqual(["R0"]);
+    // The Processor's own records are catalogued on its own paths, never tools.
+    expect(OPERATION_CATALOGUE["alarm.occurrence.claim"]).toMatchObject({
+      risk: ["R2"],
+      effect: "accepted",
+      paths: ["alarm"],
+    });
+    expect(OPERATION_CATALOGUE["lane.tick"]).toMatchObject({
+      risk: ["R2", "R1"],
+      effect: "applied",
+      paths: ["lane"],
+    });
+    for (const path of ["agent-http", "mcp"] as const) {
+      expect(toolOperation("kogane.alarm.occurrence.claim", path)).toBeNull();
+      expect(toolOperation("kogane.lane.tick", path)).toBeNull();
+    }
+  });
+});
+
+describe("the Processor's own records (plan slice S7)", () => {
+  const CLAIM = {
+    jobId: "mizuho-bank",
+    source: "mizuho-bank",
+    occurrenceId: "scheduled:mizuho-bank:1790000000000",
+    scheduleRevision: 3,
+    claimedAt: AT,
+  };
+  const WRITES: LaneWrites = {
+    decisions: { count: 2, from: 10, to: 14 },
+    commits: { count: 2, from: 7, to: 8, epoch: "core-epoch-1" },
+    proposals: [
+      { kind: "reconciliation-supports", count: 1, from: 30, to: 30 },
+      { kind: "reconciliation-pending-to-posted", count: 3, from: 21, to: 29 },
+    ],
+  };
+  const LANE = {
+    path: "lane",
+    subject: null,
+    principal: "lane:purchase-recognition",
+    principalKind: "automatic",
+    correlationId: CORRELATION,
+  } as const;
+  const lane = (
+    facts: Partial<Parameters<typeof buildAuditRecord>[1]> = {},
+    actor: Partial<AuditActor> = {},
+  ) =>
+    buildAuditRecord(
+      { ...LANE, ...actor },
+      {
+        operation: "lane.tick",
+        riskClass: "R2",
+        result: "applied",
+        diff: { kind: "lane", decisionRevisions: 0, commits: 0, proposals: [] },
+        ...facts,
+      },
+      AT,
+    );
+
+  test("alarm and lane principals have their own shapes, no subject, and only effect or failure results", () => {
+    expect(() => lane({}, { principal: "lane:purchase_recognition" })).toThrow(
+      "audit_record_invalid:principal",
+    );
+    expect(() => lane({}, { principal: "alarm:mizuho-bank" })).toThrow(
+      "audit_record_invalid:principal",
+    );
+    expect(() => lane({}, { principal: PROVIDER_TEXT })).toThrow("audit_record_invalid:principal");
+    expect(() => lane({}, { subject: SUBJECT })).toThrow("audit_record_invalid:subject");
+    expect(() => lane({}, { principalKind: "agent" })).toThrow(
+      "audit_record_invalid:principal_kind",
+    );
+    for (const result of ["read", "refused", "replayed"] as const)
+      expect(() =>
+        lane({ result, resultCode: result === "refused" ? "lane_failed" : null }),
+      ).toThrow("audit_record_invalid:result");
+    expect(() => lane({ step: "prepare", result: "failed", resultCode: "lane_failed" })).toThrow(
+      "audit_record_invalid:result",
+    );
+    expect(lane({ result: "failed", resultCode: "lane_failed" }).result).toBe("failed");
+  });
+
+  test("the lane diff is closed: counts and closed proposal kinds only, each kind once", () => {
+    const diff = (value: unknown) =>
+      lane({ diff: value as Parameters<typeof buildAuditRecord>[1]["diff"] });
+    expect(() =>
+      diff({ kind: "lane", decisionRevisions: 1, commits: 0, proposals: [], scanned: 4 }),
+    ).toThrow("audit_record_invalid:diff_json");
+    expect(() =>
+      diff({
+        kind: "lane",
+        decisionRevisions: 0,
+        commits: 0,
+        proposals: [{ kind: PROVIDER_TEXT, count: 1 }],
+      }),
+    ).toThrow("audit_record_invalid:diff_json");
+    expect(() =>
+      diff({
+        kind: "lane",
+        decisionRevisions: 0,
+        commits: 0,
+        proposals: [
+          { kind: "maintenance-survey-new", count: 1 },
+          { kind: "maintenance-survey-new", count: 2 },
+        ],
+      }),
+    ).toThrow("audit_record_invalid:diff_json");
+    expect(() =>
+      diff({
+        kind: "lane",
+        decisionRevisions: 0,
+        commits: 0,
+        proposals: [{ kind: "maintenance-survey-new", count: 0 }],
+      }),
+    ).toThrow("audit_record_invalid:diff_json");
+  });
+
+  test("a lane tick names its ranges and their sizes, R2 with decisions or commits, R1 with proposals only, nothing when idle", () => {
+    const row = laneTickRecord(
+      "purchase_recognition",
+      WRITES,
+      { result: "applied" },
+      AT,
+      CORRELATION,
+    )!;
+    expect(row).toMatchObject({
+      path: "lane",
+      subject: null,
+      principal: "lane:purchase-recognition",
+      principal_kind: "automatic",
+      operation: "lane.tick",
+      risk_class: "R2",
+      result: "applied",
+      target_ref: null,
+      scope_source: null,
+    });
+    expect(JSON.parse(row.refs_json)).toEqual([
+      "decision-revisions:10-14",
+      "commit-seq:core-epoch-1:7-8",
+      "proposals:reconciliation-supports:30-30",
+      "proposals:reconciliation-pending-to-posted:21-29",
+    ]);
+    expect(JSON.parse(row.diff_json)).toEqual({
+      kind: "lane",
+      decisionRevisions: 2,
+      commits: 2,
+      proposals: [
+        { kind: "reconciliation-pending-to-posted", count: 3 },
+        { kind: "reconciliation-supports", count: 1 },
+      ],
+    });
+    const proposalsOnly = laneTickRecord(
+      "maintenance_survey",
+      {
+        decisions: null,
+        commits: null,
+        proposals: [{ kind: "maintenance-survey-changed", count: 1, from: 4, to: 4 }],
+      },
+      { result: "failed", code: "TypeError" },
+      AT,
+      CORRELATION,
+    )!;
+    expect(proposalsOnly).toMatchObject({
+      principal: "lane:maintenance-survey",
+      risk_class: "R1",
+      result: "failed",
+      result_code: "lane_failed",
+    });
+    expect(
+      laneTickRecord(
+        "maintenance_survey",
+        { decisions: null, commits: null, proposals: [] },
+        { result: "failed", code: "survey_failed" },
+        AT,
+        CORRELATION,
+      ),
+    ).toBeNull();
+    // A range the reference patterns refuse is refused whole, never stored without its reference.
+    expect(() =>
+      laneTickRecord(
+        "purchase_recognition",
+        { ...WRITES, commits: { count: 1, from: 1, to: 1, epoch: "Core Epoch" } },
+        { result: "applied" },
+        AT,
+        CORRELATION,
+      ),
+    ).toThrow("audit_record_invalid:refs_json");
+  });
+
+  test("a claim record is joined to the occurrence its batch inserted, once per occurrence", async () => {
+    const db = migratedDatabase();
+    const store = sqliteCommandStore(db);
+    db.run(
+      "UPDATE collection_schedules SET enabled=1,next_nominal_at='2026-09-21T13:33:20.000Z' WHERE id='mizuho-bank'",
+    );
+    const write = alarmClaimWrite(CLAIM, CORRELATION);
+    // No occurrence row: no record.
+    expect((await store.batch([write]))[0]?.changes).toBe(0);
+    db.run(
+      "INSERT INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,status) VALUES(?,?,?,?,'started')",
+      [CLAIM.occurrenceId, "mizuho-bank", "2026-09-21T13:33:20.000Z", AT],
+    );
+    expect((await store.batch([write]))[0]?.changes).toBe(1);
+    // A second claim batch that sees the same occurrence adds none.
+    expect((await store.batch([alarmClaimWrite(CLAIM, CORRELATION)]))[0]?.changes).toBe(0);
+    const stored = db.query("SELECT * FROM audit_records WHERE path='alarm'").all() as AuditRow[];
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({
+      principal: "alarm:mizuho-bank",
+      principal_kind: "automatic",
+      subject: null,
+      operation: "alarm.occurrence.claim",
+      risk_class: "R2",
+      result: "accepted",
+      target_ref: "schedule:mizuho-bank",
+      scope_namespace: "schedule-source",
+      scope_source: "mizuho-bank",
+      diff_json: '{"kind":"none"}',
+    });
+    expect(JSON.parse(stored[0]!.refs_json)).toEqual([
+      "occurrence:scheduled:mizuho-bank:1790000000000",
+      "schedule:mizuho-bank@3",
+    ]);
+    db.close();
   });
 });
 
