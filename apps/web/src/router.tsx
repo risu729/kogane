@@ -111,6 +111,8 @@ export function isObservationKind(value: string): value is ObservationKind {
 export type Route =
   | { name: "overview" }
   | { name: "schedules" }
+  /** The operator's read-only audit log (ADR 0064). Filters are query parameters. */
+  | { name: "audit" }
   | { name: "transactions" }
   | { name: "balances" }
   | { name: "summaries" }
@@ -161,6 +163,7 @@ export function matchRoute(path: string): Route {
 
   if (segments.length === 1) {
     if (first === "schedules") return { name: "schedules" };
+    if (first === "audit") return { name: "audit" };
     if (first === "transactions") return { name: "transactions" };
     if (first === "balances") return { name: "balances" };
     if (first === "summaries") return { name: "summaries" };

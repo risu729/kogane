@@ -9,7 +9,8 @@ calls (`mcp`). It does not record the Processor's own `alarm` and `lane` work
 yet (plan S7). S3 execution integration adds delegated calls for installed
 adapters and common preparation/confirmation primitives; actual schedule
 adapters remain incomplete. The checked-in delegation configuration is still
-empty. Agent HTTP and MCP can read scoped records under `audit.read`.
+empty. Agent HTTP and MCP can read scoped records under `audit.read`, and
+the operator reads the whole log on the web UI's `監査ログ` page (slice S8).
 The limits are listed at the end.
 
 ## The record
@@ -170,12 +171,55 @@ Query parameters, each at most once: `operation`, `path`, `principalKind`,
 `400 invalid_query`. The filters are in the SQL `WHERE` before the `LIMIT`, no
 total is computed, and the cursor binds the filters it was issued under (a
 cursor presented with other filters is `409 stale_context`). Reading the log is
-a page load and is not recorded. No page shows it yet (plan S8). Agent routes `POST /api/agent/v1/audit.search` and `/audit.get`, also served as
+a page load and is not recorded. Agent routes `POST /api/agent/v1/audit.search` and `/audit.get`, also served as
 `kogane.audit.search` and `kogane.audit.get`, require `audit.read` and whole
 account scope. Their source predicates precede the page window and cursor,
 with financial and schedule source scopes separate. Null-source records
 require whole scope on both axes. Other subjects are pseudonymized; details
 outside scope and absent details return the same refusal.
+
+### The 監査ログ page (plan slice S8)
+
+`/audit` in the web UI (`apps/web/src/pages/Audit.tsx`) is a read-only view
+of `GET /api/v2/audit`, listed in the navigation of the observation client
+that `services/app` serves (not the evidence-only build). It shows one
+server page at a time, newest first, with each record's stored UTC time,
+operation, risk class and step, result with its closed result and reason
+codes, principal kind, principal and path, target and scope, a summary of
+its diff (rows read, revision from and to with the changed field names,
+decision counts, request status, release, overflow count and cap), and a
+disclosure of its identifiers (audit id, request id, delegation reference,
+idempotency key, digests, linked audit ids, references). Every closed code
+is named in Japanese next to the code itself; an unnamed code is shown as
+itself. There is nothing else to show: the record holds no amount,
+provider text or body.
+
+- **Filters** are the server's closed values only: operation (the names of
+  `OPERATION_CATALOGUE`), result, path, principal kind and a UTC day range.
+  They are query parameters of the page URL (`/audit?result=refused`), so a
+  filtered view deep-links; a URL with any other key, a repeated key, a value
+  outside those lists, a day that is not a calendar day or a range that ends
+  before it starts is refused on the page and sends no request.
+- **Paging** follows the server's cursor: next, previous (the cursors already
+  read) and a restart from the newest record. The page shows its page number
+  and the records on that page, never a total. A cursor the server refuses
+  (`409 stale_context`) is reported, with the restart offered.
+- **Validation.** The browser checks every page before rendering it
+  (`packages/observation-shared/src/audit-contract.ts`, through
+  `validApiResponse`): the schema version, at most 50 records newest first,
+  each field in the builder's closed vocabulary, references in its closed
+  patterns, one strict shape per diff kind, and the pairings the table's
+  CHECK constraints require. A page outside them is an error, never a partial
+  table. The shared package may not import the application layer, so the
+  lists are restated there and a test pins them to the builder's.
+- **Refusals.** A non-operator (`403 operator_required`) is told that the log
+  is shown to the operator only, and no record is shown; a deployment
+  without the route (`404`) says the log is not provided.
+
+The page reads no capability from `/api/meta`: like the schedule settings
+page it is always listed, and the server's operator check is the only gate.
+It does not show which delegations are in force: no route serves them to the
+browser yet.
 
 ## Cost
 
@@ -250,7 +294,14 @@ caps, overflow, chokepoint, page and plans),
 `services/processor/test/schedule-audit.test.ts` (each Processor writer and
 its envelope), `services/app/test/audit.test.ts` (every path end to end, the
 lost answer, the caps, the operator's read and a deep scan for provider text,
-a token-shaped value and an amount).
+a token-shaped value and an amount, and that the served page passes the
+page's contract), `apps/web/test/audit-contract.test.ts` (the page
+contract against pages `readAuditPage` produces, its restated lists and
+patterns, the Japanese labels and the URL filters) and
+`apps/web/test/audit.browser.test.ts` (the page on a desktop and a phone
+viewport: navigation, title and focus, labels, cursor paging without a
+total, filters, the refused URL, the non-operator, a malformed page and a
+refused cursor).
 
 ## S3 maintenance execution and confirmation (2026-10-10)
 

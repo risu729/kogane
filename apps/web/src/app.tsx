@@ -1,4 +1,5 @@
 import { SchedulesPage } from "./pages/Schedules";
+import { AuditPage } from "./pages/Audit.tsx";
 // Read-only navigation. Connection metadata describes the API, not freshness
 // of financial observations or whether a collector is currently running.
 
@@ -66,6 +67,7 @@ const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeat
   { to: "/identities", label: "口座・銘柄", icon: NAV_ICONS.identities, feature: "identities" },
   { to: "/rewards", label: "ポイント・前払式残高", icon: NAV_ICONS.rewards, feature: "rewards" },
   { to: "/schedules", label: "収集スケジュール", icon: NAV_ICONS.evidence },
+  { to: "/audit", label: "監査ログ", icon: NAV_ICONS.audit },
   { to: "/evidence", label: "取得履歴", icon: NAV_ICONS.evidence, feature: "evidenceHistory" },
 ];
 
@@ -89,6 +91,8 @@ function View({ route }: { route: Route }): ReactNode {
   switch (route.name) {
     case "schedules":
       return <SchedulesPage />;
+    case "audit":
+      return <AuditPage />;
     case "overview":
       return <OverviewPage />;
     case "transactions":
@@ -169,6 +173,7 @@ export function App(): ReactNode {
   // The schedules page is drawn outside the metadata boundary, with its own
   // caption; one trailing slash names it too, as in matchRoute.
   const schedulesRoute = trimTrailingSlash(path) === "/schedules";
+  const auditRoute = trimTrailingSlash(path) === "/audit";
   const navItems: NavItem[] = NAV.filter((item) => !item.feature || features[item.feature]).map(
     (item) => ({
       to: item.to,
@@ -185,7 +190,7 @@ export function App(): ReactNode {
         title: "数字の先に、原本を。",
         body: "取引や残高から、取得時の記録と保存された原本を確認できます。",
       }}
-      caption={schedulesRoute ? "収集スケジュール" : "保存された記録"}
+      caption={schedulesRoute ? "収集スケジュール" : auditRoute ? "監査ログ" : "保存された記録"}
       modeLabel={schedulesRoute ? "管理者による設定変更" : "閲覧専用"}
       connection={{
         connected,
@@ -236,6 +241,9 @@ export function App(): ReactNode {
       ) : null}
       {schedulesRoute ? (
         <SchedulesPage />
+      ) : auditRoute ? (
+        // The operator's own record: it reads no observation capability.
+        <AuditPage />
       ) : (
         <QueryBoundary query={metadata} label="接続情報">
           {() =>

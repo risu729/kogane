@@ -31,6 +31,7 @@ export const NAV_ICONS = {
   identities: "M3 10l9-6 9 6 M5 10v9 M10 10v9 M14 10v9 M19 10v9 M3 19h18",
   rewards: "M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16 M12 8v8 M9.5 10h5 M9.5 14h5",
   evidence: "M12 3a9 9 0 1 0 0 18 9 9 0 1 0 0-18 M12 7v5l3 2",
+  audit: "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z M8.5 12l2.5 2.5 4.5-4.5",
 } as const;
 
 export function AppShell({

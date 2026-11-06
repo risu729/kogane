@@ -25,6 +25,7 @@ import {
   validInstrumentCandidateReview,
 } from "./instrument-candidates-contract.ts";
 import { validCardOwnershipReview } from "./card-ownership-contract.ts";
+import { AUDIT_PAGE_PATH, validAuditPage } from "./audit-contract.ts";
 import { validCardPurchasePage } from "./card-purchase-contract.ts";
 import { validReconstructedState } from "./reconstructed-state-contract.ts";
 import { validReportedState } from "./reported-state-contract.ts";
@@ -765,6 +766,7 @@ export function validSharedQueryResponse(value: unknown): boolean {
 
 /** Additive fields are allowed; required fields and their nullability are checked. */
 export function validApiResponse(path: string, value: unknown): boolean {
+  if (path === AUDIT_PAGE_PATH) return validAuditPage(value);
   if (path === "/api/v2/reconciliation/card-settlements/ownership")
     return validCardOwnershipReview(value);
   if (path === "/api/v2/reconciliation/card-settlements")
