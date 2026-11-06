@@ -220,7 +220,7 @@ test("VPoint three-parser completeness refuses a missing page; a later complete 
     newest_run_id: second.run,
   });
   const answer = {
-    apiVersion: 1,
+    apiVersion: 2,
     sourceId: "v-point",
     latestFetchRun: null,
     cells: result.map(cell),
@@ -347,7 +347,13 @@ test("missing coverage is distinct from complete and incomplete stored claims; p
   s.parse(r.artifacts[2]!, "global-pass-activity", { kind: "published" });
   const result = rows(s, "global-pass")[0]!;
   expect(result).toMatchObject({ published: 3, incomplete_coverage: 1, unreported_coverage: 1 });
-  expect(cell(result).reasons).toEqual(["coverage_incomplete", "coverage_not_recorded"]);
+  expect(cell(result).reasons).toEqual([
+    "identity_not_recorded",
+    "published_without_observations",
+    "retention_not_assessed",
+    "coverage_incomplete",
+    "coverage_not_recorded",
+  ]);
   s.db.close();
 });
 
