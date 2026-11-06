@@ -10,15 +10,16 @@ container without a capture is named, never shown as zero.
 What adopted events imply from a start snapshot, compared with these figures,
 is [reconstructed state](reconstructed-state.md) (served by `GET /api/v2/reconstructed-state`, an agent read and the `/reconstruction` page).
 
-| Layer        | Where                                                                                                   |
-| ------------ | ------------------------------------------------------------------------------------------------------- |
-| Snapshot CTE | `SnapshotCteOptions.cutoffParam` in `packages/parsers/src/snapshot-query.ts`                            |
-| SQL          | `packages/read-model/src/dated-state.ts`                                                                |
-| Policies     | `packages/domain/src/reported-state.ts` (cutoff, freshness, payable status, perimeter)                  |
-| Query        | `queryDatedState` in `packages/application/src/query/dated-state.ts`                                    |
-| HTTP         | `GET /api/v2/reported-state?date=YYYY-MM-DD` (`services/app/src/reported-state-api.ts`)                 |
-| Contract     | `validReportedState` in `packages/observation-shared/src/reported-state-contract.ts`                    |
-| Page         | 基準日の保有状況 at `/state` (`apps/web/src/pages/ReportedState.tsx`), capability `reportedStateOnDate` |
+| Layer        | Where                                                                                                                       |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| Snapshot CTE | `SnapshotCteOptions.cutoffParam` in `packages/parsers/src/snapshot-query.ts`                                                |
+| SQL          | `packages/read-model/src/dated-state.ts`                                                                                    |
+| Policies     | `packages/domain/src/reported-state.ts` (cutoff, freshness, payable status, perimeter)                                      |
+| Query        | `queryDatedState` in `packages/application/src/query/dated-state.ts`                                                        |
+| HTTP         | `GET /api/v2/reported-state?date=YYYY-MM-DD` (`services/app/src/reported-state-api.ts`)                                     |
+| Contract     | `validReportedState` in `packages/observation-shared/src/reported-state-contract.ts`                                        |
+| Page         | 基準日の保有状況 at `/state` (`apps/web/src/pages/ReportedState.tsx`), capability `reportedStateOnDate`                     |
+| Two dates    | `queryHoldingsChange` in `packages/application/src/query/holdings-change.ts` ([below](#holdings-changes-between-two-dates)) |
 
 ## The cutoff
 
@@ -133,6 +134,54 @@ and sets it beside the balances reconstructed from adopted events; it is
 served, and `reconstructedStateOnDate` advertised, on the same condition
 ([reconstructed state](reconstructed-state.md#http-agent-tool-and-page)).
 
+## Holdings changes between two dates
+
+`queryHoldingsChange(sql, { from, to, today, source?, account? })` in
+`packages/application/src/query/holdings-change.ts` sets the reported
+holdings of two dates side by side
+([ADR 0075](adr/0075-reported-holdings-change-between-dates.md)); the rules
+are `compareReportedHoldings` in `packages/domain/src/holdings-change.ts`
+(`holdings-change-v1`). It is an application query only: no route, agent tool
+or page serves it yet.
+
+It reads the reported state on both dates (narrowed by `source` only, so a
+capture whose identity is not recorded yet still lists its holdings), each
+listed position's decimal-v1 quantity (`DATED_POSITION_QUANTITIES_SQL`, as
+valuation on a date reads it) and each chosen snapshot's fetch unit
+(`DATED_SNAPSHOT_UNITS_SQL`, keyed by artifact id). A holding is the
+provider's own key: source, container (parser and dataset), provider account,
+market and security code. On each date it is `listed`,
+`listed_more_than_once`, `not_listed` (the complete capture of its container
+and fetch unit does not list it), `snapshot_scope_ambiguous` (listed in
+captures of several fetch units) or `no_snapshot` (no complete capture of its
+container and fetch unit before the end of the date).
+
+| Status                 | When                                                                                  | Figure                          |
+| ---------------------- | ------------------------------------------------------------------------------------- | ------------------------------- |
+| `compared`             | Listed once on both dates, in different captures, with exact quantities and no reason | `end − start`, exact, zero kept |
+| `listed_at_start_only` | Listed on `from`; the capture of its container and unit on `to` does not list it      | None (not a zero)               |
+| `listed_at_end_only`   | Listed on `to`; the capture of its container and unit on `from` does not list it      | None (not a zero)               |
+| `not_comparable`       | Any reason below                                                                      | None                            |
+
+Reasons, in this order: `no_snapshot_at_start|end`,
+`snapshot_scope_ambiguous_at_start|end`, `holding_key_ambiguous_at_start|end`,
+`same_capture_both_dates` (no capture between the dates), `capture_order_inverted`,
+`account_differs` and `instrument_differs` (both dates name a resolved id and
+they differ), `quantity_not_exact_at_start|end`.
+
+`account` keeps a key a listing on either date names for that account; its
+other side is still judged on that date's whole listing. The answer lists the
+holdings in key order with counts per status, the position containers
+without a capture on either date and the stale snapshots, and states
+`total: "not-computed"` and `valuation: "not-computed"`: holdings are never
+added or valued. The change is between the two chosen captures; a stale one is
+shown with its age. The manifest pins both reported context ids and every
+key's side refs, status and reasons; `contextId` is its digest. More than 500
+positions on a date is refused (`holding_limit_exceeded`), as is a reported
+state past its own bound (`dated_state_limit_exceeded`); a malformed request,
+`from` not before `to`, `to` after today, and an unknown source or account
+have their own codes.
+
 ## Cost
 
 Measured on `bun:sqlite` with every CORE migration and no table statistics, on
@@ -166,6 +215,18 @@ smaller `STATEMENT_CI_SCALE` in CI, checks each date's snapshot and statements
 against independent queries, fails on a plan that scans an observation, parse,
 run or identity table whole, and requires each answer under one second.
 
+A holdings change between two dates is two of these answers (run
+concurrently through the executor) plus two keyed reads: the position
+quantities by primary key and `DATED_SNAPSHOT_UNITS_SQL` (artifacts and fetch
+units by primary key; its plan is checked in
+`packages/read-model/test/dated-state.test.ts`). At `STATEMENT_SCALE`, a month
+ending today took 1,198 ms (median of three, one run on `bun:sqlite` on a
+machine shared with other test processes; the store holds no position
+container). `packages/application/test/holdings-change-scale.test.ts` records
+every statement one answer runs on `STATEMENT_CI_SCALE` and fails on a whole
+scan beyond what the dated reads' own scale test accepts, and requires an
+answer under two seconds.
+
 ## Limits
 
 - Not measured on workerd or D1 itself. The scaled store holds balance
@@ -192,3 +253,7 @@ run or identity table whole, and requires each answer under one second.
   total across sources.
 - Nothing is stored: a reported state has no fixed report or
   `calculation_runs` row yet.
+- Holdings changes between two dates have no route, agent tool or page yet.
+  A change is what two captures report, not attributed to any trade or
+  transfer (no event moves a security quantity); a parser renamed between the
+  dates would make one holding two keys; balances are not compared there.

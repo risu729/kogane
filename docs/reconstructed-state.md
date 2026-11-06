@@ -339,7 +339,10 @@ Any input order gives the same output and the same id.
 - No producer states family or history coverage (`coverage-producer-none-v1`),
   so no real account can be `complete` today.
 - Positions carry provider text only and are counted, never folded; only the
-  cash basis and one account are answered.
+  cash basis and one account are answered. How a reported holding changed
+  between two dates is the reported state's own comparison
+  ([holdings changes between two dates](reported-state.md#holdings-changes-between-two-dates),
+  ADR 0075), not a reconstruction: no event moves a security quantity yet.
 - Selection cost: one load reads the whole history of every touched event;
   measured once on `bun` locally (not asserted), 1,500 events with 4,500
   revisions loaded in 63–76 ms and selected in 198–257 ms; not measured on

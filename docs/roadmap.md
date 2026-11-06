@@ -163,7 +163,7 @@ New collectors (#455–#510) start only when the owner asks, or after Phase 3.
 | 0–3: collection, evidence, observations | Source collectors, shared raw evidence, versioned parsing and publication; operations-API collection requests executed through the named collector RPC and traced to publication                                                                                                                                   | Coverage by account and data type; enabling and verifying request dispatch in production, requested windows, READ projection tracing |
 | 4–5: accounts and instruments           | Provider-local identities, mappings and append-only corrections; cross-identifier instrument candidates on a review page and an agent read, decided only through the change lifecycle ([ADR 0055](adr/0055-instrument-candidates.md))                                                                              | Evidence-backed resolution across direct providers, aggregators and brokers; review of unresolved identities                         |
 | 6–7: reconciliation and economic events | Candidate matching, decisions, event/leg/allocation/obligation/settlement contracts; own-transfer proposals and unregistered planners, nothing adopts ([ADR 0057](adr/0057-own-transfer-proposals.md))                                                                                                             | More transaction families and continuous event production from adopted observations                                                  |
-| 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots; reported state on a date (positions, provider valuations, balances, card payables)                                                                                                                                                              | Adoption across sources on a date, dated identity, liabilities beyond provider statements                                            |
+| 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots; reported state on a date (positions, provider valuations, balances, card payables); reported holdings changes between two dates as an application query ([ADR 0075](adr/0075-reported-holdings-change-between-dates.md))                        | Adoption across sources on a date, dated identity, liabilities beyond provider statements                                            |
 | 9 + 13: prices and valuation            | Price contracts, pure valuation functions, fixed report artifacts; as-of price/FX selection under explicit policies (values not yet decided)                                                                                                                                                                       | Price/FX acquisition, owner-decided selection policy values and portfolio valuation from actual holdings                             |
 | 10: rewards                             | Bucket claims, expiry and conversion functions, READ projections with displayed and computed expiry apart and their basis                                                                                                                                                                                          | Classified activity history, verified applicable rules, membership and usable conversion offers                                      |
 | 11: derived balances and positions      | Difference contracts and reconciliation readers; a pure fold from a start snapshot and adopted events, a commit-log knowledge selector, a one-account query, its route, agent tool, page ([ADR 0052](adr/0052-reconstructed-state-fold.md), [ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md)) | Applying adopted events to a starting snapshot to reconstruct balances and quantities                                                |
@@ -312,6 +312,21 @@ Vpass/MyJCB statements due around it with their settlement status, naming
 containers without a capture and the liabilities it does not cover. Nothing is
 added or converted. Not yet: adoption across sources, identity as of the date,
 unbilled usage, installments and loans, and reconstruction from events.
+
+**Since then:** [reconstructed state](reconstructed-state.md)
+([ADR 0052](adr/0052-reconstructed-state-fold.md),
+[ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md)) folds
+one account's adopted events from a start snapshot on the cash basis and sets
+the difference against the provider's end balance beside it, explained or
+`difference_unexplained`, never an adjustment; it is served by a route, an
+agent read and a page. [Holdings changes between two dates](reported-state.md#holdings-changes-between-two-dates)
+([ADR 0075](adr/0075-reported-holdings-change-between-dates.md)) compare the
+reported holdings of two dates per provider holding key, with the exact
+change where both dates list a holding and a reason where a capture is
+missing or ambiguous; nothing is totalled, and it is an application query
+without a route or page yet. Still open: positions folded from events (no
+securities writer), several accounts at once, and the scoped net worth of
+#551.
 
 **Done when:** for a requested date, quantities and liabilities in the supported
 scope are available, with discrepancies traced to transactions, timing or
