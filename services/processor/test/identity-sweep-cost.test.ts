@@ -43,7 +43,7 @@ test("identity sweep lowers mixed and Vpass reads with bounded source-scoped ove
             values.length ? db.prepare(sql).bind(...values) : db.prepare(sql),
           ),
       );
-    for (const source of [null, "mizuho-bank", "vpass"]) {
+    for (const source of [null, "mizuho-bank", "sbi-shinsei-bank", "vpass"]) {
       const old = await db.prepare(legacy).bind(source, 40).all();
       const updated = await db
         .prepare(identitySweepCandidatesSql(source !== null))
@@ -51,7 +51,7 @@ test("identity sweep lowers mixed and Vpass reads with bounded source-scoped ove
         .all();
       expect(old.results.length).toBeGreaterThan(0);
       expect(updated.results).toEqual(old.results);
-      if (source === "mizuho-bank")
+      if (source === "mizuho-bank" || source === "sbi-shinsei-bank")
         expect(updated.meta.rows_read).toBeLessThanOrEqual(old.meta.rows_read + 40);
       else expect(updated.meta.rows_read).toBeLessThan(old.meta.rows_read * 0.95);
 

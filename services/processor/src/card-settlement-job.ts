@@ -7,6 +7,7 @@ import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import {
   exactQuantity,
   normalizeDecimal,
+  validQuantity,
   type Quantity,
 } from "../../../packages/domain/src/values.ts";
 import {
@@ -121,12 +122,44 @@ async function recordDebitAccountEvidence(
   return result.meta.changes;
 }
 
+/**
+ * Why a statement the sweep examined this tick yielded no candidate, as a
+ * closed code (docs/card-settlements.md, Unmatched statements; ADR 0009):
+ *
+ * - `statement_not_comparable`: no exact positive total, no valid due date or
+ *   no period, so no debit can be compared with it;
+ * - `no_debit_in_window`: the bank read around its due date returned no row;
+ * - `no_equal_amount_debit`: it returned rows, and none has an exact amount
+ *   equal to the total.
+ *
+ * Only the rows the sweep already read decide the code. A statement paid by
+ * two debits, partly paid, or paid by a debit outside the window or the
+ * adapters is one of the last two; the codes never say which.
+ */
+export const CARD_SETTLEMENT_UNMATCHED_CODES = [
+  "statement_not_comparable",
+  "no_debit_in_window",
+  "no_equal_amount_debit",
+] as const;
+type CardSettlementUnmatchedCode = (typeof CARD_SETTLEMENT_UNMATCHED_CODES)[number];
+
 export interface CardSettlementSweepResult {
   scanned: number;
   proposed: number;
   written: number;
   /** Debit-account evidence rows this tick newly appended. */
   debitAccountEvidence: number;
+  /** Statements examined this tick that yielded no candidate, per closed code. */
+  unmatched: Record<CardSettlementUnmatchedCode, number>;
+}
+
+/** The statement-side test `cardSettlementCandidate` applies before any comparison. */
+function comparableTotal(quantity: Quantity): boolean {
+  return (
+    validQuantity(quantity) &&
+    quantity.value.status === "exact" &&
+    BigInt(quantity.value.value.coefficient) > 0n
+  );
 }
 
 /** Published source facts only; heuristic candidates always remain unaccepted. */
@@ -156,6 +189,11 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
     written = 0,
     debitAccountEvidence = 0,
     scanned = statements.results.length;
+  const unmatched: Record<CardSettlementUnmatchedCode, number> = {
+    statement_not_comparable: 0,
+    no_debit_in_window: 0,
+    no_equal_amount_debit: 0,
+  };
   const readBanks = createSettlementBankReader<Row>(
     () => db.prepare(CORE_REVISION_SQL).first<CoreRevisionRow>(),
     async (date) =>
@@ -174,6 +212,7 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
       !parseLocalDate(statement.payment_date) ||
       !statement.period
     ) {
+      unmatched.statement_not_comparable++;
       await db
         .prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=? WHERE singleton=1")
         .bind(statement.id)
@@ -183,6 +222,7 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
     const banks = await readBanks(statement.payment_date);
     // Preserve the existing logical scan count, including shared rows.
     scanned += banks.length;
+    let matched = false;
     for (const bank of banks) {
       const debit = amount(bank, true);
       const bankDate = bank.debit_date ?? null;
@@ -223,6 +263,7 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
         [...new Set([...evidence(statement), ...evidence(bank)])],
       );
       if (!facts) continue;
+      matched = true;
       proposed++;
       const digest = await canonicalDigest({
         policy: CARD_SETTLEMENT_POLICY,
@@ -286,8 +327,19 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
             );
         }
       }
-      if (written >= 500) return { scanned, proposed, written, debitAccountEvidence };
+      if (written >= 500) return { scanned, proposed, written, debitAccountEvidence, unmatched };
     }
+    // Classified from the rows read above only: no further read. A total that
+    // is not a valid positive quantity never matches (`cardSettlementCandidate`),
+    // whatever the window holds.
+    if (!matched)
+      unmatched[
+        !comparableTotal(total)
+          ? "statement_not_comparable"
+          : banks.length === 0
+            ? "no_debit_in_window"
+            : "no_equal_amount_debit"
+      ]++;
     await db
       .prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=? WHERE singleton=1")
       .bind(statement.id)
@@ -297,5 +349,5 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
     await db
       .prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1")
       .run();
-  return { scanned, proposed, written, debitAccountEvidence };
+  return { scanned, proposed, written, debitAccountEvidence, unmatched };
 }

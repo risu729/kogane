@@ -5,7 +5,7 @@
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker from "../src/worker";
-import { reportsApi } from "../src/reports-api";
+import { REPORT_LIST_SQL, REPORTS_PAGE_SIZE, reportsApi } from "../src/reports-api";
 import {
   DECIMAL_POLICY_PROJECTIONS,
   decimalPolicySelection,
@@ -13,6 +13,7 @@ import {
 } from "../src/decimal-policy";
 import { canonicalJson, type ReportBody } from "../../../packages/domain/src/index";
 import { validInterpretationContext } from "../../../packages/observation-shared/src/api-schema";
+import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 
 const CONTEXT = "ctx-synthetic-1";
 const RUN = "run-synthetic-1";
@@ -69,10 +70,36 @@ beforeAll(async () => {
   ).join("");
   storageRef = `reports/${digest}`;
   await env.EVIDENCE.put(storageRef, bytes);
+  // The node the report job caches beside the body: references only.
   await env.EVIDENCE.put(
     `${storageRef}.explanation`,
     new TextEncoder().encode(
-      canonicalJson({ schemaVersion: "report-explanation-v1", contextId: CONTEXT }),
+      canonicalJson({
+        schemaVersion: "report-explanation-v1",
+        contextId: CONTEXT,
+        calculationRunId: RUN,
+        inputManifest: {
+          schemaVersion: "report-inputs-v1",
+          perimeterRef: "perimeter:test",
+          unitRef: "JPY",
+          knowledgeCutoffEffective: NOW,
+          decimalPolicyRelease: "decimal-v1",
+          instrumentValuationPolicyId: "instrument-valuation-v1",
+          positionObservationIds: [11, 12],
+          valuationObservationIds: [21],
+          priceObservationIds: ["price:synthetic"],
+        },
+        policyRefs: body.policyRefs,
+        prices: [
+          {
+            id: "price:synthetic",
+            baseInstrumentRef: "instrument:synthetic:-:FUND",
+            quoteUnitRef: "JPY",
+            priceKind: "reference",
+            sourceClaimRef: "valuation_observations/21#$.current_price",
+          },
+        ],
+      }),
     ),
   );
   await env.DB.batch([
@@ -114,6 +141,9 @@ describe("re-displaying a fixed report", () => {
       "recompute-under-current-rules",
       "share-corrected-version",
     ]);
+    // The answer is exactly what the web client's contract accepts.
+    expect(validApiResponse(`/api/v2/reports/${REPORT}`, first.json)).toBe(true);
+    expect(validApiResponse("/api/v2/reports/rpt-another", first.json)).toBe(false);
 
     // A later rule, price and classification change: new policies, a new price
     // and a new calculation run at a different context.
@@ -184,6 +214,9 @@ describe("AT66 restricted evidence", () => {
     const beforeExplain = await call(`/api/v2/reports/${REPORT}/explanation`);
     expect(beforeExplain.status).toBe(200);
     expect(beforeExplain.json.replayability).toBe("replayable");
+    expect(validApiResponse(`/api/v2/reports/${REPORT}/explanation`, beforeExplain.json)).toBe(
+      true,
+    );
     expect((await call(`/api/v2/reports/${REPORT}/export`)).status).toBe(200);
 
     await env.DB.prepare(
@@ -208,6 +241,12 @@ describe("AT66 restricted evidence", () => {
       },
     });
     expect(redisplay.json.body).toEqual(body);
+    // A restricted report still passes the client contract, which then shows
+    // no explanation: its capabilities must say explain is refused.
+    expect(validApiResponse(`/api/v2/reports/${REPORT}`, redisplay.json)).toBe(true);
+    const claimsExplain = structuredClone(redisplay.json);
+    claimsExplain.report.capabilities.explain = true;
+    expect(validApiResponse(`/api/v2/reports/${REPORT}`, claimsExplain)).toBe(false);
   });
 
   it("does not serve a cached explanation node once the pipeline has purged it", async () => {
@@ -215,6 +254,91 @@ describe("AT66 restricted evidence", () => {
     // Still 403 rather than 404: the refusal is the authorization decision,
     // not an accident of the cache being empty.
     expect((await call(`/api/v2/reports/${REPORT}/explanation`)).status).toBe(403);
+  });
+});
+
+describe("listing the stored reports", () => {
+  const digestOf = (index: number) => index.toString(16).padStart(64, "0");
+  const idOf = (index: number) => `rpt-list-${String(index).padStart(3, "0")}`;
+  const listed = async (query = "") => call(`/api/v2/reports${query}`);
+
+  it("lists catalogue rows newest first, one page at a time, with no total", async () => {
+    // More artifacts than one page, at distinct instants; two share the newest
+    // instant so the tie is broken by id. No body is stored: listing never
+    // reads one.
+    const extra = REPORTS_PAGE_SIZE + 1;
+    await env.DB.batch(
+      Array.from({ length: extra }, (_, index) => {
+        const created =
+          index >= extra - 2
+            ? "2026-09-30T00:00:00.000Z"
+            : new Date(Date.parse("2026-09-01T00:00:00.000Z") + index * 60_000).toISOString();
+        return env.DB.prepare(
+          `INSERT INTO report_artifacts(report_id,context_id,purpose,schema_version,content_digest,storage_ref,created_by,created_at)
+           VALUES (?,?,'holdings-view','report-holdings-v1',?,?,'report-job',?)`,
+        ).bind(
+          idOf(index),
+          `ctx-list-${String(index)}`,
+          digestOf(index + 1),
+          `reports/${digestOf(index + 1)}`,
+          created,
+        );
+      }),
+    );
+    const first = await listed();
+    expect(first.status).toBe(200);
+    expect(validApiResponse("/api/v2/reports", first.json)).toBe(true);
+    expect(Object.keys(first.json)).toEqual(["apiVersion", "items", "nextCursor"]);
+    expect(first.json.items).toHaveLength(REPORTS_PAGE_SIZE);
+    expect(first.json.items.slice(0, 2).map((item: { reportId: string }) => item.reportId)).toEqual(
+      [idOf(extra - 1), idOf(extra - 2)],
+    );
+    expect(first.json.items[0]).toEqual({
+      reportId: idOf(extra - 1),
+      contextId: `ctx-list-${String(extra - 1)}`,
+      purpose: "holdings-view",
+      schemaVersion: "report-holdings-v1",
+      contentDigest: digestOf(extra),
+      createdBy: "report-job",
+      createdAt: "2026-09-30T00:00:00.000Z",
+    });
+    expect(first.json.nextCursor).toBe(String(REPORTS_PAGE_SIZE));
+
+    const second = await listed(`?offset=${first.json.nextCursor}`);
+    expect(validApiResponse("/api/v2/reports", second.json)).toBe(true);
+    expect(second.json.nextCursor).toBeNull();
+    // The two pages together hold every artifact exactly once, the first
+    // synthetic report (2026-08-31) last.
+    const ids = [...first.json.items, ...second.json.items].map(
+      (item: { reportId: string }) => item.reportId,
+    );
+    expect(new Set(ids).size).toBe(extra + 1);
+    expect(ids.at(-1)).toBe(REPORT);
+  });
+
+  it("refuses any parameter but one offset, and keeps the route behind Access", async () => {
+    for (const query of [
+      "?offset=-1",
+      "?offset=01",
+      "?offset=1.5",
+      "?offset=1000001",
+      "?offset=0&offset=1",
+      "?limit=10",
+      "?decimalPolicy=decimal-v1",
+    ])
+      expect((await listed(query)).status, query).toBe(400);
+    expect((await listed("?offset=0")).status).toBe(200);
+    const unauthenticated = await worker.fetch(
+      new Request("https://fixture.test/api/v2/reports"),
+      env,
+    );
+    expect(unauthenticated.status).toBe(401);
+  });
+
+  it("the list query reads the catalogue only", () => {
+    expect(REPORT_LIST_SQL).toMatch(/FROM report_artifacts\s/u);
+    expect(REPORT_LIST_SQL).not.toMatch(/JOIN|storage_ref|count\(/iu);
+    expect(REPORT_LIST_SQL).toContain("ORDER BY created_at DESC,report_id DESC");
   });
 });
 

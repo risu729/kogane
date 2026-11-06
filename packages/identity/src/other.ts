@@ -25,6 +25,45 @@ const LABELS: Record<string, string> = {
   paypay: "PayPay利用履歴",
 };
 
+/**
+ * The SBI Shinsei identity policy version that classifies the parser's two
+ * references that name no account (ADR 0076). Under policy 1 every
+ * `sbi-shinsei:` reference was mapped as a provider-local deposit; a run
+ * recorded under policy 1 keeps that mapping as evidence, and a policy-2 run
+ * appends the correction as a new mapping revision of the same source account.
+ */
+export const SBI_SHINSEI_POLICY_VERSION = 2;
+
+/**
+ * The parser's fixed non-account references (`SBI_SHINSEI_FX_BOARD_ACCOUNT`,
+ * `SBI_SHINSEI_CUSTOMER_ACCOUNT`). Each takes the role and `aggregate` status
+ * the rules already give the same kind of provider statement elsewhere: the
+ * board's rates are valuation-kind provider statements that are not a holding
+ * (as PRESTIA groups and Sony gross categories), and the stage is a
+ * relationship-level qualification (as `prestia-bank:relationship`).
+ */
+const SBI_SHINSEI_NON_ACCOUNTS: ReadonlyMap<
+  string,
+  { role: string; reason: string; label: string }
+> = new Map([
+  [
+    "sbi-shinsei:fx-board",
+    {
+      role: "valuation-aggregate",
+      reason: "provider-fx-board-quotes-not-an-account",
+      label: "SBI新生銀行 外貨為替レート",
+    },
+  ],
+  [
+    "sbi-shinsei:customer",
+    {
+      role: "qualification-aggregate",
+      reason: "provider-customer-stage-not-an-account",
+      label: "SBI新生銀行 お客さまステージ",
+    },
+  ],
+]);
+
 export function otherIdentity(input: IdentityInput): IdentityPlan {
   const a = input.sourceAccount;
   const plan: IdentityPlan = {
@@ -124,7 +163,16 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
       break;
     case "sbi-shinsei-bank":
       if (/^sbi-shinsei:.+$/u.test(a)) {
-        account("deposit", "provider-account-reference-with-native-unit");
+        const statement = SBI_SHINSEI_NON_ACCOUNTS.get(a);
+        if (
+          statement &&
+          (input.policyVersion ?? SBI_SHINSEI_POLICY_VERSION) >= SBI_SHINSEI_POLICY_VERSION
+        ) {
+          account(statement.role, statement.reason, "aggregate");
+          plan.account.label = statement.label;
+        } else account("deposit", "provider-account-reference-with-native-unit");
+        // The key is the same under every version, so a correction is a new
+        // revision of the same source account, never a second subject.
         const native =
           string(input.subject) ??
           string(input.extra.currency) ??

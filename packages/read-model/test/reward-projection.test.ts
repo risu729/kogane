@@ -11,6 +11,7 @@ import type { TemporalValue } from "../../domain/src/time.ts";
 import {
   buildRewardProjection,
   REWARD_PROJECTION_RELEASE,
+  savedSimulationRequest,
   UNCLASSIFIED_REWARD_HISTORY,
   type RewardExpiryProjectionRow,
   type RewardProjectionInputContent,
@@ -309,5 +310,55 @@ describe("the stored buckets against the seeded rules", () => {
       expect(entry.reasonCodes).not.toContain("no_expiry_under_verified_terms");
       expect(entry.expiresOn).toBeNull();
     }
+  });
+});
+
+describe("a saved simulation is replayed only from a whole retained request", () => {
+  const request = {
+    offerId: "offer:synthetic",
+    offerVersion: "1",
+    quantity: { coefficient: "1500", scale: 0, unitRef: "points:program-a" },
+  };
+  const plan = (value: unknown) => JSON.stringify({ request: value });
+
+  test("a complete request is read back exactly, at the bounds of its fields", () => {
+    expect(savedSimulationRequest(plan(request))).toEqual(request);
+    for (const quantity of [
+      { ...request.quantity, coefficient: "0" },
+      { ...request.quantity, coefficient: "9".repeat(30) },
+      { ...request.quantity, coefficient: "15", scale: 4096 },
+    ])
+      expect(savedSimulationRequest(plan({ ...request, quantity }))).toEqual({
+        ...request,
+        quantity,
+      });
+  });
+
+  test("a digest-only, unreadable or half-readable request is no input, never a guess", () => {
+    const quantity = (change: Record<string, unknown>) =>
+      plan({ ...request, quantity: { ...request.quantity, ...change } });
+    for (const planJson of [
+      "",
+      "{",
+      "null",
+      "[]",
+      JSON.stringify({ requestDigest: "a".repeat(64) }),
+      plan(null),
+      plan({ ...request, quantity: null }),
+      plan({ ...request, offerId: 1 }),
+      plan({ offerId: request.offerId, quantity: request.quantity }),
+      quantity({ coefficient: 1500 }),
+      quantity({ coefficient: "-1500" }),
+      quantity({ coefficient: "01500" }),
+      quantity({ coefficient: "1.5" }),
+      quantity({ coefficient: "9".repeat(31) }),
+      quantity({ scale: -1 }),
+      quantity({ scale: 4097 }),
+      quantity({ scale: 1.5 }),
+      quantity({ scale: "0" }),
+      quantity({ unitRef: "" }),
+      quantity({ unitRef: null }),
+    ])
+      expect(savedSimulationRequest(planJson)).toBeNull();
   });
 });
