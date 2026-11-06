@@ -39,6 +39,9 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
   分けて返す（§2.1、[ADR 0049](adr/0049-reward-expiry-basis.md)）。
 - `redemptionPositions(held, events, destinationUnit)` — 申請・減算・着金・取消・返却を別段階として
   追う。申請だけでは何も動かず、返却は元のlotを復活させず新しいbucket claimになる。
+  数量が exact でない減算は保有と移動中を、着金は着金累計を、返却は保有を、その理由つきの
+  不明値にし、動かなかったもの（0）としては扱わない（INV05）。着金と返却は数量によらず
+  移動中を0に戻す。
 - `findConversionPaths(offers, start, goal, budget)` — 深さと候補数を明示的に制限した探索。
 
 ## 2. 期限の状態

@@ -34,6 +34,13 @@ and `operation_receipts.operation_kind` CHECK constraints admit exactly the same
 
 `operation` (a fifth route) returns the receipt of a completed operation.
 
+A `relation.accept` or `relation.reject` payload's `validFrom` and `validTo`
+are each `null` or a calendar day (`YYYY-MM-DD`; `2026-02-30` is not one),
+and `validFrom` is not after `validTo` (they may be the same day); anything
+else is `invalid_command` at `plan` (`validPayload`). The check runs when a
+plan is created; `approve` and `commit` do not re-check a relation plan that
+is already stored.
+
 ### Plan digest
 
 ```
