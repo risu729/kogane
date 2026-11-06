@@ -67,13 +67,13 @@ here parses the token a second time and nothing reads an actor from a request
 body or header, which is the same rule the change lifecycle follows. A valid
 token with no grant is still refused.
 
-| Capability               | Allows                                                                                                                                                                                                     | Notes                                                   |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                                                                                         | The first capability an agent should get                |
-| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `economic-readiness.read`, `reported-state.read` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                                                                                                | A separate grant; raw bytes are still a different route |
-| `interpretation.propose` | `reconcile.propose`                                                                                                                                                                                        | Proposals only; never adoption                          |
-| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                                                                                                  | Not a financial read; implied by no other capability    |
+| Capability               | Allows                                                                                                                                                                                                                                        | Notes                                                   |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                                                                                                                            | The first capability an agent should get                |
+| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `economic-readiness.read`, `reported-state.read`, `reconstructed-state.read`, `balances.read` and `positions.read` on a whole-store scope | Never implies `evidence.read`                           |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                                                                                                                                   | A separate grant; raw bytes are still a different route |
+| `interpretation.propose` | `reconcile.propose`                                                                                                                                                                                                                           | Proposals only; never adoption                          |
+| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                                                                                                                                     | Not a financial read; implied by no other capability    |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
 exist in this vocabulary: `interpretation.accept`, `calculation.run`,
@@ -185,9 +185,12 @@ recognition and an eighth while it serves the reconstructed state, one
 implementation each (`src/agent-service.ts`), reachable two ways. The read
 tools of `src/read-tools.ts` (`kogane.instruments.history`,
 `kogane.instruments.coverage`, `kogane.accounts.candidates`,
-`kogane.economic-readiness.read`, `kogane.audit.search`, `kogane.audit.get`) are reachable both ways too; the dated reported state's read
-(`kogane.reported-state.read`) is served on the same condition as the eighth, and each is listed only to a grant its service
-would answer ([below](#instrument-coverage),
+`kogane.economic-readiness.read`, `kogane.balances.read` while the
+deployment has a READ binding, `kogane.positions.read`, `kogane.audit.search`,
+`kogane.audit.get`) are reachable both ways too; the dated reported state's
+read (`kogane.reported-state.read`) is served on the same condition as the
+eighth, and each is listed only to a grant its service would answer
+([below](#instrument-coverage), [balances and positions](#balances-and-positions),
 [shared history reads](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)). The two
 maintenance tools (`src/schedule-tools.ts`) exist while `SCHEDULES_ENABLED` is
 on: the read is reachable both ways, the revision on `/mcp` only and listed
@@ -206,6 +209,8 @@ the other delegated MCP tools are described there too.
 | `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                               |
 | `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                         |
 | `kogane.instruments.coverage`         | `POST /api/agent/v1/instruments.coverage`       | `kogane.instruments.coverage`         | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                              |
+| `kogane.balances.read`                | `POST /api/agent/v1/balances.read`              | `kogane.balances.read`                | `records.read` on `"*"` sources and accounts, while the deployment has a READ binding ([below](#balances-and-positions))                               |
+| `kogane.positions.read`               | `POST /api/agent/v1/positions.read`             | `kogane.positions.read`               | `records.read` on `"*"` sources and accounts ([below](#balances-and-positions))                                                                        |
 | `kogane.accounts.candidates`          | `POST /api/agent/v1/accounts.candidates`        | `kogane.accounts.candidates`          | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                                               |
 | `kogane.economic-readiness.read`      | `POST /api/agent/v1/economic-readiness.read`    | `kogane.economic-readiness.read`      | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))                             |
 | `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                          |
@@ -251,7 +256,12 @@ reported state's views), otherwise `unknown_tool` and `404 not_found`.
 `kogane.reported-state.read` follows `GET /api/v2/reported-state` on the same
 condition (`reportedStateOnDate`, the same views); it is listed after
 `kogane.instruments.history`, and only to a grant that holds `records.read`
-over every source and account. The six
+over every source and account. `kogane.balances.read` follows
+`GET /api/v2/balances/latest` and `/history`: it exists while the deployment
+has a READ binding, which is what makes those routes exist, and is otherwise
+`unknown_tool` and `404 not_found`. `kogane.positions.read` follows
+`GET /api/positions`, which every deployment serves. Both are listed only to a
+grant that holds `records.read` over every source and account. The six
 `kogane.ops.*` tools of [ops-api.md](ops-api.md) are published on `/mcp`,
 whose callers are all agent-only, only to a principal whose resolved
 delegation holds their capability ([ops-api](ops-api.md#mcp)): with
@@ -586,6 +596,83 @@ configuration this tool (and `kogane.instruments.history`) is listed to that
 client. That is configuration, not evidence that a client listed or called
 either.
 
+### Balances and positions
+
+`kogane.balances.read` is `GET /api/v2/balances/latest` and
+`GET /api/v2/balances/history` for an agent, and `kogane.positions.read` is
+`GET /api/positions` (plan D3 and D4,
+[ADR 0063](adr/0063-delegated-ai-operation-path.md#balance-and-position-reads-amendment--2026-11-06-proposed)).
+Routes and tools share one function, `readObservationList` in
+`services/app/src/observation-api.ts`: the request rules every observation
+route applies and the routes' reads (`readLatestBalancePage` and
+`readBalanceHistoryPage` in `src/balances-v2.ts`, the positions list with its
+valuations). These are not the `holdings` and `reported-state` intents of
+`kogane.financial.query`, which answer inside a scope from the adopted
+subtotals and the latest balance rows; no intent reads positions.
+
+The pages carry provider text (the provider's account string, metric and
+instrument codes and amount text, account and instrument labels, security
+names), so each tool hands the route's body unchanged under `data`, as
+`kogane.purchases.explain` hands its page:
+
+```jsonc
+{
+  "schemaVersion": "kogane-balances-v1",
+  "list": "latest",
+  "data": {/* the route's page */},
+}
+```
+
+The positions read answers `{schemaVersion: "kogane-positions-v1", data}`.
+`data` is the route's answer byte for byte: for balances the D10 envelope of
+[the balance read model](balance-read-model.md#the-api) (`items`, `page` with
+`nextCursor`, `dataCoverage`, and `subtotals` on the latest list), for
+positions `{positions, interpretationContext, coverage}`, each position with
+its valuations and 500 positions a page.
+
+Input, a closed object (`src/read-tools.ts`); what depends on the deployment
+or the snapshot is checked by the routes' own rules, so that refusal keeps the
+route's code:
+
+| Tool             | Key                                         | Shape                                                             |
+| ---------------- | ------------------------------------------- | ----------------------------------------------------------------- |
+| `balances.read`  | `list`                                      | Required; `"latest"` or `"history"`, which route answers          |
+| `balances.read`  | `source`, `account`, `instrument`, `metric` | Optional; 1 to 512 characters, no control character, as the route |
+| `balances.read`  | `view`                                      | Optional; `balances` or `summaries`                               |
+| `balances.read`  | `cursor`                                    | Optional; the page's `nextCursor`, sent with the same filters     |
+| `balances.read`  | `limit`                                     | Optional; an integer, one of the route's offered page sizes       |
+| `positions.read` | `source`, `account`                         | Optional; 1 to 512 characters, no control character, as the route |
+| `positions.read` | `offset`                                    | Optional; an integer, 0 to 1,000,000, the route's `offset`        |
+| both             | `identityRead`                              | Optional; `latest` (when absent) or `as-recorded`                 |
+
+Authorization, before the body is validated: `records.read`, else
+`403 unauthorized` (`capability:records.read`); and a whole-store perimeter,
+else `403 evidence_restricted` (`scope:source`, `scope:account`), as
+[ADR 0063](adr/0063-delegated-ai-operation-path.md) decision 10 asks of every
+new read until a scoped version is proven. Both are `financial-error-v1`
+bodies. A body outside the closed object (an unknown key, a value outside its
+list or shape, `identityRead: "snapshot"`, which the route answers
+`unsupported_semantics`) is `400 invalid_request`. The routes' own refusals
+keep their status and their `{error}` body on both agent paths:
+`400 invalid_limit`, `400 invalid_cursor`, `400 cursor_mismatch`,
+`410 context_expired`, `503 read_model_unavailable` (nothing published) and
+the snapshot refusals `503 read_model_context_changed` and
+`503 read_model_restriction_changed` for balances; `400 invalid_offset` for
+positions. The grant's `budget.maxRows` does not bound a page; the route's
+page sizes do. It reads and never writes.
+
+Neither page carries a raw object's sha256 or a fetch URL, so `evidence.read`
+changes neither answer; an observation's `organization` keeps, as on the
+route, the fetch artifact id and the parser's position its product claim was
+read from. Each served call writes one R0 audit record (`result = "read"`)
+whose row count is the page's balances or positions, truncated when a next
+page follows (`page.hasMore`) or the list was cut at 500
+(`coverage.truncated`); an absent tool records nothing. The committed MCP
+reader grant holds `records.read` over `"*"` sources and accounts, so both
+tools are listed to it, the balance read where READ is bound (production
+binds it). That is configuration, not evidence that a client listed or called
+either.
+
 ### Reconstructed state
 
 `kogane.reconstructed-state.read` is `GET /api/v2/reconstructed-state` for an
@@ -845,7 +932,8 @@ Converting them to JSON does not make them instructions.
 is 404); the category is advisory. `kogane.reported-state.read` answers its
 route's own refusals as the route does (`{error}` with the route's status) and
 its grant refusals as `financial-error-v1`
-([above](#reported-state-on-a-date)).
+([above](#reported-state-on-a-date)). `kogane.balances.read` and
+`kogane.positions.read` do the same ([above](#balances-and-positions)).
 
 Authentication failures keep the transport's own closed responses (401 with
 `{error, requestId}`), unchanged from every GET route. Every answer an MCP

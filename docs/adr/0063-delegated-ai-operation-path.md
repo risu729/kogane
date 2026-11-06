@@ -633,3 +633,88 @@ production-bundle browser tests of both pages at 1280 and 390 px for every
 configuration and an unreadable answer, and a failed re-read on the
 schedules page. The committed `MCP_DELEGATIONS` stays empty; no grant, Access
 setting, delegation or deployment changes.
+
+## Balance and position reads amendment — 2026-11-06 (proposed)
+
+- Status: proposed (accepted when the pull request that adds it merges)
+- Date: 2026-11-06
+
+**Context.** Plan section 5.3 lists the reads an agent lacks. Rows D3
+(`GET /api/v2/balances/latest`, `GET /api/v2/balances/history`) and D4
+(`GET /api/positions`) had routes but no agent tool. Inside a scope, the
+`holdings` intent of `kogane.financial.query` answers per-unit subtotals of
+the adopted snapshot and its `reported-state` intent the provider's latest
+balance rows, without the snapshot's adoption state, organization, history or
+cursor; no intent reads positions. Decision 10 above
+asks a new read to call the route's own reader and to be whole-store only.
+Unlike the events pages, these pages carry provider text: the provider's
+account strings, metric and instrument codes and amount text, account and
+instrument labels, and security names. The agent API's untrusted-content rule
+(AT71) lets provider text reach a caller only under a result's `data` field.
+
+**Options considered.** (1) Answer the route's body as the tool's body, as
+`kogane.reconstructed-state.read` does: rejected, because provider text would
+sit outside `data`. (2) Drop or mask the provider strings: rejected, because
+the rows lose what identifies them, and the page would no longer be the
+operator's page. (3) Add these reads as `kogane.financial.query` intents:
+rejected, because that service's intents are graded per scope and paged under
+a context, and these pages are neither scoped nor proven inside a listed scope
+(plan section 7). (4) One function for the routes' request rules and read,
+called by the routes and by two read tools, which hand the route's body
+unchanged under `data`, as `kogane.purchases.explain` hands the purchases
+page: chosen.
+
+**Decision.** `readObservationList` (`services/app/src/observation-api.ts`)
+holds the request rules every observation route applies (which paths this
+deployment serves, which parameters each takes, their shape) and the read of
+the two balance pages and the positions list; the routes and the tools call
+it.
+
+- `kogane.balances.read` (`POST /api/agent/v1/balances.read` and MCP
+  `tools/call`) takes `{list: "latest" | "history", source?, account?,
+  instrument?, metric?, view?, identityRead?, cursor?, limit?}` as a closed
+  object and answers
+  `{schemaVersion: "kogane-balances-v1", list, data}`, where `data` is the
+  route's page. It exists while the routes do, that is while the deployment
+  has a READ binding: otherwise its name is `unknown_tool` and its path `404`.
+  While nothing is published it answers the route's
+  `503 read_model_unavailable`.
+- `kogane.positions.read` (`POST /api/agent/v1/positions.read` and MCP
+  `tools/call`) takes `{source?, account?, identityRead?, offset?}` as a
+  closed object and answers `{schemaVersion: "kogane-positions-v1", data}`,
+  where `data` is the route's list. The route is always served, and so is the
+  tool.
+
+Both require `records.read` over `"*"` sources and accounts (else
+`403 unauthorized` or `403 evidence_restricted` before the body is
+validated), answer the routes' own refusals with the routes' codes, are listed
+only to a grant that can call them, and are R0: one audit record per served
+call whose row count is the page's balances or positions, truncated when a
+next page follows or the list was cut at 500.
+
+**Consequences.** The committed MCP reader grant (`summary.read` and
+`records.read` over the whole store) is listed both tools; the production
+App has a READ binding, so the balance read exists there. The routes' own
+behavior and grant check are unchanged. Neither page carries a raw object's
+sha256 or a fetch URL, so `evidence.read` changes nothing in either answer;
+the organization's `origin` keeps the fetch artifact id and the parser's
+position, as the routes do. The grant's `budget.maxRows` does not bound a
+page; the routes' page sizes do (the balance route's offered sizes, 500
+positions with their valuations). A scoped version stays unproven. Adding
+the two operations to the catalogue is an agent-operation change that the
+owner approves before merge (AGENTS.md, Merging).
+
+**Verification.** `services/app/test/observation-tools.test.ts`: both agent
+paths answer the routes' bytes under `data` (the HTTP body and the MCP text
+content) for each list and filter, a cursor continues across route and tool,
+and nothing is written; a hostile account string and security name reach a
+caller only under `data`, and no answer names the seeded raw objects' sha256;
+listing per grant shape and with or without READ; route refusals with the
+route's code and equal status and body on HTTP and MCP; grant refusals before
+the body is validated; absence without READ; one R0 audit record per served
+call with row counts and nothing else. The listing rule of every read tool
+over all grant shapes in `services/app/test/instrument-coverage-api.test.ts`;
+the pinned tool lists in `services/app/test/agent-api.test.ts` (schema
+snapshot included) and `services/app/test/mcp-client.test.ts`. The existing
+balance, position and read-model tests run unchanged against the shared
+reader.

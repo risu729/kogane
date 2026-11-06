@@ -235,6 +235,12 @@ is present and answer `503 read_model_unavailable` until that snapshot is
 published. With no READ binding those paths answer 404. The v1 routes keep
 `paginationVersion: "offset-v1"`.
 
+The agent tool `kogane.balances.read` answers the same two pages through the
+routes' own request rules and reader (`readObservationList`), under
+`records.read` over the whole store, with the page under `data`, and exists
+exactly while the v2 paths do
+([agent API](agent-api.md#balances-and-positions)).
+
 `/api/balances` is unchanged. When READ is bound and a snapshot is published
 it is served through a compat adapter over the same projection — identical
 rows, order, offset window and `interpretation` record, proved by a parity
