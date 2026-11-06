@@ -112,7 +112,7 @@ const FIELD_PATH = "(?:body|[a-z][A-Za-z]{0,31}(?:\\.(?:[a-z][A-Za-z]{0,31}|[0-9
  * that was refused, and never provider text. A `field:` reference names the
  * field of a refused request by its schema path.
  */
-const AUDIT_REF_PATTERNS: readonly RegExp[] = [
+export const AUDIT_REF_PATTERNS: readonly RegExp[] = [
   new RegExp(`^plan:${HEX64}$`, "u"),
   new RegExp(`^approval:ap_${HEX64}$`, "u"),
   // A commit's operation id is the caller's own idempotency key (A09).

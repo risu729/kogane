@@ -4,7 +4,7 @@
 - Date: 2026-11-06
 - Issue: #550 (指定日状態: 採用イベントから残高・保有数量を再構成する) and #551
   (範囲付きの指定日状態), the "changes between dates" part of
-  [phases 8 + 11](../roadmap.md#phases-8--11--dated-reported-and-reconstructed-state)
+  [layers 8 + 11](../roadmap.md#layers-8--11--dated-reported-and-reconstructed-state)
 - Builds on: [ADR 0019](0019-dated-reported-state.md) (reported state on a
   date), [ADR 0056](0056-as-of-price-fx-selection.md) (the decimal-v1 position
   quantity read of valuation on a date)

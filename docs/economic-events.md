@@ -28,7 +28,7 @@ while `RECONCILIATION_ENABLED` is off.
 
 The implemented Vpass and MyJCB pending/posted slices below are the starting
 point for phases 6–7, not completion of reconciliation or event generation. The
-[next product milestone](roadmap.md#phases-67--reconciliation-and-economic-event-generation)
+[next product milestone](roadmap.md#layers-67--reconciliation-and-economic-event-generation)
 builds on them with card statements and bank debits, review/correction and an
 explanation from purchase through settlement to source evidence. Event, leg,
 allocation and settlement tables still need continuous population from the

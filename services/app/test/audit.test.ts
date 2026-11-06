@@ -26,6 +26,7 @@ import {
   RECONSTRUCTED_STATE_TOOL_NAME,
 } from "../src/agent-service";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
+import { validAuditPage } from "../../../packages/observation-shared/src/audit-contract";
 import { OPS_MCP_TOOLS } from "../src/ops-tools";
 
 /** A provider line with a token-shaped value and an amount in it. */
@@ -897,6 +898,8 @@ describe("the operator's read and the never-recorded list", () => {
       cursor: string | null;
     };
     expect(body.schemaVersion).toBe("kogane-audit-page-v1");
+    // The 監査ログ page's own check accepts what the route serves.
+    expect(validAuditPage(body)).toBe(true);
     expect(body.records.length).toBeGreaterThan(0);
     expect(body.records.length).toBeLessThanOrEqual(50);
     expect(body.records.every((record) => record.result === "refused")).toBe(true);
