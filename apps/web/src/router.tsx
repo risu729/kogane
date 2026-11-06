@@ -143,9 +143,12 @@ function parseId(value: string | undefined): number | undefined {
 }
 
 export function matchRoute(path: string): Route {
-  const ownership = /^\/reconciliation\/([A-Za-z0-9_-]{1,128})\/ownership$/u.exec(path);
+  // One trailing slash names the same page, as it already does for the
+  // segment routes below.
+  const trimmed = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+  const ownership = /^\/reconciliation\/([A-Za-z0-9_-]{1,128})\/ownership$/u.exec(trimmed);
   if (ownership) return { name: "cardOwnership", proposalId: ownership[1]! };
-  const purchase = /^\/purchases\/((?:purchase|refund)_[0-9a-f]{64})$/u.exec(path);
+  const purchase = /^\/purchases\/((?:purchase|refund)_[0-9a-f]{64})$/u.exec(trimmed);
   if (purchase) return { name: "purchase", eventId: purchase[1]! };
   const segments = path.split("/").filter((segment) => segment !== "");
   const [first, second, third] = segments;
