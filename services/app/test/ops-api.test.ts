@@ -116,6 +116,7 @@ async function call(
     subject?: string;
     environment?: Record<string, unknown>;
     target?: typeof worker | typeof demo;
+    headers?: Record<string, string>;
   } = {},
 ) {
   const jwt = await token(options.subject, path === "/mcp" ? MCP_AUDIENCE : undefined);
@@ -125,6 +126,7 @@ async function call(
       "cf-access-jwt-assertion": jwt,
       // What an MCP client sends on every POST (Streamable HTTP).
       ...(path === "/mcp" ? MCP_CLIENT_HEADERS : {}),
+      ...options.headers,
     },
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
@@ -431,6 +433,38 @@ describe("the schema is the boundary (G3-08, G3-13)", () => {
       environment: ENABLED,
     });
     expect(response.status).toBe(413);
+  });
+
+  // A page on another site must not drive a signed-in browser's Access
+  // session into an operation (ADR 0078): the same own-origin rule as every
+  // agent path, before a grant is graded or a body is read.
+  it("refuses a request from another origin before it is graded or stored", async () => {
+    const stored = () =>
+      env.DB.prepare("SELECT count(*) AS n FROM ops_requests").first<number>("n");
+    const before = await stored();
+    for (const origin of ["https://elsewhere.invalid", "null", "http://fixture.test"]) {
+      for (const [path, body] of [
+        ["/collections", COLLECTION],
+        ["/projections", { reason: "cross-site" }],
+        ["/sessions/sony-bank/refresh", {}],
+      ] as const) {
+        const response = await call(`${OPS}${path}`, {
+          body,
+          environment: ENABLED,
+          headers: { origin },
+        });
+        expect(response.status, `${origin} ${path}`).toBe(403);
+        expect((await response.json()).error).toBe("origin_not_allowed");
+      }
+    }
+    expect(await stored()).toBe(before);
+    // The Worker's own origin, and a client that sends none (curl), are unaffected.
+    const own = await call(`${OPS}/collections`, {
+      body: { ...COLLECTION, idempotencyKey: "own-origin" },
+      environment: ENABLED,
+      headers: { origin: "https://fixture.test" },
+    });
+    expect(own.status).toBe(202);
   });
 
   it("refuses a query string on an operations route", async () => {

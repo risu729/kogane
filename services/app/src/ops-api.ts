@@ -50,7 +50,7 @@ import {
 } from "../../../packages/application/src/index";
 import { auditContext, auditedRoute } from "./audit";
 import { principalFor } from "./grants";
-import { HttpError, json } from "./http";
+import { assertOwnOrigin, HttpError, json } from "./http";
 
 export const OPS_PREFIX = "/api/ops/v1";
 /** Largest request body any operations route reads, in bytes. */
@@ -398,6 +398,7 @@ export async function opsApi(
   const operation = opsOperation(request.method, url.pathname);
   if (operation === null) {
     if (url.search) throw new HttpError(400, "invalid_query");
+    if (request.method === "POST") assertOwnOrigin(request, url);
     return app.fetch(request, { ...env, VERIFIED_SUBJECT: subject });
   }
   // One audit record per operations request (ADR 0064, path `ui`): the
@@ -405,6 +406,9 @@ export async function opsApi(
   // answer — a re-send, a read, a refusal — is recorded after it.
   return auditedRoute(auditContext(request, env, "ui", subject), operation, async (call) => {
     if (url.search) throw new HttpError(400, "invalid_query");
+    // A page on another site never reaches the grant, the schema or the
+    // store (ADR 0078); the refusal is recorded like any other.
+    if (request.method === "POST") assertOwnOrigin(request, url);
     const audit: OpsAudit = { call, quiet: { result: "skip" } };
     const response = await app.fetch(request, { ...env, VERIFIED_SUBJECT: subject, AUDIT: audit });
     return { response, outcome: audit.quiet };
