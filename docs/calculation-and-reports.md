@@ -465,6 +465,45 @@ Three operations are deliberately distinct:
 An agent therefore cannot rewrite a submission through one ambiguous
 "regenerate".
 
+### Listing and the 評価レポート pages
+
+[ADR 0072](adr/0072-report-artifact-pages.md) adds the catalogue and the
+operator's pages.
+
+| Layer      | Where                                                                                                                 |
+| ---------- | --------------------------------------------------------------------------------------------------------------------- |
+| HTTP       | `GET /api/v2/reports?offset=N` (`REPORT_LIST_SQL` in `services/app/src/reports-api.ts`), beside the routes above      |
+| Capability | `reportArtifacts` on `/api/meta`, true where the store has `report_artifacts`                                         |
+| Contract   | `validReportResponse` in `packages/observation-shared/src/report-artifact-contract.ts` (list, detail and explanation) |
+| Pages      | 評価レポート at `/reports` and `/reports/{id}` (`apps/web/src/pages/Reports.tsx`)                                     |
+
+The list returns catalogue columns only (id, context, purpose, schema,
+digest, creator, creation time), newest first by `created_at` then id, 50 per
+page with `nextCursor` and no total. It reads no body and derives no
+replayability; those come from re-displaying one report. Only one `offset`
+is accepted, and the route answers 404 where `report_artifacts` is absent.
+
+The detail page shows the stored body as fixed: the stated figure (a
+`complete` report's total, or a partial report's subtotal of the valued
+holdings, named as neither a whole total nor a lower bound), the counts of
+valued and unvalued rows, each row with its exact amount or its unvalued
+reason (never zero), the truncation notice, the run, the `report_events` and
+the replayability. The explanation (perimeter, effective knowledge boundary,
+policies, the position and valuation observations it read linked to their
+observation pages, and each price with its source claim) is requested only
+when the report says it may be explained; a restricted or unavailable report
+says why it is not, and a missing cached node is shown as missing. A body
+whose digest no longer matches, or that is gone, is never shown as the
+report. The page has no recompute or share control. Amounts are formatted by
+the shared exact formatter; a decimal with more places than its unit's minor
+unit is shown as stored, never rounded.
+
+Limits: the list has no index on `created_at` and sorts the table per page;
+paging is by offset, so a report stored between two page loads shifts the
+older rows by one and the next page can repeat a row (rows are never
+updated or deleted, so none is skipped); the page does not use `/export`;
+activity and obligations have no page.
+
 ## 5. The context is the input set, not a timestamp
 
 `services/processor/src/report-job.ts` builds a
@@ -525,7 +564,7 @@ compatibility test does not authorize a pre-alarm production rollback.
    `"false"`. The scheduled handler then behaves exactly as before: the report
    stage is not even added to the stage list, so no extra log line and no write.
 3. Deploy `services/app`. `/api/v2/reports/{id}` returns 404 until
-   a report exists; every other route is unchanged.
+   a report exists (the list is empty); every other route is unchanged.
 4. Turn the flag on (`REPORTS_ENABLED="true"`) when the report job should start
    writing.
 
@@ -589,9 +628,17 @@ would discard later collection and later decisions (docs/operations.md).
   0017-0037, append-only triggers, retention-class seed, the flag, provider
   value beside own valuation (AT30), reuse, a corrected price giving a new
   context while the submitted report keeps its digest (AT36/AT60), the
-  knowledge cutoff (AT63), and the restriction purge (AT66).
+  knowledge cutoff (AT63), the restriction purge (AT66), and that the stored
+  body and explanation node pass the report page's contract.
 - `services/app/test/reports-api.test.ts` — re-display, Access and
-  method gates, refusal of explanation and export under a restriction, and the
-  decimal policy selection contract.
+  method gates, refusal of explanation and export under a restriction, the
+  decimal policy selection contract, the list's order, paging and query
+  refusals, and the real answers checked against the client contract.
+- `apps/web/test/report-artifacts-contract.test.ts` — refusals of the list,
+  detail and explanation contract, the capability, the routes and the exact
+  amount formatting; `apps/web/test/reports.browser.test.ts` — both pages in
+  Chromium on synthetic answers (navigation gate, paging, reasons instead of
+  zeros, restriction, missing body, digest mismatch, malformed answer, phone
+  width).
 - `services/app/test/load.test.ts` — opt-in D1 budgets
   (docs/operations.md).

@@ -32,6 +32,7 @@ interface ViewState {
   "purchases.offset": number;
   "reportedState.date": string;
   "reconstructedState.query": ReconstructedStateQuery | null;
+  "reports.offset": number;
 }
 const Context = createContext<{
   state: ViewState;
@@ -61,6 +62,7 @@ export function ViewStateProvider({ children }: { children: ReactNode }): ReactN
     "purchases.offset": 0,
     "reportedState.date": "",
     "reconstructedState.query": null,
+    "reports.offset": 0,
   }));
   return <Context.Provider value={{ state, setState }}>{children}</Context.Provider>;
 }

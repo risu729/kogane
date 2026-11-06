@@ -183,6 +183,13 @@ export interface ApiCapabilities {
    */
   readonly reconstructedStateOnDate?: boolean;
   /**
+   * `GET /api/v2/reports` lists the fixed report artifacts the report job
+   * stored, newest first, and `GET /api/v2/reports/{id}` re-displays one with
+   * its explanation (docs/calculation-and-reports.md). False unless the store
+   * the server reads has `report_artifacts` (CORE 0034).
+   */
+  readonly reportArtifacts?: boolean;
+  /**
    * The authenticated operations API (`/api/ops/v1/*`) is served (02 §4):
    * collection, re-registration, replay, rebuild, session refresh and the
    * progress of one accepted operation. False everywhere the
@@ -219,6 +226,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   cardPurchaseRecognition: false,
   reportedStateOnDate: false,
   reconstructedStateOnDate: false,
+  reportArtifacts: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -255,6 +263,7 @@ export const CENTRAL_STORE_CAPABILITIES = {
   cardPurchaseRecognition: false,
   reportedStateOnDate: false,
   reconstructedStateOnDate: false,
+  reportArtifacts: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
