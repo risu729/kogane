@@ -115,7 +115,7 @@ describe.if(runnable)("instrument counts on the identity page", () => {
     test(`shows each source's identifiers by state at ${String(width)} px`, async () => {
       refuse = false;
       const tab = await open(width);
-      const region = tab.getByRole("region", { name: "銘柄の整理状況" });
+      const region = tab.getByRole("region", { name: "取得元ごとの銘柄の識別子", exact: true });
       await region.locator("tbody tr").first().waitFor();
       const headers = await region.locator("thead th").allInnerTexts();
       expect(headers).toEqual([
@@ -154,11 +154,12 @@ describe.if(runnable)("instrument counts on the identity page", () => {
     const tab = await open(1280);
     await tab.getByLabel("取得元", { exact: true }).fill(BROKER_B);
     await tab.getByRole("button", { name: "絞り込む" }).click();
-    const region = tab.getByRole("region", { name: "銘柄の整理状況" });
+    const region = tab.getByRole("region", { name: "取得元ごとの銘柄の識別子", exact: true });
     await tab.waitForFunction(
       () =>
-        document.querySelectorAll('[aria-label="銘柄の整理状況"] tbody tr').length === 1 &&
-        document.querySelector('[aria-label="銘柄の整理状況"] tbody td')?.textContent !==
+        document.querySelectorAll('[aria-label="取得元ごとの銘柄の識別子"] tbody tr').length ===
+          1 &&
+        document.querySelector('[aria-label="取得元ごとの銘柄の識別子"] tbody td')?.textContent !==
           "sbi-securities",
     );
     expect(await region.locator("tbody td").first().innerText()).toBe(BROKER_B);

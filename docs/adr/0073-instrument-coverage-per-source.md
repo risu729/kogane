@@ -98,6 +98,10 @@ observation, which ADR 0055's amendment measured (about 0.8 to 0.95 s per
    `判断の記録なしで同じ銘柄（要確認）`, `別の銘柄と判断済み`, `候補なし`).
    It is its own query, so a refusal is shown as the reason in that panel
    while the account coverage still renders; a refusal is not retried.
+   The table scrolls in a region named `取得元ごとの銘柄の識別子`, so no
+   two landmarks on the page share a name, and a failed read is titled
+   `銘柄の整理状況を読み込めませんでした`, apart from the account
+   coverage's `整理状況を読み込めませんでした`.
 
 No migration, index, SQL text or agent tool is added; the existing coverage
 response and its contract are unchanged.
@@ -150,5 +154,11 @@ Synthetic data only, no production access:
   production build at 1280 and 390 px (the state columns and counts, no
   total, no page-wide horizontal scroll), the source filter, and a refusal
   shown as its reason with no table while the account coverage renders.
+- `experiments/observation-pipeline-local/test/identity-browser.test.ts`:
+  its synthetic server answers the route in the wire shape, so the panel
+  renders counts while only the account list fails (401, 403); when every
+  identity read is blocked, stalled or offline, the page shows four
+  distinct errors and four retry buttons, one per read.
 - `mise run //packages/application:ci`, `//packages/observation-shared:ci`,
-  `//services/app:ci`, `//apps/web:ci`, `mise run ci:root`.
+  `//services/app:ci`, `//apps/web:ci`,
+  `//experiments/observation-pipeline-local:ci`, `mise run ci:root`.

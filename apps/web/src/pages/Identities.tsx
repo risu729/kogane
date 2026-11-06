@@ -220,7 +220,12 @@ function InstrumentCoverage({ source }: { source: string }): ReactNode {
               </EmptyState>
             </div>
           ) : (
-            <div className="table-scroll" role="region" aria-label="銘柄の整理状況" tabIndex={0}>
+            <div
+              className="table-scroll"
+              role="region"
+              aria-label="取得元ごとの銘柄の識別子"
+              tabIndex={0}
+            >
               <table className="identity-coverage-table">
                 <caption>
                   取得元ごとの銘柄の識別子の数と、同一性の候補に対する判断状況の内訳。表にない取得元は、現在の整理済み記録でこれらの識別子を使っていません。
