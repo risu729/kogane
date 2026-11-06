@@ -425,8 +425,13 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     failureCodes: string[],
     profile?: DirectProfile,
   ): Promise<void> {
-    let logoutSucceeded = false;
-    if (profile) {
+    // A completion that logged out and then exhausted its retries keeps that
+    // logout's outcome: logging out a second time cannot succeed.
+    let logoutSucceeded = progress.logoutSucceeded === true;
+    if (typeof progress.logoutSucceeded === "boolean") {
+      if (!logoutSucceeded && !failureCodes.includes("logout_failed"))
+        failureCodes.push("logout_failed");
+    } else if (profile) {
       try {
         await profile.logout();
         logoutSucceeded = true;
