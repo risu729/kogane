@@ -172,6 +172,10 @@ it("a write body is JSON of at most 16 KiB of bytes, refused before the Processo
   const kana = JSON.stringify({ note: "あ".repeat(6_000) });
   for (const [options, status, code] of [
     [{ body: "{}", contentType: "text/plain" }, 415, "json_required"],
+    // The media type is judged before the size: an oversized body that is not
+    // JSON is `415`, declared or streamed, never `413`.
+    [{ body: kana, contentType: "text/plain" }, 415, "json_required"],
+    [{ rawBody: new Blob([kana]).stream(), contentType: "text/plain" }, 415, "json_required"],
     [{ body: "{}", contentType: "application/json; charset=utf-8" }, 200, null],
     [{ body: "" }, 400, "invalid_request"],
     [{ body: '{"bad":' }, 400, "invalid_request"],
