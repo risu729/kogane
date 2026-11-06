@@ -1,8 +1,14 @@
 import { expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { RewardExpiryResults } from "../src/pages/Rewards.tsx";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RewardExpiryResults, RewardsPage } from "../src/pages/Rewards.tsx";
+import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
-import type { RewardReadExpiryPage } from "../../../packages/observation-shared/src/reward-contract.ts";
+import type {
+  RewardExpiryRow,
+  RewardHoldingRow,
+  RewardReadExpiryPage,
+} from "../../../packages/observation-shared/src/reward-contract.ts";
 
 const page: RewardReadExpiryPage = {
   rows: [
@@ -370,4 +376,68 @@ test("provider subset sections render separately, including not-displayed and un
     expect(absent).toContain("期限未確認");
     expect(absent).not.toContain("有効期限なし");
   }
+});
+
+test("each holding and expiry table region has its own accessible name", () => {
+  // Two synthetic programmes and one rule that applies to both holdings.
+  const quantity = {
+    unitRef: "points:synthetic",
+    value: {
+      status: "exact" as const,
+      value: { coefficient: "100", scale: 0 },
+      normalizationVersion: "decimal-v1" as const,
+    },
+  };
+  const holding = (id: string): RewardHoldingRow => ({
+    programId: `program:${id}`,
+    programRef: `Synthetic ${id}`,
+    institutionRef: "institution:synthetic",
+    sourceId: "synthetic-source",
+    holdingRef: `holding:${id}`,
+    holdingKind: "reward-points",
+    unitRef: "points:synthetic",
+    termsEvidenceRefs: [],
+    consumable: quantity,
+    byKind: [],
+    excluded: [],
+    buckets: [],
+    qualificationMeasures: [],
+    membership: [],
+    valueModel: { netAssetEligible: false, cashLikeRedemptionEstimate: null, reasonCode: "none" },
+  });
+  const expiry = (id: string): RewardExpiryRow => ({
+    holdingRef: `holding:${id}`,
+    programId: `program:${id}`,
+    ruleRef: "rule:synthetic@v1",
+    family: "inactivity",
+    verification: "verified",
+    state: "partial",
+    uncertaintyCodes: [],
+    deadlineZone: "Asia/Tokyo",
+    deadlineZoneBasis: "assumed",
+    rows: [],
+    sourceExpiryRefs: [],
+  });
+  const client = new QueryClient();
+  client.setQueryData(["metadata"], {
+    apiVersion: 1,
+    source: { kind: "central-store", classification: "financial" },
+    capabilities: { ...CENTRAL_STORE_CAPABILITIES, rewardsV2: true },
+  });
+  client.setQueryData(["reward-holdings"], {
+    rows: [holding("a"), holding("b")],
+    coverage: { limit: 100, truncated: false, nextOffset: null },
+  });
+  client.setQueryData(["reward-expiry"], {
+    rows: [expiry("a"), expiry("b")],
+    coverage: { limit: 100, truncated: false, nextOffset: null },
+  });
+  const html = renderToStaticMarkup(
+    <QueryClientProvider client={client}>
+      <RewardsPage />
+    </QueryClientProvider>,
+  );
+  const names = [...html.matchAll(/role="region" aria-label="([^"]*)"/gu)].map((match) => match[1]);
+  expect(names).toHaveLength(4);
+  expect(new Set(names).size).toBe(names.length);
 });
