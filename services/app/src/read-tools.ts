@@ -112,7 +112,7 @@ export async function callReadTool(
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       }
       case "kogane.reported-state.read": {
-        // The grant first, before the body is read: records.read over the
+        // The grant first, before the body is validated: records.read over the
         // whole store (plan D5, ADR 0063 decision 10).
         if (!grantAllows(grant, "records.read"))
           return {

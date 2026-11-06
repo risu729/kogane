@@ -457,7 +457,7 @@ Input, a closed object (`src/read-tools.ts`); the patterns are the route's own:
 | `source`  | a source id           | Optional; only this provider source                         |
 | `account` | a resolved account id | Optional; only this account                                 |
 
-Authorization, before the body is read: `records.read`, else
+Authorization, before the body is validated: `records.read`, else
 `403 unauthorized` (`capability:records.read`); and a whole-store perimeter,
 else `403 evidence_restricted` (`scope:source`, `scope:account`), as
 [ADR 0063](adr/0063-delegated-ai-operation-path.md) decision 10 asks of every

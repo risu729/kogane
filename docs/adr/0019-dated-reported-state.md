@@ -140,7 +140,7 @@ chosen.
 and MCP `tools/call`) takes `{date, source?, account?}` as a closed object with
 the route's patterns, requires `records.read` over `"*"` sources and accounts
 (else `403 unauthorized` or `403 evidence_restricted` before the body is
-read), and answers through `readReportedState`
+validated), and answers through `readReportedState`
 (`services/app/src/reported-state-api.ts`), which the route also calls: the
 same body (`apiVersion: 2` and the reported state), the same refusals
 (`invalid_date`, `date_in_future`, `413 result_limit_exceeded`) on both agent
@@ -158,7 +158,7 @@ does, and is refused rather than cut. A scoped version stays unproven.
 **Verification.** `services/app/test/reported-state-api.test.ts` ("the agent
 tool"): both agent paths answer exactly the route's body; listing per grant
 shape and per store; route refusals with equal status and body on HTTP and
-MCP; grant refusals before the body is read; absence without the views; one
+MCP; grant refusals before the body is validated; absence without the views; one
 R0 audit record per served call with a row count and nothing else. The
 pinned tool lists in `services/app/test/agent-api.test.ts` (schema snapshot
 included) and `services/app/test/mcp-client.test.ts`.

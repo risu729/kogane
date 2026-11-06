@@ -29,7 +29,7 @@ for current behavior.
 - [ADR 0016: Key MyJCB pending statements by payment month, current while their position shows them](0016-myjcb-pending-statement-slots.md)
 - [ADR 0017: Add card purchase review command kinds with one rebuild, not relation markers](0017-card-purchase-review-commands.md)
 - [ADR 0018: SBI Shinsei as the second bank debit adapter of card settlement review](0018-sbi-shinsei-bank-debit-adapter.md)
-- [ADR 0019: Reported state on a date from the latest complete capture before it](0019-dated-reported-state.md)
+- [ADR 0019: Reported state on a date from the latest complete capture before it](0019-dated-reported-state.md) — agent read `kogane.reported-state.read` (amendment 2026-11-06, proposed)
 - [ADR 0020: Prices are provider observations promoted by a closed rule list](0020-price-promotion-by-rule.md)
 - [ADR 0021: Collectors state the registration contract; the Processor's refusals stay](0021-collector-registration-contract.md)
 - [ADR 0022: Give registered shared-R2 artifacts their parser dataset](0022-registration-artifact-datasets.md)

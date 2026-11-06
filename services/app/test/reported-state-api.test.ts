@@ -403,7 +403,7 @@ describe("the agent tool", () => {
     });
   });
 
-  it("needs records.read over the whole store, checked before the body is read", async () => {
+  it("needs records.read over the whole store, checked before the body is validated", async () => {
     const refusals: [unknown, Record<string, unknown>][] = [
       [
         { ...FULL_GRANT, capabilities: ["summary.read"] },
