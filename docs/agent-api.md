@@ -954,10 +954,12 @@ in `structuredContent`; `content[0].text` is that object serialised.
 
 ### Which client connects, and how
 
-Every row is owner-executed and production-unverified. The Worker-side
+Every row is owner-executed. Apart from the dated observations in the
+[connection recovery runbook](mcp-recovery.md), none is verified in
+production. The Worker-side
 mapping, the grant shape and the local checks are the same for all of them.
-If an existing connection reports that it needs reauthentication, follow the
-[connection recovery runbook](mcp-recovery.md).
+If an existing connection reports that it needs reauthentication, follow that
+runbook.
 
 | Client                                          | Flow it presents ([Claude][claude-auth], [ChatGPT][openai-auth], [Codex][codex-mcp])                                                                                                                                                                      | Owner creates in Cloudflare                                                                  | Worker mapping           | Grants                                                                                                  | Client-side registration                                                                                       |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |

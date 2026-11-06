@@ -569,7 +569,9 @@ Synthetic data only.
 
 Not verified: no deployed instance, no live Access policy, no real provider or
 session, and no deployed collector has served `runOperation`; no connection is
-enabled in the committed configuration. No MCP client has connected.
+enabled in the committed configuration. `MCP_DELEGATIONS` is empty, so no
+operations tool can run for an MCP client; dated client connection evidence is
+in the [recovery runbook](mcp-recovery.md).
 
 Acceptance ids and the test that carries each:
 
