@@ -29,7 +29,9 @@ escaped React text. The frontend never reads SQLite or R2 directly.
 
 Transaction filters, search, sort, and page selection, balance source/account,
 currency/unit and kind filters, plus position filters and page selection,
-survive visits to detail pages within the current tab. They reset on reload
+survive visits to detail pages within the current tab. A page selection
+belongs to the server window it was chosen in: the next 500 rows or a changed
+server filter open at their first page. They reset on reload
 and are never written to URL parameters, browser history state, localStorage,
 or sessionStorage. Route changes update the document title and focus the new
 heading; typing and API refreshes do not move focus.

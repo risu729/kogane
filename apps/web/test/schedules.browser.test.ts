@@ -466,6 +466,8 @@ describe.if(runnable)("operator schedule administration", () => {
       await item.getByRole("button", { name: "変更", exact: true }).click();
       const form = page.locator(".maintenance-editor");
       expect(await form.getByLabel("開始時刻", { exact: true }).inputValue()).toBe("01:00");
+      // An edit in progress in the open form.
+      await form.getByLabel("開始時刻", { exact: true }).fill("01:30");
       // Another change is stored while the editor is open, and the page reads it back.
       snapshot.maintenance = [
         { ...rule, pattern: { ...rule.pattern, start: "02:00" }, revision: 2 },
@@ -475,6 +477,9 @@ describe.if(runnable)("operator schedule administration", () => {
       const current = page.locator(".maintenance-list li").filter({ hasText: "毎週 日 02:00" });
       await current.waitFor();
       expect(snapshotReads).toBeGreaterThan(reads);
+      // The read-back alone leaves the open form as the operator left it: it
+      // it still carries revision 1, which the server's version check refuses.
+      expect(await form.getByLabel("開始時刻", { exact: true }).inputValue()).toBe("01:30");
       // Opening the rule again shows what revision 2 stores; saving it without
       // a change must not write revision 1's times under revision 2.
       await current.getByRole("button", { name: "変更", exact: true }).click();
