@@ -16,7 +16,7 @@ const computed = await computeParserDigests(PARSERS);
 describe("parser code digests", () => {
   test("the checked-in digests describe the sources on disk", () => {
     // Changing a parser file, or a shared helper it imports, without running
-    // `bun run scripts/parser-digests.ts` fails here.
+    // `mise run //packages/parsers:digests` fails here.
     expect(computed.releases).toEqual(PARSER_DIGESTS.releases);
     expect(computed.sourceDigests).toEqual(PARSER_DIGESTS.sourceDigests);
   });

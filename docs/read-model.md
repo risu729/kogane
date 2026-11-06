@@ -375,10 +375,11 @@ provider-history completeness. `UNCOMPOSED_QUERY_RULE_PARSERS` is empty today,
 but pinned against the lists' parser guards to detect a future withheld rule.
 A capture no job or parse names is its own cell,
 shown only while it is newer than every parsed capture of its slot. The read
-counts no observation, so an empty current capture is `current` like any
-other; the GLOBAL PASS months where such a capture supersedes an older one
-with rows are named by `globalPassEmptyMonths` (the Queries table), not by
-this read. A
+counts the rows of the newest capture's published parses; an empty current
+capture stays `current` with `published_without_observations`, which never
+proves an empty provider history. The GLOBAL PASS months where an empty
+capture supersedes an older one with rows are also named by
+`globalPassEmptyMonths` (the Queries table). A
 `container-snapshot` cell is current in the sense of the Balances and
 Positions reads: the Transactions read applies no snapshot selection, so the
 transactions a snapshot parser also emits
@@ -396,8 +397,10 @@ loaded machine with every row never registered, the worst case: about 20 ms at
 4,000 rows, 200 ms at 16,000; not asserted). The cell read reaches the source's artifacts by
 `idx_fetch_artifacts_source_dataset_time (source_id=?)`, its runs by
 `idx_fetch_runs_source` and their units by `idx_fetch_units_run`, and every
-job, parse, publication, claim and unit report by key; no observation table is
-read. Its only whole-store passes are inside the composed snapshot CTEs, the
+job, parse, publication, claim and unit report by key. Observation tables are
+counted by published parse id; eligible sealed identity runs and current
+mapping revisions are read by key. Unit-only attempts join the newest declared
+units by run id. Its only whole-store passes are inside the composed snapshot CTEs, the
 passes the Transactions, Balances and Positions reads already make, and each is
 evaluated once (an `IN` list materialized once, or an automatic index built
 once), never per row. A per-source CTE is reached only from a cell of its

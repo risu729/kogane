@@ -3,13 +3,32 @@
 ## Language
 
 Use English consistently for repository documentation and other prose, code comments,
-commit messages, and pull request titles and descriptions. Preserve intentional
-localizations, locale-specific fixtures, quoted source text, and data whose exact
-wording is required for correctness.
+commit messages, pull request titles and descriptions, and new issues and issue
+comments. Preserve intentional localizations, locale-specific fixtures, quoted
+source text, and data whose exact wording is required for correctness. Existing
+Japanese issues stay as they are.
 
 Standing rules for any agent working in this repository. Each rule points to
 the document that carries the detail; when this file and that document
 disagree, the document is right and this file is corrected.
+
+## Continuing the work
+
+- [The roadmap](docs/roadmap.md#work-order) is the work order. A merged PR is not a
+  stopping point: continue with the next unit of the current phase until its
+  done-when holds, then the next phase.
+- Issues track individual items; the roadmap names which issues belong to which
+  phase. Update the issue with progress and the roadmap when a phase's scope or
+  order changes. Do not keep a second roadmap in an issue.
+- A thread that researches something lands its findings in a docs PR, including
+  the roadmap lines they change.
+- Past decisions, ADRs and earlier owner instructions are not authoritative by
+  themselves; judge them on merit against the code and evidence, and propose a
+  better design to the owner when one exists.
+- While a design is under discussion with the owner, write no ADR, code or PR for
+  it until the owner approves. A plan or design proposal gets an independent
+  subagent review (facts against the code, security and permission impact)
+  before it goes to the owner.
 
 ## Decisions live in the repository
 
@@ -18,16 +37,101 @@ disagree, the document is right and this file is corrected.
   [ADR 0001](docs/adr/0001-domain-axes.md) (status, date, context, options
   considered, decision, consequences, verification; `proposed` until the PR
   merges, then `accepted`), or an amendment to the ADR it changes.
+  Smaller owner decisions go into the owning `docs/` page with the date and
+  time in UTC.
+- Before taking an ADR number, check open PRs for the same number.
 - Plans live in [`docs/plans/`](docs/plans/) with a status header, like
   [the next-milestone plan](docs/plans/2026-09-next-milestone.md).
 - A decision made in a conversation and not yet in the repository is not a
   decision.
 
+## Checks before pushing
+
+- Run `mise run //<workspace>:ci` for every workspace the change touches and
+  `mise run ci:root` ([ci](docs/ci.md#local-commands)). The complete local check
+  is `mise exec -- hk check --all --no-fail-fast`; run it when a change touches
+  more than one workspace's contracts, the task graph or tooling.
+- Run `mise run fix` before committing lint or format changes; `hk check` does not
+  rewrite files.
+- State in the PR body which commands ran and their result, and say what was not
+  run.
+
+## CI
+
+- `CI Check` is the required status. It passes only when `Checks` and both
+  `Processor` shards succeed ([ci](docs/ci.md#jobs-and-the-required-merge-guard)).
+  The ruleset also blocks merges on CodeQL security alerts of high severity or
+  above and on CodeQL alerts of error level.
+- CI has no path filters, retries or test selection. Do not add any.
+- Never skip, disable, quarantine, retry or loosen a test or a deadline to make CI
+  pass. Fix the cause, or open a separate PR for the flaky test that explains the
+  cause.
+
 ## Every PR gets an independent review
 
 A fresh reviewer that did not write the change (a separate agent) verifies
 its claims by reading the code and running the tests, and fixes what it finds
-before merge. The PR body states what the review checked.
+before merge. The PR body states what the review checked. Changes pushed after
+the review, including conflict resolutions that change behavior, are reviewed
+again.
+
+## Merging
+
+Every merge to `main` releases every Worker the release ledger marks `deploy` to production through
+[deploy.yml](.github/workflows/deploy.yml) ([CI/CD](docs/ci-cd.md#continuous-deployment)).
+
+Agents act through the owner's GitHub account, which has admin rights and can
+bypass the ruleset. Never use that bypass. An agent's PR is one whose branch
+starts with `claude/` and whose body links the thread that drove it; every
+other PR authored by `risu729` is treated as the owner's.
+
+An agent merges its own PR when all of these hold:
+
+1. One scope: the PR does one independently reviewable thing, with its tests and
+   owning docs.
+2. The independent review above is done and its findings are fixed or answered in
+   the PR.
+3. `CI Check` is green on the PR's final head commit, and CodeQL reports no
+   blocking alert.
+4. The branch contains the latest `main` and `CI Check` ran on that commit. The
+   ruleset does not require an up-to-date branch, so this is the agent's check.
+5. The owning docs and any ADR are updated in the same PR.
+
+Merge with squash (the only allowed method). Do not use admin bypass or merge
+before green.
+
+Merging needs no owner approval in general. Before merging a large or
+hard-to-undo change, ask the owner, unless the owner already asked for that
+change (owner, 2026-11-06 13:25 UTC). Examples:
+
+- adds or changes a migration (`packages/storage-d1/migrations/`) or a resource in
+  `infra/resources.json`; rollback restores no database
+  ([CI/CD: rollback](docs/ci-cd.md#rollback-plan-11-7));
+- changes a feature flag, grant, delegation, Access audience, secret name or
+  binding in a `wrangler.jsonc`;
+- adds an agent or MCP operation or capability in
+  `packages/application/src/operation-path/catalogue.ts`;
+- changes `.github/workflows/`, the release ledger or the rollback floor;
+- adopts or replaces a major library, framework or provider.
+
+Renovate PRs: those with native auto-merge on follow the shared preset and
+need no agent. An agent may merge another Renovate PR after green CI and a
+check of the changelog, unless it is one of the changes above (for example a
+workflow or action update). A Renovate PR whose `renovate/stability-days`
+status is still pending is not merged, by an agent or through auto-merge
+enabled by an agent, until the owner says so for that PR (owner, 2026-11-06
+13:52 UTC).
+
+After a merge, delete the branch if GitHub did not, and close PRs the merge
+superseded with a comment linking it. An agent never pushes to, closes or
+reopens a PR that is not its own, except to close one its own merged PR
+superseded, or a PR the owner assigned to agents in the roadmap. A branch that is the base of an open PR is still in use.
+
+## Pull request text
+
+Write every PR, issue, commit, workflow run and URL in PR and issue text as a
+Markdown link, never a bare `#123`, SHA or URL. Use short SHAs. Give times in
+UTC.
 
 ## Invariants that do not bend
 
@@ -79,6 +183,10 @@ tests, docs or PR text. Tests use synthetic inputs that mirror the observed
 shapes ([ci](docs/ci.md); examples in
 [economic events](docs/economic-events.md#single-payment-per-source) and
 [ADR 0003](docs/adr/0003-relative-period-labels.md)).
+
+Logging in to a provider, running a collector by hand, a hosted Container
+experiment, and reading or changing a secret each need the owner's approval for
+that action. Never ask the owner for passwords, codes or HAR captures.
 
 ## Toolchain
 

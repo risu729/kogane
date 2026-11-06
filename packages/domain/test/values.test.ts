@@ -159,6 +159,31 @@ describe("exact arithmetic", () => {
       expect(result).toEqual({ ok: true, value: decimalLiteral(expected) });
     }
   });
+
+  test("a negative divisor moves its sign to the numerator before exactness and rounding", () => {
+    expect(divideDecimals(integerDecimal(1), integerDecimal(-4))).toEqual({
+      ok: true,
+      value: decimalLiteral("-0.25"),
+    });
+    expect(divideDecimals(integerDecimal(1), integerDecimal(-3))).toMatchObject({
+      ok: false,
+      error: { code: "inexact_result" },
+    });
+    // Each mode rounds the signed quotient, not the magnitude of the divisor.
+    const cases: [string, string, number, string, string][] = [
+      ["2", "-3", 2, "down", "-0.66"],
+      ["2", "-3", 2, "floor", "-0.67"],
+      ["2", "-3", 2, "ceiling", "-0.66"],
+      ["-2", "-3", 2, "floor", "0.66"],
+      ["-2", "-3", 2, "up", "0.67"],
+      ["2.5", "-1", 0, "half-even", "-2"],
+      ["2.5", "-1", 0, "half-up", "-3"],
+    ];
+    for (const [a, b, scale, mode, expected] of cases)
+      expect(
+        divideDecimals(decimalLiteral(a), decimalLiteral(b), { scale, mode: mode as "down" }),
+      ).toEqual({ ok: true, value: decimalLiteral(expected) });
+  });
 });
 
 describe("quantities", () => {
@@ -194,6 +219,29 @@ describe("quantities", () => {
       }
     }
     expect(sumQuantities("JPY", [])).toEqual({ ok: true, quantity: q("JPY", "0") });
+  });
+
+  test("scales an exact quantity in its own unit, and refuses an inexact or invalid ratio", () => {
+    expect(scaleQuantity(q("JPY", "10"), { numerator: "1", denominator: "4" })).toEqual({
+      ok: true,
+      quantity: q("JPY", "2.5"),
+    });
+    expect(
+      scaleQuantity(
+        q("JPY", "10"),
+        { numerator: "1", denominator: "3" },
+        { scale: 0, mode: "down" },
+      ),
+    ).toEqual({ ok: true, quantity: q("JPY", "3") });
+    // A third of 10 is not a finite decimal: refused, never silently rounded.
+    expect(scaleQuantity(q("JPY", "10"), { numerator: "1", denominator: "3" })).toMatchObject({
+      ok: false,
+      error: { code: "inexact_result" },
+    });
+    expect(scaleQuantity(q("JPY", "10"), { numerator: "1", denominator: "0" })).toMatchObject({
+      ok: false,
+      error: { code: "invalid_ratio" },
+    });
   });
 
   test("adapts decimal-v1 rows without inventing values", () => {

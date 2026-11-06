@@ -229,68 +229,98 @@ describe.if(runnable)("combined production client", () => {
     );
   }
 
-  test("route readiness waits for deferred metadata before accepting the page", async () => {
-    const page = await browser.newPage();
-    await page.addInitScript(() => {
-      const originalFetch = window.fetch.bind(window);
-      let release!: () => void;
-      const gate = new Promise<void>((resolve) => {
-        release = resolve;
-      });
-      const controlled = window as typeof window & {
-        productionMetadataBlocked: boolean;
-        releaseProductionMetadata: () => void;
-      };
-      controlled.productionMetadataBlocked = false;
-      controlled.releaseProductionMetadata = () => release();
-      window.fetch = (async (...args: Parameters<typeof originalFetch>) => {
-        const input = args[0];
-        const url =
-          typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-        if (new URL(url, location.href).pathname === "/api/meta") {
-          controlled.productionMetadataBlocked = true;
-          await gate;
-        }
-        return originalFetch(...args);
-      }) as typeof window.fetch;
-    });
-    let ready = false;
-    const opening = openObservation(page, "/transactions", HOSTILE_DESCRIPTION).then(() => {
-      ready = true;
-    });
-    void opening.catch(() => {});
-    try {
-      await page.waitForFunction(
-        () =>
-          (window as typeof window & { productionMetadataBlocked: boolean })
-            .productionMetadataBlocked,
-        undefined,
+  async function openSummaries(page: Page) {
+    // Metadata enables this request after the client mounts. Network idle alone
+    // can finish before that happens; register the response wait before navigation.
+    const [response] = await Promise.all([
+      page.waitForResponse(
+        (response) => {
+          const url = new URL(response.url());
+          return url.pathname === "/api/balances" && url.search === "?view=summaries";
+        },
         { timeout: 10_000 },
-      );
-      await page.waitForLoadState("networkidle", { timeout: 10_000 });
-      expect(await page.locator("h1").count()).toBe(0);
-      expect(ready).toBe(false);
-      await page.evaluate(() =>
-        (
-          window as typeof window & { releaseProductionMetadata: () => void }
-        ).releaseProductionMetadata(),
-      );
-      await opening;
-      expect(ready).toBe(true);
-      expect(await page.locator("h1").count()).toBe(1);
-      expect(await page.locator("body").innerText()).toContain(HOSTILE_DESCRIPTION);
-    } finally {
-      await page
-        .evaluate(() =>
+      ),
+      page.goto(origin + "/summaries", { waitUntil: "networkidle" }),
+    ]);
+    expect(await response.finished()).toBeNull();
+    await page.getByRole("region", { name: "実績・請求の表示条件", exact: true }).waitFor();
+  }
+
+  for (const [path, expected] of [
+    ["/transactions", HOSTILE_DESCRIPTION],
+    ["/summaries", "期間実績・請求"],
+  ] as const) {
+    test(`${path} readiness waits for deferred metadata before accepting the page`, async () => {
+      const page = await browser.newPage();
+      await page.addInitScript(() => {
+        const originalFetch = window.fetch.bind(window);
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const controlled = window as typeof window & {
+          productionMetadataBlocked: boolean;
+          releaseProductionMetadata: () => void;
+        };
+        controlled.productionMetadataBlocked = false;
+        controlled.releaseProductionMetadata = () => release();
+        window.fetch = (async (...args: Parameters<typeof originalFetch>) => {
+          const input = args[0];
+          const url =
+            typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+          if (new URL(url, location.href).pathname === "/api/meta") {
+            controlled.productionMetadataBlocked = true;
+            await gate;
+          }
+          return originalFetch(...args);
+        }) as typeof window.fetch;
+      });
+      const before = requests.length;
+      let ready = false;
+      const opening = (
+        path === "/summaries" ? openSummaries(page) : openObservation(page, path, expected)
+      ).then(() => {
+        ready = true;
+      });
+      void opening.catch(() => {});
+      try {
+        await page.waitForFunction(
+          () =>
+            (window as typeof window & { productionMetadataBlocked: boolean })
+              .productionMetadataBlocked,
+          undefined,
+          { timeout: 10_000 },
+        );
+        await page.waitForLoadState("networkidle", { timeout: 10_000 });
+        expect(await page.locator("h1").count()).toBe(0);
+        expect(ready).toBe(false);
+        await page.evaluate(() =>
           (
             window as typeof window & { releaseProductionMetadata: () => void }
           ).releaseProductionMetadata(),
-        )
-        .catch(() => {});
-      await opening.catch(() => {});
-      await page.close();
-    }
-  }, 30_000);
+        );
+        await opening;
+        expect(ready).toBe(true);
+        expect(await page.locator("h1").count()).toBe(1);
+        expect(await page.locator("body").innerText()).toContain(expected);
+        if (path === "/summaries") {
+          expect(
+            requests.slice(before).filter((request) => request.startsWith("/api/balances")),
+          ).toEqual(["/api/balances?view=summaries"]);
+        }
+      } finally {
+        await page
+          .evaluate(() =>
+            (
+              window as typeof window & { releaseProductionMetadata: () => void }
+            ).releaseProductionMetadata(),
+          )
+          .catch(() => {});
+        await opening.catch(() => {});
+        await page.close();
+      }
+    }, 30_000);
+  }
 
   test("all observation routes render under production CSP at desktop and mobile widths", async () => {
     for (const width of [1280, 390]) {
@@ -462,7 +492,7 @@ describe.if(runnable)("combined production client", () => {
     async function observe(kind: string) {
       sourceKind = kind;
       const before = requests.length;
-      await page.goto(origin + "/summaries", { waitUntil: "networkidle" });
+      await openSummaries(page);
       const nav = page.getByRole("navigation", { name: "メインナビゲーション" });
       return {
         requests: requests.slice(before).filter((path) => path.startsWith("/api/balances")),

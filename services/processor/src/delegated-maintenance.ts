@@ -17,6 +17,7 @@ import {
   ScheduleError,
   type MaintenanceWrite,
 } from "./schedule-store";
+import { boundedText, INTERNAL_BODY_LIMIT } from "./bounded-body";
 const schema = z.strictObject({
   step: z.enum(["apply", "prepare", "confirm"]),
   payload: delegatedMaintenancePayloadSchema,
@@ -53,9 +54,8 @@ export async function delegatedMaintenanceRoute(
     if (auth.notAfter <= new Date().toISOString())
       throw new DelegatedOperationError("delegation_expired");
     audit = processorCall(envelope, "schedules.maintenance.update", actor, "delegated");
-    const text = await request.text();
-    if (new TextEncoder().encode(text).byteLength > 16 * 1024)
-      throw new ScheduleError("request_too_large", 413);
+    const text = await boundedText(request, INTERNAL_BODY_LIMIT);
+    if (text === null) throw new ScheduleError("request_too_large", 413);
     let body: unknown;
     try {
       body = JSON.parse(text);

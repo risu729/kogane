@@ -21,8 +21,10 @@ import {
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
+import { boundedText } from "./bounded-body.ts";
 import { auditOverflowStage } from "./audit-overflow.ts";
 import { scheduleRoute } from "./schedule-store";
+import { collectionQualityAlarmRoute } from "./collection-quality-alarms";
 import { maintenanceSurveyLane } from "./maintenance-survey/lane.ts";
 import { maintenanceSurveyEnabled } from "./maintenance-survey/config.ts";
 import { internalHealthRoute } from "./internal-health.ts";
@@ -33,6 +35,7 @@ import { cardDebitAccountSweep } from "./card-debit-account-job.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import { cardPurchaseSweep, purchaseRecognitionEnabled } from "./card-purchase-job.ts";
 import { laneTickSummary, recordTick, type LaneTickResult } from "./lane-ticks.ts";
+import { markLaneAudit, recordLaneAudit } from "./lane-audit.ts";
 import {
   publicationConsistency,
   publishBatch,
@@ -1156,36 +1159,12 @@ export async function sweep(env: Env, options: SweepOptions = {}) {
   return { ...totals, lanes };
 }
 
-async function bounded(request: Request, limit: number): Promise<string | null> {
-  if (!request.body) return null;
-  const reader = request.body.getReader();
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  let size = 0,
-    text = "";
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > limit) {
-        await reader.cancel();
-        return null;
-      }
-      text += decoder.decode(value, { stream: true });
-    }
-    return text + decoder.decode();
-  } catch {
-    return null;
-  } finally {
-    reader.releaseLock();
-  }
-}
-
 async function command(request: Request): Promise<Record<string, unknown> | null> {
-  const body = await bounded(request, 4096);
-  if (body === null) return null;
   let value: unknown;
   try {
+    // Malformed UTF-8 and a failing stream refuse the command like bad JSON.
+    const body = await boundedText(request, 4096, { fatal: true });
+    if (body === null) return null;
     value = JSON.parse(body);
   } catch {
     return null;
@@ -1940,6 +1919,8 @@ export async function runScheduled(
     // past a day's cap, aggregated once that day has ended.
     ["audit_overflow", stages.auditOverflow, true],
   ];
+  // One correlation id for the lane audit records of this invocation.
+  const correlationId = crypto.randomUUID();
   for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
     const startedAtMs = Date.now();
@@ -1949,6 +1930,10 @@ export async function runScheduled(
       await recordTick(env.DB, event, startedAtMs, { outcome: "skipped-by-flag" }, log);
       continue;
     }
+    // The lanes that write decisions, proposals or settings get one audit
+    // record per tick that wrote any (ADR 0064, src/lane-audit.ts). The mark
+    // and the record are read and written outside the lane's metered scope.
+    const mark = await markLaneAudit(env.DB, event, log);
     let tick: LaneTickResult;
     try {
       const result = await stage(observation.env, context);
@@ -1971,6 +1956,7 @@ export async function runScheduled(
       tick = { outcome: "failed", code };
     }
     await recordTick(env.DB, event, startedAtMs, tick, log);
+    await recordLaneAudit(env.DB, event, mark, tick, correlationId, log);
   }
 }
 
@@ -2076,6 +2062,8 @@ export default {
       (await delegatedScheduleRoute(request, env, url));
     if (delegatedScheduling) return delegatedScheduling;
     const scheduling = await scheduleRoute(request, env, url);
+    const qualityAlarms = await collectionQualityAlarmRoute(request, env, url);
+    if (qualityAlarms) return qualityAlarms;
     if (scheduling) return scheduling;
     const health = await internalHealthRoute(request, env, path);
     if (health) return health;
