@@ -201,6 +201,23 @@ still pairs, and nothing names that as a gap. The status read ignores a
 a period reads as permanent. A rejection from `instrument:<id>` keeps the
 identifier apart from every identifier currently mapped to that instrument.
 
+### Per-source counts
+
+`readInstrumentCoverage` (`packages/application/src/query/instrument-coverage.ts`,
+[ADR 0073](adr/0073-instrument-coverage-per-source.md)) runs the same read and
+counts, for each source that uses at least one security, crypto or product
+identifier in its current organized records, its distinct identifiers and how
+many are in each state above. `GET /api/identity/instrument-coverage?source=`
+serves it under the reader grant (`summary.read`, whole store), with the same
+observation bound and read bounds, refused whole past either; `/identities`
+shows it as `銘柄の整理状況` beside the account coverage. An identifier two
+sources use is counted under each, so no total across sources is given; a
+source with no row uses no such identifier, which is not a count of zero
+resolved instruments. Counts are of identifiers, not instruments or holdings,
+and are not a match rate. Only current mapping revisions and the newest
+`listed_as` relation count: an adoption a person later corrected no longer
+counts as resolved.
+
 ## Acceptance gates
 
 - All merged source patterns exercised with synthetic tests; all seven SBI

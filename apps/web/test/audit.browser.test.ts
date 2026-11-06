@@ -124,6 +124,20 @@ describe.if(runnable)("the operator's audit log page", () => {
           "停止した実行を解除",
           "1日の上限（2000件）を超えた読み取り37件を集計",
           "記録の照会",
+          // The Processor's own alarm and lane records.
+          "定期収集の実行の受付",
+          "alarm:synthetic-bank-collect",
+          "定期実行",
+          "処理レーンの1回の実行",
+          "lane:purchase-recognition",
+          "処理レーン",
+          "自動処理",
+          "判断の改訂 2件 · 確定の記録 2件",
+          "照合の提案（未確定の明細と確定の明細）: 3件",
+          "照合の提案（取得元が示す同一の取引）: 1件",
+          "判断の改訂 0件 · 確定の記録 0件",
+          "定例停止の再調査の提案（案内の変更）: 1件",
+          "lane_failed",
         ])
           expect(text).toContain(expected);
         expect(text).not.toMatch(/件中|全\d+件|合計/u);
@@ -135,11 +149,11 @@ describe.if(runnable)("the operator's audit log page", () => {
 
         await page.getByRole("button", { name: "次のページ", exact: true }).click();
         await page
-          .getByText("2ページ目 · このページ" + String(FILLER_READS + 10 - 50) + "件", {
+          .getByText("2ページ目 · このページ" + String(FILLER_READS + 13 - 50) + "件", {
             exact: true,
           })
           .waitFor();
-        expect(await rows(page).count()).toBe(FILLER_READS + 10 - 50);
+        expect(await rows(page).count()).toBe(FILLER_READS + 13 - 50);
         expect(reads.at(-1)!.get("cursor")).toMatch(/^[A-Za-z0-9_-]+$/u);
         await page.getByText("監査ログのページ：最後のページです", { exact: true }).waitFor();
         expect(
@@ -166,7 +180,7 @@ describe.if(runnable)("the operator's audit log page", () => {
       // Read a second page first: its cursor belongs to the unfiltered read.
       await page.getByRole("button", { name: "次のページ", exact: true }).click();
       await page
-        .getByText(`2ページ目 · このページ${FILLER_READS + 10 - 50}件`, { exact: true })
+        .getByText(`2ページ目 · このページ${FILLER_READS + 13 - 50}件`, { exact: true })
         .waitFor();
       expect(reads.at(-1)!.has("cursor")).toBe(true);
       const result = page.getByLabel("結果", { exact: true });
@@ -215,6 +229,12 @@ describe.if(runnable)("the operator's audit log page", () => {
       await page.waitForURL(`${origin}/audit?result=refused&from=2026-10-09&to=2026-10-09`);
       await page.getByText("1ページ目 · このページ1件", { exact: true }).waitFor();
       expect(await page.getByLabel("結果", { exact: true }).inputValue()).toBe("refused");
+
+      // The Processor's own paths are filters like any other.
+      await page.goto(`${origin}/audit?path=lane`);
+      await page.getByText("1ページ目 · このページ2件", { exact: true }).waitFor();
+      expect(Object.fromEntries(reads.at(-1)!)).toEqual({ path: "lane" });
+      expect(await page.getByLabel("経路", { exact: true }).inputValue()).toBe("lane");
 
       // An empty answer says so, and says nothing about a total.
       await page.goto(`${origin}/audit?operation=reconcile.propose`);

@@ -6,10 +6,11 @@
   `mcp` paths, the daily caps with their overflow aggregate and the operator's
   `GET /api/v2/audit` ([audit log](../audit-log.md)); slice S4 (#564) adds the
   maintenance read and revision to the catalogue, the revision on `mcp` only
-  as a recorded refusal; slice S8 adds the operator's `監査ログ` page
-  ([amendment](#amendment-the-operators-page-slice-s8-2026-11-06)). The
-  `alarm` and `lane` writers are not implemented; the agent read
-  (`audit.read`) and the state of delegated execution (ADR 0063) are
+  as a recorded refusal. Slice S7 adds the `alarm` and `lane` writers
+  ([amendment](#amendment-the-alarm-and-lane-writers-slice-s7-2026-11-06)),
+  and slice S8 adds the operator's `監査ログ` page
+  ([amendment](#amendment-the-operators-page-slice-s8-2026-11-06)). The agent
+  read (`audit.read`) and the state of delegated execution (ADR 0063) are
   described in the [audit log](../audit-log.md).
 - Date: 2026-10-09
 - Related: [ADR 0063](0063-delegated-ai-operation-path.md) (the delegated AI
@@ -274,7 +275,11 @@ changes. Four details are fixed by it:
   `packages/observation-shared/src/audit-contract.ts` validates every page
   before it renders (schema version, at most 50 records newest first, each
   field and pairing as the builder and the table admit, one strict shape per
-  diff kind), and a page outside it is an error. The shared package may not
+  diff kind), and a page outside it is an error. With slice S7 that includes
+  the `lane` diff and the builder's pairings on the `alarm` and `lane` paths
+  (their principal shapes, `applied`/`accepted`/`failed` in one step), and
+  the new references, so the page shows the Processor's records rather than
+  refusing them. The shared package may not
   import `packages/application`, so it restates the lists and patterns, and
   `apps/web/test/audit-contract.test.ts` pins them to `vocabulary.ts` and
   `diff.ts`; `AUDIT_REF_PATTERNS` is exported for that comparison.
@@ -294,3 +299,82 @@ synthetic records built by the real builder and read by the real
 `readAuditPage`; `services/app/test/audit.test.ts` checks the served page
 against the same contract. Not verified: anything in production. The
 delegation status of plan slice S8 is not part of this amendment.
+
+## Amendment: the `alarm` and `lane` writers, slice S7 (2026-11-06)
+
+- Status: proposed (accepted when the slice's pull request merges).
+
+The decision named the two Processor paths and what each records; slice S7
+implements them and settles the details it left open. Nothing here changes
+who may read a record or what a record may hold.
+
+- **Operations and classes.** Two catalogue entries, on their own paths only
+  and never tools: `alarm.occurrence.claim` (R2, the class of
+  `ops.collection.request`: the occurrence is handed to a collector that
+  contacts the provider) and `lane.tick` (R2 when the tick wrote a rule
+  decision or an economic commit, the class of `command.commit`; R1 when it
+  wrote proposals only, the class of `reconcile.propose`).
+- **Principals.** `alarm:<job id>` and `lane:<lane>`, kind `automatic`, no
+  subject, no delegation. The lane's name is written with hyphens for
+  underscores (`lane:purchase-recognition`), because the principal's
+  character set has no underscore. The builder refuses any other shape on
+  these paths, and admits only `applied`, `accepted` and `failed` there:
+  nothing on them is a read, a refusal, a replay or a preparation, so nothing
+  on them is capped or aggregated.
+- **The alarm record.** One `accepted` record per occurrence of a
+  `collection`-kind job that `ScheduleAlarm` claims, as the last statement of
+  the claim's own batch, joined to the occurrence row that batch inserted (its
+  id, `started_at` and `started` status) and refused for an occurrence that
+  already has one. Target `schedule:<job id>`, scope the job's schedule
+  source, refs `occurrence:<occurrence id>` and `schedule:<job id>@<revision>`,
+  diff `none`. A record that cannot be written rolls the claim back, so the
+  occurrence is neither claimed nor dispatched, and the alarm's existing
+  bookkeeping retry re-arms it. The `processor` tick and `keepalive` jobs
+  write none. No `failed` alarm record is written: a dispatch that fails is
+  in the occurrence row, and a claim that fails leaves nothing to record.
+- **Which lanes.** `reconciliation_sweep` (stage A proposals and the rule
+  acceptance of a provider-linked pair), `card_settlement_sweep` (settlement
+  candidates), `purchase_recognition` (rule decisions with their commit rows,
+  pending-to-posted candidates) and `maintenance_survey` (re-survey
+  proposals). No lane writes a setting today, so no lane record names one.
+- **The lane record is not in a writer's batch.** A lane writes in many
+  batches, so its record cannot be the last statement of one. Instead the
+  Processor reads a high-water mark of each table before an audited lane runs
+  and, after it, the lane's own rows above the mark — rows under the lane's own
+  decision actor (`rule:reconciliation-v1`, `rule:card-purchase-recognition-v1`,
+  method `rule`), commit principal, or proposal method `rule` — and appends one
+  record if there are any. So a lane's effects can exist without their record:
+  a mark or record that cannot be read or written is logged as
+  `lane_audit_record_failed` with a safe code and changes nothing the lane did.
+  A tick that threw after writing is one `failed` record (the tick's code when
+  it is a lower-case code, otherwise `lane_failed`) naming what it wrote; an
+  idle or failed tick that wrote nothing records nothing.
+- **Ranges.** The references are `decision-revisions:<from>-<to>` (rowids of
+  `decision_revisions`), `commit-seq:<epoch>:<from>-<to>` and
+  `proposals:<kind>:<from>-<to>` per closed proposal kind (rowids of
+  `reconciliation_proposals` and `card_settlement_candidates`, the integer key
+  of `maintenance_survey_proposals`), all inclusive. A range names the lane's
+  own rows inside it; a row another writer added in between is inside the range
+  and not named. The rowid of a TEXT-keyed table orders rows the way the
+  card-ownership read already relies on; these tables are append-only, so a
+  position is not reused. SQLite keeps such a rowid only while the table is
+  not rebuilt: a `VACUUM`, an export and re-import, or a migration that copies
+  the table into a new one without its rowid renumbers it, and the table's
+  earlier references would then name other rows or none. A migration that
+  rebuilds `decision_revisions`, `reconciliation_proposals` or
+  `card_settlement_candidates` copies the rowid. `resolveLaneRef` in
+  `services/processor/src/lane-audit.ts` reads a reference back.
+- **The `lane` diff** is `{decisionRevisions, commits, proposals: [{kind,
+  count}]}` — the number of the lane's own rows each reference names. The
+  decision listed only decision revisions and proposals; the commit count is
+  the number of the lane's own commit rows its commit-sequence reference
+  names, which the decision already allowed. None of `processor_lane_ticks`' counts is copied.
+- **Correlation.** The lane records of one tick share one correlation id;
+  each alarm claim has its own.
+
+Limits: the ranges assume one scheduled tick at a time (the one
+`processor-tick` alarm runs the lanes in sequence); two overlapping ticks of
+one lane, or of `reconciliation_sweep` and `purchase_recognition` (both write
+rule `reconciliation_proposals`), would both name the rows either wrote. The
+rowid positions hold only while the tables are not rebuilt (above). Not
+verified in production.

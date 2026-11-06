@@ -662,6 +662,27 @@ the lane did. `GET /status` (`mise run //services/processor:ops status`) and
 `GET /internal/health` (§13) report the latest tick of each lane as
 `laneTicks`; reading them is in [operations.md](operations.md#lane-tick-records).
 
+### 6.2 Lane audit records
+
+Four lanes write rule decisions, economic commits or proposals:
+`reconciliation_sweep`, `card_settlement_sweep`, `purchase_recognition` and
+`maintenance_survey`. Each tick of one of them that wrote any also appends one
+`lane` record to the common audit log (`src/lane-audit.ts`,
+[audit log](audit-log.md#the-processors-own-records-alarm-and-lane),
+[ADR 0064](adr/0064-common-audit-log.md#amendment-the-alarm-and-lane-writers-slice-s7-2026-11-06)):
+principal `lane:<lane>` (hyphens for underscores), operation `lane.tick`,
+`applied`, or `failed` when the stage threw after writing. Before such a lane
+runs, `runScheduled` reads one high-water mark of the tables it may write;
+after it, the lane's own rows above the mark, by its decision actor, commit
+principal or proposal method. The record's references are inclusive ranges of
+those rows (`decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`,
+`proposals:<kind>:<a>-<b>`) and its diff the number of the lane's own rows in
+each; it copies none of the tick row's counts. An idle tick, a lane whose flag
+is off and every other lane write no record. The mark and the record are read
+and written outside the lane's metered scope, and a failure to read or write
+them is logged as `{"event":"lane_audit_record_failed","lane":…,"code":…}` and
+changes nothing the lane did.
+
 ## 7. Operations dispatch
 
 The App accepts an operations-API request, stores it and answers 202;
