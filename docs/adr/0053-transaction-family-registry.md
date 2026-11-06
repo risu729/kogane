@@ -8,7 +8,7 @@
 
 ## Context
 
-Phases 6–7 of the [roadmap](../roadmap.md#phases-67--reconciliation-and-economic-event-generation)
+Phases 6–7 of the [roadmap](../roadmap.md#layers-67--reconciliation-and-economic-event-generation)
 ask for events generated continuously from adopted observations for bank
 transfers, FX, remittances, securities, reward exchanges and stored-value
 funding. Today only two writers exist: card purchase recognition (Vpass and
