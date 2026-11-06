@@ -63,7 +63,11 @@ interface IdentityCommand {
   label and status come from the target's current claims, or the entity when
   it has none; ambiguous claims are refused.
 - `release-override` appends a `release-override` decision at the current
-  revision and sets `superseded_by` on every active override of the subject.
+  revision and sets `superseded_by` on every active override of the subject at
+  or before that revision. An identical resend whose batch runs after a later
+  `assign` finds the first send's ledger row, which is its own, so the bound is
+  what keeps it from releasing the later override; it answers the stored
+  receipt and writes nothing.
   It does not delete or replace the manual mapping row: the manual mapping
   stays current until automatic policy appends the next rule revision. It also
   releases a manual row no decision describes (one written by an older build):

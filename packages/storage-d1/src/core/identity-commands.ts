@@ -314,12 +314,23 @@ export async function prepareIdentityCommand(
   );
   if (!assign)
     // The one permitted update: each active override is superseded exactly once, by this release.
+    // Only overrides at or before the revision the release saw: an identical
+    // resend whose batch runs after a later assign finds its own ledger row
+    // (the first send's), and must not release an override it never saw.
     writes.push({
       sql: `UPDATE decision_revisions SET superseded_by=? WHERE subject_kind=? AND subject_ref=?
         AND decision_kind='assign' AND method IN ('manual','legacy-migration') AND superseded_by IS NULL
+        AND revision<=?
         AND EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)
         AND EXISTS(SELECT 1 FROM decision_operations op WHERE ${ownLedger})`,
-      binds: [decisionId, subjectKind, command.referenceId, decisionId, ...ownLedgerBinds],
+      binds: [
+        decisionId,
+        subjectKind,
+        command.referenceId,
+        command.expectedRevision,
+        decisionId,
+        ...ownLedgerBinds,
+      ],
     });
   return { receipt, digest, writes };
 }
