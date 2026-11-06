@@ -121,6 +121,8 @@ async function call(
   options: {
     method?: string;
     body?: unknown;
+    /** Sent as is, in place of `JSON.stringify(body)`. */
+    rawBody?: BodyInit;
     subject?: string;
     jwt?: string | null;
     environment?: Record<string, unknown>;
@@ -131,7 +133,9 @@ async function call(
       ? await token(options.subject, path === "/mcp" ? MCP_AUDIENCE : undefined)
       : options.jwt;
   const init: RequestInit = {
-    method: options.method ?? (options.body === undefined ? "GET" : "POST"),
+    method:
+      options.method ??
+      (options.body === undefined && options.rawBody === undefined ? "GET" : "POST"),
     headers: {
       ...(jwt ? { "cf-access-jwt-assertion": jwt } : {}),
       // What an MCP client sends on every POST (Streamable HTTP).
@@ -139,6 +143,7 @@ async function call(
     },
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
+  if (options.rawBody !== undefined) init.body = options.rawBody;
   return worker.fetch(new Request(`https://fixture.test${path}`, init), {
     ...env,
     ACCESS_ISSUER: issuer,
@@ -261,6 +266,35 @@ describe("the agent API is off until a grant is configured", () => {
       environment: grants({ "agent-principal": FULL_GRANT }),
     });
     expect(response.status).toBe(413);
+  });
+
+  it("bounds the body in bytes, streamed or declared, before any tool runs", async () => {
+    const environment = grants({ "agent-principal": FULL_GRANT });
+    // 30,000 kana are about 90 KB but 30,000 UTF-16 code units: under the
+    // bound if it counted characters, over it in bytes. A streamed body
+    // declares no length to check first.
+    const kana = JSON.stringify({ intent: "activity", filters: { q: "あ".repeat(30_000) } });
+    for (const rawBody of [kana, new Blob([kana]).stream()]) {
+      const response = await call("/api/agent/v1/financial.query", { rawBody, environment });
+      expect(response.status).toBe(413);
+      expect(await response.json()).toMatchObject({ error: "request_too_large" });
+    }
+  });
+
+  it("reads an empty body as {} and refuses a body that is not JSON", async () => {
+    const environment = grants({ "agent-principal": FULL_GRANT });
+    const path = "/api/agent/v1/financial.query";
+    const object = await call(path, { rawBody: "{}", environment });
+    const empty = await call(path, { rawBody: "", environment });
+    expect(empty.status).toBe(object.status);
+    expect(await empty.json()).toEqual(await object.json());
+    // A byte-order mark alone decodes to no text, but it is not an empty
+    // body: emptiness, like the bound, is judged on bytes.
+    for (const rawBody of ["{", new Uint8Array([0xef, 0xbb, 0xbf])]) {
+      const response = await call(path, { rawBody, environment });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "invalid_body" });
+    }
   });
 });
 
