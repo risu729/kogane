@@ -77,7 +77,9 @@ from the historical scan; nothing needs backfilling.
 
 Internal `POST` routes on the pipeline Worker at the same trust level as
 `/sweep` (private service binding, no public route). Bodies are JSON, at most
-4 KiB, and responses contain identifiers and counts only.
+4 KiB counted in bytes as they are read (reading stops and the stream is
+cancelled past the limit; `services/processor/src/bounded-body.ts`), and
+responses contain identifiers and counts only.
 
 | Route             | Body                                                                                                                              | Effect                                                                                                                                                                                                                                                                                        |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
