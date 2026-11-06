@@ -90,7 +90,7 @@ describe("only the three admitted Container configurations change deployment bac
       expect(deploy.body).toContain("production-strategy: deploy");
       expect(deploy.body).toContain("deploy-triggers: 'true'");
       expect(deploy.body).toMatch(
-        /^\s*uses: risu729\/wrangler-deploy-action@[a-f0-9]{40} # v2\.\d+\.\d+$/mu,
+        /^\s*uses: risu729\/wrangler-deploy-action@[a-f0-9]{40} # v3\.\d+\.\d+$/mu,
       );
       const between = steps.slice(steps.indexOf(deploy) + 1, steps.indexOf(verify));
       expect(
