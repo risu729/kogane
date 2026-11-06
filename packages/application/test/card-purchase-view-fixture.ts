@@ -300,6 +300,12 @@ export function purchasePage(
       completeTransactionHistory: false,
       unsupportedShapes: [...CARD_USAGE_EXCLUSIONS],
       unrecognizedCurrentRows: 3,
+      unrecognizedReasons: [
+        { reasonCode: "payment_type_unsupported", rows: 1 },
+        { reasonCode: "installment_amount_differs", rows: 1 },
+        { reasonCode: "not_yet_recognized", rows: 1 },
+      ],
+      refundsAllocated: false,
       limit: 50,
     },
   };

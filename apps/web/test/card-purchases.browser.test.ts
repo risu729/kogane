@@ -111,6 +111,14 @@ describe.if(runnable)("card purchase explanation", () => {
     expect(main).toContain("引落は購入費用に加算しません");
     // The unrecognised count is across every statement month, and says so.
     expect(main).toContain("3 件は、カード利用として認識されていないため、どの請求月の一覧にも");
+    // Each unrecognised row is named by its closed reason, as a count only.
+    expect(await page.getByRole("list", { name: "認識していない理由ごとの件数" }).innerText()).toBe(
+      [
+        "1回払い以外（分割・リボ・ボーナス払いなど）: 1件",
+        "利用額と今回の支払額が異なる（分割払いの一部など）: 1件",
+        "認識の条件を満たすが、まだ処理していない: 1件",
+      ].join("\n"),
+    );
     // The statement total is reference only, behind its own disclosure.
     await page.getByText("カード会社の請求総額（参考）", { exact: true }).click();
     expect(await page.locator("main").innerText()).toContain("1734 JPY");

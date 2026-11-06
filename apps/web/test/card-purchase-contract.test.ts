@@ -78,6 +78,46 @@ describe("card purchase HTTP contract", () => {
     const unknownShape = clone(purchasePage()) as unknown as { coverage: Record<string, unknown> };
     unknownShape.coverage.unsupportedShapes = ["guessed_installment"];
     expect(validCardPurchasePage(unknownShape)).toBe(false);
+    const allocated = clone(purchasePage()) as unknown as { coverage: Record<string, unknown> };
+    allocated.coverage.refundsAllocated = true;
+    expect(validCardPurchasePage(allocated)).toBe(false);
+  });
+
+  test("names every unrecognised row's closed reason once, never a guessed one", () => {
+    const withReasons = (reasons: unknown, total = 3) => {
+      const page = clone(purchasePage()) as unknown as { coverage: Record<string, unknown> };
+      page.coverage.unrecognizedReasons = reasons;
+      page.coverage.unrecognizedCurrentRows = total;
+      return validCardPurchasePage(page);
+    };
+    expect(withReasons([{ reasonCode: "payment_type_unsupported", rows: 3 }])).toBe(true);
+    expect(withReasons([], 0)).toBe(true);
+    expect(withReasons([{ reasonCode: "beyond_read_limit", rows: 3 }])).toBe(true);
+    for (const reasons of [
+      // A guessed provider semantic is not a reason.
+      [{ reasonCode: "installment", rows: 3 }],
+      [{ reasonCode: "revolving", rows: 3 }],
+      // The reasons must add up to the unrecognised count: none left out, none twice.
+      [{ reasonCode: "payment_type_unsupported", rows: 2 }],
+      [
+        { reasonCode: "payment_type_unsupported", rows: 2 },
+        { reasonCode: "payment_type_unsupported", rows: 1 },
+      ],
+      // The closed list's order, and only reasons with rows.
+      [
+        { reasonCode: "not_yet_recognized", rows: 1 },
+        { reasonCode: "payment_type_unsupported", rows: 2 },
+      ],
+      [
+        { reasonCode: "payment_type_unsupported", rows: 3 },
+        { reasonCode: "amount_zero", rows: 0 },
+      ],
+      // No amount or text beside a count.
+      [{ reasonCode: "payment_type_unsupported", rows: 3, amount: "1200" }],
+      [{ reasonCode: "payment_type_unsupported", rows: 3.5 }],
+      null,
+    ])
+      expect(withReasons(reasons)).toBe(false);
   });
 
   test("refuses any figure the contract does not name, at every level", () => {

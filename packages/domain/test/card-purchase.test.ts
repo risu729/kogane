@@ -7,6 +7,7 @@ import { describe, expect, test } from "bun:test";
 import {
   CARD_PURCHASE_POLICY,
   CARD_USAGE_EXCLUSIONS,
+  CARD_USAGE_UNRECOGNIZED_REASONS,
   cardPurchaseContent,
   cardPurchaseEventId,
   cardPurchaseRetirement,
@@ -20,6 +21,7 @@ import {
   nextCardPurchaseAction,
   recognitionKey,
   statementPeriod,
+  unrecognizedReasonCounts,
   validCardPurchaseFacts,
   VPASS_CUSTOMIZED_SINGLE_PAYMENT_CODE,
   VPASS_WEB_SINGLE_PAYMENT_CODE,
@@ -521,6 +523,56 @@ describe("exclusions", () => {
     expect(reason(vpassRow({ externalId: null }))).toBe("card_identity_unstable");
     // MyJCB's connection-scoped identity is resolved by the default policy.
     expect(reason(myjcbRow())).toBe("recognised");
+  });
+});
+
+describe("unrecognised rows per closed reason", () => {
+  test("each row is counted under its own reason; nothing guesses an installment kind", () => {
+    const facts = [
+      // Unobserved Vpass codes and MyJCB installment, revolving and bonus wording.
+      vpassRow({ paymentType: "２" }),
+      vpassRow({ providerStatus: "unconfirmed", paymentType: "1" }),
+      myjcbRow({ paymentType: "架空店舗 分割" }),
+      myjcbRow({ paymentType: "架空店舗 リボ払" }),
+      myjcbRow({ paymentType: "架空店舗 ボーナス1回払" }),
+      // An installment slice: this statement's payment is part of the usage.
+      myjcbRow({ amount: observed("4000"), usageAmountText: "12,000", paymentAmountText: "4,000" }),
+      myjcbRow({ paymentAmountText: null }),
+      vpassRow({ amount: absentQuantity("JPY", "unparsed", "synthetic") }),
+      vpassRow({ amount: observed("-300"), providerSaleCode: "5" }),
+      // Rows the rule accepts, which no live event holds yet.
+      vpassRow(),
+      myjcbRow(),
+    ];
+    expect(unrecognizedReasonCounts(facts, facts.length)).toEqual([
+      { reasonCode: "amount_not_exact", rows: 1 },
+      { reasonCode: "payment_type_unsupported", rows: 5 },
+      { reasonCode: "installment_amount_differs", rows: 1 },
+      { reasonCode: "payment_split_unknown", rows: 1 },
+      { reasonCode: "refund_shape_unverified", rows: 1 },
+      { reasonCode: "not_yet_recognized", rows: 2 },
+    ]);
+  });
+
+  test("rows counted but not read are unread, never given a reason; the rows add up", () => {
+    const facts = [vpassRow({ paymentType: "" })];
+    const counts = unrecognizedReasonCounts(facts, 4);
+    expect(counts).toEqual([
+      { reasonCode: "payment_type_unsupported", rows: 1 },
+      { reasonCode: "beyond_read_limit", rows: 3 },
+    ]);
+    expect(counts.reduce((sum, entry) => sum + entry.rows, 0)).toBe(4);
+    expect(unrecognizedReasonCounts([], 0)).toEqual([]);
+    expect(() => unrecognizedReasonCounts(facts, 0)).toThrow("card_usage_count_invalid");
+    expect(() => unrecognizedReasonCounts([], 1.5)).toThrow("card_usage_count_invalid");
+  });
+
+  test("the reasons are the exclusions and two that are not, closed", () => {
+    expect(CARD_USAGE_UNRECOGNIZED_REASONS).toEqual([
+      ...CARD_USAGE_EXCLUSIONS,
+      "not_yet_recognized",
+      "beyond_read_limit",
+    ]);
   });
 });
 

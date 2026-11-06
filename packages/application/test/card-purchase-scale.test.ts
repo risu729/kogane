@@ -16,7 +16,13 @@ import {
   unboundedScans,
 } from "../../read-model/test/card-usage-plan.ts";
 import { CI_SCALE, scaledStore } from "../../read-model/test/card-usage-scale-fixture.ts";
-import { CARD_PURCHASE_PAGE_SIZE, queryCardPurchases } from "../src/query/card-purchases.ts";
+import {
+  CARD_PURCHASE_CURRENT_SQL,
+  CARD_PURCHASE_PAGE_SIZE,
+  CARD_USAGE_REASON_READ_LIMIT,
+  queryCardPurchases,
+} from "../src/query/card-purchases.ts";
+import { LEGACY_CARD_PURCHASE_CURRENT_SQL } from "./card-purchase-current-legacy-sql.ts";
 
 let db: Database;
 
@@ -77,8 +83,44 @@ describe("card purchases on a scaled store without statistics", () => {
     const usage = seen.filter((query) => query.includes(CURRENT_CARD_USAGE_SQL));
     expect(usage).toHaveLength(1);
     // The wrapper's own relations: the materialized usage and the page's key list.
-    const steps = explain(db, usage[0]!, [0, -1, "[]"]);
+    const steps = explain(db, usage[0]!, [0, -1, "[]", CARD_USAGE_REASON_READ_LIMIT]);
     expect(unboundedScans(steps, ["usage", "u", "json_each"])).toEqual([]);
     expect(currentRowsDriver(steps)).toMatch(/^SCAN candidate\b/u);
+  });
+
+  test("its pass returns the shipped pass's keys and count, and the unrecognised rows", () => {
+    const current = db.query(CURRENT_CARD_USAGE_SQL).all(0, -1) as {
+      observation_id: number;
+      recognition_key: string | null;
+    }[];
+    const keys = JSON.stringify(
+      current.flatMap((row, index) =>
+        row.recognition_key !== null && index % 3 === 0 ? [row.recognition_key] : [],
+      ),
+    );
+    const legacy = db.query(LEGACY_CARD_PURCHASE_CURRENT_SQL).all(0, -1, keys) as {
+      current_key: string | null;
+      unrecognized: number | null;
+    }[];
+    const rows = db
+      .query(CARD_PURCHASE_CURRENT_SQL)
+      .all(0, -1, keys, CARD_USAGE_REASON_READ_LIMIT) as {
+      part: string;
+      current_key: string | null;
+      unrecognized: number | null;
+      observation_id: number | null;
+    }[];
+    const count = legacy.find((row) => row.current_key === null)!.unrecognized!;
+    expect(count).toBeGreaterThan(0);
+    expect(rows.filter((row) => row.part === "count").map((row) => row.unrecognized)).toEqual([
+      count,
+    ]);
+    expect(rows.flatMap((row) => (row.part === "key" ? [row.current_key] : [])).sort()).toEqual(
+      legacy.flatMap((row) => (row.current_key === null ? [] : [row.current_key])).sort(),
+    );
+    const unrecognized = rows.filter((row) => row.part === "row");
+    expect(unrecognized).toHaveLength(Math.min(count, CARD_USAGE_REASON_READ_LIMIT));
+    const ids = unrecognized.map((row) => row.observation_id!);
+    expect(ids).toEqual([...ids].sort((a, b) => a - b));
   });
 });

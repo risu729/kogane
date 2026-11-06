@@ -749,7 +749,10 @@ skipped with a code from a closed set and never guessed (INV05):
 `unit_unsupported`, `payment_type_unsupported`, `installment_amount_differs`,
 `payment_split_unknown`, `refund_shape_unverified`, `status_unsupported` and
 `date_absent`. Installment, revolving and bonus rows are never recognised, and
-a MyJCB row needs its usage and payment amounts to agree. A Vpass row needs the
+a MyJCB row needs its usage and payment amounts to agree. The lane counts
+skipped rows per code in its tick record. The purchases read counts the current
+rows no live event holds per code, and the `/purchases` page lists those
+counts. A Vpass row needs the
 trusted importer card binding (identity family `vpass-card-binding`): a card
 ordinal is not an identity. A mapping whose status is `unresolved` names a
 placeholder, not a card, and counts as no account.
@@ -1341,8 +1344,19 @@ statement totals are listed beside the figures and are never subtracted from
 or compared with them, and `settlementAddsPurchaseExpense` is `false`.
 `coverage` says the list is not a complete transaction history, names the
 excluded shapes, and counts the current provider rows no live event holds,
-across every statement month whatever the filter. All figures are exact
-decimals added in `@kogane/domain`.
+across every statement month whatever the filter. `unrecognizedReasons`
+splits that count by closed reason
+([ADR 0004, amendment of 2026-11-06](adr/0004-payment-type-shapes-from-evidence.md#amendment-name-each-unrecognised-rows-closed-reason-in-the-purchases-read-2026-11-06)).
+Each row gets its own `classifyCardUsage` exclusion code, or
+`not_yet_recognized` when the rule accepts it but no live event holds it yet.
+At most 2,000 rows are classified per request (`CARD_USAGE_REASON_READ_LIMIT`,
+lowest observation id first). The rest are counted as `beyond_read_limit`.
+Only reasons with rows are listed, and their rows add up to the count. An
+installment, revolving or bonus row has no code of its own: it is
+`payment_type_unsupported`, like every other unobserved payment type, or a
+MyJCB amount code. `refundsAllocated` is `false`: a refund is never allocated
+to the purchase it refunds. All figures are exact decimals added in
+`@kogane/domain`.
 
 Cost per request: one selection of the filter's live events that carries only
 what the figures, the order and the statement links read (a few hundred bytes
@@ -1350,7 +1364,8 @@ per event; evidence, facts and history are read for the page's 50 events
 only), one statement query and one settlement query over the (account,
 source, period) keys of those events, and one pass of the shared current card
 usage query (`packages/read-model/src/card-usage.ts`) for the `current` flags
-and the unrecognised count. That pass reads every current Vpass/MyJCB capture
+and the unrecognised count, with the classified columns of up to 2,000
+unrecognised rows. That pass reads every current Vpass/MyJCB capture
 and dominates the cost: on a synthetic store of about 34,000 usage
 observations (180 days of daily captures) and 8,200 live events, the
 unfiltered first page took about 0.4 s in `bun:sqlite`, of which the usage

@@ -6,6 +6,7 @@ import type {
   CardPurchaseSourceId,
   CardPurchaseUnitTotals,
   CardUsageExclusion,
+  CardUsageReasonCount,
 } from "./card-purchase.ts";
 import type { EventState, SourceFactRef, UnknownStateReason } from "./events.ts";
 import type {
@@ -178,6 +179,20 @@ export interface CardPurchasePage {
     completeTransactionHistory: false;
     unsupportedShapes: CardUsageExclusion[];
     unrecognizedCurrentRows: number;
+    /**
+     * The same rows per closed reason (`unrecognizedReasonCounts`): only
+     * reasons with rows, in the closed list's order, adding up to
+     * `unrecognizedCurrentRows`. Installment, revolving and bonus rows are
+     * `payment_type_unsupported` (ADR 0004); they have no code of their own
+     * until one is observed.
+     */
+    unrecognizedReasons: CardUsageReasonCount[];
+    /**
+     * No refund is allocated to the purchase it refunds: the review kind
+     * exists (`card-refund.allocate`, ADR 0017) but no planner does, so a
+     * refund is shown and summed apart, never netted against a purchase.
+     */
+    refundsAllocated: false;
     limit: number;
   };
 }

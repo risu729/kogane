@@ -7,6 +7,7 @@ import {
   CARD_PURCHASE_ACTIONS,
   CARD_PURCHASE_SOURCES,
   CARD_USAGE_EXCLUSIONS,
+  CARD_USAGE_UNRECOGNIZED_REASONS,
 } from "../../domain/src/card-purchase.ts";
 import {
   CARD_PURCHASE_REVIEW_AFFORDANCES,
@@ -52,8 +53,11 @@ const COVERAGE_KEYS = [
   "completeTransactionHistory",
   "unsupportedShapes",
   "unrecognizedCurrentRows",
+  "unrecognizedReasons",
+  "refundsAllocated",
   "limit",
 ];
+const REASON_COUNT_KEYS = ["reasonCode", "rows"];
 const ITEM_KEYS = [
   "eventId",
   "revision",
@@ -116,6 +120,25 @@ const list = (value: unknown, bound: number): value is unknown[] =>
   Array.isArray(value) && value.length <= bound;
 const period = (value: unknown) => text(value) && PERIOD.test(value);
 const nullableQuantity = (value: unknown) => value === null || validQuantity(value);
+
+/**
+ * The unrecognised rows per closed reason: each reason once, in the closed
+ * list's order, each with rows, and together exactly the unrecognised count,
+ * so no row is left without a reason and none is counted twice.
+ */
+function validReasonCounts(value: unknown, total: unknown): boolean {
+  if (!list(value, CARD_USAGE_UNRECOGNIZED_REASONS.length) || !count(total)) return false;
+  let position = -1;
+  let rows = 0;
+  for (const entry of value) {
+    if (!record(entry) || !exactKeys(entry, REASON_COUNT_KEYS) || !count(entry.rows)) return false;
+    const index = (CARD_USAGE_UNRECOGNIZED_REASONS as readonly unknown[]).indexOf(entry.reasonCode);
+    if (index <= position || entry.rows === 0) return false;
+    position = index;
+    rows += entry.rows;
+  }
+  return rows === total;
+}
 
 function validSourceRow(value: unknown): boolean {
   return (
@@ -369,6 +392,8 @@ function validPage(value: unknown, candidate: (value: unknown) => boolean): bool
     list(coverage.unsupportedShapes, CARD_USAGE_EXCLUSIONS.length) &&
     coverage.unsupportedShapes.every(member(CARD_USAGE_EXCLUSIONS)) &&
     count(coverage.unrecognizedCurrentRows) &&
+    validReasonCounts(coverage.unrecognizedReasons, coverage.unrecognizedCurrentRows) &&
+    coverage.refundsAllocated === false &&
     coverage.limit === CARD_PURCHASE_PAGE_LIMIT &&
     value.items.every((item) => validItem(item, candidate))
   );

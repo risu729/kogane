@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type {
   CardPurchaseSourceId,
   CardUsageExclusion,
+  CardUsageUnrecognizedReason,
 } from "../../../packages/domain/src/card-purchase.ts";
 import type {
   CardPurchaseCandidate,
@@ -89,6 +90,18 @@ export const EXCLUSION_LABELS: Record<CardUsageExclusion, string> = {
   status_unsupported: "確定・未確定以外の状態",
   date_absent: "利用日が記録されていない",
   superseded_representation: "同じ明細のより新しい取得がある",
+};
+
+/**
+ * Every reason a current row has no recognised purchase: the exclusions, a row
+ * the rule accepts but the writer has not reached, and rows the read counted
+ * without classifying. Installments, revolving and bonus payments have no
+ * label of their own: they fall under `payment_type_unsupported` (ADR 0004).
+ */
+export const UNRECOGNIZED_REASON_LABELS: Record<CardUsageUnrecognizedReason, string> = {
+  ...EXCLUSION_LABELS,
+  not_yet_recognized: "認識の条件を満たすが、まだ処理していない",
+  beyond_read_limit: "件数が多いため理由を確認していない",
 };
 
 /** A stored `transaction:<id>` / `balance:<id>` reference as a link to its record and original. */

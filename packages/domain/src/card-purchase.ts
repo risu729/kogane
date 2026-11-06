@@ -119,6 +119,35 @@ export const CARD_USAGE_EXCLUSIONS = [
 ] as const;
 export type CardUsageExclusion = (typeof CARD_USAGE_EXCLUSIONS)[number];
 
+/**
+ * Why a current usage row has no live recognised event, as the purchases read
+ * counts it (ADR 0004, amendment of 2026-11-06): the row's own exclusion code
+ * from `classifyCardUsage`, or one of two codes that are not exclusions:
+ *
+ * - `not_yet_recognized`: the rule accepts the row, but no live event holds
+ *   its key yet (the writer has not reached it, or its batch conflicted);
+ * - `beyond_read_limit`: the read counted the row but did not classify it,
+ *   because more unrecognised rows are current than one read classifies.
+ *
+ * Installment, revolving and bonus rows have no code of their own: no such
+ * row has been observed, so they are `payment_type_unsupported` together with
+ * every other unknown payment type (ADR 0004), or, for MyJCB, the amount codes
+ * `installment_amount_differs` and `payment_split_unknown`.
+ */
+export const CARD_USAGE_UNRECOGNIZED_REASONS = [
+  ...CARD_USAGE_EXCLUSIONS,
+  "not_yet_recognized",
+  "beyond_read_limit",
+] as const;
+export type CardUsageUnrecognizedReason = (typeof CARD_USAGE_UNRECOGNIZED_REASONS)[number];
+
+/** Current usage rows without a live recognised event, for one closed reason. */
+export interface CardUsageReasonCount {
+  reasonCode: CardUsageUnrecognizedReason;
+  /** Always positive: a reason with no row is left out. */
+  rows: number;
+}
+
 /** What one stored revision did; the same closed list as the 0047 CHECK. */
 export const CARD_PURCHASE_ACTIONS = [
   "recognize",
@@ -426,6 +455,36 @@ export function classifyCardUsage(fact: CardUsageFact): CardUsageClassification 
     state,
     magnitude: exactQuantity(fact.amount.unitRef, magnitude, normalizationVersion),
   };
+}
+
+/**
+ * The current usage rows no live event holds, counted per closed reason
+ * (`CARD_USAGE_UNRECOGNIZED_REASONS`): each classified row under its
+ * `classifyCardUsage` reason, or `not_yet_recognized` when the rule accepts
+ * it, and the `total - facts.length` rows the read counted without
+ * classifying under `beyond_read_limit`. Reasons with no row are left out;
+ * the rest follow the closed list's order, and their rows add up to `total`.
+ * A count only: no amount and no provider text leaves this function.
+ */
+export function unrecognizedReasonCounts(
+  facts: readonly CardUsageFact[],
+  total: number,
+): CardUsageReasonCount[] {
+  if (!Number.isSafeInteger(total) || total < facts.length)
+    throw new Error("card_usage_count_invalid");
+  const counts = new Map<CardUsageUnrecognizedReason, number>();
+  const add = (reasonCode: CardUsageUnrecognizedReason, rows: number): void => {
+    if (rows > 0) counts.set(reasonCode, (counts.get(reasonCode) ?? 0) + rows);
+  };
+  for (const fact of facts) {
+    const classified = classifyCardUsage(fact);
+    add(classified.ok ? "not_yet_recognized" : classified.reasonCode, 1);
+  }
+  add("beyond_read_limit", total - facts.length);
+  return CARD_USAGE_UNRECOGNIZED_REASONS.flatMap((reasonCode) => {
+    const rows = counts.get(reasonCode);
+    return rows === undefined ? [] : [{ reasonCode, rows }];
+  });
 }
 
 /** The immutable Layer B reference of a row: never a bare string (SourceFactRef). */

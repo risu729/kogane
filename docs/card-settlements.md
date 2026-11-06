@@ -433,7 +433,12 @@ apart, and no difference between them is computed. Accepting a settlement
 changes none of the purchase figures (引落は購入費用に加算しません). An empty
 list does not prove there were no purchases: installment, revolving and bonus
 rows and rows the recognition writer has not reached are counted as
-unrecognised instead.
+unrecognised instead. The page lists those counts per closed reason, such as
+`payment_type_unsupported`, `installment_amount_differs` and
+`not_yet_recognized`
+([economic events](economic-events.md#card-purchase-recognition)). A purchase
+whose statement has no settlement review shows 未照合. This read gives no
+reason why the statement has no candidate.
 
 ### Reviewing a pending-to-posted link
 

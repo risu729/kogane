@@ -16,7 +16,9 @@ import { baseWorld, myjcbRoot } from "../../read-model/test/card-usage-fixture.t
 import { factOf } from "../../storage-d1/test/card-purchase-fixture.ts";
 import { myJcbCreditStatement } from "../../parsers/src/parsers/myjcb.ts";
 import {
+  CARD_PURCHASE_CURRENT_SQL,
   CARD_PURCHASE_PAGE_SIZE,
+  CARD_USAGE_REASON_READ_LIMIT,
   CardPurchaseLimitError,
   queryCardPurchases,
 } from "../src/query/card-purchases.ts";
@@ -209,6 +211,8 @@ describe("card purchase explanation", () => {
         "installment_amount_differs",
       ]),
       unrecognizedCurrentRows: 0,
+      unrecognizedReasons: [],
+      refundsAllocated: false,
       limit: CARD_PURCHASE_PAGE_SIZE,
     });
   });
@@ -834,6 +838,58 @@ function factFrom(row: CurrentCardUsageRow): CardUsageFact {
 }
 
 describe("current provider rows", () => {
+  test("every unrecognised current row is named by its closed reason, never a guessed one", async () => {
+    // The snapshot world's current rows: a Vpass web code other than 1 and a
+    // MyJCB installment (分割) row, an amountless Vpass row and seven rows the
+    // rule accepts but nothing has recognised yet.
+    const { store } = baseWorld();
+    const db = store.db;
+    try {
+      const reads: unknown[][] = [];
+      const sql = (bound?: number): SqlExecutor => ({
+        all: async <T>(query: string, args: readonly unknown[]) => {
+          const bind =
+            query === CARD_PURCHASE_CURRENT_SQL && bound !== undefined
+              ? [...args.slice(0, 3), bound]
+              : args;
+          if (query === CARD_PURCHASE_CURRENT_SQL) reads.push([...args]);
+          return db.query(query).all(...(bind as never[])) as T[];
+        },
+        first: async <T>(query: string, args: readonly unknown[]) =>
+          (db.query(query).get(...(args as never[])) as T | null) ?? null,
+      });
+      const page = await queryCardPurchases(sql());
+      expect(reads.at(-1)?.at(3)).toBe(CARD_USAGE_REASON_READ_LIMIT);
+      expect(page.coverage.unrecognizedCurrentRows).toBe(10);
+      expect(page.coverage.unrecognizedReasons).toEqual([
+        { reasonCode: "amount_not_exact", rows: 1 },
+        { reasonCode: "payment_type_unsupported", rows: 2 },
+        { reasonCode: "not_yet_recognized", rows: 7 },
+      ]);
+      expect(page.coverage.refundsAllocated).toBe(false);
+      // Past the bound, the rest are counted as unread, never given a reason.
+      const bounded = await queryCardPurchases(sql(3));
+      expect(bounded.coverage.unrecognizedCurrentRows).toBe(10);
+      expect(bounded.coverage.unrecognizedReasons.at(-1)).toEqual({
+        reasonCode: "beyond_read_limit",
+        rows: 7,
+      });
+      expect(bounded.coverage.unrecognizedReasons.reduce((sum, entry) => sum + entry.rows, 0)).toBe(
+        10,
+      );
+      const none = await queryCardPurchases(sql(0));
+      expect(none.coverage.unrecognizedReasons).toEqual([
+        { reasonCode: "beyond_read_limit", rows: 10 },
+      ]);
+      // Counts only: no provider text of an unrecognised row reaches the page.
+      const text = JSON.stringify(page);
+      for (const merchant of ["架空店舗B", "架空店舗C", "架空店舗H", "分割"])
+        expect(text).not.toContain(merchant);
+    } finally {
+      db.close();
+    }
+  });
+
   test("rows the provider still shows are current, and unrecognised current rows are counted", async () => {
     // The read model's snapshot world: published captures, a Vpass month that
     // flipped from pending to posted, installment and amountless rows.
