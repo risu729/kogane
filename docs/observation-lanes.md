@@ -27,6 +27,14 @@ jobs of that lane, so a 10,000-job replay backlog cannot delay a run sealed a
 minute ago, and a slow history scan cannot delay either. Jobs are ordered by
 `priority DESC, available_at_ms, fetch_artifact_id` inside a lane.
 
+The interrupted-attempt repair (`UPDATE parse_runs ... WHERE status='pending'`)
+reads the partial index `parse_runs_pending` (migration 0081,
+[ADR 0072](adr/0072-pending-parse-run-index.md)), which holds the pending
+parse runs only; before it, every sweep read every parse run. Every statement
+one scheduled tick prepares is explained without table statistics by
+`test/tick-query-plan.test.ts`, which lists the whole reads a tick still makes
+on purpose and the document that accepts each.
+
 Existing rows in `observation_parse_jobs` became `lane='incremental'` through
 the column default; jobs created by the repair scan are `repair`, jobs created
 from a plan are `replay` and carry `replay_plan_id` and `target_release`.

@@ -1162,6 +1162,12 @@
         }
       ],
       "sha256": "f8ad258b0146a79780b706d7caef693120a575973e190f13f913a3fa27b40118"
+    },
+    {
+      "file": "0081_parse_runs_pending_index.sql",
+      "statementCount": 1,
+      "insertStatements": [],
+      "sha256": "c8dcc91ae67200a9eed3391bdb8fa54228c23e2df104e0a8b7d7dd1663064d54"
     }
   ],
   "tables": [
@@ -13130,6 +13136,16 @@
             "parser_name",
             "parser_version"
           ]
+        },
+        {
+          "name": "parse_runs_pending",
+          "unique": false,
+          "partial": true,
+          "columns": [
+            "fetch_artifact_id",
+            "parser_name",
+            "parser_version"
+          ]
         }
       ],
       "triggers": [
@@ -21568,6 +21584,11 @@
       "sqlSha256": "72dceae20185f415"
     },
     {
+      "name": "parse_runs_pending",
+      "table": "parse_runs",
+      "sqlSha256": "3b1a51f0b7f8cc3b"
+    },
+    {
       "name": "parser_releases_parser",
       "table": "parser_releases",
       "sqlSha256": "d111be8c3e7aa5c8"
@@ -21722,7 +21743,7 @@
     "tableCount": 141,
     "viewCount": 44,
     "triggerCount": 525,
-    "explicitIndexCount": 145,
+    "explicitIndexCount": 146,
     "byClassification": {
       "core-keep": [
         "account_connection_reviews",
@@ -21979,6 +22000,6 @@
       "0071_economic_event_command_kinds.sql",
       "0080_jpoint_program.sql"
     ],
-    "schemaSha256": "91cf2b56e847ae6ae155844b0ea00d09ba71bc9e3ff57a4e4c7b41c6ce792e71"
+    "schemaSha256": "836ae255a29499fecfc3eb5450bef0633766074749cde29a074f9c1db7535fa1"
   }
 }
