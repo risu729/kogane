@@ -64,7 +64,9 @@ refresh failures retain previously authorized records with an explicit warning.
 | `tables.css`     | Scroll region, cell defaults, sortable headers, the transaction/balance/identity column contracts                                                         |
 | `pages.css`      | Page-specific layouts: overview, source cards, positions, observation lists, rewards, settlement, card ownership, card purchases, reported state, reports |
 
-`balance-display.css` stays beside its component. Responsive rules sit next to
+`styles/schedules.css` is not in the index: `pages/Schedules.tsx` imports it
+directly, and it still carries raw pixel sizes and fallback colours beside its
+token references. `balance-display.css` stays beside its component. Responsive rules sit next to
 the rule they modify, not in one media block, so page work touches one file.
 
 The scales in `tokens.css`:
@@ -129,7 +131,7 @@ parameters each capability unlocks, and the client argument builder are one
 definition in `packages/observation-shared/src/api-schema.ts`. The response
 validator (`validApiResponse`) checks the object against that schema, both
 servers derive their accepted parameters from it, and the same
-conformance checks (`test/api-conformance.ts`) run against the local store,
+conformance checks (`packages/observation-shared/test-support/api-conformance.ts`) run against the local store,
 the local synthetic snapshot adapter, and the production Worker. Capabilities are never
 an authorization switch: Access JWT verification, closed responses on auth
 failure, and `no-store` apply before any capability is read.
