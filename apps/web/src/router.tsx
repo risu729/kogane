@@ -142,7 +142,7 @@ function parseId(value: string | undefined): number | undefined {
   return Number.isSafeInteger(id) ? id : undefined;
 }
 
-/** One trailing slash names the same page; only one is removed, so `//` is still distinct. */
+/** One trailing slash names the same page. Only one is removed, so `/evidence//` stays distinct. */
 export function trimTrailingSlash(path: string): string {
   return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
 }

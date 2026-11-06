@@ -611,7 +611,9 @@ function daysBetween(from: string, to: string): number {
 export function formProblem(draft: ReconstructedStateQuery, today: string): string | null {
   if (!ACCOUNT.test(draft.account)) return "口座 ID を選ぶか入力してください。";
   // A calendar day by the route's own rule: 2026-02-30 fits the pattern but
-  // is no day, and would otherwise reach the range check as NaN.
+  // is no day, and the route would refuse it as invalid_date. (Date.parse
+  // rolls it over to March rather than failing, so the checks below would
+  // not catch it.)
   if (!validLocalDateText(draft.from) || !validLocalDateText(draft.to))
     return "日付を 2026-03-31 のように指定してください。";
   if (draft.from >= draft.to) return "開始日は終了日より前にしてください。";
