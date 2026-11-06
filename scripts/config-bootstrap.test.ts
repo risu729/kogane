@@ -1,9 +1,9 @@
 // The committed bootstrap SQL must be the render of the declaration, must
 // apply to a fresh CORE, and must be a no-op the second time (plan 06 §3).
-import { Database } from "bun:sqlite";
-import { readFileSync, readdirSync } from "node:fs";
+import type { Database } from "bun:sqlite";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import {
   CONFIG_PATH,
   OUTPUT_PATH,
@@ -13,36 +13,23 @@ import {
   renderIngestClientsSql,
 } from "./config-bootstrap.ts";
 import { COLLECTOR_SOURCE_IDS } from "../packages/application/src/collection/descriptors.ts";
-
-const MIGRATIONS = join(REPO_ROOT, "packages/storage-d1/migrations/core");
+import { fullCoreDatabase } from "../packages/storage-d1/test/sqlite.ts";
 
 /**
- * The bytes of CORE replayed from 0001 with foreign keys on, as D1 enforces
- * them. The replay costs over a second (several migrations rebuild tables
- * under the whole schema), and repeating it in every test ran past Bun's
- * five-second deadline under the full verification load. It runs once, when
- * the file loads, outside any test's deadline.
+ * CORE from 0001 with foreign keys on, as D1 enforces them: a copy of the
+ * image every CORE migration builds once per test process
+ * (packages/storage-d1/test/sqlite.ts). Replaying the migrations in every test
+ * ran past Bun's five-second default under the full verification load.
  */
-const REPLAYED_CORE = (() => {
-  const db = new Database(":memory:");
-  db.exec("PRAGMA foreign_keys=ON");
-  for (const name of readdirSync(MIGRATIONS)
-    .filter((entry) => entry.endsWith(".sql"))
-    .sort()) {
-    db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
-  }
-  const bytes = db.serialize();
-  db.close();
-  return bytes;
-})();
-
-/** A private, writable copy of the replayed CORE, foreign keys on. */
 function freshCore(): Database {
-  const db = Database.deserialize(REPLAYED_CORE);
-  // The pragma belongs to the connection, not to the serialized file.
-  db.exec("PRAGMA foreign_keys=ON");
-  return db;
+  return fullCoreDatabase();
 }
+
+// The first build of the image runs every migration; pay it here under its
+// own budget, not inside whichever test first asks for a copy.
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 const REGISTRY = [
   "ingest_clients",
