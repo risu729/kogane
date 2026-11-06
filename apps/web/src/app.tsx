@@ -1,5 +1,6 @@
 import { SchedulesPage } from "./pages/Schedules";
 import { CollectionQualityPage } from "./pages/CollectionQuality.tsx";
+import { AuditPage } from "./pages/Audit.tsx";
 // Read-only navigation. Connection metadata describes the API, not freshness
 // of financial observations or whether a collector is currently running.
 
@@ -7,7 +8,7 @@ import { useEffect, useRef, type ReactNode } from "react";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import { useFeatures, useMetadata } from "./api.ts";
 import { QueryBoundary } from "./ui.tsx";
-import { useRoute, usePath, type Route } from "./router.tsx";
+import { trimTrailingSlash, useRoute, usePath, type Route } from "./router.tsx";
 import { AppShell, NAV_ICONS, type NavItem } from "./app-shell.tsx";
 import type { ClientFeatures } from "./capabilities.ts";
 import { OverviewPage } from "./pages/Overview.tsx";
@@ -18,7 +19,7 @@ import { ArtifactsPage } from "./pages/Artifacts.tsx";
 import { ArtifactDetailPage } from "./pages/ArtifactDetail.tsx";
 import { ObservationDetailPage } from "./pages/ObservationDetail.tsx";
 import { NotFoundPage } from "./pages/NotFound.tsx";
-import { EvidenceContent } from "./evidence-app.tsx";
+import { EvidenceContent, isEvidencePath } from "./evidence-app.tsx";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
 import { GlobalPassEmptyMonthsNotice } from "./global-pass-empty-months.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
@@ -68,6 +69,7 @@ const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeat
   { to: "/rewards", label: "ポイント・前払式残高", icon: NAV_ICONS.rewards, feature: "rewards" },
   { to: "/schedules", label: "収集スケジュール", icon: NAV_ICONS.evidence },
   { to: "/collection-quality", label: "収集品質", icon: NAV_ICONS.evidence },
+  { to: "/audit", label: "監査ログ", icon: NAV_ICONS.audit },
   { to: "/evidence", label: "取得履歴", icon: NAV_ICONS.evidence, feature: "evidenceHistory" },
 ];
 
@@ -93,6 +95,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <SchedulesPage />;
     case "collectionQuality":
       return <CollectionQualityPage />;
+    case "audit":
+      return <AuditPage />;
     case "overview":
       return <OverviewPage />;
     case "transactions":
@@ -169,8 +173,11 @@ export function App(): ReactNode {
         ? (SOURCE_KIND_LABELS[metadata.data?.source.kind ?? ""] ?? "保存された記録に接続")
         : "接続を確認できません";
 
-  const evidenceRoute =
-    features.evidenceHistory && (path === "/evidence" || path.startsWith("/runs/"));
+  const evidenceRoute = features.evidenceHistory && isEvidencePath(path);
+  // The schedules page is drawn outside the metadata boundary, with its own
+  // caption; one trailing slash names it too, as in matchRoute.
+  const schedulesRoute = trimTrailingSlash(path) === "/schedules";
+  const auditRoute = trimTrailingSlash(path) === "/audit";
   const navItems: NavItem[] = NAV.filter((item) => !item.feature || features[item.feature]).map(
     (item) => ({
       to: item.to,
@@ -187,8 +194,8 @@ export function App(): ReactNode {
         title: "数字の先に、原本を。",
         body: "取引や残高から、取得時の記録と保存された原本を確認できます。",
       }}
-      caption={path === "/schedules" ? "収集スケジュール" : "保存された記録"}
-      modeLabel={path === "/schedules" ? "管理者による設定変更" : "閲覧専用"}
+      caption={schedulesRoute ? "収集スケジュール" : auditRoute ? "監査ログ" : "保存された記録"}
+      modeLabel={schedulesRoute ? "管理者による設定変更" : "閲覧専用"}
       connection={{
         connected,
         label: connectionLabel,
@@ -236,8 +243,11 @@ export function App(): ReactNode {
       {!synthetic ? (
         <GlobalPassEmptyMonthsNotice notice={metadata.data?.globalPassEmptyMonths} />
       ) : null}
-      {path === "/schedules" ? (
+      {schedulesRoute ? (
         <SchedulesPage />
+      ) : auditRoute ? (
+        // The operator's own record: it reads no observation capability.
+        <AuditPage />
       ) : (
         <QueryBoundary query={metadata} label="接続情報">
           {() =>
