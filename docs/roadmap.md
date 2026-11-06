@@ -5,7 +5,7 @@ not.** The next objective is to turn collected provider displays into connected
 transactions, explainable assets and liabilities, valuations, and eventually
 cost basis, P&L and tax outputs.
 
-The code status was reviewed on 2026-11-06 against main 9342955. It distinguishes implemented
+The code status was reviewed on 2026-11-06 against main `46246f3`. It distinguishes implemented
 contracts and calculation components from a feature that works with real inputs
 through its user interface. This is a repository assessment, not a new production
 acceptance run. Dated production observations in the linked history describe those observations,
