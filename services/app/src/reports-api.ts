@@ -114,7 +114,8 @@ export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
   const route = reportsRoute(path);
   if (!route) throw new HttpError(404, "not_found");
   for (const key of url.searchParams.keys())
-    if (key !== "decimalPolicy") throw new HttpError(400, "invalid_query");
+    if (key !== "decimalPolicy" || url.searchParams.getAll(key).length !== 1)
+      throw new HttpError(400, "invalid_query");
   // Selecting a normalization policy is part of the read contract even where
   // the stored body already fixed one; an unknown name is refused here rather
   // than served from the decimal-v1 projection (docs/normalized-decimals.md).

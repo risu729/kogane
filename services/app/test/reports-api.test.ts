@@ -154,6 +154,17 @@ describe("re-displaying a fixed report", () => {
     }
   });
 
+  it("refuses a repeated decimalPolicy instead of reading only the first", async () => {
+    for (const query of [
+      "decimalPolicy=decimal-v1&decimalPolicy=decimal-v2",
+      "decimalPolicy=decimal-v1&decimalPolicy=decimal-v1",
+    ]) {
+      const answer = await call(`/api/v2/reports/${REPORT}?${query}`);
+      expect(answer.status).toBe(400);
+      expect(answer.json.code).toBe("invalid_query");
+    }
+  });
+
   it("keeps the route behind Access and read-only", async () => {
     const unauthenticated = await worker.fetch(
       new Request(`https://fixture.test/api/v2/reports/${REPORT}`),
