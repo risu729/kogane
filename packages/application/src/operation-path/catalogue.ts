@@ -266,6 +266,15 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // Reported positions and their valuations (plan D4), as `GET /api/positions`;
+  // whole-store only (ADR 0063 decision 10).
+  "positions.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "audit.search": {
     risk: ["R0"],
     effect: null,

@@ -208,6 +208,15 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       truncated: page["hasMore"] === true,
     };
   }
+  // One page of positions (their valuations ride with them), truncated when cut at 500.
+  if (operation === "positions.read") {
+    const data = (value["data"] ?? {}) as Record<string, unknown>;
+    const coverage = (data["coverage"] ?? {}) as Record<string, unknown>;
+    return {
+      rows: Array.isArray(data["positions"]) ? data["positions"].length : 0,
+      truncated: coverage["truncated"] === true,
+    };
+  }
   if (operation === "audit.search")
     return {
       rows: Array.isArray(value["records"]) ? value["records"].length : 0,

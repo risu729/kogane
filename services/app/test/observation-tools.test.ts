@@ -1,13 +1,14 @@
-// The balance read for agents (plan D3): `kogane.balances.read` answers
-// `GET /api/v2/balances/{latest,history}` through the routes' own request
-// rules and reader (`readObservationList`), on both agent paths.
+// The balance and position reads for agents (plan D3, D4):
+// `kogane.balances.read` answers `GET /api/v2/balances/{latest,history}` and
+// `kogane.positions.read` answers `GET /api/positions`, through the routes'
+// own request rules and reader (`readObservationList`), on both agent paths.
 // The page is handed under `data`, because it carries provider text.
 //
 // Every value is synthetic. No real account, security, name or amount appears.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { BALANCES_TOOL_NAME, READ_MCP_TOOLS } from "../src/read-tools";
+import { BALANCES_TOOL_NAME, POSITIONS_TOOL_NAME, READ_MCP_TOOLS } from "../src/read-tools";
 import worker from "../src/worker";
 import { runBalanceProjection } from "../../processor/src/balance-projection-job";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
@@ -23,6 +24,7 @@ const FULL_GRANT = {
 /** The MCP Access application's audience (ADR 0047); `/mcp` accepts nothing else. */
 const MCP_AUDIENCE = "fixture-mcp-audience";
 const BALANCES_PATH = "/api/agent/v1/balances.read";
+const POSITIONS_PATH = "/api/agent/v1/positions.read";
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;
@@ -241,6 +243,8 @@ const counts = async () => ({
 /** The tool's body around the route's bytes. */
 const balancesBody = (list: "latest" | "history", routeText: string) =>
   `{"schemaVersion":"kogane-balances-v1","list":"${list}","data":${routeText}}`;
+const positionsBody = (routeText: string) =>
+  `{"schemaVersion":"kogane-positions-v1","data":${routeText}}`;
 
 describe("kogane.balances.read", () => {
   it("answers the route's 503 while no snapshot is published, on both agent paths", async () => {
@@ -418,6 +422,105 @@ describe("kogane.balances.read", () => {
   });
 });
 
+describe("kogane.positions.read", () => {
+  it("answers on both agent paths the route's bytes under data, and writes nothing", async () => {
+    await seed();
+    const before = await counts();
+    const cases: [string, Record<string, unknown>][] = [
+      ["/api/positions", {}],
+      [
+        "/api/positions?source=other-test&account=tools-position-account&identityRead=as-recorded",
+        { source: "other-test", account: "tools-position-account", identityRead: "as-recorded" },
+      ],
+      ["/api/positions?offset=1", { offset: 1 }],
+    ];
+    for (const [path, args] of cases) {
+      const route = await call(path);
+      expect(route.status, path).toBe(200);
+      const expected = positionsBody(await route.text());
+      const response = await http(POSITIONS_PATH, args);
+      expect(response.status, path).toBe(200);
+      expect(await response.text(), path).toBe(expected);
+      const viaMcp = await mcpCall(POSITIONS_TOOL_NAME, args);
+      expect(viaMcp.result?.isError, path).toBe(false);
+      expect(viaMcp.result?.structuredContent, path).toEqual(JSON.parse(expected));
+      expect(viaMcp.result?.content, path).toEqual([{ type: "text", text: expected }]);
+    }
+    const page = (await (await http(POSITIONS_PATH, {})).json()) as {
+      data: { positions: { valuations: unknown[] }[] };
+    };
+    expect(page.data.positions).toHaveLength(2);
+    expect(page.data.positions.every((entry) => entry.valuations.length === 1)).toBe(true);
+    expect(await counts()).toEqual(before);
+  });
+
+  it("hands provider text only under data, and no raw object's sha256 (AT71)", async () => {
+    await seed();
+    for (const body of [
+      await (await http(POSITIONS_PATH, {})).json(),
+      (await mcpCall(POSITIONS_TOOL_NAME, {})).result!.structuredContent,
+    ]) {
+      const found = pathsContaining(body, HOSTILE);
+      expect(found.length).toBeGreaterThan(0);
+      for (const path of found) expect(path.startsWith("$.data."), path).toBe(true);
+      for (const sha256 of rawObjects) expect(JSON.stringify(body)).not.toContain(sha256);
+    }
+  });
+
+  it("is listed with the route's parameters to a whole-store records.read grant, READ or not", async () => {
+    const tool = READ_MCP_TOOLS.find((entry) => entry.name === POSITIONS_TOOL_NAME)!;
+    expect(tool.inputSchema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        identityRead: { type: "string", enum: ["latest", "as-recorded"] },
+        offset: { type: "integer" },
+      },
+    });
+    expect(tool.inputSchema["required"]).toBeUndefined();
+    expect(Object.keys(tool.inputSchema["properties"] as object).sort()).toEqual([
+      "account",
+      "identityRead",
+      "offset",
+      "source",
+    ]);
+    expect(await listed(granted)).toContain(POSITIONS_TOOL_NAME);
+    expect(await listed(granted, false)).toContain(POSITIONS_TOOL_NAME);
+    for (const grant of [
+      { ...FULL_GRANT, capabilities: ["summary.read"] },
+      { ...FULL_GRANT, scopes: { sources: ["other-test"], accounts: "*" } },
+      { ...FULL_GRANT, scopes: { sources: "*", accounts: ["acct-synthetic"] } },
+    ])
+      expect(await listed(withGrant(grant))).not.toContain(POSITIONS_TOOL_NAME);
+  });
+
+  it("refuses with the route's codes and the same status on both agent paths", async () => {
+    const cases: [unknown, string | null, string][] = [
+      [{ offset: -1 }, "/api/positions?offset=-1", "invalid_offset"],
+      [{ offset: 1_000_001 }, "/api/positions?offset=1000001", "invalid_offset"],
+      [{ offset: 1.5 }, null, "invalid_request"],
+      [{ offset: "1" }, null, "invalid_request"],
+      [{ identityRead: "snapshot" }, null, "invalid_request"],
+      [{ instrument: "SYN1" }, null, "invalid_request"],
+      [{ account: "x".repeat(513) }, null, "invalid_request"],
+    ];
+    for (const [args, path, code] of cases) {
+      const label = JSON.stringify(args);
+      if (path !== null) {
+        const route = await call(path);
+        expect(route.status, label).toBe(400);
+        expect(await route.json(), label).toMatchObject({ error: code });
+      }
+      const response = await http(POSITIONS_PATH, args);
+      expect(response.status, label).toBe(400);
+      expect(await response.json(), label).toEqual({ error: code });
+      const viaMcp = await mcpCall(POSITIONS_TOOL_NAME, args);
+      expect(viaMcp.result?.isError, label).toBe(true);
+      expect(viaMcp.result?.structuredContent, label).toEqual({ error: code });
+    }
+  });
+});
+
 describe("both reads", () => {
   it("need records.read over the whole store, checked before the body is validated", async () => {
     const refusals: [unknown, Record<string, unknown>][] = [
@@ -434,7 +537,10 @@ describe("both reads", () => {
         { code: "evidence_restricted", refs: ["scope:account"] },
       ],
     ];
-    for (const [path, name] of [[BALANCES_PATH, BALANCES_TOOL_NAME]] as const)
+    for (const [path, name] of [
+      [BALANCES_PATH, BALANCES_TOOL_NAME],
+      [POSITIONS_PATH, POSITIONS_TOOL_NAME],
+    ] as const)
       for (const [grant, expected] of refusals) {
         // A malformed body is not reached: the grant decides first.
         const response = await http(path, { list: "nothing" }, { environment: withGrant(grant) });
@@ -448,11 +554,10 @@ describe("both reads", () => {
         expect(viaMcp.result?.structuredContent, name).toMatchObject(expected);
       }
     // No grant at all, and no Access identity.
-    expect((await http(BALANCES_PATH, { list: "latest" }, { environment: {} })).status).toBe(403);
-    expect(
-      (await call(BALANCES_PATH, { jwt: null, body: { list: "latest" }, environment: granted }))
-        .status,
-    ).toBe(401);
+    expect((await http(POSITIONS_PATH, {}, { environment: {} })).status).toBe(403);
+    expect((await call(POSITIONS_PATH, { jwt: null, body: {}, environment: granted })).status).toBe(
+      401,
+    );
   });
 
   it("record each served call as an R0 read with row counts only, and nothing where absent (ADR 0064)", async () => {
@@ -473,6 +578,8 @@ describe("both reads", () => {
     expect(await records()).toEqual([]);
     expect((await http(BALANCES_PATH, { list: "latest", limit: 50 })).status).toBe(200);
     await mcpCall(BALANCES_TOOL_NAME, { list: "history", metric: "tm-00001" });
+    expect((await http(POSITIONS_PATH, {})).status).toBe(200);
+    await mcpCall(POSITIONS_TOOL_NAME, { offset: 1 });
     const read = (operation: string, rows: number, truncated: boolean) => ({
       principal_kind: "agent",
       operation,
@@ -486,10 +593,13 @@ describe("both reads", () => {
       principal: "mcp-client:agent-principal",
       subject: "agent-principal",
     };
-    // 50 of 61 latest balances (more follow), then one history row: counts and nothing else.
+    // 50 of 61 latest balances (more follow), one history row, two positions,
+    // then the one after the first: counts and nothing else.
     expect(await records()).toEqual([
       { ...http_, ...read("balances.read", 50, true) },
       { ...mcp, ...read("balances.read", 1, false) },
+      { ...http_, ...read("positions.read", 2, false) },
+      { ...mcp, ...read("positions.read", 1, false) },
     ]);
   });
 });

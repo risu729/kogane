@@ -915,9 +915,9 @@ describe("tools under each grant shape", () => {
       // The list describes this deployment; the grant is enforced on the call
       // and described by kogane.capabilities.
       // Each read tool is listed only to a grant its service answers: the
-      // history and the balance read (this store has a READ binding) to
-      // records.read, the instrument coverage to summary.read, all over the
-      // whole store.
+      // history, the balance read (this store has a READ binding) and the
+      // position read to records.read, the instrument coverage to
+      // summary.read, all over the whole store.
       expect(await listTools({ environment })).toEqual(
         capabilities.includes("records.read")
           ? [
@@ -927,6 +927,7 @@ describe("tools under each grant shape", () => {
               "kogane.accounts.candidates",
               "kogane.economic-readiness.read",
               "kogane.balances.read",
+              "kogane.positions.read",
               PURCHASES_TOOL_NAME,
               RECONSTRUCTED_STATE_TOOL_NAME,
             ]

@@ -1,6 +1,6 @@
 // Additional read adapters over the existing history, instrument coverage
 // (ADR 0073), dated reported state, account correspondence candidates
-// (ADR 0077), balance pages, and common audit readers.
+// (ADR 0077), balance and position lists, and common audit readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -56,6 +56,8 @@ import { V2_HISTORY_PATH, V2_LATEST_PATH } from "./balances-v2";
  * and the MCP name `unknown_tool`.
  */
 export const BALANCES_TOOL_NAME = "kogane.balances.read";
+/** `kogane.positions.read` (plan D4): `GET /api/positions` for an agent. */
+export const POSITIONS_TOOL_NAME = "kogane.positions.read";
 
 /**
  * One filter value as the routes accept it: present, at most 512 characters
@@ -155,6 +157,13 @@ const schemas = {
     cursor: filterValue().optional(),
     limit: z.number().int().optional(),
   }),
+  // The route's query parameters, as a body; the offset's range is the route's.
+  "kogane.positions.read": z.strictObject({
+    source: filterValue().optional(),
+    account: filterValue().optional(),
+    identityRead: z.enum(IDENTITY_READ_MODES).optional(),
+    offset: z.number().int().optional(),
+  }),
   "kogane.audit.search": z.strictObject({
     filters: z.record(z.string(), z.string()).optional(),
     cursor: z.string().min(1).max(400).nullable().optional(),
@@ -182,6 +191,8 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
   "kogane.balances.read":
     "One page of the latest adopted balances (list: latest) or of the balance history (list: history) from the published balance snapshot, the same page as GET /api/v2/balances/latest or /history, under data, under records.read and a whole-store read grant. Pages are keyset: pass data.page.nextCursor as cursor with the same filters. Provider text is only under data. Each quantity keeps its unit and status; a value that is not exact has no coefficient, never zero, and there is no net worth.",
+  "kogane.positions.read":
+    "Reported positions with their valuations, 500 a page from offset, the same list as GET /api/positions, under data, under records.read and a whole-store read grant. Provider figures and names only under data: nothing is added, converted or netted.",
   "kogane.audit.search":
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
   "kogane.audit.get":
@@ -211,6 +222,7 @@ export function readMcpTools(grant: Grant, served: { reportedState: boolean; bal
   return READ_MCP_TOOLS.filter((tool) => {
     switch (tool.name as ReadToolName) {
       case "kogane.instruments.history":
+      case "kogane.positions.read":
         return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.reported-state.read":
         return served.reportedState && grantAllows(grant, "records.read") && wholeStore(grant);
@@ -321,8 +333,8 @@ export async function callReadTool(
       }
       // The routes' own request rules and read (`readObservationList`); their
       // refusals keep their codes. The page is handed under `data`, because
-      // it carries provider text (account and instrument labels and
-      // amount text), which reaches a caller only there (AT71).
+      // it carries provider text (account and instrument labels, security
+      // names, amount text), which reaches a caller only there (AT71).
       case "kogane.balances.read": {
         const refusal = wholeStoreRefusal(grant, "balances.read");
         if (refusal) return refusal;
@@ -345,6 +357,17 @@ export async function callReadTool(
           status: 200,
           body: { schemaVersion: "kogane-balances-v1", list: input.list, data: page },
         };
+      }
+      case "kogane.positions.read": {
+        const refusal = wholeStoreRefusal(grant, "positions.read");
+        if (refusal) return refusal;
+        const input = parseRequest(schemas[name], body ?? {});
+        const page = await readObservationList(
+          env,
+          "/api/positions",
+          routeParameters(input, ["source", "account", "identityRead", "offset"]),
+        );
+        return { status: 200, body: { schemaVersion: "kogane-positions-v1", data: page } };
       }
       case "kogane.audit.search": {
         const input = parseRequest(schemas[name], body ?? {});
