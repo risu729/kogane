@@ -157,14 +157,14 @@ A proposal recorded after a decision then replaced the decision, though INV07
 says a proposal changes nothing until a decision accepts it
 ([ADR 0001](0001-domain-axes.md)):
 
-| Reader                                                                             | Order                                    | What a later proposal did                                                                                                                                                                                              |
-| ---------------------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Change lifecycle relation target (`RELATION_SQL`)                                  | `created_at`, `id`                       | A plan showed an accepted or rejected relation as `proposed`, so a reviewer withdrawing an acceptance approved `proposed → rejected`. Display and plan digest only: the pin (the row count) and the commit were right. |
-| Instrument candidates (`LISTED_AS_SQL`)                                            | `created_at`, `id`                       | Re-opened a candidate a person kept apart: `rejected` became `proposed` and the candidate named its adoption command again.                                                                                            |
-| Pending-to-posted candidates (`CANDIDATE_RELATIONS_SQL`)                           | `created_at`, insertion order            | An accepted link read as not linked: a merged link lost its `withdraw` action (`proposal_closed`), and the lane skipped merging a pair the reconciliation lane had accepted by rule.                                   |
-| Purchase lane merge guard (`ACCEPTED_APART_GUARD_SQL`)                             | `created_at`, insertion order            | The same pair's merge was refused inside the batch even once the read above was right.                                                                                                                                 |
-| Card settlement ownership (`cardSettlementOwnershipCtes`, every settlement reader) | insertion order, the two account aliases | Retired an accepted owner (the account became unowned), and retired a dated claim's veto, so a conflicting timeless owner was adopted.                                                                                 |
-| Card ownership review claims (`card-ownership.ts`)                                 | insertion order, the two account aliases | Hid the accepted owner the readers adopt behind the proposal, so the review offered no rejection of it.                                                                                                                |
+| Reader                                                                             | Order                                    | What a later proposal did                                                                                                                                                                                                                                 |
+| ---------------------------------------------------------------------------------- | ---------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Change lifecycle relation target (`RELATION_SQL`)                                  | `created_at`, `id`                       | A plan showed an accepted or rejected relation as `proposed`, so a reviewer withdrawing an acceptance approved `proposed → rejected`. Display only: the plan digest (kind, payload, pins and context), the pin (the row count) and the commit were right. |
+| Instrument candidates (`LISTED_AS_SQL`)                                            | `created_at`, `id`                       | Re-opened a candidate a person kept apart: `rejected` became `proposed` and the candidate named its adoption command again.                                                                                                                               |
+| Pending-to-posted candidates (`CANDIDATE_RELATIONS_SQL`)                           | `created_at`, insertion order            | An accepted link read as not linked: a merged link lost its `withdraw` action (`proposal_closed`), and the lane skipped merging a pair the reconciliation lane had accepted by rule.                                                                      |
+| Purchase lane merge guard (`ACCEPTED_APART_GUARD_SQL`)                             | `created_at`, insertion order            | The same pair's merge was refused inside the batch even once the read above was right.                                                                                                                                                                    |
+| Card settlement ownership (`cardSettlementOwnershipCtes`, every settlement reader) | insertion order, the two account aliases | Retired an accepted owner (the account became unowned), and retired a dated claim's veto, so a conflicting timeless owner was adopted.                                                                                                                    |
+| Card ownership review claims (`card-ownership.ts`)                                 | insertion order, the two account aliases | Hid the accepted owner the readers adopt behind the proposal, so the review offered no rejection of it.                                                                                                                                                   |
 
 Only the change lifecycle target is reachable by a shipped writer today:
 `reconcile.propose` takes two `source_account:` refs, and no shipped path
@@ -214,15 +214,28 @@ A later proposal could only disable the pending-to-posted paths (they act on
   blocks a self-declaration, and the instrument history count), histories (the
   instrument history), lists of unlogged legacy rows (instrument temporal
   blockers), evidence pins (economic row readiness), and the one row a receipt
-  names (delegated reversal). The balance projection's relation read is a
-  separate change.
+  names (delegated reversal). The balance projection's relation read applies
+  the same rule in its own change
+  ([ADR 0001's amendment of 2026-11-06](0001-domain-axes.md#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)),
+  ranked with `row_number()` as `LISTED_AS_SQL` is.
 
 ### Consequences
 
-- No migration and no operator step. Stored plans are not re-simulated at
-  approve or commit for relation kinds, so only plans made after deploy show
-  the corrected current status; a plan's digest differs from the shipped one
-  only where a proposal follows a decision of its relation.
+- No migration and no operator step. The plan digest covers the kind, the
+  payload, the pins and the context, not the shown status, so no stored plan's
+  digest changes and approve and commit refuse nothing new. Stored plans are
+  not re-simulated at approve or commit for relation kinds, and planning the
+  same change again over unchanged data returns the stored plan, so a plan
+  made before deploy keeps showing the status it was planned with until it
+  expires (at most 24 hours).
+- Cost: the ownership CTEs' two newer-row checks are still keyed searches of
+  `entity_relations_from` by a rowid range, but they now read past the
+  proposals that follow a claim until they meet a decision, where the shipped
+  checks stopped at the first later row of the owner. A read therefore costs,
+  per observation it resolves, up to the number of proposals recorded after
+  its owners' newest decisions; no shipped writer records such a proposal
+  today. The claims read's added check, for a proposal row, is one keyed
+  search of the account's rows up to the pin.
 - On every store where no proposal follows a decision of the same relation,
   every reader returns what it returned before. Production has no such
   proposal on the five readers no shipped writer reaches.
