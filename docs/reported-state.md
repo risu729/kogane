@@ -2,7 +2,7 @@
 
 What each provider last reported, per account, on a date the owner chooses,
 beside the card statements due around that date. This is phase 8's first
-slice ([roadmap](roadmap.md#phases-8--11--dated-reported-and-reconstructed-state)),
+slice ([roadmap](roadmap.md#layers-8--11--dated-reported-and-reconstructed-state)),
 decided in [ADR 0019](adr/0019-dated-reported-state.md). It is a list of
 provider figures, never a total: nothing is added, converted or netted, and a
 container without a capture is named, never shown as zero.
