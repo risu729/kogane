@@ -124,6 +124,12 @@ Not verified: no official page has been fetched; which pages to allow and at
 which cadence are the owner's to confirm, and pages that are PDFs, need a
 login or render with JavaScript cannot be read this way.
 
+The page also shows **AIへの委任**, the AI delegations the App reads from
+`MCP_DELEGATIONS` (none, a void configuration, or each entry's state, role,
+window, capabilities and scope), as a read-only notice; delegations are
+changed only in the deployment configuration
+([agent API](agent-api.md#the-operators-delegation-status-s8-2026-11-06)).
+
 ## Settings API
 
 - `GET /api/ops/v1/schedules`: settings, maintenance provenance, reservations
@@ -134,6 +140,8 @@ login or render with JavaScript cannot be read this way.
   execution lease after confirmation, without starting collection.
 - `POST /api/ops/v1/schedules/proposals/:id`: accept or reject one undecided
   re-survey proposal (`{"decision":"accept"}` or `"reject"`).
+- `GET /api/v2/delegations` (outside this prefix, operator only): the
+  delegation notice's read.
 
 Every write is recorded in the common audit log ([audit log](audit-log.md),
 ADR 0064) on the `ui` path: the Processor's writer ends its own batch with the

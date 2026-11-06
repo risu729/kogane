@@ -25,6 +25,8 @@ import {
   validInstrumentCandidateReview,
 } from "./instrument-candidates-contract.ts";
 import { validCardOwnershipReview } from "./card-ownership-contract.ts";
+import { AUDIT_PAGE_PATH, validAuditPage } from "./audit-contract.ts";
+import { DELEGATION_STATUS_PATH, validDelegationStatus } from "./delegation-status-contract.ts";
 import { validCardPurchasePage } from "./card-purchase-contract.ts";
 import { validReconstructedState } from "./reconstructed-state-contract.ts";
 import { validReportedHoldingsChange } from "./reported-holdings-change-contract.ts";
@@ -766,6 +768,7 @@ export function validSharedQueryResponse(value: unknown): boolean {
 
 /** Additive fields are allowed; required fields and their nullability are checked. */
 export function validApiResponse(path: string, value: unknown): boolean {
+  if (path === AUDIT_PAGE_PATH) return validAuditPage(value);
   if (path === "/api/v2/reconciliation/card-settlements/ownership")
     return validCardOwnershipReview(value);
   if (path === "/api/v2/reconciliation/card-settlements")
@@ -780,6 +783,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path === INSTRUMENT_HISTORY_PATH) return validInstrumentHistoryRead(value);
   if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);
   if (path === "/api/v2/query") return validSharedQueryResponse(value);
+  if (path === DELEGATION_STATUS_PATH) return validDelegationStatus(value);
   if (path === "/api/filter-options") {
     return (
       record(value) &&

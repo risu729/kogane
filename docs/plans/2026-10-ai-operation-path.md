@@ -6,7 +6,9 @@
   a separate R2 slice adds command and provider-request adapters, and a
   settings slice adds job prepare/confirm with linked reversal. The integrated
   follow-up adds maintenance R1/R2 execution; survey acceptance and
-  real-client activation remain distinct work. See the
+  real-client activation remain distinct work. Slice S8's `監査ログ` page
+  is implemented (proposed until its pull request merges); its delegation
+  status on the schedules and confirm pages is not. See the
   [current resume plan](2026-10-mcp-maintenance-followups.md).
   The decisions it rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and
@@ -1074,7 +1076,25 @@ acceptance and concrete client delegation remain separate owner decisions.
   confirm pages.
 - ADR: 0064. Migration: none.
 - Tests: browser tests, desktop and mobile.
+- Status: the audit page is implemented — `/audit` over `GET /api/v2/audit`,
+  closed filters in the URL, server cursor paging without a total, strict
+  page validation, a plain refusal for a non-operator, browser tests on a
+  desktop and a phone viewport ([audit log](../audit-log.md#the-監査ログ-page-plan-slice-s8);
+  [ADR 0064 amendment](../adr/0064-common-audit-log.md#amendment-the-operators-page-slice-s8-2026-11-06)).
+  The delegation status is not: no route serves the delegations in force to
+  the browser, and adding one is its own change.
 - Review gate: fresh reviewer.
+- Delegation status (2026-11-06, proposed until its pull request merges): the
+  operator-only `GET /api/v2/delegations` reads `MCP_DELEGATIONS` through the
+  resolver's own parser and answers `none`, `misconfigured` (no entry shown)
+  or `valid` with each entry's role, capabilities, scope, window state
+  (`in_force`, `not_yet_valid`, `expired`), daily write budget and
+  `delegationRef`; the schedules and confirm pages show it as a read-only
+  notice. The route and shape are recorded in
+  [ADR 0063's amendment](../adr/0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06-proposed);
+  [agent API](../agent-api.md#the-operators-delegation-status-s8-2026-11-06).
+  Service, contract and desktop/mobile browser tests cover it. The audit page
+  is a separate pull request.
 
 **Delegation test matrix (S3, S6)**, modelled on #565's:
 

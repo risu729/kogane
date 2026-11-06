@@ -6,8 +6,11 @@
   `mcp` paths, the daily caps with their overflow aggregate and the operator's
   `GET /api/v2/audit` ([audit log](../audit-log.md)); slice S4 (#564) adds the
   maintenance read and revision to the catalogue, the revision on `mcp` only
-  as a recorded refusal. The `alarm` and `lane` writers, the agent read and
-  delegated execution (ADR 0063) are not implemented.
+  as a recorded refusal; slice S8 adds the operator's `監査ログ` page
+  ([amendment](#amendment-the-operators-page-slice-s8-2026-11-06)). The
+  `alarm` and `lane` writers are not implemented; the agent read
+  (`audit.read`) and the state of delegated execution (ADR 0063) are
+  described in the [audit log](../audit-log.md).
 - Date: 2026-10-09
 - Related: [ADR 0063](0063-delegated-ai-operation-path.md) (the delegated AI
   operation path, whose two-step confirmation and idempotency use this
@@ -259,3 +262,35 @@ stated too tightly; none changes what is recorded or who may read it.
 
 The plan's S1 verification is in [the audit log](../audit-log.md#cost) and its
 test files.
+
+## Amendment: the operator's page (slice S8, 2026-11-06)
+
+Status: proposed until its pull request merges. The "(and a page)" of
+_Reading_ is the web UI's `監査ログ` page at `/audit`, a read-only view of
+`GET /api/v2/audit`; nothing about what is recorded or who may read it
+changes. Four details are fixed by it:
+
+- **The browser checks the page against the closed vocabulary.**
+  `packages/observation-shared/src/audit-contract.ts` validates every page
+  before it renders (schema version, at most 50 records newest first, each
+  field and pairing as the builder and the table admit, one strict shape per
+  diff kind), and a page outside it is an error. The shared package may not
+  import `packages/application`, so it restates the lists and patterns, and
+  `apps/web/test/audit-contract.test.ts` pins them to `vocabulary.ts` and
+  `diff.ts`; `AUDIT_REF_PATTERNS` is exported for that comparison.
+- **Filters are the page URL's query parameters, cursors are not.** The
+  operation filter offers the names of `OPERATION_CATALOGUE` only (the route
+  admits any name of the operation pattern); the other filters offer the
+  closed lists. A cursor stays in the page's memory, since it is bound to the
+  filters it was issued under.
+- **No total.** The page shows a page number and the records on the page.
+- **No capability.** The page reads no `/api/meta` capability and is always
+  listed, like the schedule settings; the route's operator check is the only
+  gate, and a refusal is shown as the operator-only state.
+
+Verification: `apps/web/test/audit-contract.test.ts` and
+`apps/web/test/audit.browser.test.ts` (desktop and phone viewports) on
+synthetic records built by the real builder and read by the real
+`readAuditPage`; `services/app/test/audit.test.ts` checks the served page
+against the same contract. Not verified: anything in production. The
+delegation status of plan slice S8 is not part of this amendment.
