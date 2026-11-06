@@ -103,6 +103,23 @@ export const AUDIT_OPERATION_LABELS: Readonly<Record<string, string>> = {
   "reconcile.propose": "照合の提案",
   "mcp.request": "MCPのリクエスト（操作の特定前）",
   "audit.overflow": "上限を超えた記録の日次集計",
+  "alarm.occurrence.claim": "定期収集の実行の受付",
+  "lane.tick": "処理レーンの1回の実行",
+};
+
+/** The proposal kinds a lane record counts (`LANE_PROPOSAL_KINDS`). */
+export const AUDIT_LANE_PROPOSAL_KIND_LABELS: Readonly<Record<string, string>> = {
+  "reconciliation-provider-same": "照合の提案（取得元が示す同一の取引）",
+  "reconciliation-pending-to-posted": "照合の提案（未確定の明細と確定の明細）",
+  "reconciliation-supersedes": "照合の提案（置き換え）",
+  "reconciliation-supports": "照合の提案（裏付け）",
+  "reconciliation-contradicts": "照合の提案（食い違い）",
+  "reconciliation-funded-by": "照合の提案（資金の出どころ）",
+  "reconciliation-statement-covers": "照合の提案（明細書が含む取引）",
+  "card-settlement-candidate": "カード請求と銀行引落の照合候補",
+  "maintenance-survey-new": "定例停止の再調査の提案（新しい案内）",
+  "maintenance-survey-changed": "定例停止の再調査の提案（案内の変更）",
+  "maintenance-survey-absent": "定例停止の再調査の提案（案内の消失）",
 };
 
 export const AUDIT_REVISION_FIELD_LABELS: Readonly<Record<string, string>> = {
