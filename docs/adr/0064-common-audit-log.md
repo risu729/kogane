@@ -275,7 +275,11 @@ changes. Four details are fixed by it:
   `packages/observation-shared/src/audit-contract.ts` validates every page
   before it renders (schema version, at most 50 records newest first, each
   field and pairing as the builder and the table admit, one strict shape per
-  diff kind), and a page outside it is an error. The shared package may not
+  diff kind), and a page outside it is an error. With slice S7 that includes
+  the `lane` diff and the builder's pairings on the `alarm` and `lane` paths
+  (their principal shapes, `applied`/`accepted`/`failed` in one step), and
+  the new references, so the page shows the Processor's records rather than
+  refusing them. The shared package may not
   import `packages/application`, so it restates the lists and patterns, and
   `apps/web/test/audit-contract.test.ts` pins them to `vocabulary.ts` and
   `diff.ts`; `AUDIT_REF_PATTERNS` is exported for that comparison.

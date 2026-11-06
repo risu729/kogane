@@ -240,12 +240,17 @@ server page at a time, newest first, with each record's stored UTC time,
 operation, risk class and step, result with its closed result and reason
 codes, principal kind, principal and path, target and scope, a summary of
 its diff (rows read, revision from and to with the changed field names,
-decision counts, request status, release, overflow count and cap), and a
+decision counts, request status, release, overflow count and cap, and a
+lane tick's decision revisions, commits and proposals per kind), and a
 disclosure of its identifiers (audit id, request id, delegation reference,
-idempotency key, digests, linked audit ids, references). The operation is
+idempotency key, digests, linked audit ids, references, among them an alarm
+record's occurrence and a lane record's ranges). The `alarm` and `lane`
+records appear like any other, under the principal kind 自動処理 and their
+`alarm:<job id>` or `lane:<lane>` principal, and both paths and both
+operations are filter values. The operation is
 named in Japanese next to its code; the result, path, principal kind, step,
-scope namespace, changed field names, decision counts and request status are
-shown by their Japanese names; result and reason codes, and any value
+scope namespace, changed field names, decision counts, request status and
+lane proposal kinds are shown by their Japanese names; result and reason codes, and any value
 without a Japanese name, are shown as the code itself. There is nothing else
 to show: the record holds no amount,
 provider text or body.
@@ -265,7 +270,13 @@ provider text or body.
   `validApiResponse`): the schema version, at most 50 records newest first,
   each field in the builder's closed vocabulary, references in its closed
   patterns, one strict shape per diff kind, and the pairings the table's
-  CHECK constraints require. A page outside them is an error, never a partial
+  CHECK constraints require. On the `alarm` and `lane` paths it also holds
+  the builder's own pairings: the principal is `alarm:<job id>` or
+  `lane:<lane>` by path, the result is `applied`, `accepted` or `failed`, and
+  the step is `call`. A `lane` diff has exactly its four keys, non-negative
+  counts, and proposals of closed kinds, each kind at most once with a
+  positive count (in any order, as the builder's schema admits; the builder
+  stores them sorted). A page outside them is an error, never a partial
   table. The shared package may not import the application layer, so the
   lists are restated there and a test pins them to the builder's.
 - **Refusals.** A non-operator (`403 operator_required`) is told that the log

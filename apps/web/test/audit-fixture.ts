@@ -6,10 +6,13 @@ import type { Database } from "bun:sqlite";
 import {
   auditPageFilters,
   buildAuditRecord,
+  laneTickRecord,
+  occurrenceRef,
   readAuditPage,
   type AuditActor,
   type AuditFacts,
   type AuditRow,
+  type LaneWrites,
 } from "../../../packages/application/src/index.ts";
 import { auditInsertWrite } from "../../../packages/application/src/audit/record.ts";
 import {
@@ -213,6 +216,64 @@ export async function auditFixture(): Promise<AuditFixture> {
       diff: { kind: "revision", from: 1, to: 2, fields: ["pattern"] },
     },
     at("2026-10-09", 160),
+  );
+  // The Processor's own paths: a claimed collection occurrence (the facts of
+  // `alarmClaimWrite`, whose batch also needs the occurrence row) and lane
+  // ticks built by `laneTickRecord` itself, one applied and one failed.
+  add(
+    {
+      path: "alarm",
+      subject: null,
+      principal: "alarm:synthetic-bank-collect",
+      principalKind: "automatic",
+    },
+    {
+      operation: "alarm.occurrence.claim",
+      riskClass: "R2",
+      result: "accepted",
+      targetRef: "schedule:synthetic-bank-collect",
+      scope: { namespace: "schedule-source", source: "synthetic-bank" },
+      refs: [
+        occurrenceRef("scheduled:synthetic-bank-collect:1791536400000"),
+        "schedule:synthetic-bank-collect@3",
+      ],
+      diff: { kind: "none" },
+    },
+    at("2026-10-09", 200),
+  );
+  const lane = (
+    name: string,
+    writes: LaneWrites,
+    outcome: Parameters<typeof laneTickRecord>[2],
+    second: number,
+  ) => {
+    n += 1;
+    const row = laneTickRecord(name, writes, outcome, at("2026-10-09", second), uuid(n));
+    if (row === null) throw new Error("the synthetic lane tick wrote nothing");
+    rows.push({ ...row, audit_id: auditId(n) });
+  };
+  lane(
+    "purchase_recognition",
+    {
+      decisions: { count: 2, from: 41, to: 43 },
+      commits: { count: 2, epoch: "synthetic-epoch", from: 7, to: 8 },
+      proposals: [
+        { kind: "reconciliation-provider-same", count: 1, from: 101, to: 101 },
+        { kind: "reconciliation-pending-to-posted", count: 3, from: 102, to: 105 },
+      ],
+    },
+    { result: "applied" },
+    220,
+  );
+  lane(
+    "maintenance_survey",
+    {
+      decisions: null,
+      commits: null,
+      proposals: [{ kind: "maintenance-survey-changed", count: 1, from: 12, to: 12 }],
+    },
+    { result: "failed", code: "lane_failed" },
+    240,
   );
   await store.batch(rows.map(auditInsertWrite));
   return {
