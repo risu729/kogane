@@ -26,6 +26,7 @@ import {
   RECONSTRUCTED_STATE_TOOL_NAME,
 } from "../src/agent-service";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
+import { maskRandomTokens } from "../../../packages/application/test/random-tokens";
 import { OPS_MCP_TOOLS } from "../src/ops-tools";
 
 /** A provider line with a token-shaped value and an amount in it. */
@@ -912,7 +913,9 @@ describe("the operator's read and the never-recorded list", () => {
   it("no record holds provider text, a token-shaped value or an amount", async () => {
     const rows = (await env.DB.prepare("SELECT * FROM audit_records").all()).results;
     expect(rows.length).toBeGreaterThan(10);
-    const stored = JSON.stringify(rows);
+    // Audit and correlation ids and digests are random hex: masked, so the
+    // amount's digits are found only where a record really carries them.
+    const stored = maskRandomTokens(JSON.stringify(rows));
     for (const needle of NEEDLES) expect(stored).not.toContain(needle);
   });
 });

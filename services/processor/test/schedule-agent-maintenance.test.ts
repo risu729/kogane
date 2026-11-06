@@ -37,6 +37,7 @@ import {
 import { fullCoreDatabase, sqliteD1 } from "../../../packages/storage-d1/test/sqlite";
 import { ACCEPTED_REASON, proposalRef } from "../src/maintenance-survey/decisions";
 import { envelopeHeaders, testCall } from "./audit-envelope";
+import { maskRandomTokens } from "../../../packages/application/test/random-tokens.ts";
 import { newAuditId } from "../../../packages/application/src/audit/record";
 
 const DELEGATE = "mcp-client:maintenance-owner-synthetic";
@@ -1122,8 +1123,10 @@ describe("the writer's batch: the revision and what its caller appends are one w
       },
     ]);
     // The reference URL is provenance of the rule, never part of the record.
+    // The audit and correlation ids are random hex: masked, so the
+    // reference's digits are found only where the record really carries them.
     for (const needle of ["c3ludGhldGlj", "123456", "batch?"])
-      expect(JSON.stringify(record)).not.toContain(needle);
+      expect(maskRandomTokens(JSON.stringify(record))).not.toContain(needle);
   });
 
   test("an appended record that fails leaves no revision and no provenance change", async () => {
