@@ -79,7 +79,8 @@ Internal `POST` routes on the pipeline Worker at the same trust level as
 `/sweep` (private service binding, no public route). Bodies are JSON, at most
 4 KiB counted in bytes as they are read (reading stops and the stream is
 cancelled past the limit; `services/processor/src/bounded-body.ts`), and
-responses contain identifiers and counts only.
+responses contain identifiers and counts only. A larger body, malformed UTF-8
+or anything but a JSON object is refused with `400 request_invalid`.
 
 | Route             | Body                                                                                                                              | Effect                                                                                                                                                                                                                                                                                        |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

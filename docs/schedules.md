@@ -146,14 +146,15 @@ all. The page's `GET` is not recorded.
 
 These routes require the configured human Access operator. Writes require
 same-origin JSON, `x-kogane-settings: 1` and strict payload validation
-(maximum 16 KiB). The Processor's private `/internal/schedules` routes, its
-agent read and its delegated job and maintenance adapters bound the same
-bodies again at 16 KiB in bytes while reading them: past the limit they stop
-reading, cancel the stream and answer `413 request_too_large`, with or without
-a content-length (`services/processor/src/bounded-body.ts`). They are not
-agent grants, service-token edit routes or MCP tools. The separately
-allowlisted, bodyless deployment `/bootstrap` route only reconciles
-reservations after release identity checks.
+(maximum 16 KiB). They are not agent grants, service-token edit routes or
+MCP tools. The separately allowlisted, bodyless deployment `/bootstrap` route
+only reconciles reservations after release identity checks.
+
+The Processor's private `/internal/schedules` writes, its agent read and its
+delegated job and maintenance adapters bound their bodies again at 16 KiB in
+bytes while reading them: past the limit they stop reading, cancel the stream
+and answer `413 request_too_large`, with or without a content-length
+(`services/processor/src/bounded-body.ts`).
 
 Maintenance changes are made from the management screen using this HTTP API.
 An agent can read maintenance windows through the tool below; revising one
