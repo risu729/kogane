@@ -1693,8 +1693,10 @@ export function providerDisplayedValue(quantity: Quantity, evidenceRef: string):
  * creates an in-transit amount; only an observed credit increases the
  * destination. A cancellation waits for an observed return, and the return is
  * a new bucket claim — the debited lot is never resurrected. A debit, credit
- * or return whose quantity is not exact makes every position it moves that
- * unknown value, with its reason; it is never read as a move of nothing.
+ * or return whose quantity is not exact makes every position it adds to or
+ * takes from that unknown value, with its reason; it is never read as a move
+ * of nothing. A credit or a return clears the in-transit amount whatever its
+ * quantity.
  */
 export function redemptionPositions(
   initialHeld: Quantity,
