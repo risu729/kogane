@@ -790,13 +790,17 @@ should ever depend on it.
   all, or hand out a short-lived R2 URL instead. Serving through the
   Worker means the Worker streams financial documents; handing out a URL
   moves the inert-response problem to R2's own response headers.
-- Whether the client should be served under a restrictive
-  `Content-Security-Policy` of its own. It would have to admit the bundle
-  and the stylesheet, so it is narrower than it once would have been, and
-  it remains defence in depth against a future mistake rather than a fix
-  for a known hole. It is worth more than it was: the pages now execute
-  script, where before they did not. `/api/raw/<sha256>` already carries
-  `sandbox`.
+- Whether the local server should serve the client under a restrictive
+  `Content-Security-Policy` of its own. The deployed Worker (`services/app`)
+  already does: `secureResponse` in `src/http.ts` gives every answer that
+  does not set its own policy `default-src 'self'` with `script-src`,
+  `style-src` and `connect-src` limited to `'self'`, `object-src 'none'`,
+  `base-uri 'none'`, `frame-ancestors 'none'` and `form-action 'none'`, plus
+  `no-store`, `nosniff`, `Referrer-Policy: no-referrer`,
+  `X-Frame-Options: DENY`, `Cross-Origin-Resource-Policy: same-origin` and
+  `Cross-Origin-Opener-Policy: same-origin`; its raw downloads carry
+  `sandbox`. `test/api.test.ts` there asserts them on the shell, a read and a
+  refusal.
 - Character encoding on the raw route. Bytes are served with the stored
   content type, so a Shift-JIS CSV stored as `text/csv` with no charset
   renders as mojibake. Whether the charset belongs in the stored content
