@@ -21,6 +21,7 @@ import {
 } from "../src/agent-service";
 import { principalFor } from "../src/grants";
 import { HttpError } from "../src/http";
+import { REPORTED_STATE_TOOL_NAME } from "../src/read-tools";
 import { parseGrants } from "../../../packages/application/src/index";
 import { INITIALIZE_PARAMS, MCP_CLIENT_HEADERS } from "./mcp-headers";
 
@@ -582,6 +583,14 @@ describe("untrusted provider content (AT71)", () => {
         properties: ["identifierId"],
         annotations: readOnly,
       },
+      // Published because this store serves GET /api/v2/reported-state.
+      {
+        name: "kogane.reported-state.read",
+        required: ["date"],
+        closed: false,
+        properties: ["account", "date", "source"],
+        annotations: readOnly,
+      },
       {
         name: "kogane.purchases.explain",
         required: [],
@@ -631,6 +640,7 @@ describe("untrusted provider content (AT71)", () => {
     expect(listed.result.tools.map((tool) => tool.name)).toEqual([
       ...AGENT_TOOL_NAMES,
       "kogane.instruments.history",
+      REPORTED_STATE_TOOL_NAME,
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -709,6 +719,7 @@ describe("untrusted provider content (AT71)", () => {
     expect(listed.result.tools.map((tool) => tool.name)).toEqual([
       ...AGENT_TOOL_NAMES,
       "kogane.instruments.history",
+      REPORTED_STATE_TOOL_NAME,
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);

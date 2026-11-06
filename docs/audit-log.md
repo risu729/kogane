@@ -99,7 +99,8 @@ namespace (`403 actor_not_supported`, before any tool) is recorded on
 (`financial.query`: the result's rows and whether more exist; `explain`:
 nodes; `purchases.explain`: purchases; `instruments.candidates`: candidates on
 the page, truncated when the total is larger; `reconstructed-state.read`: one
-when the answer carries a reconstruction, else none; the others one).
+when the answer carries a reconstruction, else none; `reported-state.read`:
+the answer's accounts plus payables, never truncated; the others one).
 Whole-store and multi-source reads carry no scope. A replay names the earlier
 effect by the id the service answered with.
 

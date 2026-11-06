@@ -17,6 +17,7 @@ is [reconstructed state](reconstructed-state.md) (served by `GET /api/v2/reconst
 | Policies     | `packages/domain/src/reported-state.ts` (cutoff, freshness, payable status, perimeter)                  |
 | Query        | `queryDatedState` in `packages/application/src/query/dated-state.ts`                                    |
 | HTTP         | `GET /api/v2/reported-state?date=YYYY-MM-DD` (`services/app/src/reported-state-api.ts`)                 |
+| Agent tool   | `kogane.reported-state.read` (`services/app/src/read-tools.ts`), the route's `readReportedState`        |
 | Contract     | `validReportedState` in `packages/observation-shared/src/reported-state-contract.ts`                    |
 | Page         | 基準日の保有状況 at `/state` (`apps/web/src/pages/ReportedState.tsx`), capability `reportedStateOnDate` |
 

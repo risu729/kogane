@@ -217,6 +217,15 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // One account's reconstructed state, when there is one to show.
   if (operation === "reconstructed-state.read")
     return { rows: value["reconstruction"] ? 1 : 0, truncated: false };
+  // The dated reported state: its accounts and its payables. A read past the
+  // route's bound is refused, never cut, so it is never truncated.
+  if (operation === "reported-state.read")
+    return {
+      rows:
+        (Array.isArray(value["accounts"]) ? value["accounts"].length : 0) +
+        (Array.isArray(value["payables"]) ? value["payables"].length : 0),
+      truncated: false,
+    };
   if (operation === "instruments.candidates") {
     const items = Array.isArray(value["items"]) ? value["items"].length : 0;
     return {
