@@ -31,6 +31,7 @@ import { ReconciliationPage } from "./pages/Reconciliation.tsx";
 import { PurchasePage, PurchasesPage } from "./pages/Purchases.tsx";
 import { ReportedStatePage } from "./pages/ReportedState.tsx";
 import { ReconstructedStatePage } from "./pages/ReconstructedState.tsx";
+import { ReportPage, ReportsPage } from "./pages/Reports.tsx";
 
 // Every destination in one list. A `feature` entry is shown only while the
 // API advertises that capability; the others are always present.
@@ -52,6 +53,12 @@ const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeat
     feature: "reconstructedStateOnDate",
   },
   { to: "/summaries", label: "期間実績・請求", icon: NAV_ICONS.summaries },
+  {
+    to: "/reports",
+    label: "評価レポート",
+    icon: NAV_ICONS.reports,
+    feature: "reportArtifacts",
+  },
   { to: "/artifacts", label: "原本・証跡", icon: NAV_ICONS.artifacts },
   {
     to: "/purchases",
@@ -129,6 +136,10 @@ function View({ route }: { route: Route }): ReactNode {
       return <ArtifactsPage />;
     case "artifact":
       return <ArtifactDetailPage id={route.id} />;
+    case "reports":
+      return <ReportsPage />;
+    case "report":
+      return <ReportPage key={route.reportId} reportId={route.reportId} />;
     case "observation":
       return <ObservationDetailPage kind={route.kind} id={route.id} />;
     case "confirm":
