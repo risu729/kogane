@@ -915,7 +915,12 @@ describe("the operator's read and the never-recorded list", () => {
   it("no record holds provider text, a token-shaped value or an amount", async () => {
     const rows = (await env.DB.prepare("SELECT * FROM audit_records").all()).results;
     expect(rows.length).toBeGreaterThan(10);
-    const stored = JSON.stringify(rows);
+    // Random UUIDs and hex digests can contain the digits of the synthetic
+    // amount by chance (for example `…-740e72498765`), so they are masked
+    // before the search; an amount stored anywhere else is still found.
+    const stored = JSON.stringify(rows)
+      .replaceAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<uuid>")
+      .replaceAll(/[0-9a-f]{32,}/g, "<hex>");
     for (const needle of NEEDLES) expect(stored).not.toContain(needle);
   });
 });
