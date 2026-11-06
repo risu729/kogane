@@ -45,7 +45,10 @@ override to release; the trigger aborts the whole D1 batch otherwise.
 A relation decision never updates or supersedes an earlier relation row: each
 `relation.accept` or `relation.reject` appends a new `entity_relations` row
 (with its own decision, whose `subject_ref` is that row's id) for the same
-triple (kind, `from_ref`, `to_ref`), and so does an agent proposal
+triple (kind, `from_ref`, `to_ref`), and so do a reconciliation proposal's
+acceptance (`services/processor/src/reconciliation-commands.ts`), the card
+purchase provider link (`services/processor/src/card-purchase-job.ts`) and an
+agent proposal
 (`reconcile.propose`, [agent API](agent-api.md#proposals-are-not-adoptions)).
 Which row is in force
 is decided by each reader in its own SQL; there is no view for it.

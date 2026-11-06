@@ -210,7 +210,11 @@ and the table is append-only (migration 0029). Every judgement appends a row
 with its own decision, whose `subject_ref` is that row's id:
 `relation.accept` and `relation.reject`
 (`packages/application/src/operations/relation-writes.ts`) write `accepted`
-or `rejected` rows, and an agent's `reconcile.propose`
+or `rejected` rows; accepting a reconciliation proposal
+(`services/processor/src/reconciliation-commands.ts`, whose kinds include
+`statement_covers`) and the card purchase provider link
+(`services/processor/src/card-purchase-job.ts`, `pending_to_posted`) write
+`accepted` rows; and an agent's `reconcile.propose`
 (`services/app/src/proposals.ts`) writes a `proposed` row for any relation
 kind. No relation write sets `superseded_by` on an earlier relation decision,
 and the 0029 trigger could not let it: a decision is superseded only by a
