@@ -198,6 +198,12 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       truncated: typeof value["cursor"] === "string",
     };
   if (operation === "audit.get") return { rows: value["record"] ? 1 : 0, truncated: false };
+  // One page of events or obligations, truncated when a next page follows.
+  if (operation === "events.read")
+    return {
+      rows: Array.isArray(value["items"]) ? value["items"].length : 0,
+      truncated: typeof value["nextCursor"] === "string",
+    };
   if (operation === "financial.query") {
     const result = (value["result"] ?? {}) as Record<string, unknown>;
     const coverage = (result["coverage"] ?? {}) as Record<string, unknown>;

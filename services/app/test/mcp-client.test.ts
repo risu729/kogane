@@ -29,6 +29,7 @@ import {
 } from "../src/agent-service";
 import { principalFor } from "../src/grants";
 import { HttpError } from "../src/http";
+import { EVENTS_TOOL_NAME } from "../src/read-tools";
 import { opsContext } from "../src/ops-api";
 import { callOpsTool } from "../src/ops-tools";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
@@ -909,6 +910,7 @@ describe("tools under each grant shape", () => {
           ? [
               ...AGENT_TOOL_NAMES,
               "kogane.instruments.history",
+              EVENTS_TOOL_NAME,
               PURCHASES_TOOL_NAME,
               RECONSTRUCTED_STATE_TOOL_NAME,
             ]
