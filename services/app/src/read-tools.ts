@@ -9,6 +9,7 @@ import {
   ERROR_STATUS,
   auditPageFilters,
   financialError,
+  readEconomicRowReadinessForGrant,
 } from "../../../packages/application/src/index";
 import {
   readAuditForGrant,
@@ -22,6 +23,7 @@ import {
 } from "../../../packages/application/src/query/account-candidates.ts";
 import { readInstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
+import { ECONOMIC_ROW_READINESS_SCHEMA } from "../../../packages/domain/src/economic-row-readiness.ts";
 import { INSTRUMENT_IDENTIFIER_ID } from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import type { ToolResult } from "./agent-service";
@@ -66,6 +68,20 @@ const schemas = {
     offset: z.number().int().min(0).max(ACCOUNT_CANDIDATES_MAX_OFFSET).optional(),
     sourceAccountId: z.string().regex(ACCOUNT_SOURCE_ACCOUNT_ID).optional(),
   }),
+  "kogane.economic-readiness.read": z.strictObject({
+    schema: z.literal(ECONOMIC_ROW_READINESS_SCHEMA),
+    family: z.enum(["bank-movement", "securities-execution"]),
+    rows: z
+      .array(
+        z.strictObject({
+          observationId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+          parseRunId: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+        }),
+      )
+      .min(1)
+      .max(64),
+    knowledge: z.literal("current"),
+  }),
   "kogane.audit.search": z.strictObject({
     filters: z.record(z.string(), z.string()).optional(),
     cursor: z.string().min(1).max(400).nullable().optional(),
@@ -89,6 +105,8 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "Count each source's instrument identifiers by candidate state, the same counts as the owner UI, under summary.read and a whole-store read grant.",
   "kogane.accounts.candidates":
     "One page of the ADR 0077 account correspondence candidates: which direct provider source accounts a reviewed aggregator connection contains, on which evidence, with closed status, hold and same-account reasons, under records.read and a whole-store read grant. Read-only; never proposes same_account. A candidate names the relation.accept or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
+  "kogane.economic-readiness.read":
+    "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
   "kogane.audit.search":
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
   "kogane.audit.get":
@@ -123,6 +141,7 @@ export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
       case "kogane.instruments.coverage":
         return grantAllows(grant, "summary.read") && wholeStore(grant);
       case "kogane.accounts.candidates":
+      case "kogane.economic-readiness.read":
         return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.audit.search":
       case "kogane.audit.get":
@@ -204,6 +223,23 @@ export async function callReadTool(
         return outcome.ok
           ? { status: 200, body: outcome.review }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
+      case "kogane.economic-readiness.read": {
+        // The shared service grades scope before validation or database access.
+        const outcome = await readEconomicRowReadinessForGrant({
+          grant,
+          sql: d1Executor(env.DB),
+          request: body,
+        });
+        if (outcome.status === "refused")
+          return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+        if (outcome.status === "unavailable")
+          return {
+            status: 503,
+            body: outcome,
+            auditOutcome: { result: "failed", code: outcome.reason },
+          };
+        return { status: 200, body: outcome };
       }
       case "kogane.audit.search": {
         const input = parseRequest(schemas[name], body ?? {});
