@@ -513,8 +513,10 @@ statements, and for the sweep once per tick for the statements plus once per
 statement for the debits, over every transaction identity of the store (up to
 100 bank reads a tick: about six minutes of reading at this size). The reads
 now name their statements or debits first and resolve owners through
-`packages/read-model/src/card-settlement-ownership.ts`, the same view text
-applied to the parses of those observations only; the view is unchanged. They
+`packages/read-model/src/card-settlement-ownership.ts`, the view's text
+applied to the parses of those observations only, except that a proposal
+recorded after a decision retires no claim (see
+[candidate and decision lifecycle](#candidate-and-decision-lifecycle)); the view is unchanged. They
 reach identities through `identity_observation_lookup (kind, observation_id)`
 and the identity runs' keys, and the rest through the primary keys and
 `published_parse_runs_run`. The settlement read matched each statement's

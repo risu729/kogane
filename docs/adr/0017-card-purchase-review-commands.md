@@ -1,7 +1,9 @@
 # ADR 0017: Add card purchase review command kinds with one rebuild, not relation markers
 
-- Status: proposed
-- Date: 2026-09-26
+- Status: proposed; the
+  [2026-11-06 amendment](#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision)
+  is proposed until the PR that carries it merges, then accepted
+- Date: 2026-09-26; amended 2026-11-06
 - Decision owner: the owner accepted decision 1.1 of the
   [next-milestone plan](../plans/2026-09-next-milestone.md#11-add-real-command-kinds-with-one-rebuild-not-more-relation-markers)
   on 2026-09-26; this record carries it into the repository.
@@ -123,3 +125,134 @@ No `entity_relations` kind means "this row is not a purchase", "refund of" or
   `services/processor/test/change-lifecycle.test.ts` check that planning any
   review kind is refused with `unsupported_semantics` and writes no row, and
   that a directly inserted plan of these kinds commits nothing.
+
+## Amendment 2026-11-06: a later proposal never replaces a relation decision
+
+- Status: proposed until the PR that carries it merges, then accepted
+- Date: 2026-11-06
+- Carried by: `RELATION_SQL` in `packages/application/src/operations/targets.ts`,
+  `LISTED_AS_SQL` in `packages/read-model/src/instrument-resolution.ts`,
+  `CANDIDATE_RELATIONS_SQL` in
+  `packages/application/src/query/card-purchase-candidates.ts`,
+  `ACCEPTED_APART_GUARD_SQL` in `services/processor/src/card-purchase-job.ts`,
+  `cardSettlementOwnershipCtes` in
+  `packages/read-model/src/card-settlement-ownership.ts`,
+  `CARD_OWNERSHIP_CLAIMS_SQL` in `packages/application/src/query/card-ownership.ts`,
+  [card settlements](../card-settlements.md),
+  [change lifecycle](../change-lifecycle.md#pending-to-posted-link-review),
+  [identity](../identity.md)
+
+### Context
+
+`entity_relations` is append-only (migration 0029). Every judgement of a
+relation appends a row with its own decision: `relation.accept` and
+`relation.reject` write `accepted` and `rejected` rows, the rule paths of the
+reconciliation and purchase lanes write `accepted` rows, and an agent's
+`reconcile.propose` (`services/app/src/proposals.ts`) writes a `proposed` row
+of any relation kind. No write retires an earlier row, so which row of a
+relation is in force is each reader's rule.
+
+Six readers that pick one row per relation took the newest row of any status.
+A proposal recorded after a decision then replaced the decision, though INV07
+says a proposal changes nothing until a decision accepts it
+([ADR 0001](0001-domain-axes.md)):
+
+| Reader                                                                             | Order                                    | What a later proposal did                                                                                                                                                                                              |
+| ---------------------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Change lifecycle relation target (`RELATION_SQL`)                                  | `created_at`, `id`                       | A plan showed an accepted or rejected relation as `proposed`, so a reviewer withdrawing an acceptance approved `proposed → rejected`. Display and plan digest only: the pin (the row count) and the commit were right. |
+| Instrument candidates (`LISTED_AS_SQL`)                                            | `created_at`, `id`                       | Re-opened a candidate a person kept apart: `rejected` became `proposed` and the candidate named its adoption command again.                                                                                            |
+| Pending-to-posted candidates (`CANDIDATE_RELATIONS_SQL`)                           | `created_at`, insertion order            | An accepted link read as not linked: a merged link lost its `withdraw` action (`proposal_closed`), and the lane skipped merging a pair the reconciliation lane had accepted by rule.                                   |
+| Purchase lane merge guard (`ACCEPTED_APART_GUARD_SQL`)                             | `created_at`, insertion order            | The same pair's merge was refused inside the batch even once the read above was right.                                                                                                                                 |
+| Card settlement ownership (`cardSettlementOwnershipCtes`, every settlement reader) | insertion order, the two account aliases | Retired an accepted owner (the account became unowned), and retired a dated claim's veto, so a conflicting timeless owner was adopted.                                                                                 |
+| Card ownership review claims (`card-ownership.ts`)                                 | insertion order, the two account aliases | Hid the accepted owner the readers adopt behind the proposal, so the review offered no rejection of it.                                                                                                                |
+
+Only the change lifecycle target is reachable by a shipped writer today:
+`reconcile.propose` takes two `source_account:` refs, and no shipped path
+writes a `proposed` row whose ends are `transaction:`, `instrument:` and
+`identifier:`, or an account and a party. The other five follow from the
+table's contract, not from a current writer, and a later proposal writer
+would have reached them.
+
+A later proposal could only disable the pending-to-posted paths (they act on
+`accepted` alone); it could both remove and add an owner.
+
+### Options considered
+
+1. **Leave the readers.** Rejected: the outcome of a decision would depend on
+   whether anyone proposed the same relation later.
+2. **Retire earlier rows on write** (set a superseding decision). Rejected:
+   rows and decisions are append-only, and migration 0029's trigger only lets
+   a decision supersede a decision on the same subject, while each relation row
+   is its own subject.
+3. **A CORE view of current relations every reader joins.** Not now: it is a
+   migration, the readers order rows three ways (`created_at` and `id`,
+   `created_at` and insertion order, insertion order over two aliases), and
+   each would need its own equality proof against the view.
+4. **The newest decision; a proposal never replaces a decision.** Chosen,
+   applied in each reader's own order.
+
+### Decision
+
+- A relation's current row is its newest **decision** (`accepted`, `rejected`
+  or `released`) in the reader's order, which does not change. Only a relation
+  with no decision reads its newest proposal. Every reader above applies this.
+- The card settlement ownership CTEs retire an accepted claim, and a dated
+  claim's veto, only by a later decision naming the same owner through either
+  alias. The card ownership review shows per owner the same current row,
+  so the owner the readers adopt is the one the review offers to reject.
+- The migration 0044 views `card_settlement_fact_ownership` and
+  `card_settlement_readiness` keep the older rule. No reader queries them
+  (every reader uses the keyed CTEs; [ADR 0011's amendment](0011-keyed-ownership-ctes.md#amendment-2026-11-06-the-ctes-depart-from-the-views-in-one-rule) records the departure),
+  they agree with the CTEs wherever no proposal follows a decision of the same
+  owner, and replacing them would rebuild two views for no reader.
+  `card-settlements-api.ts` only checks that they exist.
+- Pins do not change: the change lifecycle's relation pin, the
+  pending-to-posted relation pin and the ownership pin still count every row,
+  so a proposal still moves a pin and stales an open plan, which is safe.
+- Readers that deliberately read every row stay as they are: row counts (the
+  pins above, the ownership declaration context, where any recorded claim
+  blocks a self-declaration, and the instrument history count), histories (the
+  instrument history), lists of unlogged legacy rows (instrument temporal
+  blockers), evidence pins (economic row readiness), and the one row a receipt
+  names (delegated reversal). The balance projection's relation read is a
+  separate change.
+
+### Consequences
+
+- No migration and no operator step. Stored plans are not re-simulated at
+  approve or commit for relation kinds, so only plans made after deploy show
+  the corrected current status; a plan's digest differs from the shipped one
+  only where a proposal follows a decision of its relation.
+- On every store where no proposal follows a decision of the same relation,
+  every reader returns what it returned before. Production has no such
+  proposal on the five readers no shipped writer reaches.
+- The 0044 views and the readers can disagree on a store with such a
+  proposal. A test or a manual query against the views reads the older rule.
+
+### Verification
+
+Synthetic data only. Each reader has a test that fails on the shipped text: a
+decision followed by a later proposal
+(`relation-target-current.test.ts`, `listed-as-current.test.ts`,
+`card-ownership-query.test.ts` in `packages/application`;
+`card-purchase-merge.test.ts` and `card-settlement-ownership.test.ts` in
+`services/processor` on D1). Each changed SQL text is frozen as shipped with
+its digest and compared:
+
+- on random stores (one to many rows per relation, every status, `created_at`
+  ties, ids and insertion order unrelated to time; for ownership, both
+  aliases, superseded decisions, dated claims and a pin below the newest row)
+  the current read equals a model written without SQL, the shipped read
+  equals the old rule's model, and the two differ only where a proposal
+  follows a decision (`packages/read-model/test/relation-history.ts`);
+- for the ownership CTEs, on the settlement random stores the current and
+  shipped CTEs are equal, and on the same seeds with ownership proposals
+  appended last the current CTEs read exactly the store without them while
+  the shipped CTEs (equal to the view) both lost and gained owners; every
+  caller's own differential test against its frozen text still passes;
+- on scaled stores (5,000 relations or more) with no proposal after a decision
+  the two reads return the same rows;
+- without table statistics every lookup is a keyed search of
+  `entity_relations_from` or `_to`, the ownership plans pass the statement plan
+  checks, and the `listed_as` and claims plans are the shipped ones but for
+  one more sort term and one more keyed check.
