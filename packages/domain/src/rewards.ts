@@ -935,8 +935,9 @@ function bucketError(quantities: readonly Quantity[], unitRef: string): ValueErr
 /**
  * A holding's consumable quantity and its qualification measures, never mixed.
  * A holding with no consumable bucket reports an exact zero only because the
- * bucket list itself is the complete observed set; an unparsed bucket makes
- * the whole sum an error rather than a smaller number (INV05). Unclassified
+ * bucket list itself is the complete observed set; an unparsed bucket, or a
+ * consumable bucket in another unit, makes the whole sum an error rather than
+ * a smaller number (INV05). Unclassified
  * quantities remain in per-kind subtotals, but block an exact consumable total.
  */
 export function summarizeHolding(
@@ -948,6 +949,10 @@ export function summarizeHolding(
   const consumableBuckets: RewardBucket[] = [];
   for (const bucket of holding.buckets) {
     if (bucket.quantity.unitRef !== holding.unitRef) {
+      // A consumable bucket in another unit still belongs to the consumable
+      // set: the sum below refuses it (`unit_mismatch`), so the total is a
+      // conflict rather than the smaller sum of the other buckets (INV03, INV05).
+      if (CONSUMABLE_BUCKET_KINDS.includes(bucket.kind)) consumableBuckets.push(bucket);
       excluded.push({
         bucketRef: bucket.bucketRef,
         kind: bucket.kind,

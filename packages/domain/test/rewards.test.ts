@@ -251,6 +251,28 @@ describe("SC11 / AT37 / AT43 / AT47 / AT48 — quantity, eligibility and qualifi
     expect(measures[0]!.consumable).toBe(false);
   });
 
+  test("INV05 a consumable bucket in another unit makes the consumable total a conflict, not a smaller sum", () => {
+    const points = holding("points:program-a", [
+      bucket("bucket:regular", "regular", "points:program-a", "300"),
+      bucket("bucket:foreign", "time-limited", "points:program-b", "500"),
+      bucket("bucket:status", "qualification", "status-points:program-a", "100"),
+    ]);
+    const summary = summarizeHolding(points);
+    expect(summary.consumable).toEqual({
+      unitRef: "points:program-a",
+      value: { status: "conflict", reasonCode: "unit_mismatch" },
+    });
+    expect(summary.error?.code).toBe("unit_mismatch");
+    // Both other-unit buckets stay out of every subtotal, each with its reason.
+    expect(summary.excluded).toEqual([
+      { bucketRef: "bucket:foreign", kind: "time-limited", reasonCode: "unit_mismatch" },
+      { bucketRef: "bucket:status", kind: "qualification", reasonCode: "unit_mismatch" },
+    ]);
+    expect(summary.byKind.map((entry) => [entry.kind, quantityText(entry.quantity)])).toEqual([
+      ["regular", "300"],
+    ]);
+  });
+
   test("SYN19 the wallet's JPY and the programme's points are never added", () => {
     const points = holding("points:program-a", [
       bucket("bucket:regular", "regular", "points:program-a", "300"),
