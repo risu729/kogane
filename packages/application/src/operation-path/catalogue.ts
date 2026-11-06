@@ -222,6 +222,14 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // Per-source instrument identifier counts by candidate state (ADR 0073).
+  "instruments.coverage": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "summary.read",
+    paths: AGENT,
+  },
   "audit.search": {
     risk: ["R0"],
     effect: null,
