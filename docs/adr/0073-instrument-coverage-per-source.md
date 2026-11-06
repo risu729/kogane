@@ -155,7 +155,8 @@ Synthetic data only, no production access:
   parameter refusals, nothing written).
 - `apps/web/test/identity-coverage.browser.test.ts`: Chromium against the
   production build at 1280 and 390 px (the state columns and counts, no
-  total, no page-wide horizontal scroll), the source filter, and a refusal
+  total, no page-wide horizontal scroll), the source filter, a filtered
+  source with no row named as that source's absence, and a refusal
   shown as its reason with no table while the account coverage renders.
 - `experiments/observation-pipeline-local/test/identity-browser.test.ts`:
   its synthetic server answers the route in the wire shape, so the panel

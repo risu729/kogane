@@ -50,7 +50,7 @@ import {
 } from "../../../packages/application/src/index";
 import { auditContext, auditedRoute } from "./audit";
 import { principalFor } from "./grants";
-import { HttpError, json } from "./http";
+import { boundedText, HttpError, json } from "./http";
 
 export const OPS_PREFIX = "/api/ops/v1";
 /** Largest request body any operations route reads, in bytes. */
@@ -169,11 +169,7 @@ export function parseRequest<T>(schema: z.ZodType<T>, value: unknown): T {
 }
 
 async function boundedBody(request: Request): Promise<unknown> {
-  const declared = request.headers.get("content-length");
-  if (declared !== null && Number(declared) > OPS_BODY_LIMIT)
-    throw new HttpError(413, "request_too_large");
-  const text = await request.text();
-  if (text.length > OPS_BODY_LIMIT) throw new HttpError(413, "request_too_large");
+  const text = await boundedText(request, OPS_BODY_LIMIT);
   if (text.trim() === "") return {};
   try {
     const value: unknown = JSON.parse(text);

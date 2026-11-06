@@ -433,6 +433,16 @@ describe("the schema is the boundary (G3-08, G3-13)", () => {
     expect(response.status).toBe(413);
   });
 
+  it("bounds the body in bytes, not in UTF-16 code units", async () => {
+    // 6,000 kana are about 18 KB of UTF-8 but 6,000 code units.
+    const response = await call(`${OPS}/projections`, {
+      body: { reason: "あ".repeat(6_000) },
+      environment: ENABLED,
+    });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({ error: "request_too_large" });
+  });
+
   it("refuses a query string on an operations route", async () => {
     const response = await call(`${OPS}/collections?source=sony-bank`, {
       body: COLLECTION,

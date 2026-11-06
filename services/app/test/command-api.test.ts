@@ -182,6 +182,31 @@ describe("the command boundary", () => {
     expect((await call("/api/command/v1/plan", { body: huge, environment: enabled })).status).toBe(
       413,
     );
+    // The bound is 16 KiB of bytes, not of UTF-16 code units: 6,000 kana are
+    // about 18 KB, and a streamed body declares no length to check first.
+    const forwarded: Request[] = [];
+    const streamed = await worker.fetch(
+      new Request("https://fixture.test/api/command/v1/plan", {
+        method: "POST",
+        headers: { "cf-access-jwt-assertion": await token(), "content-type": "application/json" },
+        body: new Blob([JSON.stringify({ reason: "あ".repeat(6_000) })]).stream(),
+      }),
+      {
+        ...env,
+        ACCESS_ISSUER: issuer,
+        ACCESS_AUDIENCE: "synthetic-test-audience",
+        ...enabled,
+        PIPELINE: {
+          fetch: async (request: Request) => {
+            forwarded.push(request);
+            return Response.json({ ok: true });
+          },
+        },
+      } as unknown as Env,
+    );
+    expect(streamed.status).toBe(413);
+    expect(await streamed.json()).toMatchObject({ error: "request_too_large" });
+    expect(forwarded).toHaveLength(0);
     const response = await worker.fetch(
       new Request("https://fixture.test/api/command/v1/plan", {
         method: "POST",

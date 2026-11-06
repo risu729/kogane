@@ -9,6 +9,7 @@ import { ownershipDeclarationRef } from "../../../../packages/domain/src/ownersh
 import { useCardOwnership } from "../card-ownership-api.ts";
 import { CardOwnershipDetails, OWNERSHIP_ROLES, ownerLabel } from "../card-ownership-display.tsx";
 import { useFeatures } from "../api.ts";
+import { tokyoToday } from "../reported-state-api.ts";
 import { postCommand, type ChangePlanView } from "../command-api.ts";
 import { Link, navigate } from "../router.tsx";
 import { EmptyState, Loading, Notice, Panel, QueryBoundary } from "../ui.tsx";
@@ -25,7 +26,8 @@ function OwnershipForm({
   const [reason, setReason] = useState("");
   const [evidence, setEvidence] = useState(false);
   const [basis, setBasis] = useState<"reviewed" | "self-declared">("reviewed");
-  const [declaredOn, setDeclaredOn] = useState(() => new Date().toISOString().slice(0, 10));
+  // The declaration is dated on the owner's calendar day, not UTC's.
+  const [declaredOn, setDeclaredOn] = useState(() => tokyoToday());
   const declarationRef = ownershipDeclarationRef(side.role, declaredOn);
   const selfDeclared = basis === "self-declared";
   const partyRef = "party:" + label.trim();

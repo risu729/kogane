@@ -253,6 +253,10 @@ cd services/processor
 `SELECT lane, outcome, count(*) FROM processor_lane_ticks GROUP BY lane, outcome`
 summarises the day. A row that could not be written is itself logged as
 `lane_tick_record_failed` with a code, and never changes what the lane did.
+The lanes that write decisions or proposals also append a `lane` audit record
+per writing tick; one that could not be written is logged as
+`lane_audit_record_failed` with a code, likewise
+([audit log](audit-log.md#the-processors-own-records-alarm-and-lane)).
 
 ### Replaying a parser rejection
 

@@ -184,6 +184,20 @@ async function token() {
     .sign(keys.privateKey);
 }
 
+/** Appends synthetic offers; conversion_offers rejects updates and deletes. */
+async function storeOffers(rows: readonly (typeof OFFER)[]) {
+  await env.DB.batch(
+    rows.map((row) =>
+      env.DB.prepare(
+        `INSERT INTO conversion_offers(${Object.keys(row).join(",")})
+         VALUES(${Object.keys(row)
+           .map((_, index) => `?${index + 1}`)
+           .join(",")})`,
+      ).bind(...Object.values(row)),
+    ),
+  );
+}
+
 async function get(path: string, enabled = true, method = "GET") {
   return worker.fetch(
     new Request(`https://fixture.test${path}`, {
@@ -345,10 +359,17 @@ describe("reward reads", () => {
     ).json()) as {
       paths: { optimality: string; hops: { offerRef: string }[] }[];
       searchCoverage: string;
-      budget: { maxDepth: number };
+      budget: { maxDepth: number; maxExpansions: number };
+      expansions: number;
+      stoppedBy: string[];
       basis: string;
     };
     expect(body.searchCoverage).toBe("bounded");
+    // One stored offer, examined at the start and again from JPY: no cap ended
+    // the search, so the single path is all the stored offers give.
+    expect(body.expansions).toBe(2);
+    expect(body.budget.maxExpansions).toBe(500);
+    expect(body.stoppedBy).toEqual([]);
     expect(body.basis).toBe("policy-estimated");
     expect(body.budget.maxDepth).toBe(2);
     expect(body.paths).toHaveLength(1);
@@ -362,5 +383,203 @@ describe("reward reads", () => {
         .status,
     ).toBe(400);
     expect((await get("/api/v2/rewards/offers/simulate?quantity=1000")).status).toBe(400);
+  });
+
+  it("refuses a search depth that is only numerically 1 or 2", async () => {
+    for (const depth of ["0x2", "1.0", "+1", "2e0", "%201"]) {
+      const response = await get(
+        `/api/v2/rewards/offers/simulate?goal=JPY&quantity=2500&unit=points:v-point&depth=${depth}`,
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "invalid_query" });
+    }
+    expect(
+      (
+        await get(
+          "/api/v2/rewards/offers/simulate?goal=JPY&quantity=2500&unit=points:v-point&depth=1",
+        )
+      ).status,
+    ).toBe(200);
+  });
+
+  it("reports the offer bound on every simulate answer", async () => {
+    const named = (await (
+      await get("/api/v2/rewards/offers/simulate?offer=offer:synthetic-a-to-b&quantity=2500")
+    ).json()) as { offerCoverage: unknown };
+    expect(named.offerCoverage).toEqual({ limit: 200, truncated: false });
+    const search = (await (
+      await get("/api/v2/rewards/offers/simulate?goal=JPY&quantity=2500&unit=points:v-point")
+    ).json()) as { offerCoverage: unknown };
+    expect(search.offerCoverage).toEqual({ limit: 200, truncated: false });
+    const none = (await (
+      await get("/api/v2/rewards/offers/simulate?offer=offer:synthetic-absent&quantity=2500")
+    ).json()) as { offerCoverage: unknown; reasonCodes: string[] };
+    expect(none.reasonCodes).toEqual(["no_stored_offer"]);
+    expect(none.offerCoverage).toEqual({ limit: 200, truncated: false });
+  });
+
+  it("never picks one stored version of a named offer on the caller's behalf", async () => {
+    // Two versions of one synthetic offer with different rates, on units no
+    // other test converts. No adoption pointer exists and version text has no
+    // defined order, so neither version is "the" offer.
+    const versioned = {
+      ...OFFER,
+      offer_id: "offer:synthetic-versioned",
+      from_unit_ref: "points:synthetic-versioned",
+      to_unit_ref: "points:synthetic-versioned-out",
+      fixed_fees_json: "[]",
+    };
+    await storeOffers([
+      { ...versioned, version: "v1", ratio_numerator: "1", ratio_denominator: "2" },
+      { ...versioned, version: "v2", ratio_numerator: "1", ratio_denominator: "4" },
+    ]);
+    const unnamed = await get(
+      "/api/v2/rewards/offers/simulate?offer=offer:synthetic-versioned&quantity=2000",
+    );
+    expect(unnamed.status).toBe(200);
+    expect(await unnamed.json()).toEqual({
+      simulation: null,
+      offerCoverage: { limit: 200, truncated: false },
+      offerVersions: ["offer:synthetic-versioned@v1", "offer:synthetic-versioned@v2"],
+      reasonCodes: ["offer_version_not_selected"],
+      release: "conversion-search-v1",
+    });
+    const receive = async (version: string) =>
+      (
+        (await (
+          await get(
+            `/api/v2/rewards/offers/simulate?offer=offer:synthetic-versioned&version=${version}&quantity=2000`,
+          )
+        ).json()) as {
+          simulation: { offerRef: string; receive: { value: { value: { coefficient: string } } } };
+        }
+      ).simulation;
+    expect(await receive("v1")).toMatchObject({
+      offerRef: "offer:synthetic-versioned@v1",
+      receive: { value: { value: { coefficient: "1000" } } },
+    });
+    expect(await receive("v2")).toMatchObject({
+      offerRef: "offer:synthetic-versioned@v2",
+      receive: { value: { value: { coefficient: "500" } } },
+    });
+    const absent = (await (
+      await get(
+        "/api/v2/rewards/offers/simulate?offer=offer:synthetic-versioned&version=v3&quantity=2000",
+      )
+    ).json()) as { simulation: unknown; reasonCodes: string[] };
+    expect(absent.simulation).toBeNull();
+    expect(absent.reasonCodes).toEqual(["no_stored_offer"]);
+    // A version names a version of an offer; without the offer it means nothing.
+    expect(
+      (await get("/api/v2/rewards/offers/simulate?goal=JPY&version=v1&quantity=2000")).status,
+    ).toBe(400);
+  });
+
+  it("never picks a goal search's starting unit on the caller's behalf", async () => {
+    // Two synthetic offers from different source units that both reach one
+    // goal, on units no other test converts. The offer ids sort the opposite
+    // way to the units, so a first-row pick and a first-unit pick differ.
+    const goal = "points:synthetic-goal";
+    await storeOffers([
+      {
+        ...OFFER,
+        offer_id: "offer:synthetic-goal-from-y",
+        from_unit_ref: "points:synthetic-goal-source-y",
+        to_unit_ref: goal,
+        fixed_fees_json: "[]",
+      },
+      {
+        ...OFFER,
+        offer_id: "offer:synthetic-goal-from-z",
+        from_unit_ref: "points:synthetic-goal-source-x",
+        to_unit_ref: goal,
+        ratio_denominator: "4",
+        fixed_fees_json: "[]",
+      },
+    ]);
+    // Naming the unit gives a different path for each source: an answer
+    // without one would be one of these, chosen by row order.
+    const pathFrom = async (unit: string) =>
+      (
+        (await (
+          await get(`/api/v2/rewards/offers/simulate?goal=${goal}&quantity=2000&unit=${unit}`)
+        ).json()) as { paths: { hops: { offerRef: string }[] }[] }
+      ).paths.map((path) => path.hops.map((hop) => hop.offerRef));
+    expect(await pathFrom("points:synthetic-goal-source-y")).toEqual([
+      ["offer:synthetic-goal-from-y@v1"],
+    ]);
+    expect(await pathFrom("points:synthetic-goal-source-x")).toEqual([
+      ["offer:synthetic-goal-from-z@v1"],
+    ]);
+
+    const response = await get(`/api/v2/rewards/offers/simulate?goal=${goal}&quantity=2000`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    // Every distinct source unit of the stored offers, in code-unit order
+    // rather than reader order, so the list does not depend on row order.
+    const stored = (
+      await env.DB.prepare(
+        "SELECT DISTINCT from_unit_ref AS unit FROM conversion_offers ORDER BY from_unit_ref",
+      ).all<{ unit: string }>()
+    ).results.map((row) => row.unit);
+    expect(stored).toEqual(
+      expect.arrayContaining(["points:synthetic-goal-source-x", "points:synthetic-goal-source-y"]),
+    );
+    expect(body).toEqual({
+      simulation: null,
+      searchCoverage: "bounded",
+      offerCoverage: { limit: 200, truncated: false },
+      sourceUnits: stored,
+      reasonCodes: ["source_unit_not_selected"],
+      release: "conversion-search-v1",
+    });
+    expect(body).not.toHaveProperty("paths");
+    expect(body).not.toHaveProperty("rejected");
+
+    // A named offer has one source unit, so its goal search needs no `unit`.
+    const named = (await (
+      await get(
+        `/api/v2/rewards/offers/simulate?offer=offer:synthetic-goal-from-y&goal=${goal}&quantity=2000`,
+      )
+    ).json()) as { paths: { hops: { offerRef: string }[] }[] };
+    expect(named.paths.map((path) => path.hops.map((hop) => hop.offerRef))).toEqual([
+      ["offer:synthetic-goal-from-y@v1"],
+    ]);
+  });
+
+  // Last in the file: it stores 200 more offers, and conversion_offers is
+  // append-only, so nothing after it may assume the single fixture offer.
+  it("refuses a goal search over an offer set larger than its bound instead of answering from part of it", async () => {
+    // 200 synthetic offers whose ids sort before the fixture offer, so the only
+    // offer that reaches JPY is the 201st row in the reader's order.
+    const filler = Array.from({ length: 200 }, (_, index) => ({
+      ...OFFER,
+      offer_id: `offer:synthetic-0-filler-${String(index).padStart(3, "0")}`,
+      from_unit_ref: "points:synthetic-filler",
+      to_unit_ref: "points:synthetic-filler-out",
+    }));
+    await storeOffers(filler);
+    const response = await get(
+      "/api/v2/rewards/offers/simulate?goal=JPY&quantity=2500&unit=points:v-point",
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    // Not "no path": the search did not run over a partial offer set, so the
+    // answer is a closed reason with the bound it hit, and no path list at all.
+    expect(body).not.toHaveProperty("paths");
+    expect(body).not.toHaveProperty("rejected");
+    expect(body.simulation).toBeNull();
+    expect(body.searchCoverage).toBe("bounded");
+    expect(body.offerCoverage).toEqual({ limit: 200, truncated: true });
+    expect(body.reasonCodes).toEqual(["offer_set_too_large"]);
+    // A named offer reads that offer's own versions, which stay within the bound.
+    const named = (await (
+      await get("/api/v2/rewards/offers/simulate?offer=offer:synthetic-a-to-b&quantity=2500")
+    ).json()) as {
+      offerCoverage: unknown;
+      simulation: { receive: { value: { value: { coefficient: string } } } };
+    };
+    expect(named.offerCoverage).toEqual({ limit: 200, truncated: false });
+    expect(named.simulation.receive.value.value.coefficient).toBe("1000");
   });
 });
