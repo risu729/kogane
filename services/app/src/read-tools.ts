@@ -62,6 +62,33 @@ function wholeStoreRefusal(grant: Grant, operation: string): ToolResult | null {
       };
 }
 
+/**
+ * A page of `readEvents` without its `raw_object:<sha256>` explanation refs.
+ * The sha256 names the raw bytes (`GET /api/raw/:sha256`); `kogane.explain`
+ * hands its `raw:<sha256>` only with `evidence.read`, and `records.read` never
+ * implies it (ADR 0047). The routes' reader authority holds `evidence.read`,
+ * so a caller with it gets the routes' page unchanged. The parser position
+ * (`raw_locator:`) stays, as `purchases.explain` carries its `rawLocator`.
+ */
+function withoutRawObjects(page: Record<string, unknown>): Record<string, unknown> {
+  const items = page["items"];
+  if (!Array.isArray(items)) return page;
+  return {
+    ...page,
+    items: items.map((item: Record<string, unknown>) => {
+      const refs = item["explanationRefs"];
+      return Array.isArray(refs)
+        ? {
+            ...item,
+            explanationRefs: refs.filter(
+              (ref) => typeof ref !== "string" || !ref.startsWith("raw_object:"),
+            ),
+          }
+        : item;
+    }),
+  };
+}
+
 const schemas = {
   "kogane.instruments.history": z.strictObject({
     identifierId: z.string().regex(INSTRUMENT_IDENTIFIER_ID),
@@ -99,7 +126,7 @@ export const READ_MCP_TOOLS = Object.entries(schemas).map(([name, schema]) => {
       name === "kogane.instruments.history"
         ? "Read the same append-only instrument history as the owner UI, under records.read and a whole-store read grant."
         : name === EVENTS_TOOL_NAME
-          ? "Adopted economic events (list: activity, on one basis: cash-movement by default or purchase-recognition) or obligations with their settlements, 200 a page from offset. The same answer as GET /api/v2/activity or /api/v2/obligations, under records.read and a whole-store read grant. Every quantity keeps its basis and unit; bases are never merged, and an outstanding amount that is not exact is null with a reason, never zero."
+          ? "Adopted economic events (list: activity, on one basis: cash-movement by default or purchase-recognition) or obligations with their settlements, 200 a page from offset. The same answer as GET /api/v2/activity or /api/v2/obligations, under records.read and a whole-store read grant; raw_object refs only with evidence.read. Every quantity keeps its basis and unit; bases are never merged, and an outstanding amount that is not exact is null with a reason, never zero."
           : "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
     inputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -142,9 +169,10 @@ export async function callReadTool(
         const parameters = new URLSearchParams();
         if (input.basis !== undefined) parameters.set("basis", input.basis);
         if (input.offset !== undefined) parameters.set("offset", String(input.offset));
+        const page = await readEvents(env, `/api/v2/${input.list}`, parameters);
         return {
           status: 200,
-          body: await readEvents(env, `/api/v2/${input.list}`, parameters),
+          body: grantAllows(grant, "evidence.read") ? page : withoutRawObjects(page),
         };
       }
       case "kogane.audit.search": {

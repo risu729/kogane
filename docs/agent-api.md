@@ -70,7 +70,7 @@ token with no grant is still refused.
 | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------- |
 | `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                               | The first capability an agent should get                |
 | `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates`, `reconstructed-state.read` and `events.read` on a whole-store scope | Never implies `evidence.read`                           |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                                      | A separate grant; raw bytes are still a different route |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`) and the `raw_object:` refs of `events.read`                                          | A separate grant; raw bytes are still a different route |
 | `interpretation.propose` | `reconcile.propose`                                                                                                                              | Proposals only; never adoption                          |
 | `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                                        | Not a financial read; implied by no other capability    |
 
@@ -501,7 +501,9 @@ provider transaction observations, and that query's `obligations` intent stays
 `unsupported_semantics`. Route and tool share one function, `readEvents` in
 `services/app/src/events-api.ts`: the routes' request rules and their reader
 `createEventsReader` (`packages/read-model/src/events.ts`). The body is the
-route's answer, field for field (`apiVersion: 2`, and `basis` for activity).
+route's answer, field for field (`apiVersion: 2`, and `basis` for activity),
+except the `raw_object:` refs a grant without `evidence.read` does not get
+(below).
 
 Input, a closed object (`src/read-tools.ts`); what depends on the route is
 checked by the routes' own rules, so that refusal keeps the route's code:
@@ -527,9 +529,16 @@ bound a page, the route's 200 does. It reads and never writes.
 
 Every quantity keeps its basis and unit, bases are never merged, and an
 outstanding amount that is not exact is `null` with
-`outstandingReasonCode`, never zero. The explanation refs are the route's,
-`raw_locator:` and `raw_object:<sha256>` identifiers included, as
-`purchases.explain` carries a `rawLocator`; no agent tool reads raw bytes.
+`outstandingReasonCode`, never zero. The explanation refs are the route's.
+Its `raw_locator:` refs, the parser's position inside an artifact, stay under
+`records.read`, as `purchases.explain` carries a `rawLocator`. Its
+`raw_object:<sha256>` refs name the raw bytes, the identifier `explain` hands
+as `raw:<sha256>` only with `evidence.read`: a grant without `evidence.read`
+gets every item without them, and a grant with it (as the routes' reader
+authority has) gets the route's page unchanged. No agent tool reads raw
+bytes. The answer carries no provider text: its strings are ids, refs, closed
+codes, dates and exact decimals, never a transaction description, merchant
+or account label, so it has no `data` field to hold one.
 The committed MCP reader grant holds `records.read` over `"*"` sources and
 accounts, so the tool is listed to it wherever the projection exists. Each
 served call writes one R0 audit record (`result = "read"`) whose row count is
