@@ -761,9 +761,12 @@ export function SchedulesPage(): ReactNode {
             <p>
               公式サイトの再調査は提案だけを行い、ここに表示される設定を自動では変更しません。新しい案内を確認したら、出典・確認日時と合わせて変更してください。
             </p>
+            {/* Keyed by revision: reopening a rule that changed since the form
+                opened starts from what is stored, so the form never sends an
+                earlier revision's fields under the newer revision number. */}
             {editor !== undefined ? (
               <MaintenanceEditor
-                key={editor?.id ?? "new"}
+                key={editor === null ? "new" : `${editor.id}:${String(editor.revision)}`}
                 rule={editor}
                 sources={query.data.schedules
                   .flatMap((s) => (s.source ? [s.source] : []))

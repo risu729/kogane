@@ -426,6 +426,52 @@ describe.if(runnable)("operator schedule administration", () => {
     });
     await page.close();
   }, 30000);
+  test("reopening a maintenance rule after it changed edits the stored revision, not the earlier form", async () => {
+    // Synthetic rule and page; no provider page is read.
+    const rule = {
+      id: "synthetic-weekly",
+      source: "sony-bank",
+      timezone: "Asia/Tokyo",
+      pattern: { kind: "weekly" as const, weekdays: [0], start: "01:00", end: "04:00" },
+      enabled: true,
+      referenceUrl: "https://example.test/maintenance",
+      verifiedAt: "2026-10-04T14:00:00.000Z",
+      scope: "collection" as const,
+      revision: 1,
+    };
+    snapshot.maintenance = [rule];
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const item = page.locator(".maintenance-list li").filter({ hasText: "毎週 日 01:00" });
+      await item.getByRole("button", { name: "変更", exact: true }).click();
+      const form = page.locator(".maintenance-editor");
+      expect(await form.getByLabel("開始時刻", { exact: true }).inputValue()).toBe("01:00");
+      // Another change is stored while the editor is open, and the page reads it back.
+      snapshot.maintenance = [
+        { ...rule, pattern: { ...rule.pattern, start: "02:00" }, revision: 2 },
+      ];
+      const reads = snapshotReads;
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      const current = page.locator(".maintenance-list li").filter({ hasText: "毎週 日 02:00" });
+      await current.waitFor();
+      expect(snapshotReads).toBeGreaterThan(reads);
+      // Opening the rule again shows what revision 2 stores; saving it without
+      // a change must not write revision 1's times under revision 2.
+      await current.getByRole("button", { name: "変更", exact: true }).click();
+      expect(await form.getByLabel("開始時刻", { exact: true }).inputValue()).toBe("02:00");
+      await form.getByRole("button", { name: "停止時間を保存", exact: true }).click();
+      await form.waitFor({ state: "detached" });
+      expect(writes).toHaveLength(1);
+      expect(writes[0]?.body).toMatchObject({
+        id: "synthetic-weekly",
+        revision: 2,
+        pattern: { kind: "weekly", start: "02:00", end: "04:00" },
+      });
+    } finally {
+      await page.close();
+    }
+  }, 30000);
   test("the official-site re-survey shows freshness and failures, and changes nothing until a decision", async () => {
     // Synthetic: invented pages, times and proposals; no provider page is read.
     snapshot.survey = {
