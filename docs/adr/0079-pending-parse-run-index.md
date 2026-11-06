@@ -14,11 +14,12 @@ UPDATE parse_runs SET status='error',error='parse_interrupted'
 WHERE status='pending' AND EXISTS(SELECT 1 FROM observation_parse_jobs j WHERE ...)
 ```
 
-`parse_runs` has no index on `status`. D1 never runs `ANALYZE`, and without
-statistics SQLite planned the statement as `SCAN parse_runs`: every parse run
-ever written, on every sweep, to find the few still pending. Parse runs are
-evidence and only grow (16,056 published parses in the read model's cost
-store, docs/read-model.md#cost). The lanes are documented as bounded per
+No index of `parse_runs` serves `status='pending'` (its one partial index,
+`idx_parse_runs_success`, holds the `ok` runs). D1 never runs `ANALYZE`, and
+without statistics SQLite planned the statement as `SCAN parse_runs`: every
+parse run ever written, on every sweep, to find the few still pending. Parse
+runs are evidence and only grow (16,056 published parses in the scaled store
+of [card settlements: cost](../card-settlements.md#cost)). The lanes are documented as bounded per
 sweep (docs/observation-lanes.md); this statement was not.
 
 The scan was found by the plan check of one whole scheduled tick
