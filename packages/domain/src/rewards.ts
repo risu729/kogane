@@ -1687,7 +1687,9 @@ export function providerDisplayedValue(quantity: Quantity, evidenceRef: string):
  * Walk a redemption's observed events. A request alone moves nothing; a debit
  * creates an in-transit amount; only an observed credit increases the
  * destination. A cancellation waits for an observed return, and the return is
- * a new bucket claim — the debited lot is never resurrected.
+ * a new bucket claim — the debited lot is never resurrected. A debit, credit
+ * or return whose quantity is not exact makes every position it moves that
+ * unknown value, with its reason; it is never read as a move of nothing.
  */
 export function redemptionPositions(
   initialHeld: Quantity,
@@ -1702,11 +1704,18 @@ export function redemptionPositions(
   let inTransit = exactQuantity(unit, integerDecimal(0));
   let credited = exactQuantity(destinationUnitRef, integerDecimal(0));
   let debited = false;
-  const move = (from: Quantity, to: Quantity, amount: Quantity): [Quantity, Quantity] => {
-    const a = sumQuantities(from.unitRef, [from, { unitRef: from.unitRef, value: negate(amount) }]);
-    const b = sumQuantities(to.unitRef, [to, amount]);
-    return [a.ok ? a.quantity : from, b.ok ? b.quantity : to];
+  // The units are checked before every call, so a sum fails only on a value
+  // that is not exact; the result is then that unknown value, never the other
+  // operand unchanged, which would read an unknown amount as zero (INV05).
+  const plus = (total: Quantity, amount: Quantity): Quantity => {
+    const sum = sumQuantities(total.unitRef, [total, amount]);
+    if (sum.ok) return sum.quantity;
+    return total.value.status !== "exact" ? total : { unitRef: total.unitRef, value: amount.value };
   };
+  const move = (from: Quantity, to: Quantity, amount: Quantity): [Quantity, Quantity] => [
+    plus(from, { unitRef: from.unitRef, value: negate(amount) }),
+    plus(to, amount),
+  ];
   for (const event of events) {
     const codes: string[] = [];
     switch (event.stage) {
@@ -1723,8 +1732,7 @@ export function redemptionPositions(
         if (event.quantity.unitRef !== destinationUnitRef) violations.push("credit_unit_mismatch");
         else if (!debited) violations.push("credit_before_debit");
         else {
-          const sum = sumQuantities(destinationUnitRef, [credited, event.quantity]);
-          if (sum.ok) credited = sum.quantity;
+          credited = plus(credited, event.quantity);
           inTransit = exactQuantity(unit, integerDecimal(0));
         }
         break;
@@ -1734,8 +1742,7 @@ export function redemptionPositions(
       case "returned":
         if (event.quantity.unitRef !== unit) violations.push("return_unit_mismatch");
         else {
-          const sum = sumQuantities(unit, [held, event.quantity]);
-          if (sum.ok) held = sum.quantity;
+          held = plus(held, event.quantity);
           inTransit = exactQuantity(unit, integerDecimal(0));
           returnedBuckets.push({
             bucketRef: event.returnedToBucketRef ?? `bucket:returned:${event.eventRef}`,

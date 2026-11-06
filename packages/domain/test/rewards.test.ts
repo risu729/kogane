@@ -28,7 +28,13 @@ import {
   type RewardHolding,
   type SearchBudget,
 } from "../src/rewards.ts";
-import { addQuantities, decimalLiteral, type ExactRatio, type Quantity } from "../src/values.ts";
+import {
+  absentQuantity,
+  addQuantities,
+  decimalLiteral,
+  type ExactRatio,
+  type Quantity,
+} from "../src/values.ts";
 import { addMonths, formatLocalDate, parseLocalDate, type LocalDateValue } from "../src/time.ts";
 import { loadFixture, q, quantityText } from "./helpers.ts";
 
@@ -726,6 +732,71 @@ describe("SC13 / AT41 / AT49 — eligibility and the application-credit distinct
     );
     expect(returned.observedExpiry).not.toEqual(day("2027-08-01"));
     expect(validRewardBucket(returned)).toBe(true);
+  });
+
+  test("INV05 an event amount that is not exact leaves the positions it moves unknown, never unmoved", () => {
+    const unread = absentQuantity(fixture.pointUnit, "unparsed", "synthetic_amount_unreadable");
+    const event = (
+      eventRef: string,
+      stage: "debited" | "credited" | "returned",
+      quantity: Quantity,
+    ) => ({
+      eventRef,
+      stage,
+      quantity,
+      returnedToBucketRef: null,
+      at: day("2026-09-02"),
+      evidenceRefs: [],
+    });
+    const state = (position: { sourceHeld: Quantity; inTransit: Quantity }) => [
+      position.sourceHeld.value.status === "exact"
+        ? quantityText(position.sourceHeld)
+        : position.sourceHeld.value.reasonCode,
+      position.inTransit.value.status === "exact"
+        ? quantityText(position.inTransit)
+        : position.inTransit.value.reasonCode,
+    ];
+
+    // An unreadable debit moved some amount: neither side still holds what it held.
+    const debit = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [event("event:debit", "debited", unread)],
+      fixture.walletUnit,
+    );
+    expect(debit.positions.map(state)).toEqual([
+      ["synthetic_amount_unreadable", "synthetic_amount_unreadable"],
+    ]);
+
+    // An unreadable credit is not a credit of nothing.
+    const credit = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [
+        event("event:debit", "debited", q(fixture.pointUnit, "5000")),
+        event(
+          "event:credit",
+          "credited",
+          absentQuantity(fixture.walletUnit, "missing", "synthetic_credit_missing"),
+        ),
+      ],
+      fixture.walletUnit,
+    );
+    const credited = credit.positions[1]!.destinationCredited;
+    expect(credited.unitRef).toBe(fixture.walletUnit);
+    expect(credited.value).toEqual({ status: "missing", reasonCode: "synthetic_credit_missing" });
+
+    // An unreadable return does not leave the source as it was before the return.
+    const returned = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [
+        event("event:debit", "debited", q(fixture.pointUnit, "5000")),
+        event("event:return", "returned", unread),
+      ],
+      fixture.walletUnit,
+    );
+    expect(returned.positions.map(state)).toEqual([
+      ["3000", "5000"],
+      ["synthetic_amount_unreadable", "0"],
+    ]);
   });
 });
 
