@@ -12,7 +12,11 @@ import {
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
-import { COLLECTION_QUALITY_PATH } from "../../../packages/observation-shared/src/collection-quality-contract.ts";
+import {
+  COLLECTION_QUALITY_PATH,
+  validCollectionQualityAlarms,
+  type CollectionQualitySummary,
+} from "../../../packages/observation-shared/src/collection-quality-contract.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { readerGrant } from "./agent-api";
 import { HttpError, json } from "./http";
@@ -41,14 +45,19 @@ export async function collectionQualityApi(
     return null;
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
+  // Resolve authority before schema/source enumeration. This aggregation
+  // cannot safely answer an account-filtered grant, even for a known source.
+  const grant = readerGrant(subject);
+  if (!grant.capabilities.includes("evidence.read")) throw new HttpError(403, "forbidden");
+  if (grant.scopes.sources !== "*" || grant.scopes.accounts !== "*")
+    throw new HttpError(403, "scope_restricted");
   if (!(await collectionQualityAvailable(env))) throw new HttpError(404, "not_found");
-  // The reader authority: every source, evidence identifiers and codes.
-  if (!readerGrant(subject).capabilities.includes("evidence.read"))
-    throw new HttpError(403, "forbidden");
   try {
     if (path === COLLECTION_QUALITY_PATH) {
       if (url.search) throw new HttpError(400, "invalid_query");
-      return json(await queryCollectionQualitySummary(d1Executor(env.DB)));
+      const summary = await queryCollectionQualitySummary(d1Executor(env.DB));
+      await readAlarms(env, summary);
+      return json(summary);
     }
     const sourceId = path.slice(COLLECTION_QUALITY_PATH.length + 1);
     if (!SOURCE.test(sourceId)) throw new HttpError(404, "not_found");
@@ -68,5 +77,53 @@ export async function collectionQualityApi(
     if (error instanceof CollectionQualityLimitError)
       throw new HttpError(413, "result_limit_exceeded");
     throw error;
+  }
+}
+
+/** Enrich only matching stored configurations; a relay failure stays unknown. */
+async function readAlarms(env: Env, summary: CollectionQualitySummary): Promise<void> {
+  if (env.SCHEDULES_ENABLED !== "true") return;
+  const controller = new AbortController();
+  let timer: ReturnType<typeof setTimeout>;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new Error("alarm_read_unavailable"));
+    }, 5000);
+  });
+  try {
+    // The deadline covers both headers and JSON, even for a relay that does
+    // not honor cancellation. The core summary remains available.
+    const value: unknown = await Promise.race([
+      (async () => {
+        const response = await env.PIPELINE.fetch(
+          new Request("https://observation-pipeline.internal/internal/collection-quality/alarms", {
+            headers: { "x-kogane-internal-caller": "kogane-evidence-browser" },
+            signal: controller.signal,
+          }),
+        );
+        return response.ok ? response.json() : null;
+      })(),
+      deadline,
+    ]);
+    if (!validCollectionQualityAlarms(value)) return;
+    for (const schedule of [
+      ...summary.sources.flatMap((source) => source.schedules),
+      ...summary.otherSchedules,
+    ]) {
+      const found = value.alarms.find((alarm) => alarm.id === schedule.id);
+      if (
+        found &&
+        found.enabled === schedule.enabled &&
+        found.nextRunAt === schedule.nextRunAt &&
+        found.nextNominalAt === schedule.nextNominalAt
+      )
+        schedule.alarm = found.alarm;
+    }
+  } catch {
+    // No actual reservation claim is inferred from the stored settings.
+  } finally {
+    clearTimeout(timer!);
+    controller.abort();
   }
 }

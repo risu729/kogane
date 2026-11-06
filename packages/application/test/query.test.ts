@@ -107,6 +107,30 @@ describe("query spec validation", () => {
     }
   });
 
+  test("an activity date range is calendar days in order, as the v1 route reads it", () => {
+    const activity = (filters: Record<string, string>) =>
+      parseQueryRequest({ intent: "activity", filters });
+    expect(activity({ from: "2024-02-29", to: "2024-03-01" })).toMatchObject({ ok: true });
+    expect(activity({ from: "2026-01-01", to: "2026-01-01" })).toMatchObject({ ok: true });
+    for (const day of ["2026-02-29", "2026-02-30", "2026-04-31", "2026-13-01", "2026-00-10"]) {
+      expect(activity({ from: day })).toEqual({
+        ok: false,
+        code: "invalid_query",
+        refs: ["filter:from"],
+      });
+      expect(activity({ to: day })).toEqual({
+        ok: false,
+        code: "invalid_query",
+        refs: ["filter:to"],
+      });
+    }
+    expect(activity({ from: "2026-12-31", to: "2026-01-01" })).toEqual({
+      ok: false,
+      code: "invalid_query",
+      refs: ["filter:from", "filter:to"],
+    });
+  });
+
   test("no request can carry a URL, SQL or an ordering", () => {
     for (const body of [
       { intent: "activity", url: "https://provider.invalid" },

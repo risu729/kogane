@@ -13,6 +13,7 @@ import {
   AUDIT_PAGE_SQL,
   type AuditActor,
   type AuditRow,
+  auditPageFilters,
   buildAuditRecord,
   executeOperation,
   OPERATION_CATALOGUE,
@@ -755,6 +756,29 @@ describe("the operator's page", () => {
     }
     return store.batch(writes);
   }
+
+  test("a day filter outside the calendar is refused with null, never thrown", () => {
+    expect(auditPageFilters({ from: "2026-10-09", to: "2026-10-10" })).toEqual({
+      from: "2026-10-09",
+      to: "2026-10-10",
+    });
+    expect(auditPageFilters({ to: "2024-02-29" })).toEqual({ to: "2024-02-29" });
+    // Shaped like a day, not one: a rolled-over date and an out-of-range
+    // month or day are both outside the vocabulary.
+    for (const day of [
+      "2026-02-29",
+      "2026-02-30",
+      "2026-04-31",
+      "2026-13-01",
+      "2026-00-10",
+      "2026-01-00",
+      "2026-01-32",
+      "2026-99-99",
+    ]) {
+      expect(auditPageFilters({ from: day })).toBeNull();
+      expect(auditPageFilters({ to: day })).toBeNull();
+    }
+  });
 
   test("filters before the limit, pages by a cursor bound to its filters, and returns no total", async () => {
     const db = migratedDatabase();
