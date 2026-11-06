@@ -152,6 +152,64 @@ test("pending policy matches projection: only trusted Vpass bindings require pol
     db.close();
   }
 });
+test("SBI Shinsei policy-1 runs count as pending until policy 2 reclassifies the board (ADR 0076)", () => {
+  const db = fixture();
+  const rows = (name: string) =>
+    db
+      .query<Record<string, unknown>, []>(IDENTITY_AUDIT_QUERIES.find((q) => q.name === name)!.sql)
+      .all();
+  try {
+    // One published parse with an account balance and a board valuation,
+    // mapped by a sealed policy-1 run exactly as policy 1 recorded them.
+    db.exec(`INSERT INTO sources VALUES ('sbi-shinsei-bank');
+      INSERT INTO fetch_artifacts VALUES (9,'sbi-shinsei-bank',1);
+      INSERT INTO parse_runs VALUES (9,9,'ok',NULL);
+      INSERT INTO published_parse_runs VALUES (9,'parser-9',9);
+      INSERT INTO balance_observations VALUES (9,9); INSERT INTO valuation_observations VALUES (9,9);
+      INSERT INTO source_accounts VALUES ('shacct','sbi-shinsei-bank','synthetic','["PRIVATE_ACCOUNT","unit","JPY"]'),('shboard','sbi-shinsei-bank','synthetic','["sbi-shinsei:fx-board","unit","USD"]');
+      INSERT INTO accounts VALUES ('shacct-e','PRIVATE_NAME','deposit','provider-local'),('shboard-e','PRIVATE_NAME','deposit','provider-local');
+      INSERT INTO account_mappings VALUES ('sham1','shacct',1,'shacct-e','rule','provider-account-reference-with-native-unit',1,'2099','PRIVATE_NAME','provider-local'),('shbm1','shboard',1,'shboard-e','rule','provider-account-reference-with-native-unit',1,'2099','PRIVATE_NAME','provider-local');
+      INSERT INTO identity_runs VALUES ('sh1',9,1,'2099');
+      INSERT INTO identity_observations VALUES ('sh1b','sh1','balance',9,'shacct','sham1','[]'),('sh1v','sh1','valuation',9,'shboard','shbm1','[]');
+      INSERT INTO identity_run_seals VALUES ('sh1',2,'2099');`);
+    expect(rows("pending_parses")).toContainEqual({
+      source: "sbi-shinsei-bank",
+      lineage: "current",
+      eligible_parses: 1,
+      pending_parses: 1,
+    });
+    expect(rows("account_status").filter((r) => r.source === "sbi-shinsei-bank")).toEqual([
+      { source: "sbi-shinsei-bank", status: "provider-local", count: 2 },
+    ]);
+    // The policy-2 run appends revisions of the same source accounts; the
+    // policy-1 rows stay as recorded.
+    db.exec(`INSERT INTO account_mappings VALUES ('sham2','shacct',2,'shacct-e','rule','provider-account-reference-with-native-unit',2,'2099','PRIVATE_NAME','provider-local'),('shbm2','shboard',2,'shboard-e','rule','provider-fx-board-quotes-not-an-account',2,'2099','PRIVATE_NAME','aggregate');
+      INSERT INTO identity_runs VALUES ('sh2',9,2,'2099');
+      INSERT INTO identity_observations VALUES ('sh2b','sh2','balance',9,'shacct','sham2','[]'),('sh2v','sh2','valuation',9,'shboard','shbm2','[]');
+      INSERT INTO identity_run_seals VALUES ('sh2',2,'2099');`);
+    expect(rows("pending_parses")).toContainEqual({
+      source: "sbi-shinsei-bank",
+      lineage: "current",
+      eligible_parses: 1,
+      pending_parses: 0,
+    });
+    expect(rows("account_status").filter((r) => r.source === "sbi-shinsei-bank")).toEqual([
+      { source: "sbi-shinsei-bank", status: "aggregate", count: 1 },
+      { source: "sbi-shinsei-bank", status: "provider-local", count: 1 },
+    ]);
+    const report = validateIdentityAudit(IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()));
+    expect(
+      report
+        .find((s) => s.name === "integrity")!
+        .rows.every((row) =>
+          Object.values(row as Record<string, number>).every((count) => count === 0),
+        ),
+    ).toBe(true);
+    expect(JSON.stringify(report)).not.toContain("PRIVATE_");
+  } finally {
+    db.close();
+  }
+});
 test("audit detects duplicate and ineligible exposure if a current view regresses", () => {
   const db = fixture();
   try {
@@ -297,7 +355,9 @@ test("Vpass audit separates revoked retained evidence from invalid current expos
     db.exec(
       `DROP VIEW current_identity_observations; CREATE VIEW current_identity_observations AS SELECT o.*,r.parse_run_id FROM identity_observations o JOIN identity_runs r ON r.id=o.identity_run_id WHERE r.id='vp7v2';`,
     );
-    expect(rows("vpass_pins")[0]).toMatchObject({ invalid_current_pin_exposures: 1 });
+    expect(rows("vpass_pins")[0]).toMatchObject({
+      invalid_current_pin_exposures: 1,
+    });
     expect(JSON.stringify(rows("vpass_pins"))).not.toContain("PRIVATE_");
   } finally {
     db.close();

@@ -503,3 +503,45 @@ continue only if the bounded run reports more candidates. Verify that the
 current Mizuho account mappings read `provider-local` at policy 2. No reimport
 or B reparse is needed. Rolling back the code leaves the policy-2 runs current:
 an older build cannot replace a newer sealed decision.
+
+## Policy 2: SBI Shinsei non-account references
+
+Policy 1 mapped every `sbi-shinsei:` reference as a provider-local `deposit`,
+including the parser's two references that name no account: the exchange-rate
+board `sbi-shinsei:fx-board` (one source account per board currency) and the
+stage category `sbi-shinsei:customer`. From policy 2 the resolver maps the board
+as `valuation-aggregate` / `aggregate`
+(`provider-fx-board-quotes-not-an-account`, label `SBI新生銀行 外貨為替レート`)
+and the stage as `qualification-aggregate` / `aggregate`
+(`provider-customer-stage-not-an-account`, label `SBI新生銀行 お客さまステージ`),
+and maps every other `sbi-shinsei:{accountNo}` reference exactly as policy 1
+did ([ADR 0076](adr/0076-sbi-shinsei-non-account-identity.md)).
+
+The rule reads the identity run's own version, so an explicit policy-1 run
+still records the policy-1 mapping. The `sbi-shinsei-bank` policy module
+(`identity-policies/sbi-shinsei.ts`) requires version 2 for every SBI Shinsei
+parse, with the same family, release (`identity-default-v2`) and empty
+dependency set as Mizuho. The bounded sweep therefore treats sealed policy-1
+SBI Shinsei parses as candidates again and appends a policy-2 run and, per
+source account, a policy-2 mapping revision; the current views select the newer
+sealed run. Every key is unchanged, so each observation keeps its source
+account: account references gain a revision equal to their policy-1 one except
+for its version, and the board and stage references gain a revision with the
+`aggregate` classification. Their account entities keep the `deposit` role they
+were first written with (shown as the role in the identity browser); the
+classification is on the policy-2 mapping revision, which projections and the
+ownership declaration's single-account check read. Policy-1 runs, their rows
+and revisions and Layer A/B stay as recorded, and a manual decision on an SBI
+Shinsei reference is not replaced. Price promotion selects board and stage rows
+by source account, not by identity, so prices are unaffected.
+
+Nothing is configured to enable it. After deployment the five-minute pipeline
+sweep picks the parses up on its own; every SBI Shinsei parse is re-identified
+once, so the backlog is the source's sealed history. To finish sooner run
+`node scripts/identity-ops.ts catchup 100 sbi-shinsei-bank` and continue only
+if the bounded run reports more candidates. Then run the read-only
+[identity audit](identity-audit.md): `pending_parses` for `sbi-shinsei-bank`
+reads zero, and its `account_status` counts the board and stage observations
+under `aggregate`. No reimport or B reparse is needed. Rolling back the code
+leaves the policy-2 runs current: an older build cannot replace a newer sealed
+decision.
