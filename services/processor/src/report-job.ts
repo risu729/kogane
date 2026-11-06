@@ -37,12 +37,15 @@ import {
   type NormalizedDecimal,
 } from "../../../packages/observation-shared/src/normalized-decimal.ts";
 import { createD1ObservationReader } from "../../../packages/read-model/src/d1";
+import { PAGE_LIMIT } from "../../../packages/read-model/src/scope";
 import type { PositionWithValuations } from "../../../packages/observation-shared/src/api-contract.ts";
 
 /** The report body version this job writes; it is the schema of the stored bytes. */
 export const REPORT_JOB_RELEASE = "report-job-v1";
 const INPUT_MANIFEST_VERSION = "report-inputs-v1";
 const DEFAULT_MAX_ROWS = 500;
+/** Positions one reader page returns with their valuations (`PAGE_LIMIT` less its probe row). */
+const POSITION_PAGE = PAGE_LIMIT - 1;
 const DECIMAL_LOOKUP_CHUNK = 80;
 
 /** Feature flag. Off unless the deployment explicitly sets the string "true". */
@@ -345,15 +348,26 @@ export async function runReportJob(
   if (!reportsEnabled(env.REPORTS_ENABLED)) return { ...empty, skipped: "flag_off" };
   const maxRows = options.maxRows ?? DEFAULT_MAX_ROWS;
   const reader = createD1ObservationReader(env.DB);
-  const visible = await reader.listPositions({ offset: 0 });
   const cutoffMs = Date.parse(options.knowledgeCutoff);
   if (!Number.isFinite(cutoffMs)) return { ...empty, skipped: "invalid_knowledge_cutoff" };
-  const late = await recordedAfterCutoff(
-    env.DB,
-    visible.map((entry) => entry.position.id),
-    cutoffMs,
-  );
-  const all = visible.filter((entry) => !late.has(entry.position.id));
+  // The reader answers pages of `POSITION_PAGE` positions plus one row that
+  // only says another page exists (and carries no valuations). Positions
+  // recorded after the cutoff are dropped page by page, so the in-scope set
+  // is read until it exceeds the bound or the store ends: dropping late rows
+  // from the first page alone would leave the rows behind it unread and the
+  // report would claim a shorter set is the whole scope.
+  const all: PositionWithValuations[] = [];
+  for (let offset = 0; ; offset += POSITION_PAGE) {
+    const page = await reader.listPositions({ offset });
+    const entries = page.slice(0, POSITION_PAGE);
+    const late = await recordedAfterCutoff(
+      env.DB,
+      entries.map((entry) => entry.position.id),
+      cutoffMs,
+    );
+    all.push(...entries.filter((entry) => !late.has(entry.position.id)));
+    if (all.length > maxRows || page.length <= POSITION_PAGE) break;
+  }
   const truncated = all.length > maxRows;
   const positions = all.slice(0, maxRows);
 
