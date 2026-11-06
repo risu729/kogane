@@ -29,7 +29,9 @@ import { AUDIT_PAGE_PATH, validAuditPage } from "./audit-contract.ts";
 import { DELEGATION_STATUS_PATH, validDelegationStatus } from "./delegation-status-contract.ts";
 import { validCardPurchasePage } from "./card-purchase-contract.ts";
 import { validReconstructedState } from "./reconstructed-state-contract.ts";
+import { validReportedHoldingsChange } from "./reported-holdings-change-contract.ts";
 import { validReportedState } from "./reported-state-contract.ts";
+import { validReportResponse } from "./report-artifact-contract.ts";
 import { validCollectionQualityResponse } from "./collection-quality-contract.ts";
 import { validCardSettlementReviewPage } from "./card-settlement-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
@@ -209,6 +211,7 @@ export const validApiCapabilities: Check<ApiCapabilities> = object<ApiCapabiliti
   cardPurchaseRecognition: optional(boolean),
   reportedStateOnDate: optional(boolean),
   reconstructedStateOnDate: optional(boolean),
+  reportArtifacts: optional(boolean),
   opsApi: boolean,
 });
 const globalPassEmptyMonth = object<GlobalPassEmptyMonth>({
@@ -774,7 +777,10 @@ export function validApiResponse(path: string, value: unknown): boolean {
     return validCardSettlementReviewPage(value);
   if (path === "/api/v2/card-purchases") return validCardPurchasePage(value);
   if (path === "/api/v2/reported-state") return validReportedState(value);
+  if (path === "/api/v2/reported-holdings-change") return validReportedHoldingsChange(value);
   if (path === "/api/v2/reconstructed-state") return validReconstructedState(value);
+  if (path === "/api/v2/reports" || path.startsWith("/api/v2/reports/"))
+    return validReportResponse(path, value) ?? false;
   if (path.startsWith("/api/collection-quality"))
     return validCollectionQualityResponse(path, value);
   if (path === INSTRUMENT_CANDIDATES_PATH) return validInstrumentCandidateReview(value);

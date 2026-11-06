@@ -55,14 +55,14 @@ refresh failures retain previously authorized records with an explicit warning.
 `apps/web/src/styles.css` is an index of `@import` lines; the rules live in
 `apps/web/src/styles/`, imported in cascade order:
 
-| File             | Holds                                                                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tokens.css`     | Every colour, type size, spacing step, radius and shadow, as `:root` custom properties                                                           |
-| `base.css`       | Reset, body, links, focus ring, headings, `summary`, code, value and list helpers                                                                |
-| `shell.css`      | App shell: sidebar, brand, navigation, workspace bar, source notice, main, footer                                                                |
-| `components.css` | Panels and note tones, badges, buttons, filters, key/value grids, states, pagination, disclosures, tiles, provenance chain, code preview         |
-| `tables.css`     | Scroll region, cell defaults, sortable headers, the transaction/balance/identity column contracts                                                |
-| `pages.css`      | Page-specific layouts: overview, source cards, positions, observation lists, rewards, settlement, card ownership, card purchases, reported state |
+| File             | Holds                                                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tokens.css`     | Every colour, type size, spacing step, radius and shadow, as `:root` custom properties                                                                    |
+| `base.css`       | Reset, body, links, focus ring, headings, `summary`, code, value and list helpers                                                                         |
+| `shell.css`      | App shell: sidebar, brand, navigation, workspace bar, source notice, main, footer                                                                         |
+| `components.css` | Panels and note tones, badges, buttons, filters, key/value grids, states, pagination, disclosures, tiles, provenance chain, code preview                  |
+| `tables.css`     | Scroll region, cell defaults, sortable headers, the transaction/balance/identity column contracts                                                         |
+| `pages.css`      | Page-specific layouts: overview, source cards, positions, observation lists, rewards, settlement, card ownership, card purchases, reported state, reports |
 
 `balance-display.css` stays beside its component. Responsive rules sit next to
 the rule they modify, not in one media block, so page work touches one file.
@@ -150,6 +150,7 @@ failure, and `no-store` apply before any capability is read.
 | `financialProducts`    | boolean                 | false        | true                          | Organized rows may carry a product claim                                                                                                                                                                                                                                                                                     |
 | `evidenceHistory`      | boolean                 | false        | true                          | The 取得履歴 route and link exist                                                                                                                                                                                                                                                                                            |
 | `sharedQuery`          | boolean                 | false        | true                          | Summary counts come from `GET /api/v2/query`, not page arithmetic                                                                                                                                                                                                                                                            |
+| `reportArtifacts`      | boolean                 | false        | `report_artifacts` present    | The 評価レポート route and link exist; the report routes are requested                                                                                                                                                                                                                                                       |
 
 `balancesV2` is the one capability that also depends on stored state: the
 production Worker advertises it only when the balance projection has a sealed

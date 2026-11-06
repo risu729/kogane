@@ -133,10 +133,26 @@ export type Route =
   | { name: "purchase"; eventId: string }
   | { name: "artifacts" }
   | { name: "artifact"; id: number }
+  /** The stored fixed report artifacts, newest first. */
+  | { name: "reports" }
+  /** One stored report, re-displayed by its id; never recomputed. */
+  | { name: "report"; reportId: string }
   | { name: "observation"; kind: ObservationKind; id: number }
   /** A09 change confirmation. The plan id is a 64-hex digest, nothing else. */
   | { name: "confirm"; planId: string }
   | { name: "notFound"; path: string };
+
+/** The report API's own identifier rule (`REPORT_ID` in the report contract). */
+const REPORT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
+
+/** A path segment decoded once, or undefined when it is not valid percent-encoding. */
+function decodeSegment(value: string): string | undefined {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
 
 /** Only plain non-negative integers, matching the API's own id rule. */
 function parseId(value: string | undefined): number | undefined {
@@ -177,6 +193,12 @@ export function matchRoute(path: string): Route {
     if (first === "reconciliation") return { name: "reconciliation" };
     if (first === "purchases") return { name: "purchases" };
     if (first === "artifacts") return { name: "artifacts" };
+    if (first === "reports") return { name: "reports" };
+  }
+
+  if (first === "reports" && segments.length === 2 && second !== undefined) {
+    const reportId = decodeSegment(second);
+    if (reportId !== undefined && REPORT_ID.test(reportId)) return { name: "report", reportId };
   }
 
   if (first === "identities" && second === "instrument-candidates" && segments.length === 2)

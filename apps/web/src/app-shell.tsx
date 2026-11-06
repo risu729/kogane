@@ -27,6 +27,7 @@ export const NAV_ICONS = {
   purchases: "M5 8h14l-1 13H6z M9 8V6a3 3 0 0 1 6 0v2",
   state: "M4 5h16v15H4z M4 10h16 M9 3v4 M15 3v4 M8 14h3 M8 17h6",
   reconstruction: "M4 20h16 M5 16l4-5 4 3 6-8 M15 6h4v4",
+  reports: "M6 3h12v18H6z M9 7h6 M9 11h6 M9 15h3 M15 17l1.5 1.5L19 16",
   reconciliation: "M3 5h18v14H3z M3 10h18 M7 15h3 M14 15l2 2 4-4",
   identities: "M3 10l9-6 9 6 M5 10v9 M10 10v9 M14 10v9 M19 10v9 M3 19h18",
   rewards: "M12 4a8 8 0 1 0 0 16 8 8 0 1 0 0-16 M12 8v8 M9.5 10h5 M9.5 14h5",

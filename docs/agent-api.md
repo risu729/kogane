@@ -199,6 +199,13 @@ nobody ([below](#maintenance-windows)).
 | `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                              |
 | `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | a delegation (`MCP_DELEGATIONS`) holding `schedules.maintenance.update`; no delegation executes yet, so it is listed to nobody ([below](#maintenance-windows)) |
 
+No tool lists or reads the fixed report artifacts (評価レポート): they are
+served to the operator by `GET /api/v2/reports` and
+`/api/v2/reports/{id}` only. A later agent read adds a list and a detail
+together under `records.read` on `"*"` sources and accounts and refuses a
+restricted report outright
+([ADR 0072, amendment](adr/0072-report-artifact-pages.md#amendment-the-export-link-and-no-agent-report-read-yet-2026-11-06)).
+
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
 folded in, which is the same object `/api/meta` returns (today that is
@@ -236,6 +243,10 @@ the call from the caller object (`actor_not_supported`) before any grader runs.
 | `holdings`       | Adopted holdings per unit                               | `source`, `account`                                 | `summary.read` |
 | `reported-state` | What the provider reported                              | `source`, `account`, `instrument`, `metric`, `view` | `records.read` |
 | `activity`       | Adopted events in a period                              | `source`, `account`, `from`, `to`, `q`              | `records.read` |
+
+`activity`'s `from` and `to` are calendar days (`YYYY-MM-DD`; `2026-02-30` is
+not one) and `from` is not after `to`, as the v1 activity route reads them;
+anything else is `invalid_query` (`parseQueryRequest`).
 
 `coverage` lists each in-scope source — the grant's sources, narrowed by the
 `source` filter — with its `artifactCount` and `collectionRunCount`: the
