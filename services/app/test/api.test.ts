@@ -734,6 +734,27 @@ describe("authenticated read-only evidence", () => {
     });
     expect((await call(`${prefix}/meta`)).status).toBe(200);
   });
+  it("labels agent and operations paths with closed route codes, never the caller's path text", async () => {
+    const logs = vi.spyOn(console, "log").mockImplementation(() => {});
+    for (const [path, method] of [
+      ["/api/agent/v1/privatesecret123", "POST"],
+      ["/api/agent/v1/financial.query", "POST"],
+      ["/api/ops/v1/privatesecret", "GET"],
+      ["/api/ops/v1/operations/op_privatesecret", "GET"],
+    ] as const)
+      await call(path, { method });
+    const routes = logs.mock.calls
+      .map(([value]) => JSON.parse(String(value)) as { event: string; route?: string })
+      .filter((value) => value.event === "evidence_request")
+      .map((value) => value.route);
+    expect(routes).toEqual([
+      "agent_unknown",
+      "agent_financial_query",
+      "ops_unknown",
+      "ops_operations",
+    ]);
+    expect(JSON.stringify(logs.mock.calls)).not.toMatch(/privatesecret/);
+  });
   it("distinguishes catalogue and object transport failures without leaking error contents", async () => {
     const run = await seedRun({ count: 1 });
     const logs = vi.spyOn(console, "log").mockImplementation(() => {});
