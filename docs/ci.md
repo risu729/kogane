@@ -171,8 +171,9 @@ Operational tasks are not dependencies of the check graph.
 
 The manifest guard checks task discovery, workspace coverage, runnable `ci`
 tasks, deployment dry-run coverage, tracked Wrangler configurations, untracked
-Wrangler types output and the ban on package scripts. A workspace is not silently omitted because someone
-forgot to add another Actions matrix row or root task-file include.
+Wrangler types output and the ban on package scripts. A workspace is not
+silently omitted because someone forgot to add another Actions matrix row or
+root task-file include.
 
 ## Checks and coverage
 
@@ -194,11 +195,11 @@ forgot to add another Actions matrix row or root task-file include.
   in [unused-code analysis](unused-report.md).
 - Every workspace `ci` task runs its declared type generation, typechecks,
   tests and builds. The `types` task writes Wrangler's
-  `worker-configuration.d.ts`, which each workspace git-ignores; the manifest
-  guard fails when any copy is tracked, because a committed one drifts with the
-  next Wrangler or workerd update and every check run would rewrite it.
-  Container checks use frozen installs; syntax-only probes
-  remain syntax-only rather than executing live infrastructure experiments.
+  `worker-configuration.d.ts`, which git ignores in every Worker workspace; the
+  manifest guard fails when any copy is tracked, because a committed one drifts
+  with the next Wrangler or workerd update and every check run would rewrite
+  it. Container checks use frozen installs; syntax-only probes remain
+  syntax-only rather than executing live infrastructure experiments.
 - Worker `dry-run` tasks use each workspace's pinned Wrangler, never upload
   code and require no Cloudflare account id or API token.
 
