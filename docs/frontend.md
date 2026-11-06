@@ -174,7 +174,10 @@ shown to be wrong. Where the server advertises `sharedQuery`, the Overview
 page's summary counts therefore come from `GET /api/v2/query?intent=coverage`
 — the shared application service (`packages/application`) that the agent API
 also calls, with the same scope rules — instead of summing rows in the client.
-On a store without that capability the page keeps its own arithmetic, so the
+While that read is loading or after it fails, the counts show the loading or
+error state and are not replaced by client arithmetic: the Overview's own run
+list is a bounded window of the newest runs, not the whole history. On a
+store without that capability the page keeps its own arithmetic, so the
 local pipeline experiment and snapshot conformance tests are unaffected.
 
 What a page may still decide for itself is unchanged: open and closed
