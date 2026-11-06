@@ -100,10 +100,12 @@ combine, 1 to 3; no defaults), it answers per statement:
 
 - `proposed`: exactly one set of whole debits whose exact sum is the total
   (`single-debit` or `multiple-debits`), none of them in another statement's
-  candidate;
-- `needs_review` (`candidate_not_unique`, and
+  candidate, and no refused debit competing;
+- `needs_review` (`candidate_not_unique`, with
   `debit_in_other_statement_allocation` when a debit could pay two
-  statements): every candidate listed, none chosen;
+  statements, and `excluded_debit_competes` when a debit refused as an
+  unresolved duplicate or for a missing date could complete an exact sum):
+  every candidate listed, none chosen;
 - `unsupported`: `no_debit_in_window`, or `no_exact_allocation` with
   `in_window_debits_below_total` (a shortfall) and/or `debit_above_total`
   (an excess). No remainder is computed and no debit is called a partial
@@ -111,6 +113,10 @@ combine, 1 to 3; no defaults), it answers per statement:
   debit paying several statements has not been observed;
 - `refused` for a statement that is malformed, repeated, not exact, not
   positive, without a due date or already reserved.
+
+Contests between statements and competing refused debits are judged within
+one run only, so a caller that splits overlapping windows across runs would
+lose them.
 
 A debit given twice, two debits sharing a key or alias class, a debit whose
 key or alias class is held, and a debit without an admitted identity take no
@@ -684,9 +690,10 @@ acceptance and a withdrawal write to the consumption guard, and its refusals
 shows the SMBC branch returns exactly the 0044 view's rows.
 `packages/domain/test/card-settlement-allocation.test.ts` covers the allocation
 planner on synthetic inputs: today's matcher on a two-debit and a partial case,
-every refusal, exclusion and outcome code, and 300 seeded random runs compared
-with a brute-force subset oracle (exact sums, whole and distinct members, no
-held debit, no debit proposed for two statements, order independence).
+every refusal, exclusion and outcome code, refused debits competing, and 300
+seeded random runs compared with a brute-force subset oracle (exact sums,
+whole and distinct members, no held or dateless debit, each status and code,
+no debit proposed for two statements, order independence).
 `packages/domain/test/card-debit-account.test.ts` covers the provider-stated
 debit-account rule on synthetic inputs: bank names resolve only through the
 table, a unique account starting with the leading digits is proposed, an

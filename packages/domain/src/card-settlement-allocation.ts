@@ -17,7 +17,9 @@
 // key or an alias class, and a debit whose key or alias class a live holder
 // already holds take no part; a debit in more than one candidate allocation,
 // of one statement or of two, makes every allocation it is in `needs_review`
-// and none is chosen. Amounts are compared and added with the exact decimal
+// and none is chosen. A debit refused as an unresolved duplicate or for a
+// missing date still competes (as in ADR 0057): if it could complete an exact
+// allocation, the statement is `needs_review`, so the refusal never picks. Amounts are compared and added with the exact decimal
 // helpers of `values.ts` (INV03); a value that is not exact is a reason,
 // never zero (INV05). The date window and the most debits one allocation may
 // combine come from an explicit, versioned policy without defaults; nothing
@@ -175,10 +177,16 @@ export type AllocationPairExclusion = (typeof ALLOCATION_PAIR_EXCLUSIONS)[number
 
 /** What a statement's outcome states. */
 export const ALLOCATION_OUTCOME_CODES = [
-  /** More than one allocation, or a member debit in another statement's allocation. */
+  /** More than one allocation, a member debit in another statement's allocation, or a competing refused debit. */
   "candidate_not_unique",
   /** A member debit is also in an allocation of another statement of this run. */
   "debit_in_other_statement_allocation",
+  /**
+   * A debit refused `duplicate_unresolved` (inside the window) or
+   * `debit_date_missing` (the window cannot exclude it) could complete an
+   * exact allocation: the refusal does not pick the statement's payer.
+   */
+  "excluded_debit_competes",
   /** No admitted debit of the statement's unit is inside the window. */
   "no_debit_in_window",
   /** In-window debits exist but no combination within the size bound sums to the total. */
@@ -230,7 +238,7 @@ export type StatementAllocationOutcome =
   | { status: "refused"; code: AllocationStatementRefusal }
   /** Exactly one allocation, none of whose debits is in another candidate. A proposal, never a decision. */
   | { status: "proposed"; allocations: [CardStatementAllocation]; codes: [] }
-  /** Two or more candidates touch one debit: none is chosen. */
+  /** Two or more candidates, a debit two statements could use, or a competing refused debit: none is chosen. */
   | {
       status: "needs_review";
       allocations: CardStatementAllocation[];
@@ -322,6 +330,12 @@ interface AdmittedDebit {
   date: string;
 }
 
+/** A debit refused before the search that still competes: its date, or null when it has none. */
+interface CompetingDebit {
+  input: AllocationDebitInput;
+  date: string | null;
+}
+
 function ownershipOf(
   statement: CardStatementFact,
   members: readonly AdmittedDebit[],
@@ -374,13 +388,13 @@ function allocationOf(
  * whose exact sum equals `total`. Amounts are positive, so a branch whose
  * running sum already exceeds the total is not extended.
  */
-function exactCombinations(
+function exactCombinations<T extends { input: AllocationDebitInput }>(
   total: Quantity,
-  debits: readonly AdmittedDebit[],
+  debits: readonly T[],
   size: number,
-): AdmittedDebit[][] {
-  const found: AdmittedDebit[][] = [];
-  const walk = (start: number, chosen: AdmittedDebit[], sum: Quantity | null) => {
+): T[][] {
+  const found: T[][] = [];
+  const walk = (start: number, chosen: T[], sum: Quantity | null) => {
     for (let index = start; index < debits.length; index++) {
       const debit = debits[index]!;
       const next =
@@ -402,7 +416,10 @@ function exactCombinations(
 }
 
 /** Within one unit only: a comparison across units is not an order. */
-function byAmountThenRef(a: AdmittedDebit, b: AdmittedDebit): number {
+function byAmountThenRef(
+  a: { input: AllocationDebitInput },
+  b: { input: AllocationDebitInput },
+): number {
   const order = compareQuantities(a.input.debit.amount, b.input.debit.amount);
   if (order.ok && order.order !== 0) return order.order;
   return compareText(a.input.debit.ref.id, b.input.debit.ref.id);
@@ -446,6 +463,7 @@ export function planCardStatementAllocations(
     if (validDebitShape(item))
       refCounts.set(item.debit.ref.id, (refCounts.get(item.debit.ref.id) ?? 0) + 1);
   const valued: AdmittedDebit[] = [];
+  const competing: CompetingDebit[] = [];
   for (const item of input.debits) {
     if (!validDebitShape(item)) {
       debitExclusions.push({ debitRef: null, code: "debit_invalid" });
@@ -461,8 +479,10 @@ export function planCardStatementAllocations(
       const date = localDate(item.debit.occurred);
       if (value === "not_exact") exclude("amount_not_exact");
       else if (value === "not_positive") exclude("amount_not_positive");
-      else if (date === null) exclude("debit_date_missing");
-      else valued.push({ input: item, aliasClass: item.aliasClass, date });
+      else if (date === null) {
+        exclude("debit_date_missing");
+        competing.push({ input: item, date: null });
+      } else valued.push({ input: item, aliasClass: item.aliasClass, date });
     }
   }
   const keyCounts = new Map<string, number>();
@@ -477,9 +497,10 @@ export function planCardStatementAllocations(
     if (
       (keyCounts.get(debit.input.bankKey) ?? 0) > 1 ||
       (aliasCounts.get(debit.aliasClass) ?? 0) > 1
-    )
+    ) {
       debitExclusions.push({ debitRef: ref, code: "duplicate_unresolved" });
-    else if (heldKeys.has(debit.input.bankKey))
+      competing.push({ input: debit.input, date: debit.date });
+    } else if (heldKeys.has(debit.input.bankKey))
       debitExclusions.push({ debitRef: ref, code: "economic_claim_held" });
     else if (heldAliases.has(debit.aliasClass))
       debitExclusions.push({ debitRef: ref, code: "alias_conflict" });
@@ -511,6 +532,8 @@ export function planCardStatementAllocations(
     statement: CardStatementFact | null;
     candidates: AdmittedDebit[][];
     inWindow: AdmittedDebit[];
+    /** Whether a competing refused debit could complete an exact allocation. */
+    competes: boolean;
   }
   const planned: Planned[] = [];
   for (const item of input.statements) {
@@ -525,6 +548,7 @@ export function planCardStatementAllocations(
         statement: null,
         candidates: [],
         inWindow: [],
+        competes: false,
       });
       continue;
     }
@@ -539,6 +563,7 @@ export function planCardStatementAllocations(
       statement: null,
       candidates: [],
       inWindow: [],
+      competes: false,
     });
     const value = exactPositive(statement.amount);
     const due = localDate(statement.paymentDate);
@@ -556,15 +581,39 @@ export function planCardStatementAllocations(
       const dueDate = parseLocalDate(due)!;
       const pairExclusions: StatementAllocationResult["pairExclusions"] = [];
       const inWindow: AdmittedDebit[] = [];
+      const withinWindow = (date: string): boolean => {
+        const gap = daysBetween(dueDate, parseLocalDate(date)!);
+        return gap >= policy.window.minDaysFromDue && gap <= policy.window.maxDaysFromDue;
+      };
       for (const debit of admitted) {
-        const gap = daysBetween(dueDate, parseLocalDate(debit.date)!);
         if (debit.input.debit.amount.unitRef !== statement.amount.unitRef)
           pairExclusions.push({ debitRef: debit.input.debit.ref, code: "currency_differs" });
-        else if (gap < policy.window.minDaysFromDue || gap > policy.window.maxDaysFromDue)
+        else if (!withinWindow(debit.date))
           pairExclusions.push({ debitRef: debit.input.debit.ref, code: "date_outside_window" });
         else inWindow.push(debit);
       }
       pairExclusions.sort((a, b) => compareText(a.debitRef.id, b.debitRef.id));
+      const candidates = exactCombinations(
+        statement.amount,
+        [...inWindow].sort(byAmountThenRef),
+        policy.maxDebitsPerAllocation,
+      );
+      // Only a statement that has a candidate can be demoted; one with none is
+      // unsupported whatever a refused debit could have done.
+      const rivals = competing.filter(
+        (debit) =>
+          debit.input.debit.amount.unitRef === statement.amount.unitRef &&
+          (debit.date === null || withinWindow(debit.date)),
+      );
+      const rivalIds = new Set(rivals.map((debit) => debit.input.debit.ref.id));
+      const competes =
+        candidates.length > 0 &&
+        rivals.length > 0 &&
+        exactCombinations(
+          statement.amount,
+          [...inWindow, ...rivals].sort(byAmountThenRef),
+          policy.maxDebitsPerAllocation,
+        ).some((members) => members.some((member) => rivalIds.has(member.input.debit.ref.id)));
       planned.push({
         result: {
           statementRef: statement.ref,
@@ -575,12 +624,9 @@ export function planCardStatementAllocations(
         },
         statement,
         // One unit only, so the amount order is total and the search may prune.
-        candidates: exactCombinations(
-          statement.amount,
-          [...inWindow].sort(byAmountThenRef),
-          policy.maxDebitsPerAllocation,
-        ),
+        candidates,
         inWindow,
+        competes,
       });
     }
   }
@@ -633,12 +679,13 @@ export function planCardStatementAllocations(
     const elsewhere = plan.candidates.some((members) =>
       members.some((member) => (statementsByDebit.get(member.input.debit.ref.id)?.size ?? 0) > 1),
     );
-    if (allocations.length === 1 && !elsewhere) {
+    if (allocations.length === 1 && !elsewhere && !plan.competes) {
       plan.result.outcome = { status: "proposed", allocations: [allocations[0]!], codes: [] };
       continue;
     }
     const codes: AllocationOutcomeCode[] = ["candidate_not_unique"];
     if (elsewhere) codes.push("debit_in_other_statement_allocation");
+    if (plan.competes) codes.push("excluded_debit_competes");
     plan.result.outcome = { status: "needs_review", allocations, codes };
   }
 

@@ -105,20 +105,31 @@ same-unit, in-window debits whose exact sum (`values.ts`, INV03) equals the
 statement total. Each member allocates its whole amount; no debit is split.
 Outcome per statement:
 
-- `proposed`: exactly one candidate, and none of its debits is in a
-  candidate of another statement of the run. `single-debit` is the shape the
+- `proposed`: exactly one candidate, none of its debits is in a candidate
+  of another statement of the run, and no refused debit competes (below). `single-debit` is the shape the
   sweep already proposes; `multiple-debits` is new.
 - `needs_review` with `candidate_not_unique`: two or more candidates (a
   statement is paid once, so even disjoint candidates are ambiguous), or a
   member debit in another statement's candidate (also
-  `debit_in_other_statement_allocation`; ADR 0034's two-sided uniqueness).
-  Every candidate is listed and none is chosen.
+  `debit_in_other_statement_allocation`; ADR 0034's two-sided uniqueness),
+  or a refused debit that competes (also `excluded_debit_competes`). Every
+  candidate is listed and none is chosen.
 - `unsupported`: no candidate. `no_debit_in_window`, or
   `no_exact_allocation` with `in_window_debits_below_total` when the
   in-window debits together are below the total (the shortfall shape a partial
   payment would have) and `debit_above_total` when one is above it (the shape
   of an overpayment or a debit paying several statements). No difference is
   computed and no debit is named as a partial payment.
+
+A refused debit still competes, as in ADR 0057, so a refusal never picks the
+payer: for a statement that has a candidate, a same-unit debit refused
+`duplicate_unresolved` inside the window, or refused `debit_date_missing`
+(checked without the window, which cannot exclude it), that could complete
+an exact combination within the size bound with the in-window admitted
+debits makes the statement `needs_review` with `excluded_debit_competes`.
+Such a debit is never a member of a listed allocation. A held debit
+(`economic_claim_held`, `alias_conflict`) does not compete: another holder
+already consumed it. A statement without a candidate stays `unsupported`.
 
 Ownership is carried as today's matcher carries it: `established-same`,
 `unknown` or `different` over the statement's and every member's owner, with
@@ -159,7 +170,14 @@ provider evidence first.
   `unsupported` (`no_exact_allocation`).
 - The bounds (16 statements, 32 debits) are below what one sweep page reads
   (100 statements, up to 1,000 debits per due date); a caller must partition
-  its input, and a run past them is refused.
+  its input, and a run past them is refused. Cross-statement contests and
+  competing refused debits are judged within one run only: a caller that
+  splits statements whose windows overlap, or the debits of one window,
+  across runs loses them, so the caller's ADR must state a partition that
+  keeps them together.
+- A debit refused for another reason (`identity_not_admitted`,
+  `amount_not_exact`, `debit_repeated`, `debit_invalid`) does not compete;
+  it is listed in the run's exclusions.
 
 ## Verification
 
@@ -169,11 +187,17 @@ today's matcher on a two-debit and a partial case; every policy refusal and
 bound; exact two- and three-debit allocations across decimal scales; the
 size bound; ownership as a condition; every unsupported code; the signed
 window; mixed currencies never combined; ambiguity within and across
-statements; every debit and statement refusal; the module's exports and that
+statements; dateless and unresolved-duplicate debits competing, held ones
+not; every debit and statement refusal; the module's exports and that
 nothing outside the domain calls it; and a property comparison on 300 seeded
 random runs against a brute-force subset oracle: every allocation sums
 exactly to its statement's total, members are whole, distinct, same-unit and
-never held, no debit is proposed for two statements, the result is
+never held or dateless, each statement's status and codes match the oracle's
+uniqueness, cross-statement and competition rules, no debit is proposed for
+two statements, the result is
 independent of input order, and every outcome and code occurs. That
 comparison found an order-dependent search when debits of two units were
-sorted together by amount, fixed before this ADR.
+sorted together by amount, fixed before this ADR. The independent review added the competition rule
+(the planner first let a refused duplicate or dateless debit drop out
+silently, so a statement could be `proposed` beside another possible payer)
+and the oracle's status check.

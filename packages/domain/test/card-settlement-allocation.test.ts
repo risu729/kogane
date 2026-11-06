@@ -422,6 +422,60 @@ describe("ambiguity is needs_review, never a choice", () => {
   });
 });
 
+describe("a refused debit that could pay still competes (as in ADR 0057)", () => {
+  const dateless = { occurred: { kind: "unknown", reasonCode: "not_reported" } } as const;
+  test("a dateless debit of the total makes the one candidate needs_review", () => {
+    const result = only(run([statement(1, 3000)], [debit(1, 3000), debit(2, 3000, dateless)]));
+    expect(result.outcome).toMatchObject({
+      status: "needs_review",
+      codes: ["candidate_not_unique", "excluded_debit_competes"],
+    });
+    expect(memberIds(result)).toEqual([["transaction:1"]]);
+  });
+  test("a dateless debit that completes a sum with an admitted one competes; the window cannot exclude it", () => {
+    const result = only(
+      run([statement(1, 3000)], [debit(1, 3000), debit(2, 1000), debit(3, 2000, dateless)]),
+    );
+    expect(codesOf(result)).toEqual(["candidate_not_unique", "excluded_debit_competes"]);
+  });
+  test("an unresolved duplicate group inside the window competes; outside it does not", () => {
+    const group = (occurred: string) => [
+      debit(2, 3000, { alias: "shared-alias", occurred: day(occurred) }),
+      debit(3, 3000, { alias: "shared-alias", occurred: day(occurred) }),
+    ];
+    expect(
+      codesOf(only(run([statement(1, 3000)], [debit(1, 3000), ...group("2026-09-11")]))),
+    ).toEqual(["candidate_not_unique", "excluded_debit_competes"]);
+    expect(
+      only(run([statement(1, 3000)], [debit(1, 3000), ...group("2026-09-20")])).outcome.status,
+    ).toBe("proposed");
+  });
+  test("a competitor that cannot complete the total, or is of another unit, does not demote", () => {
+    for (const rival of [
+      debit(2, 2500, dateless),
+      debit(2, exactQuantity("USD", integerDecimal(3000)), dateless),
+    ])
+      expect(only(run([statement(1, 3000)], [debit(1, 3000), rival])).outcome.status).toBe(
+        "proposed",
+      );
+  });
+  test("held debits do not compete: another holder already consumed them", () => {
+    const result = only(
+      run([statement(1, 3000)], [debit(1, 3000), debit(2, 3000, { key: "held-key" })], {
+        held: { bankKeys: ["held-key"], aliasClasses: [], statementKeys: [] },
+      }),
+    );
+    expect(result.outcome.status).toBe("proposed");
+  });
+  test("a statement without a candidate stays unsupported", () => {
+    expect(only(run([statement(1, 3000)], [debit(1, 3000, dateless)])).outcome).toEqual({
+      status: "unsupported",
+      allocations: [],
+      codes: ["no_debit_in_window"],
+    });
+  });
+});
+
 describe("every debit is one fact (INV06)", () => {
   test("held keys and alias classes, duplicates, repeats and unadmitted identities take no part", () => {
     const result = run(
@@ -513,6 +567,7 @@ describe("module surface", () => {
   test("no code outside packages/domain calls the planner: it adopts nothing and writes nothing", async () => {
     const root = join(import.meta.dir, "..", "..", "..");
     const callers: string[] = [];
+    let scanned = 0;
     for (const pattern of [
       "packages/*/src/**/*.ts",
       "services/*/src/**/*.ts",
@@ -520,6 +575,7 @@ describe("module surface", () => {
     ])
       for await (const path of new Glob(pattern).scan({ cwd: root })) {
         if (path.startsWith("packages/domain/")) continue;
+        scanned++;
         const text = await Bun.file(join(root, path)).text();
         if (
           text.includes("card-settlement-allocation.ts") ||
@@ -528,6 +584,8 @@ describe("module surface", () => {
           callers.push(path);
       }
     expect(callers).toEqual([]);
+    // The scan read the tree: an empty glob would pass vacuously.
+    expect(scanned).toBeGreaterThan(100);
   });
 });
 
@@ -555,25 +613,46 @@ function shuffle<T>(items: readonly T[], random: () => number): T[] {
   return copy;
 }
 
-/** Brute force over every subset of the admitted debits, in integer yen-hundredths. */
+interface OracleDebit {
+  id: number;
+  cents: bigint;
+  unit: string;
+  offset: number;
+  usable: boolean;
+  /** Refused for a missing date: it competes whatever the window. */
+  dateless: boolean;
+}
+
+/** Every subset of `pool` of at most `size` members summing to `total`, in integer yen-hundredths. */
+function subsets(pool: readonly OracleDebit[], total: bigint, size: number): OracleDebit[][] {
+  const found: OracleDebit[][] = [];
+  for (let mask = 1; mask < 1 << pool.length; mask++) {
+    const chosen = pool.filter((_, i) => mask & (1 << i));
+    if (chosen.length <= size && chosen.reduce((sum, d) => sum + d.cents, 0n) === total)
+      found.push(chosen);
+  }
+  return found;
+}
+
+/** Brute force: each statement's candidates, and whether a dateless debit competes. */
 function oracle(
   totals: readonly bigint[],
-  debits: readonly { id: number; cents: bigint; unit: string; offset: number; usable: boolean }[],
+  debits: readonly OracleDebit[],
   size: number,
   window: { min: number; max: number },
-): string[][][] {
+): { candidates: string[][]; competes: boolean }[] {
   return totals.map((total) => {
     const pool = debits.filter(
       (d) => d.usable && d.unit === "JPY" && d.offset >= window.min && d.offset <= window.max,
     );
-    const found: string[][] = [];
-    for (let mask = 1; mask < 1 << pool.length; mask++) {
-      const chosen = pool.filter((_, i) => mask & (1 << i));
-      if (chosen.length > size) continue;
-      if (chosen.reduce((sum, d) => sum + d.cents, 0n) === total)
-        found.push(chosen.map((d) => `transaction:${d.id}`).sort());
-    }
-    return found.sort((a, b) => a.length - b.length || (a.join("\n") < b.join("\n") ? -1 : 1));
+    const rivals = debits.filter((d) => d.dateless && d.unit === "JPY");
+    const candidates = subsets(pool, total, size)
+      .map((chosen) => chosen.map((d) => `transaction:${d.id}`).sort())
+      .sort((a, b) => a.length - b.length || (a.join("\n") < b.join("\n") ? -1 : 1));
+    const competes =
+      candidates.length > 0 &&
+      subsets([...pool, ...rivals], total, size).some((chosen) => chosen.some((d) => d.dateless));
+    return { candidates, competes };
   });
 }
 
@@ -597,8 +676,10 @@ describe("property: the planner agrees with a brute-force oracle", () => {
           BigInt(pick([0, 0, 0, 50]));
         const unit = random() < 0.1 ? "USD" : "JPY";
         const offset = Math.floor(random() * 11) - 5;
-        const held = random() < 0.1;
-        return { id: i + 1, cents, unit, offset, usable: !held, held };
+        const draw = random();
+        const held = draw < 0.1;
+        const dateless = draw >= 0.1 && draw < 0.25;
+        return { id: i + 1, cents, unit, offset, usable: !held && !dateless, held, dateless };
       });
       const totals = Array.from(
         { length: 1 + Math.floor(random() * 3) },
@@ -609,7 +690,9 @@ describe("property: the planner agrees with a brute-force oracle", () => {
       );
       const debits = specs.map((spec) =>
         debit(spec.id, exactQuantity(spec.unit, normalizeDecimal(spec.cents, 2)), {
-          occurred: day(`2026-09-${String(10 + spec.offset).padStart(2, "0")}`),
+          occurred: spec.dateless
+            ? { kind: "unknown", reasonCode: "not_reported" }
+            : day(`2026-09-${String(10 + spec.offset).padStart(2, "0")}`),
         }),
       );
       const held = {
@@ -623,11 +706,31 @@ describe("property: the planner agrees with a brute-force oracle", () => {
       );
 
       const expected = oracle(totals, specs, size, window);
+      // A debit in the candidates of two statements contests both.
+      const statementsUsing = new Map<string, number>();
+      for (const { candidates } of expected)
+        for (const id of new Set(candidates.flat()))
+          statementsUsing.set(id, (statementsUsing.get(id) ?? 0) + 1);
       const usage = new Map<string, number>();
       for (const [index, item] of result.statements.entries()) {
         const outcome = item.outcome;
         if (outcome.status === "refused") throw new Error(`seed ${seed}: unexpected refusal`);
-        expect(memberIds(item)).toEqual(expected[index]!);
+        const { candidates, competes } = expected[index]!;
+        expect(memberIds(item)).toEqual(candidates);
+        const shared = candidates.flat().some((id) => (statementsUsing.get(id) ?? 0) > 1);
+        expect(outcome.status).toBe(
+          candidates.length === 0
+            ? "unsupported"
+            : candidates.length === 1 && !shared && !competes
+              ? "proposed"
+              : "needs_review",
+        );
+        if (outcome.status === "needs_review")
+          expect(outcome.codes).toEqual([
+            "candidate_not_unique",
+            ...(shared ? ["debit_in_other_statement_allocation" as const] : []),
+            ...(competes ? ["excluded_debit_competes" as const] : []),
+          ]);
         for (const allocation of outcome.allocations) {
           const ids = allocation.members.map((m) => m.ref.id);
           expect(new Set(ids).size).toBe(ids.length);
@@ -644,6 +747,7 @@ describe("property: the planner agrees with a brute-force oracle", () => {
           for (const member of allocation.members) {
             const spec = specs.find((s) => `transaction:${s.id}` === member.ref.id)!;
             expect(spec.held).toBe(false);
+            expect(spec.dateless).toBe(false);
             expect(spec.unit).toBe("JPY");
             expect(member.allocated).toEqual(debits[spec.id - 1]!.debit.amount);
           }
@@ -651,10 +755,6 @@ describe("property: the planner agrees with a brute-force oracle", () => {
         if (outcome.status === "proposed")
           for (const member of outcome.allocations[0].members)
             usage.set(member.ref.id, (usage.get(member.ref.id) ?? 0) + 1);
-        if (outcome.status === "unsupported") expect(expected[index]).toEqual([]);
-        if (outcome.status === "needs_review")
-          expect(outcome.codes[0]).toBe("candidate_not_unique");
-        if (outcome.status === "proposed") expect(expected[index]!.length).toBe(1);
       }
       // Across every proposed statement of a run, no debit is proposed twice.
       for (const count of usage.values()) expect(count).toBe(1);
@@ -678,6 +778,7 @@ describe("property: the planner agrees with a brute-force oracle", () => {
       "multiple-debits",
       "candidate_not_unique",
       "debit_in_other_statement_allocation",
+      "excluded_debit_competes",
       "no_debit_in_window",
       "no_exact_allocation",
       "in_window_debits_below_total",
