@@ -923,3 +923,66 @@ td summary {
     max-height: 24rem;
   }
 }
+
+/* ── AI delegation status ──────────────────────────────────────────── */
+
+/* A compact, read-only notice on the pages a delegate can act on (schedules,
+ * confirm). The principal and the reference wrap anywhere so a phone never
+ * scrolls sideways. */
+.delegation-status {
+  margin: var(--space-4) 0;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-2);
+  color: var(--text-2);
+  font-size: var(--text-md);
+}
+
+.delegation-status h2 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--text-md);
+  color: var(--text);
+}
+
+.delegation-status p {
+  margin: var(--space-2) 0 0;
+}
+
+.delegation-status code {
+  overflow-wrap: anywhere;
+}
+
+.delegation-entries,
+.delegation-capabilities {
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.delegation-entry + .delegation-entry {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.delegation-entry-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.delegation-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-3);
+}
+
+.delegation-status details {
+  margin-top: var(--space-2);
+}
+
+.delegation-status summary {
+  cursor: pointer;
+}

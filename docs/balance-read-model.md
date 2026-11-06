@@ -64,7 +64,18 @@ writer fencing and captured CORE references; the contract is in
    `same_account` → `same`, `connection_contains` / `account_has_pocket` /
    `statement_covers` → `subset`. A _proposed_ relation contributes nothing,
    which is why SC06 stays an unknown overlap: knowing the connection never
-   establishes which terminal account a line belongs to.
+   establishes which terminal account a line belongs to. A relation's
+   decisions are append-only rows, so the build reads one row per triple
+   (kind, `from_ref`, `to_ref`): its newest decision (`accepted`, `rejected`
+   or `released`) by `created_at` and then `id`, newest first, or, for a
+   triple with no decision, its newest proposal (`projectionRelationsSql` in
+   `packages/read-model/src/balance-projection-sql.ts`; scope relation
+   release `scope-relations-v2`,
+   [ADR 0001's amendment](adr/0001-domain-axes.md#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)).
+   A `relation.reject` after a `relation.accept` withdraws the acceptance, a
+   later acceptance overrides an earlier rejection, and a later proposal
+   changes nothing. The validity window (`valid_from`, `valid_to`) is not
+   read.
 5. **Disjointness policy** (`distinct-identified-accounts-v1`). Within one
    source, two distinct non-aggregate scopes are disjoint, because the
    provider listed them as separate accounts. Across sources, only scopes the
@@ -109,7 +120,7 @@ observe" is never rendered as "the balance is gone".
 
 | Budget                    | Value | Why                                                                                                                                                                  |
 | ------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Candidate bound           | 5,000 | The existing read bound; above it the build is refused, not cut. Coverage claims and declared relations have the same bound and the same refusal.                    |
+| Candidate bound           | 5,000 | The existing read bound; above it the build is refused, not cut. Coverage claims and declared relations (current triples) have the same bound and the same refusal.  |
 | `ADOPTION_SUBJECT_BOUND`  | 250   | Adoption compares scopes pairwise. A larger target records every candidate `unresolved`/`adoption_target_oversized` — never silently adopted, never silently summed. |
 | `PROJECTION_WRITE_BUDGET` | 1,000 | Rows written per scheduled invocation; the rest resume from the stored build cursor.                                                                                 |
 

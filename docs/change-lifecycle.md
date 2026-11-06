@@ -524,7 +524,10 @@ stale, and Approve / Commit buttons. The buttons act only when the API
 advertises `commands: true`; without it the screen is read-only and says so.
 After a commit the receipt panel distinguishes `受理` (accepted) from
 `反映済み` (published) and offers a re-check rather than claiming completion
-(addendum 11 §5).
+(addendum 11 §5). Above the plan, a read-only **AIへの委任** notice shows the
+AI delegations in force, if any
+([agent API](agent-api.md#the-operators-delegation-status-s8-2026-11-06));
+it does not change what the operator's buttons do.
 
 A plan that reviews something shown elsewhere adds a panel that reads the
 reviewed item back from the server. The panel compares the plan's pins with that

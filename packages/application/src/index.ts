@@ -15,6 +15,7 @@
 export { parseDelegations } from "./delegation/parse.ts";
 export { resolveDelegation } from "./delegation/resolve.ts";
 export { delegationCapabilities, delegationExecutionReadiness } from "./delegation/readiness.ts";
+export { delegationStatus } from "./delegation/status.ts";
 export * from "./delegation/contract.ts";
 
 // ── command services (A09) ───────────────────────────────────────────

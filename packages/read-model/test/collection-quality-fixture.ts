@@ -20,7 +20,7 @@ export interface ArtifactSpec {
 }
 
 export interface UnitSpec {
-  outcome: "success" | "partial" | "failed" | "human_required";
+  outcome: "success" | "partial" | "failed" | "human_required" | "unknown";
   code?: string;
 }
 
