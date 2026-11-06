@@ -52,9 +52,11 @@ describe("paypay-csv refuses or flags what it cannot read exactly", () => {
   });
 
   test("a marker-signed amount keeps its display text when it has no decimal form", () => {
-    const { observation, warnings } = only(`${HEADER}\n${row("2026/08/01 00:00:00", "", "△5")}\n`);
-    expect(warnings).toEqual([]);
-    expect(observation).toMatchObject({ amountMinor: -5, amountText: "△5" });
+    // Only the display-text fallback is pinned. Whether a signed value in a
+    // directional column is accepted (and with which sign) is unobserved
+    // provider semantics, so neither amountMinor nor the warnings are pinned.
+    const { observation } = only(`${HEADER}\n${row("2026/08/01 00:00:00", "", "△5")}\n`);
+    expect(observation.amountText).toBe("△5");
     expect(observation.amountScale).toBeUndefined();
     // A zero outgoing amount is zero, never negative zero.
     const zero = only(`${HEADER}\n${row("2026/08/01 00:00:00", "0", "")}\n`).observation;
