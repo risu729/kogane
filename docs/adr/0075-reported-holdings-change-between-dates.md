@@ -198,7 +198,7 @@ Synthetic data only; no production data, D1 or Workers.
 
 ## Amendment: Route, contract and page (2026-11-06)
 
-- Status: accepted (merged 2026-11-07 in #950)
+- Status: accepted (merged 2026-11-06 in #950)
 - Date: 2026-11-06
 - Issue: #550 and #551, the exposure of the comparison above
 - Replaces: decision 8's "no route, agent tool or page in this decision"

@@ -303,7 +303,7 @@ delegation status of plan slice S8 is not part of this amendment.
 
 ## Amendment: the `alarm` and `lane` writers, slice S7 (2026-11-06)
 
-- Status: accepted (merged 2026-11-07 in #925).
+- Status: accepted (merged 2026-11-06 in #925).
 
 The decision named the two Processor paths and what each records; slice S7
 implements them and settles the details it left open. Nothing here changes

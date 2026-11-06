@@ -376,7 +376,7 @@ enforce append-only/current-publication guards and bump the source revision.
 
 ## Amendment: bounded offer set for offer simulation
 
-- Status: accepted (merged 2026-11-07 in #937)
+- Status: accepted (merged 2026-11-06 in #937)
 - Date: 2026-11-06
 
 No ADR recorded the offer read of `GET /api/v2/rewards/offers/simulate`.

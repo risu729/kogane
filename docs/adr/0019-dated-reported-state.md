@@ -116,7 +116,7 @@ contract and browser tests, all on synthetic data.
 
 ## Agent read amendment — 2026-11-06 (proposed)
 
-- Status: accepted (merged 2026-11-07 in #953)
+- Status: accepted (merged 2026-11-06 in #953)
 - Date: 2026-11-06
 
 **Context.** The reported state on a date had a route and a page but no agent
