@@ -168,9 +168,13 @@ common bucketは種類未確認のまま一覧に残り、算定期限は `unava
   `reasonCodes: ["offer_set_too_large"]`, with no `paths` or `rejected` list, so an unread
   offer never reads as "no path" or as a shorter candidate list (INV05). The route does not
   page past the bound. An answer with `truncated: false` read every matching stored offer;
-  the depth, candidate and expansion caps still make it `bounded`. Open limit: the answer
-  carries `budget` but not the search's `expansions`, so it does not say whether
-  `maxExpansions` (500 offer examinations across all hops) stopped the search early
+  the depth, candidate and expansion caps still make it `bounded`. A goal search answer also
+  carries `expansions` (offer examinations used across every hop, against
+  `budget.maxExpansions` = 500) and `stoppedBy`, the closed list of caps that ended the
+  search early (`max_expansions`: an offer was left unexamined; `max_candidates`: a goal
+  path was dropped or a state left unexpanded because the 8-candidate list was full). An
+  empty `stoppedBy` means every offer was examined at every reachable state within the
+  depth, so an empty `paths` is the offers' answer; a non-empty one means it may be the cap
   ([ADR 0049 amendment 2026-11-06](adr/0049-reward-expiry-basis.md#amendment-bounded-offer-set-for-offer-simulation)).
 - Offer versions are append-only reference claims (`PRIMARY KEY(offer_id, version)`, a
   correction is a new version). No adoption pointer marks one version current, and the

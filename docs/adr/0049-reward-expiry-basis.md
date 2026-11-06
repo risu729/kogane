@@ -419,17 +419,17 @@ answer is `simulation: null`, `searchCoverage: "bounded"`, the
 release, with no `paths` and no `rejected` list. The check precedes the
 `no_stored_offer` answer and applies to both forms of the request: a goal
 search reads every stored offer, a named offer reads that offer's versions.
-No query, bound, page size, search budget, domain function or evaluation
-calendar changes; the reader already reported the truncation.
+No query, bound, page size, search budget or evaluation calendar changes;
+the reader already reported the truncation. The addenda below add the
+`version` parameter and the search's `stoppedBy`.
 
 ### Consequences
 
 An answer computed from offers always read every matching stored offer
 (`truncated: false`). Beyond 200 stored offers goal search is unavailable
 until the bound is revisited together with the READ capture's `OFFER_BOUND`
-and the search's expansion budget. The answer still does not report the
-search's `expansions`, so whether `maxExpansions` stopped a search early is
-not visible; that is an open limit, not covered by this amendment. No client
+and the search's expansion budget. Whether a budget cap stopped the search
+is reported by the second addendum below. No client
 in the repository reads this route (the web app, MCP tools and the shared
 response validators do not), so the additive field and the refusal change no
 consumer.
@@ -475,3 +475,34 @@ request silently simulated `v1`; now it is `offer_version_not_selected` with
 both refs, `version=v1` and `version=v2` receive 1,000 and 500 from 2,000, an
 unstored version is `no_stored_offer`, and `version` without `offer` is 400.
 `apps/web/test/api-schema.test.ts` pins the parameter list.
+
+### Addendum: the search reports the caps that stopped it
+
+Within the offer bound a search could still end early: `findConversionPaths`
+stops examining offers at `maxExpansions` (500 examinations, counted across
+every hop) and stops adding or expanding at `maxCandidates` (8). The answer
+carried `budget` only, so `paths: []` after an exhausted budget read the same
+as "no stored offer reaches the goal".
+
+Options: report only `expansions` (a caller compares it with the budget, but
+`expansions === maxExpansions` cannot tell a search that stopped from one that
+finished on its last allowed examination; rejected alone); a single boolean
+(loses which cap; rejected); the count plus a closed list of the caps that
+actually stopped it (chosen).
+
+Decision: `ConversionSearchResult` gains `stoppedBy: SearchStop[]`, closed
+codes `max_expansions` (an offer was left unexamined) and `max_candidates` (a
+goal path was dropped, or a state below the depth left unexpanded, because the
+list was full), in `SEARCH_STOPS` order. The goal-search answer of the route
+carries `expansions` and `stoppedBy` beside `budget`. The depth cap is the
+search's definition and is not a stop. The search order, budget values,
+`searchCoverage` (still `bounded`) and the paths found are unchanged, and no
+stored or projected value includes the result.
+
+Verification: `packages/domain/test/rewards.test.ts` runs one offer list three
+times. Examining all three offers finds the path with `stoppedBy: []`, and a
+two-examination budget gives `paths: []` with `expansions: 2` and
+`stoppedBy: ["max_expansions"]`. A one-candidate list with two goal offers
+reports `max_candidates`, at depth 1 and at depth 2. An unverified-only search
+reports `stoppedBy: []`. `services/app/test/rewards-api.test.ts` checks the
+route reports `expansions: 2` and `stoppedBy: []` for the fixture search.

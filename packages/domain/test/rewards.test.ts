@@ -1114,6 +1114,51 @@ describe("SC14 / AT49-AT54 — conversion simulation and bounded search", () => 
     expect(result.rejected).toEqual([
       { offerRef: "offer:a-to-b:standard@v1", reasonCode: "needs_rule_verification" },
     ]);
+    // Every offer was examined: this "no path" is the offers', not a cap's.
+    expect(result.expansions).toBe(1);
+    expect(result.stoppedBy).toEqual([]);
+  });
+
+  test("a cap that ends the search early is reported, so it never reads as 'no path'", () => {
+    // Two offers that lead nowhere come first; the only offer to the goal is third.
+    const offers = [
+      offer({ offerId: "offer:a-to-x", toUnitRef: "points:x" }),
+      offer({ offerId: "offer:a-to-y", toUnitRef: "points:y" }),
+      offer({ offerId: "offer:a-to-b" }),
+    ];
+    const start = { quantity: q("points:a", "2500"), clock: day("2026-09-09") };
+    const oneHop = { ...budget, maxDepth: 1 };
+    const complete = findConversionPaths(offers, start, "points:b", oneHop);
+    expect(complete.paths).toHaveLength(1);
+    expect(complete.expansions).toBe(3);
+    expect(complete.stoppedBy).toEqual([]);
+
+    const starved = findConversionPaths(offers, start, "points:b", {
+      ...oneHop,
+      maxExpansions: 2,
+    });
+    expect(starved.paths).toEqual([]);
+    expect(starved.expansions).toBe(2);
+    expect(starved.stoppedBy).toEqual(["max_expansions"]);
+
+    // Two offers reach the goal; a one-candidate list keeps the first and says
+    // that it dropped another.
+    const crowded = findConversionPaths(
+      [offer({ offerId: "offer:a-to-b:first" }), offer({ offerId: "offer:a-to-b:second" })],
+      start,
+      "points:b",
+      { ...oneHop, maxCandidates: 1 },
+    );
+    expect(crowded.paths.map((path) => path.hops[0]!.offerRef)).toEqual(["offer:a-to-b:first@v1"]);
+    expect(crowded.stoppedBy).toEqual(["max_candidates"]);
+    // A full list also stops the search from expanding a state below the depth.
+    const deep = findConversionPaths(
+      [offer({ offerId: "offer:a-to-b:first" }), offer({ offerId: "offer:a-to-b:second" })],
+      start,
+      "points:b",
+      { ...budget, maxDepth: 2, maxCandidates: 1 },
+    );
+    expect(deep.stoppedBy).toEqual(["max_candidates"]);
   });
 });
 

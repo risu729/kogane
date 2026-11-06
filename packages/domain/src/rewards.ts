@@ -1820,12 +1820,29 @@ export interface ConversionPath {
   reasonCodes: string[];
 }
 
+/**
+ * A budget cap that left part of the bounded search unexamined: an offer not
+ * examined (`max_expansions`) or a candidate or state dropped because the
+ * candidate list was full (`max_candidates`). The depth cap is the search's
+ * definition, not a stop, and is reported through `budget.maxDepth`.
+ */
+export const SEARCH_STOPS = ["max_expansions", "max_candidates"] as const;
+export type SearchStop = (typeof SEARCH_STOPS)[number];
+
 export interface ConversionSearchResult {
   paths: ConversionPath[];
   /** Always `bounded` while depth and candidate caps apply. */
   searchCoverage: "bounded" | "complete";
   rejected: { offerRef: string; reasonCode: string }[];
+  /** Offer examinations used, across every hop; at most `budget.maxExpansions`. */
   expansions: number;
+  /**
+   * The caps that stopped the search early, in `SEARCH_STOPS` order; empty
+   * when every offer was examined at every reachable state within the depth.
+   * A non-empty list means "no path" or a short list may be the cap, not the
+   * offers.
+   */
+  stoppedBy: SearchStop[];
   budget: SearchBudget;
   release: string;
 }
@@ -1858,7 +1875,8 @@ function dayText(day: number): string {
  * expected. Re-using one offer or two offers behind the same quota inside one
  * plan is rejected, as is returning to a unit already visited, so a positive
  * cycle cannot manufacture value. The result is always `bounded`; no path is
- * called optimal.
+ * called optimal. `expansions` and `stoppedBy` say whether a cap, rather than
+ * the offers, ended the search.
  */
 export function findConversionPaths(
   offers: readonly ConversionOffer[],
@@ -1877,15 +1895,23 @@ export function findConversionPaths(
       searchCoverage: "bounded",
       rejected: [{ offerRef: "-", reasonCode: "clock_not_a_date" }],
       expansions,
+      stoppedBy: [],
       budget,
       release: CONVERSION_SEARCH_RELEASE,
     };
 
+  const stops = new Set<SearchStop>();
   const visit = (state: SearchState, visitedUnits: string[]): void => {
     if (state.hops.length >= budget.maxDepth) return;
-    if (paths.length >= budget.maxCandidates) return;
+    if (paths.length >= budget.maxCandidates) {
+      stops.add("max_candidates");
+      return;
+    }
     for (const offer of offers) {
-      if (expansions >= budget.maxExpansions) return;
+      if (expansions >= budget.maxExpansions) {
+        stops.add("max_expansions");
+        return;
+      }
       expansions += 1;
       const offerRef = `${offer.offerId}@${offer.version}`;
       if (offer.fromUnitRef !== state.unitRef) continue;
@@ -1943,14 +1969,17 @@ export function findConversionPaths(
           : state.usedQuotaRefs,
         fees: [...state.fees, ...plan.fees],
       };
-      if (offer.toUnitRef === goalUnitRef && paths.length < budget.maxCandidates)
-        paths.push({
-          hops: next.hops,
-          received: next.quantity,
-          fees: next.fees,
-          optimality: "not-determined",
-          reasonCodes: next.hops.flatMap((h) => h.plan.reasonCodes),
-        });
+      if (offer.toUnitRef === goalUnitRef) {
+        if (paths.length < budget.maxCandidates)
+          paths.push({
+            hops: next.hops,
+            received: next.quantity,
+            fees: next.fees,
+            optimality: "not-determined",
+            reasonCodes: next.hops.flatMap((h) => h.plan.reasonCodes),
+          });
+        else stops.add("max_candidates");
+      }
       visit(next, [...visitedUnits, offer.toUnitRef]);
     }
   };
@@ -1972,6 +2001,7 @@ export function findConversionPaths(
     searchCoverage: "bounded",
     rejected,
     expansions,
+    stoppedBy: SEARCH_STOPS.filter((stop) => stops.has(stop)),
     budget,
     release: CONVERSION_SEARCH_RELEASE,
   };

@@ -251,6 +251,11 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
       searchCoverage: result.searchCoverage,
       offerCoverage,
       rejected: result.rejected,
+      // Offer examinations used against `budget.maxExpansions`, and the caps
+      // that ended the search early: with a non-empty `stoppedBy`, an empty or
+      // short `paths` may be the cap rather than the offers.
+      expansions: result.expansions,
+      stoppedBy: result.stoppedBy,
       budget: result.budget,
       basis: "policy-estimated",
       release: result.release,

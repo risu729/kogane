@@ -359,10 +359,17 @@ describe("reward reads", () => {
     ).json()) as {
       paths: { optimality: string; hops: { offerRef: string }[] }[];
       searchCoverage: string;
-      budget: { maxDepth: number };
+      budget: { maxDepth: number; maxExpansions: number };
+      expansions: number;
+      stoppedBy: string[];
       basis: string;
     };
     expect(body.searchCoverage).toBe("bounded");
+    // One stored offer, examined at the start and again from JPY: no cap ended
+    // the search, so the single path is all the stored offers give.
+    expect(body.expansions).toBe(2);
+    expect(body.budget.maxExpansions).toBe(500);
+    expect(body.stoppedBy).toEqual([]);
     expect(body.basis).toBe("policy-estimated");
     expect(body.budget.maxDepth).toBe(2);
     expect(body.paths).toHaveLength(1);
