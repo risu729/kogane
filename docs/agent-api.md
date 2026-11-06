@@ -465,10 +465,12 @@ Both are decided before the store is read. The candidate read's bounds apply
 unchanged: more than 500,000 current identity observations is
 `413 budget_exceeded` (`budget:identityObservations=500000`) and a store past
 the read's own bounds `413 budget_exceeded` (`budget:instrumentResolution`).
-An unknown key or a malformed `source` is `400 invalid_request`. Over MCP
-each refusal is the same body with `isError: true`. `tools/list` lists the
+An unknown key or a malformed `source` is `400 invalid_request`, checked
+against the closed input before the grant, so for every caller alike. Over
+MCP each refusal is the same body with `isError: true`. `tools/list` lists the
 tool only to a grant holding `summary.read` over the whole store; a grant it
-is not listed to that calls it anyway gets the refusal above.
+is not listed to that calls it anyway with a valid input gets the refusal
+above, never an answer or `unknown_tool`.
 
 Each call walks every current identity observation, as a page load does
 (ADR 0055 amendment, Cost); routine polling needs a written bound first. It

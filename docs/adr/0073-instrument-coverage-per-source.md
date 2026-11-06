@@ -209,7 +209,8 @@ already computes.
    (`capability:summary.read`); sources and accounts both `"*"`, else
    `403 evidence_restricted` (`scope:source`, `scope:account`); both decided
    before the store is read. Over MCP the refusal is the same body with
-   `isError: true`.
+   `isError: true`. This is the whole-store-only rule ADR 0063 (decision 10)
+   sets for every new read tool, which calls the route's own reader.
 3. **Listing.** `tools/list` lists it only to a grant that holds
    `summary.read` over the whole store (`readMcpTools`), as the history tool
    is listed only to `records.read` over the whole store. A grant it is not

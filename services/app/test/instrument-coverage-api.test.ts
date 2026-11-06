@@ -9,9 +9,11 @@
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { AGENT_CAPABILITIES, type Grant } from "../../../packages/application/src/grants.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
 import { identifyParse } from "../../processor/src/identity-store";
+import { readMcpTools } from "../src/read-tools";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
@@ -255,6 +257,35 @@ describe("GET /api/identity/instrument-coverage", () => {
 });
 
 describe("kogane.instruments.coverage", () => {
+  it("lists every read tool by its own rule under every capability set and scope shape", () => {
+    // Pins the rule of each read tool, the earlier ones included, over all
+    // capability sets and the four whole/listed scope shapes.
+    let shapes = 0;
+    for (let mask = 0; mask < 1 << AGENT_CAPABILITIES.length; mask++) {
+      const capabilities = AGENT_CAPABILITIES.filter((_, bit) => mask & (1 << bit));
+      for (const sources of ["*", ["sbi-securities"]] as const)
+        for (const accounts of ["*", ["sbi-securities:domestic"]] as const) {
+          const grant = { ...SUMMARY_GRANT, scopes: { sources, accounts }, capabilities } as Grant;
+          const whole = sources === "*" && accounts === "*";
+          const expected = [
+            ...(capabilities.includes("records.read") && whole
+              ? ["kogane.instruments.history"]
+              : []),
+            ...(capabilities.includes("summary.read") && whole ? [TOOL] : []),
+            ...(capabilities.includes("audit.read") && accounts === "*"
+              ? ["kogane.audit.search", "kogane.audit.get"]
+              : []),
+          ];
+          expect(
+            readMcpTools(grant).map((tool) => tool.name),
+            JSON.stringify(grant),
+          ).toEqual(expected);
+          shapes += 1;
+        }
+    }
+    expect(shapes).toBe(4 << AGENT_CAPABILITIES.length);
+  });
+
   it("is listed only to summary.read over the whole store", async () => {
     expect(await listed(SUMMARY_GRANT)).toContain(TOOL);
     expect(
