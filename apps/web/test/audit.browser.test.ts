@@ -161,6 +161,12 @@ describe.if(runnable)("the operator's audit log page", () => {
     try {
       await page.goto(`${origin}/audit`);
       await rows(page).first().waitFor();
+      // Read a second page first: its cursor belongs to the unfiltered read.
+      await page.getByRole("button", { name: "次のページ", exact: true }).click();
+      await page
+        .getByText(`2ページ目 · このページ${FILLER_READS + 10 - 50}件`, { exact: true })
+        .waitFor();
+      expect(reads.at(-1)!.has("cursor")).toBe(true);
       const result = page.getByLabel("結果", { exact: true });
       const options = await result.locator("option").allInnerTexts();
       expect(options).toEqual([
@@ -180,6 +186,7 @@ describe.if(runnable)("the operator's audit log page", () => {
       await page.getByLabel("終了日（UTC）").fill("2026-10-09");
       await page.getByRole("button", { name: "条件を適用" }).click();
       await page.waitForURL(`${origin}/audit?result=refused&from=2026-10-09&to=2026-10-09`);
+      // A new filter is a new read from the newest record: the earlier cursor is not sent.
       await page.getByText("1ページ目 · このページ1件", { exact: true }).waitFor();
       expect(Object.fromEntries(reads.at(-1)!)).toEqual({
         result: "refused",
@@ -199,6 +206,13 @@ describe.if(runnable)("the operator's audit log page", () => {
       await page.getByRole("button", { name: "条件をクリア" }).click();
       await page.waitForURL(`${origin}/audit`);
       await page.getByText("1ページ目 · このページ50件", { exact: true }).waitFor();
+      expect(reads.at(-1)!.has("cursor")).toBe(false);
+
+      // Browser history changes the filters too, and paging starts again with them.
+      await page.goBack();
+      await page.waitForURL(`${origin}/audit?result=refused&from=2026-10-09&to=2026-10-09`);
+      await page.getByText("1ページ目 · このページ1件", { exact: true }).waitFor();
+      expect(await page.getByLabel("結果", { exact: true }).inputValue()).toBe("refused");
 
       // An empty answer says so, and says nothing about a total.
       await page.goto(`${origin}/audit?operation=reconcile.propose`);

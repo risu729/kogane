@@ -32,6 +32,7 @@ import {
   AUDIT_SUBJECT,
   SCOPE_NAMESPACES,
 } from "../../../packages/application/src/audit/vocabulary.ts";
+import { auditDiffSchema } from "../../../packages/application/src/audit/diff.ts";
 import { OPERATION_STATUSES } from "../../../packages/application/src/operations/requests.ts";
 import { OPERATION_CATALOGUE } from "../../../packages/application/src/operation-path/catalogue.ts";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
@@ -96,6 +97,32 @@ describe("the shared contract restates the application's closed vocabulary", () 
       refused: AUDIT_DAILY_CAPS.refused,
     });
     expect(AUDIT_PAGE_LIMIT).toBe(AUDIT_PAGE_SIZE);
+  });
+
+  test("the strict diff shapes are the builder's kinds and keys", () => {
+    // The contract checks each kind's exact keys; a kind or key the builder
+    // gains must reach the contract before a page carrying it can render.
+    const builder = (
+      auditDiffSchema as unknown as {
+        _zod: { def: { options: { _zod: { def: { shape: Record<string, unknown> } } }[] } };
+      }
+    )._zod.def.options.map((option) => Object.keys(option._zod.def.shape).sort());
+    expect(builder).toEqual(
+      [
+        ["kind", "from", "to", "fields"],
+        ["kind", "decisionRevisions", "commitSeq", "counts"],
+        ["kind", "status"],
+        ["kind", "rows", "truncated"],
+        ["kind", "released"],
+        ["kind", "of", "count", "cap"],
+        ["kind"],
+      ].map((keys) => keys.sort()),
+    );
+    const examples = new Map(first.records.map((record: any) => [record.diff.kind, record.diff]));
+    for (const keys of builder)
+      expect(
+        [...examples.values()].some((diff: any) => Object.keys(diff).sort().join() === keys.join()),
+      ).toBe(true);
   });
 
   test("every pattern is the builder's, and every stored reference passes both", () => {

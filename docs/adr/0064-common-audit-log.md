@@ -8,7 +8,9 @@
   maintenance read and revision to the catalogue, the revision on `mcp` only
   as a recorded refusal; slice S8 adds the operator's `監査ログ` page
   ([amendment](#amendment-the-operators-page-slice-s8-2026-11-06)). The
-  `alarm` and `lane` writers, the agent read and delegated execution (ADR 0063) are not implemented.
+  `alarm` and `lane` writers are not implemented; the agent read
+  (`audit.read`) and the state of delegated execution (ADR 0063) are
+  described in the [audit log](../audit-log.md).
 - Date: 2026-10-09
 - Related: [ADR 0063](0063-delegated-ai-operation-path.md) (the delegated AI
   operation path, whose two-step confirmation and idempotency use this
