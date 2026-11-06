@@ -96,12 +96,13 @@ describe.if(runnable)("identity coverage page", () => {
   let browser: Browser;
   let server: ReturnType<typeof Bun.serve>;
   let origin: string;
-  let broken = false;
+  // Which inconsistency the coverage answer carries, if any.
+  let broken: "sum" | "excess" | null = null;
   const requests: { method: string; url: URL }[] = [];
   const bodies: Record<string, unknown> = {};
 
   beforeEach(() => {
-    broken = false;
+    broken = null;
     requests.length = 0;
   });
   beforeAll(async () => {
@@ -128,8 +129,16 @@ describe.if(runnable)("identity coverage page", () => {
           if (url.pathname === "/api/identity/coverage") {
             const source = url.searchParams.get("source");
             const rows = COVERAGE.filter((row) => source === null || row.source === source);
-            // organized no longer equals the sum of its status counts.
-            if (broken) return Response.json(page(rows.map((row) => ({ ...row, organized: 4 }))));
+            // One row breaks one rule; every other count stays consistent.
+            // "sum": organized no longer equals its status counts (5).
+            // "excess": the status counts add up, but exceed eligible (7).
+            const bad = (row: IdentityCoverageRow): IdentityCoverageRow =>
+              row.source !== "synthetic-bank"
+                ? row
+                : broken === "sum"
+                  ? { ...row, organized: 4 }
+                  : { ...row, organized: 8, unresolved: 5 };
+            if (broken) return Response.json(page(rows.map(bad)));
             return Response.json(page(rows));
           }
           const body = bodies[url.pathname];
@@ -222,13 +231,25 @@ describe.if(runnable)("identity coverage page", () => {
     await tab.close();
   }, 30_000);
 
-  test("counts that do not add up are refused instead of shown", async () => {
-    broken = true;
-    const tab = await open();
-    await tab.getByText("整理状況を読み込めませんでした", { exact: false }).waitFor();
-    expect(await tab.getByRole("region", { name: "口座の整理状況" }).count()).toBe(0);
-    await tab.close();
-  }, 30_000);
+  test.each(["sum", "excess"] as const)(
+    "%s: counts that do not add up are refused instead of shown",
+    async (kind) => {
+      broken = kind;
+      const tab = await open();
+      await tab
+        .getByText("整理状況を読み込めませんでした", { exact: false })
+        .waitFor({ timeout: 10_000 });
+      expect(await tab.getByRole("region", { name: "口座の整理状況" }).count()).toBe(0);
+      // Only the coverage answer is refused; the account list still shows.
+      await tab
+        .getByRole("region", { name: "整理済みの口座", exact: true })
+        .locator(".identity-card")
+        .first()
+        .waitFor();
+      await tab.close();
+    },
+    30_000,
+  );
 
   test("the page fits a phone width without sideways page scroll", async () => {
     const tab = await open(390);
