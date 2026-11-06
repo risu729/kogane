@@ -44,7 +44,9 @@ Two consequences, and both are rules rather than preferences:
 ## The schema
 
 `packages/storage-d1/migrations/read/0001_read_baseline.sql`,
-`0002_reward_read.sql` and `0003_reward_expiry_basis.sql`, generated into
+`0002_reward_read.sql`, `0003_reward_expiry_basis.sql`,
+`0004_reward_unclassified_buckets.sql` and
+`0005_reward_provider_expiry_sections.sql`, generated into
 [`infra/schema/read-ledger.md`](../infra/schema/read-ledger.md). Every table is
 `STRICT`; no foreign key names a CORE table; the mutable tables are mutable on
 purpose, because a rebuildable database gains nothing from append-only guards
@@ -61,16 +63,20 @@ that would make a rebuild harder.
 | `read_build_checkpoints`     | Where a bounded build got to, written in the same batch as the chunk it records.                                                                                              |
 
 Migration 0002 adds the reward second stage, table for table the same shape
-(U16):
+(U16); 0004 replaces its estimate table with `reward_expiry_estimates_v2`
+(the 0002 table stays, historical), and 0005 adds the provider-stated expiry
+sections:
 
-| Table                           | What it holds                                                                                                                                               |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `reward_expiry_snapshots`       | One reward build: the baseline's content key and attempt, plus the fixed `evaluated_at`, the evaluation calendar, the rule-set digest and the claim window. |
-| `reward_expiry_estimates_v2`    | One estimated deadline per bucket and rule version, with a date-only `expires_on`, the amount at risk in the programme's own unit, and a `row_digest`.      |
-| `reward_conversion_simulations` | One saved simulation, replayed when its request was retained and `not_reproducible` with a reason code when only its digest survived.                       |
-| `reward_snapshot_input_refs`    | The rules, offers, claim set, evaluation clock and calendar the build was made from, each with a digest (04 §3).                                            |
-| `reward_snapshot_pointer`       | What is published, and the watermark it was verified against.                                                                                               |
-| `reward_build_checkpoints`      | Where a bounded reward build got to, per stage.                                                                                                             |
+| Table                                 | What it holds                                                                                                                                                        |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reward_expiry_snapshots`             | One reward build: the baseline's content key and attempt, plus the fixed `evaluated_at`, the evaluation calendar, the rule-set digest and the claim window.          |
+| `reward_expiry_estimates_v2`          | One estimated deadline per bucket and rule version, with a date-only `expires_on`, the amount at risk in the programme's own unit, and a `row_digest`.               |
+| `reward_conversion_simulations`       | One saved simulation, replayed when its request was retained and `not_reproducible` with a reason code when only its digest survived.                                |
+| `reward_snapshot_input_refs`          | The rules, offers, claim set, evaluation clock and calendar the build was made from, each with a digest (04 §3).                                                     |
+| `reward_snapshot_pointer`             | What is published, and the watermark it was verified against.                                                                                                        |
+| `reward_build_checkpoints`            | Where a bounded reward build got to, per stage.                                                                                                                      |
+| `reward_provider_expiry_sections`     | (0005) The provider-stated expiry displays of one build, one non-additive row per section with a `row_digest`; the snapshot counts them in `provider_section_count`. |
+| `reward_provider_display_checkpoints` | (0005) Where a bounded build's provider-display stage got to.                                                                                                        |
 
 ## Identity, and the limit it fixes
 
@@ -112,8 +118,8 @@ instance; the id alone cannot say which physical database answered.
 
 The identity rule is the baseline's with one addition that is the whole point:
 **the evaluation instant is part of the content.** A reward capture reads the
-rules, the current claims, the membership, the offers and the saved simulations
-_and_ fixes the instant the deadlines are computed against, all inside the
+rules, the current claims, the provider-stated expiry sections, the
+membership and the offers _and_ fixes the instant the deadlines are computed against, all inside the
 content that is hashed. Consequences:
 
 - the instant is the start of the captured UTC day (`YYYY-MM-DDT00:00:00.000Z`,
@@ -129,7 +135,10 @@ content that is hashed. Consequences:
   under one epoch, and — at the same revision — never to an older evaluation
   instant.
 
-A saved simulation is replayed only when the stored row retained its request;
+A fresh capture carries no saved simulations: no runtime path persists one,
+and `captureRewardInput` (`services/processor/src/reward-read-projection.ts`)
+captures an empty set. An archived input that does carry one replays it only
+when the stored row retained its request;
 a row that kept nothing but a digest is written as `not_reproducible` with
 `simulation_input_not_retained`, and one naming an offer version the input does
 not carry as `offer_not_in_fixed_input`. Nothing recomputes a digest-only
@@ -220,7 +229,9 @@ exclusively; there is no storage-target switch.
 
 One D1 database named **`kogane-read`**, id
 `320ebe31-a031-48a1-985f-0e6fabbd517a` (account `risu`, region APAC). It was
-created on 2026-09-11 and has READ migrations through 0002 applied by CD. It is bound as `READ` in:
+created on 2026-09-11; CD applies the READ migrations through the
+configuration that `infra/deploy-order.json` names as `schema.read`. It is
+bound as `READ` in:
 
 - `services/processor/wrangler.jsonc`;
 - `services/processor/wrangler.read-migrations.jsonc` (also

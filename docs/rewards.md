@@ -364,7 +364,9 @@ digestなので、**評価日時が変われば別のsnapshotになる**。既�
 COREの `projection_input_records` が参照する。表・prefix・記録の仕組みを増やしていない。
 
 captureが読む各集合には上限があり、超えたら**切り詰めず拒否**する（`rule_set_too_large`、
-`claim_set_too_large`、`offer_set_too_large`、`simulation_set_too_large`）。
+`claim_set_too_large`、`offer_set_too_large`）。Fresh captures read no saved
+simulations (`captureRewardInput` in `services/processor/src/reward-read-projection.ts`
+captures an empty set), so there is no simulation bound.
 
 CORE migration `0041_reward_revision_triggers.sql` が元の5表を0038の依存台帳へ追加し、
 `0077_reward_bucket_claims_v2.sql` が現在のclaim表とrevision triggerを追加する。これが

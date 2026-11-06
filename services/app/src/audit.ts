@@ -195,6 +195,10 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // One row per source the coverage answer counts; never the counts themselves.
   if (operation === "instruments.coverage")
     return { rows: Array.isArray(value["rows"]) ? value["rows"].length : 0, truncated: false };
+  if (operation === "economic-readiness.read") {
+    const manifest = value["manifest"] as { rows?: unknown } | undefined;
+    return { rows: Array.isArray(manifest?.rows) ? manifest.rows.length : 0, truncated: false };
+  }
   if (operation === "audit.search")
     return {
       rows: Array.isArray(value["records"]) ? value["records"].length : 0,
@@ -229,7 +233,7 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
         (Array.isArray(value["payables"]) ? value["payables"].length : 0),
       truncated: false,
     };
-  if (operation === "instruments.candidates") {
+  if (operation === "instruments.candidates" || operation === "accounts.candidates") {
     const items = Array.isArray(value["items"]) ? value["items"].length : 0;
     return {
       rows: items,

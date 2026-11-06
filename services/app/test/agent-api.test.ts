@@ -633,6 +633,20 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
+        name: "kogane.accounts.candidates",
+        required: [],
+        closed: false,
+        properties: ["offset", "sourceAccountId", "view"],
+        annotations: readOnly,
+      },
+      {
+        name: "kogane.economic-readiness.read",
+        required: ["schema", "family", "rows", "knowledge"],
+        closed: false,
+        properties: ["family", "knowledge", "rows", "schema"],
+        annotations: readOnly,
+      },
+      {
         name: "kogane.purchases.explain",
         required: [],
         closed: false,
@@ -683,6 +697,8 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.instruments.history",
       REPORTED_STATE_TOOL_NAME,
       "kogane.instruments.coverage",
+      "kogane.accounts.candidates",
+      "kogane.economic-readiness.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -763,6 +779,8 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.instruments.history",
       REPORTED_STATE_TOOL_NAME,
       "kogane.instruments.coverage",
+      "kogane.accounts.candidates",
+      "kogane.economic-readiness.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);

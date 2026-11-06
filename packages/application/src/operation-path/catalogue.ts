@@ -241,6 +241,21 @@ export const OPERATION_CATALOGUE = {
     capability: "summary.read",
     paths: AGENT,
   },
+  // Account correspondence candidates (ADR 0077): read-only, the page's service.
+  "accounts.candidates": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  "economic-readiness.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "audit.search": {
     risk: ["R0"],
     effect: null,
