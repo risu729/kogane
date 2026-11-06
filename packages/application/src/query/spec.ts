@@ -10,7 +10,7 @@
 import { isRecord } from "../../../domain/src/guards.ts";
 import type { FinancialErrorCode, QuerySpec } from "../../../domain/src/result.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
-import type { TemporalValue } from "../../../domain/src/time.ts";
+import { validLocalDateText, type TemporalValue } from "../../../domain/src/time.ts";
 import { MEASURE_VIEWS } from "../../../../packages/observation-shared/src/api-schema.ts";
 import { DEFAULT_QUERY_LIMIT, GRANT_LIMITS } from "../grants.ts";
 
@@ -73,7 +73,6 @@ export interface SpecRejection {
 export type SpecOutcome<T> = { ok: true; value: T } | SpecRejection;
 
 const REQUEST_KEYS = ["intent", "filters", "cursor", "limit"] as const;
-const DATE = /^\d{4}-\d{2}-\d{2}$/u;
 const CONTROL = /[\u0000-\u001f\u007f]/u;
 
 function reject(code: FinancialErrorCode, refs: string[]): SpecRejection {
@@ -113,12 +112,16 @@ export function parseQueryRequest(value: unknown): SpecOutcome<QueryRequest> {
     const item: unknown = rawFilters[key];
     if (typeof item !== "string" || item === "" || item.length > 512 || CONTROL.test(item))
       return reject("invalid_query", [`filter:${key}`]);
-    if ((key === "from" || key === "to") && !DATE.test(item))
+    // A calendar day, as the v1 activity route reads one: `2026-02-30` is not.
+    if ((key === "from" || key === "to") && !validLocalDateText(item))
       return reject("invalid_query", [`filter:${key}`]);
     if (key === "view" && !(MEASURE_VIEWS as readonly string[]).includes(item))
       return reject("invalid_query", ["filter:view"]);
     filters[key] = item;
   }
+  // A range that ends before it starts is a malformed range, not an empty one.
+  if (filters.from !== undefined && filters.to !== undefined && filters.from > filters.to)
+    return reject("invalid_query", ["filter:from", "filter:to"]);
   const cursor: unknown = value.cursor ?? null;
   if (cursor !== null && (typeof cursor !== "string" || cursor.length > 2048))
     return reject("invalid_query", ["cursor"]);

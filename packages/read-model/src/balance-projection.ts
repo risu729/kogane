@@ -38,7 +38,14 @@ import { AUTHORITY_POLICY_RELEASE } from "./authority";
 import type { MeasureView } from "./scope";
 
 export const BALANCE_PROJECTION_RELEASE = "balance-projection-v1";
-export const SCOPE_RELATION_RELEASE = "scope-relations-v1";
+/**
+ * v2: the declared relations are the newest decision of each relation triple
+ * (`projectionRelationsSql`), so a later rejection withdraws an earlier
+ * acceptance; v1 read every stored row. The release is part of the build
+ * digest, so the first tick after a deploy captures afresh instead of serving
+ * a v1 snapshot as current (ADR 0001's amendment of 2026-11-06).
+ */
+export const SCOPE_RELATION_RELEASE = "scope-relations-v2";
 /** The disjointness the policy asserts, and the evidence it rests on. */
 export const DISJOINT_ACCOUNTS_POLICY = "distinct-identified-accounts-v1";
 
@@ -278,6 +285,8 @@ const CONTAINMENT_KINDS = new Set([
  * kind that makes two scopes one measurement; a containment kind makes the
  * contained scope a subset. A relation that is only proposed contributes
  * nothing, so an unconfirmed correspondence stays an unknown overlap (SC06).
+ * `rows` must hold one row per relation triple, its current row
+ * (`projectionRelationsSql`); this function does not order a triple's history.
  */
 export function scopeRelationsFromEntityRelations(
   rows: readonly EntityRelationRow[],

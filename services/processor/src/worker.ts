@@ -24,6 +24,7 @@ import { changeCommandRoute } from "./change-commands.ts";
 import { boundedText } from "./bounded-body.ts";
 import { auditOverflowStage } from "./audit-overflow.ts";
 import { scheduleRoute } from "./schedule-store";
+import { collectionQualityAlarmRoute } from "./collection-quality-alarms";
 import { maintenanceSurveyLane } from "./maintenance-survey/lane.ts";
 import { maintenanceSurveyEnabled } from "./maintenance-survey/config.ts";
 import { internalHealthRoute } from "./internal-health.ts";
@@ -34,6 +35,7 @@ import { cardDebitAccountSweep } from "./card-debit-account-job.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import { cardPurchaseSweep, purchaseRecognitionEnabled } from "./card-purchase-job.ts";
 import { laneTickSummary, recordTick, type LaneTickResult } from "./lane-ticks.ts";
+import { markLaneAudit, recordLaneAudit } from "./lane-audit.ts";
 import {
   publicationConsistency,
   publishBatch,
@@ -1917,6 +1919,8 @@ export async function runScheduled(
     // past a day's cap, aggregated once that day has ended.
     ["audit_overflow", stages.auditOverflow, true],
   ];
+  // One correlation id for the lane audit records of this invocation.
+  const correlationId = crypto.randomUUID();
   for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
     const startedAtMs = Date.now();
@@ -1926,6 +1930,10 @@ export async function runScheduled(
       await recordTick(env.DB, event, startedAtMs, { outcome: "skipped-by-flag" }, log);
       continue;
     }
+    // The lanes that write decisions, proposals or settings get one audit
+    // record per tick that wrote any (ADR 0064, src/lane-audit.ts). The mark
+    // and the record are read and written outside the lane's metered scope.
+    const mark = await markLaneAudit(env.DB, event, log);
     let tick: LaneTickResult;
     try {
       const result = await stage(observation.env, context);
@@ -1948,6 +1956,7 @@ export async function runScheduled(
       tick = { outcome: "failed", code };
     }
     await recordTick(env.DB, event, startedAtMs, tick, log);
+    await recordLaneAudit(env.DB, event, mark, tick, correlationId, log);
   }
 }
 
@@ -2053,6 +2062,8 @@ export default {
       (await delegatedScheduleRoute(request, env, url));
     if (delegatedScheduling) return delegatedScheduling;
     const scheduling = await scheduleRoute(request, env, url);
+    const qualityAlarms = await collectionQualityAlarmRoute(request, env, url);
+    if (qualityAlarms) return qualityAlarms;
     if (scheduling) return scheduling;
     const health = await internalHealthRoute(request, env, path);
     if (health) return health;

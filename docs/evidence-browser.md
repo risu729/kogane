@@ -851,5 +851,22 @@ tables. Every answer is checked by `validApiResponse` against
 
 A missing stage is a reason, never a zero or an empty success: a source with
 no capture has no cells and `latestFetchRun: null` with `no_registered_run`. A
-capture time is shown as stored; nothing computes an age. There is no page for
-these routes yet.
+capture time is shown as stored; nothing judges an age against a threshold.
+
+Open `/collection-quality` and choose a source. It shows source reasons and
+last attempts alongside the source/unit/dataset/period cells. Actual Alarm
+reservation reads distinguish `observed` (a nullable time) from `unavailable`;
+stored enabled settings alone are not an armed reservation. Next nominal and
+maintenance-adjusted due times are shown separately from the actual reservation
+and the last attempt's actual start. Reservation reads never reconcile settings.
+A unit with no original file still appears with `unit_without_artifacts`; the
+absence of a stored unit/period is not inferred as complete acquisition.
+
+Published observation counts distinguish no rows from a missing acquisition.
+No rows never prove zero transactions. Missing sealed identity runs and
+unresolved current account mappings have separate reasons. Provider retention
+caps stay `retention_not_assessed`; page/coverage failures keep their stored
+closed causes. Older-current and not-in-latest states identify newer acquisition
+gaps without an invented stale threshold. Continuation and empty page messages
+never claim full history. Production scope verification remains separate
+([checklist](plans/2026-10-collection-quality-completion.md)).
