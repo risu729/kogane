@@ -42,6 +42,11 @@ export function IdentitiesPage(): ReactNode {
             同じ銘柄の可能性がある識別子の候補を確認する
           </Link>
         </p>
+        <p className="footnote">
+          <Link to="/identities/account-candidates">
+            集約サービスの連携と取得元の口座の対応候補を確認する
+          </Link>
+        </p>
       </div>
       <QueryBoundary query={connections} label="取得経路の対応">
         {(data) => <AccountConnectionInventory connections={data.connections} />}

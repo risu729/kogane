@@ -21,6 +21,10 @@ import { isDecimalMinorUnit } from "../../parsers/src/money.ts";
 import { validFinancialResult } from "../../domain/src/result.ts";
 import { validIdentityResponse } from "./identity-contract.ts";
 import {
+  ACCOUNT_CANDIDATES_PATH,
+  validAccountCandidateReview,
+} from "./account-candidates-contract.ts";
+import {
   INSTRUMENT_CANDIDATES_PATH,
   validInstrumentCandidateReview,
 } from "./instrument-candidates-contract.ts";
@@ -775,6 +779,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path.startsWith("/api/collection-quality"))
     return validCollectionQualityResponse(path, value);
   if (path === INSTRUMENT_CANDIDATES_PATH) return validInstrumentCandidateReview(value);
+  if (path === ACCOUNT_CANDIDATES_PATH) return validAccountCandidateReview(value);
   if (path === INSTRUMENT_HISTORY_PATH) return validInstrumentHistoryRead(value);
   if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);
   if (path === "/api/v2/query") return validSharedQueryResponse(value);

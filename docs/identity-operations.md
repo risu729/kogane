@@ -109,6 +109,21 @@ The read is refused with `budget:identityObservations=500000` once the
 store holds more current identity observations than that; raising the bound
 needs a remote D1 measurement first (ADR 0055 amendment, Cost).
 
+### Account candidates
+
+`/identities/account-candidates` lists which direct source accounts a
+reviewed MoneyForward connection may contain ([identity](identity.md#aggregator-to-direct-account-candidates),
+ADR 0077). Accepting is `relation.accept` of `connection_contains` from the
+connection to the direct source account; keeping apart, or withdrawing an
+acceptance, is `relation.reject` of the same triple. Both are planned with
+the reason you write, after the page reads the candidate again, and approved
+and committed on `/confirm/:planId`; a decision made in between makes the
+plan stale. A held candidate (evidence no longer eligible, or the direct
+account pinned by two connections) offers keeping apart only. Nothing is
+proposed as the same account. New confirmed reviews come from
+`review-account-connections.ts` ([account connections](account-connections.md));
+an agent reads the same list through `kogane.accounts.candidates`.
+
 ## Verification and rollback
 
 - `/api/identity/coverage` compares all eligible current B observations against
@@ -117,6 +132,8 @@ needs a remote D1 measurement first (ADR 0055 amendment, Cost).
   revisions, expose their evidence links, and paginate at 100 rows.
 - `/api/identity/instrument-candidates` reads the ADR 0055 candidate set and
   pages it at 50 items per view; it writes nothing.
+- `/api/identity/account-candidates` reads the ADR 0077 account candidate set
+  and pages it at 50 items per view; it writes nothing.
 - Preserve the original pinned decision IDs to audit what was recorded at the
   time, even after a manual correction.
 - Old B parses/failed acquisitions remain in their own history and never

@@ -201,6 +201,61 @@ still pairs, and nothing names that as a gap. The status read ignores a
 a period reads as permanent. A rejection from `instrument:<id>` keeps the
 identifier apart from every identifier currently mapped to that instrument.
 
+## Aggregator-to-direct account candidates
+
+A MoneyForward account identity names one provider connection registered at
+MoneyForward, which can list several products; its observations are
+connection-scoped and no parser records a branch, an account number or a leaf
+reference for them. The only stored evidence tying such a connection to a
+direct collector's accounts is a current confirmed connection review
+([account connections](account-connections.md)), possible today for SBI
+Shinsei only. `reviewAccountCandidates`
+(`packages/application/src/query/account-candidates.ts`,
+[ADR 0077](adr/0077-account-connection-candidates.md), policy
+`account-candidates-v1`) reads those reviews and answers:
+
+- **candidates**: one per (current confirmed review, direct source account it
+  pinned), proposing `connection_contains` from `connection:<producer>/<key>`
+  to `source_account:<id>`, with evidence `connection-review-confirmed` and
+  the review's artifact refs. Status comes from the newest stored relation of
+  that triple (`accepted`, `rejected`, else `proposed`). Acceptance is
+  withheld by a `hold`: `evidence-ineligible`, or
+  `direct-account-in-several-connections` when current eligible reviews of two
+  identity values pin the same direct account (none is chosen). Each names
+  the `relation.accept` and `relation.reject` payloads that would decide it,
+  to be planned with a reason through the [change lifecycle](change-lifecycle.md);
+  rejecting an accepted pair withdraws it as a later row;
+- **never `same_account`**: every candidate says why
+  (`aggregator-account-connection-scoped`, and `several-direct-accounts` when
+  one connection pins several direct accounts) and reports a `same_account`
+  relation already stored between its two sides, in either orientation;
+- **connections**: every current review with its state (`confirmed`,
+  `unresolved`, `evidence-ineligible`) and its aggregator source accounts of
+  any producer; **unreviewed**: aggregator source accounts no current review
+  names (`no-connection-review`, `reference-unrecognized`).
+
+A label, an institution name or an amount is never read. Nothing here adopts:
+an accepted `connection_contains` is a subset claim of a `connection:` scope
+no measurement has, so it moves no balance, and no transaction or display is
+merged or suppressed.
+
+It is served to whoever its grant allows, `records.read` over the whole
+store: `GET /api/identity/account-candidates?view=&offset=&sourceAccountId=`
+(`services/app/src/account-candidates-api.ts`, reader grant behind Access),
+`kogane.accounts.candidates` ([agent API](agent-api.md#account-candidates))
+and the page `/identities/account-candidates` (`口座の対応候補`), whose
+buttons plan the named payload with the reason a person writes after reading
+the candidate again; approval and commit happen on the confirmation screen.
+Views `open`, `held`, `decided`, `connections`, `unreviewed`; 50 items a page.
+Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 newest
+relation rows, refused whole past each. Every read is keyed (ADR 0077, Cost).
+
+Limits today: only SBI Shinsei pairs exist; a relation that migration 0029
+backfilled under an importer-era key the identity-value rewrite later
+replaced does not decide the pair under its current key; reviews are
+producer-scoped; no history view of a pair; no validity period; no
+leaf-account equivalence and no dedup of aggregator against direct rows.
+
 ## Acceptance gates
 
 - All merged source patterns exercised with synthetic tests; all seven SBI

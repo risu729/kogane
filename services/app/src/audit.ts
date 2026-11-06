@@ -217,7 +217,7 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // One account's reconstructed state, when there is one to show.
   if (operation === "reconstructed-state.read")
     return { rows: value["reconstruction"] ? 1 : 0, truncated: false };
-  if (operation === "instruments.candidates") {
+  if (operation === "instruments.candidates" || operation === "accounts.candidates") {
     const items = Array.isArray(value["items"]) ? value["items"].length : 0;
     return {
       rows: items,

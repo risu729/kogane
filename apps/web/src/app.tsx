@@ -22,6 +22,7 @@ import { ParsingHealthNotice } from "./parsing-health.tsx";
 import { GlobalPassEmptyMonthsNotice } from "./global-pass-empty-months.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
 import { InstrumentCandidatesPage } from "./pages/InstrumentCandidates.tsx";
+import { AccountCandidatesPage } from "./pages/AccountCandidates.tsx";
 import { RewardsPage } from "./pages/Rewards.tsx";
 import { ConfirmPage } from "./pages/Confirm.tsx";
 import { CardOwnershipPage } from "./pages/CardOwnership.tsx";
@@ -107,6 +108,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <IdentitiesPage />;
     case "instrumentCandidates":
       return <InstrumentCandidatesPage />;
+    case "accountCandidates":
+      return <AccountCandidatesPage />;
     case "rewards":
       return <RewardsPage />;
     case "cardOwnership":

@@ -29,6 +29,7 @@ import { reportedStateApi, REPORTED_STATE_PATH } from "./reported-state-api";
 import { reconstructedStateApi, RECONSTRUCTED_STATE_PATH } from "./reconstructed-state-api";
 import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
+import { accountCandidatesApi } from "./account-candidates-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
 import { instrumentHistoryApi } from "./instrument-history-api";
 import { reportsApi } from "./reports-api";
@@ -128,6 +129,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     instrumentCandidatesApi(request, env, url, subject),
   );
   if (candidatesResponse) return candidatesResponse;
+  const accountCandidatesResponse = await catalogue(() =>
+    accountCandidatesApi(request, env, url, subject),
+  );
+  if (accountCandidatesResponse) return accountCandidatesResponse;
   const historyResponse = await catalogue(() => instrumentHistoryApi(request, env, url, subject));
   if (historyResponse) return historyResponse;
   const identityResponse = await catalogue(() => identityApi(request, env, url));

@@ -66,13 +66,13 @@ here parses the token a second time and nothing reads an actor from a request
 body or header, which is the same rule the change lifecycle follows. A valid
 token with no grant is still refused.
 
-| Capability               | Allows                                                                                                                            | Notes                                                   |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                | The first capability an agent should get                |
-| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                       | A separate grant; raw bytes are still a different route |
-| `interpretation.propose` | `reconcile.propose`                                                                                                               | Proposals only; never adoption                          |
-| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                         | Not a financial read; implied by no other capability    |
+| Capability               | Allows                                                                                                                                                   | Notes                                                   |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                                       | The first capability an agent should get                |
+| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates`, `accounts.candidates` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                                              | A separate grant; raw bytes are still a different route |
+| `interpretation.propose` | `reconcile.propose`                                                                                                                                      | Proposals only; never adoption                          |
+| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                                                | Not a financial read; implied by no other capability    |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
 exist in this vocabulary: `interpretation.accept`, `calculation.run`,
@@ -194,6 +194,7 @@ nobody ([below](#maintenance-windows)).
 | `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                                                 |
 | `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                                       |
 | `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                 |
+| `kogane.accounts.candidates`          | `POST /api/agent/v1/accounts.candidates`        | `kogane.accounts.candidates`          | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                                                       |
 | `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                                  |
 | `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                                       |
 | `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                              |
@@ -429,6 +430,37 @@ plan from the page is; under today's lists an agent can plan and cannot
 approve or commit. The server pins only the subject's mapping revision of an
 adoption plan, not the anchor's: read the candidate again right before
 planning, as the page does.
+
+### Account candidates
+
+`kogane.accounts.candidates` reads one page of the aggregator-to-direct
+account candidate review ([identity](identity.md#aggregator-to-direct-account-candidates),
+[ADR 0077](adr/0077-account-connection-candidates.md)). It is the browser
+route's own service (`reviewAccountCandidates`), so an agent and the
+`口座の対応候補` page read one answer. It is listed on `/mcp` only to a grant
+holding `records.read` over the whole store.
+
+Input, a closed object (every key optional): `view` (`open`, `held`,
+`decided`, `connections`, `unreviewed`; default `open`), `offset` (0 to
+6,400) and `sourceAccountId` (only the items naming that source account).
+Output: `kogane-account-candidates-v1` with the manifest (policy, bounds,
+every closed code), the summary, `decisions: "change-lifecycle"`, `total`, at
+most 50 `items`, `nextOffset` and the named source accounts with their
+current mappings.
+
+Authorization: `records.read`, else `403 unauthorized`; sources and accounts
+both `"*"`, else `403 evidence_restricted`; `offset + 50` within `maxRows`,
+else `413 budget_exceeded`; all decided before the store is read. A store past
+a bound is `413 budget_exceeded` (`budget:accountCandidates.<bound>`); a
+`sourceAccountId` the read does not name is `403 evidence_restricted`; an
+unknown key or malformed value is `400 invalid_request`.
+
+It reads and never writes, and never proposes `same_account`. A candidate's
+`commands` are the `relation.accept` and `relation.reject` payloads of
+`connection_contains` that would decide it; deciding is a plan of that
+payload, with a reason, through the change lifecycle, where an agent can plan
+and cannot approve or commit. No candidate provenance is checked on the
+server: read the candidate again right before planning, as the page does.
 
 ### Reconstructed state
 

@@ -1,4 +1,5 @@
-// Additional read adapters over the existing history and common audit readers.
+// Additional read adapters over the existing history, account correspondence
+// candidates (ADR 0077) and common audit readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -11,6 +12,12 @@ import {
   readAuditForGrant,
   readAuditRecordForGrant,
 } from "../../../packages/application/src/audit/read.ts";
+import {
+  ACCOUNT_CANDIDATE_VIEWS,
+  ACCOUNT_CANDIDATES_MAX_OFFSET,
+  ACCOUNT_SOURCE_ACCOUNT_ID,
+  reviewAccountCandidates,
+} from "../../../packages/application/src/query/account-candidates.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
 import { INSTRUMENT_IDENTIFIER_ID } from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
@@ -21,6 +28,12 @@ import { parseRequest } from "./ops-api";
 const schemas = {
   "kogane.instruments.history": z.strictObject({
     identifierId: z.string().regex(INSTRUMENT_IDENTIFIER_ID),
+  }),
+  // The route's parameters, with the service's own limits.
+  "kogane.accounts.candidates": z.strictObject({
+    view: z.enum(ACCOUNT_CANDIDATE_VIEWS).optional(),
+    offset: z.number().int().min(0).max(ACCOUNT_CANDIDATES_MAX_OFFSET).optional(),
+    sourceAccountId: z.string().regex(ACCOUNT_SOURCE_ACCOUNT_ID).optional(),
   }),
   "kogane.audit.search": z.strictObject({
     filters: z.record(z.string(), z.string()).optional(),
@@ -45,14 +58,16 @@ export const READ_MCP_TOOLS = Object.entries(schemas).map(([name, schema]) => {
     description:
       name === "kogane.instruments.history"
         ? "Read the same append-only instrument history as the owner UI, under records.read and a whole-store read grant."
-        : "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
+        : name === "kogane.accounts.candidates"
+          ? "One page of the ADR 0077 account correspondence candidates: which direct provider source accounts a reviewed aggregator connection contains, on which evidence, with closed status, hold and same-account reasons, under records.read and a whole-store read grant. Read-only; never proposes same_account. A candidate names the relation.accept or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there."
+          : "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
     inputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
   };
 });
 export function readMcpTools(grant: Grant) {
   return READ_MCP_TOOLS.filter((tool) =>
-    tool.name === "kogane.instruments.history"
+    tool.name === "kogane.instruments.history" || tool.name === "kogane.accounts.candidates"
       ? grantAllows(grant, "records.read") &&
         grant.scopes.sources === "*" &&
         grant.scopes.accounts === "*"
@@ -76,6 +91,23 @@ export async function callReadTool(
         });
         return outcome.ok
           ? { status: 200, body: outcome.history }
+          : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
+      case "kogane.accounts.candidates": {
+        // The page's own service and request: capability, perimeter, bounds
+        // and refusals are decided there, once for both transports.
+        const input = parseRequest(schemas[name], body ?? {});
+        const outcome = await reviewAccountCandidates({
+          grant,
+          sql: d1Executor(env.DB),
+          request: {
+            view: input.view ?? "open",
+            offset: input.offset ?? 0,
+            sourceAccountId: input.sourceAccountId ?? null,
+          },
+        });
+        return outcome.ok
+          ? { status: 200, body: outcome.review }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       }
       case "kogane.audit.search": {
