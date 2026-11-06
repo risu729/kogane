@@ -96,6 +96,8 @@ function SnapshotLine({ snapshot }: { snapshot: ReportedSnapshot }): ReactNode {
 
 function AccountCard({ account, index }: { account: ReportedAccount; index: number }): ReactNode {
   const id = `reported-account-${index}`;
+  // Every account has these tables; the account names each one apart.
+  const accountName = `${account.sourceId} · ${account.sourceAccount}`;
   return (
     <Panel
       id={id}
@@ -119,7 +121,12 @@ function AccountCard({ account, index }: { account: ReportedAccount; index: numb
         )}
       </div>
       {account.positions.length === 0 ? null : (
-        <div className="table-scroll" role="region" aria-label="保有銘柄" tabIndex={0}>
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label={`${accountName}の保有銘柄`}
+          tabIndex={0}
+        >
           <table className="reported-state-table">
             <caption>取得元の評価額は取得元の通貨のまま表示し、換算・合算しません。</caption>
             <thead>
@@ -167,7 +174,12 @@ function AccountCard({ account, index }: { account: ReportedAccount; index: numb
         </div>
       )}
       {account.balances.length === 0 ? null : (
-        <div className="table-scroll" role="region" aria-label="残高" tabIndex={0}>
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label={`${accountName}の残高`}
+          tabIndex={0}
+        >
           <table className="reported-state-table">
             <caption>取得元が報告した残高です。口座をまたいで合算していません。</caption>
             <thead>

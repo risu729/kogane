@@ -12,6 +12,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import {
   capturedPurchase,
@@ -443,4 +444,14 @@ describe.if(runnable)("change confirmation screen", () => {
     expect(purchaseReads).toHaveLength(0);
     await unserved.close();
   }, 30_000);
+
+  test("the confirmation passes the accessibility audit", async () => {
+    commands = true;
+    stale = false;
+    published = false;
+    posted.length = 0;
+    const page = await open();
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 });

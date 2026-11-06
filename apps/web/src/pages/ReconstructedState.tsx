@@ -326,6 +326,7 @@ function DispositionTable({ rows }: { rows: LegDispositionRecord[] }): ReactNode
   return (
     <div className="table-scroll" role="region" aria-label="イベントの扱いの一覧" tabIndex={0}>
       <table className="reconstructed-state-table">
+        <caption className="visually-hidden">イベントの扱いの一覧</caption>
         <thead>
           <tr>
             <th scope="col">イベント</th>
