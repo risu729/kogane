@@ -171,6 +171,36 @@ test("a claimed collection occurrence is one accepted record in its claim's batc
   expect(JSON.stringify(record)).not.toContain("run-synthetic");
 });
 
+test("an occurrence an earlier attempt already claimed is not claimed again and gets no record", async () => {
+  const nominal = await due("mizuho-bank");
+  const occurrenceId = `scheduled:mizuho-bank:${Date.parse(nominal)}`;
+  // An earlier attempt's claim row of the same occurrence, at another instant.
+  await env.DB.prepare(
+    "INSERT INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,status) VALUES(?,'mizuho-bank',?,?,'started')",
+  )
+    .bind(occurrenceId, nominal, new Date(Date.parse(nominal) + 1000).toISOString())
+    .run();
+  const before = (await alarmRecords()).length;
+  let calls = 0;
+  await new AlarmClass(state("mizuho-bank"), {
+    ...env,
+    SCHEDULE_MIZUHO: {
+      async runScheduled() {
+        calls++;
+        return { status: "completed", runIds: [], failureCode: null };
+      },
+    },
+  } as unknown as Env).alarm();
+  // The insert was ignored, so the record's guard found no row of this claim.
+  expect(calls).toBe(0);
+  expect((await alarmRecords()).length).toBe(before);
+  expect(
+    await env.DB.prepare("SELECT status FROM collection_schedule_occurrences WHERE id=?")
+      .bind(occurrenceId)
+      .first<string>("status"),
+  ).toBe("uncertain");
+});
+
 test("the processor tick and the keepalive job claim their occurrences and write no audit record", async () => {
   const before = (await alarmRecords()).length;
   for (const job of ["processor-tick", "sbi-vc-keepalive"]) {

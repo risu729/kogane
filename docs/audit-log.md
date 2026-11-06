@@ -298,7 +298,9 @@ and by the caps above. Each claimed collection occurrence adds one row (about
 a dozen a day with today's jobs), and each writing tick of an audited lane one
 row; an audited lane adds one mark statement before it runs and one range read
 per table it writes after it, each on the table's key, so it reads only what
-was written since its mark.
+was written since its mark. A claim's one-record-per-occurrence check reads
+the earlier records of its job's target (`schedule:<job id>`) through the
+target index, one more for each claimed occurrence of that job.
 
 ## Not recorded, and other limits
 
@@ -311,9 +313,15 @@ was written since its mark.
   decisions or proposals can stand without their record when the mark or the
   record cannot be read or written (`lane_audit_record_failed` in the log), or
   when the Worker is stopped between the lane and its record. Its ranges
-  assume one tick of a lane at a time (the one `processor-tick` alarm runs the
-  lanes in sequence); two overlapping ticks of one lane would both name the
-  rows either wrote.
+  assume one scheduled tick at a time (the one `processor-tick` alarm runs the
+  lanes in sequence); two overlapping ticks of one lane, or of
+  `reconciliation_sweep` and `purchase_recognition` (both write rule
+  `reconciliation_proposals`), would both name the rows either wrote.
+- The rowid positions of `decision_revisions`, `reconciliation_proposals` and
+  `card_settlement_candidates` hold only while those tables are not rebuilt: a
+  `VACUUM`, an export and re-import, or a migration that copies a table
+  without its rowid renumbers it, and earlier lane references would name
+  other rows or none. A migration that rebuilds one of them copies the rowid.
 - Page loads and reads of the operator's GET routes (the schedules page, the
   read pages, `/api/v2/query`, this log), except `GET /api/ops/v1/operations/{id}`,
   which is an operations read and is recorded.

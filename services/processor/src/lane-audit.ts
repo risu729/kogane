@@ -17,7 +17,8 @@
 // `decision_revisions`, `reconciliation_proposals` and
 // `card_settlement_candidates`, which the repository already orders by (for
 // example `entity_relations` in the card-ownership read). These tables are
-// append-only, so a position is never reused.
+// append-only, so a position is never reused while the table is not rebuilt
+// (a rebuild that drops the rowid renumbers it; docs/audit-log.md, limits).
 //
 // Recording never changes what the lane did: a mark or a record that cannot
 // be read or written is logged as `lane_audit_record_failed` with a safe code,
@@ -237,14 +238,21 @@ export async function markLaneAudit(
   }
 }
 
+/** A closed code of this module or the audit builder (`audit_record_invalid`, …). */
+const SAFE_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
+
 function logFailure(log: (line: string) => void, lane: string, error: unknown): void {
+  // Only a lower-case code is kept from an error's `code`; any other value
+  // (a driver's own text) falls back to the error's class name.
+  const code =
+    error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : null;
   log(
     JSON.stringify({
       event: "lane_audit_record_failed",
       lane,
       code:
-        error instanceof Error && "code" in error && typeof error.code === "string"
-          ? error.code
+        code !== null && SAFE_CODE.test(code)
+          ? code
           : error instanceof Error
             ? error.constructor.name
             : "unknown",

@@ -353,16 +353,24 @@ who may read a record or what a record may hold.
   own rows inside it; a row another writer added in between is inside the range
   and not named. The rowid of a TEXT-keyed table orders rows the way the
   card-ownership read already relies on; these tables are append-only, so a
-  position is not reused. `resolveLaneRef` in `services/processor/src/lane-audit.ts`
-  reads a reference back.
+  position is not reused. SQLite keeps such a rowid only while the table is
+  not rebuilt: a `VACUUM`, an export and re-import, or a migration that copies
+  the table into a new one without its rowid renumbers it, and the table's
+  earlier references would then name other rows or none. A migration that
+  rebuilds `decision_revisions`, `reconciliation_proposals` or
+  `card_settlement_candidates` copies the rowid. `resolveLaneRef` in
+  `services/processor/src/lane-audit.ts` reads a reference back.
 - **The `lane` diff** is `{decisionRevisions, commits, proposals: [{kind,
   count}]}` — the number of the lane's own rows each reference names. The
   decision listed only decision revisions and proposals; the commit count is
-  the size of the commit-sequence range its references name, which the
-  decision already allowed. None of `processor_lane_ticks`' counts is copied.
+  the number of the lane's own commit rows its commit-sequence reference
+  names, which the decision already allowed. None of `processor_lane_ticks`' counts is copied.
 - **Correlation.** The lane records of one tick share one correlation id;
   each alarm claim has its own.
 
-Limits: the ranges assume one tick of a lane at a time (the one
-`processor-tick` alarm runs them in sequence); two overlapping ticks of one
-lane would both name the rows either wrote. Not verified in production.
+Limits: the ranges assume one scheduled tick at a time (the one
+`processor-tick` alarm runs the lanes in sequence); two overlapping ticks of
+one lane, or of `reconciliation_sweep` and `purchase_recognition` (both write
+rule `reconciliation_proposals`), would both name the rows either wrote. The
+rowid positions hold only while the tables are not rebuilt (above). Not
+verified in production.
