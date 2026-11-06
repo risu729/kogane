@@ -25,7 +25,7 @@ const camel = (value: unknown): any =>
       : value;
 
 describe("cf migration preserves the canonical Wrangler deployment contract", () => {
-  test("current cf deployments share one immutable v2 pin and historical rollback retains v1", () => {
+  test("current cf deployments share one immutable v3 pin and historical rollback retains v1", () => {
     const pins = new Set<string>();
     for (const target of allTargets) {
       const legacy = steps.find((step) => step.body.includes(`id: deploy-${target.name}\n`));
@@ -33,7 +33,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(legacy?.body).toMatch(
         /^\s*uses: risu729\/wrangler-deploy-action@[a-f0-9]{40} # v1\.\d+\.\d+$/mu,
       );
-      const pin = /^\s*uses: (risu729\/wrangler-deploy-action@[a-f0-9]{40} # v2\.\d+\.\d+)$/mu.exec(
+      const pin = /^\s*uses: (risu729\/wrangler-deploy-action@[a-f0-9]{40} # v3\.\d+\.\d+)$/mu.exec(
         cf?.body ?? "",
       );
       expect(pin).not.toBeNull();
