@@ -98,6 +98,7 @@ with real data; do not infer product completion from a schema or a pure function
 - [Operations: health signals, load budgets, retention and recovery drills](operations.md)
 - [Production rollout and feature controls](rollout.md)
 - [Runbook: rebuilding the READ database](read-rebuild-runbook.md)
+- [Runbook: recovering an MCP client connection](mcp-recovery.md)
 - [`packages/storage-d1`: CORE database access](storage-d1.md)
 - [Package layout and import boundaries](package-layout.md)
 - [Library decisions](libraries.md)
