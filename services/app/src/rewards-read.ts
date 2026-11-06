@@ -118,10 +118,7 @@ function pageLimit(url: URL): number {
   // One of the offered sizes as written: `Number` alone would also read
   // "0x19", "2.5e1" or " 25" as 25.
   const limit = Number(text);
-  if (
-    String(limit) !== text ||
-    !(REWARD_READ_PAGE_LIMITS as readonly number[]).includes(limit)
-  )
+  if (String(limit) !== text || !(REWARD_READ_PAGE_LIMITS as readonly number[]).includes(limit))
     throw new HttpError(400, "invalid_limit");
   return limit;
 }
