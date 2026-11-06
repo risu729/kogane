@@ -1,8 +1,8 @@
 #:schema https://mise.jdx.dev/schema/mise.json
 
-# mise 2026.9.3 is the first release whose `deps` providers this repository
-# relies on (`mise deps --explain bun`, `mise deps --force`); the CI workflow
-# pins the same version.
+# mise 2026.10.10 is the minimum: it is the first release with the native
+# task `skip_if` that //apps/web:browser uses. CI pins a newer release
+# (jdx/mise-action `version:` in .github/workflows/).
 min_version = "2026.10.10"
 monorepo_root = true
 

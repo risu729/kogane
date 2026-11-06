@@ -13,6 +13,7 @@ import {
 } from "../../../packages/application/src/index";
 import { canonicalDigest } from "../../../packages/domain/src/context";
 import { jobFor, readSchedule, updateSchedule, ScheduleError } from "./schedule-store";
+import { boundedText, INTERNAL_BODY_LIMIT } from "./bounded-body";
 export async function delegatedScheduleRoute(
   request: Request,
   env: Env,
@@ -46,9 +47,8 @@ export async function delegatedScheduleRoute(
     if (auth.notAfter <= new Date().toISOString())
       throw new DelegatedOperationError("delegation_expired");
     audit = processorCall(envelope, "schedules.job.update", actor, "delegated");
-    const text = await request.text();
-    if (new TextEncoder().encode(text).byteLength > 16 * 1024)
-      throw new ScheduleError("request_too_large", 413);
+    const text = await boundedText(request, INTERNAL_BODY_LIMIT);
+    if (text === null) throw new ScheduleError("request_too_large", 413);
     let body: Record<string, unknown>;
     try {
       body = JSON.parse(text) as Record<string, unknown>;
