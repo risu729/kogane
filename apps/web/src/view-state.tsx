@@ -31,6 +31,7 @@ interface ViewState {
   "purchases.draft": string;
   "purchases.offset": number;
   "reportedState.date": string;
+  "reportedState.changeFrom": string;
   "reconstructedState.query": ReconstructedStateQuery | null;
   "reports.offset": number;
 }
@@ -61,6 +62,7 @@ export function ViewStateProvider({ children }: { children: ReactNode }): ReactN
     "purchases.draft": "",
     "purchases.offset": 0,
     "reportedState.date": "",
+    "reportedState.changeFrom": "",
     "reconstructedState.query": null,
     "reports.offset": 0,
   }));

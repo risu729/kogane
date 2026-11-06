@@ -173,6 +173,8 @@ export interface ApiCapabilities {
    * on a date, per account, with the card statements due around it and the
    * coverage that names what is missing. False unless the store the server
    * reads has the snapshot policy table and the statement and settlement views.
+   * `GET /api/v2/reported-holdings-change` is served on the same condition and
+   * has no flag of its own.
    */
   readonly reportedStateOnDate?: boolean;
   /**
