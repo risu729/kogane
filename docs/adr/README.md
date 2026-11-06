@@ -29,7 +29,7 @@ for current behavior.
 - [ADR 0016: Key MyJCB pending statements by payment month, current while their position shows them](0016-myjcb-pending-statement-slots.md)
 - [ADR 0017: Add card purchase review command kinds with one rebuild, not relation markers](0017-card-purchase-review-commands.md)
 - [ADR 0018: SBI Shinsei as the second bank debit adapter of card settlement review](0018-sbi-shinsei-bank-debit-adapter.md)
-- [ADR 0019: Reported state on a date from the latest complete capture before it](0019-dated-reported-state.md)
+- [ADR 0019: Reported state on a date from the latest complete capture before it](0019-dated-reported-state.md) — agent read `kogane.reported-state.read` (amendment 2026-11-06, proposed)
 - [ADR 0020: Prices are provider observations promoted by a closed rule list](0020-price-promotion-by-rule.md)
 - [ADR 0021: Collectors state the registration contract; the Processor's refusals stay](0021-collector-registration-contract.md)
 - [ADR 0022: Give registered shared-R2 artifacts their parser dataset](0022-registration-artifact-datasets.md)
@@ -78,7 +78,7 @@ for current behavior.
 - [ADR 0070: Validate observed SBI Shinsei history offline before enabling acquisition](0070-sbi-shinsei-observed-history-boundary.md) — proposed; offline-only request and capture inspection, no history acquisition or publication
 - [ADR 0071: Let Renovate own dependency auto-merge](0071-remove-custom-automerge.md) — proposed; remove the unconfigured custom merge workflow
 - [ADR 0072: List and re-display fixed report artifacts in the web UI](0072-report-artifact-pages.md) — proposed; catalogue route, `reportArtifacts` capability and read-only 評価レポート pages; amended (proposed, 2026-11-06): export link, no agent report read yet
-- [ADR 0073: Count each source's instrument identifiers by their candidate state, in a read beside the account coverage](0073-instrument-coverage-per-source.md) — proposed; `GET /api/identity/instrument-coverage` and the `銘柄の整理状況` panel
+- [ADR 0073: Count each source's instrument identifiers by their candidate state, in a read beside the account coverage](0073-instrument-coverage-per-source.md) — proposed; `GET /api/identity/instrument-coverage`, the `銘柄の整理状況` panel and (amendment 2026-11-06) the agent read `kogane.instruments.coverage`
 - [ADR 0074: A pure planner states multi-debit allocations of a card statement and answers unsupported for partial payments and excesses](0074-card-statement-allocation-planner.md) — proposed; nothing calls it, no policy, no writer
 - [ADR 0075: Reported holdings change between two dates, per provider holding key, never totalled](0075-reported-holdings-change-between-dates.md) — proposed; an application query, served by a route, a wire contract and a panel of the `/state` page (2026-11-06 amendment), no agent tool
 - [ADR 0076: Classify SBI Shinsei's FX board and stage references as non-account statements under identity policy version 2](0076-sbi-shinsei-non-account-identity.md) — proposed; the sweep re-identifies SBI Shinsei parses append-only after deployment

@@ -216,7 +216,10 @@ source with no row uses no such identifier, which is not a count of zero
 resolved instruments. Counts are of identifiers, not instruments or holdings,
 and are not a match rate. Only current mapping revisions and the newest
 `listed_as` relation count: an adoption a person later corrected no longer
-counts as resolved.
+counts as resolved. An agent reads the same answer under its own grant
+through `kogane.instruments.coverage` (`/mcp`) or
+`POST /api/agent/v1/instruments.coverage`, which require `summary.read` over
+the whole store ([agent API](agent-api.md#instrument-coverage)).
 
 ## Acceptance gates
 

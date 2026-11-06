@@ -66,13 +66,13 @@ here parses the token a second time and nothing reads an actor from a request
 body or header, which is the same rule the change lifecycle follows. A valid
 token with no grant is still refused.
 
-| Capability               | Allows                                                                                                                            | Notes                                                   |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                | The first capability an agent should get                |
-| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                       | A separate grant; raw bytes are still a different route |
-| `interpretation.propose` | `reconcile.propose`                                                                                                               | Proposals only; never adoption                          |
-| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                         | Not a financial read; implied by no other capability    |
+| Capability               | Allows                                                                                                                                                   | Notes                                                   |
+| ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                                       | The first capability an agent should get                |
+| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates`, `reported-state.read` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                                              | A separate grant; raw bytes are still a different route |
+| `interpretation.propose` | `reconcile.propose`                                                                                                                                      | Proposals only; never adoption                          |
+| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                                                | Not a financial read; implied by no other capability    |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
 exist in this vocabulary: `interpretation.accept`, `calculation.run`,
@@ -181,7 +181,13 @@ and it belongs in its own change.
 
 Six tools, plus a seventh while the deployment serves card purchase
 recognition and an eighth while it serves the reconstructed state, one
-implementation each (`src/agent-service.ts`), reachable two ways. The two
+implementation each (`src/agent-service.ts`), reachable two ways. The read
+tools of `src/read-tools.ts` (`kogane.instruments.history`,
+`kogane.instruments.coverage`, `kogane.audit.search`, `kogane.audit.get`) are
+reachable both ways too; the dated reported state's read
+(`kogane.reported-state.read`) is served on the same condition as the eighth, and each is listed only to a grant its service
+would answer ([below](#instrument-coverage),
+[shared history reads](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)). The two
 maintenance tools (`src/schedule-tools.ts`) exist while `SCHEDULES_ENABLED` is
 on: the read is reachable both ways, the revision on `/mcp` only and listed to
 nobody ([below](#maintenance-windows)).
@@ -194,7 +200,9 @@ nobody ([below](#maintenance-windows)).
 | `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                                                 |
 | `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                                       |
 | `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                 |
+| `kogane.instruments.coverage`         | `POST /api/agent/v1/instruments.coverage`       | `kogane.instruments.coverage`         | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                                      |
 | `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                                  |
+| `kogane.reported-state.read`          | `POST /api/agent/v1/reported-state.read`        | `kogane.reported-state.read`          | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#reported-state-on-a-date))                                       |
 | `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                                       |
 | `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                              |
 | `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | a delegation (`MCP_DELEGATIONS`) holding `schedules.maintenance.update`; no delegation executes yet, so it is listed to nobody ([below](#maintenance-windows)) |
@@ -229,7 +237,11 @@ above, and otherwise its name is
 grant checks every agent path makes. `kogane.reconstructed-state.read` follows
 `GET /api/v2/reconstructed-state` the same way: listed after them while
 `/api/meta` reports `reconstructedStateOnDate: true` (the store has the
-reported state's views), otherwise `unknown_tool` and `404 not_found`. The six
+reported state's views), otherwise `unknown_tool` and `404 not_found`.
+`kogane.reported-state.read` follows `GET /api/v2/reported-state` on the same
+condition (`reportedStateOnDate`, the same views); it is listed after
+`kogane.instruments.history`, and only to a grant that holds `records.read`
+over every source and account. The six
 `kogane.ops.*` tools of [ops-api.md](ops-api.md) are never published on
 `/mcp`, whose callers are all agent-only: with `OPS_API_ENABLED` off an
 operations tool name is `unknown_tool`, and with it on `callOpsTool` refuses
@@ -440,6 +452,95 @@ plan from the page is; under today's lists an agent can plan and cannot
 approve or commit. The server pins only the subject's mapping revision of an
 adoption plan, not the anchor's: read the candidate again right before
 planning, as the page does.
+
+### Reported state on a date
+
+`kogane.reported-state.read` is `GET /api/v2/reported-state` for an agent
+(plan D5, [ADR 0019](adr/0019-dated-reported-state.md#agent-read-amendment--2026-11-06-proposed)):
+what each provider last reported on a date, per account, beside the card
+statements due around it ([reported state](reported-state.md)). It is not the
+`reported-state` intent of `kogane.financial.query`, which reads the latest
+balances and positions. Route and tool share one function,
+`readReportedState` in `services/app/src/reported-state-api.ts`: the route's
+request rules and its reader `queryDatedState`
+(`packages/application/src/query/dated-state.ts`). The body is the route's
+answer, field for field, `apiVersion: 2` included (`validReportedState` in
+`packages/observation-shared/src/reported-state-contract.ts`).
+
+Input, a closed object (`src/read-tools.ts`); the patterns are the route's own:
+
+| Key       | Shape                 | Means                                                       |
+| --------- | --------------------- | ----------------------------------------------------------- |
+| `date`    | `YYYY-MM-DD`          | Required; a civil date in Asia/Tokyo, not after today there |
+| `source`  | a source id           | Optional; only this provider source                         |
+| `account` | a resolved account id | Optional; only this account                                 |
+
+Authorization, before the body is validated: `records.read`, else
+`403 unauthorized` (`capability:records.read`); and a whole-store perimeter,
+else `403 evidence_restricted` (`scope:source`, `scope:account`), as
+[ADR 0063](adr/0063-delegated-ai-operation-path.md) decision 10 asks of every
+new read until a scoped version is proven. Both are `financial-error-v1`
+bodies. A body outside the closed object is `400 invalid_request` with the
+offending keys, as for the other read tools of `src/read-tools.ts`. The
+route's own refusals keep its status and its `{error}` body on both agent
+paths: `400 invalid_date` (a date that is not a calendar day),
+`400 date_in_future`, and `413 result_limit_exceeded` past the read's 5,000
+rows (refused, never cut). The answer is not paged, so the grant's
+`budget.maxRows` does not bound it. It reads and never writes.
+
+The committed MCP reader grant (`AGENT_API_GRANTS` in
+`services/app/wrangler.jsonc`) holds `summary.read` and `records.read` over
+`"*"` sources and accounts, so the tool is listed to it wherever the store
+has the views. Each served call writes one R0 audit record
+(`result = "read"`) whose row count is the answer's accounts plus payables,
+never truncated; an absent tool records nothing.
+
+### Instrument coverage
+
+`kogane.instruments.coverage` counts, per source, the security, crypto and
+product identifiers its current organized records use, by their candidate
+state ([identity](identity.md#per-source-counts),
+[ADR 0073 amendment 2026-11-06](adr/0073-instrument-coverage-per-source.md#amendment-2026-11-06-the-agent-read-on-both-agent-paths)).
+It is the browser route's own service (`readInstrumentCoverage`), so an agent
+and the `銘柄の整理状況` panel read one answer; `GET
+/api/identity/instrument-coverage` runs it under the reader grant, this tool
+under the caller's grant, and the two answer equal bodies for the same
+`source`.
+
+Input, a closed object: `source` (optional; 1 to 128 characters, no control
+character; only that source's row). Output: `kogane-instrument-coverage-v1`
+with `policy`, `query.source` (or null) and one row per source of
+`{ source, identifiers, states }`, where `states` holds the five ADR 0055
+states and adds up to `identifiers`. No identifier, label, amount or rate is
+in it, and an identifier two sources use counts under each, so there is no
+total. A source with no row uses no such identifier; that is not a row of
+zeros.
+
+Authorization, in order, after the Access check and the grant lookup:
+`summary.read`, else `403 unauthorized` (`capability:summary.read`); sources
+and accounts both `"*"`, else `403 evidence_restricted` (`scope:source`,
+`scope:account`), because each identifier's state depends on every source.
+Both are decided before the store is read. The candidate read's bounds apply
+unchanged: more than 500,000 current identity observations is
+`413 budget_exceeded` (`budget:identityObservations=500000`) and a store past
+the read's own bounds `413 budget_exceeded` (`budget:instrumentResolution`).
+An unknown key or a malformed `source` is `400 invalid_request`, checked
+against the closed input before the grant, so for every caller alike. Over
+MCP each refusal is the same body with `isError: true`. `tools/list` lists the
+tool only to a grant holding `summary.read` over the whole store; a grant it
+is not listed to that calls it anyway with a valid input gets the refusal
+above, never an answer or `unknown_tool`.
+
+Each call walks every current identity observation, as a page load does
+(ADR 0055 amendment, Cost); routine polling needs a written bound first. It
+reads and never writes; its audit record (operation `instruments.coverage`,
+R0 `read`) carries the number of source rows only.
+
+The committed `AGENT_API_GRANTS` entry for the owner's MCP client holds
+`summary.read` and `records.read` over `"*"` sources and accounts, so by
+configuration this tool (and `kogane.instruments.history`) is listed to that
+client. That is configuration, not evidence that a client listed or called
+either.
 
 ### Reconstructed state
 
@@ -694,7 +795,10 @@ Converting them to JSON does not make them instructions.
 | `needs_rule_verification` | 422  | Ask for the rule to be verified; an estimate is not a fact        |
 
 `kogane.reconstructed-state.read` keeps its route's status (`unknown_account`
-is 404); the category is advisory.
+is 404); the category is advisory. `kogane.reported-state.read` answers its
+route's own refusals as the route does (`{error}` with the route's status) and
+its grant refusals as `financial-error-v1`
+([above](#reported-state-on-a-date)).
 
 Authentication failures keep the transport's own closed responses (401 with
 `{error, requestId}`), unchanged from every GET route. Every answer an MCP

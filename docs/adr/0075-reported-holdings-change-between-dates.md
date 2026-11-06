@@ -120,7 +120,9 @@ result. What exists, read from the code on main at `f33b121`:
    the reported state is: a route, a wire contract and a panel of the `/state`
    page, decided in the [amendment below](#amendment-route-contract-and-page-2026-11-06),
    which replaces this decision's earlier "no route, agent tool or page yet".
-   No agent tool, since the reported state on a date has none.
+   No agent tool, since the reported state on a date had none when this was
+   decided; it now has `kogane.reported-state.read`, and a change tool would
+   follow it.
 
 ## Consequences
 
@@ -157,8 +159,8 @@ result. What exists, read from the code on main at `f33b121`:
   shared machine). The statement-scale store holds no
   position container (see [reported state](../reported-state.md#cost)); not
   measured on workerd or D1.
-- No agent tool: the reported state on a date has none to mirror
-  (amendment below).
+- No agent tool yet (amendment below); the reported state on a date now has
+  `kogane.reported-state.read`, which a change tool would follow.
 
 ## Verification
 
@@ -213,7 +215,8 @@ would follow the reported state's own: `GET /api/v2/reported-state` under the
 reader authority, a strict wire contract checked by the browser, and the
 `/state` page. The reported state on a date has no agent tool (the shared
 query's `reported-state` intent reads the latest balances, not a dated state),
-so there is none to mirror.
+so there was none to mirror. (The dated read `kogane.reported-state.read`
+was added afterwards, with the amendment to ADR 0019.)
 
 ### Options considered
 
@@ -272,8 +275,8 @@ so there is none to mirror.
 
 ### Limits
 
-- No agent read; one would follow an agent read of the reported state on a
-  date.
+- No agent read; one would follow `kogane.reported-state.read`, the agent
+  read of the reported state on a date.
 - The page compares only up to its own 基準日, and does not offer the
   `source` or `account` filters the route takes.
 
