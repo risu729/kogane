@@ -98,6 +98,24 @@ test("aggregate audit covers all forms, pending history, current claims, and hid
     db.close();
   }
 });
+test("issues the identity store itself records are named, not folded into other", () => {
+  const db = fixture();
+  try {
+    // `identifyParse` appends this closed code when a still-effective manual
+    // decision on a run-scoped Vpass reference outranks the token mapping.
+    db.exec(`INSERT INTO identity_runs VALUES ('run6',6,1,'2099');
+      INSERT INTO identity_observations VALUES ('t6','run6','transaction',6,'ref','am1','["manual-run-scoped-account-mapping-preserved"]');
+      INSERT INTO identity_run_seals VALUES ('run6',1,'2099');`);
+    const report = validateIdentityAudit(IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()));
+    expect(report.find((s) => s.name === "issues")!.rows).toContainEqual({
+      source: "synthetic",
+      issue: "manual-run-scoped-account-mapping-preserved",
+      count: 1,
+    });
+  } finally {
+    db.close();
+  }
+});
 test("audit refuses unknown output fields, unsafe counts and excess cardinality", () => {
   const empty = () => IDENTITY_AUDIT_QUERIES.map(() => [] as unknown[]);
   for (const entry of [
