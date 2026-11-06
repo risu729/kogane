@@ -819,6 +819,24 @@ describe("SC13 / AT41 / AT49 — eligibility and the application-credit distinct
       ["3000", "5000"],
       ["synthetic_amount_unreadable", "0"],
     ]);
+
+    // Once unknown, a position stays unknown: a later exact event does not
+    // turn it back into a number, and the credit side stays exact.
+    const later = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [
+        event("event:debit-1", "debited", unread),
+        event("event:debit-2", "debited", q(fixture.pointUnit, "1000")),
+        event("event:credit", "credited", q(fixture.walletUnit, "1000")),
+      ],
+      fixture.walletUnit,
+    );
+    expect(later.positions.map(state)).toEqual([
+      ["synthetic_amount_unreadable", "synthetic_amount_unreadable"],
+      ["synthetic_amount_unreadable", "synthetic_amount_unreadable"],
+      ["synthetic_amount_unreadable", "0"],
+    ]);
+    expect(quantityText(later.positions[2]!.destinationCredited)).toBe("1000");
   });
 });
 

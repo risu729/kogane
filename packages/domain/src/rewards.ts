@@ -920,7 +920,10 @@ export interface RewardHoldingSummary {
   consumable: Quantity;
   /** Per-kind subtotals; unclassified, pending awards and qualification stay outside consumable. */
   byKind: { kind: BucketKind; quantity: Quantity; bucketRefs: string[] }[];
-  /** Buckets deliberately left out of `consumable`, each with its reason. */
+  /**
+   * Buckets left out of every subtotal, each with its reason. A consumable
+   * bucket in another unit is listed here and also makes `consumable` a conflict.
+   */
   excluded: { bucketRef: string; kind: BucketKind; reasonCode: string }[];
   qualificationMeasures: QualificationMeasure[];
   uncertaintyCodes: string[];
