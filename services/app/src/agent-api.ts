@@ -85,7 +85,7 @@ import {
   callDelegatedMaintenanceTool,
   delegatedMaintenanceTools,
 } from "./delegated-maintenance-tools";
-import { HttpError, json } from "./http";
+import { boundedRead, HttpError, json } from "./http";
 import { mcpDelegationCapabilities, resolveMcpDelegation } from "./delegation";
 
 import { commandsEnabled } from "./command-api";
@@ -130,33 +130,11 @@ export function classifyAgentPath(path: string): string | null {
 
 /** Read a bounded JSON body. An oversized or malformed body never reaches a tool. */
 async function boundedJson(request: Request): Promise<unknown> {
-  const declared = request.headers.get("content-length");
-  if (declared !== null && Number(declared) > MAX_REQUEST_BYTES)
-    throw new HttpError(413, "request_too_large");
-  const body = request.body;
-  if (body === null) return {};
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_REQUEST_BYTES) {
-      await reader.cancel();
-      throw new HttpError(413, "request_too_large");
-    }
-    chunks.push(value);
-  }
-  if (size === 0) return {};
-  const joined = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    joined.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  // An absent or zero-byte body is `{}`: no argument, not malformed JSON.
+  const { text, bytes } = await boundedRead(request, MAX_REQUEST_BYTES);
+  if (bytes === 0) return {};
   try {
-    return JSON.parse(new TextDecoder().decode(joined));
+    return JSON.parse(text);
   } catch {
     throw new HttpError(400, "invalid_body");
   }

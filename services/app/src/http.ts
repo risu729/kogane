@@ -33,11 +33,23 @@ export function identifier(value: string, prefix: "r" | "a" | "c"): number {
  * code units and let up to three times the bound of non-ASCII text through.
  */
 export async function boundedText(request: Request, limit: number): Promise<string> {
+  return (await boundedRead(request, limit)).text;
+}
+
+/**
+ * `boundedText`, with the number of bytes the body carried. A route that
+ * treats an empty body specially asks the bytes, not the text: a lone UTF-8
+ * byte-order mark decodes to no text but is not an empty body.
+ */
+export async function boundedRead(
+  request: Request,
+  limit: number,
+): Promise<{ text: string; bytes: number }> {
   const declared = request.headers.get("content-length");
   if (declared !== null && !(Number(declared) <= limit))
     throw new HttpError(413, "request_too_large");
   const reader = request.body?.getReader();
-  if (!reader) return "";
+  if (!reader) return { text: "", bytes: 0 };
   const decoder = new TextDecoder();
   let size = 0;
   let text = "";
@@ -55,7 +67,7 @@ export async function boundedText(request: Request, limit: number): Promise<stri
   } finally {
     reader.releaseLock();
   }
-  return text + decoder.decode();
+  return { text: text + decoder.decode(), bytes: size };
 }
 
 export function cursor(url: URL): number {
