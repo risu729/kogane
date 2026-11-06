@@ -248,3 +248,77 @@ checked without statistics, with automatic indexes confined to the composed
 CTEs, and timings printed rather than asserted. Independent review, hosted CI
 and latest-main integration remain merge gates. Production read-only scope
 verification of #542 remains separate and is not claimed by these tests.
+
+## Amendment 2026-10-09: a page, actual reservations and missing-unit states
+
+- Status: proposed (until this PR merges)
+- Issue: #542 (implementation; production acceptance remains open)
+
+### Context and options
+
+The read exists but has no page. Starting every cell from an artifact loses a
+newly declared unit whose attempt produced no file. Enabled settings alone do
+not prove an Alarm reservation; a failed reservation read must not mean none.
+Published parses can contain no observations or unresolved identities.
+
+Extending the artifact-backed read with declared attempts, the current
+published parse's stored row counts and eligible sealed identity runs avoids
+new projections or writers. Inferring an account from an opaque unit key, a
+provider retention failure from a generic parser refusal, or a stale threshold
+from elapsed time is rejected: none has the necessary stored evidence.
+
+### Decision
+
+`/collection-quality` consumes the shared strict contract in the observation
+and evidence clients. It reads the summary first and reads cells only for a
+chosen source, 500 per page, with continuation explicit. Source selection and
+paging use the URL. Query errors, no captures and no observations have distinct
+messages. Refresh only re-reads stored state. UTC instants are displayed as
+stored, including actual attempt start separately from its nominal schedule.
+
+The expanded strict wire shape has `apiVersion: 2`; version-1 replies are not
+rendered by this page. The quality version is separate from metadata's version.
+
+The summary adds stored future nominal/due times and `alarm` with `observed`
+or `unavailable` plus a nullable actual time. The App reads a bounded internal
+Processor route through the existing service binding, after the reader's
+capability and all-source/all-account scope check. The Processor enumerates
+the current `collection_schedules`, then calls only each named DO's read-only
+`alarmTime`. It does not reconcile, release a lease or execute collection.
+A failed RPC is unavailable; a successful null is observed absence. A relay
+failure, timeout, invalid response or changed schedule configuration leaves
+that schedule unavailable. This exposes reservation counts/times under the
+same authenticated evidence reader boundary as schedule status, with no grant,
+MCP tool, authentication change or settings mutation.
+
+The newest declared unit of each producer/unit that has no visible artifact
+is an attempt cell: null dataset/parser/period, zero stored artifacts and
+observations, no current capture, `unit_without_artifacts`, its stored outcome
+and safe failure code. These are counts of missing records, never financial
+zeros or complete-empty acquisition claims. A successful artifact capture
+suppresses the unit-only row after recovery. Existing artifact cells can still
+show an older current capture and `not_in_latest_run` alongside the failed
+attempt. The per-source union is ordered and paged as a whole.
+
+The newest capture reports observation-row counts of its published parses and
+unresolved account observation counts from each parse's newest eligible sealed
+identity policy, using current mapping revisions. No provider amount, label,
+account identifier or body is read for these counts. A missing identity run is
+`identity_not_recorded`; unresolved mappings are `identity_unresolved`; a
+published parse with no rows is `published_without_observations`. None asserts
+provider-history completeness. Every cell carries `retention_not_assessed`:
+stored parser refusals do not identify whether a provider retention cap was
+reached. Unit outcome absence/unknown is explicitly `unit_outcome_unknown`.
+
+### Consequences and verification
+
+The page now distinguishes stopped, unsupported, authentication-waiting,
+missing-file, pending/refused/unpublished parse, empty publication, unresolved
+identity, unavailable Alarm read and older-current states. No stale or retention
+threshold is invented. The indexed full-CORE plan guard includes new bounded
+per-source CTEs while retaining base-table negative controls and frozen
+financial-query digests. Synthetic tests cover missing units, recovery, empty
+publication, identity policy revisions, restricted authority before enumeration,
+Alarm failures/configuration races, read-only browser refresh and existing
+currentness. Production acceptance still follows the scoped read-only checklist
+in [the completion plan](../plans/2026-10-collection-quality-completion.md).

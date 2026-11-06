@@ -111,6 +111,7 @@ export function isObservationKind(value: string): value is ObservationKind {
 export type Route =
   | { name: "overview" }
   | { name: "schedules" }
+  | { name: "collectionQuality" }
   | { name: "transactions" }
   | { name: "balances" }
   | { name: "summaries" }
@@ -154,6 +155,7 @@ export function matchRoute(path: string): Route {
 
   if (segments.length === 1) {
     if (first === "schedules") return { name: "schedules" };
+    if (first === "collection-quality") return { name: "collectionQuality" };
     if (first === "transactions") return { name: "transactions" };
     if (first === "balances") return { name: "balances" };
     if (first === "summaries") return { name: "summaries" };
