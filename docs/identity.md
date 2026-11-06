@@ -125,8 +125,10 @@ trading-currency ones make its currencies several and the comparison
 
 Nothing here adopts. A candidate is `adopted` only when its two identifiers
 map to one instrument, which only a manual `identity.assign` does today, and
-`rejected` only when the newest `listed_as` relation from one identifier's
-current instrument to the other identifier is rejected. A proposed candidate
+`rejected` only when the current `listed_as` relation from one identifier's
+current instrument to the other identifier is rejected: the pair's newest
+decision, which a proposal recorded after it does not replace
+([ADR 0017's amendment](adr/0017-card-purchase-review-commands.md#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision)). A proposed candidate
 names those two commands (assign the subject identifier to the anchor's
 instrument; reject `listed_as` from the anchor's instrument to the subject),
 to be planned with a reason through the [change lifecycle](change-lifecycle.md);
