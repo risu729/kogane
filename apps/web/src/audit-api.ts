@@ -102,6 +102,7 @@ export const AUDIT_OPERATION_LABELS: Readonly<Record<string, string>> = {
   "instruments.coverage": "銘柄の整理状況の照会",
   "accounts.candidates": "口座の対応候補の照会",
   "economic-readiness.read": "経済行の準備状況の照会",
+  "balances.read": "残高の照会",
   "audit.search": "監査ログの検索",
   "audit.get": "監査記録の取得",
   "reconcile.propose": "照合の提案",

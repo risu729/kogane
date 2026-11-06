@@ -199,6 +199,15 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     const manifest = value["manifest"] as { rows?: unknown } | undefined;
     return { rows: Array.isArray(manifest?.rows) ? manifest.rows.length : 0, truncated: false };
   }
+  // One page of balances, truncated when a next page follows.
+  if (operation === "balances.read") {
+    const data = (value["data"] ?? {}) as Record<string, unknown>;
+    const page = (data["page"] ?? {}) as Record<string, unknown>;
+    return {
+      rows: Array.isArray(data["items"]) ? data["items"].length : 0,
+      truncated: page["hasMore"] === true,
+    };
+  }
   if (operation === "audit.search")
     return {
       rows: Array.isArray(value["records"]) ? value["records"].length : 0,

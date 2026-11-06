@@ -647,6 +647,23 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
+        name: "kogane.balances.read",
+        required: ["list"],
+        closed: false,
+        properties: [
+          "account",
+          "cursor",
+          "identityRead",
+          "instrument",
+          "limit",
+          "list",
+          "metric",
+          "source",
+          "view",
+        ],
+        annotations: readOnly,
+      },
+      {
         name: "kogane.purchases.explain",
         required: [],
         closed: false,
@@ -699,6 +716,8 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.instruments.coverage",
       "kogane.accounts.candidates",
       "kogane.economic-readiness.read",
+      // The balance read (this store has a READ binding).
+      "kogane.balances.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -781,6 +800,8 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.instruments.coverage",
       "kogane.accounts.candidates",
       "kogane.economic-readiness.read",
+      // The balance read (this store has a READ binding).
+      "kogane.balances.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);

@@ -1,6 +1,6 @@
 // Additional read adapters over the existing history, instrument coverage
 // (ADR 0073), dated reported state, account correspondence candidates
-// (ADR 0077) and common audit readers.
+// (ADR 0077), balance pages, and common audit readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -11,6 +11,10 @@ import {
   financialError,
   readEconomicRowReadinessForGrant,
 } from "../../../packages/application/src/index";
+import {
+  IDENTITY_READ_MODES,
+  MEASURE_VIEWS,
+} from "../../../packages/observation-shared/src/api-schema";
 import {
   readAuditForGrant,
   readAuditRecordForGrant,
@@ -42,6 +46,60 @@ import {
  * path is 404 and the MCP name `unknown_tool`.
  */
 export const REPORTED_STATE_TOOL_NAME = "kogane.reported-state.read";
+import { readObservationList } from "./observation-api";
+import { V2_HISTORY_PATH, V2_LATEST_PATH } from "./balances-v2";
+
+/**
+ * `kogane.balances.read` (plan D3): `GET /api/v2/balances/latest` and
+ * `GET /api/v2/balances/history` for an agent. Served exactly while those
+ * routes are (this deployment has a READ binding); otherwise the path is 404
+ * and the MCP name `unknown_tool`.
+ */
+export const BALANCES_TOOL_NAME = "kogane.balances.read";
+
+/**
+ * One filter value as the routes accept it: present, at most 512 characters
+ * and no control character (`observation-api.ts`).
+ */
+const filterValue = () =>
+  z
+    .string()
+    .min(1)
+    .max(512)
+    .regex(/^[^\u0000-\u001f]+$/u);
+
+/**
+ * The grant refusal of a whole-store record read, before its body is
+ * validated: `records.read`, then `"*"` on both scope axes (plan section 5.3,
+ * ADR 0063 decision 10). Null when the grant may read.
+ */
+function wholeStoreRefusal(grant: Grant, operation: string): ToolResult | null {
+  if (!grantAllows(grant, "records.read"))
+    return {
+      status: ERROR_STATUS.unauthorized,
+      body: financialError("unauthorized", operation, ["capability:records.read"]),
+    };
+  const narrowed = [
+    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
+    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
+  ];
+  return narrowed.length === 0
+    ? null
+    : {
+        status: ERROR_STATUS.evidence_restricted,
+        body: financialError("evidence_restricted", operation, narrowed),
+      };
+}
+
+/** The tool's input as the route's query parameters, in a fixed order. */
+function routeParameters(input: Record<string, unknown>, keys: readonly string[]) {
+  const parameters = new URLSearchParams();
+  for (const key of keys) {
+    const value = input[key];
+    if (value !== undefined) parameters.set(key, String(value));
+  }
+  return parameters;
+}
 
 const schemas = {
   "kogane.instruments.history": z.strictObject({
@@ -82,6 +140,21 @@ const schemas = {
       .max(64),
     knowledge: z.literal("current"),
   }),
+  // The routes' query parameters, as a body. Closed lists are the routes' own
+  // (`MEASURE_VIEWS`, `IDENTITY_READ_MODES`); what depends on the deployment
+  // or the snapshot (a page size on offer, a cursor of this query) is checked
+  // by the routes' own rules, so that refusal keeps the route's code.
+  "kogane.balances.read": z.strictObject({
+    list: z.enum(["latest", "history"]),
+    source: filterValue().optional(),
+    account: filterValue().optional(),
+    instrument: filterValue().optional(),
+    metric: filterValue().optional(),
+    view: z.enum(MEASURE_VIEWS).optional(),
+    identityRead: z.enum(IDENTITY_READ_MODES).optional(),
+    cursor: filterValue().optional(),
+    limit: z.number().int().optional(),
+  }),
   "kogane.audit.search": z.strictObject({
     filters: z.record(z.string(), z.string()).optional(),
     cursor: z.string().min(1).max(400).nullable().optional(),
@@ -107,6 +180,8 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "One page of the ADR 0077 account correspondence candidates: which direct provider source accounts a reviewed aggregator connection contains, on which evidence, with closed status, hold and same-account reasons, under records.read and a whole-store read grant. Read-only; never proposes same_account. A candidate names the relation.accept or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
+  "kogane.balances.read":
+    "One page of the latest adopted balances (list: latest) or of the balance history (list: history) from the published balance snapshot, the same page as GET /api/v2/balances/latest or /history, under data, under records.read and a whole-store read grant. Pages are keyset: pass data.page.nextCursor as cursor with the same filters. Provider text is only under data. Each quantity keeps its unit and status; a value that is not exact has no coefficient, never zero, and there is no net worth.",
   "kogane.audit.search":
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
   "kogane.audit.get":
@@ -128,16 +203,19 @@ const wholeStore = (grant: Grant) => grant.scopes.sources === "*" && grant.scope
 /**
  * The read tools listed to this grant: each only to a grant its service would
  * answer. A call by any other grant is refused by the service itself, with the
- * same closed code on both transports. `reportedState`: whether this deployment
- * serves `GET /api/v2/reported-state`.
+ * same closed code on both transports. `served.reportedState`: whether this
+ * deployment serves `GET /api/v2/reported-state`; `served.balances`: whether
+ * it serves the v2 balance routes (`balanceReadConfigured`).
  */
-export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
+export function readMcpTools(grant: Grant, served: { reportedState: boolean; balances: boolean }) {
   return READ_MCP_TOOLS.filter((tool) => {
     switch (tool.name as ReadToolName) {
       case "kogane.instruments.history":
         return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.reported-state.read":
         return served.reportedState && grantAllows(grant, "records.read") && wholeStore(grant);
+      case "kogane.balances.read":
+        return served.balances && grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.instruments.coverage":
         return grantAllows(grant, "summary.read") && wholeStore(grant);
       case "kogane.accounts.candidates":
@@ -240,6 +318,33 @@ export async function callReadTool(
             auditOutcome: { result: "failed", code: outcome.reason },
           };
         return { status: 200, body: outcome };
+      }
+      // The routes' own request rules and read (`readObservationList`); their
+      // refusals keep their codes. The page is handed under `data`, because
+      // it carries provider text (account and instrument labels and
+      // amount text), which reaches a caller only there (AT71).
+      case "kogane.balances.read": {
+        const refusal = wholeStoreRefusal(grant, "balances.read");
+        if (refusal) return refusal;
+        const input = parseRequest(schemas[name], body ?? {});
+        const page = await readObservationList(
+          env,
+          input.list === "latest" ? V2_LATEST_PATH : V2_HISTORY_PATH,
+          routeParameters(input, [
+            "source",
+            "account",
+            "instrument",
+            "metric",
+            "view",
+            "identityRead",
+            "cursor",
+            "limit",
+          ]),
+        );
+        return {
+          status: 200,
+          body: { schemaVersion: "kogane-balances-v1", list: input.list, data: page },
+        };
       }
       case "kogane.audit.search": {
         const input = parseRequest(schemas[name], body ?? {});

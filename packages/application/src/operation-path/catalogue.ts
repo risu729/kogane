@@ -256,6 +256,16 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // Latest balances and balance history of the published snapshot (plan D3),
+  // served while `GET /api/v2/balances/{latest,history}` are; whole-store only
+  // (ADR 0063 decision 10).
+  "balances.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "audit.search": {
     risk: ["R0"],
     effect: null,

@@ -260,39 +260,43 @@ describe("kogane.instruments.coverage", () => {
   it("lists every read tool by its own rule under every capability set and scope shape", () => {
     // Pins the rule of each read tool, the earlier ones included, over all
     // capability sets and the four whole/listed scope shapes.
+    // The balance read is listed only where its routes are served (a READ binding).
     let shapes = 0;
     for (let mask = 0; mask < 1 << AGENT_CAPABILITIES.length; mask++) {
       const capabilities = AGENT_CAPABILITIES.filter((_, bit) => mask & (1 << bit));
       for (const sources of ["*", ["sbi-securities"]] as const)
-        for (const accounts of ["*", ["sbi-securities:domestic"]] as const) {
-          const grant = { ...SUMMARY_GRANT, scopes: { sources, accounts }, capabilities } as Grant;
-          const whole = sources === "*" && accounts === "*";
-          // The dated reported state's read is listed only where its route is served.
-          for (const reportedState of [false, true]) {
-            const expected = [
-              ...(capabilities.includes("records.read") && whole
-                ? ["kogane.instruments.history"]
-                : []),
-              ...(reportedState && capabilities.includes("records.read") && whole
-                ? ["kogane.reported-state.read"]
-                : []),
-              ...(capabilities.includes("summary.read") && whole ? [TOOL] : []),
-              ...(capabilities.includes("records.read") && whole
-                ? ["kogane.accounts.candidates", "kogane.economic-readiness.read"]
-                : []),
-              ...(capabilities.includes("audit.read") && accounts === "*"
-                ? ["kogane.audit.search", "kogane.audit.get"]
-                : []),
-            ];
-            expect(
-              readMcpTools(grant, { reportedState }).map((tool) => tool.name),
-              JSON.stringify({ grant, reportedState }),
-            ).toEqual(expected);
-            shapes += 1;
-          }
-        }
+        for (const accounts of ["*", ["sbi-securities:domestic"]] as const)
+          // The dated reported state's read is listed only where its route is
+          // served, the balance read only where its routes are (a READ binding).
+          for (const reportedState of [false, true])
+            for (const balances of [true, false]) {
+              const grant = {
+                ...SUMMARY_GRANT,
+                scopes: { sources, accounts },
+                capabilities,
+              } as Grant;
+              const whole = sources === "*" && accounts === "*";
+              const records = capabilities.includes("records.read") && whole;
+              const expected = [
+                ...(records ? ["kogane.instruments.history"] : []),
+                ...(records && reportedState ? ["kogane.reported-state.read"] : []),
+                ...(capabilities.includes("summary.read") && whole ? [TOOL] : []),
+                ...(records
+                  ? ["kogane.accounts.candidates", "kogane.economic-readiness.read"]
+                  : []),
+                ...(records && balances ? ["kogane.balances.read"] : []),
+                ...(capabilities.includes("audit.read") && accounts === "*"
+                  ? ["kogane.audit.search", "kogane.audit.get"]
+                  : []),
+              ];
+              expect(
+                readMcpTools(grant, { reportedState, balances }).map((tool) => tool.name),
+                JSON.stringify({ grant, reportedState, balances }),
+              ).toEqual(expected);
+              shapes += 1;
+            }
     }
-    expect(shapes).toBe(8 << AGENT_CAPABILITIES.length);
+    expect(shapes).toBe(16 << AGENT_CAPABILITIES.length);
   });
 
   it("is listed only to summary.read over the whole store", async () => {
