@@ -29,4 +29,9 @@ describe("maskRandomTokens", () => {
       expect(masked).toBe(JSON.stringify(leaked));
     }
   });
+
+  test("a planted value joined into a run of twelve or more digits is masked too (the stated limit)", () => {
+    for (const hidden of [{ amount_micro: 987650000000 }, { blob: "abcdef98765012" }])
+      expect(maskRandomTokens(JSON.stringify(hidden))).not.toContain("98765");
+  });
 });

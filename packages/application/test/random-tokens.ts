@@ -10,9 +10,15 @@
  * digits (which covers 13-digit millisecond clocks). A needle of five or more
  * digits then matches only where the text carries it outside those tokens:
  * what is left of an ISO timestamp has no digit run longer than four. A
- * four-digit needle is safe only against a text without timestamps. The
- * masking hides a planted value only if it sits inside a UUID or a run of
- * twelve hex digits, which no record or log line writes a value as.
+ * four-digit needle is safe only against a text without timestamps.
+ *
+ * Limit: the masking also hides a planted value written inside such a token,
+ * that is inside a UUID-shaped value or joined to other digits or hex letters
+ * into a run of twelve or more (an amount scaled to twelve digits such as
+ * `987650000000`, or glued to a hex string). The checks it serves look for a
+ * planted value written as a value of its own (a JSON number, a formatted
+ * amount, a URL parameter, provider text), which stays visible; a leak only
+ * in that hidden form would pass them.
  */
 const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu;
 const LONG_HEX = /[0-9a-f]{12,}/giu;

@@ -552,8 +552,9 @@ describe("the maintenance revision: delegated authority and closed request bound
       window("vpass", { ruleId: "Has Space", referenceUrl: `${REFERENCE}/y?t=${TOKEN}&a=123456` }),
       environment,
     );
-    // Audit ids, digests and new rule ids are random hex: masked, so the
-    // digits of the reference are found only where a row really carries them.
+    // Audit and correlation ids are random UUIDs, and a rule saved without an
+    // id gets a random hex suffix: masked, so the digits of the reference are
+    // found only where a row really carries them.
     const stored = maskRandomTokens(
       JSON.stringify((await env.DB.prepare("SELECT * FROM audit_records").all()).results),
     );
