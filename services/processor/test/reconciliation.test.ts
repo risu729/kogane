@@ -1737,3 +1737,73 @@ test("the stored digests are looked up a chunk at a time, the last chunk short",
   expect(again.sent).toEqual({ inserts: 0, lookups: 2, batches: 0 });
   expect(await citing(rows)).toHaveLength(3);
 });
+
+test("a command racing another proposal's command under its operation id adopts nothing", async () => {
+  const slice = syntheticSlice("synthetic-key-race");
+  // One pending row and two posted rows in its window: two candidates per card.
+  for (const card of ["card-r1", "card-r2"])
+    await seedRows("synthetic-key-race", card, [
+      { status: "unconfirmed", amount: -400, asOf: "2026-09-20", month: "2026-09", family: "c" },
+      { status: "posted", amount: -400, asOf: "2026-09-20", month: "2026-09", family: "web" },
+      { status: "posted", amount: -400, asOf: "2026-09-21", month: "2026-09", family: "web" },
+    ]);
+  const before = new Set((await proposals()).map((row) => row.id));
+  await reconciliationSweep(db, { slices: [slice], now: NOW });
+  const fresh = (await proposals()).filter((row) => !before.has(row.id));
+  expect(fresh.map((row) => row.status)).toEqual(["proposed", "proposed", "proposed", "proposed"]);
+  for (const [index, action] of (["accept", "reject"] as const).entries()) {
+    const [mine, theirs] = [fresh[index * 2]!, fresh[index * 2 + 1]!];
+    const command: ProposalCommand = {
+      operationId: `op-key-race-${action}`,
+      actorId: "reviewer",
+      actorVerification: "server",
+      action,
+      proposalId: mine.id,
+      expectedStatus: "proposed",
+      method: "manual",
+      reason: "reviewed against the statement page",
+    };
+    // The same command for another proposal takes the key between this
+    // command's reads and its batch. Its decisions, and the relation it
+    // creates, carry the same derived ids, but none of them is this command's.
+    const racing = new Proxy(db, {
+      get(target_, property) {
+        if (property === "batch")
+          return async (statements: D1PreparedStatement[]) => {
+            expect(await decideProposal(db, { ...command, proposalId: theirs.id })).toMatchObject({
+              ok: true,
+              replayed: false,
+            });
+            return target_.batch(statements);
+          };
+        const value = Reflect.get(target_, property) as unknown;
+        return typeof value === "function" ? (value as Function).bind(target_) : value;
+      },
+    });
+    expect(await decideProposal(racing, command)).toEqual({
+      ok: false,
+      error: "idempotency_conflict",
+    });
+    const after = await proposals();
+    expect(after.find((row) => row.id === mine.id)!.status).toBe("proposed");
+    expect(after.find((row) => row.id === theirs.id)!.status).toBe(
+      action === "accept" ? "accepted" : "rejected",
+    );
+    expect(
+      await db
+        .prepare(
+          "SELECT decision_revision_id FROM reconciliation_proposals WHERE id=? AND decision_revision_id IS NOT NULL",
+        )
+        .bind(mine.id)
+        .first(),
+    ).toBeNull();
+    expect(
+      await db
+        .prepare(
+          "SELECT count(*) AS n FROM entity_relations r JOIN decision_revisions d ON d.id=r.decision_revision_id WHERE d.operation_id=?",
+        )
+        .bind(command.operationId)
+        .first<number>("n"),
+    ).toBe(action === "accept" ? 1 : 0);
+  }
+});

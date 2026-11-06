@@ -694,9 +694,11 @@ guarded, and is covered by a test with a synthetic source that does report one.
 a caller-chosen `operationId` makes a resend idempotent, the actor is the
 principal the server verified, and `expectedStatus` is the state the caller saw.
 All writes of one command are one D1 batch guarded on the ledger row, so a
-failed guard writes nothing; a decision row needs the ledger row of that same
-command (key, payload digest and actor), so a conflicting command that took
-the key first carries none of its decisions. An acceptance appends two decision revisions (one
+failed guard writes nothing. Every statement after the ledger insert needs the
+ledger row of that same command (key, payload digest and actor), so a
+conflicting command that took the key first carries none of its decisions,
+relation or resolution, and the command answers `idempotency_conflict`. An
+acceptance appends two decision revisions (one
 for the proposal, one for the relation it creates), inserts the
 `entity_relations` row, and resolves the proposal. The relation's ends are the
 targets' own `SourceFactRef` ids, `transaction:<id>`, which already carry
