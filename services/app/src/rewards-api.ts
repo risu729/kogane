@@ -189,26 +189,49 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
   const quantityText = url.searchParams.get("quantity");
   const unitRef = reference(url, "unit");
   const goal = reference(url, "goal");
+  // A version names one stored version of the named offer, never a search.
+  const version = reference(url, "version");
   const depthText = url.searchParams.get("depth");
-  if (!offerId && !goal) throw new HttpError(400, "invalid_query");
+  if ((!offerId && !goal) || (version !== undefined && !offerId))
+    throw new HttpError(400, "invalid_query");
   if (quantityText === null || !QUANTITY.test(quantityText))
     throw new HttpError(400, "invalid_quantity");
   const depth = depthText === null ? 2 : Number(depthText);
   if (!Number.isSafeInteger(depth) || depth < 1 || depth > 2)
     throw new HttpError(400, "invalid_query");
   const offers = await reader.offers({ ...(offerId ? { offerId } : {}), offset: 0 });
-  if (offers.rows.length === 0)
+  // The offer set is read once, bounded by one reader page (one row past the
+  // limit reports more). Every answer carries that bound; `truncated` is never
+  // true on an answer computed from offers (ADR 0049, amendment 2026-11-06).
+  const offerCoverage = { limit: offers.coverage.limit, truncated: offers.coverage.truncated };
+  if (offers.coverage.truncated)
     return json({
       simulation: null,
       searchCoverage: "bounded",
+      offerCoverage,
+      // More offers are stored than one read admits. A search over the first
+      // page would turn the unread offers into "no path" or a narrower list of
+      // paths, so nothing is computed: refused, as the READ capture refuses
+      // the same set, rather than answered from part of it (INV05).
+      reasonCodes: ["offer_set_too_large"],
+      release: CONVERSION_SEARCH_RELEASE,
+    });
+  const matching =
+    version === undefined ? offers.rows : offers.rows.filter((row) => row.version === version);
+  if (matching.length === 0)
+    return json({
+      simulation: null,
+      searchCoverage: "bounded",
+      offerCoverage,
       // Nothing to simulate is not "impossible": no verified offer is stored.
       reasonCodes: ["no_stored_offer"],
       release: CONVERSION_SEARCH_RELEASE,
     });
-  const quantity = decimalQuantity(unitRef ?? offers.rows[0]!.fromUnitRef, quantityText);
+  const quantity = decimalQuantity(unitRef ?? matching[0]!.fromUnitRef, quantityText);
   if (goal) {
+    // Every stored version is its own candidate here, named by its offerRef.
     const result = findConversionPaths(
-      offers.rows,
+      matching,
       {
         quantity,
         clock: {
@@ -226,14 +249,36 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
       // The search is bounded by depth and candidate caps, so no path is
       // described as optimal and an unknown condition stays a candidate.
       searchCoverage: result.searchCoverage,
+      offerCoverage,
       rejected: result.rejected,
+      // Offer examinations used against `budget.maxExpansions`, and the caps
+      // that ended the search early: with a non-empty `stoppedBy`, an empty or
+      // short `paths` may be the cap rather than the offers.
+      expansions: result.expansions,
+      stoppedBy: result.stoppedBy,
       budget: result.budget,
       basis: "policy-estimated",
       release: result.release,
     });
   }
-  const offer = offers.rows[0]!;
-  return json({ simulation: simulationDto(offer, quantity), release: CONVERSION_SEARCH_RELEASE });
+  if (matching.length > 1)
+    return json({
+      simulation: null,
+      offerCoverage,
+      // Versions are append-only reference claims with no adoption pointer, and
+      // version text has no defined order, so none of them is "the" offer: the
+      // caller names one with `version` (docs/rewards.md §4). Simulating the
+      // first row would answer for a version nobody chose.
+      offerVersions: matching.map((row) => `${row.offerId}@${row.version}`),
+      reasonCodes: ["offer_version_not_selected"],
+      release: CONVERSION_SEARCH_RELEASE,
+    });
+  const offer = matching[0]!;
+  return json({
+    simulation: simulationDto(offer, quantity),
+    offerCoverage,
+    release: CONVERSION_SEARCH_RELEASE,
+  });
 }
 
 function simulationDto(offer: ConversionOffer, quantity: Quantity) {
