@@ -83,6 +83,45 @@ The parsers preserve zero and refund totals as source values. The positive-debit
 matcher excludes them; a refund or a partial/multiple settlement requires its
 own supported model. No payment total is manufactured by summing purchase rows.
 
+### Multiple debits and partial payments (ADR 0074)
+
+The sweep pairs one statement with one debit of the same amount. A statement
+that two debits pay together, or that one debit pays in part, gets no
+candidate and no reason: each half fails the equal-amount test, so it looks
+the same as a statement with no debit at all.
+
+`planCardStatementAllocations` (`packages/domain/src/card-settlement-allocation.ts`,
+[ADR 0074](adr/0074-card-statement-allocation-planner.md)) is a pure planner
+that states these cases. Given at most 16 statements, at most 32 debits (each
+with its `bank_key` and the alias class of its admitted identity), the keys,
+alias classes and statement keys already held, and an explicit, versioned
+policy (the window around the due date and the most debits one allocation may
+combine, 1 to 3; no defaults), it answers per statement:
+
+- `proposed`: exactly one set of whole debits whose exact sum is the total
+  (`single-debit` or `multiple-debits`), none of them in another statement's
+  candidate;
+- `needs_review` (`candidate_not_unique`, and
+  `debit_in_other_statement_allocation` when a debit could pay two
+  statements): every candidate listed, none chosen;
+- `unsupported`: `no_debit_in_window`, or `no_exact_allocation` with
+  `in_window_debits_below_total` (a shortfall) and/or `debit_above_total`
+  (an excess). No remainder is computed and no debit is called a partial
+  payment: how a provider represents a partial payment, an overpayment or a
+  debit paying several statements has not been observed;
+- `refused` for a statement that is malformed, repeated, not exact, not
+  positive, without a due date or already reserved.
+
+A debit given twice, two debits sharing a key or alias class, a debit whose
+key or alias class is held, and a debit without an admitted identity take no
+part; currencies are never combined. Ownership is a rejection condition as in
+the sweep.
+
+Limits: nothing calls the planner. No lane runs it, no table stores its
+output, the review page does not show it, nothing supplies a policy, and the
+acceptance writer still claims exactly one debit, so a multi-debit statement
+still cannot be accepted. Refunds against a statement are not handled.
+
 ### Provider-stated debit accounts
 
 Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md) and its
@@ -643,6 +682,11 @@ and a later capture reusing the reference is refused against that holder.
 acceptance and a withdrawal write to the consumption guard, and its refusals
 ([economic events](economic-events.md#common-consumption-guard-migration-0070)). `packages/read-model/test/card-bank-debit-facts.test.ts`
 shows the SMBC branch returns exactly the 0044 view's rows.
+`packages/domain/test/card-settlement-allocation.test.ts` covers the allocation
+planner on synthetic inputs: today's matcher on a two-debit and a partial case,
+every refusal, exclusion and outcome code, and 300 seeded random runs compared
+with a brute-force subset oracle (exact sums, whole and distinct members, no
+held debit, no debit proposed for two statements, order independence).
 `packages/domain/test/card-debit-account.test.ts` covers the provider-stated
 debit-account rule on synthetic inputs: bank names resolve only through the
 table, a unique account starting with the leading digits is proposed, an
