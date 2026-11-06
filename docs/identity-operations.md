@@ -89,6 +89,15 @@ offers keeping apart only; moving that subject is a correction of the
 earlier decision, made as above. An agent reads the same list through
 `kogane.instruments.candidates` and plans through the same command API.
 
+On `/identities`, `銘柄の整理状況` counts per source how many of these
+identifiers (security, crypto and product) wait on a candidate
+(`未判断の候補あり`), were resolved by a person's decision, share an
+instrument without a recorded decision, were kept apart or have no
+candidate; a decision made on the candidate page moves the counts
+once it is committed ([ADR 0073](adr/0073-instrument-coverage-per-source.md)).
+If the store is past the candidate read's bounds, the panel shows the refusal
+instead of counts.
+
 Staleness: the page reads the candidate again before it plans, and plans
 nothing unless the same candidate, with the same commands and the same
 mapping revisions of both identifiers, is still listed. Candidate adoption
@@ -113,10 +122,22 @@ needs a remote D1 measurement first (ADR 0055 amendment, Cost).
 
 - `/api/identity/coverage` compares all eligible current B observations against
   completed C runs by source; organized is not globally identified.
+  The 口座・銘柄 page (`/identities`) shows it as 整理状況: one row per source
+  with the served counts and 未処理 (eligible minus organized) for that row
+  only, no row across sources; an answer whose status counts do not add up to
+  organized, or whose organized exceeds eligible, is refused by the shared
+  validator and not shown
+  (`apps/web/test/identities.browser.test.ts`, desktop and phone width).
 - `/api/identity/accounts` and `/api/identity/instruments` read effective mapping
   revisions, expose their evidence links, and paginate at 100 rows.
 - `/api/identity/instrument-candidates` reads the ADR 0055 candidate set and
   pages it at 50 items per view; it writes nothing.
+- `/api/identity/instrument-coverage` runs the same candidate read and counts,
+  per source, the security, crypto and product identifiers in each ADR 0055
+  state (`銘柄の整理状況` on `/identities`, [ADR 0073](adr/0073-instrument-coverage-per-source.md)).
+  It shares the candidate read's bounds and refusals; an identifier two
+  sources use counts under each, so there is no cross-source total. It writes
+  nothing.
 - Preserve the original pinned decision IDs to audit what was recorded at the
   time, even after a manual correction.
 - Old B parses/failed acquisitions remain in their own history and never

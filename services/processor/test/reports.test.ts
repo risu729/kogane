@@ -4,6 +4,8 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { canonicalJson } from "../../../packages/domain/src/index.ts";
+import { validReportBody } from "../../../packages/domain/src/reports.ts";
+import { validReportExplanationNode } from "../../../packages/observation-shared/src/report-artifact-contract.ts";
 import {
   instrumentRef,
   purgeRestrictedExplanations,
@@ -479,6 +481,9 @@ test("a holding is valued only at a price claimed from its own snapshot, never a
   const explanation = JSON.parse(
     await (await env.EVIDENCE.get(`reports/${result.contentDigest}.explanation`))!.text(),
   ) as { inputManifest: { priceObservationIds: string[] } };
+  // What the job stores is what the report page's contract accepts.
+  expect(validReportBody(body)).toBe(true);
+  expect(validReportExplanationNode(explanation)).toBe(true);
   expect(explanation.inputManifest.priceObservationIds).toContain("price:snap:old");
   expect(explanation.inputManifest.priceObservationIds).not.toContain("price:snap:future");
   expect(explanation.inputManifest.priceObservationIds).not.toContain("price:snap:unclaimed");
