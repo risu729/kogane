@@ -1,6 +1,7 @@
 // The fixed report artifact routes (docs/calculation-and-reports.md §4). Read
 // only: re-displaying a stored report never recomputes it, and recomputing or
 // sharing a corrected version are commands this client does not offer.
+// `/export` is a plain download link (`reportExportUrl`), never a fetch.
 // `getJson` validates every answer against
 // `packages/observation-shared/src/report-artifact-contract.ts`, so a
 // malformed answer is an error, never a different report or a zero.
@@ -28,6 +29,15 @@ export const REPORTS_PAGE_SIZE = 50;
 
 function reportPath(reportId: string): string {
   return `${REPORTS_PATH}/${encodeURIComponent(reportId)}`;
+}
+
+/**
+ * The download link of a report's export: the stored body re-displayed as
+ * `view: "export"`, which the server serves only while the report's
+ * capabilities allow export. The page offers it only then.
+ */
+export function reportExportUrl(reportId: string): string {
+  return `${reportPath(reportId)}/export`;
 }
 
 /** One page of stored reports, newest first, once the server advertises them. */

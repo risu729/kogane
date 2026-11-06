@@ -496,13 +496,17 @@ says why it is not, and a missing cached node is shown as missing. A body
 whose digest no longer matches, or that is gone, is never shown as the
 report. The page has no recompute or share control. Amounts are formatted by
 the shared exact formatter; a decimal with more places than its unit's minor
-unit is shown as stored, never rounded.
+unit is shown as stored, never rounded. While the report's
+`capabilities.export` is true the page links to
+`/api/v2/reports/{id}/export` (the id encoded as one path segment) as a
+download; a restricted or unavailable report, which the reader would refuse,
+gets no link and a sentence saying why ([ADR 0072, amendment](adr/0072-report-artifact-pages.md#amendment-the-export-link-and-no-agent-report-read-yet-2026-11-06)).
 
 Limits: the list has no index on `created_at` and sorts the table per page;
 paging is by offset, so a report stored between two page loads shifts the
 older rows by one and the next page can repeat a row (rows are never
-updated or deleted, so none is skipped); the page does not use `/export`;
-activity and obligations have no page.
+updated or deleted, so none is skipped); no agent or MCP tool lists or
+reads reports; activity and obligations have no page.
 
 ## 5. The context is the input set, not a timestamp
 

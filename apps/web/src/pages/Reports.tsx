@@ -8,6 +8,7 @@ import { ApiError, useFeatures } from "../api.ts";
 import { Pagination } from "../pagination.tsx";
 import {
   REPORTS_PAGE_SIZE,
+  reportExportUrl,
   useReport,
   useReportExplanation,
   useReports,
@@ -322,6 +323,36 @@ function ReportFacts({
   );
 }
 
+/**
+ * The export download, offered only when the report's capabilities allow it:
+ * the server refuses `/export` for a restricted or unavailable report, and the
+ * page does not link to a refusal.
+ */
+function ReportExport({ report }: { report: ReportSummary }): ReactNode {
+  if (!report.capabilities.export)
+    return (
+      <p className="dim">
+        {report.replayability === "restricted"
+          ? "根拠にした記録の利用が制限されたため、書き出しはできません。"
+          : "保存内容を読み出せないため、書き出しはできません。"}
+      </p>
+    );
+  return (
+    <>
+      <p>
+        <a
+          className="button"
+          href={reportExportUrl(report.reportId)}
+          download={`${report.reportId}.json`}
+        >
+          保存内容を書き出す（JSON）
+        </a>
+      </p>
+      <p className="dim">保存されたときの内容をそのまま書き出します。計算し直しません。</p>
+    </>
+  );
+}
+
 function ExplanationContent({ data }: { data: ReportExplanation }): ReactNode {
   const node = data.explanation;
   const manifest = node.inputManifest;
@@ -467,6 +498,7 @@ function ReportContent({ detail }: { detail: ReportDetail }): ReactNode {
       <Panel id="report-facts" title="レポートの記録">
         <div className="panel-body">
           <ReportFacts report={report} detail={detail} />
+          <ReportExport report={report} />
           {"events" in detail ? (
             <>
               <h3>出来事</h3>

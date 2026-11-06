@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import {
+  COLON_ID,
   COMPLETE_ID,
   completeDetail,
   explanationOf,
@@ -52,6 +53,7 @@ describe.if(runnable)("fixed report artifacts", () => {
     if (id === COMPLETE_ID) return Response.json(completeDetail());
     if (id === RESTRICTED_ID) return Response.json(partialDetail(RESTRICTED_ID, "restricted"));
     if (id === UNEXPLAINED_ID) return Response.json(partialDetail(UNEXPLAINED_ID));
+    if (id === COLON_ID) return Response.json(partialDetail(COLON_ID));
     if (id === MISSING_ID) return Response.json(missingDetail());
     if (id === MISMATCH_ID)
       return Response.json({ error: "report_digest_mismatch" }, { status: 503 });
@@ -74,11 +76,15 @@ describe.if(runnable)("fixed report artifacts", () => {
           requests.push(url);
           return Response.json(listPage(Number(url.searchParams.get("offset") ?? "0"), STORED));
         }
-        const match = /^\/api\/v2\/reports\/([^/]+)(\/explanation)?$/u.exec(url.pathname);
+        const match = /^\/api\/v2\/reports\/([^/]+)(\/explanation|\/export)?$/u.exec(url.pathname);
         if (match) {
           requests.push(url);
           const id = decodeURIComponent(match[1]!);
           if (match[2] === undefined) return detailFor(id);
+          if (match[2] === "/export")
+            return id === PARTIAL_ID || id === COLON_ID
+              ? Response.json({ ...partialDetail(id), view: "export" })
+              : Response.json({ error: "evidence_restricted" }, { status: 403 });
           if (id === PARTIAL_ID) return Response.json(explanationOf(partialDetail()));
           if (id === COMPLETE_ID) return Response.json(explanationOf(completeDetail()));
           return Response.json({ error: "not_found" }, { status: 404 });
@@ -203,6 +209,41 @@ describe.if(runnable)("fixed report artifacts", () => {
       .waitFor();
     expect(await page.locator("main").innerText()).toContain("根拠の利用が制限されている");
     expect(explanationRequests()).toHaveLength(0);
+    await page.close();
+  }, 30_000);
+
+  test("the export is offered only where the report's capabilities allow it", async () => {
+    const exportLink = (page: Page) =>
+      page.getByRole("link", { name: "保存内容を書き出す（JSON）" });
+    for (const id of [PARTIAL_ID, COMPLETE_ID]) {
+      const page = await open(`/reports/${id}`, "評価レポートの内容");
+      await page.getByRole("region", { name: "保有資産ごとの評価" }).waitFor();
+      expect(await exportLink(page).getAttribute("href")).toBe(`/api/v2/reports/${id}/export`);
+      await page.close();
+    }
+    // A restricted or unavailable report is refused by the server: no link to a refusal.
+    const restricted = await open(`/reports/${RESTRICTED_ID}`, "評価レポートの内容");
+    await restricted.getByRole("region", { name: "保有資産ごとの評価" }).waitFor();
+    await restricted
+      .getByText("根拠にした記録の利用が制限されたため、書き出しはできません。")
+      .waitFor();
+    expect(await exportLink(restricted).count()).toBe(0);
+    await restricted.close();
+    const missing = await open(`/reports/${MISSING_ID}`, "評価レポートの内容");
+    await missing.getByText("保存内容を読み出せないため、書き出しはできません。").waitFor();
+    expect(await exportLink(missing).count()).toBe(0);
+    await missing.close();
+    // The id is one encoded path segment, and the link downloads the export.
+    const page = await open(`/reports/${encodeURIComponent(COLON_ID)}`, "評価レポートの内容");
+    await page.getByRole("region", { name: "保有資産ごとの評価" }).waitFor();
+    const link = exportLink(page);
+    expect(await link.getAttribute("href")).toBe("/api/v2/reports/rpt-synthetic%3Aexport.1/export");
+    const [download] = await Promise.all([page.waitForEvent("download"), link.click()]);
+    expect(new URL(download.url()).pathname).toBe(
+      "/api/v2/reports/rpt-synthetic%3Aexport.1/export",
+    );
+    expect(requests.filter((url) => url.pathname.endsWith("/export"))).toHaveLength(1);
+    await download.cancel();
     await page.close();
   }, 30_000);
 
