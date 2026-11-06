@@ -591,7 +591,8 @@ export async function queryCardPurchases(
   }
   if (details.size !== page.length) throw new Error("card_purchase_facts_invalid");
 
-  // One pass over current usage: the page's current keys and the unrecognised count.
+  // One pass over current usage: the page's current keys, the unrecognised
+  // count and the unrecognised rows, each named by its closed reason.
   const current = await sql.all<CurrentRow>(CARD_PURCHASE_CURRENT_SQL, [
     0,
     -1,

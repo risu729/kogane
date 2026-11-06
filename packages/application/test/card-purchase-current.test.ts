@@ -36,8 +36,11 @@ function executor(db: Database): SqlExecutor {
   };
 }
 
-const project = (row: Record<string, unknown>) =>
-  Object.fromEntries(CARD_USAGE_FACT_COLUMNS.map((column) => [column, row[column]]));
+/** A row narrowed to the columns recognition classifies. */
+const project = (row: object) =>
+  Object.fromEntries(
+    CARD_USAGE_FACT_COLUMNS.map((column) => [column, (row as Record<string, unknown>)[column]]),
+  );
 
 /** The reasons the seeds reported, for the coverage check. */
 const reported = new Set<CardUsageUnrecognizedReason>();
