@@ -123,7 +123,10 @@ function HoldingRow({ holding }: { holding: HoldingChange }): ReactNode {
       <td>
         <Badge tone={status.tone}>{status.label}</Badge>
         {holding.reasons.length === 0 ? null : (
-          <ul className="warning-list" aria-label="比較できない理由">
+          <ul
+            className="warning-list"
+            aria-label={`${holding.key.securityCode} を比較できない理由`}
+          >
             {holding.reasons.map((reason) => (
               <li key={reason}>{label(REASON, reason)}</li>
             ))}

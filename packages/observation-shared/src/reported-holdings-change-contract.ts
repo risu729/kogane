@@ -257,6 +257,37 @@ function validFilters(value: unknown): boolean {
   );
 }
 
+/** The manifest's reference to one side, as the domain writes it. */
+function sideRef(side: Record<string, unknown>): unknown {
+  if (side.state === "listed") return side.positionRef;
+  if (side.state === "listed_more_than_once") return (side.positionRefs as string[]).join(",");
+  return side.state;
+}
+
+const KEY_FIELDS = [...CONTAINER_KEYS, "sourceAccount", "market", "securityCode"] as const;
+const sameList = (a: unknown, b: unknown): boolean =>
+  Array.isArray(a) &&
+  Array.isArray(b) &&
+  a.length === b.length &&
+  a.every((entry, index) => entry === b[index]);
+
+const sameFilters = (a: unknown, b: unknown): boolean =>
+  record(a) && record(b) && a.source === b.source && a.account === b.account;
+
+/** Each manifest entry describes the body's holding at the same index. */
+function manifestEntryAgrees(entry: Record<string, unknown>, holding: unknown): boolean {
+  if (!record(holding)) return false;
+  const key = entry.key as Record<string, unknown>;
+  const holdingKey = holding.key as Record<string, unknown>;
+  return (
+    KEY_FIELDS.every((field) => key[field] === holdingKey[field]) &&
+    entry.status === holding.status &&
+    sameList(entry.reasons, holding.reasons) &&
+    entry.start === sideRef(holding.start as Record<string, unknown>) &&
+    entry.end === sideRef(holding.end as Record<string, unknown>)
+  );
+}
+
 function validManifest(value: unknown, body: Record<string, unknown>): boolean {
   return (
     record(value) &&
@@ -277,6 +308,7 @@ function validManifest(value: unknown, body: Record<string, unknown>): boolean {
     value.from === body.from &&
     value.to === body.to &&
     validFilters(value.filters) &&
+    sameFilters(value.filters, body.filters) &&
     value.quantityPolicy === body.quantityPolicy &&
     record(value.reportedContextIds) &&
     exactKeys(value.reportedContextIds, ["start", "end"]) &&
@@ -294,7 +326,10 @@ function validManifest(value: unknown, body: Record<string, unknown>): boolean {
         validReasons(entry.reasons),
     ) &&
     Array.isArray(body.holdings) &&
-    value.holdings.length === body.holdings.length
+    value.holdings.length === body.holdings.length &&
+    value.holdings.every((entry, index) =>
+      manifestEntryAgrees(entry as Record<string, unknown>, (body.holdings as unknown[])[index]),
+    )
   );
 }
 

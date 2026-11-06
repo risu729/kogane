@@ -128,6 +128,28 @@ describe("reported holdings change HTTP contract", () => {
     expect(mutate((copy) => copy["holdings"].pop())).toBe(false);
     expect(mutate((copy) => delete copy["coverage"])).toBe(false);
     expect(mutate((copy) => (copy["manifest"]["to"] = "2026-09-11"))).toBe(false);
+    // The manifest describes the body it came with, holding by holding.
+    expect(mutate((copy) => (copy["manifest"]["filters"]["account"] = "acct-sbi"))).toBe(false);
+    expect(
+      mutate((copy) => (copy["manifest"]["holdings"][compared]["status"] = "not_comparable")),
+    ).toBe(false);
+    expect(mutate((copy) => (copy["manifest"]["holdings"][startOnly]["end"] = "listed"))).toBe(
+      false,
+    );
+    // (A fresh key object: the query's manifest shares the holding's key until serialized.)
+    expect(
+      mutate(
+        (copy) =>
+          (copy["manifest"]["holdings"][compared]["key"] = {
+            ...copy["manifest"]["holdings"][compared]["key"],
+            securityCode: "9999",
+          }),
+      ),
+    ).toBe(false);
+    expect(mutate((copy) => (copy["manifest"]["holdings"][unreadable]["reasons"] = []))).toBe(
+      false,
+    );
+    expect(mutate((copy) => copy["manifest"]["holdings"].reverse())).toBe(false);
     expect(mutate((copy) => (copy["from"] = "2026-09-10"))).toBe(false);
     expect(mutate((copy) => (copy["contextId"] = "not-a-digest"))).toBe(false);
   });

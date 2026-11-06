@@ -138,6 +138,10 @@ describe.if(runnable)("reported holdings change between two dates", () => {
     expect(region).toContain("基準日だけに記載");
     expect(region).toContain("基準日の数量を正確に読み取れません");
     expect(region).toContain("開始日までにこの取得元の完全な取得結果がありません");
+    // Each row's reasons are their own list, named after the holding.
+    expect(
+      await page.getByRole("list", { name: "1004 を比較できない理由", exact: true }).innerText(),
+    ).toContain("基準日の数量を正確に読み取れません");
     // The provider's quantities as reported, and the absent side as a status.
     expect(region).toContain("12.5");
     expect(region).toContain("unreadable");

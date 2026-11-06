@@ -250,8 +250,9 @@ so there is none to mirror.
   exact decimal-v1 quantity (decimal strings) in the holding's unit, and
   `null` for `listed_at_*_only` and `not_comparable`, the one-date statuses
   facing a `not_listed` side; counts equal to the holdings; `total` and
-  `valuation` `"not-computed"`; the manifest's dates, policy and length
-  matching the body. The lists are imported from `packages/domain`, which the
+  `valuation` `"not-computed"`; the manifest's dates, filters and policy
+  matching the body, and its holdings matching the body's one by one (key,
+  each side's reference, status and reasons). The lists are imported from `packages/domain`, which the
   client already bundles; the client recalculates nothing.
 - **Page.** A panel `保有数量の変化` on the `/state` page (shown while
   `reportedStateOnDate` is; no new capability, since the route is served on
@@ -283,18 +284,25 @@ so there is none to mirror.
   (the clock faked while each is recorded); the validated answer (compared,
   start-only and end-only rows, and a missing start capture as a reason),
   nothing written, any signed-in subject served and an anonymous one refused,
-  GET-only, every closed refusal and its status, the 413 on a dated read past
-  its bound, and absence where the views are missing.
+  GET-only, every closed refusal and its status, `date_in_future` flipping at
+  Tokyo midnight exactly where the reported state's does, the 413 on a dated
+  read past its bound, and absence where the views are missing.
 - `services/app/test/mcp-client.test.ts`: an MCP-application token is refused
   on the route.
 - `apps/web/test/reported-holdings-change-contract.test.ts`: the query's own
   answers pass on four ranges, and a total, a valuation, a figure on a
   one-date or not-comparable row, a missing or out-of-order reason, an unknown
   status or side state, a change in another unit or not exact, wrong counts, a
-  dropped holding or coverage and a mismatched manifest are refused.
+  dropped holding or coverage and a manifest that does not describe the
+  body (dates, filters, a holding's status, side, key or reasons, its order)
+  are refused.
 - `apps/web/test/reported-holdings-change.browser.test.ts`: in the production
   client, nothing is asked before a start date is chosen; the request carries
   `from` and the page's date; compared rows show `+2.5`, `±0` and `-3.5`, the
   other rows `数値なし` with their status and reasons; no sum appears; a start
   date on or after the 基準日 cannot be asked; a 413 says so; and the page
   has no sideways scroll at desktop and phone widths.
+- `apps/web/test/quantity-change.test.ts`: `QuantityChange` writes `+`, `-`
+  or `±0` and every digit of the exact decimal (18 fraction digits, more
+  integer digits than a Number holds), and a change that is not exact as
+  unknown.

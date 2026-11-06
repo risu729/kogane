@@ -204,8 +204,9 @@ is after today in Tokyo, `404 unknown_source` and `404 unknown_account`, and
 valuation, a sum), any status, reason or side state outside the closed lists,
 reasons out of the domain's order or missing a side's own reason, a change on
 a row that is not `compared`, a change that is not an exact decimal in the
-holding's unit, counts that do not match the holdings, and a manifest whose
-dates or length differ from the body.
+holding's unit, counts that do not match the holdings, and a manifest that
+does not describe the body (its dates, filters, and each holding's key, side
+references, status and reasons, in the body's order).
 
 The `/state` page carries a panel 保有数量の変化 while `reportedStateOnDate`
 is advertised (no capability of its own: the route is served on the same

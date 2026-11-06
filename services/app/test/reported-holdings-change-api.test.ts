@@ -271,6 +271,20 @@ describe("reported holdings change between two dates", () => {
     }
   });
 
+  it("decides a future date at Tokyo midnight, as the reported state does", async () => {
+    const tomorrow = "?from=2026-09-03&to=2026-09-11";
+    // 23:59:59 on 2026-09-10 in Tokyo: the 11th is still tomorrow.
+    vi.setSystemTime(new Date("2026-09-10T14:59:59.000Z"));
+    const before = await call(PATH + tomorrow);
+    expect(before.status).toBe(400);
+    expect(((await before.json()) as { error: string }).error).toBe("date_in_future");
+    expect((await call(`/api/v2/reported-state?date=2026-09-11`)).status).toBe(400);
+    // 00:00 on 2026-09-11 in Tokyo (still the 10th in UTC): both routes answer it.
+    vi.setSystemTime(new Date("2026-09-10T15:00:00.000Z"));
+    expect((await call(PATH + tomorrow)).status).toBe(200);
+    expect((await call(`/api/v2/reported-state?date=2026-09-11`)).status).toBe(200);
+  });
+
   it("refuses a read past the row bound with 413 rather than a cut answer", async () => {
     const response = await call(PATH + RANGE, { full: true });
     expect(response.status).toBe(413);
