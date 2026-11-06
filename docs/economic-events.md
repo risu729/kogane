@@ -28,7 +28,7 @@ while `RECONCILIATION_ENABLED` is off.
 
 The implemented Vpass and MyJCB pending/posted slices below are the starting
 point for phases 6–7, not completion of reconciliation or event generation. The
-[next product milestone](roadmap.md#phases-67--reconciliation-and-economic-event-generation)
+[next product milestone](roadmap.md#layers-67--reconciliation-and-economic-event-generation)
 builds on them with card statements and bank debits, review/correction and an
 explanation from purchase through settlement to source evidence. Event, leg,
 allocation and settlement tables still need continuous population from the
@@ -37,17 +37,18 @@ produce the complete economic event or its balance effect.
 
 ## What is automatic and what is proposal-only
 
-| Step                                                      | Who does it                                                                               |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Producing stage A candidates from published observations  | The rule job, whenever `RECONCILIATION_ENABLED` is on                                     |
-| Accepting a candidate                                     | A decision in the decision log, through a guarded command                                 |
-| Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision                                       |
-| Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision                                     |
-| Pairing a recognised pending event with posted events     | The purchase lane's candidate pass: proposals only                                        |
-| Merging a pending and a posted event into one purchase    | A reviewed `relation.accept` (change lifecycle)                                           |
-| Merging a pair the provider itself linked                 | The purchase lane, **still** as recorded `rule` decisions                                 |
-| Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)                                  |
-| Pairing an own-account debit and credit (own transfer)    | Proposal only ([below](#own-transfer-proposals-migration-0072)); nothing adopts one today |
+| Step                                                      | Who does it                                                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Producing stage A candidates from published observations  | The rule job, whenever `RECONCILIATION_ENABLED` is on                                             |
+| Accepting a candidate                                     | A decision in the decision log, through a guarded command                                         |
+| Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision                                               |
+| Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision                                             |
+| Pairing a recognised pending event with posted events     | The purchase lane's candidate pass: proposals only                                                |
+| Merging a pending and a posted event into one purchase    | A reviewed `relation.accept` (change lifecycle)                                                   |
+| Merging a pair the provider itself linked                 | The purchase lane, **still** as recorded `rule` decisions                                         |
+| Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)                                          |
+| Pairing an own-account debit and credit (own transfer)    | Proposal only ([below](#own-transfer-proposals-migration-0072)); nothing adopts one today         |
+| Allocating several bank debits to one card statement      | A pure planner only ([ADR 0074](adr/0074-card-statement-allocation-planner.md)); nothing calls it |
 
 [Card purchase recognition](#card-purchase-recognition) runs only while
 `PURCHASE_RECOGNITION_ENABLED` is on, and only for single-payment rows with an
@@ -510,6 +511,12 @@ released`). The DB CHECK is unchanged.
   - `effectiveRate` and `referenceQuoteDifference` — the second returns
     `kind: "estimate"`, deliberately not a fee (UC21).
   - `legTotal` — a total for one basis and unit; two bases are never summed.
+- `src/card-settlement-allocation.ts` — `planCardStatementAllocations`
+  ([ADR 0074](adr/0074-card-statement-allocation-planner.md)): under an
+  explicit policy, the set of whole debits whose exact sum is a statement
+  total, `needs_review` when not unique, and `unsupported` with
+  `in_window_debits_below_total` / `debit_above_total` when no set sums
+  exactly. It computes no remainder and nothing calls it.
 - `src/reconcile.ts` — the stage A/B/C candidate matcher. It returns proposals
   with rationale codes only, always `status: "proposed"`, and
   `autoAcceptable: true` only when the provider itself linked the pair inside
@@ -1614,3 +1621,12 @@ an SBI Shinsei debit is admitted when a 0.1.3 run stored it and refused with
 refused while another writer holds the debit's key or alias class
 (`claim_available`); a withdrawal releases the claim. The event revision cites
 its statement and bank rows as `SourceFactRef` objects.
+
+A statement is paired with one debit of equal amount only. A statement two
+debits pay together, or one debit pays in part, gets no candidate and no
+reason from the sweep. The pure planner of
+[ADR 0074](adr/0074-card-statement-allocation-planner.md)
+([card settlements](card-settlements.md#multiple-debits-and-partial-payments-adr-0074))
+states those cases in closed codes, but no lane, table, page or writer uses
+it, so a multi-debit statement still cannot be accepted, and partial
+payments and refunds against a statement have no model.

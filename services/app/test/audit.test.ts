@@ -26,6 +26,7 @@ import {
   RECONSTRUCTED_STATE_TOOL_NAME,
 } from "../src/agent-service";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
+import { validAuditPage } from "../../../packages/observation-shared/src/audit-contract";
 import { OPS_MCP_TOOLS } from "../src/ops-tools";
 
 /** A provider line with a token-shaped value and an amount in it. */
@@ -897,6 +898,8 @@ describe("the operator's read and the never-recorded list", () => {
       cursor: string | null;
     };
     expect(body.schemaVersion).toBe("kogane-audit-page-v1");
+    // The 監査ログ page's own check accepts what the route serves.
+    expect(validAuditPage(body)).toBe(true);
     expect(body.records.length).toBeGreaterThan(0);
     expect(body.records.length).toBeLessThanOrEqual(50);
     expect(body.records.every((record) => record.result === "refused")).toBe(true);
@@ -912,7 +915,12 @@ describe("the operator's read and the never-recorded list", () => {
   it("no record holds provider text, a token-shaped value or an amount", async () => {
     const rows = (await env.DB.prepare("SELECT * FROM audit_records").all()).results;
     expect(rows.length).toBeGreaterThan(10);
-    const stored = JSON.stringify(rows);
+    // Random UUIDs and 32- or 64-character hex ids can contain the digits of the synthetic
+    // amount by chance (for example `…-740e72498765`), so they are masked
+    // before the search; an amount stored anywhere else is still found.
+    const stored = JSON.stringify(rows)
+      .replaceAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<uuid>")
+      .replaceAll(/(?<![0-9a-f])(?:[0-9a-f]{64}|[0-9a-f]{32})(?![0-9a-f])/g, "<hex>");
     for (const needle of NEEDLES) expect(stored).not.toContain(needle);
   });
 });
