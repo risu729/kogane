@@ -82,9 +82,12 @@ Chromium with synthetic answers.
 
 Two limits were left open above: the detail page did not offer
 `/api/v2/reports/{id}/export`, and no agent or MCP tool reads reports. No
-agent tool reads a report by id either (`src/read-tools.ts`,
-`src/agent-service.ts` and `src/mcp.ts` publish none), so the question is
-whether to add a list, a list and a detail read, or neither.
+agent tool reads a report by id either (`services/app/src/read-tools.ts`,
+`agent-service.ts` and `mcp.ts` publish none), so the question is whether to
+add a list, a list and a detail read, or neither. The
+[AI operation path plan](../plans/2026-10-ai-operation-path.md#53-reads-searches-and-details)
+lists a detail and explanation read as row D18 (`kogane.reports.read`, new,
+`/export` not exposed).
 
 ### Options considered
 
@@ -101,7 +104,9 @@ Choose option 3.
   one path segment, a same-origin `download` link that is never fetched or
   parsed by the client) only while the report's `capabilities.export` is
   true. That is exactly when the reader serves it: it refuses `/export` for
-  a `restricted` report (`evidence_restricted`) and an `unavailable` one,
+  a `restricted` report (`403 evidence_restricted`) and for one whose body
+  is gone (`403 evidence_restricted` without a complete run, else
+  `404 not_found`), which the detail route shows as `unavailable`,
   and the client contract already requires those capabilities to be
   `replayCapabilities(replayability)` and a missing body to be
   `unavailable`. A report without export says why, and no link points at a
@@ -120,7 +125,10 @@ Choose option 3.
   the other whole-store reads), published only while `/api/meta` reports
   `reportArtifacts`, refusing a restricted or unavailable report outright,
   never exposing `/export`, with HTTP and MCP parity and the common R0 read
-  audit.
+  audit. This refines plan row D18: the list is added with the detail, an
+  explanation read is refused wherever the detail read is, and because the
+  operator reader returns a restricted report's body, the detail tool cannot
+  be a bare call of that reader as the plan's other rows are.
 
 ### Consequences
 
