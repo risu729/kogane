@@ -159,6 +159,19 @@ common bucketは種類未確認のまま一覧に残り、算定期限は `unava
 - 未確認の条件は「不可能」ではなく `needs_rule_verification` の別候補として返す。
 - 手数料は各hopの `fixedFees` をそのまま積む。変動手数料は `variableFeePolicyRef` の参照のみで、
   金額は計算しない。
+- The offer set is read once and bounded by one reader page: `CONVERSION_OFFERS_SQL` reads
+  `REWARD_PAGE_LIMIT + 1` (201) rows in `offer_id, version` order, the same read and bound
+  (200) as the READ capture. Every `/offers/simulate` answer carries
+  `offerCoverage: {limit: 200, truncated}`. When more than 200 offers match (all stored
+  offers for a goal search, or the named offer's versions), nothing is computed: the answer
+  is `simulation: null`, `searchCoverage: "bounded"`, `offerCoverage.truncated: true` and
+  `reasonCodes: ["offer_set_too_large"]`, with no `paths` or `rejected` list, so an unread
+  offer never reads as "no path" or as a shorter candidate list (INV05). The route does not
+  page past the bound. An answer with `truncated: false` read every matching stored offer;
+  the depth, candidate and expansion caps still make it `bounded`. Open limit: the answer
+  carries `budget` but not the search's `expansions`, so it does not say whether
+  `maxExpansions` (500 offer examinations across all hops) stopped the search early
+  ([ADR 0049 amendment 2026-11-06](adr/0049-reward-expiry-basis.md#amendment-bounded-offer-set-for-offer-simulation)).
 
 ## 5. 価値の扱い
 
@@ -222,6 +235,8 @@ route を広告することはない。未知の reward path は 404 であり�
 | `GET /api/v2/rewards/offers/simulate` | 純粋なquery。offer指定なら単発simulation、goal指定なら深さ制限つき経路探索 |
 
 すべて GET で、書き込みも外部通信も行わない。`Page<T>` = `{rows, coverage:{limit,truncated,nextOffset}}`。
+`/offers/simulate` is not paged: it reads at most 200 offers and reports the bound in
+`offerCoverage`, refusing with `offer_set_too_large` beyond it (§4).
 `offset` はbucket行を歩く。読み取りは公開済みparse runに結び付いたclaimだけを見るため、
 publication pointerの巻き戻しはreward側の表示からも同時に消える。
 

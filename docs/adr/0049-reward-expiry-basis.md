@@ -373,3 +373,73 @@ Domain/API/web tests keep dated and undated unknown buckets, quantities and
 source refs, refuse computed/converted quantities, and render 種類未確認.
 Migration/promotion tests preserve v1 rows, re-promote with the new release,
 enforce append-only/current-publication guards and bump the source revision.
+
+## Amendment: bounded offer set for offer simulation
+
+- Status: proposed; accepted upon merge
+- Date: 2026-11-06
+
+No ADR recorded the offer read of `GET /api/v2/rewards/offers/simulate`.
+This ADR's rule, that a gap is reported rather than filled, is the one the
+route broke, so the decision is recorded here.
+
+### Context
+
+The route read the offer set through the reward reader's `offers` page:
+`CONVERSION_OFFERS_SQL` in `offer_id, version` order with
+`LIMIT REWARD_PAGE_LIMIT + 1` (201). It used `rows` (at most 200) and ignored
+`coverage.truncated`. With 201 or more stored offers a goal search ran over
+the first 200 only: an offer outside that page could not appear, so a path
+that needed it came back as `paths: []`, indistinguishable from "no path among
+the stored offers", and the candidate and `rejected` lists could be narrower
+than the stored set without saying so. `searchCoverage: "bounded"` described
+the depth and candidate caps, not this. The READ capture already reads the
+same query and refuses a larger set with `offer_set_too_large` (OFFER_BOUND
+200 in `services/processor/src/reward-read-projection.ts`).
+
+### Options considered
+
+1. Keep the single page and answer from it with a `truncated` flag beside
+   the paths. Every existing field would still look complete to a caller that
+   ignores the flag; rejected.
+2. Page through every offer deterministically. This is unbounded D1 work on a
+   GET, while the search itself stops after `maxExpansions` (500) offer
+   examinations across all hops, so it would still not see every offer of a
+   large set; and it would diverge from the READ capture's bound; rejected.
+3. Read once up to the existing bound, report the bound on every answer, and
+   refuse with a closed code when it is exceeded, as the READ capture does.
+
+### Decision
+
+Option 3. Every `/offers/simulate` answer carries
+`offerCoverage: {limit, truncated}` from the reader page (`limit` is
+`REWARD_PAGE_LIMIT`, 200). When `truncated` is true nothing is computed: the
+answer is `simulation: null`, `searchCoverage: "bounded"`, the
+`offerCoverage`, `reasonCodes: ["offer_set_too_large"]` and the search
+release, with no `paths` and no `rejected` list. The check precedes the
+`no_stored_offer` answer and applies to both forms of the request: a goal
+search reads every stored offer, a named offer reads that offer's versions.
+No query, bound, page size, search budget, domain function or evaluation
+calendar changes; the reader already reported the truncation.
+
+### Consequences
+
+An answer computed from offers always read every matching stored offer
+(`truncated: false`). Beyond 200 stored offers goal search is unavailable
+until the bound is revisited together with the READ capture's `OFFER_BOUND`
+and the search's expansion budget. The answer still does not report the
+search's `expansions`, so whether `maxExpansions` stopped a search early is
+not visible; that is an open limit, not covered by this amendment. No client
+in the repository reads this route (the web app, MCP tools and the shared
+response validators do not), so the additive field and the refusal change no
+consumer.
+
+### Verification
+
+`services/app/test/rewards-api.test.ts`: every answer (named offer, goal
+search, no stored offer) carries `offerCoverage {limit: 200, truncated:
+false}`. With 200 synthetic offers stored whose ids sort before the only
+offer that reaches the goal, the search answer before this change was
+`paths: []`; it is now `offer_set_too_large` with `truncated: true` and no
+`paths` or `rejected`, while a named-offer simulation of that offer still
+computes.

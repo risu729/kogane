@@ -57,7 +57,7 @@ for current behavior.
 - [ADR 0046: Maintenance windows as a separately granted agent capability](0046-agent-maintenance-windows.md) — proposed; amended 2026-10-09 by ADR 0063 (the revision is a delegated operation, refused until delegated execution exists)
 - [ADR 0047: Connect MCP clients through Cloudflare Access Managed OAuth, as an agent-only principal](0047-mcp-client-connection.md) — proposed; no client has connected to a deployment
 - [ADR 0048: Run an accepted collection or session refresh once through the named collector RPC](0048-operation-collector-dispatch.md) — accepted; production dispatch unverified
-- [ADR 0049: Keep the displayed and the computed reward expiry apart, each with its basis](0049-reward-expiry-basis.md) — accepted
+- [ADR 0049: Keep the displayed and the computed reward expiry apart, each with its basis](0049-reward-expiry-basis.md) — accepted; offer-simulation bound amended 2026-11-06 (proposed)
 - [ADR 0050: Re-survey official maintenance pages as proposals an operator accepts](0050-maintenance-survey-proposals.md) — accepted; no page enabled until the owner confirms it
 - [ADR 0051: A pure lot engine over a provisional input contract](0051-provisional-lot-engine.md) — accepted; its adapter is ADR 0059
 - [ADR 0052: Reconstructed state is a pure fold over a provisional adopted-event input, compared with reported snapshots](0052-reconstructed-state-fold.md) — accepted; amended by ADR 0058

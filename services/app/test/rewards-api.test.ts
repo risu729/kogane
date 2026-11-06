@@ -363,4 +363,65 @@ describe("reward reads", () => {
     ).toBe(400);
     expect((await get("/api/v2/rewards/offers/simulate?quantity=1000")).status).toBe(400);
   });
+
+  it("reports the offer bound on every simulate answer", async () => {
+    const named = (await (
+      await get("/api/v2/rewards/offers/simulate?offer=offer:synthetic-a-to-b&quantity=2500")
+    ).json()) as { offerCoverage: unknown };
+    expect(named.offerCoverage).toEqual({ limit: 200, truncated: false });
+    const search = (await (
+      await get("/api/v2/rewards/offers/simulate?goal=JPY&quantity=2500&unit=points:v-point")
+    ).json()) as { offerCoverage: unknown };
+    expect(search.offerCoverage).toEqual({ limit: 200, truncated: false });
+    const none = (await (
+      await get("/api/v2/rewards/offers/simulate?offer=offer:synthetic-absent&quantity=2500")
+    ).json()) as { offerCoverage: unknown; reasonCodes: string[] };
+    expect(none.reasonCodes).toEqual(["no_stored_offer"]);
+    expect(none.offerCoverage).toEqual({ limit: 200, truncated: false });
+  });
+
+  // Last in the file: it stores 200 more offers, and conversion_offers is
+  // append-only, so nothing after it may assume the single fixture offer.
+  it("refuses a goal search over an offer set larger than its bound instead of answering from part of it", async () => {
+    // 200 synthetic offers whose ids sort before the fixture offer, so the only
+    // offer that reaches JPY is the 201st row in the reader's order.
+    const filler = Array.from({ length: 200 }, (_, index) => ({
+      ...OFFER,
+      offer_id: `offer:synthetic-0-filler-${String(index).padStart(3, "0")}`,
+      from_unit_ref: "points:synthetic-filler",
+      to_unit_ref: "points:synthetic-filler-out",
+    }));
+    await env.DB.batch(
+      filler.map((row) =>
+        env.DB.prepare(
+          `INSERT INTO conversion_offers(${Object.keys(row).join(",")})
+           VALUES(${Object.keys(row)
+             .map((_, index) => `?${index + 1}`)
+             .join(",")})`,
+        ).bind(...Object.values(row)),
+      ),
+    );
+    const response = await get(
+      "/api/v2/rewards/offers/simulate?goal=JPY&quantity=2500&unit=points:v-point",
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    // Not "no path": the search did not run over a partial offer set, so the
+    // answer is a closed reason with the bound it hit, and no path list at all.
+    expect(body).not.toHaveProperty("paths");
+    expect(body).not.toHaveProperty("rejected");
+    expect(body.simulation).toBeNull();
+    expect(body.searchCoverage).toBe("bounded");
+    expect(body.offerCoverage).toEqual({ limit: 200, truncated: true });
+    expect(body.reasonCodes).toEqual(["offer_set_too_large"]);
+    // A named offer reads that offer's own versions, which stay within the bound.
+    const named = (await (
+      await get("/api/v2/rewards/offers/simulate?offer=offer:synthetic-a-to-b&quantity=2500")
+    ).json()) as {
+      offerCoverage: unknown;
+      simulation: { receive: { value: { value: { coefficient: string } } } };
+    };
+    expect(named.offerCoverage).toEqual({ limit: 200, truncated: false });
+    expect(named.simulation.receive.value.value.coefficient).toBe("1000");
+  });
 });
