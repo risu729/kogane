@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import {
   COLON_ID,
@@ -298,4 +299,15 @@ describe.if(runnable)("fixed report artifacts", () => {
       await page.close();
     }
   }, 30_000);
+
+  test("the list and a report pass the accessibility audit", async () => {
+    const list = await open("/reports", "評価レポート");
+    await list.getByRole("region", { name: "評価レポートの一覧" }).waitFor();
+    expect(await auditView(list)).toEqual([]);
+    await list.close();
+    const report = await open(`/reports/${PARTIAL_ID}`, "評価レポートの内容");
+    await report.getByRole("region", { name: "保有資産ごとの評価" }).waitFor();
+    expect(await auditView(report)).toEqual([]);
+    await report.close();
+  }, 60_000);
 });
