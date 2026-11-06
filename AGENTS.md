@@ -14,7 +14,7 @@ disagree, the document is right and this file is corrected.
 
 ## Continuing the work
 
-- [The roadmap](docs/roadmap.md#roadmap) is the work order. A merged PR is not a
+- [The roadmap](docs/roadmap.md#work-order) is the work order. A merged PR is not a
   stopping point: continue with the next unit of the current phase until its
   done-when holds, then the next phase.
 - Issues track individual items; the roadmap names which issues belong to which
@@ -60,7 +60,8 @@ disagree, the document is right and this file is corrected.
 
 - `CI Check` is the required status. It passes only when `Checks` and both
   `Processor` shards succeed ([ci](docs/ci.md#jobs-and-the-required-merge-guard)).
-  The ruleset also blocks merges on CodeQL alerts of high severity or above.
+  The ruleset also blocks merges on CodeQL security alerts of high severity or
+  above and on CodeQL alerts of error level.
 - CI has no path filters, retries or test selection. Do not add any.
 - Never skip, disable, quarantine, retry or loosen a test or a deadline to make CI
   pass. Fix the cause, or open a separate PR for the flaky test that explains the
@@ -76,7 +77,7 @@ again.
 
 ## Merging
 
-Every merge to `main` releases every Worker to production through
+Every merge to `main` releases every Worker the release ledger marks `deploy` to production through
 [deploy.yml](.github/workflows/deploy.yml) ([CI/CD](docs/ci-cd.md#continuous-deployment)).
 
 Agents act through the owner's GitHub account, which has admin rights and can
@@ -121,7 +122,7 @@ workflow or action update).
 After a merge, delete the branch if GitHub did not, and close PRs the merge
 superseded with a comment linking it. An agent never pushes to, closes or
 reopens a PR that is not its own, except to close one its own merged PR
-superseded. A branch that is the base of an open PR is still in use.
+superseded, or a PR the owner assigned to agents in the roadmap. A branch that is the base of an open PR is still in use.
 
 ## Pull request text
 

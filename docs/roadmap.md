@@ -13,7 +13,7 @@ not a fresh measurement of the deployed system. Historical infrastructure
 completion evidence belongs in [legacy retirement](legacy-retirement.md) and
 the relevant rollout records.
 
-## Roadmap
+## Work order
 
 This section is the work order. Agents continue with the next unit of the
 current phase after each merged PR, until the phase's done-when holds; then the
@@ -28,7 +28,7 @@ The owner adopted these phases on 2026-11-06 (13:25 UTC) and said their order ma
 ### Phase 1 — Land or close the open work and re-baseline
 
 On 2026-11-06 at 12:45 UTC, 45 pull requests were open: 32 agent PRs opened
-that day (#922–#957), all with a green `CI Check`; 9 older agent PRs from
+that day (#922–#957), all with a green `CI Check`; 9 older PRs from agent sessions (Codex, Cursor and others) from
 2026-10-04 to 2026-11-04 (8 of them drafts); and 4 Renovate PRs. 74 branches
 existed. The [status page](current-status.md) was last reviewed on 2026-10-05.
 
@@ -45,7 +45,7 @@ this roadmap are re-reviewed against a stated `main` SHA.
 The owner decided on 2026-11-06 (12:49 UTC) that this project's threads fix
 and merge the `claude/adoring-faraday-…` PRs. That session keeps working on
 other accounts but does not merge, and marks the PRs it is still changing as
-drafts. A unit skips a PR while it is a draft.
+drafts. A unit skips a PR while it is a draft. The owner also assigned the older PRs in unit 1i to this project's threads.
 
 The units run in five threads: 1a with 1c; 1b with 1d; 1e with 1g; 1f; and 1h with 1i. Unit 1j follows them. Reviews run in parallel, but merges go through one
 queue: 16 of these PRs touch `docs/current-status.md` and 14 touch
