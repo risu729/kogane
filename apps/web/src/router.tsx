@@ -142,10 +142,14 @@ function parseId(value: string | undefined): number | undefined {
   return Number.isSafeInteger(id) ? id : undefined;
 }
 
+/** One trailing slash names the same page; only one is removed, so `//` is still distinct. */
+export function trimTrailingSlash(path: string): string {
+  return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+}
+
 export function matchRoute(path: string): Route {
-  // One trailing slash names the same page, as it already does for the
-  // segment routes below.
-  const trimmed = path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+  // As the segment routes below already allow, so do the pattern routes.
+  const trimmed = trimTrailingSlash(path);
   const ownership = /^\/reconciliation\/([A-Za-z0-9_-]{1,128})\/ownership$/u.exec(trimmed);
   if (ownership) return { name: "cardOwnership", proposalId: ownership[1]! };
   const purchase = /^\/purchases\/((?:purchase|refund)_[0-9a-f]{64})$/u.exec(trimmed);

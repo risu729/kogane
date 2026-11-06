@@ -17,7 +17,7 @@ import { ArtifactsPage } from "./pages/Artifacts.tsx";
 import { ArtifactDetailPage } from "./pages/ArtifactDetail.tsx";
 import { ObservationDetailPage } from "./pages/ObservationDetail.tsx";
 import { NotFoundPage } from "./pages/NotFound.tsx";
-import { EvidenceContent } from "./evidence-app.tsx";
+import { EvidenceContent, isEvidencePath } from "./evidence-app.tsx";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
 import { GlobalPassEmptyMonthsNotice } from "./global-pass-empty-months.tsx";
 import { IdentitiesPage } from "./pages/Identities.tsx";
@@ -165,8 +165,7 @@ export function App(): ReactNode {
         ? (SOURCE_KIND_LABELS[metadata.data?.source.kind ?? ""] ?? "保存された記録に接続")
         : "接続を確認できません";
 
-  const evidenceRoute =
-    features.evidenceHistory && (path === "/evidence" || path.startsWith("/runs/"));
+  const evidenceRoute = features.evidenceHistory && isEvidencePath(path);
   const navItems: NavItem[] = NAV.filter((item) => !item.feature || features[item.feature]).map(
     (item) => ({
       to: item.to,

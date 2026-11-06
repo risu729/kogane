@@ -1,5 +1,31 @@
 import { describe, expect, test } from "bun:test";
+import { isEvidencePath, routeFor } from "../src/evidence-app.tsx";
 import { matchRoute } from "../src/router.tsx";
+
+describe("evidence browser route matching", () => {
+  test("one trailing slash opens the same evidence route", () => {
+    for (const path of ["/evidence", "/schedules", "/runs/r_1", "/runs/r_1/artifacts/a_2"]) {
+      expect(routeFor(`${path}/`)).toEqual(routeFor(path));
+      expect(routeFor(path).kind).not.toBe("missing");
+    }
+    expect(routeFor("/runs/r_1/artifacts/a_2/")).toMatchObject({
+      kind: "artifact",
+      runId: "r_1",
+      artifactId: "a_2",
+    });
+    expect(isEvidencePath("/evidence/")).toBe(true);
+    expect(isEvidencePath("/evidence")).toBe(true);
+    expect(isEvidencePath("/runs/r_1/")).toBe(true);
+  });
+
+  test("a trailing slash does not widen the evidence ids or paths", () => {
+    for (const path of ["/runs/r_0/", "/runs/r_1/artifacts/a_01/", "/runs/r_1/extra/", "/runs/"])
+      expect(routeFor(path).kind).toBe("missing");
+    expect(routeFor("/evidence//").kind).toBe("missing");
+    for (const path of ["/evidence-x", "/evidence/x", "/evidence//", "/transactions/"])
+      expect(isEvidencePath(path)).toBe(false);
+  });
+});
 
 describe("route matching", () => {
   test("one trailing slash opens the same route on every path, not only segment routes", () => {
