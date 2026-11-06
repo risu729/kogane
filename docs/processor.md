@@ -730,8 +730,13 @@ and `accepted`: its `dispatch_attempts` goes up by one, its `failure_code` is
 The queue is ordered by `available_at_ms`, so the request moves behind every
 request already due; the requests after it in the same tick are still
 dispatched, the collector executions are still tracked, and the lane tick is
-`ran`. It is registered on a later look once the cause is gone, and it is
-retried for as long as the cause lasts. If recording the attempt also fails
+`ran`. It is registered on a later look once the cause is gone; the
+`registration_failed` code stays on the request after that, as every retry
+code does, because a dispatch that names no code keeps the last one. **Open
+limit:** there is no cap. A throw that never goes away (a refusal no code
+classifies) is retried every five minutes for as long as the lane runs, one
+more `dispatch_attempts` and one more `failed` each time, and nothing closes
+the request. If recording the attempt also fails
 (CORE itself unavailable), that error fails the lane tick as any other D1
 error in the lane does.
 

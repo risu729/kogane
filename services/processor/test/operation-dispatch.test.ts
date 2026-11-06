@@ -351,5 +351,7 @@ test("an import whose registration throws moves behind the queue and never fails
   const recovered = await receipt(harness, queueHead);
   if (!recovered.ok) throw new Error("receipt missing");
   expect(recovered.receipt.dispatch).toMatchObject({ state: "dispatched", attempts: 2 });
+  // A dispatch that names no code keeps the last one (docs/processor.md §7).
+  expect(recovered.receipt.failureCode).toBe("registration_failed");
   expect(stageOf(recovered.receipt.stages, "registered")).toMatchObject({ state: "completed" });
 });

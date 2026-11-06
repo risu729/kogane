@@ -502,7 +502,9 @@ handing the work over. An import whose re-registration throws (R2 or CORE
 unavailable) neither fails the lane nor holds the head of the queue: it stays
 `dispatch_pending` with `failureCode: "registration_failed"`, one more
 dispatch attempt and a retry time five minutes ahead, while the requests
-behind it are dispatched in the same tick (`docs/processor.md` §7).
+behind it are dispatched in the same tick (`docs/processor.md` §7). It is
+retried with no cap, and the code stays on the record after a later look
+registers it, as every retry code does.
 
 The collector execution services are in
 `packages/application/src/operations/collector-dispatch.ts` (writes) and
