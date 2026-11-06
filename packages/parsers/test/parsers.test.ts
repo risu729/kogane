@@ -511,6 +511,62 @@ describe("paypay-csv", () => {
     expect(result.warnings.some((w) => w.includes("not documented"))).toBe(true);
   });
 
+  test("a signed outgoing amount is left empty with a closed warning", () => {
+    // No document records what a sign in the outgoing column means (ADR
+    // 0004), so neither reading of `-100` (a payment, or its reversal) is
+    // guessed.
+    const header =
+      "取引日,出金金額（円）,入金金額（円）,海外出金金額,通貨,変換レート（円）,利用国,取引内容,取引先,取引方法,支払い区分,利用者,取引番号\n";
+    const signed = ["-100", "△100", "▲100", "(100)", "+100", '"-1,180"'];
+    const csv =
+      header +
+      signed
+        .map(
+          (value, at) =>
+            `2026/08/01 00:00:00,${value},,,,,,支払い,店,PayPay残高,一括払い,本人,t-${at}\n`,
+        )
+        .join("");
+    const result = paypayCsv.parse(new TextEncoder().encode(csv), meta);
+    expect(result.observations).toHaveLength(signed.length);
+    result.observations.forEach((observation, at) => {
+      if (observation.kind !== "transaction") throw new Error("expected transaction");
+      expect(observation.amountMinor).toBeUndefined();
+      expect(observation.amountText).toBeUndefined();
+      expect(observation.amountScale).toBeUndefined();
+      expect(result.warnings).toContain(
+        `row ${at + 2}: outgoing amount carries a sign; provider-signed amounts are unsupported, amount left empty`,
+      );
+    });
+    // The closed warning names no value.
+    for (const warning of result.warnings) expect(warning).not.toMatch(/100|1,180/u);
+  });
+
+  test("a signed incoming amount is left empty with a closed warning", () => {
+    const header =
+      "取引日,出金金額（円）,入金金額（円）,海外出金金額,通貨,変換レート（円）,利用国,取引内容,取引先,取引方法,支払い区分,利用者,取引番号\n";
+    const signed = ["△5", "▲5", "-5", "(5)", "+5"];
+    const csv =
+      header +
+      signed
+        .map(
+          (value, at) => `2026/08/01 00:00:00,,${value},,,,,受け取り,人,PayPay残高,,本人,t-${at}\n`,
+        )
+        .join("");
+    const result = paypayCsv.parse(new TextEncoder().encode(csv), meta);
+    expect(result.observations).toHaveLength(signed.length);
+    result.observations.forEach((observation, at) => {
+      if (observation.kind !== "transaction") throw new Error("expected transaction");
+      expect(observation.amountMinor).toBeUndefined();
+      expect(observation.amountText).toBeUndefined();
+      expect(observation.amountScale).toBeUndefined();
+      // The verbatim row is still preserved as evidence.
+      expect(observation.extra["cells"]).toContain(signed[at]);
+      expect(result.warnings).toContain(
+        `row ${at + 2}: incoming amount carries a sign; provider-signed amounts are unsupported, amount left empty`,
+      );
+    });
+  });
+
   test("a row stating no amount at all is warned about", () => {
     const csv =
       "取引日,出金金額（円）,入金金額（円）,海外出金金額,通貨,変換レート（円）,利用国,取引内容,取引先,取引方法,支払い区分,利用者,取引番号\n" +

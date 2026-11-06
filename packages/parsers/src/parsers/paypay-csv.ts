@@ -77,6 +77,18 @@ function toIsoJst(value: string): string | undefined {
   return `${year}-${pad(month!)}-${pad(day!)}T${pad(hour!)}:${minute}:${second}+09:00`;
 }
 
+/**
+ * Whether an amount cell carries a sign of its own: a leading `+`, `-`, `△`
+ * or `▲`, or parentheses, the markers `amountToMinorUnits` would read. The
+ * column, not the cell, states the direction in this export, and no document
+ * or observation records what a signed outgoing or incoming value means (a
+ * reversal, a correction, or a display variant), so such a value is left
+ * without an amount rather than given a guessed direction (ADR 0004).
+ */
+function carriesSign(cell: string): boolean {
+  return /^[+\-△▲(]/u.test(cell) || cell.endsWith(")");
+}
+
 /** Locate each documented field in the header row. */
 function mapColumns(header: string[]): {
   index: Record<string, number>;
@@ -122,10 +134,14 @@ function mapColumns(header: string[]): {
 
 export const paypayCsv: Parser = {
   name: "paypay-csv",
+  // 0.2.2: an outgoing or incoming amount that carries its own sign (-, +,
+  // △, ▲ or parentheses) is left without an amount, with a closed warning,
+  // instead of being negated (outgoing) or transcribed (incoming); every
+  // unsigned amount reads as in 0.2.1.
   // 0.2.1: a transaction date or time that does not exist gives no asOf and
   // the "not recognized" warning instead of an impossible instant; every
   // existing date and time reads as in 0.2.0.
-  version: "0.2.1",
+  version: "0.2.2",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "paypay" && artifact.mime === "text/csv";
@@ -158,6 +174,14 @@ export const paypayCsv: Parser = {
       if (outgoing !== "" && incoming !== "") {
         warnings.push(
           `row ${rowNumber}: both outgoing and incoming amounts present; not conflated`,
+        );
+      } else if (outgoing !== "" && carriesSign(outgoing)) {
+        warnings.push(
+          `row ${rowNumber}: outgoing amount carries a sign; provider-signed amounts are unsupported, amount left empty`,
+        );
+      } else if (incoming !== "" && carriesSign(incoming)) {
+        warnings.push(
+          `row ${rowNumber}: incoming amount carries a sign; provider-signed amounts are unsupported, amount left empty`,
         );
       } else if (outgoing !== "") {
         amountVerbatim = outgoing;
