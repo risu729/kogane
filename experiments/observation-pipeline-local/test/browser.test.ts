@@ -146,9 +146,18 @@ describe.if(runnable)("evidence browser in a real browser", () => {
     "/no-such-view": "main h1",
   };
 
-  async function open(path: string, preparedPage?: Page): Promise<{ text: string; xss: boolean }> {
+  // An idle network can precede even the metadata fetch, and on a busy machine
+  // React may not have rendered by then. These existing markers are inside each
+  // view's data boundary (or the static 404 view), so a test reads a view's
+  // state only once its marker is visible.
+  async function viewReady(page: Page, path: string): Promise<void> {
     const selector = views[path];
     if (!selector) throw new Error(`No readiness marker for ${path}`);
+    await page.locator(selector).waitFor({ state: "visible", timeout: 10_000 });
+  }
+
+  async function open(path: string, preparedPage?: Page): Promise<{ text: string; xss: boolean }> {
+    if (!views[path]) throw new Error(`No readiness marker for ${path}`);
     const page = preparedPage ?? (await browser.newPage());
     page.on("console", (message) => {
       if (message.type() === "error") consoleErrors.push(`${path}: ${message.text()}`);
@@ -156,9 +165,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
     page.on("pageerror", (error) => consoleErrors.push(`${path}: ${error.message}`));
     try {
       await page.goto(baseUrl + path, { waitUntil: "networkidle" });
-      // An idle network can precede even the metadata fetch. These existing
-      // markers are inside each view's data boundary (or the static 404 view).
-      await page.locator(selector).waitFor({ state: "visible", timeout: 10_000 });
+      await viewReady(page, path);
       const text = await page.locator("body").innerText();
       const xss = await page.evaluate(() => (globalThis as { __xss?: boolean }).__xss === true);
       return { text, xss };
@@ -201,6 +208,9 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         const snapshot = open(path, page);
         try {
           await page.waitForURL(baseUrl + path, { waitUntil: "networkidle" });
+          // The gate holds every API request, so the loading state is stable
+          // once React has rendered it; an idle network does not imply that.
+          await page.getByText("接続情報を読み込んでいます").first().waitFor({ timeout: 10_000 });
           expect(await page.locator("body").innerText()).toContain("接続情報を読み込んでいます");
           expect(await page.locator(views[path]!).count()).toBe(0);
           await page.evaluate(() => {
@@ -270,6 +280,8 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         await page.goto(`${baseUrl}/observations/${kind}/1`, {
           waitUntil: "networkidle",
         });
+        // The raw link is part of the loaded record, not of the loading state.
+        await page.locator('a[href^="/api/raw/"]').first().waitFor({ timeout: 10_000 });
         const text = await page.locator("body").innerText();
         for (const step of ["解析", "原本", "取得"]) {
           expect(text).toContain(step);
@@ -403,6 +415,8 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       });
       for (const path of ["/", "/transactions", "/balances", "/positions", "/artifacts"]) {
         await page.goto(baseUrl + path, { waitUntil: "networkidle" });
+        // Measure the rendered view, not the page before React has drawn it.
+        await viewReady(page, path);
         const dimensions = await page.evaluate(() => ({
           width: window.innerWidth,
           document: document.documentElement.scrollWidth,
@@ -430,11 +444,13 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         await route.fulfill({ response: original, json: { transactions } });
       });
       await page.goto(`${baseUrl}/transactions`, { waitUntil: "networkidle" });
+      await viewReady(page, "/transactions");
       expect(await page.locator("tbody tr").count()).toBe(50);
       await page.getByRole("button", { name: "次へ", exact: true }).click();
       expect(await page.locator("tbody").innerText()).toContain("Pagination item 51");
       await page.getByRole("navigation").getByRole("link", { name: "残高", exact: true }).click();
       await page.goBack({ waitUntil: "networkidle" });
+      await viewReady(page, "/transactions");
       expect(await page.locator("tbody").innerText()).toContain("Pagination item 51");
       await page.getByLabel("内容を検索", { exact: true }).fill("Pagination item 125");
       expect(await page.locator("tbody tr").count()).toBe(1);
@@ -459,6 +475,9 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         });
       });
       await page.goto(`${baseUrl}/transactions`, { waitUntil: "networkidle" });
+      // Only a refresh after records loaded can preserve them; failing the
+      // first load instead would test a different state.
+      await viewReady(page, "/transactions");
       fail = true;
       await page.getByRole("button", { name: "表示を更新", exact: true }).click();
       await page.locator("main").getByRole("alert").waitFor();
@@ -522,7 +541,12 @@ describe.if(runnable)("evidence browser in a real browser", () => {
     async () => {
       const page = await browser.newPage();
       await page.goto(baseUrl, { waitUntil: "networkidle" });
-      expect(await page.title()).toBe("ホーム | kogane");
+      // The app sets the title in an effect once metadata has loaded and the
+      // view's heading exists; an idle network does not imply either, so wait
+      // for the title itself, as the navigation below does.
+      await page.waitForFunction(() => document.title === "ホーム | kogane", undefined, {
+        timeout: 10_000,
+      });
       const link = page.getByRole("navigation").getByRole("link", { name: "取引", exact: true });
       await link.focus();
       await page.keyboard.press("Enter");
@@ -534,8 +558,12 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         "search",
       );
       await page.goBack({ waitUntil: "networkidle" });
-      expect(await page.title()).toBe("ホーム | kogane");
-      expect(await page.evaluate(() => document.activeElement?.tagName)).toBe("H1");
+      // The same effect sets the title and moves focus after the view renders.
+      await page.waitForFunction(
+        () => document.title === "ホーム | kogane" && document.activeElement?.tagName === "H1",
+        undefined,
+        { timeout: 10_000 },
+      );
       await page.close();
     },
     TIMEOUT_MS,
@@ -559,6 +587,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       await page.locator("tbody").getByRole("link", { name: "詳細", exact: true }).click();
       await page.locator('a[href^="/api/raw/"]').first().waitFor();
       await page.goBack({ waitUntil: "networkidle" });
+      await viewReady(page, "/transactions");
       expect(await page.getByLabel("取得元", { exact: true }).inputValue()).toBe("demo-bank");
       expect(await page.getByLabel("開始日", { exact: true }).inputValue()).toBe("2026-08-20");
       expect(await page.getByLabel("終了日", { exact: true }).inputValue()).toBe("2026-08-20");
@@ -572,6 +601,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         0, 0,
       ]);
       await page.reload({ waitUntil: "networkidle" });
+      await viewReady(page, "/transactions");
       expect(await page.getByLabel("内容を検索", { exact: true }).inputValue()).toBe("");
       expect(await page.getByLabel("取得元", { exact: true }).inputValue()).toBe("");
       await page.close();
@@ -597,6 +627,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       await latest.getByRole("link", { name: "詳細", exact: true }).first().click();
       await page.locator('a[href^="/api/raw/"]').first().waitFor();
       await page.goBack({ waitUntil: "networkidle" });
+      await viewReady(page, "/balances");
       expect(await unit.inputValue()).toBe("JPY");
       expect(await kind.inputValue()).toBe("ledger");
       await page.getByRole("button", { name: "条件をクリア", exact: true }).click();
@@ -618,6 +649,7 @@ describe.if(runnable)("evidence browser in a real browser", () => {
       await page.getByRole("link", { name: "詳細・原本を確認", exact: true }).first().click();
       await page.locator('a[href^="/api/raw/"]').first().waitFor();
       await page.goBack({ waitUntil: "networkidle" });
+      await viewReady(page, "/positions");
       expect(await source.inputValue()).toBe("demo-bank");
       expect(await account.inputValue()).toBe(accountValue!);
       expect(await page.locator(".position-card").count()).toBe(count);

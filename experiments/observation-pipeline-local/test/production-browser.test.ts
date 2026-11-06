@@ -398,7 +398,9 @@ describe.if(runnable)("combined production client", () => {
 
   test("evidence navigation preserves observation routes and does not deny available parsing", async () => {
     const page = await browser.newPage();
-    await page.goto(origin + "/transactions", { waitUntil: "networkidle" });
+    // Capture the shell only once the view has rendered its records: an idle
+    // network can precede the metadata that the shell's labels depend on.
+    await openObservation(page, "/transactions", HOSTILE_DESCRIPTION);
     const shell = await page.locator(".app-shell").elementHandle();
     const sidebar = await page.locator(".sidebar").elementHandle();
     const header = await page.locator(".workspace-bar").elementHandle();
@@ -425,9 +427,13 @@ describe.if(runnable)("combined production client", () => {
     expect(await page.locator(".source-notice").innerText()).toBe(noticeText);
     expect(await page.locator("main").count()).toBe(1);
     expect(await page.locator(".nav a[aria-current='page']").innerText()).toBe("取得履歴");
-    expect(await page.title()).toBe("取得履歴と原本 | kogane");
-    expect(await page.evaluate(() => document.activeElement === document.querySelector("h1"))).toBe(
-      true,
+    // An effect sets the title and moves focus after the view renders.
+    await page.waitForFunction(
+      () =>
+        document.title === "取得履歴と原本 | kogane" &&
+        document.activeElement === document.querySelector("h1"),
+      undefined,
+      { timeout: 10_000 },
     );
     expect(await page.locator("body").innerText()).not.toContain("解析結果はまだ提供していません");
     for (const name of ["取引", "残高", "保有資産", "原本・証跡", "ホーム"])

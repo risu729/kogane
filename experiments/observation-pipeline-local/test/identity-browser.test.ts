@@ -272,6 +272,9 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
     const page = await browser.newPage();
     try {
       await page.goto(`${origin}/transactions`, { waitUntil: "networkidle" });
+      // Capture the shell only once the view has rendered its records: an idle
+      // network can precede the metadata the shell depends on.
+      await page.locator("#transactions").waitFor({ timeout: 10_000 });
       const shell = await page.locator(".app-shell").elementHandle();
       await page
         .getByRole("navigation", { name: "メインナビゲーション" })
