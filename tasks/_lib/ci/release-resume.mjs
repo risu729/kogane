@@ -472,8 +472,10 @@ async function main() {
     const statuses = await paginate(`${base}/deployments/${deployment.id}/statuses?per_page=100`, {
       token: client.token,
     });
-    const latest = [...statuses].sort((a, b) => b.id - a.id)[0];
-    if (latest?.state === "success") fail("already_completed");
+    // `inactive` only ever follows a `success` (GitHub adds it once a newer
+    // deployment succeeds), so either one means this release already finished.
+    if (statuses.some((s) => s.state === "success" || s.state === "inactive"))
+      fail("already_completed");
     const bound = [...statuses]
       .filter((s) => s.state === "in_progress")
       .sort((a, b) => b.id - a.id)
