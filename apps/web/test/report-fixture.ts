@@ -16,6 +16,8 @@ export const RESTRICTED_ID = "rpt-synthetic-restricted";
 export const MISSING_ID = "rpt-synthetic-missing";
 export const MISMATCH_ID = "rpt-synthetic-mismatch";
 export const UNEXPLAINED_ID = "rpt-synthetic-unexplained";
+/** An id with the characters a path segment must encode (`:`), as context-derived ids have. */
+export const COLON_ID = "rpt-synthetic:export.1";
 
 const digest = (seed: number) => seed.toString(16).padStart(64, "a");
 
