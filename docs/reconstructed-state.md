@@ -3,7 +3,7 @@
 What adopted events imply for an account's balances and holdings, folded from
 a start snapshot and compared with what the provider reported at the end.
 This is phase 11's first piece
-([roadmap](roadmap.md#phases-8--11--dated-reported-and-reconstructed-state)),
+([roadmap](roadmap.md#layers-8--11--dated-reported-and-reconstructed-state)),
 decided in [ADR 0052](adr/0052-reconstructed-state-fold.md). It sits beside
 [reported state on a date](reported-state.md) and never replaces it: the
 reported figure and the reconstructed figure are two columns, and the
