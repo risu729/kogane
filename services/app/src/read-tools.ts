@@ -1,5 +1,5 @@
 // Additional read adapters over the existing history, instrument coverage
-// (ADR 0073) and common audit readers.
+// (ADR 0073), dated reported state and common audit readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -7,6 +7,7 @@ import {
   d1CommandStore,
   ERROR_STATUS,
   auditPageFilters,
+  financialError,
 } from "../../../packages/application/src/index";
 import {
   readAuditForGrant,
@@ -19,10 +20,29 @@ import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
+import {
+  readReportedState,
+  REPORTED_STATE_ACCOUNT,
+  REPORTED_STATE_DATE,
+  REPORTED_STATE_SOURCE,
+} from "./reported-state-api";
+
+/**
+ * `kogane.reported-state.read` (plan D5): `GET /api/v2/reported-state` for an
+ * agent. Served exactly while that route is (its views exist); otherwise the
+ * path is 404 and the MCP name `unknown_tool`.
+ */
+export const REPORTED_STATE_TOOL_NAME = "kogane.reported-state.read";
 
 const schemas = {
   "kogane.instruments.history": z.strictObject({
     identifierId: z.string().regex(INSTRUMENT_IDENTIFIER_ID),
+  }),
+  // The route's query parameters, as a body; the patterns are the route's own.
+  "kogane.reported-state.read": z.strictObject({
+    date: z.string().regex(REPORTED_STATE_DATE),
+    source: z.string().regex(REPORTED_STATE_SOURCE).optional(),
+    account: z.string().regex(REPORTED_STATE_ACCOUNT).optional(),
   }),
   // The route's one parameter, with the identity catalogue's limits.
   "kogane.instruments.coverage": z.strictObject({
@@ -50,6 +70,8 @@ export function isReadToolName(name: string): name is ReadToolName {
 const DESCRIPTIONS: Record<ReadToolName, string> = {
   "kogane.instruments.history":
     "Read the same append-only instrument history as the owner UI, under records.read and a whole-store read grant.",
+  "kogane.reported-state.read":
+    "What each provider last reported on a date (YYYY-MM-DD, Asia/Tokyo, not after today), per account, from the latest complete capture before the end of that date, beside the card statements due around it; optionally one source or one account. The same answer as GET /api/v2/reported-state, under records.read and a whole-store read grant. Provider figures only: nothing is added, converted or netted, and a container without a capture is named in the coverage, never shown as zero.",
   "kogane.instruments.coverage":
     "Count each source's instrument identifiers by candidate state, the same counts as the owner UI, under summary.read and a whole-store read grant.",
   "kogane.audit.search":
@@ -73,13 +95,16 @@ const wholeStore = (grant: Grant) => grant.scopes.sources === "*" && grant.scope
 /**
  * The read tools listed to this grant: each only to a grant its service would
  * answer. A call by any other grant is refused by the service itself, with the
- * same closed code on both transports.
+ * same closed code on both transports. `reportedState`: whether this deployment
+ * serves `GET /api/v2/reported-state`.
  */
-export function readMcpTools(grant: Grant) {
+export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
   return READ_MCP_TOOLS.filter((tool) => {
     switch (tool.name as ReadToolName) {
       case "kogane.instruments.history":
         return grantAllows(grant, "records.read") && wholeStore(grant);
+      case "kogane.reported-state.read":
+        return served.reportedState && grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.instruments.coverage":
         return grantAllows(grant, "summary.read") && wholeStore(grant);
       case "kogane.audit.search":
@@ -106,6 +131,34 @@ export async function callReadTool(
         return outcome.ok
           ? { status: 200, body: outcome.history }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
+      case "kogane.reported-state.read": {
+        // The grant first, before the body is validated: records.read over the
+        // whole store (plan D5, ADR 0063 decision 10).
+        if (!grantAllows(grant, "records.read"))
+          return {
+            status: ERROR_STATUS.unauthorized,
+            body: financialError("unauthorized", "reported-state.read", [
+              "capability:records.read",
+            ]),
+          };
+        const narrowed = [
+          ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
+          ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
+        ];
+        if (narrowed.length > 0)
+          return {
+            status: ERROR_STATUS.evidence_restricted,
+            body: financialError("evidence_restricted", "reported-state.read", narrowed),
+          };
+        const input = parseRequest(schemas[name], body ?? {});
+        // The route's own request rules and reader; its refusals keep their codes.
+        const state = await readReportedState(env, {
+          date: input.date,
+          source: input.source ?? null,
+          account: input.account ?? null,
+        });
+        return { status: 200, body: { apiVersion: 2, ...state } };
       }
       case "kogane.instruments.coverage": {
         const input = parseRequest(schemas[name], body ?? {});

@@ -267,23 +267,29 @@ describe("kogane.instruments.coverage", () => {
         for (const accounts of ["*", ["sbi-securities:domestic"]] as const) {
           const grant = { ...SUMMARY_GRANT, scopes: { sources, accounts }, capabilities } as Grant;
           const whole = sources === "*" && accounts === "*";
-          const expected = [
-            ...(capabilities.includes("records.read") && whole
-              ? ["kogane.instruments.history"]
-              : []),
-            ...(capabilities.includes("summary.read") && whole ? [TOOL] : []),
-            ...(capabilities.includes("audit.read") && accounts === "*"
-              ? ["kogane.audit.search", "kogane.audit.get"]
-              : []),
-          ];
-          expect(
-            readMcpTools(grant).map((tool) => tool.name),
-            JSON.stringify(grant),
-          ).toEqual(expected);
-          shapes += 1;
+          // The dated reported state's read is listed only where its route is served.
+          for (const reportedState of [false, true]) {
+            const expected = [
+              ...(capabilities.includes("records.read") && whole
+                ? ["kogane.instruments.history"]
+                : []),
+              ...(reportedState && capabilities.includes("records.read") && whole
+                ? ["kogane.reported-state.read"]
+                : []),
+              ...(capabilities.includes("summary.read") && whole ? [TOOL] : []),
+              ...(capabilities.includes("audit.read") && accounts === "*"
+                ? ["kogane.audit.search", "kogane.audit.get"]
+                : []),
+            ];
+            expect(
+              readMcpTools(grant, { reportedState }).map((tool) => tool.name),
+              JSON.stringify({ grant, reportedState }),
+            ).toEqual(expected);
+            shapes += 1;
+          }
         }
     }
-    expect(shapes).toBe(4 << AGENT_CAPABILITIES.length);
+    expect(shapes).toBe(8 << AGENT_CAPABILITIES.length);
   });
 
   it("is listed only to summary.read over the whole store", async () => {

@@ -199,6 +199,15 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // The dated reported state (plan D5), served while `GET /api/v2/reported-state`
+  // is; whole-store only (ADR 0063 decision 10).
+  "reported-state.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "purchases.explain": {
     risk: ["R0"],
     effect: null,
