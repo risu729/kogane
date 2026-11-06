@@ -223,6 +223,9 @@ INSERT INTO obligation_revisions(obligation_id,revision,creditor_ref,debtor_ref,
     expect(unknown.outstanding).toBeNull();
     expect(unknown.outstandingReasonCode).toBe("principal_unparsed");
     expect(unknown.unknownReason).toBe("provider_status_absent");
+    // No fee components: `null` means "no such fee", not an unknown total.
+    expect(unknown.confirmedFees).toBeNull();
+    expect(unknown.projectedFees).toBeNull();
   });
 
   test("a fee that is not exact leaves its fee total unknown with a reason, never absent (INV05)", async () => {
@@ -247,9 +250,9 @@ INSERT INTO obligation_revisions(obligation_id,revision,creditor_ref,debtor_ref,
     // A fee in another unit is never added to the principal's unit.
     expect(obligation.projectedFees).toEqual({
       unitRef: "JPY",
-      value: { status: "unparsed", reasonCode: "unit_mismatch" },
+      value: { status: "conflict", reasonCode: "unit_mismatch" },
     });
-    // An obligation without fees still has none.
+    // Exact fees in the principal's unit are still summed.
     const plain = page.items.find((item) => item.obligationId === "obl-1")!;
     expect(plain.confirmedFees?.value).toMatchObject({ value: { coefficient: "100" } });
   });

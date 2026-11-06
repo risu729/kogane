@@ -1252,7 +1252,7 @@ event already retired keeps the period it had.
   with an `outstandingReasonCode`; it is never zero-filled (INV05). A fee
   total is `null` only when there is no such fee: a fee that is not exact, or
   in another unit than the principal, leaves it unknown with a reason (the
-  fee's own, or `unit_mismatch`).
+  fee's own status and reason, or a `conflict` with `unit_mismatch`).
 - `reconciliationSignals({ subjectRefs })` — the latest published
   provider-reported balance beside the amount the adopted events'
   `cash-movement` legs imply, and their `difference` with reason codes (`snapshot_boundary_unknown`,

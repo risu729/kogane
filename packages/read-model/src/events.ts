@@ -346,15 +346,16 @@ function temporal(text: string): TemporalValue {
 /**
  * A total that could not be added. When an operand is not exact, the first
  * such operand keeps its own status and reason; any other refusal (an operand
- * in another unit) is `unparsed` with the refusal's code. It is never zero and
- * never left out (INV05).
+ * in another unit) is a `conflict` with the refusal's code, as the reward
+ * summaries in `packages/domain` report it. It is never zero and never left
+ * out (INV05).
  */
 function unknownTotal(unitRef: string, operands: readonly Quantity[], code: string): Quantity {
   const value =
     code === "value_not_exact"
       ? operands.map((operand) => operand.value).find((candidate) => candidate.status !== "exact")
       : undefined;
-  return { unitRef, value: value ?? { status: "unparsed", reasonCode: code } };
+  return { unitRef, value: value ?? { status: "conflict", reasonCode: code } };
 }
 
 /**
