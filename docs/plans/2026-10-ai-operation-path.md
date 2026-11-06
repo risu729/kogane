@@ -1084,6 +1084,17 @@ acceptance and concrete client delegation remain separate owner decisions.
   The delegation status is not: no route serves the delegations in force to
   the browser, and adding one is its own change.
 - Review gate: fresh reviewer.
+- Delegation status (2026-11-06, proposed until its pull request merges): the
+  operator-only `GET /api/v2/delegations` reads `MCP_DELEGATIONS` through the
+  resolver's own parser and answers `none`, `misconfigured` (no entry shown)
+  or `valid` with each entry's role, capabilities, scope, window state
+  (`in_force`, `not_yet_valid`, `expired`), daily write budget and
+  `delegationRef`; the schedules and confirm pages show it as a read-only
+  notice. The route and shape are recorded in
+  [ADR 0063's amendment](../adr/0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06-proposed);
+  [agent API](../agent-api.md#the-operators-delegation-status-s8-2026-11-06).
+  Service, contract and desktop/mobile browser tests cover it. The audit page
+  is a separate pull request.
 
 **Delegation test matrix (S3, S6)**, modelled on #565's:
 

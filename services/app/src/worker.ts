@@ -13,6 +13,7 @@ import {
 } from "./agent-api";
 import { auditLogCode, beginAudit } from "./audit";
 import { AUDIT_PATH, auditApi } from "./audit-api";
+import { DELEGATION_STATUS_PATH, delegationApi } from "./delegation-api";
 import { commandApi, isCommandPath } from "./command-api";
 import { classifyOpsPath, opsApi } from "./ops-api";
 import { healthApi } from "./health";
@@ -43,6 +44,7 @@ function classify(path: string): string {
   if (ops !== null) return ops;
   if (isCommandPath(path)) return "command";
   if (path === AUDIT_PATH) return "audit";
+  if (path === DELEGATION_STATUS_PATH) return "delegations";
   if (path === CARD_SETTLEMENT_PATH || path === CARD_OWNERSHIP_PATH)
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
@@ -106,6 +108,9 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // The operator's read of the audit record (ADR 0064); a page load, not recorded.
   const auditResponse = await catalogue(() => auditApi(env, url, subject));
   if (auditResponse) return auditResponse;
+  // The operator's read of the delegation table (ADR 0063); a page load, not recorded.
+  const delegationResponse = await delegationApi(env, url, subject);
+  if (delegationResponse) return delegationResponse;
   const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
   if (settlementResponse) return settlementResponse;
   // Operator-only and read-only; 404 unless CORE 0047 exists

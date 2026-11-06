@@ -5,6 +5,8 @@ import { chromium, type Browser } from "playwright";
 import jobs from "../../../config/alarm-jobs.json";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema";
 import type { ScheduleSnapshot } from "../../../packages/collection/src/schedule-model";
+import type { DelegationStatus } from "../../../packages/observation-shared/src/delegation-status-contract";
+import { delegationStatusFixture, expectDelegationNotice } from "./delegation-status-fixture";
 const client = join(import.meta.dir, "../dist-production"),
   executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
@@ -18,7 +20,8 @@ describe.if(runnable)("operator schedule administration", () => {
   let snapshotReads = 0,
     snapshotStatus = 200,
     leaseResponse: (() => Promise<Response>) | null = null,
-    readAfterWrite: (() => Promise<void>) | null = null;
+    readAfterWrite: (() => Promise<void>) | null = null,
+    delegations: DelegationStatus | null = null;
   let writes: {
     path: string;
     body: Record<string, unknown>;
@@ -31,6 +34,7 @@ describe.if(runnable)("operator schedule administration", () => {
     snapshotStatus = 200;
     leaseResponse = null;
     readAfterWrite = null;
+    delegations = delegationStatusFixture("none");
     snapshot = {
       schedules: jobs.map((job) => ({
         ...job,
@@ -76,6 +80,10 @@ describe.if(runnable)("operator schedule administration", () => {
             source: { kind: "central-store", classification: "financial" },
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
+        if (url.pathname === "/api/v2/delegations")
+          return delegations
+            ? Response.json(delegations)
+            : Response.json({ error: "operator_required" }, { status: 403 });
         if (url.pathname === "/api/ops/v1/schedules") {
           snapshotReads++;
           if (writes.length && readAfterWrite) await readAfterWrite();
@@ -410,6 +418,23 @@ describe.if(runnable)("operator schedule administration", () => {
         });
       await page.close();
     }, 30000);
+  for (const width of [1280, 390])
+    for (const configuration of ["valid", "none", "misconfigured", "unavailable"] as const)
+      test(`the delegation in force is a read-only notice (${configuration}, ${width}px)`, async () => {
+        delegations =
+          configuration === "unavailable" ? null : delegationStatusFixture(configuration);
+        const page = await browser.newPage({ viewport: { width, height: 960 } });
+        try {
+          await page.goto(`${origin}/schedules`);
+          await page.getByRole("heading", { name: "収集スケジュール", exact: true }).waitFor();
+          await expectDelegationNotice(page, configuration);
+          // The schedule settings stay usable whatever the delegation table says.
+          await page.getByLabel("ソニー銀行の実行時刻").waitFor();
+          expect(writes).toHaveLength(0);
+        } finally {
+          await page.close();
+        }
+      }, 30000);
   test("a dated maintenance change uses Japan time and retains provenance", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/schedules`);

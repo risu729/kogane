@@ -1167,3 +1167,36 @@ state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
 the committed MCP financial-reader grant receives no schedule authority.
 S6 survey acceptance remains unavailable pending the separate owner decision;
 no survey grammar, grants, Access, authentication or deployment is changed.
+
+## The operator's delegation status (S8, 2026-11-06)
+
+Status: proposed until its pull request merges
+([ADR 0063's amendment](adr/0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06-proposed)).
+
+`GET /api/v2/delegations` shows the operator what `MCP_DELEGATIONS` declares,
+read through the resolver's own parser at the server's clock. It is served on
+the browser Access application only, to the operator only
+(`403 operator_required` for an agent, any other subject or an
+`mcp-client:` name; an MCP-audience assertion is refused before it), and
+takes no query string. It is not an agent route or an MCP tool and is not
+recorded in the audit log.
+
+The answer (`kogane-delegation-status-v1`) has a `configuration` of `none`,
+`misconfigured` or `valid`. A misconfigured table — the one every delegated
+call refuses with `503 delegation_misconfigured` — is shown with no entry and
+no reason. A valid table lists each entry, ordered by principal, with its
+delegator, role, effective capabilities, the `sources`, `accounts` and
+`scheduleSources` axes, `issuedAt`, `notAfter`, `writesPerDay`, a `state` of
+`in_force`, `not_yet_valid` or `expired` (the window `/mcp` enforces, at
+`evaluatedAt`), and the `delegationRef` audit records carry. No secret,
+token, Access setting, read-grant budget or raw configuration is in it; the
+shared contract refuses any key it does not name.
+
+The schedules page (`/schedules`) and the confirm page (`/confirm/:planId`)
+show this as a compact, read-only notice **AIへの委任**: no delegation, a
+void configuration, or each entry's principal, state, role, Japan-time window
+and daily write cap, with capabilities, scope and reference behind a
+disclosure. Nothing on it edits, grants or revokes a delegation, and the
+operator's own approval and settings do not depend on it. A failed read says
+the state cannot be confirmed. With the committed empty `MCP_DELEGATIONS`
+both pages say that no delegation exists.
