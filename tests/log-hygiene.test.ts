@@ -4,11 +4,13 @@
 // that enforce it (`safeErrorDetails`, each collector's closed failure codes)
 // only help where a log line goes through them; this guard keeps the raw
 // material out of the log calls themselves, across every deployed source of
-// the services and of the collection packages:
+// the services (`src/`, `container/`) and of the packages they bundle:
 //
 //   * no log call's arguments read an exception's `.message` or `.stack`,
-//     stringify it (`String(error)`, `${error}`) or pass the error object
-//     itself — a closed code or `safeErrorDetails(error)` goes there instead;
+//     stringify it (`String(error)`, `JSON.stringify(error)`, `${error}`,
+//     `error.toString()`) or pass the error object itself — a closed code or
+//     `safeErrorDetails(error)` goes there instead, and a local wrapper that
+//     takes the error and reduces it is listed below;
 //   * no source reads `.stack` at all;
 //   * every `.message` a source reads is listed below with the reason it is
 //     safe (a classifier that matches the text against closed codes and
@@ -16,7 +18,10 @@
 //     read fails here until someone has looked at where its value goes.
 //
 // The scan is textual, like `tasks/_lib/import-boundaries.ts`: comments are
-// dropped and a call's arguments are its balanced parentheses.
+// dropped and a call's arguments are its balanced parentheses. It does not
+// see an exception that escapes a Worker handler, which the runtime records
+// with its message: what a thrown message may hold is each source's own
+// concern (its closed codes and `safeErrorDetails`), not this guard's.
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -26,9 +31,10 @@ const ROOTS = [
   ...readdirSync(join(REPO_ROOT, "services")).flatMap((service) =>
     ["src", "container"].map((dir) => join("services", service, dir)),
   ),
-  "packages/collection/src",
-  "packages/collector-diagnostics/src",
-  "packages/sbi-vc-trade-client/src",
+  // Every package: the Workers bundle them (`packages/application` and
+  // `packages/read-model` into the app and processor, `packages/collection`
+  // into the collectors), so their sources are deployed sources too.
+  ...readdirSync(join(REPO_ROOT, "packages")).map((pkg) => join("packages", pkg, "src")),
 ];
 const SOURCE = /\.(?:ts|mjs)$/u;
 const NOT_SOURCE = /(?:\.d\.ts|\.test\.ts|\.test\.mjs|\.node-test\.mjs)$/u;
@@ -39,6 +45,22 @@ const NOT_SOURCE = /(?:\.d\.ts|\.test\.ts|\.test\.mjs|\.node-test\.mjs)$/u;
  * its entry here, with the reason.
  */
 const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>> = {
+  "packages/application/src/collection/seal-refusal.ts": {
+    count: 3,
+    reason: "a D1 trigger refusal's RAISE code is kept only when it is a code-shaped token",
+  },
+  "packages/application/src/command/commit.ts": {
+    count: 1,
+    reason: "economicGuardCode finds one of the closed guard codes in it; the text is dropped",
+  },
+  "packages/application/src/ingest/objects.ts": {
+    count: 1,
+    reason: "tested for a checksum refusal; only the closed object_checksum_mismatch is thrown",
+  },
+  "packages/application/src/query/reconstructed-state-read.ts": {
+    count: 2,
+    reason: "a ReconstructedStateRefusedError's message is its own closed *_exceeded code",
+  },
   "packages/collection/src/manifest.ts": {
     count: 1,
     reason: "a CollectionKeyError's message is its closed key-refusal code",
@@ -54,6 +76,22 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
   "packages/collector-diagnostics/src/index.ts": {
     count: 1,
     reason: "safeErrorDetails matches known shapes and emits only closed codes and statuses",
+  },
+  "packages/domain/src/coverage.ts": {
+    count: 1,
+    reason: "a validator checks a parse issue's `message` field shape; no exception is read",
+  },
+  "packages/domain/src/result.ts": {
+    count: 1,
+    reason: "a validator checks a financial error's `message` field shape; no exception is read",
+  },
+  "packages/parsers/src/parsers/coverage.ts": {
+    count: 2,
+    reason: "a parse issue's own `message` field, which the parser wrote; no exception is read",
+  },
+  "packages/parsers/src/parsers/sbi-domestic-cash-positions.ts": {
+    count: 1,
+    reason: "the string `trailing.message` names a record field for the reader; not a read",
   },
   "services/collector-globalpass/container/server.mjs": {
     count: 1,
@@ -119,18 +157,47 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
   },
 };
 
-// The names a caught exception goes by in these sources.
-const ERRORISH = "(?:error|err|e|cause|caught)";
+/**
+ * Log calls that pass the error object itself to a local wrapper which reduces
+ * it to a closed field before anything is emitted, by file, with how many such
+ * calls the file has and where the reduction happens. Only the "logs the error
+ * object" rule is waived for them; reading `.message` or interpolating the
+ * error in the same call still fails.
+ */
+const ERROR_TO_SANITIZING_WRAPPER: Readonly<Record<string, { count: number; reason: string }>> = {
+  "services/collector-sbi-shinsei/src/tcp-relay.ts": {
+    count: 2,
+    reason: "the relay's local `log` keeps only `errorType: safeErrorType(error)`",
+  },
+  "services/collector-st-george/src/tcp-relay.ts": {
+    count: 2,
+    reason: "the relay's local `log` keeps only `errorType: safeErrorType(error)`",
+  },
+};
+
+// The names a caught exception goes by in these sources: the short ones and
+// any camelCase `…Error`/`…Err` binding (`originalError`, `authError`). A
+// capitalised name is a class (`TypeError`), not a value, and is left alone.
+const ERRORISH = "(?:error|err|e|cause|caught|[a-z][\\w$]*(?:Error|Err))";
 const LOG_CALL =
   /\b(?:console\s*\.\s*(?:log|info|warn|error|debug)|console\s*\[[^\]]+\]|logEvent|emitDiagnostic|logMizuhoRecord|logVpassDiagnostic|logError|log)\s*\(/gu;
 const FORBIDDEN_IN_LOG: readonly [RegExp, string][] = [
   [/\.\s*message\b/u, "reads an exception message"],
   [/\.\s*stack\b/u, "reads a stack"],
-  [new RegExp(`\\bString\\(\\s*${ERRORISH}\\s*\\)`, "u"), "stringifies an error"],
+  [
+    new RegExp(`\\b(?:String|JSON\\s*\\.\\s*stringify|inspect)\\(\\s*${ERRORISH}\\s*[,)]`, "u"),
+    "stringifies an error",
+  ],
+  [new RegExp(`\\b${ERRORISH}\\s*\\.\\s*(?:toString|toJSON)\\s*\\(`, "u"), "stringifies an error"],
   [new RegExp(`\\$\\{\\s*${ERRORISH}\\s*\\}`, "u"), "interpolates an error"],
-  [new RegExp(`^\\s*${ERRORISH}\\s*$`, "u"), "logs the error object"],
-  [new RegExp(`(?:^|[^$])[{,]\\s*${ERRORISH}\\s*[,}]`, "u"), "logs the error object"],
-  [new RegExp(`:\\s*${ERRORISH}\\s*[,}]`, "u"), "logs the error object"],
+  // The error as a whole argument (`console.error("failed", error)`), an
+  // object value (`{ error: e }`) or a shorthand property (`{ error }`); not
+  // an argument of another call, where a sanitizer such as
+  // `safeErrorDetails(error)` takes it.
+  [
+    new RegExp(`(?:^|,|:|(?:^|[^$])\\{)\\s*${ERRORISH}\\s*(?:$|[,}]|\\bas\\b)`, "u"),
+    "logs the error object",
+  ],
 ];
 
 function sourceFiles(): string[] {
@@ -182,7 +249,9 @@ function callArguments(text: string, open: number): string {
       else if (char === quote) quote = null;
       continue;
     }
-    if (char === '"' || char === "'") quote = char;
+    // A template literal is skipped whole too: a parenthesis or an apostrophe
+    // in its text must not end the call or open a string.
+    if (char === '"' || char === "'" || char === "`") quote = char;
     else if (char === "(") depth += 1;
     else if (char === ")") {
       depth -= 1;
@@ -206,6 +275,7 @@ describe("log hygiene", () => {
 
   test("no log call carries an exception's message, stack or the error itself", () => {
     const findings: string[] = [];
+    const wrapped: Record<string, number> = {};
     let calls = 0;
     for (const { path, text } of files) {
       for (const match of text.matchAll(LOG_CALL)) {
@@ -214,6 +284,10 @@ describe("log hygiene", () => {
         const args = callArguments(text, open);
         for (const [pattern, why] of FORBIDDEN_IN_LOG) {
           if (pattern.test(args)) {
+            if (why === "logs the error object" && path in ERROR_TO_SANITIZING_WRAPPER) {
+              wrapped[path] = (wrapped[path] ?? 0) + 1;
+              continue;
+            }
             const line = text.slice(0, match.index).split("\n").length;
             findings.push(`${path}:${line} ${why}`);
           }
@@ -222,6 +296,11 @@ describe("log hygiene", () => {
     }
     expect(calls).toBeGreaterThan(100);
     expect(findings).toEqual([]);
+    expect(wrapped).toEqual(
+      Object.fromEntries(
+        Object.entries(ERROR_TO_SANITIZING_WRAPPER).map(([path, entry]) => [path, entry.count]),
+      ),
+    );
   });
 
   test("no source reads a stack", () => {
@@ -252,6 +331,11 @@ describe("log hygiene", () => {
         "console[level](`failed: ${error}`);",
         "logEvent({ event: 'x', error });",
         'console.log(JSON.stringify({ event: "ok", ...safeErrorDetails(error) }));',
+        'console.error("failed:", error);',
+        "console.error(\n  JSON.stringify(error),\n);",
+        "console.warn(`can't (yet) ${err.toString()}`);",
+        'log(JSON.stringify({ event: "x", reason: String(originalError) }));',
+        'console.log(JSON.stringify({ event: "x", code: classify(error), errorType: "TypeError" }));',
         'fetch("https://example.invalid/");',
       ].join("\n"),
     );
@@ -263,6 +347,11 @@ describe("log hygiene", () => {
       ["reads an exception message"],
       ["interpolates an error"],
       ["logs the error object"],
+      [],
+      ["logs the error object"],
+      ["stringifies an error"],
+      ["stringifies an error"],
+      ["stringifies an error"],
       [],
     ]);
     expect(sample).toContain("https://example.invalid/");

@@ -80,7 +80,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
     // A record written before the status was closed may still hold the
     // gateway's own string; it is read, and so re-written, as `rejected`.
     const status: unknown = health.lastGatewayStatus;
-    if (status !== null && status !== "OK") health.lastGatewayStatus = "rejected";
+    health.lastGatewayStatus = status === "OK" ? "OK" : status == null ? null : "rejected";
     return health;
   }
   async runKeepAlive(): Promise<HealthState> {
