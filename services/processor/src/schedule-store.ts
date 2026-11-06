@@ -36,6 +36,7 @@ import {
 } from "../../../packages/application/src/index.ts";
 import type { SqlWrite } from "../../../packages/storage-d1/src/core/operations.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
+import { boundedText, INTERNAL_BODY_LIMIT } from "./bounded-body.ts";
 export { jobs };
 export interface ScheduleRow {
   id: string;
@@ -1400,8 +1401,8 @@ async function agentRoute(request: Request, env: Env, path: string): Promise<unk
   const agent = request.headers.get("x-kogane-agent");
   if (!agent || !ACTOR_PATTERN.test(agent)) throw new ScheduleError("agent_required", 403);
   if (path !== "/agent/read") throw new ScheduleError("not_found", 404);
-  const text = await request.text();
-  if (text.length > 16 * 1024) throw new ScheduleError("request_too_large", 413);
+  const text = await boundedText(request, INTERNAL_BODY_LIMIT);
+  if (text === null) throw new ScheduleError("request_too_large", 413);
   let value: unknown;
   try {
     value = JSON.parse(text);
@@ -1452,8 +1453,8 @@ export async function scheduleRoute(
     const envelope = parseAuditEnvelope(request.headers);
     if (!envelope) throw new ScheduleError("operator_required", 403);
     const call = (operation: OperationName) => processorCall(envelope, operation, actor, "human");
-    const text = await request.text();
-    if (text.length > 16 * 1024) throw new ScheduleError("request_too_large", 413);
+    const text = await boundedText(request, INTERNAL_BODY_LIMIT);
+    if (text === null) throw new ScheduleError("request_too_large", 413);
     const value: unknown = JSON.parse(text);
     if (path === "/maintenance") {
       const audit = call("schedules.maintenance.update");

@@ -1114,6 +1114,131 @@ describe("SC14 / AT49-AT54 — conversion simulation and bounded search", () => 
     expect(result.rejected).toEqual([
       { offerRef: "offer:a-to-b:standard@v1", reasonCode: "needs_rule_verification" },
     ]);
+    // Every offer was examined: this "no path" is the offers', not a cap's.
+    expect(result.expansions).toBe(1);
+    expect(result.stoppedBy).toEqual([]);
+  });
+
+  test("a cap that ends the search early is reported, so it never reads as 'no path'", () => {
+    // Two offers that lead nowhere come first; the only offer to the goal is third.
+    const offers = [
+      offer({ offerId: "offer:a-to-x", toUnitRef: "points:x" }),
+      offer({ offerId: "offer:a-to-y", toUnitRef: "points:y" }),
+      offer({ offerId: "offer:a-to-b" }),
+    ];
+    const start = { quantity: q("points:a", "2500"), clock: day("2026-09-09") };
+    const oneHop = { ...budget, maxDepth: 1 };
+    const complete = findConversionPaths(offers, start, "points:b", oneHop);
+    expect(complete.paths).toHaveLength(1);
+    expect(complete.expansions).toBe(3);
+    expect(complete.stoppedBy).toEqual([]);
+
+    const starved = findConversionPaths(offers, start, "points:b", {
+      ...oneHop,
+      maxExpansions: 2,
+    });
+    expect(starved.paths).toEqual([]);
+    expect(starved.expansions).toBe(2);
+    expect(starved.stoppedBy).toEqual(["max_expansions"]);
+
+    // Two offers reach the goal; a one-candidate list keeps the first and says
+    // that it dropped another.
+    const crowded = findConversionPaths(
+      [offer({ offerId: "offer:a-to-b:first" }), offer({ offerId: "offer:a-to-b:second" })],
+      start,
+      "points:b",
+      { ...oneHop, maxCandidates: 1 },
+    );
+    expect(crowded.paths.map((path) => path.hops[0]!.offerRef)).toEqual(["offer:a-to-b:first@v1"]);
+    expect(crowded.stoppedBy).toEqual(["max_candidates"]);
+    // A full list also stops the search from expanding a state below the depth.
+    const deep = findConversionPaths(
+      [offer({ offerId: "offer:a-to-b:first" }), offer({ offerId: "offer:a-to-b:second" })],
+      start,
+      "points:b",
+      { ...budget, maxDepth: 2, maxCandidates: 1 },
+    );
+    expect(deep.stoppedBy).toEqual(["max_candidates"]);
+  });
+
+  test("an empty stoppedBy is exactly a search no cap cut short, across random small offer graphs", () => {
+    // mulberry32 with a fixed seed, as in values.test.ts: deterministic input.
+    let state = 20261106;
+    const random = () => {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let t = state;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const pick = <T>(values: readonly T[]): T => values[Math.floor(random() * values.length)]!;
+    const units = ["points:a", "points:b", "points:c", "points:d"];
+    const seen = { complete: 0, maxExpansions: 0, maxCandidates: 0, multiHop: 0 };
+    for (let iteration = 0; iteration < 1500; iteration += 1) {
+      const offers = Array.from({ length: 1 + Math.floor(random() * 8) }, (_, index) =>
+        offer({
+          // An occasional repeated id exercises same-offer reuse across versions.
+          offerId: `offer:random:${index > 0 && random() < 0.15 ? index - 1 : index}`,
+          version: `v${index}`,
+          fromUnitRef: pick(units),
+          toUnitRef: pick(units),
+          ratio: { numerator: pick(["1", "2", "3"]), denominator: pick(["1", "2"]) },
+          minimum: decimalLiteral(pick(["1", "100", "1000"])),
+          increment: decimalLiteral(pick(["1", "100"])),
+          maximumPerRequest: random() < 0.5 ? null : decimalLiteral(pick(["500", "3000"])),
+          sharedQuotaRef: random() < 0.2 ? pick(["quota:x", "quota:y"]) : null,
+          fixedFees: [],
+          applicationDeadline: day(pick(["2026-09-09", "2026-09-12", "2026-12-31"])),
+          processingDays: pick([0, 1, 3]),
+          verification: random() < 0.85 ? "verified" : "needs-rule-verification",
+        }),
+      );
+      const start = {
+        quantity: q(pick(units.slice(0, 2)), pick(["500", "2500", "10000"])),
+        clock: day("2026-09-09"),
+      };
+      const goal = pick(units);
+      const capped: SearchBudget = {
+        maxDepth: 1 + Math.floor(random() * 3),
+        maxCandidates: 1 + Math.floor(random() * 4),
+        maxExpansions: 1 + Math.floor(random() * 30),
+        requiredCompletionBy: null,
+      };
+      const result = findConversionPaths(offers, start, goal, capped);
+      const unbounded = findConversionPaths(offers, start, goal, {
+        ...capped,
+        maxCandidates: Number.MAX_SAFE_INTEGER,
+        maxExpansions: Number.MAX_SAFE_INTEGER,
+      });
+      expect(unbounded.stoppedBy).toEqual([]);
+      // The caps never reorder the search: the paths kept are the first found.
+      expect(result.paths).toEqual(unbounded.paths.slice(0, result.paths.length));
+      if (result.paths.some((path) => path.hops.length > 1)) seen.multiHop += 1;
+      if (result.stoppedBy.length === 0) {
+        // No false negative: nothing the caps left out exists.
+        expect(result.paths).toEqual(unbounded.paths);
+        expect(result.rejected).toEqual(unbounded.rejected);
+        expect(result.expansions).toBe(unbounded.expansions);
+        seen.complete += 1;
+        continue;
+      }
+      // No false positive: a reported stop dropped a path or left an
+      // examination undone.
+      expect(
+        unbounded.paths.length > result.paths.length || unbounded.expansions > result.expansions,
+      ).toBe(true);
+      if (result.stoppedBy.includes("max_expansions")) {
+        expect(result.expansions).toBe(capped.maxExpansions);
+        expect(unbounded.expansions).toBeGreaterThan(result.expansions);
+        seen.maxExpansions += 1;
+      }
+      if (result.stoppedBy.includes("max_candidates")) {
+        expect(result.paths).toHaveLength(capped.maxCandidates);
+        seen.maxCandidates += 1;
+      }
+    }
+    // The generator reaches every branch, so the property is not vacuous.
+    expect(Object.values(seen).every((count) => count > 0)).toBe(true);
   });
 });
 

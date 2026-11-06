@@ -444,7 +444,8 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         await route.fulfill({ response: original, json: { transactions } });
       });
       await page.goto(`${baseUrl}/transactions`, { waitUntil: "networkidle" });
-      await viewReady(page, "/transactions");
+      // count() does not wait, and networkidle can settle before the rows render.
+      await page.locator("tbody tr").first().waitFor();
       expect(await page.locator("tbody tr").count()).toBe(50);
       await page.getByRole("button", { name: "次へ", exact: true }).click();
       expect(await page.locator("tbody").innerText()).toContain("Pagination item 51");
@@ -475,9 +476,11 @@ describe.if(runnable)("evidence browser in a real browser", () => {
         });
       });
       await page.goto(`${baseUrl}/transactions`, { waitUntil: "networkidle" });
-      // Only a refresh after records loaded can preserve them; failing the
-      // first load instead would test a different state.
-      await viewReady(page, "/transactions");
+      // networkidle can settle before the transactions request starts on a
+      // slow runner (metadata answers, then the page mounts and fetches).
+      // Flipping the route before that first request is sent fails the
+      // initial load instead of a refresh, so wait for the records to render.
+      await page.locator("tbody").getByText("BROWSER_FRESH", { exact: false }).waitFor();
       fail = true;
       await page.getByRole("button", { name: "表示を更新", exact: true }).click();
       await page.locator("main").getByRole("alert").waitFor();
@@ -541,12 +544,8 @@ describe.if(runnable)("evidence browser in a real browser", () => {
     async () => {
       const page = await browser.newPage();
       await page.goto(baseUrl, { waitUntil: "networkidle" });
-      // The app sets the title in an effect once metadata has loaded and the
-      // view's heading exists; an idle network does not imply either, so wait
-      // for the title itself, as the navigation below does.
-      await page.waitForFunction(() => document.title === "ホーム | kogane", undefined, {
-        timeout: 10_000,
-      });
+      // The title is set only once metadata resolves; networkidle can come first.
+      await page.waitForFunction(() => document.title === "ホーム | kogane");
       const link = page.getByRole("navigation").getByRole("link", { name: "取引", exact: true });
       await link.focus();
       await page.keyboard.press("Enter");

@@ -179,6 +179,11 @@ version 1 with `eligibility.status = "fallback"` and the reason. The
 version 2 (`identity-default-v2`) for every Mizuho parse, so parses sealed
 before the resolver's Mizuho rule are re-identified
 ([identity-operations.md](identity-operations.md#policy-2-mizuho-rule-re-identification)).
+The `sbi-shinsei-bank` module is the same shape: `identity-default-v2` for
+every SBI Shinsei parse, no evidence, so parses sealed while policy 1 mapped
+the exchange-rate board and the stage category as deposits are re-identified
+([ADR 0076](adr/0076-sbi-shinsei-non-account-identity.md),
+[identity-operations.md](identity-operations.md#policy-2-sbi-shinsei-non-account-references)).
 Sources without a module get `identity-default`. The standard request
 (`IDENTITY_POLICY_VERSION`) runs the default family at the base version, as
 before; an explicit other version is stored as requested, so the numeric
