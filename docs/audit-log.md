@@ -189,9 +189,12 @@ codes, principal kind, principal and path, target and scope, a summary of
 its diff (rows read, revision from and to with the changed field names,
 decision counts, request status, release, overflow count and cap), and a
 disclosure of its identifiers (audit id, request id, delegation reference,
-idempotency key, digests, linked audit ids, references). Every closed code
-is named in Japanese next to the code itself; an unnamed code is shown as
-itself. There is nothing else to show: the record holds no amount,
+idempotency key, digests, linked audit ids, references). The operation is
+named in Japanese next to its code; the result, path, principal kind, step,
+scope namespace, changed field names, decision counts and request status are
+shown by their Japanese names; result and reason codes, and any value
+without a Japanese name, are shown as the code itself. There is nothing else
+to show: the record holds no amount,
 provider text or body.
 
 - **Filters** are the server's closed values only: operation (the names of
