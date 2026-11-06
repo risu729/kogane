@@ -9,8 +9,9 @@
 // application layer, so they are restated here and
 // `apps/web/test/audit-contract.test.ts` asserts they are the same lists. A
 // record outside them — an unknown result, a diff of a kind the builder does
-// not write, a pairing the table refuses — fails the whole page rather than
-// being shown as something it is not.
+// not write, a pairing the builder or the table refuses (an `alarm` or `lane`
+// record under another principal, or with a read or a refusal) — fails the
+// whole page rather than being shown as something it is not.
 
 /** The operator's read of the whole store. */
 export const AUDIT_PAGE_PATH = "/api/v2/audit";
@@ -64,6 +65,30 @@ export const AUDIT_REQUEST_STATUS_VALUES = [
   "failed",
   "blocked",
 ] as const;
+/**
+ * The proposal kinds a lane record names, in its references and its diff
+ * (`LANE_PROPOSAL_KINDS`).
+ */
+export const AUDIT_LANE_PROPOSAL_KIND_VALUES = [
+  "reconciliation-provider-same",
+  "reconciliation-pending-to-posted",
+  "reconciliation-supersedes",
+  "reconciliation-supports",
+  "reconciliation-contradicts",
+  "reconciliation-funded-by",
+  "reconciliation-statement-covers",
+  "card-settlement-candidate",
+  "maintenance-survey-new",
+  "maintenance-survey-changed",
+  "maintenance-survey-absent",
+] as const;
+/**
+ * The results a record of the Processor's own `alarm` and `lane` paths may
+ * have (`record.ts`): an effect, or a lane tick that failed after writing;
+ * never a read, a refusal, a replay, a preparation or an overflow, and always
+ * one step.
+ */
+export const AUDIT_AUTOMATIC_RESULT_VALUES = ["applied", "accepted", "failed"] as const;
 /** The capped results and their daily caps (`AUDIT_DAILY_CAPS`). */
 export const AUDIT_OVERFLOW_CAPS = { read: 2000, refused: 500 } as const;
 /** The filters the server accepts besides `cursor`, each at most once. */
@@ -98,6 +123,12 @@ export type AuditDiffView =
   | { kind: "read"; rows: number; truncated: boolean }
   | { kind: "release"; released: true }
   | { kind: "overflow"; of: "read" | "refused"; count: number; cap: number }
+  | {
+      kind: "lane";
+      decisionRevisions: number;
+      commits: number;
+      proposals: { kind: (typeof AUDIT_LANE_PROPOSAL_KIND_VALUES)[number]; count: number }[];
+    }
   | { kind: "none" };
 
 /** One record as `GET /api/v2/audit` returns it (`AuditRecordView`). */
@@ -153,6 +184,9 @@ export const AUDIT_PATTERNS = {
   confirmationDigest: /^cfm_[0-9a-f]{64}$/u,
   scopeSource: /^[a-z0-9-]{1,100}$/u,
   commitSeq: /^commit-seq:[a-z0-9.-]{1,64}:[1-9][0-9]{0,15}$/u,
+  /** The Processor's own principals (`AUTOMATIC_PRINCIPAL`), one per automatic path. */
+  alarmPrincipal: /^alarm:[a-z0-9-]{1,100}$/u,
+  lanePrincipal: /^lane:[a-z0-9-]{1,64}$/u,
   /** The server's cursor text. */
   cursor: /^[A-Za-z0-9_-]{1,400}$/u,
   /** A UTC day filter. */
@@ -162,6 +196,9 @@ export const AUDIT_PATTERNS = {
 const SOURCE_ID = "[a-z0-9-]{1,100}";
 const HEX64 = "[0-9a-f]{64}";
 const FIELD_PATH = "(?:body|[a-z][A-Za-z]{0,31}(?:\\.(?:[a-z][A-Za-z]{0,31}|[0-9]{1,3})){0,3})";
+/** A row position: a rowid, an integer key or a commit sequence number. */
+const POSITION = "[1-9][0-9]{0,18}";
+const RANGE = `${POSITION}-${POSITION}`;
 /**
  * The references a record may carry in `targetRef` or `refs`
  * (`AUDIT_REF_PATTERNS`): identifiers the existing logs already hold, never a
@@ -180,6 +217,12 @@ export const AUDIT_REFERENCE_PATTERNS: readonly RegExp[] = [
   new RegExp(`^collection-lease:${SOURCE_ID}$`, "u"),
   new RegExp(`^source:${SOURCE_ID}$`, "u"),
   new RegExp(`^field:${FIELD_PATH}$`, "u"),
+  // An alarm occurrence: its job and nominal instant in epoch milliseconds.
+  new RegExp(`^occurrence:scheduled:${SOURCE_ID}:[0-9]{1,16}$`, "u"),
+  // The rows of one table a lane tick wrote, between two positions inclusive.
+  new RegExp(`^decision-revisions:${RANGE}$`, "u"),
+  new RegExp(`^commit-seq:[a-z0-9.-]{1,64}:${RANGE}$`, "u"),
+  new RegExp(`^proposals:(?:${AUDIT_LANE_PROPOSAL_KIND_VALUES.join("|")}):${RANGE}$`, "u"),
 ];
 const reference = (value: unknown): boolean =>
   typeof value === "string" &&
@@ -259,6 +302,27 @@ function validDiff(value: unknown): boolean {
         value["count"] > 0 &&
         (value["cap"] === AUDIT_OVERFLOW_CAPS.read || value["cap"] === AUDIT_OVERFLOW_CAPS.refused)
       );
+    case "lane": {
+      const proposals = value["proposals"];
+      return (
+        exactKeys(value, ["kind", "decisionRevisions", "commits", "proposals"]) &&
+        count(value["decisionRevisions"]) &&
+        count(value["commits"]) &&
+        Array.isArray(proposals) &&
+        proposals.length <= AUDIT_LANE_PROPOSAL_KIND_VALUES.length &&
+        proposals.every(
+          (item: unknown) =>
+            record(item) &&
+            exactKeys(item, ["kind", "count"]) &&
+            oneOf(AUDIT_LANE_PROPOSAL_KIND_VALUES)(item["kind"]) &&
+            count(item["count"]) &&
+            item["count"] > 0,
+        ) &&
+        // Each proposal kind at most once.
+        new Set(proposals.map((item: Record<string, unknown>) => item["kind"])).size ===
+          proposals.length
+      );
+    }
     case "none":
       return exactKeys(value, ["kind"]);
     default:
@@ -305,6 +369,10 @@ function validAuditRecord(value: unknown): value is AuditRecordWire {
     oneOf(AUDIT_PATH_VALUES)(v.path) &&
     (automatic ? v.subject === null : matches(AUDIT_PATTERNS.subject)(v.subject)) &&
     matches(AUDIT_PATTERNS.principal)(v.principal) &&
+    // The Processor's own principal names its path: `alarm:<job id>`, `lane:<lane>`.
+    (v.path === "alarm"
+      ? matches(AUDIT_PATTERNS.alarmPrincipal)(v.principal)
+      : v.path !== "lane" || matches(AUDIT_PATTERNS.lanePrincipal)(v.principal)) &&
     oneOf(AUDIT_PRINCIPAL_KIND_VALUES)(v.principalKind) &&
     (v.principalKind === "automatic") === automatic &&
     (v.principalKind === "delegated"
@@ -320,6 +388,8 @@ function validAuditRecord(value: unknown): value is AuditRecordWire {
         matches(AUDIT_PATTERNS.scopeSource)(scope["source"]))) &&
     nullOr(reference)(v.targetRef) &&
     oneOf(AUDIT_RESULT_VALUES)(v.result) &&
+    // The Processor's own paths record effects and failures, in one step.
+    (!automatic || (oneOf(AUDIT_AUTOMATIC_RESULT_VALUES)(v.result) && v.step === "call")) &&
     // A refusal or failure carries its closed code; nothing else does.
     (v.result === "refused" || v.result === "failed"
       ? matches(AUDIT_PATTERNS.resultCode)(v.resultCode)

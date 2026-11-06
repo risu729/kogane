@@ -28,7 +28,13 @@ import {
   type RewardHolding,
   type SearchBudget,
 } from "../src/rewards.ts";
-import { addQuantities, decimalLiteral, type ExactRatio, type Quantity } from "../src/values.ts";
+import {
+  absentQuantity,
+  addQuantities,
+  decimalLiteral,
+  type ExactRatio,
+  type Quantity,
+} from "../src/values.ts";
 import { addMonths, formatLocalDate, parseLocalDate, type LocalDateValue } from "../src/time.ts";
 import { loadFixture, q, quantityText } from "./helpers.ts";
 
@@ -243,6 +249,28 @@ describe("SC11 / AT37 / AT43 / AT47 / AT48 — quantity, eligibility and qualifi
     expect(measures).toHaveLength(1);
     expect(quantityText(measures[0]!.quantity)).toBe(fixture.expected.statusIndicator);
     expect(measures[0]!.consumable).toBe(false);
+  });
+
+  test("INV05 a consumable bucket in another unit makes the consumable total a conflict, not a smaller sum", () => {
+    const points = holding("points:program-a", [
+      bucket("bucket:regular", "regular", "points:program-a", "300"),
+      bucket("bucket:foreign", "time-limited", "points:program-b", "500"),
+      bucket("bucket:status", "qualification", "status-points:program-a", "100"),
+    ]);
+    const summary = summarizeHolding(points);
+    expect(summary.consumable).toEqual({
+      unitRef: "points:program-a",
+      value: { status: "conflict", reasonCode: "unit_mismatch" },
+    });
+    expect(summary.error?.code).toBe("unit_mismatch");
+    // Both other-unit buckets stay out of every subtotal, each with its reason.
+    expect(summary.excluded).toEqual([
+      { bucketRef: "bucket:foreign", kind: "time-limited", reasonCode: "unit_mismatch" },
+      { bucketRef: "bucket:status", kind: "qualification", reasonCode: "unit_mismatch" },
+    ]);
+    expect(summary.byKind.map((entry) => [entry.kind, quantityText(entry.quantity)])).toEqual([
+      ["regular", "300"],
+    ]);
   });
 
   test("SYN19 the wallet's JPY and the programme's points are never added", () => {
@@ -726,6 +754,89 @@ describe("SC13 / AT41 / AT49 — eligibility and the application-credit distinct
     );
     expect(returned.observedExpiry).not.toEqual(day("2027-08-01"));
     expect(validRewardBucket(returned)).toBe(true);
+  });
+
+  test("INV05 an event amount that is not exact leaves the positions it moves unknown, never unmoved", () => {
+    const unread = absentQuantity(fixture.pointUnit, "unparsed", "synthetic_amount_unreadable");
+    const event = (
+      eventRef: string,
+      stage: "debited" | "credited" | "returned",
+      quantity: Quantity,
+    ) => ({
+      eventRef,
+      stage,
+      quantity,
+      returnedToBucketRef: null,
+      at: day("2026-09-02"),
+      evidenceRefs: [],
+    });
+    const state = (position: { sourceHeld: Quantity; inTransit: Quantity }) => [
+      position.sourceHeld.value.status === "exact"
+        ? quantityText(position.sourceHeld)
+        : position.sourceHeld.value.reasonCode,
+      position.inTransit.value.status === "exact"
+        ? quantityText(position.inTransit)
+        : position.inTransit.value.reasonCode,
+    ];
+
+    // An unreadable debit moved some amount: neither side still holds what it held.
+    const debit = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [event("event:debit", "debited", unread)],
+      fixture.walletUnit,
+    );
+    expect(debit.positions.map(state)).toEqual([
+      ["synthetic_amount_unreadable", "synthetic_amount_unreadable"],
+    ]);
+
+    // An unreadable credit is not a credit of nothing.
+    const credit = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [
+        event("event:debit", "debited", q(fixture.pointUnit, "5000")),
+        event(
+          "event:credit",
+          "credited",
+          absentQuantity(fixture.walletUnit, "missing", "synthetic_credit_missing"),
+        ),
+      ],
+      fixture.walletUnit,
+    );
+    const credited = credit.positions[1]!.destinationCredited;
+    expect(credited.unitRef).toBe(fixture.walletUnit);
+    expect(credited.value).toEqual({ status: "missing", reasonCode: "synthetic_credit_missing" });
+
+    // An unreadable return does not leave the source as it was before the return.
+    const returned = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [
+        event("event:debit", "debited", q(fixture.pointUnit, "5000")),
+        event("event:return", "returned", unread),
+      ],
+      fixture.walletUnit,
+    );
+    expect(returned.positions.map(state)).toEqual([
+      ["3000", "5000"],
+      ["synthetic_amount_unreadable", "0"],
+    ]);
+
+    // Once unknown, a position stays unknown: a later exact event does not
+    // turn it back into a number, and the credit side stays exact.
+    const later = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [
+        event("event:debit-1", "debited", unread),
+        event("event:debit-2", "debited", q(fixture.pointUnit, "1000")),
+        event("event:credit", "credited", q(fixture.walletUnit, "1000")),
+      ],
+      fixture.walletUnit,
+    );
+    expect(later.positions.map(state)).toEqual([
+      ["synthetic_amount_unreadable", "synthetic_amount_unreadable"],
+      ["synthetic_amount_unreadable", "synthetic_amount_unreadable"],
+      ["synthetic_amount_unreadable", "0"],
+    ]);
+    expect(quantityText(later.positions[2]!.destinationCredited)).toBe("1000");
   });
 });
 

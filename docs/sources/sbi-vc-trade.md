@@ -530,7 +530,7 @@ login responseの属性では、`vct_bff_sid`と`__cf_bm`の`Expires`が約30分
 - responseの`meta.secureKey`はsession更新へ使った後に削除し、R2へ保存しない。各artifactは取得直後にR2へ書き、全履歴をmemoryへ保持しない。
 - responseは64 KiB上限でJSON envelopeと`meta.status === "OK"`だけを確認し、bodyを保存しない。
 - `Set-Cookie`は8 Cookieだけを追従し、`__cf_bm`は無視する。`meta.secureKey`が変化した場合も暗号化状態へ反映する。
-- 平文healthはlast attempt/success、HTTP/gateway status、Cookie更新数、連続失敗数、固定error codeだけで、残高・履歴・Cookie値・response bodyを含まない。
+- 平文healthはlast attempt/success、HTTP status、gateway statusの閉じた区分（`OK`か`rejected`。gatewayが返した`OK`以外の文字列は保存もlogもしない）、Cookie更新数、連続失敗数、固定error codeだけで、残高・履歴・Cookie値・response bodyを含まない。
 - 手動`/run`、`/reauth`、`/health`はrandom bearer tokenのWorker Secretで保護する。
 - keepaliveがHTTP 401/403、gateway拒否、seed欠落になった場合だけ再認証する。6時間cooldownで反復loginを抑止し、同種の同時実行を単一Promiseへ畳み込み、keepaliveと再認証のsession変更はDurable Object内で直列化する。
 - passkey完了responseの`body.accountId`は直後のread APIの`secureKey`と一致したため、新規sessionの`secureKey`として使う。`isAgreed !== true`なら`setAgreement`を送らず停止する。
