@@ -956,6 +956,8 @@ in `structuredContent`; `content[0].text` is that object serialised.
 
 Every row is owner-executed and production-unverified. The Worker-side
 mapping, the grant shape and the local checks are the same for all of them.
+If an existing connection reports that it needs reauthentication, follow the
+[connection recovery runbook](mcp-recovery.md).
 
 | Client                                          | Flow it presents ([Claude][claude-auth], [ChatGPT][openai-auth], [Codex][codex-mcp])                                                                                                                                                                      | Owner creates in Cloudflare                                                                  | Worker mapping           | Grants                                                                                                  | Client-side registration                                                                                       |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -1204,11 +1206,13 @@ eras returning deep-equal objects with the same gap reasons.
 `@modelcontextprotocol/client` in `legacy` (2025-11-25) and `auto`
 (2026-07-28) negotiation.
 
-Not verified: no deployed instance, no MCP Access application, Managed OAuth
-setting or policy, no real provider data, and no MCP client has connected to
-`/mcp` — every step in [Connecting an MCP client](#connecting-an-mcp-client)
-is unexercised against production. Passing a client's connection check is
-not a completion criterion (addendum 10 §10).
+These synthetic component checks do not verify a deployed instance, the MCP
+Access application, Managed OAuth settings or policy, real provider data or a
+real MCP client. Production client evidence is dated and kept in the
+[connection recovery runbook](mcp-recovery.md): a read-only client succeeded on
+2026-10-10, and the owner's plugin reported that it needed reauthentication on
+2026-11-04. Passing a client's connection check is not a completion criterion
+(addendum 10 §10).
 
 ## Deploy order and rollback
 
