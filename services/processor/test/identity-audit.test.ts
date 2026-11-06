@@ -355,9 +355,7 @@ test("Vpass audit separates revoked retained evidence from invalid current expos
     db.exec(
       `DROP VIEW current_identity_observations; CREATE VIEW current_identity_observations AS SELECT o.*,r.parse_run_id FROM identity_observations o JOIN identity_runs r ON r.id=o.identity_run_id WHERE r.id='vp7v2';`,
     );
-    expect(rows("vpass_pins")[0]).toMatchObject({
-      invalid_current_pin_exposures: 1,
-    });
+    expect(rows("vpass_pins")[0]).toMatchObject({ invalid_current_pin_exposures: 1 });
     expect(JSON.stringify(rows("vpass_pins"))).not.toContain("PRIVATE_");
   } finally {
     db.close();

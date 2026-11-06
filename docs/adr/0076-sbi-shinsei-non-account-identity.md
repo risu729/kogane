@@ -173,6 +173,14 @@ Synthetic inputs only, shaped like the parsers' rows:
 - `services/processor/test/identity-policies.test.ts`: every SBI Shinsei parse
   selects `identity-default-v2` with an empty dependency set; explicit versions
   are stored as requested; the required-policy SQL text.
+- `packages/storage-d1/test/identity-sweep-query.test.ts` and
+  `services/processor/test/identity-sweep-cost.test.ts`: the frozen
+  pre-rewrite candidate SQL (`fixtures/identity-sweep-legacy.sql`) carries the
+  shipped required-policy expression, now with the SBI Shinsei branch; the
+  synthetic store holds SBI Shinsei parses sealed at policy 1 and at policy 2,
+  and the shipped candidate SQL returns the same rows as the frozen text on
+  scaled stores (unscoped and scoped to `sbi-shinsei-bank`), with the plan
+  checks (no table statistics) and the D1 rows-read bound unchanged.
 - `services/processor/test/identity-store.test.ts`: a real policy-1 run, then
   the sweep appends one policy-2 run (and a second sweep does nothing); the
   policy-1 rows and revisions are unchanged; every observation keeps its source
