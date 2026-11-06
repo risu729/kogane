@@ -13,12 +13,12 @@ import {
   insertObservation,
   insertParseRun,
   listArtifacts,
-  openStore,
   publishParseRun,
   putRawObject,
   upsertSource,
 } from "../src/store.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
+import { openTestStore } from "./test-store.ts";
 
 const FIXTURES = join(
   import.meta.dir,
@@ -233,7 +233,7 @@ describe("Vpass canonical Layer-B parser", () => {
           ],
         }),
       );
-      const store = openStore(state);
+      const store = openTestStore(state);
       expect(
         ingestRunDirectory(store, directory, { id: "vpass", provider: "Vpass" }).artifacts,
       ).toBe(1);
@@ -303,7 +303,7 @@ describe("Vpass canonical Layer-B parser", () => {
   test("selects every page from the latest successful card-month snapshot, including empty", () => {
     const directory = mkdtempSync(join(tmpdir(), "kogane-vpass-current-"));
     try {
-      const store = openStore(directory);
+      const store = openTestStore(directory);
       upsertSource(store, {
         id: "vpass",
         provider: "Vpass",
