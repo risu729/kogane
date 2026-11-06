@@ -667,8 +667,9 @@ paths, except that a grant without `evidence.read` gets the page without its
 `kogane.explain` hands the same identifier (`raw:<sha256>`) only with
 `evidence.read`, which `records.read` never implies and ADR 0047 leaves to a
 separate owner decision; the routes' reader authority holds `evidence.read`,
-so a grant that holds it too gets the routes' page unchanged. It exists while the routes do (`eventsV2`): otherwise its name is
-`unknown_tool` and its path `404`. It is listed only to a grant that can call
+so a grant that holds it too gets the routes' page unchanged. It exists while
+the routes do (`eventsV2`): otherwise its name is `unknown_tool` and its path
+`404`. It is listed only to a grant that can call
 it. It is R0: one audit record per served call, whose row count is the page's
 entries, truncated when a next page follows.
 
@@ -685,11 +686,12 @@ description, merchant or account label. The grant's
 version stays unproven.
 
 **Verification.** `services/app/test/events-api.test.ts` ("the agent tool"):
-both agent paths answer exactly the routes' bodies for each list, basis and
-offset to a grant with `evidence.read`, and the same bodies without
-`raw_object:` refs to one without; the event's published source row carries
-a hostile description that no answer contains; listing per grant shape and per store; route refusals with the same
-code as the route and equal status and body on HTTP and MCP; grant refusals
+both agent paths answer the routes' bodies byte for byte (the HTTP body and
+the MCP text content) for each list, basis and offset to a grant with
+`evidence.read`, and the same bytes without the `raw_object:` refs to one
+without; the event's published source row carries a hostile description that
+no answer contains; listing per grant shape and per store; route refusals with
+the same code as the route and equal status and body on HTTP and MCP; grant refusals
 before the body is validated; absence without the projection; one R0 audit
 record per served call with a row count and nothing else. The pinned tool
 lists in `services/app/test/agent-api.test.ts` (schema snapshot included),

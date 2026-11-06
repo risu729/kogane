@@ -316,7 +316,11 @@ describe("the agent tool", () => {
         ...(options.schema === undefined ? {} : { schema: options.schema }),
       })
     ).json()) as {
-      result?: { isError: boolean; structuredContent: Record<string, unknown> };
+      result?: {
+        isError: boolean;
+        structuredContent: Record<string, unknown>;
+        content: { type: string; text: string }[];
+      };
       error?: { code: number; message: string };
     };
   /** Rows of the tables the routes read: none may change. */
@@ -344,20 +348,22 @@ describe("the agent tool", () => {
       ["/api/v2/obligations?offset=0", { list: "obligations", offset: 0 }],
     ];
     for (const [path, args] of cases) {
-      const route = (await (await call(path)).json()) as Record<string, unknown>;
+      const routeText = await (await call(path)).text();
+      const route = JSON.parse(routeText) as Record<string, unknown>;
       // A grant with `evidence.read`, as the routes' reader authority holds,
-      // gets the routes' page unchanged; `records.read` alone gets it without
-      // the `raw_object:` refs (below).
+      // gets the routes' page unchanged, byte for byte; `records.read` alone
+      // gets it without the `raw_object:` refs (below), every other byte kept.
       for (const [environment, expected] of [
-        [withGrant(EVIDENCE_GRANT), route],
-        [granted, withoutRawObjects(route)],
+        [withGrant(EVIDENCE_GRANT), routeText],
+        [granted, JSON.stringify(withoutRawObjects(route))],
       ] as const) {
         const response = await http(args, { environment });
         expect(response.status, path).toBe(200);
-        expect(await response.json(), path).toEqual(expected);
+        expect(await response.text(), path).toBe(expected);
         const viaMcp = await mcpCall(args, { environment });
         expect(viaMcp.result?.isError, path).toBe(false);
-        expect(viaMcp.result?.structuredContent, path).toEqual(expected);
+        expect(viaMcp.result?.structuredContent, path).toEqual(JSON.parse(expected));
+        expect(viaMcp.result?.content, path).toEqual([{ type: "text", text: expected }]);
       }
     }
     // The seeded event and obligation are there, so no comparison is of two empty pages.
