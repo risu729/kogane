@@ -107,6 +107,75 @@ describe("query spec validation", () => {
     }
   });
 
+  test("an activity date range is calendar days in order, as the v1 route reads it", () => {
+    const activity = (filters: Record<string, string>) =>
+      parseQueryRequest({ intent: "activity", filters });
+    expect(activity({ from: "2024-02-29", to: "2024-03-01" })).toMatchObject({ ok: true });
+    expect(activity({ from: "2026-01-01", to: "2026-01-01" })).toMatchObject({ ok: true });
+    for (const day of ["2026-02-29", "2026-02-30", "2026-04-31", "2026-13-01", "2026-00-10"]) {
+      expect(activity({ from: day })).toEqual({
+        ok: false,
+        code: "invalid_query",
+        refs: ["filter:from"],
+      });
+      expect(activity({ to: day })).toEqual({
+        ok: false,
+        code: "invalid_query",
+        refs: ["filter:to"],
+      });
+    }
+    expect(activity({ from: "2026-12-31", to: "2026-01-01" })).toEqual({
+      ok: false,
+      code: "invalid_query",
+      refs: ["filter:from", "filter:to"],
+    });
+  });
+
+  test("a malformed value of a known key is invalid_query naming that key, never dropped", () => {
+    const refused = (body: unknown, ref: string) => {
+      const outcome = parseQueryRequest(body);
+      expect(outcome).toEqual({ ok: false, code: "invalid_query", refs: [ref] });
+    };
+    expect(parseQueryRequest(null)).toEqual({ ok: false, code: "invalid_query", refs: [] });
+    refused({ intent: 7 }, "intent");
+    refused({ intent: "activity", filters: [] }, "filters");
+    for (const value of ["", "x".repeat(513), "a\u0000b", "a\u007fb", 1])
+      refused({ intent: "activity", filters: { source: value } }, "filter:source");
+    for (const value of ["2026-9-01", "2026-09-01T00:00:00Z", "yesterday"])
+      refused({ intent: "activity", filters: { from: value } }, "filter:from");
+    refused({ intent: "activity", filters: { to: "2026/09/30" } }, "filter:to");
+    refused({ intent: "reported-state", filters: { view: "net-worth" } }, "filter:view");
+    for (const cursor of [1, "c".repeat(2049)]) refused({ intent: "coverage", cursor }, "cursor");
+    for (const limit of [0, 1001, 1.5, "10", Number.NaN])
+      refused({ intent: "coverage", limit }, "limit");
+  });
+
+  test("an accepted request keeps exactly the filters it was given, with defaults made explicit", () => {
+    expect(parseQueryRequest({ intent: "coverage" })).toEqual({
+      ok: true,
+      value: { intent: "coverage", filters: {}, cursor: null, limit: null },
+    });
+    expect(
+      parseQueryRequest({
+        intent: "activity",
+        filters: { source: "fixture-a", from: "2026-09-01", to: "2026-09-30", q: "x".repeat(512) },
+        cursor: "c".repeat(2048),
+        limit: 1000,
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        intent: "activity",
+        filters: { source: "fixture-a", from: "2026-09-01", to: "2026-09-30", q: "x".repeat(512) },
+        cursor: "c".repeat(2048),
+        limit: 1000,
+      },
+    });
+    expect(
+      parseQueryRequest({ intent: "reported-state", filters: { view: "summaries" }, limit: 1 }),
+    ).toMatchObject({ ok: true, value: { filters: { view: "summaries" }, limit: 1 } });
+  });
+
   test("no request can carry a URL, SQL or an ordering", () => {
     for (const body of [
       { intent: "activity", url: "https://provider.invalid" },

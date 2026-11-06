@@ -40,6 +40,7 @@ import {
 } from "../../../packages/observation-shared/src/reconstructed-state-contract.ts";
 import { clientFeatures } from "../src/capabilities.ts";
 import {
+  formProblem,
   RECONSTRUCTION_REASON_LABELS,
   RECONSTRUCTION_REFUSAL_MESSAGES,
 } from "../src/pages/ReconstructedState.tsx";
@@ -251,5 +252,28 @@ describe("reconstructed state HTTP contract", () => {
         cut: { kind: "instant", coreEpoch: "core-epoch-1", instant: NOW },
       }).get("instant"),
     ).toBe(NOW);
+  });
+
+  test("the form refuses a date that is not a calendar day, as the route does", () => {
+    const today = "2026-04-30";
+    const latest = { kind: "latest" } as const;
+    expect(
+      formProblem({ account: "acct", from: "2026-03-01", to: "2026-03-31", cut: latest }, today),
+    ).toBeNull();
+    expect(
+      formProblem({ account: "acct", from: "2024-02-29", to: "2024-03-01", cut: latest }, today),
+    ).toBeNull();
+    const impossible: [string, string][] = [
+      ["2026-02-30", "2026-03-10"],
+      ["2026-02-01", "2026-02-29"],
+      ["2026-01-32", "2026-02-10"],
+      ["2026-00-10", "2026-02-10"],
+      ["2026-03-01", "2026-04-31"],
+      ["2026-03-01", "2026-13-01"],
+    ];
+    for (const [from, to] of impossible)
+      expect(formProblem({ account: "acct", from, to, cut: latest }, today)).toBe(
+        "日付を 2026-03-31 のように指定してください。",
+      );
   });
 });

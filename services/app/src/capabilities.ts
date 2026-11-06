@@ -1,7 +1,8 @@
 // What this deployment can actually serve, as one object.
 //
-// `commands` and `opsApi` follow deployment flags. `eventsV2` and the card
-// review capabilities follow the tables this database actually has.
+// `commands` and `opsApi` follow deployment flags. `eventsV2`, the card
+// review capabilities and `reportArtifacts` follow the tables this database
+// actually has.
 // `rewardsV2` is served; `rewardsV2ReadModel` is `read-d1` only when a reward
 // snapshot can be served. `balancesV2` follows a sealed snapshot on READ.
 // They are resolved here so `/api/meta` cannot advertise a route the Worker
@@ -20,6 +21,7 @@ import { eventsV2Available } from "./events-api";
 import { opsApiEnabled } from "./ops-api";
 import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { reportedStateAvailable } from "./reported-state-api";
+import { reportArtifactsAvailable } from "./reports-api";
 import { rewardReadContext } from "./rewards-read";
 
 /**
@@ -52,6 +54,8 @@ export async function centralStoreCapabilities(env: Env): Promise<ApiCapabilitie
       reportedStateOnDate: await reportedStateAvailable(env),
       // Where the reported state is, since it compares two of them.
       reconstructedStateOnDate: await reconstructedStateAvailable(env),
+      // Needs CORE 0034's catalogue, like the list route itself.
+      reportArtifacts: await reportArtifactsAvailable(env),
       // The operations API follows its own flag (02 §4, docs/ops-api.md). It is
       // advertised, never assumed: with the flag off the paths do not exist.
       opsApi: opsApiEnabled(env),

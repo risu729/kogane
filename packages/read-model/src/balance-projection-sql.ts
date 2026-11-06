@@ -125,6 +125,45 @@ export interface ProjectionInputsRow {
 }
 
 /**
+ * The declared relations of one projection build: of every relation triple
+ * (kind, from_ref, to_ref) of the four kinds the projection turns into scope
+ * relations, only its current row (ADR 0001's amendment of 2026-11-06).
+ * Relation decisions are append-only, so a `relation.reject` after a
+ * `relation.accept` is a second row of the same triple; reading every row
+ * kept the withdrawn acceptance in force.
+ *
+ * The current row is the newest decision (`accepted`, `rejected` or
+ * `released`), and only a triple with no decision at all reads its newest
+ * proposal. A proposal never supersedes a decision: an agent or rule may
+ * append a `proposed` row to any triple, and it must not withdraw an
+ * acceptance any more than it may make one (INV07). "Newest" is the change
+ * lifecycle's order of a relation's history (`created_at`, then `id`, newest
+ * first; `packages/application/src/operations/targets.ts`).
+ *
+ * Rows stay in `id` order, so a store with one row per triple reads exactly
+ * what the shipped text read. `bound` counts current triples: one row over it
+ * is read so the caller refuses rather than cuts.
+ *
+ * Cost: the rows of the four kinds are read once, by a range of
+ * `entity_relations_to` or `_from` on the kind, exactly the rows the shipped
+ * text read, and ranked by one sort (as `LISTED_AS_SQL` ranks `listed_as`).
+ * No index covers the whole triple, so a correlated newer-row check would
+ * read every row sharing (kind, one ref) once per candidate: quadratic in a
+ * long history of one triple, or in many triples onto one reference.
+ */
+export function projectionRelationsSql(bound: number): string {
+  if (!Number.isSafeInteger(bound) || bound < 0)
+    throw new Error("read-model: projection relation bound out of range");
+  return `SELECT id, kind, from_ref, to_ref, status, decision_revision_id FROM (
+  SELECT r.id, r.kind, r.from_ref, r.to_ref, r.status, r.decision_revision_id,
+   row_number() OVER (PARTITION BY r.kind, r.from_ref, r.to_ref
+    ORDER BY r.status<>'proposed' DESC, r.created_at DESC, r.id DESC) AS rank
+  FROM entity_relations r
+  WHERE r.kind IN ('same_account','connection_contains','account_has_pocket','statement_covers')
+ ) WHERE rank=1 ORDER BY id LIMIT ${bound + 1}`;
+}
+
+/**
  * One page: `snapshot_id` and `row_seq > cursor` are the leading columns of
  * the unique order index, so the plan is a keyed range scan whose cost is the
  * page size plus the rows the filter rejects inside that range.

@@ -440,8 +440,39 @@ export function describeRecord(record) {
 }
 
 /**
- * The newest deployment of the production environment whose latest status is
- * `success`, with the release record it carried, plus the deployments newer
+ * The status that says how a deployment ended: its newest status other than
+ * `inactive`.
+ *
+ * `inactive` is not an outcome. GitHub adds it by itself to a deployment that
+ * had succeeded as soon as another deployment of the environment reports
+ * `success` later, whichever was created first. The empty-payload deployment
+ * GitHub opens for a job that declares `environment: production` is created
+ * before the release record but closes a few seconds after the record's own
+ * `success`, so the newest successful release record is `inactive` by the time
+ * the next run reads it. GitHub has done this for production deployments since
+ * 2026-11-05 20:31 UTC (older ones kept `success` before then); reading
+ * `inactive` as "did not succeed" made every release since then refuse the
+ * ledger as unreadable.
+ * Nothing in this repository posts `inactive`, so skipping it cannot turn a
+ * failed or unfinished release into a successful one: a deployment whose
+ * newest real status is `failure` or `in_progress` still reads as that.
+ *
+ * @param {readonly {state?: unknown, created_at?: unknown, id?: unknown}[]} statuses
+ * @returns {{state?: unknown} | undefined}
+ */
+export function settledStatus(statuses) {
+  return [...statuses]
+    .filter((status) => status?.state !== "inactive")
+    .sort(
+      (a, b) =>
+        String(b.created_at).localeCompare(String(a.created_at)) ||
+        Number(b.id ?? 0) - Number(a.id ?? 0),
+    )[0];
+}
+
+/**
+ * The newest deployment of the production environment whose settled status
+ * (`settledStatus`) is `success`, with the release record it carried, plus the deployments newer
  * than it that did *not* succeed.
  *
  * Only the successful one is the environment's state. The others are what a
@@ -477,9 +508,7 @@ export async function readLedger(client, { fetchImpl, limit = 100 } = {}) {
       { token, fetchImpl },
     );
     if (!Array.isArray(statuses.data)) throw new Error("the status list did not return a list");
-    const latest = [...statuses.data].sort((a, b) =>
-      String(b.created_at).localeCompare(String(a.created_at)),
-    )[0];
+    const latest = settledStatus(statuses.data);
     if (latest?.state === "success") {
       return {
         release: {
