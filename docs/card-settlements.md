@@ -188,10 +188,45 @@ produce candidates only. They never cause automatic acceptance.
 
 The sweep is the `card_settlement_sweep` lane, right after
 `reconciliation_sweep` and under the same `RECONCILIATION_ENABLED` flag. It
-logs `{"event":"card_settlement_sweep","scanned":…,"proposed":…,"written":…}`
+logs `{"event":"card_settlement_sweep","scanned":…,"proposed":…,"written":…,"debitAccountEvidence":…,"unmatched":{…}}`
 (or `card_settlement_sweep_failed` with a safe code) and records each tick,
 including a `skipped-by-flag` one, in `processor_lane_ticks`
 ([processor.md §6.1](processor.md#61-tick-records)).
+
+### Unmatched statements
+
+A statement that yields no candidate is counted, not recorded: `unmatched`
+maps three closed codes to the number of statements the tick examined that
+yielded none ([ADR 0009, 2026-11-06 amendment](adr/0009-lane-tick-records.md#amendment-2026-11-06-the-settlement-sweep-counts-its-unmatched-statements)):
+
+| Code                       | The statement                                                                          |
+| -------------------------- | -------------------------------------------------------------------------------------- |
+| `statement_not_comparable` | has no exact positive total, no valid due date or no period; nothing is compared       |
+| `no_debit_in_window`       | the bank read within three days of its due date returned no row                        |
+| `no_equal_amount_debit`    | the bank read returned rows, and none has an exact amount equal to the statement total |
+
+Every code is present, zero included. The sweep decides the code from the
+rows it has already read and compared, so no query is added and the
+candidates, digests and other counts are what they were. The map reaches the
+log line, the tick row and `laneTicks` in `/status` and `/internal/health`;
+only these three codes and their integer counts are kept, never an amount,
+date, key or provider text.
+
+Limits:
+
+- **The shape is not named.** A statement settled by two debits and a
+  partially paid one are both `no_equal_amount_debit`; a statement paid
+  outside the three days, or from a bank without an adapter, is
+  `no_debit_in_window` when no other debit falls in its window and
+  `no_equal_amount_debit` when one does. Telling them apart would mean
+  summing the window's debits, which the sweep does not do.
+- **Per tick, not per store.** The cursor wraps at the last statement, so a
+  statement is counted again on every pass; a tick that stops at 500 written
+  candidates leaves the rest of its page uncounted until the next tick.
+- **The bank read stops at 1,000 rows.** A statement whose window holds more
+  counts as `no_equal_amount_debit` when none of those rows matches.
+- A statement with a candidate is not counted here, even when its window holds
+  several equal debits (each is its own candidate).
 
 The `カード照合` page shows the source facts, evidence links, candidate rationale,
 current readiness blockers and decision history. An authenticated human operator
@@ -655,6 +690,12 @@ second row on a re-run or for the same bytes of another run, refusals stored
 without values, append-only guards), and the settlement sweep (evidence
 attached, a changed outcome appended, the candidate's facts and eligibility
 unchanged).
+`services/processor/test/card-settlement-unmatched.test.ts` runs the sweep on
+synthetic rows for each [unmatched code](#unmatched-statements): two debits
+summing to the total and a partial debit, an equal debit four days late and no
+debit, a missing total, a missing due date and a zero total, and an exact match
+whose candidate and digest are pinned to what the sweep wrote before the codes
+existed; its tick row holds the closed codes and integers only.
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.
@@ -693,4 +734,5 @@ bank read. No cache survives a tick. Retention is bounded to 32 dates and
 2,000 rows; results are evicted rather than truncated. The original keyed SQL,
 adapter behavior, row order, 1,000-row query limit and candidate semantics are
 unchanged. The scanned counter continues to count logical candidate rows,
-including reused rows, rather than claiming to measure D1 rows_read.
+including reused rows, rather than claiming to measure D1 rows_read. The
+`unmatched` codes are decided from those rows and read nothing more.

@@ -1,6 +1,8 @@
 # ADR 0009: Lane tick records are bounded operational state
 
-- Status: accepted
+- Status: accepted; the
+  [2026-11-06 amendment](#amendment-2026-11-06-the-settlement-sweep-counts-its-unmatched-statements)
+  is proposed until the PR that carries it merges
 - Date: 2026-09-25
 - Implemented by: #249
 - Carried by: [processor §6.1](../processor.md#61-tick-records),
@@ -54,3 +56,77 @@ of either sweep hid the other's counts.
 
 Storage, read-model and processor tests on synthetic data, including the
 refusal of text values and of repeated count keys.
+
+## Amendment 2026-11-06: the settlement sweep counts its unmatched statements
+
+- Status: proposed (accepted when the PR that carries it merges)
+- Date: 2026-11-06
+- Carried by: `CARD_SETTLEMENT_UNMATCHED_CODES` and `cardSettlementSweep` in
+  `services/processor/src/card-settlement-job.ts`, `LANE_TICK_COUNTS` in
+  `services/processor/src/lane-ticks.ts`,
+  [card settlements: unmatched statements](../card-settlements.md#unmatched-statements),
+  [processor §6.1](../processor.md#61-tick-records)
+
+### Context
+
+`card_settlement_sweep` proposes a candidate only for a single debit whose
+exact amount equals the statement total within three days of its due date.
+A statement that yielded none left no trace: its counts said how many rows
+were scanned and how many candidates were written, not how many statements
+had none or why. A statement settled by two debits, a partial payment, a
+statement with no debit at all and one that could not be compared were the
+same silence in the log line and in its tick row.
+
+### Options considered
+
+1. A table of unmatched statements. Rejected: it would be a new record per
+   statement per pass, carry statement references into an operational table,
+   and need a migration, a ledger classification and retention, for a
+   question a count answers.
+2. Name the shape (two debits, partial payment) by summing or comparing the
+   window's debits. Rejected: that is an allocation the sweep does not make;
+   it would sum amounts outside the reviewed planner and guess a meaning no
+   rule states.
+3. A closed code map in the existing result, kept by this ADR's tick record.
+   Chosen.
+
+### Decision
+
+- The sweep's result carries `unmatched`, a map of three closed codes to the
+  number of statements examined this tick that yielded no candidate:
+  `statement_not_comparable` (no exact positive total, no valid due date or
+  no period), `no_debit_in_window` (the window read returned no row) and
+  `no_equal_amount_debit` (it returned rows, none of an exact equal amount).
+  Every code is present, zero included.
+- The codes are decided from the rows the sweep already reads, after it has
+  compared them: no query is added, and the candidates, their digests and
+  the existing counts are unchanged.
+- `processor_lane_ticks` keeps the map like `purchase_recognition`'s
+  `skipped`: by name, only the closed codes, and only safe non-negative
+  integers. No amount, date, key or provider text is recorded.
+
+### Consequences
+
+- The log line, the tick row and `laneTicks` in `/status` and
+  `/internal/health` (relayed by the App's ops health) carry the map with no
+  further change and no migration.
+- The counts are per tick: the sweep's cursor wraps, so a statement is
+  counted again on every pass, and the numbers are not a store-wide total.
+- The codes do not say why a statement is unmatched: a statement paid by two
+  debits and a partially paid one are both `no_equal_amount_debit`, and a
+  statement paid outside the three days or from a bank without an adapter is
+  `no_debit_in_window` when no other debit falls in its window (and
+  `no_equal_amount_debit` when one does). The bank read stops at 1,000 rows; a statement whose
+  window holds more counts as `no_equal_amount_debit` when none of those
+  rows matches.
+
+### Verification
+
+`services/processor/test/card-settlement-unmatched.test.ts` runs the sweep on
+synthetic rows: a statement settled by two debits and a partial one are
+`no_equal_amount_debit`, an equal debit four days late and no debit are
+`no_debit_in_window`, a missing total, a missing due date and a zero total are
+`statement_not_comparable`, and an exact match writes the candidate and digest
+the sweep wrote before the map existed. Its tick row holds closed codes and
+integers only. `services/processor/test/lane-ticks.test.ts` checks that a code
+outside the closed set is dropped from the row and from `/status`.

@@ -621,7 +621,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `identity_sweep`           | `processedRuns`, `identifiedRuns`, `identifiedObservations`                                                                                                                                                                         |
 | `reconciliation_sweep`     | `slices`, `scanned`, `groups`, `groupsSkipped`, `groupsDeferred`, `proposed`, `known`, `written`, `failed`, `autoAccepted`                                                                                                          |
 | `card_debit_account_sweep` | `scanned`, `read`, `refused`, `written`                                                                                                                                                                                             |
-| `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`                                                                                                                                                                            |
+| `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`, `unmatched` (statements with no candidate, per closed code; [card-settlements.md](card-settlements.md#unmatched-statements))                                              |
 | `purchase_recognition`     | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped`                                    |
 | `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
 | `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
@@ -647,9 +647,10 @@ an `error_code` and `counts_json`:
   name, `unknown` for anything that is not a code) and `counts_json` is `{}`.
 
 A lane whose stage is not wired at all records nothing. Only counts, flags and
-the closed exclusion codes of `purchase_recognition` are copied, by field
-name; the 0049 trigger refuses any text value, so no amount, key, account label
-or provider wording can be stored. A tick killed mid-lane (a Worker limit)
+the closed code maps above (`purchase_recognition`'s exclusion codes,
+`card_settlement_sweep`'s unmatched codes, `maintenance_survey`'s failure
+codes) are copied, by field name; the 0049 trigger refuses any text value, so
+no amount, key, account label or provider wording can be stored. A tick killed mid-lane (a Worker limit)
 leaves no row for that lane, and the gap is the signal.
 
 The table is bounded: each insert deletes that lane's rows beyond the latest
