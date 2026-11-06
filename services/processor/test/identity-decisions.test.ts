@@ -1014,3 +1014,61 @@ test("migration 0029 on 0017-0035 with seeded rows: every legacy manual once, re
     await local.dispose();
   }
 }, 60_000);
+
+test("a command racing another command under its operation id writes none of its rows", async () => {
+  const mine = await seedParse(140, "sony-bank", "sony-bank:race-mine:JPY");
+  const theirs = await seedParse(141, "sony-bank", "sony-bank:race-theirs:JPY");
+  await identifyParse(db, mine, labelled("race rule"));
+  await identifyParse(db, theirs, labelled("race rule"));
+  const mineRef = (await currentMapping(140)).source_account_id;
+  const theirsRef = (await currentMapping(141)).source_account_id;
+  await db
+    .prepare("INSERT INTO accounts VALUES('race-target','手動確認済み口座','deposit','identified')")
+    .run();
+  expect(
+    await run(
+      command({
+        operationId: "op-race-setup-141",
+        referenceId: theirsRef,
+        targetId: "race-target",
+      }),
+    ),
+  ).toMatchObject({ ok: true });
+  const assign = command({
+    operationId: "op-key-race-140",
+    referenceId: mineRef,
+    targetId: "race-target",
+  });
+  // A release of another subject takes the same key between this assign's
+  // reads and its batch. It writes no mapping row, so the mapping id this
+  // assign derives from the key is still free; the decision id is not.
+  const racing = new Proxy(db, {
+    get(target_, property) {
+      if (property === "batch")
+        return async (statements: D1PreparedStatement[]) => {
+          expect(
+            await run({
+              ...assign,
+              action: "release-override",
+              referenceId: theirsRef,
+              expectedRevision: 2,
+              targetId: null,
+            }),
+          ).toMatchObject({ ok: true, replayed: false });
+          return target_.batch(statements);
+        };
+      const value = Reflect.get(target_, property) as unknown;
+      return typeof value === "function" ? (value as Function).bind(target_) : value;
+    },
+  });
+  expect(await executeIdentityCommand(racing, assign, IDENTITY_POLICY_VERSION)).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+  });
+  // No manual mapping that no decision describes: the subject is as the rule left it.
+  expect(await count("account_mappings", "source_account_id=?", mineRef)).toBe(1);
+  expect(await currentMapping(140)).toMatchObject({ revision: 1, method: "rule" });
+  expect(await count("protected_mapping_subjects", "subject_ref=?", mineRef)).toBe(0);
+  expect(await count("decision_revisions", "subject_ref=?", mineRef)).toBe(0);
+  expect(await count("active_manual_overrides", "subject_ref=?", theirsRef)).toBe(0);
+});

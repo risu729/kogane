@@ -212,6 +212,12 @@ export async function prepareIdentityCommand(
   const now = options.now ?? new Date().toISOString();
   const guard = options.guard;
   const revisionGuard = `(SELECT max(revision) FROM ${table} WHERE ${reference}=?)=?`;
+  // Every statement after the ledger insert is joined to the ledger row of THIS
+  // command: the same key, payload digest and actor. A command that took the
+  // key in between (an idempotency conflict) wrote a row under that key too,
+  // and none of this command's mapping, decision or supersession may ride on it.
+  const ownLedger = "op.operation_id=? AND op.payload_digest=? AND op.actor_id=?";
+  const ownLedgerBinds = [command.operationId, digest, command.actorId] as const;
   const writes: IdentityCommandWrite[] = [
     // The ledger row carries every precondition; later statements exist only if it was written.
     {
@@ -241,7 +247,7 @@ export async function prepareIdentityCommand(
   if (assign && metadata)
     writes.push({
       sql: `INSERT INTO ${table}(id,${reference},revision,${target},method,reason,policy_version,created_at,label,status)
-        SELECT ?,?,?,?,'manual',?,?,?,?,? FROM decision_operations op WHERE op.operation_id=?
+        SELECT ?,?,?,?,'manual',?,?,?,?,? FROM decision_operations op WHERE ${ownLedger}
         AND NOT EXISTS(SELECT 1 FROM ${table} WHERE id=?) AND ${revisionGuard}`,
       binds: [
         mappingId,
@@ -253,7 +259,7 @@ export async function prepareIdentityCommand(
         now,
         metadata.label,
         metadata.status,
-        command.operationId,
+        ...ownLedgerBinds,
         mappingId,
         command.referenceId,
         command.expectedRevision,
@@ -264,7 +270,7 @@ export async function prepareIdentityCommand(
       ? {
           sql: `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
           SELECT ?,?,?,?,'assign','manual',?,?,?,json_array(?),?,NULL,? FROM decision_operations op
-          WHERE op.operation_id=? AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)
+          WHERE ${ownLedger} AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)
           AND EXISTS(SELECT 1 FROM ${table} WHERE id=?)`,
           binds: [
             decisionId,
@@ -277,7 +283,7 @@ export async function prepareIdentityCommand(
             `${subjectKind}:${mappingId}`,
             command.expectedRevision,
             now,
-            command.operationId,
+            ...ownLedgerBinds,
             decisionId,
             mappingId,
           ],
@@ -287,7 +293,7 @@ export async function prepareIdentityCommand(
           SELECT ?,?,?,?,'release-override','manual',?,?,?,
           (SELECT json_group_array('decision_revision:'||o.id) FROM active_manual_overrides o WHERE o.subject_kind=? AND o.subject_ref=?),
           (SELECT max(o.revision) FROM active_manual_overrides o WHERE o.subject_kind=? AND o.subject_ref=?),NULL,?
-          FROM decision_operations op WHERE op.operation_id=? AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)`,
+          FROM decision_operations op WHERE ${ownLedger} AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)`,
           binds: [
             decisionId,
             subjectKind,
@@ -301,7 +307,7 @@ export async function prepareIdentityCommand(
             subjectKind,
             command.referenceId,
             now,
-            command.operationId,
+            ...ownLedgerBinds,
             decisionId,
           ],
         },
@@ -311,8 +317,9 @@ export async function prepareIdentityCommand(
     writes.push({
       sql: `UPDATE decision_revisions SET superseded_by=? WHERE subject_kind=? AND subject_ref=?
         AND decision_kind='assign' AND method IN ('manual','legacy-migration') AND superseded_by IS NULL
-        AND EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)`,
-      binds: [decisionId, subjectKind, command.referenceId, decisionId],
+        AND EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)
+        AND EXISTS(SELECT 1 FROM decision_operations op WHERE ${ownLedger})`,
+      binds: [decisionId, subjectKind, command.referenceId, decisionId, ...ownLedgerBinds],
     });
   return { receipt, digest, writes };
 }
