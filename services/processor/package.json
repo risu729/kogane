@@ -4,16 +4,16 @@
   "type": "module",
   "dependencies": {
     "chrono-node": "2.10.3",
-    "parse5": "8.0.1",
+    "parse5": "8.1.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",
     "@types/node": "26.6.6",
-    "cf": "1.0.0-beta.26",
+    "cf": "1.0.0-beta.27",
     "miniflare": "5.20260831.0-alpha",
     "typescript": "7.0.2",
-    "undici": "8.12.3",
-    "wrangler": "4.156.0"
+    "undici": "8.12.4",
+    "wrangler": "4.157.0"
   }
 }

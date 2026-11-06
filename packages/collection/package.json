@@ -3,11 +3,11 @@
   "private": true,
   "type": "module",
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "1.4.11",
+    "@cloudflare/vitest-plugin": "1.5.1",
     "@types/bun": "1.4.4",
-    "@vitest/coverage-istanbul": "5.0.5",
+    "@vitest/coverage-istanbul": "5.1.0",
     "typescript": "7.0.2",
-    "vitest": "5.0.5",
-    "wrangler": "4.156.0"
+    "vitest": "5.1.0",
+    "wrangler": "4.157.0"
   }
 }

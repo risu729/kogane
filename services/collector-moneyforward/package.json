@@ -3,13 +3,13 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "parse5": "8.0.1"
+    "parse5": "8.1.0"
   },
   "devDependencies": {
     "@types/bun": "1.4.4",
     "@types/node": "26.6.6",
-    "cf": "1.0.0-beta.26",
+    "cf": "1.0.0-beta.27",
     "typescript": "7.0.2",
-    "wrangler": "4.156.0"
+    "wrangler": "4.157.0"
   }
 }
