@@ -31,6 +31,7 @@ import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
 import { instrumentHistoryApi } from "./instrument-history-api";
+import { instrumentCoverageApi } from "./instrument-coverage-api";
 import { reportsApi } from "./reports-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
 import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
@@ -130,6 +131,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (candidatesResponse) return candidatesResponse;
   const historyResponse = await catalogue(() => instrumentHistoryApi(request, env, url, subject));
   if (historyResponse) return historyResponse;
+  const instrumentCoverageResponse = await catalogue(() =>
+    instrumentCoverageApi(request, env, url, subject),
+  );
+  if (instrumentCoverageResponse) return instrumentCoverageResponse;
   const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
   // Fixed report artifacts (A12). Re-display only; recomputing and sharing a
