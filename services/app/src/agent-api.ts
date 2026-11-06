@@ -96,7 +96,8 @@ import {
   isDelegatedCommandTool,
 } from "./delegated-command-tools";
 
-import { readMcpTools } from "./read-tools";
+import { EVENTS_TOOL_NAME, readMcpTools } from "./read-tools";
+import { eventsV2Available } from "./events-api";
 import {
   callDelegatedDecisionTool,
   delegatedDecisionTools,
@@ -249,11 +250,15 @@ export async function agentApi(
     let reconstructedServed: Promise<boolean> | undefined;
     const reconstructed = (): Promise<boolean> =>
       (reconstructedServed ??= reconstructedStateAvailable(env));
+    // The events read exists exactly while `GET /api/v2/activity` does (`eventsV2`).
+    let eventsServed: Promise<boolean> | undefined;
+    const events = (): Promise<boolean> => (eventsServed ??= eventsV2Available(env));
     const message = await handleMcp(
       request,
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
+        if (name === EVENTS_TOOL_NAME && !(await events())) return null;
         // An MCP client's capabilities also carry its delegation declaration
         // (#628, inert: nothing executes under it); recorded like any call.
         if (name === "kogane.capabilities" && caller.kind === "mcp-client")
@@ -313,7 +318,7 @@ export async function agentApi(
       },
       async () => [
         ...MCP_TOOLS,
-        ...readMcpTools(grant),
+        ...readMcpTools(grant, { events: await events() }),
         ...(caller.kind === "mcp-client"
           ? [
               ...delegatedCommandTools(env, await delegation()),
@@ -350,6 +355,8 @@ export async function agentApi(
   if (tool === PURCHASES_TOOL_NAME && !(await cardPurchasesAvailable(env)))
     throw new HttpError(404, "not_found");
   if (tool === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructedStateAvailable(env)))
+    throw new HttpError(404, "not_found");
+  if (tool === EVENTS_TOOL_NAME && !(await eventsV2Available(env)))
     throw new HttpError(404, "not_found");
   const body = await boundedJson(request);
   const outcome = (await toolCall(request, env, caller, tool, (audit) =>

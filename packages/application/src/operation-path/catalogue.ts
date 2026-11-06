@@ -236,6 +236,16 @@ export const OPERATION_CATALOGUE = {
     capability: "audit.read",
     paths: AGENT,
   },
+  // Adopted economic events and obligations (plan D19), served while
+  // `GET /api/v2/activity` and `/api/v2/obligations` are; whole-store only
+  // (ADR 0063 decision 10).
+  "events.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   // An inert proposal (H8); acceptance is the operator's.
   "reconcile.propose": {
     risk: ["R1"],

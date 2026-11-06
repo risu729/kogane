@@ -632,3 +632,66 @@ production-bundle browser tests of both pages at 1280 and 390 px for every
 configuration and an unreadable answer, and a failed re-read on the
 schedules page. The committed `MCP_DELEGATIONS` stays empty; no grant, Access
 setting, delegation or deployment changes.
+
+## Whole-store record reads amendment — 2026-11-06 (proposed)
+
+- Status: proposed (accepted when the pull request that adds it merges)
+- Date: 2026-11-06
+
+**Context.** Plan section 5.3 lists the reads an agent lacks. Row D19
+(`GET /api/v2/activity`, `GET /api/v2/obligations`) had routes and a
+read-model reader but no agent tool: the `activity` intent of
+`kogane.financial.query` reads provider transaction observations, and its
+`obligations` intent is refused as `unsupported_semantics`. Decision 10 above
+asks a new read to call the route's own reader and to be whole-store only.
+
+**Options considered.** (1) Implement the `obligations` intent of
+`kogane.financial.query`: rejected, because that service's intents are graded
+per scope and paged under a context, and the events projection is neither
+scoped nor proven inside a listed scope (plan section 7). (2) A tool with its
+own validation over `createEventsReader`: rejected, because two copies of the
+request rules can drift. (3) One function for the routes' request rules and
+read, called by the routes and by a read tool: chosen, as for
+`kogane.reconstructed-state.read`
+([ADR 0058's 2026-10-09 amendment](0058-knowledge-selector-and-reconstruction-adapter.md#amendment-route-and-page-as-implemented-2026-10-09)).
+
+**Decision.** `kogane.events.read` (`POST /api/agent/v1/events.read` and MCP
+`tools/call`) takes `{list: "activity" | "obligations", basis?, offset?}` as a
+closed object (`basis` the reader's closed list), requires `records.read` over `"*"` sources and accounts (else
+`403 unauthorized` or `403 evidence_restricted` before the body is
+validated), and answers through `readEvents`
+(`services/app/src/events-api.ts`), which both routes also call: the same
+body and the same refusals (`invalid_query`, `invalid_offset`) on both agent
+paths, except that a grant without `evidence.read` gets the page without its
+`raw_object:<sha256>` explanation refs. That sha256 names the raw bytes, and
+`kogane.explain` hands the same identifier (`raw:<sha256>`) only with
+`evidence.read`, which `records.read` never implies and ADR 0047 leaves to a
+separate owner decision; the routes' reader authority holds `evidence.read`,
+so a grant that holds it too gets the routes' page unchanged. It exists while the routes do (`eventsV2`): otherwise its name is
+`unknown_tool` and its path `404`. It is listed only to a grant that can call
+it. It is R0: one audit record per served call, whose row count is the page's
+entries, truncated when a next page follows.
+
+**Consequences.** The committed MCP reader grant (`summary.read` and
+`records.read` over the whole store) is listed the tool where the projection
+exists. The routes' own grant check is unchanged. Under `records.read` a
+page's explanation refs keep the routes' `raw_locator:` identifiers (the
+parser's position inside an artifact, as `kogane.purchases.explain` carries
+its `rawLocator`) and lose `raw_object:`; no agent tool reads raw bytes (plan
+row D13 stays an owner decision). A page carries no provider text: its
+strings are ids, refs, closed codes, dates and exact decimals, never a
+description, merchant or account label. The grant's
+`budget.maxRows` does not bound a page; the route's 200 does. A scoped
+version stays unproven.
+
+**Verification.** `services/app/test/events-api.test.ts` ("the agent tool"):
+both agent paths answer exactly the routes' bodies for each list, basis and
+offset to a grant with `evidence.read`, and the same bodies without
+`raw_object:` refs to one without; the event's published source row carries
+a hostile description that no answer contains; listing per grant shape and per store; route refusals with the same
+code as the route and equal status and body on HTTP and MCP; grant refusals
+before the body is validated; absence without the projection; one R0 audit
+record per served call with a row count and nothing else. The pinned tool
+lists in `services/app/test/agent-api.test.ts` (schema snapshot included),
+`services/app/test/mcp-client.test.ts` and the statement count of a tool list
+in `services/app/test/purchases-explain.test.ts`.

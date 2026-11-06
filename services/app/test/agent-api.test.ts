@@ -21,6 +21,7 @@ import {
 } from "../src/agent-service";
 import { principalFor } from "../src/grants";
 import { HttpError } from "../src/http";
+import { EVENTS_TOOL_NAME } from "../src/read-tools";
 import { parseGrants } from "../../../packages/application/src/index";
 import { INITIALIZE_PARAMS, MCP_CLIENT_HEADERS } from "./mcp-headers";
 
@@ -582,6 +583,14 @@ describe("untrusted provider content (AT71)", () => {
         properties: ["identifierId"],
         annotations: readOnly,
       },
+      // Published because this store has the A10 projection (`eventsV2`).
+      {
+        name: "kogane.events.read",
+        required: ["list"],
+        closed: false,
+        properties: ["basis", "list", "offset"],
+        annotations: readOnly,
+      },
       {
         name: "kogane.purchases.explain",
         required: [],
@@ -631,6 +640,7 @@ describe("untrusted provider content (AT71)", () => {
     expect(listed.result.tools.map((tool) => tool.name)).toEqual([
       ...AGENT_TOOL_NAMES,
       "kogane.instruments.history",
+      EVENTS_TOOL_NAME,
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -709,6 +719,7 @@ describe("untrusted provider content (AT71)", () => {
     expect(listed.result.tools.map((tool) => tool.name)).toEqual([
       ...AGENT_TOOL_NAMES,
       "kogane.instruments.history",
+      EVENTS_TOOL_NAME,
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
