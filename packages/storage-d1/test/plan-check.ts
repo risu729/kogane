@@ -39,17 +39,23 @@ export function preparedStatements(): { db: D1Like; prepared: string[] } {
   };
 }
 
+/** An `INSERT` that cannot delete a row: no `OR REPLACE`, no `REPLACE INTO`. */
+const PLAIN_INSERT = /^\s*INSERT\s+(?:OR\s+(?:IGNORE|ABORT|FAIL|ROLLBACK)\s+)?INTO\b/iu;
+
 /**
  * The plan's details, as SQLite explains the statement on `db`.
  *
- * Foreign keys are switched off for the explanation only. With them on, a
- * write to a table that other tables reference compiles a scan of each
- * referencing table, which runs only while a deferred violation is
- * outstanding (`OP_FkIfZero`); it is not the statement's own access path.
+ * For a plain `INSERT`, foreign keys are switched off for the explanation
+ * only. With them on, an insert into a table that other tables reference
+ * compiles a scan of each referencing table that runs only while a deferred
+ * violation is outstanding (`OP_FkIfZero`); it is not the statement's own
+ * access path. Every other statement is explained with foreign keys as `db`
+ * has them: a `DELETE`, a `REPLACE` or an `UPDATE` of a referenced key does
+ * read the referencing rows each time, and a missing child index shows.
  */
 export function planOf(db: Database, sql: string, binds: readonly unknown[] = []): string[] {
   const enforced = (db.query("PRAGMA foreign_keys").get() as { foreign_keys: number }).foreign_keys;
-  db.exec("PRAGMA foreign_keys=OFF");
+  if (PLAIN_INSERT.test(sql)) db.exec("PRAGMA foreign_keys=OFF");
   try {
     return (
       db.query(`EXPLAIN QUERY PLAN ${sql}`).all(...(binds as SQLQueryBindings[])) as {

@@ -114,11 +114,13 @@ test("the review reads' own statements read no growing table whole", async () =>
 
   const core = fullCoreDatabase();
   const offending: { sql: string; scans: string[] }[] = [];
+  let acceptedMade = false;
   for (const query of issued) {
     const accepted = collapsed(query).includes(ACCEPTED.statement);
     const plan = planOf(core, query);
     // Each statement reaches its rows from the keys it is given.
     expect(plan.some((step) => step.startsWith("SEARCH "))).toBe(true);
+    if (accepted && plan.some((step) => ACCEPTED.step.test(step))) acceptedMade = true;
     const scans = tableScans(core, query, plan)
       .filter((scan) => !(accepted && ACCEPTED.step.test(scan.step)))
       .map((scan) => `${scan.step} [${scan.tables.join(",")}]`);
@@ -126,4 +128,7 @@ test("the review reads' own statements read no growing table whole", async () =>
   }
   core.close();
   expect(offending).toEqual([]);
+  // The accepted read is still made; once it is not, remove ACCEPTED and the
+  // limit docs/card-settlements.md records.
+  expect(acceptedMade).toBe(true);
 }, 60_000);

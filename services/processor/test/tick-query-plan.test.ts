@@ -62,7 +62,7 @@ const ACCEPTED: readonly { statement: string; step: RegExp; reason: string }[] =
     statement: "WITH identity_page AS MATERIALIZED",
     step: /^SCAN p( USING COVERING INDEX idx_parse_runs_success)?$/u,
     reason:
-      "the identity sweep's candidate page, pinned by packages/storage-d1/test/identity-sweep-query.test.ts",
+      "the identity sweep's candidate page orders every successful parse run; an open limit (docs/observation-lanes.md, Lanes)",
   },
   {
     statement: "AS published_high_water",
@@ -96,7 +96,7 @@ const ACCEPTED: readonly { statement: string; step: RegExp; reason: string }[] =
     statement: "SELECT b.id,b.parse_run_id,a.source_id,p.parser_name,b.source_account,b.metric",
     step: /^SCAN b$/u,
     reason:
-      "the reward candidate page walks balance ids from the start; pinned by reward-claims-query-differential.test.ts",
+      "the reward candidate page walks balance ids from the first row; an open limit (docs/observation-lanes.md, Lanes)",
   },
   {
     statement: "ranked AS MATERIALIZED ( SELECT o.*,p.id parse_run_id",
@@ -185,7 +185,22 @@ test("no statement of a tick reads a growing table from end to end", () => {
   expect(offending).toEqual([]);
 });
 
+// An entry this test reports no longer matches a statement the tick prepares,
+// or that statement no longer makes the accepted step (a rewrite, a new index,
+// a lane this store no longer reaches): update or remove the entry, and the
+// document it cites, in the change that caused it.
 test("every accepted whole read is still made, so none is accepted silently", () => {
-  for (const entry of ACCEPTED)
-    expect([...issued.keys()].some((sql) => collapsed(sql).includes(entry.statement))).toBe(true);
+  const core = fullCoreDatabase();
+  const read = createSqliteReadDatabase().sqlite;
+  const stale = ACCEPTED.filter(
+    (entry) =>
+      ![...issued].some(
+        ([sql, name]) =>
+          collapsed(sql).includes(entry.statement) &&
+          planOf(name === "CORE" ? core : read, sql).some((step) => entry.step.test(step)),
+      ),
+  ).map((entry) => entry.statement);
+  core.close();
+  read.close();
+  expect(stale).toEqual([]);
 });
