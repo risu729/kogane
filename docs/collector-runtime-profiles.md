@@ -13,6 +13,15 @@
 | [MyJCB](../services/collector-myjcb/README.md)                    | `kogane-myjcb-collector-poc`      | **ログインのみ** | **Browser Run binding** + Worker `fetch`       | 動的login protection scriptとNNL WebAuthn `result`を公式page内で実行し、mypage sessionを作る | login後のmenu、月列挙、明細HTML/export、R2        |
 | [PRESTIA GLOBAL PASS](../services/collector-globalpass/README.md) | `kogane-globalpass-collector-poc` | **全収集区間**   | **Container Playwright Google Chrome**         | Turnstile、JavaScript login、server-rendered明細、月selectorを実ブラウザで処理する           | Worker orchestration、TAMIA relay、NDJSON受信、R2 |
 
+Limit: the table lists only the six collectors whose README carries a
+`Runtime profile` section. The other nine deployable collectors
+(`kogane-mizuho-collector`, `kogane-mobile-suica-collector-poc`,
+`kogane-moneyforward-collector-poc`, `kogane-prestia-bank-collector`,
+`kogane-sbi-shinsei-collector-poc`, `kogane-sbi-vc-session-poc`,
+`kogane-smbc-direct-backfill-poc`, `kogane-st-george-collector`,
+`kogane-vpoint-pay-collector-poc`) have none yet and are not classified here;
+their bindings are in [`../infra/resources.md`](../infra/resources.md).
+
 GLOBAL PASSのWorkerには別にBrowser Run bindingがあるが、旧`/browser-probe`入口は廃止済みでbindingは未使用である。通常のdaily collectorはContainer Chromeを使う。MyJCBは逆に、Browser Runをsession bootstrap直後に閉じ、それ以降は通常のWorker `fetch`だけを使う。
 
 ## 新しいcollectorで必ず明記する項目

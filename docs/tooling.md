@@ -26,8 +26,9 @@ fixed toolchain:
 - **Bun** is the package manager and the test runner for pure TypeScript. The
   repository is one Bun workspace with a single root `bun.lock` and
   `linker = "isolated"`, so a workspace sees only what it declares and
-  conflicting pins (TypeScript 6.0.3 and 7.0.2, five Wrangler versions) coexist
-  instead of being reconciled by hoisting. Every workspace pins TypeScript
+  conflicting pins (TypeScript 6.0.3 and 7.0.2) coexist instead of being
+  reconciled by hoisting; every workspace that declares Wrangler pins the same
+  version (4.157.0 today). Every workspace pins TypeScript
   7.0.2 except `services/collector-globalpass`, and both it and the root
   manifest stay below 7 (6.0.3 today). Both need the in-process TypeScript
   compiler API, which 7.0 no longer ships (its `typescript` entry point exports

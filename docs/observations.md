@@ -1867,9 +1867,14 @@ Other relative labels surveyed (`services/collector-*`,
 ### SMBC Direct normalized parsing
 
 SMBC Direct stores a Shift-JIS provider response and a UTF-8 normalized partner
-for both balance and monthly transactions. The importer proves each pair is
-semantically equal before sealing, so Layer B selects only
-`balance-normalized` and `transactions-normalized`. Registering the raw partner
+for both balance and monthly transactions. The retired importer proved each
+pair semantically equal before sealing; the shared collector
+(`buildSharedRunPlan` in `services/collector-smbc-direct/src/shared-collection.ts`)
+records each normalized artifact as `collector_derived` with a transformation
+from its raw parent, and registration maps only the normalized keys to a
+dataset (`ARTIFACT_DATASETS` in
+`packages/application/src/collection/descriptors.ts`). Layer B therefore
+selects only `balance-normalized` and `transactions-normalized`. Registering the raw partner
 would duplicate every financial fact.
 
 The balance route emits one exact JPY `account_balance`. The monthly route emits
@@ -1888,8 +1893,8 @@ then collapses any cross-range overlap by `(source, sourceAccount, externalId)`.
 Stored observations are not removed, so earlier evidence remains available
 through provenance.
 
-The checked-in local canary first calls the same Layer-A
-`validateSmbcDirectRun`, then requires exactly one parser for every normalized
+The local canary, removed with the importer on 2026-09-13, first called the
+importer's Layer-A `validateSmbcDirectRun`, then required exactly one parser for every normalized
 artifact and none for raw artifacts. A 2026-09-07 production read-only run
 scanned 189 objects and one successful manifest; 94 normalized artifacts
 produced 1,069 transactions and one balance, and 94 raw partners were ignored.
@@ -2861,9 +2866,12 @@ no resume. That is fine for four artifacts and wrong for a full backfill.
 linear in artifacts, not in observations. Storage grows by one full copy
 of that parser's observations, permanently, because nothing is deleted.
 The number of artifacts a real sweep would touch is not recorded in this
-repository; both deployed collectors run on a daily Cron
-(`0 21 * * *`), and `services/collector-sbi-securities`'s README records a
-backfill invocation as `scripts/backfill.sh 2024-08-28 2026-05-29`. At
+repository; both collectors deployed when this was written ran on a daily
+Cron (`0 21 * * *`; collection now runs on Processor alarm schedules,
+[ADR 0039](adr/0039-alarm-schedule-management.md)), and
+`services/collector-sbi-securities`'s README recorded a backfill invocation
+as `scripts/backfill.sh 2024-08-28 2026-05-29`, a script it now lists as
+retired. At
 that horizon a retention policy for superseded observations becomes a real
 question, and it is one this document leaves open rather than answering by
 assertion.

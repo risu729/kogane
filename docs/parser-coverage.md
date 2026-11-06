@@ -313,24 +313,25 @@ The criteria are (a) each unit has its own terminal unit report, (b) artifacts
 carry `fetch_unit_id`, and (c) every artifact of a unit is attributed to that
 unit, so a missing page inside a unit is detectable.
 
-**MyJCB** (`services/collector-r2-importer/src/myjcb.ts`,
+**MyJCB** (`services/collector-myjcb/src/shared-collection.ts`,
 `docs/sources/myjcb.md`) is the only current source with several sibling units
 in one run:
 
-- (a) The importer catalogues one `fetch_unit` per manifest connection
-  (`unitKind: "connection"`, `unitKey: connection.connectionId`,
-  `terminalReportRequired: true`) and, in its `unit_reports` phase, posts one
-  terminal report per connection carrying that connection's own status
-  (`success` / `failed` / `human-required` → `human_required`) and, when it is
-  not a success, a `safeFailureCode`. Cards therefore fail one at a time and
-  say so individually.
-- (b) Every data artifact's descriptor sets `fetchUnitId: unit.unitId` for the
-  connection it belongs to (`artifactPlans` → `dataDescriptor`). Only the
-  run-level `manifest.json` (role `collector_manifest`) has no unit, and no
-  parser turns it into observations.
-- (c) The connection's terminal report declares
-  `declaredArtifactCount: connection.artifactCount` with
-  `artifactCountScope: "direct"`. Layer A's seal trigger (migration
+- (a) `myJcbRunPlan` writes one terminal unit per connection
+  (`unitKind: "connection"`, `unitKey` the connection id), and the Processor's
+  derivation (`unitRequest` in
+  `packages/application/src/collection/descriptors.ts`) catalogues each as a
+  `fetch_unit` with `terminalReportRequired: true`. `unitReportRequest` gives
+  each unit its own terminal report: `failed` with a `safeFailureCode` when the
+  unit names a safe error code, `success` when its coverage is `complete`,
+  otherwise `partial` or `unknown`. Cards therefore fail one at a time and say
+  so individually.
+- (b) Every data artifact names its connection's unit key, and the derivation
+  resolves it to that unit's `fetchUnitId`. Only the run-level
+  `manifest.json` (role `collector_manifest`) has no unit, and no parser turns
+  it into observations.
+- (c) Each unit's terminal report declares `declaredArtifactCount` as the
+  unit's `artifactCount` with `artifactCountScope: "direct"`. Layer A's seal trigger (migration
   `0001_initial.sql`, `run_inventory_*`) refuses to seal a run whose unit owns
   a different number of artifacts than its terminal report declared, so on a
   sealed run a unit's artifact set is exactly what the collector said it was —

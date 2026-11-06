@@ -189,9 +189,9 @@ anyway is a no-op rather than a conflict.
 ### 3.1 Collector ids, CORE source ids and producers
 
 A collector names itself in its terminal and in its `runs/<source>/` prefix
-by its **own** id. For most collectors that is the CORE source id; for three
+by its **own** id. For most collectors that is the CORE source id; for four
 it is not (`sbi-shinsei` → `sbi-shinsei-bank`, `prestia-globalpass` →
-`global-pass`, `smbc-direct` → `smbc-bank`), and `v-point-pay-email` shares
+`global-pass`, `prestia-bank` → `prestia`, `smbc-direct` → `smbc-bank`), and `v-point-pay-email` shares
 the `v-point-pay` source with the V Point Pay collector. The mapping is the
 closed table `COLLECTOR_SOURCE_IDS` in
 `packages/application/src/collection/descriptors.ts`:
@@ -386,12 +386,12 @@ What the table maps (from each collector's persist path and each parser's
 full list):
 
 - Mobile Suica `sf-history.json` → `sf-history`; Money Forward's index,
-  detail and monthly pages; MyJCB's discovery, past-months, detail and ledger
-  artifacts; GlobalPass activity pages; the SBI Securities, SBI Shinsei and
+  detail and monthly pages; MyJCB's J-POINT balance, discovery, past-months,
+  detail, ledger and skip-payment schedule artifacts; GlobalPass activity pages; the SBI Securities, SBI Shinsei and
   SBI VC Trade datasets; SMBC's normalized balance and transactions; Sony
   Bank's balance, history pages, history CSVs and wallet pages; St George's
   account snapshot; V Point's balance, SMFG point and history pages; the V
-  Point Pay notification event.
+  Point Pay notification event; PRESTIA Bank's sanitized `balance.html`.
 - Not mapped: evidence no parser reads (manifests, summaries, raw pages beside
   their normalized form); Mizuho, whose parsers read artifacts without a
   dataset; MyJCB `credit-menu.html`, whose parser requires a media type
@@ -400,9 +400,11 @@ full list):
   `WITHHELD_ARTIFACT_DATASETS` and not applied, so collector-vpass captures
   are registered but never parsed. A parsed collector capture would become
   the current statement snapshot of its card-month and retire the importer-era
-  purchases, because it cannot yet bind to the trusted card identity
-  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). It is applied when
-  the collector derives the binding.
+  purchases with nothing to replace them. The collector derives the trusted
+  card binding only once the owner sets its binding key
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md) and its amendment);
+  the rule's `until` condition in `descriptors.ts` is that key being set and
+  the collector's tokens matching the importer's.
 
 `scripts/artifact-datasets.test.ts` checks the table against both sides:
 every mapped or withheld dataset is accepted by a registered parser, every
@@ -626,7 +628,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
 | `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
 | `maintenance_survey`       | `targets`, `due`, `extracted`, `failed`, `windows`, `unchanged`, `proposed`, `reviewPending`, `known`, `failures` (closed failure codes, ADR 0050)                                                                                  |
-| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                                                            |
+| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`, `started`, `declined`, `tracked`, `published`, `unpublished`, `abandoned`                                                                                                 |
 | `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
 | `audit_overflow`           | `counters`, `written`                                                                                                                                                                                                               |
 
@@ -727,9 +729,10 @@ client the Processor registers as.
 
 ## 10. Resources to create before the flag is turned on
 
-The Queue **does not exist yet**. `infra/resources.md` says so per queue
-("to be created by the first deploy"), and the first deploy that carries
-`services/processor/wrangler.jsonc` creates it:
+`services/processor/wrangler.jsonc` declares the Queue consumer and its DLQ
+(its comment records them provisioned on 2026-09-12 with the notification
+rule), and `infra/resources.md` lists the queue as declared. What a fresh
+account needs:
 
 1. `kogane-collection-terminals` and `kogane-collection-terminals-dlq`;
 2. an R2 event-notification rule on `kogane-raw-evidence` for object creation,
@@ -761,8 +764,8 @@ as a stage rather than blocking the run.
 ## 11. Deploy order and rollback
 
 GitHub Actions applies CORE then READ migrations. ADR 0039 deploys named collector RPC entrypoints before the Processor and App, replacing the former order of consumers before
-collectors. The current collection Queue, notification rule and 13 registration
-routes are configured. Deploying a Worker does not invoke a collector.
+collectors. The collection Queue and notification rule are declared, and
+`config/ingest-clients.json` declares 16 registration routes. Deploying a Worker does not invoke a collector.
 
 Turning a lane flag off pauses its work; terminals and recorded progress remain.
 Projections use READ only. Select only code compatible with the current schema

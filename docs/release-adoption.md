@@ -9,7 +9,8 @@ transform rather than a value stored once and never correctable.
 
 Everything here is off by default: with `RELEASE_CANDIDATES_ENABLED` absent no
 candidate run is written, the command routes are not routed, and the pipeline
-behaves exactly as it did before. Verified locally with synthetic data only; no
+behaves exactly as it did before. `services/processor/wrangler.jsonc` declares
+it `"true"`. Verified locally with synthetic data only; no
 production claim is made.
 
 ## Four concepts, and where each lives
