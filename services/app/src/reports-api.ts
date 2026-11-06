@@ -64,7 +64,13 @@ interface RunRow {
 export function reportsRoute(path: string): { reportId: string; view: string } | null {
   const match = /^\/api\/v2\/reports\/([^/]+)(?:\/(explanation|export))?$/.exec(path);
   if (!match) return null;
-  const reportId = decodeURIComponent(match[1]!);
+  let reportId: string;
+  try {
+    reportId = decodeURIComponent(match[1]!);
+  } catch {
+    // A malformed percent escape is a bad identifier, like any other one.
+    throw new HttpError(400, "invalid_identifier");
+  }
   if (!REPORT_ID.test(reportId)) throw new HttpError(400, "invalid_identifier");
   return { reportId, view: match[2] ?? "body" };
 }

@@ -146,6 +146,14 @@ describe("re-displaying a fixed report", () => {
     expect(await reportsApi(env, new URL("https://fixture.test/api/balances"))).toBeNull();
   });
 
+  it("refuses a malformed percent-encoded identifier as a bad identifier, not a 500", async () => {
+    for (const segment of ["%ZZ", "rpt%E0%A4%A", "%"]) {
+      const answer = await call(`/api/v2/reports/${segment}`);
+      expect(answer.status).toBe(400);
+      expect(answer.json.code).toBe("invalid_identifier");
+    }
+  });
+
   it("keeps the route behind Access and read-only", async () => {
     const unauthenticated = await worker.fetch(
       new Request(`https://fixture.test/api/v2/reports/${REPORT}`),
