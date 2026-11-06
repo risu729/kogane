@@ -203,7 +203,7 @@ its first two points and the hold's release condition.
 - Carried by:
   [identity operations](../identity-operations.md#collector-vpass-runs-bind-in-their-own-run),
   [collection: Vpass](../collection.md#vpass-servicescollector-vpass-kogane-vpass-collector-poc),
-  [Vpass card binding](../vpass-card-identity.md#the-collectors-binding-adr-0023),
+  [Vpass card binding](../vpass-card-identity.md#the-collectors-binding-adr-0023-adr-0029),
   `services/collector-vpass/src/card-binding.ts`,
   `packages/storage-d1/migrations/core/0055_vpass_collector_card_binding.sql`,
   `packages/storage-d1/src/core/identity-store.ts` (`accountEntityId`),

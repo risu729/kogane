@@ -1,6 +1,6 @@
 # ADR 0075: Reported holdings change between two dates, per provider holding key, never totalled
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-11-06 in #944)
 - Date: 2026-11-06
 - Issue: #550 (指定日状態: 採用イベントから残高・保有数量を再構成する) and #551
   (範囲付きの指定日状態), the "changes between dates" part of
@@ -198,7 +198,7 @@ Synthetic data only; no production data, D1 or Workers.
 
 ## Amendment: Route, contract and page (2026-11-06)
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-11-07 in #950)
 - Date: 2026-11-06
 - Issue: #550 and #551, the exposure of the comparison above
 - Replaces: decision 8's "no route, agent tool or page in this decision"

@@ -267,7 +267,7 @@ test files.
 
 ## Amendment: the operator's page (slice S8, 2026-11-06)
 
-Status: proposed until its pull request merges. The "(and a page)" of
+Status: accepted (merged 2026-11-06 in #923). The "(and a page)" of
 _Reading_ is the web UI's `監査ログ` page at `/audit`, a read-only view of
 `GET /api/v2/audit`; nothing about what is recorded or who may read it
 changes. Four details are fixed by it:
@@ -303,7 +303,7 @@ delegation status of plan slice S8 is not part of this amendment.
 
 ## Amendment: the `alarm` and `lane` writers, slice S7 (2026-11-06)
 
-- Status: proposed (accepted when the slice's pull request merges).
+- Status: accepted (merged 2026-11-07 in #925).
 
 The decision named the two Processor paths and what each records; slice S7
 implements them and settles the details it left open. Nothing here changes

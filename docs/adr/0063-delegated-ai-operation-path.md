@@ -561,7 +561,7 @@ call, reconciliation, effect audit or budget charge occurs.
 
 ## Operator delegation status amendment — 2026-11-06 (proposed)
 
-- Status: proposed (accepted when its pull request merges). Plan slice S8,
+- Status: accepted (merged 2026-11-06 in #926). Plan slice S8,
   the delegation-status part; the audit page is a separate pull request.
 - Date: 2026-11-06
 

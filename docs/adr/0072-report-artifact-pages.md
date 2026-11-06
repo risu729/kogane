@@ -1,6 +1,6 @@
 # ADR 0072: List and re-display fixed report artifacts in the web UI
 
-- Status: proposed (takes effect when this PR merges)
+- Status: accepted (merged 2026-11-07 in #928)
 - Date: 2026-11-06
 - Related: [calculation policies and reports](../calculation-and-reports.md#4-reports-are-not-projections),
   [frontend](../frontend.md), [current status](../current-status.md)
@@ -76,7 +76,7 @@ Chromium with synthetic answers.
 
 ## Amendment: the export link, and no agent report read yet (2026-11-06)
 
-- Status: proposed (takes effect when the PR that adds it merges)
+- Status: accepted (merged 2026-11-07 in #942)
 
 ### Context
 

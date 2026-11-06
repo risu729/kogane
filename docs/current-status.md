@@ -1,6 +1,6 @@
 # Current implementation status
 
-Type: maintained reference. Reviewed: 2026-11-06 against main `9342955`.
+Type: maintained reference. Reviewed: 2026-11-06 against main `7baec1a`.
 This is a code/configuration assessment, not a fresh production acceptance run.
 Implementation, configured enablement, deployment and verified real-data coverage
 are separate claims. Historical acceptance records are linked from the
@@ -107,7 +107,8 @@ instrument coverage and history reads to it
 ([agent API](agent-api.md#instrument-coverage)). `/mcp` accepts only identities from a dedicated MCP
 Access application (Cloudflare Access Managed OAuth), whose audience
 `ACCESS_MCP_AUDIENCE` names, binds each to the agent-only principal
-`mcp-client:<sub>` and serves it no operations tool. Configuration is not
+`mcp-client:<sub>` and, with no delegation configured, lists it no
+operations tool. Configuration is not
 evidence that a client connected ([ADR 0047](adr/0047-mcp-client-connection.md),
 [connecting a client](agent-api.md#connecting-an-mcp-client)). See
 [agent API](agent-api.md) and [operations API](ops-api.md).

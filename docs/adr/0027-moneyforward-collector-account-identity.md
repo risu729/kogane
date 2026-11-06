@@ -285,7 +285,7 @@ value in place of the `v1` value. The text above is left as it was decided.
 
 ## Amendment 2026-11-04: captured-month ranges preserve gaps
 
-Status: proposed (until its PR merges)
+Status: accepted (merged 2026-11-06 in #915)
 Issue: [#452](https://github.com/risu729/kogane/issues/452)
 
 ### Context and options

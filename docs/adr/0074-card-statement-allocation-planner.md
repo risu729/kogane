@@ -1,6 +1,6 @@
 # ADR 0074: A pure planner states multi-debit allocations of a card statement and answers unsupported for partial payments and excesses
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-11-06 in #935)
 - Date: 2026-11-06
 - Issue: #548 (partial payments, multiple debits, refund allocation and correction)
 - Related: [ADR 0002](0002-card-purchase-recognition.md) (one live holder per

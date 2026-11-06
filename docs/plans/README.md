@@ -17,7 +17,8 @@ and limits are in [roadmap](../roadmap.md) and [current status](../current-statu
   in progress. Slices S1, S2, S3 (declarations and execution) and S4 are
   merged; #660 also carries parts of S5 (instrument history and audit reads)
   and S6 (command, job, maintenance and operations tools; not survey
-  acceptance). S7 and S8 are open. Decisions in ADR 0063 and ADR 0064 (accepted);
+  acceptance). S7 (#925) and S8 (#923, #926) are merged; survey acceptance
+  and a first delegation remain open. Decisions in ADR 0063 and ADR 0064 (accepted);
   each slice is its own pull request.
 
 - [2026-10 publish the integrated MCP execution and maintenance path](2026-10-mcp-maintenance-followups.md):
@@ -44,3 +45,6 @@ and limits are in [roadmap](../roadmap.md) and [current status](../current-statu
 - [2026-10 SBI Shinsei first history acquisition slice](2026-10-sbi-shinsei-history-first-slice.md):
   in progress; offline validation and evidence adapters merged, acquisition
   not enabled.
+
+- [2026-10 collection quality completion and scoped acceptance](2026-10-collection-quality-completion.md):
+  implemented, merged in #968; production acceptance pending.

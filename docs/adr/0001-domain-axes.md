@@ -193,7 +193,7 @@ repository lint via `hk`. No production data, D1 or Workers were involved.
 
 ## Amendment 2026-11-06: a relation triple's status is its newest decision
 
-- Status: proposed until the PR that carries it merges, then accepted
+- Status: accepted (merged 2026-11-06 in #957)
 - Date: 2026-11-06
 - Carried by: `projectionRelationsSql` in
   `packages/read-model/src/balance-projection-sql.ts`, `RELATION_SQL` in

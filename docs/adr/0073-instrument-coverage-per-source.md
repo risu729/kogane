@@ -1,8 +1,8 @@
 # ADR 0073: Count each source's instrument identifiers by their candidate state, in a read beside the account coverage
 
-- Status: proposed (until this PR merges)
+- Status: accepted (merged 2026-11-07 in #936)
 - Date: 2026-11-06
-- Related: [roadmap, phases 0–5](../roadmap.md#phases-05--coverage-and-cross-source-identity),
+- Related: [roadmap, layers 0–5](../roadmap.md#layers-05--coverage-and-cross-source-identity),
   [ADR 0055](0055-instrument-candidates.md) (the candidate read and its
   identifier states), [identity](../identity.md),
   [identity operations](../identity-operations.md)
@@ -169,7 +169,7 @@ Synthetic data only, no production access:
 
 ## Amendment 2026-11-06: the agent read on both agent paths
 
-- Status: proposed (until its PR merges)
+- Status: accepted (merged 2026-11-07 in #946)
 - Date: 2026-11-06
 - Carried by: the `kogane.instruments.coverage` case and schema of
   `services/app/src/read-tools.ts`, its `toolRows` case in
