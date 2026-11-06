@@ -26,25 +26,14 @@ import {
 } from "./card-settlements-api";
 import { cardPurchasesApi, CARD_PURCHASES_PATH } from "./card-purchases-api";
 import { reportedStateApi, REPORTED_STATE_PATH } from "./reported-state-api";
-import {
-  reconstructedStateApi,
-  RECONSTRUCTED_STATE_PATH,
-} from "./reconstructed-state-api";
+import { reconstructedStateApi, RECONSTRUCTED_STATE_PATH } from "./reconstructed-state-api";
 import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
 import { instrumentHistoryApi } from "./instrument-history-api";
 import { reportsApi } from "./reports-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
-import {
-  catalogue,
-  detailDto,
-  getArtifact,
-  getRun,
-  listArtifacts,
-  listRuns,
-  raw,
-} from "./read";
+import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
 
 const PREFIX = "/api/evidence/v1";
 function classify(path: string): string {
@@ -59,26 +48,16 @@ function classify(path: string): string {
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
   if (path === REPORTED_STATE_PATH) return "reported_state";
   if (path === RECONSTRUCTED_STATE_PATH) return "reconstructed_state";
-  if (
-    path === "/api/collection-quality" ||
-    path.startsWith("/api/collection-quality/")
-  )
+  if (path === "/api/collection-quality" || path.startsWith("/api/collection-quality/"))
     return "collection_quality";
   if (path === `${PREFIX}/meta`) return "meta";
-  if (/^\/api\/evidence\/v1\/sources\/[^/]+\/runs$/.test(path))
-    return "source_runs";
-  if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path))
-    return "run_artifacts";
-  if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+\/raw$/.test(path))
-    return "artifact_raw";
-  if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+$/.test(path))
-    return "artifact_detail";
-  if (path === "/api/v2/activity" || path === "/api/v2/obligations")
-    return "events_v2";
-  if (/^\/api\/v2\/reports\/[^/]+(?:\/(?:explanation|export))?$/.test(path))
-    return "report";
-  if (path === "/api/v2/rewards" || path.startsWith("/api/v2/rewards/"))
-    return "rewards";
+  if (/^\/api\/evidence\/v1\/sources\/[^/]+\/runs$/.test(path)) return "source_runs";
+  if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path)) return "run_artifacts";
+  if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+\/raw$/.test(path)) return "artifact_raw";
+  if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+$/.test(path)) return "artifact_detail";
+  if (path === "/api/v2/activity" || path === "/api/v2/obligations") return "events_v2";
+  if (/^\/api\/v2\/reports\/[^/]+(?:\/(?:explanation|export))?$/.test(path)) return "report";
+  if (path === "/api/v2/rewards" || path.startsWith("/api/v2/rewards/")) return "rewards";
   // The same boundary `route` answers 404 for: `/api` itself is an API path.
   return path === "/api" || path.startsWith("/api/") ? "unknown_api" : "assets";
 }
@@ -103,9 +82,7 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // resolved here: `mcp` for an MCP client, `agent-http` for a browser session.
   const agentResponse = isAgentPath(url.pathname)
     ? await auditedAgentApi(request, env, url, () =>
-        url.pathname === MCP_PATH
-          ? mcpCaller(request, env)
-          : browserCaller(request, env),
+        url.pathname === MCP_PATH ? mcpCaller(request, env) : browserCaller(request, env),
       )
     : null;
   if (agentResponse) return agentResponse;
@@ -125,28 +102,20 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (opsResponse) return opsResponse;
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
-  const sharedQueryResponse = await catalogue(() =>
-    sharedQueryApi(request, env, url, subject),
-  );
+  const sharedQueryResponse = await catalogue(() => sharedQueryApi(request, env, url, subject));
   if (sharedQueryResponse) return sharedQueryResponse;
   // The operator's read of the audit record (ADR 0064); a page load, not recorded.
   const auditResponse = await catalogue(() => auditApi(env, url, subject));
   if (auditResponse) return auditResponse;
-  const settlementResponse = await catalogue(() =>
-    cardSettlementsApi(request, env, url, subject),
-  );
+  const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
   if (settlementResponse) return settlementResponse;
   // Operator-only and read-only; 404 unless CORE 0047 exists
   // (docs/economic-events.md, HTTP).
-  const purchaseResponse = await catalogue(() =>
-    cardPurchasesApi(request, env, url, subject),
-  );
+  const purchaseResponse = await catalogue(() => cardPurchasesApi(request, env, url, subject));
   if (purchaseResponse) return purchaseResponse;
   // Reader authority and read-only; 404 unless the store has the views it
   // joins (docs/reported-state.md).
-  const reportedStateResponse = await catalogue(() =>
-    reportedStateApi(request, env, url, subject),
-  );
+  const reportedStateResponse = await catalogue(() => reportedStateApi(request, env, url, subject));
   if (reportedStateResponse) return reportedStateResponse;
   const reconstructedResponse = await catalogue(() =>
     reconstructedStateApi(request, env, url, subject),
@@ -160,13 +129,9 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     instrumentCandidatesApi(request, env, url, subject),
   );
   if (candidatesResponse) return candidatesResponse;
-  const historyResponse = await catalogue(() =>
-    instrumentHistoryApi(request, env, url, subject),
-  );
+  const historyResponse = await catalogue(() => instrumentHistoryApi(request, env, url, subject));
   if (historyResponse) return historyResponse;
-  const identityResponse = await catalogue(() =>
-    identityApi(request, env, url),
-  );
+  const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
   // Fixed report artifacts (A12). Re-display only; recomputing and sharing a
   // correction are commands, not reads (docs/calculation-and-reports.md).
@@ -176,15 +141,12 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // READ snapshot (docs/rewards.md).
   const rewardsResponse = await catalogue(() => rewardsApi(request, env, url));
   if (rewardsResponse) return rewardsResponse;
-  const observationResponse = await catalogue(() =>
-    observationApi(request, env, url),
-  );
+  const observationResponse = await catalogue(() => observationApi(request, env, url));
   if (observationResponse) return observationResponse;
   // A10 read side: 404 unless the projection table exists.
   const eventsResponse = await catalogue(() => eventsApi(env, url));
   if (eventsResponse) return eventsResponse;
-  if (env.EVIDENCE_SOURCE_ID !== "sony-bank")
-    throw new HttpError(503, "source_not_configured");
+  if (env.EVIDENCE_SOURCE_ID !== "sony-bank") throw new HttpError(503, "source_not_configured");
   const source = env.EVIDENCE_SOURCE_ID;
   const path = url.pathname;
   if (path === `${PREFIX}/meta`) {
@@ -201,9 +163,7 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
       sources: [{ id: source, label: "Sony Bank" }],
     } satisfies EvidenceMeta);
   }
-  const sourceMatch = /^\/api\/evidence\/v1\/sources\/([^/]+)\/runs$/.exec(
-    path,
-  );
+  const sourceMatch = /^\/api\/evidence\/v1\/sources\/([^/]+)\/runs$/.exec(path);
   if (sourceMatch) {
     if (sourceMatch[1] !== source) throw new HttpError(404, "not_found");
     const before = cursor(url);
@@ -214,10 +174,7 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
       ...(await catalogue(() => listRuns(env.DB, source, before))),
     });
   }
-  const match =
-    /^\/api\/evidence\/v1\/runs\/([^/]+)\/artifacts(?:\/([^/]+)(\/raw)?)?$/.exec(
-      path,
-    );
+  const match = /^\/api\/evidence\/v1\/runs\/([^/]+)\/artifacts(?:\/([^/]+)(\/raw)?)?$/.exec(path);
   if (match) {
     const runId = identifier(match[1], "r");
     const before = match[2] ? undefined : cursor(url);
@@ -227,23 +184,14 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
       return json({
         apiVersion: EVIDENCE_API_VERSION,
         run,
-        ...(await catalogue(() =>
-          listArtifacts(env.DB, source, runId, before!),
-        )),
+        ...(await catalogue(() => listArtifacts(env.DB, source, runId, before!))),
       });
     const artifactId = identifier(match[2], "a");
-    const artifact = await catalogue(() =>
-      getArtifact(env.DB, source, runId, artifactId),
-    );
+    const artifact = await catalogue(() => getArtifact(env.DB, source, runId, artifactId));
     if (match[3]) return raw(env.EVIDENCE, artifact, request.method === "HEAD");
-    return json({
-      apiVersion: EVIDENCE_API_VERSION,
-      run,
-      artifact: detailDto(artifact),
-    });
+    return json({ apiVersion: EVIDENCE_API_VERSION, run, artifact: detailDto(artifact) });
   }
-  if (path === "/api" || path.startsWith("/api/"))
-    throw new HttpError(404, "not_found");
+  if (path === "/api" || path.startsWith("/api/")) throw new HttpError(404, "not_found");
   return env.ASSETS.fetch(request);
 }
 
@@ -263,10 +211,7 @@ export default {
       const known = error instanceof HttpError;
       errorCode = known ? error.code : "internal_error";
       const refs = known && error.refs.length > 0 ? { refs: error.refs } : {};
-      response = json(
-        { error: errorCode, requestId, ...refs },
-        known ? error.status : 500,
-      );
+      response = json({ error: errorCode, requestId, ...refs }, known ? error.status : 500);
     }
     try {
       console.log(
@@ -278,9 +223,7 @@ export default {
           durationMs: Date.now() - started,
           errorCode,
           // A record of this request could not be written; the answer stands.
-          ...(auditLogCode(request)
-            ? { auditError: auditLogCode(request) }
-            : {}),
+          ...(auditLogCode(request) ? { auditError: auditLogCode(request) } : {}),
         }),
       );
     } catch {
