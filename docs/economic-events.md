@@ -998,7 +998,7 @@ every earlier revision stays readable.
 
 A withdrawn link is closed for good, a known limit: 0032 resolves a proposal
 once, so the proposal row stays `accepted` (the withdrawal supersedes the
-decision that accepted it), the triple's latest relation is `rejected`, and
+decision that accepted it), the triple's newest decision is `rejected`, and
 the candidate offers no action again. The same two rows can only be linked
 again through a new proposal, which the candidate pass writes when either
 row's event is re-anchored or revised onto a new observation.
