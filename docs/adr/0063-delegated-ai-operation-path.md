@@ -1,12 +1,13 @@
 # ADR 0063: The AI is a delegated operation path: a verified MCP principal the owner names may apply operations within capability, scope, confirmation and audit
 
-- Status: proposed (accepted when its pull request merges). Common auditing and
-  delegation declarations are implemented on main; this S3 execution slice adds
-  delegated R1 operations and shared read adapters. A separate R2 slice adds
-  command decisions and provider-request confirmation. A further settings slice adds
-  job prepare/confirm and audit-linked reversal. The integrated maintenance
-  adapter adds R1 apply and R2 prepare/confirm through #564's sole writer;
-  survey acceptance remains pending an owner decision. The slices are in the
+- Status: accepted (merged 2026-10-09 in #601). Common auditing (#619) and
+  delegation declarations (#628) are implemented on main. The S3 execution
+  integration (#660, merged 2026-10-10) adds delegated R1 operations, shared
+  read adapters, R2 command decisions and provider-request confirmation, job
+  prepare/confirm with audit-linked reversal, and maintenance R1 apply and R2
+  prepare/confirm through #564's sole writer; survey acceptance remains pending
+  an owner decision. The committed `MCP_DELEGATIONS` is empty, so no
+  delegation exists and nothing executes under one. The slices are in the
   [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
 - Date: 2026-10-09
 - Amends: [ADR 0013](0013-agent-card-purchase-read.md) (the read-only
@@ -560,7 +561,7 @@ call, reconciliation, effect audit or budget charge occurs.
 
 ## Operator delegation status amendment — 2026-11-06 (proposed)
 
-- Status: proposed (accepted when its pull request merges). Plan slice S8,
+- Status: accepted (merged 2026-11-06 in #926). Plan slice S8,
   the delegation-status part; the audit page is a separate pull request.
 - Date: 2026-11-06
 

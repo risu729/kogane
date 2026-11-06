@@ -1,6 +1,6 @@
 # ADR 0018: SBI Shinsei as the second bank debit adapter of card settlement review
 
-- Status: proposed (accepted when the PR that carries it merges)
+- Status: accepted (merged 2026-09-27 in #264)
 - Date: 2026-09-26
 - Implemented by: P1-5 of the [next-milestone plan](../plans/2026-09-next-milestone.md),
   branch `claude/sbi-shinsei-settlement-adapter-wr8pj4`
@@ -140,7 +140,7 @@ and the provider's civil date.
 
 ## 2026-10-09: release 0.1.3 records the provider-id origin
 
-- Status: proposed (accepted when the PR that carries it merges)
+- Status: accepted (merged 2026-10-09 in #613)
 - Carried by: `packages/parsers/src/parsers/sbi-shinsei-top-balances-and-activity.ts`
   (0.1.3), `packages/domain/src/event-families.ts`
   (`transaction-family-registry-v3`)

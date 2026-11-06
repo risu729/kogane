@@ -1,6 +1,6 @@
 # ADR 0047: Connect MCP clients through Cloudflare Access Managed OAuth, as an agent-only principal
 
-- Status: proposed
+- Status: accepted (merged 2026-10-09 in #565)
 - Date: 2026-10-08
 - Issue: #559 (part of)
 
@@ -391,7 +391,7 @@ counts as evidence are in
 
 ## Amendment: enable the approved MCP reader configuration
 
-- Status: proposed
+- Status: accepted (merged 2026-10-10 in #640)
 - Date: 2026-10-10
 
 The owner authorized actual MCP setup and a connection trial in a fresh

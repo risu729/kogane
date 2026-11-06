@@ -155,10 +155,11 @@ UTC.
   with an audit record. Grants, Access, delegations, secrets and deployment
   are never delegated
   ([ADR 0063](docs/adr/0063-delegated-ai-operation-path.md),
-  [ADR 0064](docs/adr/0064-common-audit-log.md)). Effective when those ADRs
-  merge; until the delegation resolver ships (slice S3 of the
-  [plan](docs/plans/2026-10-ai-operation-path.md)) no delegation exists,
-  so in practice no agent approves, commits or changes a setting.
+  [ADR 0064](docs/adr/0064-common-audit-log.md)). Delegated execution is
+  implemented (slice S3 of the
+  [plan](docs/plans/2026-10-ai-operation-path.md)), but `MCP_DELEGATIONS` in
+  `services/app/wrangler.jsonc` is empty, so no delegation exists and in
+  practice no agent approves, commits or changes a setting.
 - Amounts are exact decimals added in `packages/domain` (`sumQuantities` and
   friends refuse mixed units and inexact values, INV03), not summed in SQL
   ([domain contracts](docs/domain-contracts.md)).

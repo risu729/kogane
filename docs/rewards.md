@@ -476,7 +476,7 @@ COREのclaim・rule・offer、保存済み入力と原本は維持する。
 確認していないこと: 本番D1・本番Workerでの動作、実際のprovider規約の現在の内容、
 本番規模でのpage性能、保存済みsimulationの実データ（保存するwriterが無く、captureは空の集合を固定する）。
 
-[Vポイントサービス利用規約]: docs/sources/v-point.md
+[Vポイントサービス利用規約]: sources/v-point.md
 
 [W09]: 設計レビュー追補99 W09（ANAマイル口座グループ）
 [W10]: 同 W10（ANAマイル有効期限）

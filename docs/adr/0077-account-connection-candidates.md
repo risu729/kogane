@@ -1,6 +1,6 @@
 # ADR 0077: Propose aggregator-to-direct account containment from confirmed connection reviews; never propose the same account without leaf evidence
 
-- Status: proposed (accepted when the change that carries it merges)
+- Status: accepted (merged 2026-11-06 in #949)
 - Date: 2026-11-06
 - Issue: part of #545
 - Carried by: `packages/domain/src/account-candidates.ts` (policy

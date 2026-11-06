@@ -373,7 +373,7 @@ Synthetic data only; no production data, D1 or Workers.
 
 ## Amendment: Route and page as implemented (2026-10-09)
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-10-09 in #610)
 - Date: 2026-10-09
 - Issue: #550, the route, page and difference-explanation slice
 - Carried by: `packages/application/src/query/reconstructed-state-read.ts`,

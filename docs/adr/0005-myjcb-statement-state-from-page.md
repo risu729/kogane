@@ -2026,7 +2026,7 @@ questions of amendment (h).
 
 ## Amendment 2026-10-08 (k): the skip-payment empty row inside one more div
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (merged 2026-10-09 in #569)
 - Date: 2026-10-08
 - Carried by: `isEmptyLedgerRow`, `isEmptyItemCell` and `READER_CLASSES` in
   `packages/domain/src/myjcb-skip-payment-schedule.ts`;

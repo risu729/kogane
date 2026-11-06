@@ -1,6 +1,6 @@
 # ADR 0046: Maintenance windows as a separately granted agent capability
 
-Status: accepted (#564 merged on 2026-10-10 JST); the S3 execution amendment remains proposed until its integration PR merges
+Status: accepted (#564 merged on 2026-10-10 JST); the S3 execution amendment is accepted (merged 2026-10-10 in #660)
 Date: 2026-10-08
 Amended by: [ADR 0063](0063-delegated-ai-operation-path.md) item 8, as
 [the amendment below](#amendment-a-delegated-operation-not-an-agent-grant-2026-10-09)
@@ -360,7 +360,7 @@ capability, and no MCP client has called these tools.
 
 ## S3 maintenance execution and confirmation (2026-10-10)
 
-Status: proposed until the integration PR merges. The implementation reuses
+Status: accepted (merged 2026-10-10 in #660). The implementation reuses
 the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
 against main `c0c4088a`; #652's temporal refusal and #643's release guard are
 preserved. The [integration plan](../plans/2026-10-mcp-maintenance-followups.md)

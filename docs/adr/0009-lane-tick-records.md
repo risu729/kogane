@@ -59,7 +59,7 @@ refusal of text values and of repeated count keys.
 
 ## Amendment 2026-11-06: the settlement sweep counts its unmatched statements
 
-- Status: proposed (accepted when the PR that carries it merges)
+- Status: accepted (merged 2026-11-06 in #947)
 - Date: 2026-11-06
 - Carried by: `CARD_SETTLEMENT_UNMATCHED_CODES` and `cardSettlementSweep` in
   `services/processor/src/card-settlement-job.ts`, `LANE_TICK_COUNTS` in

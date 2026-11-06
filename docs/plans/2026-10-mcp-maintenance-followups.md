@@ -1,8 +1,9 @@
 # Plan: publish the integrated MCP execution and maintenance path
 
-- Status: in progress; owner authorized integration, publication, review,
-  required CI, merge and deployment on 2026-10-10. The former local-only
-  publication gate is superseded by that approval.
+- Status: integration merged 2026-10-10 in #660. S6 survey acceptance and
+  real-client write activation remain open. The owner authorized integration,
+  publication, review, required CI, merge and deployment on 2026-10-10; the
+  former local-only publication gate is superseded by that approval.
 - Current integration baseline: main `c0c4088a` (#661, #662 and #653 merged).
 - Earlier local candidate: tree `46d19ada3b2a05c954f4a9d82c44fed34c7006fb`,
   based on `f761630d` and the frozen S3/R2/jobs integration `dc7be256`.

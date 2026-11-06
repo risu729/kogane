@@ -34,12 +34,14 @@ transaction matching, reconstructed state, portfolio valuation, lots, cost
 basis, P&L and tax outputs are incomplete.
 
 The operator HTTP API can edit schedules and maintenance. Research is not
-automatically refreshed. MCP query/explanation/proposal tools and a
-maintenance-window read exist; the committed configuration grants one MCP
-reader summary and record reads and no schedule capability, and no delegated
-write can execute. Generic collection-operation
-requests still need executor wiring; alarm execution uses a separate implemented
-private RPC path.
+automatically refreshed. MCP query/explanation/proposal tools,
+maintenance-window, instrument-history and audit reads, and delegated
+operations exist; the committed configuration grants one MCP reader summary
+and record reads and no schedule capability, and `MCP_DELEGATIONS` is empty,
+so no delegated write executes. Accepted collection and session-refresh
+requests run through the alarm's private named collector RPC
+([ADR 0048](docs/adr/0048-operation-collector-dispatch.md)), but no connection
+is enabled for that dispatch.
 
 The next milestone is **card usage → statement → bank debit**, with an
 explainable trail and no double expense. Dated holdings/liabilities, valuation,
@@ -80,7 +82,7 @@ CI uses the same `hk check` entry point, and what to do when adding a workspace.
 
 Each source implementation lives under `services/collector-<source>`. Twelve
 have daily automatic jobs; SMBC Direct and V Point Pay automatic login remain
-unsupported. Their presence below does not claim unattended collection. The runtime
+unsupported, and the PRESTIA bank job is seeded disabled. Their presence below does not claim unattended collection. The runtime
 each of them needs, and why, is in the
 [collector runtime inventory](docs/collector-runtime-profiles.md).
 
@@ -94,6 +96,8 @@ each of them needs, and why, is in the
 - [St.George](services/collector-st-george/README.md)
 - [三井住友銀行 SMBCダイレクト](services/collector-smbc-direct/README.md)
 - [PRESTIA GLOBAL PASS](services/collector-globalpass/README.md)
+- PRESTIA bank (`services/collector-prestia-bank`; see
+  [ADR 0042](docs/adr/0042-prestia-bank-worker.md))
 - [MyJCB](services/collector-myjcb/README.md)
 - [Mobile Suica](services/collector-mobile-suica/README.md)
 - [Money Forward](services/collector-moneyforward/README.md)
@@ -108,6 +112,11 @@ Deployed code never imports them.
 - [Cloudflare Container runtime and egress probe](experiments/cloudflare-runtime-probe/EXPERIMENT.md)
 - [Cloudflare Browser Run probe](experiments/cloudflare-browser-run/EXPERIMENT.md)
 - [TAMIA raw TCP bridge](experiments/tamia-tcp-bridge/EXPERIMENT.md)
+- [Mizuho direct collection](experiments/mizuho-direct/EXPERIMENT.md)
+- [Local observation pipeline](experiments/observation-pipeline-local/EXPERIMENT.md)
+
+`experiments/d1-conformance` ([plan](docs/plans/2026-10-d1-conformance.md))
+and `experiments/st-george-automation` (its README) carry no `EXPERIMENT.md`.
 
 ## Finished experiments
 

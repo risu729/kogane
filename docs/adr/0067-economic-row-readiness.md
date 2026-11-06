@@ -1,9 +1,9 @@
 # ADR 0067: Current economic-row evidence readiness before event writers
 
-- Status: proposed
+- Status: accepted (merged 2026-10-10 in #653)
 - Date: 2026-10-10
 - Issues: #549, #550, #556
-- Scope: S0 current query and the proposed S0b grant-checked diagnostic transport;
+- Scope: S0 current query and the S0b grant-checked diagnostic transport;
   no adoption, policy or writer activation
 
 ## Context
@@ -147,7 +147,7 @@ check keyed reads without transaction/holder-history scans.
 Not verified: remote D1 behavior/performance, production evidence, principal
 ownership mapping, transport authorization or any financial writer activation.
 
-## Amendment: S0b grant-checked read transport — 2026-11-04 (proposed)
+## Amendment: S0b grant-checked read transport — 2026-11-04 (merged 2026-11-06 in #995)
 
 ### Context and options
 

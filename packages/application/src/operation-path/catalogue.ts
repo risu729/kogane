@@ -8,8 +8,9 @@
 // what a successful call that wrote nothing is (`read`, or `replayed` when an
 // earlier call already made the effect), which capability grades it today,
 // and on which paths it exists. The handler of each operation is the existing
-// service the adapter already calls; no operation is implemented twice, and
-// no delegation, prepare or confirm exists yet (ADR 0063, later slices).
+// service the adapter already calls; no operation is implemented twice.
+// Delegated execution, prepare and confirm (ADR 0063, plan slice S3) reuse
+// these entries through `delegation/execution.ts`.
 //
 // The operation name of an agent tool is the tool name without `kogane.`.
 import type { AuditPath, RiskClass, SubjectPath } from "../audit/vocabulary.ts";
@@ -26,8 +27,9 @@ export interface CatalogueEntry {
   capability: string;
   /**
    * The capability an owner's delegation must hold for this operation on
-   * `mcp` (ADR 0063). Nothing executes under a delegation yet (plan slice
-   * S3): a call on `mcp` is refused at the delegation gate and recorded.
+   * `mcp` (ADR 0063). A call on `mcp` executes only for a resolved delegation
+   * holding it and an installed adapter; otherwise it is refused at the
+   * delegation gate and recorded.
    */
   delegation?: DelegationCapability;
   /** The paths the operation exists on today. */

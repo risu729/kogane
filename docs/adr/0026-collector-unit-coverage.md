@@ -2,7 +2,7 @@
 
 ## Amendment: distinguish refusal, pending reauthentication and terminal write failure (2026-10-10)
 
-Status: proposed until this amendment merges.
+Status: accepted (merged 2026-10-10 in #655).
 
 Operational alarm results must preserve a persisted failed-run reference and a
 closed reason without promoting the run's coverage. SBI VC's explicit
@@ -1263,7 +1263,7 @@ and settlement do not read them.
 
 ## Amendment 2026-10-08: GLOBAL PASS replay compares records with detail tables
 
-- Status: proposed
+- Status: accepted (merged 2026-10-09 in #574)
 - Date: 2026-10-08
 - Carried by: `services/processor/scripts/parser-rejection.ts`
   (`globalPassActivityShape`: `detailTables`, `detailContainer`,
