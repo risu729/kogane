@@ -1,4 +1,5 @@
 import { SchedulesPage } from "./pages/Schedules";
+import { CollectionQualityPage } from "./pages/CollectionQuality.tsx";
 import { AuditPage } from "./pages/Audit.tsx";
 // Read-only navigation. Connection metadata describes the API, not freshness
 // of financial observations or whether a collector is currently running.
@@ -30,6 +31,7 @@ import { ReconciliationPage } from "./pages/Reconciliation.tsx";
 import { PurchasePage, PurchasesPage } from "./pages/Purchases.tsx";
 import { ReportedStatePage } from "./pages/ReportedState.tsx";
 import { ReconstructedStatePage } from "./pages/ReconstructedState.tsx";
+import { ReportPage, ReportsPage } from "./pages/Reports.tsx";
 
 // Every destination in one list. A `feature` entry is shown only while the
 // API advertises that capability; the others are always present.
@@ -51,6 +53,12 @@ const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeat
     feature: "reconstructedStateOnDate",
   },
   { to: "/summaries", label: "期間実績・請求", icon: NAV_ICONS.summaries },
+  {
+    to: "/reports",
+    label: "評価レポート",
+    icon: NAV_ICONS.reports,
+    feature: "reportArtifacts",
+  },
   { to: "/artifacts", label: "原本・証跡", icon: NAV_ICONS.artifacts },
   {
     to: "/purchases",
@@ -67,6 +75,7 @@ const NAV: { to: string; label: string; icon: string; feature?: keyof ClientFeat
   { to: "/identities", label: "口座・銘柄", icon: NAV_ICONS.identities, feature: "identities" },
   { to: "/rewards", label: "ポイント・前払式残高", icon: NAV_ICONS.rewards, feature: "rewards" },
   { to: "/schedules", label: "収集スケジュール", icon: NAV_ICONS.evidence },
+  { to: "/collection-quality", label: "収集品質", icon: NAV_ICONS.evidence },
   { to: "/audit", label: "監査ログ", icon: NAV_ICONS.audit },
   { to: "/evidence", label: "取得履歴", icon: NAV_ICONS.evidence, feature: "evidenceHistory" },
 ];
@@ -91,6 +100,8 @@ function View({ route }: { route: Route }): ReactNode {
   switch (route.name) {
     case "schedules":
       return <SchedulesPage />;
+    case "collectionQuality":
+      return <CollectionQualityPage />;
     case "audit":
       return <AuditPage />;
     case "overview":
@@ -125,6 +136,10 @@ function View({ route }: { route: Route }): ReactNode {
       return <ArtifactsPage />;
     case "artifact":
       return <ArtifactDetailPage id={route.id} />;
+    case "reports":
+      return <ReportsPage />;
+    case "report":
+      return <ReportPage key={route.reportId} reportId={route.reportId} />;
     case "observation":
       return <ObservationDetailPage kind={route.kind} id={route.id} />;
     case "confirm":
