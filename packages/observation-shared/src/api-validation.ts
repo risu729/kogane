@@ -26,6 +26,7 @@ import {
 } from "./instrument-candidates-contract.ts";
 import { validCardOwnershipReview } from "./card-ownership-contract.ts";
 import { AUDIT_PAGE_PATH, validAuditPage } from "./audit-contract.ts";
+import { DELEGATION_STATUS_PATH, validDelegationStatus } from "./delegation-status-contract.ts";
 import { validCardPurchasePage } from "./card-purchase-contract.ts";
 import { validReconstructedState } from "./reconstructed-state-contract.ts";
 import { validReportedState } from "./reported-state-contract.ts";
@@ -780,6 +781,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path === INSTRUMENT_HISTORY_PATH) return validInstrumentHistoryRead(value);
   if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);
   if (path === "/api/v2/query") return validSharedQueryResponse(value);
+  if (path === DELEGATION_STATUS_PATH) return validDelegationStatus(value);
   if (path === "/api/filter-options") {
     return (
       record(value) &&
