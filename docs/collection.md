@@ -359,9 +359,13 @@ record and does not carry them.)
 
 Terminal fields: `producer: collector-moneyforward-me`; one unit per account
 (`unitKind: account`) holding its detail page and its monthly fragments — the
-run-wide `accounts.html` index belongs to no unit; a `months-<unit>`
-`declared_coverage` range per account covering the monthly fragments that were
-actually captured; one `terminal` report carrying the outcome;
+run-wide `accounts.html` index belongs to no unit; `declared_coverage` month
+ranges cover only consecutive monthly fragments actually captured for each
+account. One contiguous interval retains `months-<unit>`; gaps split it into
+`months-<unit>-<start-month>` intervals. A missing month inside the outer
+bounds is not declared captured. These manifest-based ranges do not prove the
+aggregator's underlying provider data is fresh or its full history is retained;
+one `terminal` report carries the outcome;
 `requestedScope.scopeKind = full_snapshot` (the run asks for whatever the
 aggregator currently shows) listing the accounts as `unitKeys`.
 
