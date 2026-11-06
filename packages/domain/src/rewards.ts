@@ -920,7 +920,10 @@ export interface RewardHoldingSummary {
   consumable: Quantity;
   /** Per-kind subtotals; unclassified, pending awards and qualification stay outside consumable. */
   byKind: { kind: BucketKind; quantity: Quantity; bucketRefs: string[] }[];
-  /** Buckets deliberately left out of `consumable`, each with its reason. */
+  /**
+   * Buckets left out of every subtotal, each with its reason. A consumable
+   * bucket in another unit is listed here and also makes `consumable` a conflict.
+   */
   excluded: { bucketRef: string; kind: BucketKind; reasonCode: string }[];
   qualificationMeasures: QualificationMeasure[];
   uncertaintyCodes: string[];
@@ -935,8 +938,9 @@ function bucketError(quantities: readonly Quantity[], unitRef: string): ValueErr
 /**
  * A holding's consumable quantity and its qualification measures, never mixed.
  * A holding with no consumable bucket reports an exact zero only because the
- * bucket list itself is the complete observed set; an unparsed bucket makes
- * the whole sum an error rather than a smaller number (INV05). Unclassified
+ * bucket list itself is the complete observed set; an unparsed bucket, or a
+ * consumable bucket in another unit, makes the whole sum an error rather than
+ * a smaller number (INV05). Unclassified
  * quantities remain in per-kind subtotals, but block an exact consumable total.
  */
 export function summarizeHolding(
@@ -948,6 +952,10 @@ export function summarizeHolding(
   const consumableBuckets: RewardBucket[] = [];
   for (const bucket of holding.buckets) {
     if (bucket.quantity.unitRef !== holding.unitRef) {
+      // A consumable bucket in another unit still belongs to the consumable
+      // set: the sum below refuses it (`unit_mismatch`), so the total is a
+      // conflict rather than the smaller sum of the other buckets (INV03, INV05).
+      if (CONSUMABLE_BUCKET_KINDS.includes(bucket.kind)) consumableBuckets.push(bucket);
       excluded.push({
         bucketRef: bucket.bucketRef,
         kind: bucket.kind,
@@ -1687,7 +1695,11 @@ export function providerDisplayedValue(quantity: Quantity, evidenceRef: string):
  * Walk a redemption's observed events. A request alone moves nothing; a debit
  * creates an in-transit amount; only an observed credit increases the
  * destination. A cancellation waits for an observed return, and the return is
- * a new bucket claim — the debited lot is never resurrected.
+ * a new bucket claim — the debited lot is never resurrected. A debit, credit
+ * or return whose quantity is not exact makes every position it adds to or
+ * takes from that unknown value, with its reason; it is never read as a move
+ * of nothing. A credit or a return clears the in-transit amount whatever its
+ * quantity.
  */
 export function redemptionPositions(
   initialHeld: Quantity,
@@ -1702,11 +1714,18 @@ export function redemptionPositions(
   let inTransit = exactQuantity(unit, integerDecimal(0));
   let credited = exactQuantity(destinationUnitRef, integerDecimal(0));
   let debited = false;
-  const move = (from: Quantity, to: Quantity, amount: Quantity): [Quantity, Quantity] => {
-    const a = sumQuantities(from.unitRef, [from, { unitRef: from.unitRef, value: negate(amount) }]);
-    const b = sumQuantities(to.unitRef, [to, amount]);
-    return [a.ok ? a.quantity : from, b.ok ? b.quantity : to];
+  // The units are checked before every call, so a sum fails only on a value
+  // that is not exact; the result is then that unknown value, never the other
+  // operand unchanged, which would read an unknown amount as zero (INV05).
+  const plus = (total: Quantity, amount: Quantity): Quantity => {
+    const sum = sumQuantities(total.unitRef, [total, amount]);
+    if (sum.ok) return sum.quantity;
+    return total.value.status !== "exact" ? total : { unitRef: total.unitRef, value: amount.value };
   };
+  const move = (from: Quantity, to: Quantity, amount: Quantity): [Quantity, Quantity] => [
+    plus(from, { unitRef: from.unitRef, value: negate(amount) }),
+    plus(to, amount),
+  ];
   for (const event of events) {
     const codes: string[] = [];
     switch (event.stage) {
@@ -1723,8 +1742,7 @@ export function redemptionPositions(
         if (event.quantity.unitRef !== destinationUnitRef) violations.push("credit_unit_mismatch");
         else if (!debited) violations.push("credit_before_debit");
         else {
-          const sum = sumQuantities(destinationUnitRef, [credited, event.quantity]);
-          if (sum.ok) credited = sum.quantity;
+          credited = plus(credited, event.quantity);
           inTransit = exactQuantity(unit, integerDecimal(0));
         }
         break;
@@ -1734,8 +1752,7 @@ export function redemptionPositions(
       case "returned":
         if (event.quantity.unitRef !== unit) violations.push("return_unit_mismatch");
         else {
-          const sum = sumQuantities(unit, [held, event.quantity]);
-          if (sum.ok) held = sum.quantity;
+          held = plus(held, event.quantity);
           inTransit = exactQuantity(unit, integerDecimal(0));
           returnedBuckets.push({
             bucketRef: event.returnedToBucketRef ?? `bucket:returned:${event.eventRef}`,
@@ -1803,12 +1820,29 @@ export interface ConversionPath {
   reasonCodes: string[];
 }
 
+/**
+ * A budget cap that left part of the bounded search unexamined: an offer not
+ * examined (`max_expansions`) or a candidate or state dropped because the
+ * candidate list was full (`max_candidates`). The depth cap is the search's
+ * definition, not a stop, and is reported through `budget.maxDepth`.
+ */
+export const SEARCH_STOPS = ["max_expansions", "max_candidates"] as const;
+export type SearchStop = (typeof SEARCH_STOPS)[number];
+
 export interface ConversionSearchResult {
   paths: ConversionPath[];
   /** Always `bounded` while depth and candidate caps apply. */
   searchCoverage: "bounded" | "complete";
   rejected: { offerRef: string; reasonCode: string }[];
+  /** Offer examinations used, across every hop; at most `budget.maxExpansions`. */
   expansions: number;
+  /**
+   * The caps that stopped the search early, in `SEARCH_STOPS` order; empty
+   * when every offer was examined at every reachable state within the depth.
+   * A non-empty list means "no path" or a short list may be the cap, not the
+   * offers.
+   */
+  stoppedBy: SearchStop[];
   budget: SearchBudget;
   release: string;
 }
@@ -1841,7 +1875,8 @@ function dayText(day: number): string {
  * expected. Re-using one offer or two offers behind the same quota inside one
  * plan is rejected, as is returning to a unit already visited, so a positive
  * cycle cannot manufacture value. The result is always `bounded`; no path is
- * called optimal.
+ * called optimal. `expansions` and `stoppedBy` say whether a cap, rather than
+ * the offers, ended the search.
  */
 export function findConversionPaths(
   offers: readonly ConversionOffer[],
@@ -1860,15 +1895,23 @@ export function findConversionPaths(
       searchCoverage: "bounded",
       rejected: [{ offerRef: "-", reasonCode: "clock_not_a_date" }],
       expansions,
+      stoppedBy: [],
       budget,
       release: CONVERSION_SEARCH_RELEASE,
     };
 
+  const stops = new Set<SearchStop>();
   const visit = (state: SearchState, visitedUnits: string[]): void => {
     if (state.hops.length >= budget.maxDepth) return;
-    if (paths.length >= budget.maxCandidates) return;
+    if (paths.length >= budget.maxCandidates) {
+      stops.add("max_candidates");
+      return;
+    }
     for (const offer of offers) {
-      if (expansions >= budget.maxExpansions) return;
+      if (expansions >= budget.maxExpansions) {
+        stops.add("max_expansions");
+        return;
+      }
       expansions += 1;
       const offerRef = `${offer.offerId}@${offer.version}`;
       if (offer.fromUnitRef !== state.unitRef) continue;
@@ -1926,14 +1969,17 @@ export function findConversionPaths(
           : state.usedQuotaRefs,
         fees: [...state.fees, ...plan.fees],
       };
-      if (offer.toUnitRef === goalUnitRef && paths.length < budget.maxCandidates)
-        paths.push({
-          hops: next.hops,
-          received: next.quantity,
-          fees: next.fees,
-          optimality: "not-determined",
-          reasonCodes: next.hops.flatMap((h) => h.plan.reasonCodes),
-        });
+      if (offer.toUnitRef === goalUnitRef) {
+        if (paths.length < budget.maxCandidates)
+          paths.push({
+            hops: next.hops,
+            received: next.quantity,
+            fees: next.fees,
+            optimality: "not-determined",
+            reasonCodes: next.hops.flatMap((h) => h.plan.reasonCodes),
+          });
+        else stops.add("max_candidates");
+      }
       visit(next, [...visitedUnits, offer.toUnitRef]);
     }
   };
@@ -1955,6 +2001,7 @@ export function findConversionPaths(
     searchCoverage: "bounded",
     rejected,
     expansions,
+    stoppedBy: SEARCH_STOPS.filter((stop) => stops.has(stop)),
     budget,
     release: CONVERSION_SEARCH_RELEASE,
   };

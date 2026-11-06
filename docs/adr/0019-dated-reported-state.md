@@ -14,7 +14,7 @@
 
 Phase 8 asks what each provider reported at a point in time, including
 positions, provider valuations and card payables, not only today's cash
-balances ([roadmap](../roadmap.md#phases-8--11--dated-reported-and-reconstructed-state)).
+balances ([roadmap](../roadmap.md#layers-8--11--dated-reported-and-reconstructed-state)).
 The current-state reads already choose one complete container snapshot per
 partition (policy table, coverage claims, published parses), but only the
 newest one. The plan's binding decisions 4.1 (what "reported state on D"

@@ -202,6 +202,13 @@ nobody ([below](#maintenance-windows)).
 | `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                              |
 | `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | a delegation (`MCP_DELEGATIONS`) holding `schedules.maintenance.update`; no delegation executes yet, so it is listed to nobody ([below](#maintenance-windows)) |
 
+No tool lists or reads the fixed report artifacts (評価レポート): they are
+served to the operator by `GET /api/v2/reports` and
+`/api/v2/reports/{id}` only. A later agent read adds a list and a detail
+together under `records.read` on `"*"` sources and accounts and refuses a
+restricted report outright
+([ADR 0072, amendment](adr/0072-report-artifact-pages.md#amendment-the-export-link-and-no-agent-report-read-yet-2026-11-06)).
+
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
 folded in, which is the same object `/api/meta` returns (today that is
@@ -243,6 +250,10 @@ the call from the caller object (`actor_not_supported`) before any grader runs.
 | `holdings`       | Adopted holdings per unit                               | `source`, `account`                                 | `summary.read` |
 | `reported-state` | What the provider reported                              | `source`, `account`, `instrument`, `metric`, `view` | `records.read` |
 | `activity`       | Adopted events in a period                              | `source`, `account`, `from`, `to`, `q`              | `records.read` |
+
+`activity`'s `from` and `to` are calendar days (`YYYY-MM-DD`; `2026-02-30` is
+not one) and `from` is not after `to`, as the v1 activity route reads them;
+anything else is `invalid_query` (`parseQueryRequest`).
 
 `coverage` lists each in-scope source — the grant's sources, narrowed by the
 `source` filter — with its `artifactCount` and `collectionRunCount`: the
@@ -1219,3 +1230,42 @@ state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
 the committed MCP financial-reader grant receives no schedule authority.
 S6 survey acceptance remains unavailable pending the separate owner decision;
 no survey grammar, grants, Access, authentication or deployment is changed.
+
+## The operator's delegation status (S8, 2026-11-06)
+
+Status: proposed until its pull request merges
+([ADR 0063's amendment](adr/0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06-proposed)).
+
+`GET /api/v2/delegations` shows the operator what `MCP_DELEGATIONS` declares,
+read through the resolver's own parser at the server's clock. It is served on
+the browser Access application only, to the operator only
+(`403 operator_required` for an agent, any other subject or an
+`mcp-client:` name; an MCP-audience assertion is refused before it), and
+takes no query string. It is not an agent route or an MCP tool and is not
+recorded in the audit log.
+
+The answer (`kogane-delegation-status-v1`) has a `configuration` of `none`,
+`misconfigured` or `valid`. A misconfigured table — the one every delegated
+call refuses with `503 delegation_misconfigured` — is shown with no entry and
+no reason. A valid table lists each entry, ordered by principal, with its
+delegator, role, effective capabilities, the `sources`, `accounts` and
+`scheduleSources` axes, `issuedAt`, `notAfter`, `writesPerDay`, a `state` of
+`in_force`, `not_yet_valid` or `expired` (the resolver's `[issuedAt,
+notAfter)` window `/mcp` enforces, at `evaluatedAt`), and the
+`delegationRef` audit records carry. The delegated writers additionally floor
+a sub-millisecond `notAfter` to its millisecond, so in the last fraction of a
+millisecond before such a bound an `in_force` entry's write is already
+refused as `delegation_expired`. No secret, token, Access setting, read-grant
+budget or raw configuration is in it; the shared contract refuses any key it
+does not name.
+
+The schedules page (`/schedules`) and the confirm page (`/confirm/:planId`)
+show this as a compact, read-only notice **AIへの委任**: no delegation, a
+void configuration, or each entry's principal, state, role, Japan-time window
+and daily write cap, with capabilities, scope and reference behind a
+disclosure, and the Japan time of `evaluatedAt` the states were read at.
+Nothing on it edits, grants or revokes a delegation, and the operator's own
+approval and settings do not depend on it. A failed read, including a failed
+re-read after an earlier answer, says the state cannot be confirmed and shows
+no entry. With the committed empty `MCP_DELEGATIONS` both pages say that no
+delegation exists.

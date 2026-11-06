@@ -401,7 +401,9 @@ describe("GLOBAL PASS months are walked page by page", () => {
         },
       ]);
       // The log lines name a month by its position only, and carry no page text.
-      const logs = r.logs.join("\n");
+      // The run id is a random UUID whose groups can read `2099-`: it is
+      // replaced, so a page date is found only where a line really carries it.
+      const logs = r.logs.join("\n").replaceAll(r.manifest!.runId, "<run>");
       expect(logs).not.toContain("2099-");
       expect(logs).not.toContain("SYNTHETIC");
       expect(logs).not.toContain("Found");

@@ -3,34 +3,37 @@
 What the code records today about who did what, through which path
 ([ADR 0064](adr/0064-common-audit-log.md); slice S1 of the
 [AI operation path plan](plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)).
-The log covers the operations that exist today on three paths — the
+The log covers the operations that exist today on three subject paths — the
 operator's routes (`ui`), the agent HTTP routes (`agent-http`) and MCP tool
-calls (`mcp`). It does not record the Processor's own `alarm` and `lane` work
-yet (plan S7). S3 execution integration adds delegated calls for installed
+calls (`mcp`) — and the Processor's own two: claimed collection alarm
+occurrences (`alarm`) and lane ticks that wrote decisions or proposals
+(`lane`, plan S7, [below](#the-processors-own-records-alarm-and-lane)).
+S3 execution integration adds delegated calls for installed
 adapters and common preparation/confirmation primitives; actual schedule
 adapters remain incomplete. The checked-in delegation configuration is still
-empty. Agent HTTP and MCP can read scoped records under `audit.read`.
+empty. Agent HTTP and MCP can read scoped records under `audit.read`, and
+the operator reads the whole log on the web UI's `監査ログ` page (slice S8).
 The limits are listed at the end.
 
 ## The record
 
 CORE `audit_records` (migration 0075), one row per operation call:
 
-| Column                                                                               | Holds                                                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `audit_id`, `recorded_at`                                                            | `aud_` + UUID; canonical UTC milliseconds                                                                                                                                                                                                               |
-| `path`                                                                               | `ui`, `agent-http`, `mcp` (the table also admits `alarm` and `lane`, which nothing writes yet)                                                                                                                                                          |
-| `subject`, `principal`, `principal_kind`                                             | the verified Access subject; what it was graded as; `human` (the operator), `agent`, or `delegated` (the table also admits `automatic`)                                                                                                                 |
-| `delegation_ref`                                                                     | the canonical `dlg_` reference for delegated calls, NULL otherwise                                                                                                                                                                                      |
-| `operation`, `risk_class`, `step`                                                    | a name from `OPERATION_CATALOGUE` (`packages/application/src/operation-path/catalogue.ts`), its ADR 0063 risk class, and `call`, `prepare` or `confirm`                                                                                                 |
-| `scope_namespace`, `scope_source`                                                    | the one server-resolved source the target belongs to, or both NULL                                                                                                                                                                                      |
-| `target_ref`                                                                         | the target, as an id the existing logs hold (`plan:<id>`, `op_<id>`, `schedule:<id>`, …); NULL on a refusal                                                                                                                                             |
-| `result`, `result_code`, `reason_code`                                               | `applied` / `accepted` / `prepared` / `read` / `replayed` / `refused` / `failed` / `overflow`; the closed code of a refusal or failure; a closed reason                                                                                                 |
-| `correlation_id`                                                                     | the App's request id (`x-request-id` of the answer), forwarded to the Processor                                                                                                                                                                         |
-| `idempotency_key`, `payload_digest`                                                  | the caller's key (a commit's `operationId`, an operations request's key); the digest of the validated payload, never the payload                                                                                                                        |
-| `confirmation_digest`, `confirm_expires_at`, `confirms_audit_id`, `reverts_audit_id` | preparation digest/expiry and confirmed-preparation link for two-step helpers; revert links remain unused; the table requires `confirms_audit_id` only on an applied or accepted confirm, so a refused confirm with no matching prepare can be recorded |
-| `refs_json`                                                                          | at most 16 references into the existing logs (`approval:<id>`, `operation:<id>`, `decision:<id>`, `schedule:<id>@<rev>`, `field:<path>`)                                                                                                                |
-| `diff_json`                                                                          | one closed shape per kind: `revision` (from, to, changed field names), `decision` (counts), `request` (status), `read` (row count), `release`, `overflow`, `none`                                                                                       |
+| Column                                                                               | Holds                                                                                                                                                                                                                                                                   |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `audit_id`, `recorded_at`                                                            | `aud_` + UUID; canonical UTC milliseconds                                                                                                                                                                                                                               |
+| `path`                                                                               | `ui`, `agent-http`, `mcp`, and the Processor's `alarm` and `lane`                                                                                                                                                                                                       |
+| `subject`, `principal`, `principal_kind`                                             | the verified Access subject (NULL on `alarm` and `lane`); what it was graded as (`alarm:<job id>`, `lane:<lane>` there); `human` (the operator), `agent`, `delegated`, or `automatic` (the Processor's own)                                                             |
+| `delegation_ref`                                                                     | the canonical `dlg_` reference for delegated calls, NULL otherwise                                                                                                                                                                                                      |
+| `operation`, `risk_class`, `step`                                                    | a name from `OPERATION_CATALOGUE` (`packages/application/src/operation-path/catalogue.ts`), its ADR 0063 risk class, and `call`, `prepare` or `confirm`                                                                                                                 |
+| `scope_namespace`, `scope_source`                                                    | the one server-resolved source the target belongs to, or both NULL                                                                                                                                                                                                      |
+| `target_ref`                                                                         | the target, as an id the existing logs hold (`plan:<id>`, `op_<id>`, `schedule:<id>`, …); NULL on a refusal                                                                                                                                                             |
+| `result`, `result_code`, `reason_code`                                               | `applied` / `accepted` / `prepared` / `read` / `replayed` / `refused` / `failed` / `overflow`; the closed code of a refusal or failure; a closed reason                                                                                                                 |
+| `correlation_id`                                                                     | the App's request id (`x-request-id` of the answer), forwarded to the Processor                                                                                                                                                                                         |
+| `idempotency_key`, `payload_digest`                                                  | the caller's key (a commit's `operationId`, an operations request's key); the digest of the validated payload, never the payload                                                                                                                                        |
+| `confirmation_digest`, `confirm_expires_at`, `confirms_audit_id`, `reverts_audit_id` | preparation digest/expiry and confirmed-preparation link for two-step helpers; revert links remain unused; the table requires `confirms_audit_id` only on an applied or accepted confirm, so a refused confirm with no matching prepare can be recorded                 |
+| `refs_json`                                                                          | at most 16 references into the existing logs (`approval:<id>`, `operation:<id>`, `decision:<id>`, `schedule:<id>@<rev>`, `field:<path>`, `occurrence:<id>`, and a lane's ranges `decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`, `proposals:<kind>:<a>-<b>`) |
+| `diff_json`                                                                          | one closed shape per kind: `revision` (from, to, changed field names), `decision` (counts), `request` (status), `read` (row count), `release`, `overflow`, `lane` (the sizes of its ranges), `none`                                                                     |
 
 The table is append-only (no update, delete or replace), `STRICT`,
 `core-keep`, never pruned, and listed in `REVISION_EXCLUDED_TABLES`, so an
@@ -140,6 +143,57 @@ records `failed` with `upstream_unavailable`; if the Processor applied the
 operation anyway, its `applied` record under the same correlation id is the
 authoritative one.
 
+### The Processor's own records (`alarm` and `lane`)
+
+Plan slice S7 ([ADR 0064, amendment of 2026-11-06](adr/0064-common-audit-log.md#amendment-the-alarm-and-lane-writers-slice-s7-2026-11-06)).
+These records have no subject; the principal is the Processor's own, kind
+`automatic`, and the builder admits only `applied`, `accepted` and `failed`
+on these paths, so none of them is capped.
+
+| Path    | Written when                                                                                                         | Operation, class                                                                               | Principal                              | What it names                                                                                                                                                                                                                 |
+| ------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `alarm` | `ScheduleAlarm` claims an occurrence of a `collection`-kind job (`src/schedule-alarm.ts`)                            | `alarm.occurrence.claim`, R2, `accepted`                                                       | `alarm:<job id>`                       | target `schedule:<job id>`, scope the job's schedule source, refs `occurrence:<occurrence id>` and `schedule:<job id>@<revision>`, diff `none`; the dispatch outcome stays in the occurrence row                              |
+| `lane`  | a tick of `reconciliation_sweep`, `card_settlement_sweep`, `purchase_recognition` or `maintenance_survey` wrote rows | `lane.tick`, R2 with a rule decision or commit, R1 with proposals only; `applied`, or `failed` | `lane:<lane>`, hyphens for underscores | refs `decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`, `proposals:<kind>:<a>-<b>` per closed kind; diff `{"kind":"lane","decisionRevisions":…,"commits":…,"proposals":[{"kind":…,"count":…}]}`; no target, no scope |
+
+**The alarm record** is the last statement of the claim's own batch, joined
+to the occurrence row that batch inserted (id, `started_at`, `started`) and
+refused for an occurrence that already has one, so a redelivered alarm that
+claims nothing records nothing. A record that cannot be written rolls the
+claim back: the occurrence is neither claimed nor dispatched, and the alarm's
+bookkeeping retry re-arms it a minute later. The `processor-tick` and
+`sbi-vc-keepalive` occurrences (kinds `processor` and `keepalive`) write
+none, which keeps the volume at about one record per enabled collection
+occurrence.
+
+**A lane record** is not in the lane's batches, because a lane writes in
+many. `runScheduled` (`src/worker.ts`, `src/lane-audit.ts`) reads a
+high-water mark of `decision_revisions`, `economic_commit_log` (in the current
+epoch), `reconciliation_proposals`, `card_settlement_candidates` and
+`maintenance_survey_proposals` before an audited lane runs — one statement,
+each part a seek on the table's key — and, after it, the lane's own rows above
+the mark:
+
+| Lane                    | Its own rows                                                                                                                                                                    |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `reconciliation_sweep`  | rule decisions of `rule:reconciliation-v1` (the automatic acceptance of a provider-linked pair); `reconciliation_proposals` of method `rule`                                    |
+| `card_settlement_sweep` | `card_settlement_candidates`                                                                                                                                                    |
+| `purchase_recognition`  | rule decisions of `rule:card-purchase-recognition-v1`, the commit rows of that principal (ADR 0054); `reconciliation_proposals` of method `rule` (pending-to-posted candidates) |
+| `maintenance_survey`    | `maintenance_survey_proposals`                                                                                                                                                  |
+
+Each reference is an inclusive range of positions — the rowid of the
+TEXT-keyed tables, the commit sequence, the survey proposal's integer key —
+and names the lane's own rows inside it; an operator's decision or an agent's
+proposal written in between is inside a range but not named, and not
+counted. `resolveLaneRef` reads a reference back. The diff counts the rows each
+reference names and copies none of `processor_lane_ticks`' counts. No lane
+writes a schedule or a maintenance rule, so no lane record names a setting.
+A tick that wrote nothing — idle, flag off, or failed before writing — records
+nothing; one that threw after writing is `failed`, with the tick's code when
+it is a lower-case code and `lane_failed` otherwise. The lane records of one
+tick share one correlation id. A mark or record that cannot be read or
+written is logged as `{"event":"lane_audit_record_failed","lane":…,"code":…}`
+and changes nothing the lane did.
+
 ## Daily caps
 
 Per principal and UTC day (`AUDIT_DAILY_CAPS`): 2,000 `read` and 500
@@ -173,12 +227,69 @@ Query parameters, each at most once: `operation`, `path`, `principalKind`,
 `400 invalid_query`. The filters are in the SQL `WHERE` before the `LIMIT`, no
 total is computed, and the cursor binds the filters it was issued under (a
 cursor presented with other filters is `409 stale_context`). Reading the log is
-a page load and is not recorded. No page shows it yet (plan S8). Agent routes `POST /api/agent/v1/audit.search` and `/audit.get`, also served as
+a page load and is not recorded. Agent routes `POST /api/agent/v1/audit.search` and `/audit.get`, also served as
 `kogane.audit.search` and `kogane.audit.get`, require `audit.read` and whole
 account scope. Their source predicates precede the page window and cursor,
 with financial and schedule source scopes separate. Null-source records
 require whole scope on both axes. Other subjects are pseudonymized; details
 outside scope and absent details return the same refusal.
+
+### The 監査ログ page (plan slice S8)
+
+`/audit` in the web UI (`apps/web/src/pages/Audit.tsx`) is a read-only view
+of `GET /api/v2/audit`, listed in the navigation of the observation client
+that `services/app` serves (not the evidence-only build). It shows one
+server page at a time, newest first, with each record's stored UTC time,
+operation, risk class and step, result with its closed result and reason
+codes, principal kind, principal and path, target and scope, a summary of
+its diff (rows read, revision from and to with the changed field names,
+decision counts, request status, release, overflow count and cap, and a
+lane tick's decision revisions, commits and proposals per kind), and a
+disclosure of its identifiers (audit id, request id, delegation reference,
+idempotency key, digests, linked audit ids, references, among them an alarm
+record's occurrence and a lane record's ranges). The `alarm` and `lane`
+records appear like any other, under the principal kind 自動処理 and their
+`alarm:<job id>` or `lane:<lane>` principal, and both paths and both
+operations are filter values. The operation is
+named in Japanese next to its code; the result, path, principal kind, step,
+scope namespace, changed field names, decision counts, request status and
+lane proposal kinds are shown by their Japanese names; result and reason codes, and any value
+without a Japanese name, are shown as the code itself. There is nothing else
+to show: the record holds no amount,
+provider text or body.
+
+- **Filters** are the server's closed values only: operation (the names of
+  `OPERATION_CATALOGUE`), result, path, principal kind and a UTC day range.
+  They are query parameters of the page URL (`/audit?result=refused`), so a
+  filtered view deep-links; a URL with any other key, a repeated key, a value
+  outside those lists, a day that is not a calendar day or a range that ends
+  before it starts is refused on the page and sends no request.
+- **Paging** follows the server's cursor: next, previous (the cursors already
+  read) and a restart from the newest record. The page shows its page number
+  and the records on that page, never a total. A cursor the server refuses
+  (`409 stale_context`) is reported, with the restart offered.
+- **Validation.** The browser checks every page before rendering it
+  (`packages/observation-shared/src/audit-contract.ts`, through
+  `validApiResponse`): the schema version, at most 50 records newest first,
+  each field in the builder's closed vocabulary, references in its closed
+  patterns, one strict shape per diff kind, and the pairings the table's
+  CHECK constraints require. On the `alarm` and `lane` paths it also holds
+  the builder's own pairings: the principal is `alarm:<job id>` or
+  `lane:<lane>` by path, the result is `applied`, `accepted` or `failed`, and
+  the step is `call`. A `lane` diff has exactly its four keys, non-negative
+  counts, and proposals of closed kinds, each kind at most once with a
+  positive count (in any order, as the builder's schema admits; the builder
+  stores them sorted). A page outside them is an error, never a partial
+  table. The shared package may not import the application layer, so the
+  lists are restated there and a test pins them to the builder's.
+- **Refusals.** A non-operator (`403 operator_required`) is told that the log
+  is shown to the operator only, and no record is shown; a deployment
+  without the route (`404`) says the log is not provided.
+
+The page reads no capability from `/api/meta`: like the schedule settings
+page it is always listed, and the server's operator check is the only gate.
+It does not show which delegations are in force: no route serves them to the
+browser yet.
 
 ## Cost
 
@@ -197,12 +308,34 @@ only ended days through the counter table's key.
 statistics, and that the page's range form answers exactly what the page's
 first text (every bound behind `IS NULL OR`) answered. Each operator write and
 each agent call adds one row; volume is bounded by the operations themselves
-and by the caps above.
+and by the caps above. Each claimed collection occurrence adds one row (about
+a dozen a day with today's jobs), and each writing tick of an audited lane one
+row; an audited lane adds one mark statement before it runs and one range read
+per table it writes after it, each on the table's key, so it reads only what
+was written since its mark. A claim's one-record-per-occurrence check reads
+the earlier records of its job's target (`schedule:<job id>`) through the
+target index, one more for each claimed occurrence of that job.
 
 ## Not recorded, and other limits
 
-- `alarm` and `lane` records (plan S7): until they exist the log records
-  subject-originated operations only.
+- The `processor` tick and `keepalive` alarm occurrences, an alarm dispatch's
+  outcome (it stays in the occurrence row), lane ticks that wrote no decision,
+  commit or proposal, and the lanes that write none of them (parsing,
+  identity, projections, prices, rewards, reports, operations dispatch, the
+  decision outbox, the overflow aggregate).
+- A lane record is written after the lane, not in its batches: a lane's
+  decisions or proposals can stand without their record when the mark or the
+  record cannot be read or written (`lane_audit_record_failed` in the log), or
+  when the Worker is stopped between the lane and its record. Its ranges
+  assume one scheduled tick at a time (the one `processor-tick` alarm runs the
+  lanes in sequence); two overlapping ticks of one lane, or of
+  `reconciliation_sweep` and `purchase_recognition` (both write rule
+  `reconciliation_proposals`), would both name the rows either wrote.
+- The rowid positions of `decision_revisions`, `reconciliation_proposals` and
+  `card_settlement_candidates` hold only while those tables are not rebuilt: a
+  `VACUUM`, an export and re-import, or a migration that copies a table
+  without its rowid renumbers it, and earlier lane references would name
+  other rows or none. A migration that rebuilds one of them copies the rowid.
 - Page loads and reads of the operator's GET routes (the schedules page, the
   read pages, `/api/v2/query`, this log), except `GET /api/ops/v1/operations/{id}`,
   which is an operations read and is recorded.
@@ -253,7 +386,22 @@ caps, overflow, chokepoint, page and plans),
 `services/processor/test/schedule-audit.test.ts` (each Processor writer and
 its envelope), `services/app/test/audit.test.ts` (every path end to end, the
 lost answer, the caps, the operator's read and a deep scan for provider text,
-a token-shaped value and an amount).
+a token-shaped value and an amount, and that the served page passes the
+page's contract),
+`services/processor/test/schedule-alarm-audit.test.ts` (one record per claimed
+collection occurrence, none for the processor tick and keepalive, a claim
+rolled back with its record), `services/processor/test/lane-audit.test.ts`
+(ranges that name exactly the lane's rows with other writers' rows in between,
+idle, off and unaudited lanes, a failed tick, a record that cannot be written)
+`services/processor/test/card-purchase-lane-audit.test.ts` (the deployed
+purchase recognition lane's decisions, commits and candidates),
+`apps/web/test/audit-contract.test.ts` (the page
+contract against pages `readAuditPage` produces, its restated lists and
+patterns, the Japanese labels and the URL filters) and
+`apps/web/test/audit.browser.test.ts` (the page on a desktop and a phone
+viewport: navigation, title and focus, labels, cursor paging without a
+total, filters, the refused URL, the non-operator, a malformed page and a
+refused cursor).
 
 ## S3 maintenance execution and confirmation (2026-10-10)
 

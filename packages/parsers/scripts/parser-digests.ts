@@ -13,8 +13,9 @@
 // contract). A CSS change in web/ must not force every artifact to be
 // re-parsed; a change to util.ts must.
 //
-// Regenerate after a deliberate parser change, from packages/parsers:
-//   bun run scripts/parser-digests.ts
+// Regenerate after a deliberate parser change with
+//   mise run //packages/parsers:digests
+// which runs this script and then Oxfmt over the file it writes.
 // The generator refuses to record a changed digest for an unchanged
 // `version`, and test/parser-digests.test.ts fails when the checked-in file
 // no longer matches the sources.

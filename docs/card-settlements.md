@@ -83,6 +83,51 @@ The parsers preserve zero and refund totals as source values. The positive-debit
 matcher excludes them; a refund or a partial/multiple settlement requires its
 own supported model. No payment total is manufactured by summing purchase rows.
 
+### Multiple debits and partial payments (ADR 0074)
+
+The sweep pairs one statement with one debit of the same amount. A statement
+that two debits pay together, or that one debit pays in part, gets no
+candidate and no reason: each half fails the equal-amount test, so it looks
+the same as a statement with no debit at all.
+
+`planCardStatementAllocations` (`packages/domain/src/card-settlement-allocation.ts`,
+[ADR 0074](adr/0074-card-statement-allocation-planner.md)) is a pure planner
+that states these cases. Given at most 16 statements, at most 32 debits (each
+with its `bank_key` and the alias class of its admitted identity), the keys,
+alias classes and statement keys already held, and an explicit, versioned
+policy (the window around the due date and the most debits one allocation may
+combine, 1 to 3; no defaults), it answers per statement:
+
+- `proposed`: exactly one set of whole debits whose exact sum is the total
+  (`single-debit` or `multiple-debits`), none of them in another statement's
+  candidate, and no refused debit competing;
+- `needs_review` (`candidate_not_unique`, with
+  `debit_in_other_statement_allocation` when a debit could pay two
+  statements, and `excluded_debit_competes` when a debit refused as an
+  unresolved duplicate or for a missing date could complete an exact sum):
+  every candidate listed, none chosen;
+- `unsupported`: `no_debit_in_window`, or `no_exact_allocation` with
+  `in_window_debits_below_total` (a shortfall) and/or `debit_above_total`
+  (an excess). No remainder is computed and no debit is called a partial
+  payment: how a provider represents a partial payment, an overpayment or a
+  debit paying several statements has not been observed;
+- `refused` for a statement that is malformed, repeated, not exact, not
+  positive, without a due date or already reserved.
+
+Contests between statements and competing refused debits are judged within
+one run only, so a caller that splits overlapping windows across runs would
+lose them.
+
+A debit given twice, two debits sharing a key or alias class, a debit whose
+key or alias class is held, and a debit without an admitted identity take no
+part; currencies are never combined. Ownership is a rejection condition as in
+the sweep.
+
+Limits: nothing calls the planner. No lane runs it, no table stores its
+output, the review page does not show it, nothing supplies a policy, and the
+acceptance writer still claims exactly one debit, so a multi-debit statement
+still cannot be accepted. Refunds against a statement are not handled.
+
 ### Provider-stated debit accounts
 
 Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md) and its
@@ -188,10 +233,45 @@ produce candidates only. They never cause automatic acceptance.
 
 The sweep is the `card_settlement_sweep` lane, right after
 `reconciliation_sweep` and under the same `RECONCILIATION_ENABLED` flag. It
-logs `{"event":"card_settlement_sweep","scanned":…,"proposed":…,"written":…}`
+logs `{"event":"card_settlement_sweep","scanned":…,"proposed":…,"written":…,"debitAccountEvidence":…,"unmatched":{…}}`
 (or `card_settlement_sweep_failed` with a safe code) and records each tick,
 including a `skipped-by-flag` one, in `processor_lane_ticks`
 ([processor.md §6.1](processor.md#61-tick-records)).
+
+### Unmatched statements
+
+A statement that yields no candidate is counted, not recorded: `unmatched`
+maps three closed codes to the number of statements the tick examined that
+yielded none ([ADR 0009, 2026-11-06 amendment](adr/0009-lane-tick-records.md#amendment-2026-11-06-the-settlement-sweep-counts-its-unmatched-statements)):
+
+| Code                       | The statement                                                                          |
+| -------------------------- | -------------------------------------------------------------------------------------- |
+| `statement_not_comparable` | has no exact positive total, no valid due date or no period; nothing is compared       |
+| `no_debit_in_window`       | the bank read within three days of its due date returned no row                        |
+| `no_equal_amount_debit`    | the bank read returned rows, and none has an exact amount equal to the statement total |
+
+Every code is present, zero included. The sweep decides the code from the
+rows it has already read and compared, so no query is added and the
+candidates, digests and other counts are what they were. The map reaches the
+log line, the tick row and `laneTicks` in `/status` and `/internal/health`;
+only these three codes and their integer counts are kept, never an amount,
+date, key or provider text.
+
+Limits:
+
+- **The shape is not named.** A statement settled by two debits and a
+  partially paid one are both `no_equal_amount_debit`; a statement paid
+  outside the three days, or from a bank without an adapter, is
+  `no_debit_in_window` when no other debit falls in its window and
+  `no_equal_amount_debit` when one does. Telling them apart would mean
+  summing the window's debits, which the sweep does not do.
+- **Per tick, not per store.** The cursor wraps at the last statement, so a
+  statement is counted again on every pass; a tick that stops at 500 written
+  candidates leaves the rest of its page uncounted until the next tick.
+- **The bank read stops at 1,000 rows.** A statement whose window holds more
+  counts as `no_equal_amount_debit` when none of those rows matches.
+- A statement with a candidate is not counted here, even when its window holds
+  several equal debits (each is its own candidate).
 
 The `カード照合` page shows the source facts, evidence links, candidate rationale,
 current readiness blockers and decision history. An authenticated human operator
@@ -643,6 +723,12 @@ and a later capture reusing the reference is refused against that holder.
 acceptance and a withdrawal write to the consumption guard, and its refusals
 ([economic events](economic-events.md#common-consumption-guard-migration-0070)). `packages/read-model/test/card-bank-debit-facts.test.ts`
 shows the SMBC branch returns exactly the 0044 view's rows.
+`packages/domain/test/card-settlement-allocation.test.ts` covers the allocation
+planner on synthetic inputs: today's matcher on a two-debit and a partial case,
+every refusal, exclusion and outcome code, refused debits competing, and 300
+seeded random runs compared with a brute-force subset oracle (exact sums,
+whole and distinct members, no held or dateless debit, each status and code,
+no debit proposed for two statements, order independence).
 `packages/domain/test/card-debit-account.test.ts` covers the provider-stated
 debit-account rule on synthetic inputs: bank names resolve only through the
 table, a unique account starting with the leading digits is proposed, an
@@ -655,6 +741,13 @@ second row on a re-run or for the same bytes of another run, refusals stored
 without values, append-only guards), and the settlement sweep (evidence
 attached, a changed outcome appended, the candidate's facts and eligibility
 unchanged).
+`services/processor/test/card-settlement-unmatched.test.ts` runs the sweep on
+synthetic rows for each [unmatched code](#unmatched-statements): two debits
+summing to the total and a partial debit, an equal debit four days late and no
+debit, a missing total, a missing due date, a zero total and a total with no
+valid unit, and an exact match whose candidate and digest are pinned to what the
+sweep wrote before the codes existed; its tick row holds the closed codes and
+integers only.
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.
@@ -693,4 +786,5 @@ bank read. No cache survives a tick. Retention is bounded to 32 dates and
 2,000 rows; results are evicted rather than truncated. The original keyed SQL,
 adapter behavior, row order, 1,000-row query limit and candidate semantics are
 unchanged. The scanned counter continues to count logical candidate rows,
-including reused rows, rather than claiming to measure D1 rows_read.
+including reused rows, rather than claiming to measure D1 rows_read. The
+`unmatched` codes are decided from those rows and read nothing more.

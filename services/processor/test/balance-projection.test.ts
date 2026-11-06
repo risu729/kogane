@@ -4,8 +4,10 @@
 // provider body appears here.
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
+import { scopeRelationsFromEntityRelations } from "../../../packages/read-model/src/index";
 import {
   balanceProjectionOutboxProcessor,
+  captureFixedInput,
   currentCoreRevision,
   runBalanceProjection,
 } from "../src/balance-projection-job.ts";
@@ -369,4 +371,125 @@ test("the dispatcher routes the balance-projection target to that processor", as
       "SELECT count(*) AS n FROM decision_outbox WHERE decision_revision_id='dr_outbox_3' AND processed_at IS NULL AND blocked_code='no_processor'",
     ),
   ).toBe(1);
+}, 60000);
+
+/**
+ * A relation's decisions are append-only: `relation.reject` writes a new
+ * `entity_relations` row for the same (kind, from, to) and leaves the earlier
+ * acceptance in place. The projection reads the newest decision of each
+ * triple, ordered as the change lifecycle orders a relation's history
+ * (`created_at`, then `id`, newest first), so a later rejection withdraws the
+ * acceptance and a later acceptance overrides an earlier rejection; a later
+ * proposal changes nothing (ADR 0001's amendment of 2026-11-06).
+ */
+test("a later decision on a relation triple supersedes an earlier one in the projection input", async () => {
+  const decide = (
+    id: string,
+    kind: string,
+    from: string,
+    to: string,
+    status: "accepted" | "rejected" | "proposed",
+    at: string,
+  ) => [
+    env.DB.prepare(
+      `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,
+        actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+       VALUES(?1,'relation',?2,1,?3,'manual','operator:1',NULL,'Synthetic relation decision.','[]',
+        NULL,NULL,?4)`,
+    ).bind(
+      `dr_${id}`,
+      `rel_${id}`,
+      status === "accepted" ? "accept" : status === "rejected" ? "reject" : "propose",
+      at,
+    ),
+    env.DB.prepare(
+      `INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,
+        decision_revision_id,evidence_refs_json,created_at)
+       VALUES(?1,?2,?3,?4,NULL,NULL,?5,?6,'[]',?7)`,
+    ).bind(`rel_${id}`, kind, from, to, status, `dr_${id}`, at),
+  ];
+  const a = "source_account:sup:a";
+  const b = "source_account:sup:b";
+  const x = "connection:sup/x";
+  const e = "source_account:sup:e";
+  const f = "source_account:sup:f";
+  await env.DB.batch([
+    // Accepted, then rejected: withdrawn. The rejection's id sorts first, so
+    // the order is by time, not by id.
+    ...decide("sup_9", "same_account", a, b, "accepted", "2026-09-13T00:00:00Z"),
+    ...decide("sup_1", "same_account", a, b, "rejected", "2026-09-13T01:00:00Z"),
+    // Rejected, then accepted: in force.
+    ...decide(
+      "sup_2",
+      "connection_contains",
+      x,
+      "source_account:sup:c",
+      "rejected",
+      "2026-09-13T00:00:00Z",
+    ),
+    ...decide(
+      "sup_3",
+      "connection_contains",
+      x,
+      "source_account:sup:c",
+      "accepted",
+      "2026-09-13T01:00:00Z",
+    ),
+    // The same instant: the higher id is the newer decision.
+    ...decide(
+      "sup_4",
+      "connection_contains",
+      x,
+      "source_account:sup:d",
+      "accepted",
+      "2026-09-13T02:00:00Z",
+    ),
+    ...decide(
+      "sup_5",
+      "connection_contains",
+      x,
+      "source_account:sup:d",
+      "rejected",
+      "2026-09-13T02:00:00Z",
+    ),
+    // Proposed, then accepted; the reverse direction is a triple of its own.
+    ...decide("sup_6", "same_account", e, f, "proposed", "2026-09-13T00:00:00Z"),
+    ...decide("sup_7", "same_account", e, f, "accepted", "2026-09-13T01:00:00Z"),
+    ...decide("sup_8", "same_account", f, e, "rejected", "2026-09-13T02:00:00Z"),
+    // Accepted, then proposed again (by an agent, say): a proposal never
+    // supersedes a decision, so the acceptance stays in force (INV07).
+    ...decide("sup_a", "account_has_pocket", e, "pocket:sup/g", "accepted", "2026-09-13T00:00:00Z"),
+    ...decide("sup_b", "account_has_pocket", e, "pocket:sup/g", "proposed", "2026-09-13T01:00:00Z"),
+  ]);
+  const capture = await captureFixedInput(env.DB);
+  if (!capture.ok) throw new Error(`capture failed: ${capture.code}`);
+  const relations = scopeRelationsFromEntityRelations(capture.captured.input.content.relations)
+    .filter((relation) => /:sup[:/]/u.test(relation.fromScopeKey))
+    .map(({ fromScopeKey, toScopeKey, relation, decisionRevisionId }) => ({
+      fromScopeKey,
+      toScopeKey,
+      relation,
+      decisionRevisionId,
+    }));
+  expect(relations).toEqual([
+    {
+      fromScopeKey: "source_account:sup:c",
+      toScopeKey: x,
+      relation: "subset",
+      decisionRevisionId: "dr_sup_3",
+    },
+    { fromScopeKey: e, toScopeKey: f, relation: "same", decisionRevisionId: "dr_sup_7" },
+    {
+      fromScopeKey: "pocket:sup/g",
+      toScopeKey: e,
+      relation: "subset",
+      decisionRevisionId: "dr_sup_a",
+    },
+  ]);
+  // Only the current row of each triple is a declared input.
+  expect(
+    capture.captured.input.content.relations
+      .filter((row) => row.id.startsWith("rel_sup_"))
+      .map((row) => row.id),
+  ).toEqual(["rel_sup_1", "rel_sup_3", "rel_sup_5", "rel_sup_7", "rel_sup_8", "rel_sup_a"]);
 }, 60000);
