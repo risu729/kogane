@@ -10,9 +10,10 @@
 // line, bounded to one day per lane.
 //
 // What a row may hold is decided here, per lane, by name: counts, flags and
-// the closed reason-code map of `purchase_recognition`. A field a lane adds
-// later is not recorded until it is listed, and no text value is ever copied
-// (the 0049 trigger refuses one anyway).
+// the closed reason-code maps of `purchase_recognition`,
+// `card_settlement_sweep` and `maintenance_survey`. A field a lane adds later
+// is not recorded until it is listed, and no text value is ever copied (the
+// 0049 trigger refuses one anyway).
 import { CARD_USAGE_EXCLUSIONS } from "../../../packages/domain/src/card-purchase.ts";
 import { SURVEY_FAILURE_CODES } from "../../../packages/collection/src/maintenance-survey-model.ts";
 import type { OutboxDispatchResult } from "../../../packages/storage-d1/src/core/decision-outbox.ts";
@@ -26,7 +27,10 @@ import {
 } from "../../../packages/storage-d1/src/core/lane-ticks.ts";
 import type { CardPurchaseSweepResult } from "./card-purchase-job.ts";
 import type { CardDebitAccountSweepResult } from "./card-debit-account-job.ts";
-import type { CardSettlementSweepResult } from "./card-settlement-job.ts";
+import {
+  CARD_SETTLEMENT_UNMATCHED_CODES,
+  type CardSettlementSweepResult,
+} from "./card-settlement-job.ts";
 import type { DispatchSummary } from "./operations/dispatch.ts";
 import type { MaintenanceSurveyResult } from "./maintenance-survey/lane.ts";
 import type { AuditOverflowResult } from "./audit-overflow.ts";
@@ -100,12 +104,10 @@ export const LANE_TICK_COUNTS = {
     "refused",
     "written",
   ]),
-  card_settlement_sweep: countsOf<CardSettlementSweepResult>([
-    "scanned",
-    "proposed",
-    "written",
-    "debitAccountEvidence",
-  ]),
+  card_settlement_sweep: countsOf<CardSettlementSweepResult>(
+    ["scanned", "proposed", "written", "debitAccountEvidence"],
+    { unmatched: CARD_SETTLEMENT_UNMATCHED_CODES },
+  ),
   purchase_recognition: countsOf<CardPurchaseSweepResult>(
     [
       "scanned",

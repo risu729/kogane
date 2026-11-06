@@ -89,6 +89,15 @@ offers keeping apart only; moving that subject is a correction of the
 earlier decision, made as above. An agent reads the same list through
 `kogane.instruments.candidates` and plans through the same command API.
 
+On `/identities`, `銘柄の整理状況` counts per source how many of these
+identifiers (security, crypto and product) wait on a candidate
+(`未判断の候補あり`), were resolved by a person's decision, share an
+instrument without a recorded decision, were kept apart or have no
+candidate; a decision made on the candidate page moves the counts
+once it is committed ([ADR 0073](adr/0073-instrument-coverage-per-source.md)).
+If the store is past the candidate read's bounds, the panel shows the refusal
+instead of counts.
+
 Staleness: the page reads the candidate again before it plans, and plans
 nothing unless the same candidate, with the same commands and the same
 mapping revisions of both identifiers, is still listed. Candidate adoption
@@ -123,6 +132,12 @@ needs a remote D1 measurement first (ADR 0055 amendment, Cost).
   revisions, expose their evidence links, and paginate at 100 rows.
 - `/api/identity/instrument-candidates` reads the ADR 0055 candidate set and
   pages it at 50 items per view; it writes nothing.
+- `/api/identity/instrument-coverage` runs the same candidate read and counts,
+  per source, the security, crypto and product identifiers in each ADR 0055
+  state (`銘柄の整理状況` on `/identities`, [ADR 0073](adr/0073-instrument-coverage-per-source.md)).
+  It shares the candidate read's bounds and refusals; an identifier two
+  sources use counts under each, so there is no cross-source total. It writes
+  nothing.
 - Preserve the original pinned decision IDs to audit what was recorded at the
   time, even after a manual correction.
 - Old B parses/failed acquisitions remain in their own history and never
@@ -509,3 +524,45 @@ continue only if the bounded run reports more candidates. Verify that the
 current Mizuho account mappings read `provider-local` at policy 2. No reimport
 or B reparse is needed. Rolling back the code leaves the policy-2 runs current:
 an older build cannot replace a newer sealed decision.
+
+## Policy 2: SBI Shinsei non-account references
+
+Policy 1 mapped every `sbi-shinsei:` reference as a provider-local `deposit`,
+including the parser's two references that name no account: the exchange-rate
+board `sbi-shinsei:fx-board` (one source account per board currency) and the
+stage category `sbi-shinsei:customer`. From policy 2 the resolver maps the board
+as `valuation-aggregate` / `aggregate`
+(`provider-fx-board-quotes-not-an-account`, label `SBI新生銀行 外貨為替レート`)
+and the stage as `qualification-aggregate` / `aggregate`
+(`provider-customer-stage-not-an-account`, label `SBI新生銀行 お客さまステージ`),
+and maps every other `sbi-shinsei:{accountNo}` reference exactly as policy 1
+did ([ADR 0076](adr/0076-sbi-shinsei-non-account-identity.md)).
+
+The rule reads the identity run's own version, so an explicit policy-1 run
+still records the policy-1 mapping. The `sbi-shinsei-bank` policy module
+(`identity-policies/sbi-shinsei.ts`) requires version 2 for every SBI Shinsei
+parse, with the same family, release (`identity-default-v2`) and empty
+dependency set as Mizuho. The bounded sweep therefore treats sealed policy-1
+SBI Shinsei parses as candidates again and appends a policy-2 run and, per
+source account, a policy-2 mapping revision; the current views select the newer
+sealed run. Every key is unchanged, so each observation keeps its source
+account: account references gain a revision equal to their policy-1 one except
+for its version, and the board and stage references gain a revision with the
+`aggregate` classification. Their account entities keep the `deposit` role they
+were first written with (shown as the role in the identity browser); the
+classification is on the policy-2 mapping revision, which projections and the
+ownership declaration's single-account check read. Policy-1 runs, their rows
+and revisions and Layer A/B stay as recorded, and a manual decision on an SBI
+Shinsei reference is not replaced. Price promotion selects board and stage rows
+by source account, not by identity, so prices are unaffected.
+
+Nothing is configured to enable it. After deployment the five-minute pipeline
+sweep picks the parses up on its own; every SBI Shinsei parse is re-identified
+once, so the backlog is the source's sealed history. To finish sooner run
+`node scripts/identity-ops.ts catchup 100 sbi-shinsei-bank` and continue only
+if the bounded run reports more candidates. Then run the read-only
+[identity audit](identity-audit.md): `pending_parses` for `sbi-shinsei-bank`
+reads zero, and its `account_status` counts the board and stage observations
+under `aggregate`. No reimport or B reparse is needed. Rolling back the code
+leaves the policy-2 runs current: an older build cannot replace a newer sealed
+decision.

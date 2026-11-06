@@ -97,6 +97,9 @@ closed reason. Before this amendment, the code did this:
   and the read did not say this.
 - **Partial and multiple debits** are statement-side
   ([card settlements](../card-settlements.md#multiple-debits-and-partial-payments-adr-0074)).
+  The settlement sweep counts statements with no candidate per closed code
+  in its tick record
+  ([unmatched statements](../card-settlements.md#unmatched-statements)).
   This amendment does not change them.
 
 No installment, revolving or bonus row has been observed in production for

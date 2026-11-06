@@ -25,6 +25,51 @@ export function identifier(value: string, prefix: "r" | "a" | "c"): number {
   return id;
 }
 
+/**
+ * The request body as text, refused with `413 request_too_large` once it
+ * exceeds `limit` **bytes** — a declared `content-length` first, then the
+ * bytes actually streamed, so a body that declares no length (or a wrong
+ * one) is bounded too. Counting `text.length` instead would measure UTF-16
+ * code units and let up to three times the bound of non-ASCII text through.
+ */
+export async function boundedText(request: Request, limit: number): Promise<string> {
+  return (await boundedRead(request, limit)).text;
+}
+
+/**
+ * `boundedText`, with the number of bytes the body carried. A route that
+ * treats an empty body specially asks the bytes, not the text: a lone UTF-8
+ * byte-order mark decodes to no text but is not an empty body.
+ */
+export async function boundedRead(
+  request: Request,
+  limit: number,
+): Promise<{ text: string; bytes: number }> {
+  const declared = request.headers.get("content-length");
+  if (declared !== null && !(Number(declared) <= limit))
+    throw new HttpError(413, "request_too_large");
+  const reader = request.body?.getReader();
+  if (!reader) return { text: "", bytes: 0 };
+  const decoder = new TextDecoder();
+  let size = 0;
+  let text = "";
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      size += part.value.byteLength;
+      if (size > limit) {
+        await reader.cancel();
+        throw new HttpError(413, "request_too_large");
+      }
+      text += decoder.decode(part.value, { stream: true });
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return { text: text + decoder.decode(), bytes: size };
+}
+
 export function cursor(url: URL): number {
   if (
     [...url.searchParams.keys()].some((key) => key !== "cursor") ||

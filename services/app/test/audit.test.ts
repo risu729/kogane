@@ -26,6 +26,7 @@ import {
   RECONSTRUCTED_STATE_TOOL_NAME,
 } from "../src/agent-service";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
+import { maskRandomTokens } from "../../../packages/application/test/random-tokens";
 import { validAuditPage } from "../../../packages/observation-shared/src/audit-contract";
 import { OPS_MCP_TOOLS } from "../src/ops-tools";
 
@@ -915,12 +916,9 @@ describe("the operator's read and the never-recorded list", () => {
   it("no record holds provider text, a token-shaped value or an amount", async () => {
     const rows = (await env.DB.prepare("SELECT * FROM audit_records").all()).results;
     expect(rows.length).toBeGreaterThan(10);
-    // Random UUIDs and 32- or 64-character hex ids can contain the digits of the synthetic
-    // amount by chance (for example `…-740e72498765`), so they are masked
-    // before the search; an amount stored anywhere else is still found.
-    const stored = JSON.stringify(rows)
-      .replaceAll(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, "<uuid>")
-      .replaceAll(/(?<![0-9a-f])(?:[0-9a-f]{64}|[0-9a-f]{32})(?![0-9a-f])/g, "<hex>");
+    // Audit and correlation ids and digests are random hex: masked, so the
+    // amount's digits are found only where a record really carries them.
+    const stored = maskRandomTokens(JSON.stringify(rows));
     for (const needle of NEEDLES) expect(stored).not.toContain(needle);
   });
 });

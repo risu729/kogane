@@ -1,7 +1,8 @@
 # Plan: AI as a delegated operation path, with a common audit log
 
 - Status: **in progress**. Slice S1 (section 8) and S3 declaration core (#628)
-  are implemented on main. This S3 execution slice implements delegated R1
+  are implemented on main; slice S7 (the `alarm` and `lane` audit writers) is
+  implemented in its own pull request. This S3 execution slice implements delegated R1
   operations, bounded preparation machinery and shared history/audit reads;
   a separate R2 slice adds command and provider-request adapters, and a
   settings slice adds job prepare/confirm with linked reversal. The integrated
@@ -551,7 +552,7 @@ each (`result = "read"`, a row count, no data).
 | D2  | 取引 → `/api/transactions`, `/api/filter-options`                                          | `kogane.transactions.search` (new)                                                                                                                                                                                           | `records.read`   | whole-store only                                                                          |
 | D3  | 残高 / 残高の推移 → `/api/balances`, `/api/v2/balances/latest`, `/api/v2/balances/history` | `kogane.balances.read` (new); `holdings` intent (exists)                                                                                                                                                                     | `records.read`   | whole-store only; `holdings` is scoped                                                    |
 | D4  | 保有 → `/api/positions`                                                                    | `kogane.positions.read` (new)                                                                                                                                                                                                | `records.read`   | whole-store only                                                                          |
-| D5  | 指定日の状態 → `/api/v2/reported-state`                                                    | `kogane.reported-state.read` (new)                                                                                                                                                                                           | `records.read`   | whole-store only                                                                          |
+| D5  | 指定日の状態 → `/api/v2/reported-state`                                                    | `kogane.reported-state.read` (exists)                                                                                                                                                                                        | `records.read`   | whole-store only                                                                          |
 | D6  | 口座・銘柄の整理 → `/api/identity/{accounts,instruments,coverage,connections}`             | `kogane.identity.search` (new)                                                                                                                                                                                               | `records.read`   | whole-store only                                                                          |
 | D7  | ポイント → `/api/v2/rewards/{holdings,expiry,simulations}`                                 | `kogane.rewards.read` (new)                                                                                                                                                                                                  | `records.read`   | whole-store only                                                                          |
 | D8  | カード決済の照合 → `/api/v2/reconciliation/card-settlements`                               | `kogane.reviews.card-settlements.read` (new)                                                                                                                                                                                 | `reviews.read`   | whole-store only; plan payloads only with `commands.decide.card-settlement`               |
@@ -592,8 +593,9 @@ routes, H8 the agents' proposal route) and 20 reads (D1–D20). Operations with
    record will be its only durable trace. It stays R3.
 5. Agent-facing contracts for the review queues (D8, D9): only the purchases
    page has one (`validAgentCardPurchasePage`).
-6. D2–D7, D11–D14, D17–D19: the routes exist, no MCP tool does, and none is
-   proven computable inside a listed scope.
+6. D2–D4, D6, D7, D11–D14, D17–D19: the routes exist, no MCP tool does, and
+   none is proven computable inside a listed scope. D5's tool exists,
+   whole-store only.
 7. W1, W2, W4, W5: the writers exist, no agent adapter does.
 8. #564's tool exists only on its branch, with a free-text reason.
 
@@ -1061,6 +1063,12 @@ acceptance and concrete client delegation remain separate owner decisions.
 
 **S7 — `alarm` and `lane` writers** (after S1).
 
+- Status (2026-11-06): implemented in its own pull request, pending its
+  independent review and merge; the details this plan left open are in
+  [ADR 0064's S7 amendment](../adr/0064-common-audit-log.md#amendment-the-alarm-and-lane-writers-slice-s7-2026-11-06)
+  and [the audit log](../audit-log.md#the-processors-own-records-alarm-and-lane).
+  The lane record is written after the lane rather than in its batches, a
+  limit the amendment records.
 - What: one record per claimed `collection`-kind occurrence; one per lane
   tick that wrote decisions, proposals or settings, carrying refs only.
 - ADR: 0064. Migration: none.

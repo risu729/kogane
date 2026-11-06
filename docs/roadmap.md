@@ -161,7 +161,7 @@ New collectors (#455–#510) start only when the owner asks, or after Phase 3.
 | Original phases                         | Implemented foundation                                                                                                                                                                                                                                                                                                  | Work still needed for product completion                                                                                             |
 | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | 0–3: collection, evidence, observations | Source collectors, shared raw evidence, versioned parsing and publication; operations-API collection requests executed through the named collector RPC and traced to publication                                                                                                                                        | Coverage by account and data type; enabling and verifying request dispatch in production, requested windows, READ projection tracing |
-| 4–5: accounts and instruments           | Provider-local identities, mappings and append-only corrections; cross-identifier instrument candidates on a review page and an agent read, decided only through the change lifecycle ([ADR 0055](adr/0055-instrument-candidates.md))                                                                                   | Evidence-backed resolution across direct providers, aggregators and brokers; review of unresolved identities                         |
+| 4–5: accounts and instruments           | Provider-local identities, mappings and append-only corrections; instrument candidates on a page and an agent read, decided only through the change lifecycle; per-source counts of their states ([ADR 0055](adr/0055-instrument-candidates.md), [0073](adr/0073-instrument-coverage-per-source.md))                    | Evidence-backed resolution across direct providers, aggregators and brokers; review of unresolved identities                         |
 | 6–7: reconciliation and economic events | Candidate matching, decisions, event/leg/allocation/obligation/settlement contracts; own-transfer proposals and unregistered planners, nothing adopts ([ADR 0057](adr/0057-own-transfer-proposals.md))                                                                                                                  | More transaction families and continuous event production from adopted observations                                                  |
 | 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots; reported state on a date (positions, provider valuations, balances, card payables); reported holdings changes between two dates, served by a route and a panel of the `/state` page ([ADR 0075](adr/0075-reported-holdings-change-between-dates.md)) | Adoption across sources on a date, dated identity, liabilities beyond provider statements                                            |
 | 9 + 13: prices and valuation            | Price contracts, pure valuation functions, fixed report artifacts with a list route and a read-only page ([ADR 0072](adr/0072-report-artifact-pages.md)); as-of price/FX selection under explicit policies (values not yet decided)                                                                                     | Price/FX acquisition, owner-decided selection policy values and portfolio valuation from actual holdings                             |
@@ -249,6 +249,16 @@ flows first, then extend them under the same contracts.
 **Done when:** a user can request collection, follow it to published
 observations, and distinguish resolved accounts/instruments from unresolved
 ones for the selected scope. Missing data types remain visible.
+
+Today `/identities` shows, per source (or for the selected source), the
+account mapping status of eligible observations and how many security, crypto
+and product identifiers are resolved by a person's decision, wait on a
+candidate, share an instrument without a recorded decision, were kept apart
+or have no candidate
+([ADR 0073](adr/0073-instrument-coverage-per-source.md)). These are counts of
+identifiers, not a match rate; money and reward units have no resolution
+state, and a candidate across providers needs a second source whose identity
+rule records comparable identifiers.
 
 Contracts: [collection](collection.md), [observations](observations.md),
 [identity](identity.md), [source identities](identity-sources.md).

@@ -10,6 +10,7 @@ import type { Miniflare } from "miniflare";
 import { scheduleRoute } from "../src/schedule-store.ts";
 import { auditOverflowStage } from "../src/audit-overflow.ts";
 import { envelopeHeaders } from "./audit-envelope.ts";
+import { maskRandomTokens } from "../../../packages/application/test/random-tokens.ts";
 import { startPipeline } from "./harness.ts";
 
 let mf: Miniflare;
@@ -161,7 +162,9 @@ test("a maintenance edit's revision, provenance and record are one batch; a conf
       .first<number>("n"),
   ).toBe(1);
   expect(before).not.toBeNull();
-  const stored = JSON.stringify(await records());
+  // Audit ids and digests are random hex: masked, so the reference's digits
+  // are found only where a record really carries them.
+  const stored = maskRandomTokens(JSON.stringify(await records()));
   for (const needle of ["eyJ", "c3ludGhldGlj", "123456", "notice.html"])
     expect(stored).not.toContain(needle);
 }, 60_000);

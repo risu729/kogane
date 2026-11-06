@@ -34,6 +34,13 @@ and `operation_receipts.operation_kind` CHECK constraints admit exactly the same
 
 `operation` (a fifth route) returns the receipt of a completed operation.
 
+A `relation.accept` or `relation.reject` payload's `validFrom` and `validTo`
+are each `null` or a calendar day (`YYYY-MM-DD`; `2026-02-30` is not one),
+and `validFrom` is not after `validTo` (they may be the same day); anything
+else is `invalid_command` at `plan` (`validPayload`). The check runs when a
+plan is created; `approve` and `commit` do not re-check a relation plan that
+is already stored.
+
 ### Plan digest
 
 ```
@@ -45,6 +52,19 @@ row's primary key **is** that digest, so there is no second stored copy that
 could disagree with it. Any change of kind, payload, expected revision or base
 context produces a different plan id, and an approval bound to the old digest
 can never apply to the new one (SC17, INV09).
+
+### Approval id
+
+```
+approvalId = commandKey("ap", [planId, approver, now, sortedScope, uses])
+```
+
+The approval's lifetime is not part of its id. An `approve` that finds its
+approval row already written (the same approver, plan, instant, scope and use
+count) inserts no second approval and answers with that row: its stored
+`expires_at` and `uses_remaining`, not the lifetime the repeated request asked
+for, so the receipt always equals what `readOwnApproval` and `commit` read.
+The processor route always asks for the default ten-minute lifetime.
 
 ### Expected revisions
 
@@ -177,9 +197,12 @@ characters:
 | `card-installment.unlink` | `{ obligationId, portionKeys, reason }`      | `obl_cp_<sha256>`; 1–36 distinct recognition keys, each the compact JSON text of `[source, producer, namespace or null, account, external id]`, at most 2048 characters as 0047 stores it |
 
 **Limit.** The command API takes a request body of at most 16 KiB
-(`services/app/src/command-api.ts`), so a link or unlink whose 36 entries are
-long keys can exceed it and would need more than one plan; the change that
-adds installment links decides how it splits them.
+(`services/app/src/command-api.ts`); the Processor's private
+`/command/v1/*` routes bound it again at 16 KiB in bytes while reading it,
+stop reading past the limit and answer `400 invalid_command`
+(`services/processor/src/bounded-body.ts`). So a link or unlink whose 36
+entries are long keys can exceed it and would need more than one plan; the
+change that adds installment links decides how it splits them.
 
 The reason codes, the subject prefixes (`card-usage-exclusion:`,
 `card-refund:`, `card-refund-target:`, `card-installment:`) and the

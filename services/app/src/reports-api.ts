@@ -131,7 +131,13 @@ interface RunRow {
 export function reportsRoute(path: string): { reportId: string; view: string } | null {
   const match = /^\/api\/v2\/reports\/([^/]+)(?:\/(explanation|export))?$/.exec(path);
   if (!match) return null;
-  const reportId = decodeURIComponent(match[1]!);
+  let reportId: string;
+  try {
+    reportId = decodeURIComponent(match[1]!);
+  } catch {
+    // A malformed percent escape is a bad identifier, like any other one.
+    throw new HttpError(400, "invalid_identifier");
+  }
   if (!REPORT_ID.test(reportId)) throw new HttpError(400, "invalid_identifier");
   return { reportId, view: match[2] ?? "body" };
 }
@@ -176,7 +182,8 @@ export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
   const route = reportsRoute(path);
   if (!route) throw new HttpError(404, "not_found");
   for (const key of url.searchParams.keys())
-    if (key !== "decimalPolicy") throw new HttpError(400, "invalid_query");
+    if (key !== "decimalPolicy" || url.searchParams.getAll(key).length !== 1)
+      throw new HttpError(400, "invalid_query");
   // Selecting a normalization policy is part of the read contract even where
   // the stored body already fixed one; an unknown name is refused here rather
   // than served from the decimal-v1 projection (docs/normalized-decimals.md).

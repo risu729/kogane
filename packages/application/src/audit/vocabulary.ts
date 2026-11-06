@@ -13,20 +13,21 @@ export const AUDIT_PATHS = ["ui", "agent-http", "mcp", "alarm", "lane"] as const
 export type AuditPath = (typeof AUDIT_PATHS)[number];
 
 /**
- * The paths a verified Access subject stands behind, and the only ones this
- * slice writes. `alarm` and `lane` are the Processor's own paths; their
- * writers are a later slice (plan S7), and until then the log records
- * subject-originated operations only.
+ * The paths a verified Access subject stands behind. `alarm` and `lane` are
+ * the Processor's own paths (plan slice S7): no subject, an `automatic`
+ * principal, effect and failure records only, never capped.
  */
 export const SUBJECT_PATHS = ["ui", "agent-http", "mcp"] as const;
 export type SubjectPath = (typeof SUBJECT_PATHS)[number];
+/** The Processor's own paths, and the prefix of the principal each one records. */
+export const AUTOMATIC_PATHS = ["alarm", "lane"] as const;
+export type AutomaticPath = (typeof AUTOMATIC_PATHS)[number];
 
 /**
- * How the principal was graded. The table also admits `delegated` (with a
- * `delegation_ref`) for the delegated MCP principal of ADR 0063; the
- * declaration core resolves one, but nothing executes under it yet, so this
- * builder refuses it, and `automatic` is the Processor's own principal on its
- * `alarm` and `lane` paths.
+ * How the principal was graded: `human` (the operator), `agent`, `delegated`
+ * (with a `delegation_ref`, the delegated MCP principal of ADR 0063), and
+ * `automatic`, the Processor's own principal on its `alarm` and `lane` paths
+ * (`alarm:<job id>`, `lane:<lane>`).
  */
 export const AUDIT_PRINCIPAL_KINDS = ["human", "agent", "delegated", "automatic"] as const;
 export type AuditPrincipalKind = (typeof AUDIT_PRINCIPAL_KINDS)[number];
@@ -85,6 +86,38 @@ export const AUDIT_WRITE_FAILED = "audit_write_failed";
 export const AUDIT_SUBJECT = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u;
 /** `<sub>` or `mcp-client:<sub>` (ADR 0047), or the Processor's own principal. */
 export const AUDIT_PRINCIPAL = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/u;
+/**
+ * The Processor's own principals: `alarm:<job id>` for an alarm job of
+ * `config/alarm-jobs.json`, `lane:<lane>` for a scheduled lane, its name with
+ * hyphens for underscores (the principal's character set has no underscore).
+ */
+export const AUTOMATIC_PRINCIPAL = {
+  alarm: /^alarm:[a-z0-9-]{1,100}$/u,
+  lane: /^lane:[a-z0-9-]{1,64}$/u,
+} as const satisfies Record<AutomaticPath, RegExp>;
+
+/**
+ * The kinds of proposal a lane writes, as a lane record names them (plan
+ * slice S7): the reconciliation proposal kinds of migration 0032 (stage A
+ * pairs of the reconciliation sweep, the pending-to-posted candidates of the
+ * purchase recognition lane), the card settlement candidates of migration 0044,
+ * and the maintenance re-survey proposal kinds of migration 0069. Hyphenated,
+ * since neither a reference nor a diff value admits an underscore.
+ */
+export const LANE_PROPOSAL_KINDS = [
+  "reconciliation-provider-same",
+  "reconciliation-pending-to-posted",
+  "reconciliation-supersedes",
+  "reconciliation-supports",
+  "reconciliation-contradicts",
+  "reconciliation-funded-by",
+  "reconciliation-statement-covers",
+  "card-settlement-candidate",
+  "maintenance-survey-new",
+  "maintenance-survey-changed",
+  "maintenance-survey-absent",
+] as const;
+export type LaneProposalKind = (typeof LANE_PROPOSAL_KINDS)[number];
 /** An operation name; the closed list is `OPERATION_CATALOGUE`. */
 export const AUDIT_OPERATION = /^[a-z][a-z0-9.-]{0,63}$/u;
 /** A closed result code of the command, operations, schedule or agent API vocabularies. */
@@ -103,6 +136,9 @@ export const AUDIT_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 
 const SOURCE_ID = "[a-z0-9-]{1,100}";
 const HEX64 = "[0-9a-f]{64}";
+/** A row position: a rowid, an integer key or a commit sequence number. */
+const POSITION = "[1-9][0-9]{0,18}";
+const RANGE = `${POSITION}-${POSITION}`;
 /** A field path of a refused request: schema keys only, never a value. */
 const FIELD_PATH = "(?:body|[a-z][A-Za-z]{0,31}(?:\\.(?:[a-z][A-Za-z]{0,31}|[0-9]{1,3})){0,3})";
 
@@ -126,6 +162,17 @@ export const AUDIT_REF_PATTERNS: readonly RegExp[] = [
   new RegExp(`^collection-lease:${SOURCE_ID}$`, "u"),
   new RegExp(`^source:${SOURCE_ID}$`, "u"),
   new RegExp(`^field:${FIELD_PATH}$`, "u"),
+  // An alarm occurrence (`collection_schedule_occurrences.id`): its job and
+  // nominal instant in epoch milliseconds.
+  new RegExp(`^occurrence:scheduled:${SOURCE_ID}:[0-9]{1,16}$`, "u"),
+  // The ranges a lane record names (plan slice S7): the rows of one table
+  // between two positions, inclusive, that the record's lane wrote. The
+  // writer's own predicate (its actor, principal or method; `LANE_AUDIT` in
+  // services/processor/src/lane-audit.ts) selects them inside the range, so a
+  // row another writer added in between is not named.
+  new RegExp(`^decision-revisions:${RANGE}$`, "u"),
+  new RegExp(`^commit-seq:[a-z0-9.-]{1,64}:${RANGE}$`, "u"),
+  new RegExp(`^proposals:(?:${LANE_PROPOSAL_KINDS.join("|")}):${RANGE}$`, "u"),
 ];
 
 export function isAuditRef(value: unknown): value is string {

@@ -84,7 +84,7 @@ describe("shared API schema", () => {
       // stays for the request-time answer of a deployment without one.
       "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit"],
       "/api/v2/rewards/simulations": ["cursor", "limit"],
-      "/api/v2/rewards/offers/simulate": ["offer", "quantity", "unit", "goal", "depth"],
+      "/api/v2/rewards/offers/simulate": ["offer", "version", "quantity", "unit", "goal", "depth"],
     });
     // The whole route group is gated: with rewardsV2 off no parameter is
     // accepted, because the path itself is not served.
