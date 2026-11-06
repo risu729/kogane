@@ -296,10 +296,13 @@ generated from the Zod schema its route validates with:
 [ADR 0047](adr/0047-mcp-client-connection.md), `/mcp` accepts only an identity
 that came through the MCP Access application, and that identity is the
 agent-only caller `mcp-client:<sub>` — the operator's own identity included.
-Without a resolved delegation the tools are not published to it, and
-`callOpsTool` refuses a call from the caller object with
-`403 actor_not_supported` before `opsContext` or the resolver runs, writing
-nothing. Since #660 (ADR 0063, slice S3), `delegatedOpsTools` publishes each
+Without a resolved delegation the tools are not published to it, and a call
+is answered by `callDelegatedOpsTool` with the resolution's closed code
+(`403 delegation_not_configured` while `MCP_DELEGATIONS` names no entry for
+it, `503 delegation_misconfigured` for an unreadable one) before
+`opsContext` runs; only the refusal's audit record is written. `callOpsTool`
+itself refuses an `mcp-client` caller object the same way
+(`403 delegation_not_configured`). Since #660 (ADR 0063, slice S3), `delegatedOpsTools` publishes each
 tool to a principal whose resolved `MCP_DELEGATIONS` entry holds its
 `operations.*` capability, and `callDelegatedOpsTool` runs it through the
 same services; a collection request or session refresh needs a prepare and an

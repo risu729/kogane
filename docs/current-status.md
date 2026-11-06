@@ -94,7 +94,7 @@ The committed [App config](../services/app/wrangler.jsonc) and
 [Processor config](../services/processor/wrangler.jsonc) enable their existing
 boolean feature flags, including scheduling, operations, purchase recognition,
 rewards, reports and READ projections. CORE migrations reach 0080 (no
-file uses 0067, 0073, 0074 or 0076); READ reaches 0005. The Processor's
+file uses 0054, 0067, 0073, 0074 or 0076); READ reaches 0005. The Processor's
 `OPS_COLLECTOR_DISPATCH_CONNECTIONS` is empty, so the operation dispatch lane
 calls no collector. These are repository facts, not live database/deployment readback.
 

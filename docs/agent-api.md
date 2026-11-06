@@ -231,10 +231,12 @@ grant checks every agent path makes. `kogane.reconstructed-state.read` follows
 `GET /api/v2/reconstructed-state` the same way: listed after them while
 `/api/meta` reports `reconstructedStateOnDate: true` (the store has the
 reported state's views), otherwise `unknown_tool` and `404 not_found`. The six
-`kogane.ops.*` tools of [ops-api.md](ops-api.md) are never published on
-`/mcp`, whose callers are all agent-only: with `OPS_API_ENABLED` off an
-operations tool name is `unknown_tool`, and with it on `callOpsTool` refuses
-the call from the caller object (`actor_not_supported`) before any grader runs.
+`kogane.ops.*` tools of [ops-api.md](ops-api.md) are published on `/mcp`,
+whose callers are all agent-only, only to a principal whose resolved
+delegation holds their capability ([ops-api](ops-api.md#mcp)): with
+`OPS_API_ENABLED` off an operations tool name is `unknown_tool`, and with it on
+and no delegation `callDelegatedOpsTool` refuses the call
+(`delegation_not_configured`) before any service runs.
 
 ### Intents
 
@@ -750,9 +752,10 @@ attenuates it.
 not the subject it came from — is what every grader and tool receives.
 `mcp-client:<sub>` is graded by its own `AGENT_API_GRANTS` entry and by
 nothing else: the bare `<sub>`'s entry is not a fallback. `callOpsTool`
-refuses an `mcp-client` caller with `403 actor_not_supported` before
-`opsContext` or `principalFor` runs, and the operations tools are not
-published on `/mcp`; `principalFor` also refuses the `mcp-client:` name as a
+refuses an `mcp-client` caller with `403 delegation_not_configured` before
+`opsContext` or `principalFor` runs, and on `/mcp` the operations tools are
+published and run only under a resolved delegation (`callDelegatedOpsTool`,
+[ops-api](ops-api.md#mcp)); `principalFor` also refuses the `mcp-client:` name as a
 string, even when `<sub>` is the operator. It reaches no other route. It can
 record an inert proposal (actor `mcp-client:<sub>`) under
 `interpretation.propose`, and nothing approves or commits. The same person
@@ -779,23 +782,23 @@ over MCP.
 
 ### Refusals a client sees
 
-| Failure                                                                                                                                                           | Answered by                           | HTTP / result                                                                          |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------- |
-| no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access                     | Access's own `401` (Managed OAuth) — not this Worker                                   |
-| assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                                | `401 authentication_required`                                                          |
-| Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                                | `503 identity_keys_unavailable` / `503 auth_not_configured`                            |
-| an unexpected failure inside a tool or the tool list (the store, a bug)                                                                                           | Worker                                | `500 internal_error`; the exception text never reaches the client or the log           |
-| `Origin` of another site                                                                                                                                          | Worker                                | `403 origin_not_allowed`                                                               |
-| principal not in `AGENT_API_GRANTS` (empty or unreadable table included)                                                                                          | Worker                                | `403 agent_api_not_configured`                                                         |
-| `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                | `405 method_not_allowed` / `400 invalid_query`                                         |
-| media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                   | `415` / `406` / `400` / `400` / `413`                                                  |
-| unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                      | JSON-RPC `-32601`; `-32602 unknown_tool`                                               |
-| an operations tool, while the operations API is on                                                                                                                | `callOpsTool`, from the caller object | `isError: true`, `{"error":"actor_not_supported"}`; nothing written                    |
-| capability not granted                                                                                                                                            | tool                                  | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                   |
-| source, account or row outside the scope                                                                                                                          | tool                                  | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`) |
-| raw evidence without `evidence.read`                                                                                                                              | tool                                  | not an error: `explain` has no raw-locator node, `restricted: ["evidence.read"]`       |
-| page or proposal beyond the budget                                                                                                                                | tool                                  | `isError: true`, `code: budget_exceeded`, `refs: ["budget:…"]`                         |
-| approve, commit                                                                                                                                                   | —                                     | no such tool; every command route is `401` for an MCP token                            |
+| Failure                                                                                                                                                           | Answered by                                 | HTTP / result                                                                                                             |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| no token, expired token, person not in the MCP application's policy                                                                                               | Cloudflare Access                           | Access's own `401` (Managed OAuth) — not this Worker                                                                      |
+| assertion missing, forged, expired, from another issuer, not for the MCP application (the browser's, both, another), without `sub`, or with an agent-only subject | Worker                                      | `401 authentication_required`                                                                                             |
+| Access keys unreachable; `ACCESS_MCP_AUDIENCE` misconfigured                                                                                                      | Worker                                      | `503 identity_keys_unavailable` / `503 auth_not_configured`                                                               |
+| an unexpected failure inside a tool or the tool list (the store, a bug)                                                                                           | Worker                                      | `500 internal_error`; the exception text never reaches the client or the log                                              |
+| `Origin` of another site                                                                                                                                          | Worker                                      | `403 origin_not_allowed`                                                                                                  |
+| principal not in `AGENT_API_GRANTS` (empty or unreadable table included)                                                                                          | Worker                                      | `403 agent_api_not_configured`                                                                                            |
+| `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                      | `405 method_not_allowed` / `400 invalid_query`                                                                            |
+| media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                         | `415` / `406` / `400` / `400` / `413`                                                                                     |
+| unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                            | JSON-RPC `-32601`; `-32602 unknown_tool`                                                                                  |
+| an operations tool without a resolved delegation, while the operations API is on                                                                                  | `callDelegatedOpsTool`, from the resolution | `isError: true`, `{"error":"delegation_not_configured"}` (or the resolution's other closed code); only the refusal record |
+| capability not granted                                                                                                                                            | tool                                        | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                                                      |
+| source, account or row outside the scope                                                                                                                          | tool                                        | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`)                                    |
+| raw evidence without `evidence.read`                                                                                                                              | tool                                        | not an error: `explain` has no raw-locator node, `restricted: ["evidence.read"]`                                          |
+| page or proposal beyond the budget                                                                                                                                | tool                                        | `isError: true`, `code: budget_exceeded`, `refs: ["budget:…"]`                                                            |
+| approve, commit                                                                                                                                                   | —                                           | no such tool; every command route is `401` for an MCP token                                                               |
 
 A tool's refusal is the same financial error object its HTTP route answers,
 in `structuredContent`; `content[0].text` is that object serialised.
