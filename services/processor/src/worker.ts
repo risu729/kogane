@@ -1834,11 +1834,14 @@ const defaultStages: ScheduledStages = {
     }),
   // ADR 0048: a collector request reaches the same named RPC binding the
   // alarm calls, and only for connections OPS_COLLECTOR_DISPATCH_CONNECTIONS
-  // names.
+  // names. An import whose registration threw is logged by its error class
+  // only; the lane goes on and the request is looked at again later.
   operations: (env, context) =>
     dispatchOperations(collectionEnv(env), {
       budget: context.registration,
       collectors: (connection) => collectorBinding<CollectorRpc>(env, connection.workspace),
+      onFailure: (code) =>
+        console.log(JSON.stringify({ event: "operation_dispatch_registration_failed", code })),
     }),
   maintenanceSurvey: (env) =>
     maintenanceSurveyLane(env, { transport: (url, init) => fetch(url, init) }),

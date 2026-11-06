@@ -498,7 +498,11 @@ over, and — since ADR 0048 — starts a `collection` or an unattended
 `operationRequestPayload(store, operationId)` is the reader the executor uses
 to see what was accepted — the dispatch acts on the durable row, never on the
 contents of a notification. No branch of it completes an operation merely by
-handing the work over.
+handing the work over. An import whose re-registration throws (R2 or CORE
+unavailable) neither fails the lane nor holds the head of the queue: it stays
+`dispatch_pending` with `failureCode: "registration_failed"`, one more
+dispatch attempt and a retry time five minutes ahead, while the requests
+behind it are dispatched in the same tick (`docs/processor.md` §7).
 
 The collector execution services are in
 `packages/application/src/operations/collector-dispatch.ts` (writes) and
