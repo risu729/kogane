@@ -458,6 +458,78 @@ describe("reward reads", () => {
     ).toBe(400);
   });
 
+  it("never picks a goal search's starting unit on the caller's behalf", async () => {
+    // Two synthetic offers from different source units that both reach one
+    // goal, on units no other test converts. The offer ids sort the opposite
+    // way to the units, so a first-row pick and a first-unit pick differ.
+    const goal = "points:synthetic-goal";
+    await storeOffers([
+      {
+        ...OFFER,
+        offer_id: "offer:synthetic-goal-from-y",
+        from_unit_ref: "points:synthetic-goal-source-y",
+        to_unit_ref: goal,
+        fixed_fees_json: "[]",
+      },
+      {
+        ...OFFER,
+        offer_id: "offer:synthetic-goal-from-z",
+        from_unit_ref: "points:synthetic-goal-source-x",
+        to_unit_ref: goal,
+        ratio_denominator: "4",
+        fixed_fees_json: "[]",
+      },
+    ]);
+    // Naming the unit gives a different path for each source: an answer
+    // without one would be one of these, chosen by row order.
+    const pathFrom = async (unit: string) =>
+      (
+        (await (
+          await get(`/api/v2/rewards/offers/simulate?goal=${goal}&quantity=2000&unit=${unit}`)
+        ).json()) as { paths: { hops: { offerRef: string }[] }[] }
+      ).paths.map((path) => path.hops.map((hop) => hop.offerRef));
+    expect(await pathFrom("points:synthetic-goal-source-y")).toEqual([
+      ["offer:synthetic-goal-from-y@v1"],
+    ]);
+    expect(await pathFrom("points:synthetic-goal-source-x")).toEqual([
+      ["offer:synthetic-goal-from-z@v1"],
+    ]);
+
+    const response = await get(`/api/v2/rewards/offers/simulate?goal=${goal}&quantity=2000`);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    // Every distinct source unit of the stored offers, in code-unit order
+    // rather than reader order, so the list does not depend on row order.
+    const stored = (
+      await env.DB.prepare(
+        "SELECT DISTINCT from_unit_ref AS unit FROM conversion_offers ORDER BY from_unit_ref",
+      ).all<{ unit: string }>()
+    ).results.map((row) => row.unit);
+    expect(stored).toEqual(
+      expect.arrayContaining(["points:synthetic-goal-source-x", "points:synthetic-goal-source-y"]),
+    );
+    expect(body).toEqual({
+      simulation: null,
+      searchCoverage: "bounded",
+      offerCoverage: { limit: 200, truncated: false },
+      sourceUnits: stored,
+      reasonCodes: ["source_unit_not_selected"],
+      release: "conversion-search-v1",
+    });
+    expect(body).not.toHaveProperty("paths");
+    expect(body).not.toHaveProperty("rejected");
+
+    // A named offer has one source unit, so its goal search needs no `unit`.
+    const named = (await (
+      await get(
+        `/api/v2/rewards/offers/simulate?offer=offer:synthetic-goal-from-y&goal=${goal}&quantity=2000`,
+      )
+    ).json()) as { paths: { hops: { offerRef: string }[] }[] };
+    expect(named.paths.map((path) => path.hops.map((hop) => hop.offerRef))).toEqual([
+      ["offer:synthetic-goal-from-y@v1"],
+    ]);
+  });
+
   // Last in the file: it stores 200 more offers, and conversion_offers is
   // append-only, so nothing after it may assume the single fixture offer.
   it("refuses a goal search over an offer set larger than its bound instead of answering from part of it", async () => {

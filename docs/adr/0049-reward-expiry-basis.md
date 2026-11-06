@@ -421,7 +421,8 @@ release, with no `paths` and no `rejected` list. The check precedes the
 search reads every stored offer, a named offer reads that offer's versions.
 No query, bound, page size, search budget or evaluation calendar changes;
 the reader already reported the truncation. The addenda below add the
-`version` parameter and the search's `stoppedBy`.
+`version` parameter, the search's `stoppedBy` and the goal search's
+`source_unit_not_selected` refusal.
 
 ### Consequences
 
@@ -512,3 +513,64 @@ capped paths are always the first paths of the uncapped search, an empty
 and a reported stop always dropped a path or left an examination undone.
 `services/app/test/rewards-api.test.ts` checks the route reports
 `expansions: 2` and `stoppedBy: []` for the fixture search.
+
+### Addendum: a goal search's starting unit is chosen by the caller
+
+- Date: 2026-11-06
+
+Context: a goal search without `unit` started from
+`matching[0].fromUnitRef`, the source unit of the first offer in the
+reader's `offer_id, version` order. With offers from more than one source
+unit stored, that is an arbitrary pick, the same guess the first addendum
+removed for versions: the stored offers do not say which unit the caller
+holds. The answer depended on which offer id sorts first, and a start from a
+unit that reaches nothing returned `paths: []`, read as "no path to the goal"
+while another stored source unit reached it.
+
+Options: keep the first row's unit (answers for a holding nobody named;
+rejected); search from every source unit and merge the paths (changes the
+answer's meaning, multiplies the expansion budget per start, and still says
+nothing about which unit the caller holds; rejected); pick a unit by a rule
+such as the one with the most paths or the caller's holdings (a guessed rule,
+and holdings are another route's read; rejected); refuse the ambiguity and
+let the caller name `unit` (chosen).
+
+Decision: when a goal search has no `unit`, the route collects the distinct
+`fromUnitRef` values of the matching offers (every stored offer, or the named
+offer's versions). With exactly one, the search starts from it, as before.
+With more than one, nothing is computed: the answer is `simulation: null`,
+`searchCoverage: "bounded"`, the `offerCoverage`, `sourceUnits` (every
+distinct source unit ref, in code-unit order, so the list does not depend on
+reader order) and `reasonCodes: ["source_unit_not_selected"]`, with no
+`paths` or `rejected` list. The list is not filtered by reachability, by an
+offer's verification or deadline, or by the goal unit: whether a unit reaches
+the goal is the search's answer, and the search has not run. A search from
+the goal unit itself never finds a path (`findConversionPaths` counts the
+start unit as visited, so a return to it is `cycle_rejected`), but the goal
+unit stays in the list: `quantity` is read in the start unit, and dropping
+the goal unit would read a caller's goal-unit quantity as another unit's. A
+given `unit` is used as before and is not checked
+against the list. The bound check and `no_stored_offer` run first, so the
+refusal never applies to an empty or truncated offer set. The single
+simulation form is unchanged: after the version check it has one offer, and
+`unit` still defaults to that offer's source unit. No query, schema
+parameter, search budget or domain function changes.
+
+Consequences: a goal search without `unit` succeeds only over a store whose
+matching offers leave one unit; otherwise the caller adds `unit`. The API
+conformance harness requests `goal=points:b&quantity=1000` without `unit`;
+the one target that advertises `rewardsV2` (the worker fixture in
+`services/app/test/conformance.test.ts`) stores no offers, so it receives
+`no_stored_offer` before this check, and the harness still checks only
+status and `cache-control`. No client in the
+repository reads this route's body.
+
+Verification: `services/app/test/rewards-api.test.ts` stores two synthetic
+offers to one goal from two source units, with offer ids sorted opposite to
+the units. Naming either unit returns a different single path. Before this
+change the unnamed request started from the fixture offer's unit, the first
+stored row, and answered `paths: []`; it now answers
+`source_unit_not_selected` with `sourceUnits` equal to the distinct
+`from_unit_ref` values stored, sorted, and no `paths` or `rejected`. A goal
+search naming one of the two offers, which has one source unit, still finds
+its path without `unit`.

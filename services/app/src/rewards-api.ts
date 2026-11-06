@@ -227,8 +227,23 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
       reasonCodes: ["no_stored_offer"],
       release: CONVERSION_SEARCH_RELEASE,
     });
-  const quantity = decimalQuantity(unitRef ?? matching[0]!.fromUnitRef, quantityText);
   if (goal) {
+    // The search starts from one unit: the caller's `unit`, or the single
+    // source unit of the matching offers. With several, the stored offers do
+    // not say which one the caller holds, and starting from the first row's
+    // unit would answer for a holding nobody named (an empty `paths` that
+    // reads as "no path"). Listed in code-unit order, not reader order.
+    const sourceUnits = [...new Set(matching.map((row) => row.fromUnitRef))].sort();
+    if (unitRef === undefined && sourceUnits.length !== 1)
+      return json({
+        simulation: null,
+        searchCoverage: "bounded",
+        offerCoverage,
+        sourceUnits,
+        reasonCodes: ["source_unit_not_selected"],
+        release: CONVERSION_SEARCH_RELEASE,
+      });
+    const quantity = decimalQuantity(unitRef ?? sourceUnits[0]!, quantityText);
     // Every stored version is its own candidate here, named by its offerRef.
     const result = findConversionPaths(
       matching,
@@ -275,7 +290,7 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
     });
   const offer = matching[0]!;
   return json({
-    simulation: simulationDto(offer, quantity),
+    simulation: simulationDto(offer, decimalQuantity(unitRef ?? offer.fromUnitRef, quantityText)),
     offerCoverage,
     release: CONVERSION_SEARCH_RELEASE,
   });
