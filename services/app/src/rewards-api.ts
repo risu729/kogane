@@ -196,9 +196,9 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
     throw new HttpError(400, "invalid_query");
   if (quantityText === null || !QUANTITY.test(quantityText))
     throw new HttpError(400, "invalid_quantity");
+  // 1 or 2 as written: `Number` alone would also read "0x2" or "1.0".
+  if (depthText !== null && !/^[12]$/u.test(depthText)) throw new HttpError(400, "invalid_query");
   const depth = depthText === null ? 2 : Number(depthText);
-  if (!Number.isSafeInteger(depth) || depth < 1 || depth > 2)
-    throw new HttpError(400, "invalid_query");
   const offers = await reader.offers({ ...(offerId ? { offerId } : {}), offset: 0 });
   // The offer set is read once, bounded by one reader page (one row past the
   // limit reports more). Every answer carries that bound; `truncated` is never

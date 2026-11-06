@@ -385,6 +385,23 @@ describe("reward reads", () => {
     expect((await get("/api/v2/rewards/offers/simulate?quantity=1000")).status).toBe(400);
   });
 
+  it("refuses a search depth that is only numerically 1 or 2", async () => {
+    for (const depth of ["0x2", "1.0", "+1", "2e0", "%201"]) {
+      const response = await get(
+        `/api/v2/rewards/offers/simulate?goal=JPY&quantity=2500&unit=points:v-point&depth=${depth}`,
+      );
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: "invalid_query" });
+    }
+    expect(
+      (
+        await get(
+          "/api/v2/rewards/offers/simulate?goal=JPY&quantity=2500&unit=points:v-point&depth=1",
+        )
+      ).status,
+    ).toBe(200);
+  });
+
   it("reports the offer bound on every simulate answer", async () => {
     const named = (await (
       await get("/api/v2/rewards/offers/simulate?offer=offer:synthetic-a-to-b&quantity=2500")
