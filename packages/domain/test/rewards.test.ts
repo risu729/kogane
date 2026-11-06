@@ -1160,6 +1160,86 @@ describe("SC14 / AT49-AT54 — conversion simulation and bounded search", () => 
     );
     expect(deep.stoppedBy).toEqual(["max_candidates"]);
   });
+
+  test("an empty stoppedBy is exactly a search no cap cut short, across random small offer graphs", () => {
+    // mulberry32 with a fixed seed, as in values.test.ts: deterministic input.
+    let state = 20261106;
+    const random = () => {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let t = state;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const pick = <T>(values: readonly T[]): T => values[Math.floor(random() * values.length)]!;
+    const units = ["points:a", "points:b", "points:c", "points:d"];
+    const seen = { complete: 0, maxExpansions: 0, maxCandidates: 0, multiHop: 0 };
+    for (let iteration = 0; iteration < 1500; iteration += 1) {
+      const offers = Array.from({ length: 1 + Math.floor(random() * 8) }, (_, index) =>
+        offer({
+          // An occasional repeated id exercises same-offer reuse across versions.
+          offerId: `offer:random:${index > 0 && random() < 0.15 ? index - 1 : index}`,
+          version: `v${index}`,
+          fromUnitRef: pick(units),
+          toUnitRef: pick(units),
+          ratio: { numerator: pick(["1", "2", "3"]), denominator: pick(["1", "2"]) },
+          minimum: decimalLiteral(pick(["1", "100", "1000"])),
+          increment: decimalLiteral(pick(["1", "100"])),
+          maximumPerRequest: random() < 0.5 ? null : decimalLiteral(pick(["500", "3000"])),
+          sharedQuotaRef: random() < 0.2 ? pick(["quota:x", "quota:y"]) : null,
+          fixedFees: [],
+          applicationDeadline: day(pick(["2026-09-09", "2026-09-12", "2026-12-31"])),
+          processingDays: pick([0, 1, 3]),
+          verification: random() < 0.85 ? "verified" : "needs-rule-verification",
+        }),
+      );
+      const start = {
+        quantity: q(pick(units.slice(0, 2)), pick(["500", "2500", "10000"])),
+        clock: day("2026-09-09"),
+      };
+      const goal = pick(units);
+      const capped: SearchBudget = {
+        maxDepth: 1 + Math.floor(random() * 3),
+        maxCandidates: 1 + Math.floor(random() * 4),
+        maxExpansions: 1 + Math.floor(random() * 30),
+        requiredCompletionBy: null,
+      };
+      const result = findConversionPaths(offers, start, goal, capped);
+      const unbounded = findConversionPaths(offers, start, goal, {
+        ...capped,
+        maxCandidates: Number.MAX_SAFE_INTEGER,
+        maxExpansions: Number.MAX_SAFE_INTEGER,
+      });
+      expect(unbounded.stoppedBy).toEqual([]);
+      // The caps never reorder the search: the paths kept are the first found.
+      expect(result.paths).toEqual(unbounded.paths.slice(0, result.paths.length));
+      if (result.paths.some((path) => path.hops.length > 1)) seen.multiHop += 1;
+      if (result.stoppedBy.length === 0) {
+        // No false negative: nothing the caps left out exists.
+        expect(result.paths).toEqual(unbounded.paths);
+        expect(result.rejected).toEqual(unbounded.rejected);
+        expect(result.expansions).toBe(unbounded.expansions);
+        seen.complete += 1;
+        continue;
+      }
+      // No false positive: a reported stop dropped a path or left an
+      // examination undone.
+      expect(
+        unbounded.paths.length > result.paths.length || unbounded.expansions > result.expansions,
+      ).toBe(true);
+      if (result.stoppedBy.includes("max_expansions")) {
+        expect(result.expansions).toBe(capped.maxExpansions);
+        expect(unbounded.expansions).toBeGreaterThan(result.expansions);
+        seen.maxExpansions += 1;
+      }
+      if (result.stoppedBy.includes("max_candidates")) {
+        expect(result.paths).toHaveLength(capped.maxCandidates);
+        seen.maxCandidates += 1;
+      }
+    }
+    // The generator reaches every branch, so the property is not vacuous.
+    expect(Object.values(seen).every((count) => count > 0)).toBe(true);
+  });
 });
 
 test("unclassified quantities retain exact per-kind evidence but never prove a consumable total", () => {

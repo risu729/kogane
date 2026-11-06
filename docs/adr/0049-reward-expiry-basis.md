@@ -430,9 +430,10 @@ An answer computed from offers always read every matching stored offer
 until the bound is revisited together with the READ capture's `OFFER_BOUND`
 and the search's expansion budget. Whether a budget cap stopped the search
 is reported by the second addendum below. No client
-in the repository reads this route (the web app, MCP tools and the shared
-response validators do not), so the additive field and the refusal change no
-consumer.
+in the repository reads this route's body (the web app, MCP tools and the
+shared response validators do not; the API conformance harness checks only
+its status and `cache-control`, which the refusal keeps at `200` and
+`no-store`), so the additive field and the refusal change no consumer.
 
 ### Verification
 
@@ -504,5 +505,10 @@ times. Examining all three offers finds the path with `stoppedBy: []`, and a
 two-examination budget gives `paths: []` with `expansions: 2` and
 `stoppedBy: ["max_expansions"]`. A one-candidate list with two goal offers
 reports `max_candidates`, at depth 1 and at depth 2. An unverified-only search
-reports `stoppedBy: []`. `services/app/test/rewards-api.test.ts` checks the
-route reports `expansions: 2` and `stoppedBy: []` for the fixture search.
+reports `stoppedBy: []`. A seeded property test over 1,500 random small
+offer graphs compares each capped search with the same search uncapped: the
+capped paths are always the first paths of the uncapped search, an empty
+`stoppedBy` always means the same paths, `rejected` list and `expansions`,
+and a reported stop always dropped a path or left an examination undone.
+`services/app/test/rewards-api.test.ts` checks the route reports
+`expansions: 2` and `stoppedBy: []` for the fixture search.
