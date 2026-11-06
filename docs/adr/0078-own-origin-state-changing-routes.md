@@ -83,5 +83,9 @@ routes are reads and are not changed.
 - `services/app/test/ops-api.test.ts`: the same origins are refused on the
   collection, projection and session refresh routes and no `ops_requests` row
   is written; the Worker's own `Origin` is accepted.
+- `services/app/test/audit.test.ts`: a foreign `Origin` on a command and an
+  operations route is one `refused` record with the closed code
+  `origin_not_allowed` under the catalogued operation, and nothing reaches
+  the Processor or `ops_requests`.
 - `services/app/test/mcp-client.test.ts` and `services/app/test/audit.test.ts`
   keep proving the agent paths' unchanged rule.

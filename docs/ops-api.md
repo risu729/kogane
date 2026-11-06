@@ -219,11 +219,12 @@ any write that would re-point a bound target, even a direct one.
 ## Authorization
 
 Two gates in order, after the Access check that every route of this Worker
-already does and, on a `POST`, after the own-origin rule: an `Origin` that is
-present and not the Worker's own is `403 origin_not_allowed` before a grant,
-a schema or the store is touched
-([ADR 0078](adr/0078-own-origin-state-changing-routes.md)). An operator's
-`curl` sends no `Origin` and is unaffected.
+already does. Between them, on a `POST`, sits the own-origin rule: an
+`Origin` that is present and not the Worker's own is
+`403 origin_not_allowed` before a grant, a schema or the store is touched
+([ADR 0078](adr/0078-own-origin-state-changing-routes.md)). With the flag
+off the route answers as it did before (a `POST` is `405`), whatever its
+`Origin`. An operator's `curl` sends no `Origin` and is unaffected.
 
 1. the deployment flag `OPS_API_ENABLED`;
 2. the change lifecycle's principal grading (`OPERATOR_SUBJECTS` +

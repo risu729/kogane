@@ -38,6 +38,27 @@ R2, and verify the object's size and checksum metadata. Provider HTML is never
 rendered inline. Raw responses use an attachment disposition, `nosniff`, sandbox
 policy, and no-store caching.
 
+### Response headers
+
+`secureResponse` in `src/http.ts` sets these on every answer of the Worker —
+the app shell, its assets, every API answer and every refusal:
+`Cache-Control: no-store`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: no-referrer`, `X-Frame-Options: DENY`,
+`Cross-Origin-Resource-Policy: same-origin` (another site cannot load an
+answer as an image, script or media subresource) and
+`Cross-Origin-Opener-Policy: same-origin` (a window of another origin keeps
+no handle on a page of this Worker, nor it on that window). An answer without
+its own policy gets `Content-Security-Policy: default-src 'self';
+script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src
+'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none';
+form-action 'none'`; the raw download sets its own `sandbox` policy.
+`test/api.test.ts` asserts `no-store`, `nosniff` and `frame-ancestors` on the
+shell, and both cross-origin policies on the shell, a read, a `404` and a
+`401`. The Cloudflare Access login and the Managed OAuth endpoints an MCP
+client uses are served by Access itself
+([ADR 0047](adr/0047-mcp-client-connection.md)), not by this Worker, so
+these headers are not on them.
+
 ## Authentication and operation
 
 Cloudflare Access protects every route of this Worker through its Worker-scoped
@@ -50,7 +71,10 @@ The change lifecycle adds one authenticated POST path set,
 `POST /api/command/v1/*` ([change-lifecycle.md](change-lifecycle.md)). It is
 closed unless `COMMANDS_ENABLED` is exactly `"true"`, which the committed
 configuration does not set; every other request that is not `GET` or `HEAD`
-still gets 405.
+still gets 405. On these paths, as on the operations `POST`s and every agent
+path, an `Origin` that is present and not the Worker's own is
+`403 origin_not_allowed` before a grant is graded or a body is read
+([ADR 0078](adr/0078-own-origin-state-changing-routes.md)).
 
 Who may act is a separate decision from who is signed in, and it is two
 allow-lists of verified Access subjects, both **empty** in the committed
