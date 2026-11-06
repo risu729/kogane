@@ -136,4 +136,9 @@ test("trusted binding lookup flattens to artifact primary key with the complete 
   } finally {
     db.close();
   }
-});
+  // Two replays of every CORE migration that cannot share work: one with 0021,
+  // 0055 and 0057 held back and one in migration order. Several migrations
+  // rebuild tables under the whole schema, so this takes 2.5 to 3 seconds
+  // alone and ran past Bun's five-second default (5.2 seconds) under the full
+  // verification load.
+}, 30_000);

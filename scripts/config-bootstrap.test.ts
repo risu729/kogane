@@ -16,8 +16,14 @@ import { COLLECTOR_SOURCE_IDS } from "../packages/application/src/collection/des
 
 const MIGRATIONS = join(REPO_ROOT, "packages/storage-d1/migrations/core");
 
-/** CORE from 0001 with foreign keys on, as D1 enforces them. */
-function freshCore(): Database {
+/**
+ * The bytes of CORE replayed from 0001 with foreign keys on, as D1 enforces
+ * them. The replay costs over a second (several migrations rebuild tables
+ * under the whole schema), and repeating it in every test ran past Bun's
+ * five-second deadline under the full verification load. It runs once, when
+ * the file loads, outside any test's deadline.
+ */
+const REPLAYED_CORE = (() => {
   const db = new Database(":memory:");
   db.exec("PRAGMA foreign_keys=ON");
   for (const name of readdirSync(MIGRATIONS)
@@ -25,6 +31,16 @@ function freshCore(): Database {
     .sort()) {
     db.exec(readFileSync(join(MIGRATIONS, name), "utf8"));
   }
+  const bytes = db.serialize();
+  db.close();
+  return bytes;
+})();
+
+/** A private, writable copy of the replayed CORE, foreign keys on. */
+function freshCore(): Database {
+  const db = Database.deserialize(REPLAYED_CORE);
+  // The pragma belongs to the connection, not to the serialized file.
+  db.exec("PRAGMA foreign_keys=ON");
   return db;
 }
 

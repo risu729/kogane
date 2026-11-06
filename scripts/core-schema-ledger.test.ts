@@ -18,7 +18,6 @@ import {
   READ_CLASSIFICATION,
   READ_PROFILE,
   REPO_ROOT,
-  applyMigrations,
   buildSchemaLedger,
   renderSchemaMarkdown,
   splitSqlStatements,
@@ -85,7 +84,10 @@ describe("SQL statement splitter", () => {
         ...ledger.indexes.map((index) => `index ${index.name} ${index.table}`),
       ].toSorted((a, b) => a.localeCompare(b)),
     );
-  });
+    // The statement-by-statement replay is the proof, so it cannot be shared
+    // with the ledger's whole-file replay. It takes about 1.5 seconds alone and
+    // ran past Bun's five-second default under the full verification load.
+  }, 30_000);
 });
 
 describe("G0-01 CORE schema ledger", () => {
@@ -151,9 +153,14 @@ describe("G0-01 CORE schema ledger", () => {
   });
 
   test("the migration inventory records the seed and backfill migrations of 06 §1", () => {
-    const { db, migrations } = applyMigrations(REPO_ROOT);
-    db.close();
-    expect(migrations.map((entry) => entry.file)).toEqual(ledger.migrations.map((e) => e.file));
+    // The inventory is every migration on disk, in replay order. The ledger
+    // above was built by replaying them, so the files are listed rather than
+    // replayed a second time.
+    expect(ledger.migrations.map((entry) => entry.file)).toEqual(
+      readdirSync(join(REPO_ROOT, MIGRATIONS_DIR))
+        .filter((entry) => entry.endsWith(".sql"))
+        .sort(),
+    );
     // 0002 seeds the registry and 0024/0029 backfill; the plan says finding
     // them is not a reason to wipe the database, but they must stay visible.
     expect(ledger.summary.migrationsWithInserts).toContain("0002_registry.sql");
