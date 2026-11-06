@@ -216,6 +216,16 @@ regular `state/` database. A normal shutdown removes its temporary store.
 An abrupt process termination can leave a temporary `kogane-preview-*`
 directory; it contains only synthetic data.
 
+Because `/api/meta` reports `source.classification: synthetic`, the client
+mounts no financial, evidence or command view. Every such route (取引, 残高,
+保有資産, 原本・証跡 and the others) shows only 表示対象の記録がありません and
+接続先を確認してください。, even though the preview API still serves the
+fixtures ([synthetic display test](../apps/web/test/synthetic-display.browser.test.ts)).
+The preview is therefore a check of the shell and that guard, not of the
+financial pages. 収集スケジュール (`/schedules`) and 監査ログ (`/audit`) are
+drawn outside that guard and still render, but the preview serves neither
+`/api/ops/v1/schedules` nor `/api/v2/audit`, so they have no data there.
+
 `mise run //experiments/observation-pipeline-local:serve` continues to read the regular local store. Its metadata
 reports the data classification as unknown: an operator may have ingested
 real evidence, synthetic evidence, or both. An existing store must never be
