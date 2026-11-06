@@ -1,5 +1,6 @@
 // Additional read adapters over the existing history, instrument coverage
-// (ADR 0073), dated reported state and common audit readers.
+// (ADR 0073), dated reported state, account correspondence candidates
+// (ADR 0077) and common audit readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -13,6 +14,12 @@ import {
   readAuditForGrant,
   readAuditRecordForGrant,
 } from "../../../packages/application/src/audit/read.ts";
+import {
+  ACCOUNT_CANDIDATE_VIEWS,
+  ACCOUNT_CANDIDATES_MAX_OFFSET,
+  ACCOUNT_SOURCE_ACCOUNT_ID,
+  reviewAccountCandidates,
+} from "../../../packages/application/src/query/account-candidates.ts";
 import { readInstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
 import { INSTRUMENT_IDENTIFIER_ID } from "../../../packages/application/src/query/instrument-candidates-review.ts";
@@ -53,6 +60,12 @@ const schemas = {
       .regex(/^[^\u0000-\u001f]+$/u)
       .optional(),
   }),
+  // The route's parameters, with the service's own limits.
+  "kogane.accounts.candidates": z.strictObject({
+    view: z.enum(ACCOUNT_CANDIDATE_VIEWS).optional(),
+    offset: z.number().int().min(0).max(ACCOUNT_CANDIDATES_MAX_OFFSET).optional(),
+    sourceAccountId: z.string().regex(ACCOUNT_SOURCE_ACCOUNT_ID).optional(),
+  }),
   "kogane.audit.search": z.strictObject({
     filters: z.record(z.string(), z.string()).optional(),
     cursor: z.string().min(1).max(400).nullable().optional(),
@@ -74,6 +87,8 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "What each provider last reported on a date (YYYY-MM-DD, Asia/Tokyo, not after today), per account, from the latest complete capture before the end of that date, beside the card statements due around it; optionally one source or one account. The same answer as GET /api/v2/reported-state, under records.read and a whole-store read grant. Provider figures only: nothing is added, converted or netted, and a container without a capture is named in the coverage, never shown as zero.",
   "kogane.instruments.coverage":
     "Count each source's instrument identifiers by candidate state, the same counts as the owner UI, under summary.read and a whole-store read grant.",
+  "kogane.accounts.candidates":
+    "One page of the ADR 0077 account correspondence candidates: which direct provider source accounts a reviewed aggregator connection contains, on which evidence, with closed status, hold and same-account reasons, under records.read and a whole-store read grant. Read-only; never proposes same_account. A candidate names the relation.accept or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
   "kogane.audit.search":
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
   "kogane.audit.get":
@@ -107,6 +122,8 @@ export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
         return served.reportedState && grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.instruments.coverage":
         return grantAllows(grant, "summary.read") && wholeStore(grant);
+      case "kogane.accounts.candidates":
+        return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.audit.search":
       case "kogane.audit.get":
         return grantAllows(grant, "audit.read") && grant.scopes.accounts === "*";
@@ -169,6 +186,23 @@ export async function callReadTool(
         });
         return outcome.ok
           ? { status: 200, body: outcome.coverage }
+          : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
+      case "kogane.accounts.candidates": {
+        // The page's own service and request: capability, perimeter, bounds
+        // and refusals are decided there, once for both transports.
+        const input = parseRequest(schemas[name], body ?? {});
+        const outcome = await reviewAccountCandidates({
+          grant,
+          sql: d1Executor(env.DB),
+          request: {
+            view: input.view ?? "open",
+            offset: input.offset ?? 0,
+            sourceAccountId: input.sourceAccountId ?? null,
+          },
+        });
+        return outcome.ok
+          ? { status: 200, body: outcome.review }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       }
       case "kogane.audit.search": {

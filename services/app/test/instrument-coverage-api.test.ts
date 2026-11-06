@@ -277,6 +277,9 @@ describe("kogane.instruments.coverage", () => {
                 ? ["kogane.reported-state.read"]
                 : []),
               ...(capabilities.includes("summary.read") && whole ? [TOOL] : []),
+              ...(capabilities.includes("records.read") && whole
+                ? ["kogane.accounts.candidates"]
+                : []),
               ...(capabilities.includes("audit.read") && accounts === "*"
                 ? ["kogane.audit.search", "kogane.audit.get"]
                 : []),

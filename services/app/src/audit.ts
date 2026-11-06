@@ -229,7 +229,7 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
         (Array.isArray(value["payables"]) ? value["payables"].length : 0),
       truncated: false,
     };
-  if (operation === "instruments.candidates") {
+  if (operation === "instruments.candidates" || operation === "accounts.candidates") {
     const items = Array.isArray(value["items"]) ? value["items"].length : 0;
     return {
       rows: items,

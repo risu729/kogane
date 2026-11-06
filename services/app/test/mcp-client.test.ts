@@ -923,6 +923,7 @@ describe("tools under each grant shape", () => {
               ...AGENT_TOOL_NAMES,
               "kogane.instruments.history",
               REPORTED_STATE_TOOL_NAME,
+              "kogane.accounts.candidates",
               PURCHASES_TOOL_NAME,
               RECONSTRUCTED_STATE_TOOL_NAME,
             ]
