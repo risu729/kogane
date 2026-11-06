@@ -79,14 +79,15 @@ CORE has already judged under the current registration contract and the same
 terminal digest is answered from its `collection_runs` row and spends
 nothing:
 
-| Listed terminal                                                  | Attempted?                                   | Spends one of the five | Holds the page |
-| ---------------------------------------------------------------- | -------------------------------------------- | ---------------------- | -------------- |
-| no `collection_runs` row yet                                     | always                                       | yes                    | if over budget |
-| registered                                                       | no (`already_registered`)                    | no                     | no             |
-| blocked                                                          | never again under this contract version      | no                     | no             |
-| newest `registered` stage `retryable`, recorded under 24 h ago   | no; its recorded code is counted             | no                     | no             |
-| newest `registered` stage `retryable`, recorded 24 h ago or more | yes, once; a repeat refusal appends a row    | yes                    | if over budget |
-| `pending`                                                        | yes (continued first, and again when listed) | yes, when listed       | if over budget |
+| Listed terminal                                                  | Attempted?                                   | Spends one of the five | Holds the page                |
+| ---------------------------------------------------------------- | -------------------------------------------- | ---------------------- | ----------------------------- |
+| no `collection_runs` row yet                                     | always                                       | yes                    | if over budget                |
+| registered                                                       | no (`already_registered`)                    | no                     | no                            |
+| blocked                                                          | never again under this contract version      | no                     | no                            |
+| newest `registered` stage `retryable`, recorded under 24 h ago   | no; its recorded code is counted             | no                     | no                            |
+| newest `registered` stage `retryable`, recorded 24 h ago or more | yes, once; a repeat refusal appends a row    | yes                    | if over budget                |
+| `pending`                                                        | yes (continued first, and again when listed) | yes, when listed       | if over budget                |
+| its registration throws (nothing recorded)                       | yes, on every walk                           | no                     | if the 500 operations run out |
 
 Such an answer costs three operations of the invocation's budget (the
 terminal read, the conditional insert and the row read) for a registered or
@@ -113,9 +114,12 @@ ADR 0024 every tick counted a page, and a held tick on the first page, whose
 cursor is null, also counted a cycle.
 
 A registration that **throws** — R2 or CORE unavailable, or a refusal CORE
-made that the derivation did not foresee — is counted in the lane's `failed`
-and logged by its error class only; nothing is recorded for that run, the
-page still advances and the next cycle tries it again. It spends none of the
+made that the derivation did not foresee — is counted in the lane's `failed`,
+and that count is all the lane's log line and tick record carry: the error
+itself is neither logged nor recorded (`collectionScan` hands its class name
+to an `onFailure` hook, which the deployed cron does not pass). Nothing is
+recorded for that run, the page still advances and the next walk tries it
+again. It spends none of the
 five, so failing runs never stop the page by themselves (G1-13; ADR 0024,
 amendment of 2026-11-06). Before that amendment each throw spent one, and a
 page with five or more terminals that throw on every attempt held the cursor
@@ -124,9 +128,9 @@ the invocation's 500 (ADR 0010) still bound the tick. A throw late in a
 registration is expensive — a seal refusal re-verifies the run on every
 attempt, and one that yields at the budget first stays `pending` and is
 continued, and throws, on every tick — so a page whose throwing terminals
-spend the whole operation budget on every tick still holds the cursor: in the
-test, eight two-artifact runs refused at the seal finish their page and nine
-hold it. A seal CORE's completeness
+spend the whole operation budget on every tick still holds the cursor:
+measured on the test's synthetic page, eight two-artifact runs refused at the
+seal finish their page and nine hold it. A seal CORE's completeness
 trigger refuses (`run_inventory_incomplete`) is not in this class: it is a
 verdict about the terminal and blocks the run (§3; ADR 0024, amendment of
 2026-09-26).
@@ -729,6 +733,16 @@ a separate operation that does not close the old one. The ADR 0048 expiry
 applies to collector starts only; an import expiry would be a new decision.
 `services/processor/test/operation-dispatch.test.ts` ("an import has no
 expiry") pins this.
+
+**Open limit: an import whose registration throws** (CORE or R2
+unavailable, or a seal refusal no code classifies) has no end either, and
+it is worse than a `retry`: nothing catches the throw, so the whole
+`operation_dispatch` lane fails that tick (`operation_dispatch_failed` with
+the error class), nothing is written to the request, and since its
+`available_at_ms` did not move it is claimed at the same place in the order
+on the next tick.
+While the cause lasts, every request ordered after it, and the collector
+tracking that runs after the claimed requests, waits.
 
 ## 8. Retired legacy import
 

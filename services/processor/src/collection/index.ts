@@ -262,7 +262,9 @@ export async function collectionScan(
       // A failure that is not a verdict — R2 or CORE unavailable, or a
       // refusal CORE made that the derivation did not foresee. Counted, not
       // recorded, and never allowed to stop the page or pin the cursor on
-      // this run forever (G1-13). The code is logged, never the message.
+      // this run forever (G1-13). Only `onFailure` hears the class name, never
+      // the message; the deployed cron passes none, so the lane's log line
+      // carries the `failed` count alone.
       options.onFailure?.(safeFailureCode(error));
       summary.failed += 1;
       return true;
