@@ -125,7 +125,7 @@ const validDate = (value: unknown): value is string =>
   typeof value === "string" && DATE.test(value) && parseLocalDate(value) !== null;
 
 /** A stored decimal-v1 quantity, or the reason there is none; never a zero. */
-function storedQuantity(unitRef: string, row: DatedPositionQuantityRow): Quantity {
+export function storedPositionQuantity(unitRef: string, row: DatedPositionQuantityRow): Quantity {
   if (row.value_status === "exact" && row.coefficient !== null && row.scale !== null)
     return exactQuantity(
       unitRef,
@@ -236,7 +236,7 @@ export async function queryValuationOnDate(
       instrumentRef: ref,
       instrument: { ...position.instrument },
       quoteUnit: isCurrencyCode(position.currency) ? position.currency : null,
-      quantity: storedQuantity(ref, row),
+      quantity: storedPositionQuantity(ref, row),
     };
   });
 
