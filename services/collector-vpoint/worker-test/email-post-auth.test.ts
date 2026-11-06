@@ -61,9 +61,27 @@ test("a post-authentication run whose terminal was not written fails the mail", 
     raw: authenticationMail(),
     forward: async () => undefined,
   } as unknown as ForwardableEmailMessage;
+  const logged: string[] = [];
+  for (const level of ["log", "error"] as const)
+    vi.spyOn(console, level).mockImplementation((value: unknown) => {
+      logged.push(String(value));
+    });
   await expect(
     worker.email!(message, postAuthEnv(), {} as unknown as ExecutionContext),
   ).rejects.toThrow("V Point email handling failed");
+  // No success record, and the failure record carries only closed codes.
+  const records = logged.map((line) => JSON.parse(line) as Record<string, unknown>);
+  expect(records.some((record) => record.event === "vpoint-email-handled")).toBe(false);
+  expect(records).toContainEqual(
+    expect.objectContaining({
+      event: "collector-stage-failed",
+      stage: "post-auth-collection",
+      failureCode: "operation_failed",
+    }),
+  );
+  const text = logged.join("\n");
+  for (const forbidden of ["synthetic_storage_refusal", "terminal=", "synthetic-otp@"])
+    expect(text).not.toContain(forbidden);
 });
 
 test("a post-authentication run that persisted its terminal completes the mail", async () => {

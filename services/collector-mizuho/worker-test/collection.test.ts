@@ -198,8 +198,11 @@ describe("Mizuho Worker and shared DATA integration", () => {
         const results = records.filter((r) => r.event === "mizuho-collection-result");
         expect(results).toHaveLength(1);
         // The persistence failure wrote no terminal, so the alarm names no run.
-        if (scenario === "persistence") expect(result.runIds).toEqual([]);
-        else expect(results[0].runId).toBe(result.runIds[0]);
+        // The diagnostic still names the attempted run, so it can be followed.
+        if (scenario === "persistence") {
+          expect(result.runIds).toEqual([]);
+          expect(results[0].runId).toEqual(expect.any(String));
+        } else expect(results[0].runId).toBe(result.runIds[0]);
         if (scenario === "acquisition")
           expect(results[0]).toMatchObject({
             providerOutcome: "partial",
