@@ -30,6 +30,8 @@ const ISSUES = [
   "card-ordinal-needs-durable-provider-binding",
   "reward-bucket-semantic-evidence-missing-or-conflicting",
   "reward-bucket-index-not-durable-identity",
+  // Appended by the store itself (`identifyParse`), not by the resolver.
+  "manual-run-scoped-account-mapping-preserved",
 ] as const;
 export const IDENTITY_AUDIT_QUERIES = [
   {

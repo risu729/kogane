@@ -143,6 +143,7 @@ export {
   type ProjectionInputsRow,
   type ProjectionPageRow,
   PROJECTION_INPUTS_SQL,
+  projectionRelationsSql,
   SUBTOTAL_ROW_BOUND,
   balanceHistoryKeysetSql,
   projectionCoverageSql,

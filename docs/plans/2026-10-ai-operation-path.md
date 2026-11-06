@@ -6,8 +6,10 @@
   operations, bounded preparation machinery, shared history/audit reads, R2
   command and provider-request adapters, job prepare/confirm with linked
   reversal, and maintenance R1/R2 execution, which deliver parts of S5 and
-  S6. Survey acceptance (S6), the `alarm`/`lane` writers (S7), the audit page
-  (S8) and real-client activation remain open. See the
+  S6. Slice S7 (the `alarm` and `lane` audit writers, #925) and slice S8 (the
+  `監査ログ` page, #923, and the delegation status on the schedules and
+  confirm pages, #926) are implemented on main. Survey acceptance (S6) and
+  real-client activation remain open. See the
   [current resume plan](2026-10-mcp-maintenance-followups.md).
   The decisions it rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and
@@ -544,28 +546,28 @@ is proven under section 7. Each tool calls the route's own reader function; no
 query is copied. All are R0; MCP and HTTP agent calls write one audit record
 each (`result = "read"`, a row count, no data).
 
-| #   | UI page → API                                                                              | Proposed MCP tool                                                                 | Capability       | Scope mode                                                                                |
-| --- | ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------- |
-| D1  | 概要 → `/api/overview`, `/api/v2/query?intent=coverage`, `/api/meta`                       | `kogane.financial.query` `coverage` (exists), `kogane.capabilities` (exists)      | `summary.read`   | scoped, after #565's P1 fix (section 7)                                                   |
-| D2  | 取引 → `/api/transactions`, `/api/filter-options`                                          | `kogane.transactions.search` (new)                                                | `records.read`   | whole-store only                                                                          |
-| D3  | 残高 / 残高の推移 → `/api/balances`, `/api/v2/balances/latest`, `/api/v2/balances/history` | `kogane.balances.read` (new); `holdings` intent (exists)                          | `records.read`   | whole-store only; `holdings` is scoped                                                    |
-| D4  | 保有 → `/api/positions`                                                                    | `kogane.positions.read` (new)                                                     | `records.read`   | whole-store only                                                                          |
-| D5  | 指定日の状態 → `/api/v2/reported-state`                                                    | `kogane.reported-state.read` (new)                                                | `records.read`   | whole-store only                                                                          |
-| D6  | 口座・銘柄の整理 → `/api/identity/{accounts,instruments,coverage,connections}`             | `kogane.identity.search` (new)                                                    | `records.read`   | whole-store only                                                                          |
-| D7  | ポイント → `/api/v2/rewards/{holdings,expiry,simulations}`                                 | `kogane.rewards.read` (new)                                                       | `records.read`   | whole-store only                                                                          |
-| D8  | カード決済の照合 → `/api/v2/reconciliation/card-settlements`                               | `kogane.reviews.card-settlements.read` (new)                                      | `reviews.read`   | whole-store only; plan payloads only with `commands.decide.card-settlement`               |
-| D9  | 保有者の確認 → `/api/v2/reconciliation/card-settlements/ownership`                         | `kogane.reviews.card-ownership.read` (new)                                        | `reviews.read`   | whole-store only; plan payloads only with `commands.decide.relation`                      |
-| D10 | カード利用 → `/api/v2/card-purchases`                                                      | `kogane.purchases.explain` (exists)                                               | `records.read`   | whole-store only (exists); `actions`/`relation` kept only with `commands.decide.relation` |
-| D11 | 取得記録 → `/api/artifacts`, `/api/artifacts/:id`                                          | `kogane.artifacts.search`, `kogane.artifacts.get` (new)                           | `records.read`   | whole-store only                                                                          |
-| D12 | 観測の詳細 → `/api/observations/:kind/:id`                                                 | `kogane.observations.get` (new)                                                   | `records.read`   | whole-store only                                                                          |
-| D13 | 原本 → `/api/raw/:sha256`                                                                  | `kogane.evidence.raw.get` (new, last)                                             | `evidence.read`  | whole-store only; `evidence.read` stays a separate owner decision (ADR 0047)              |
-| D14 | 取得履歴 (evidence browser) → `/api/evidence/v1/…`                                         | `kogane.evidence.runs.search` (new)                                               | `records.read`   | the route's single configured source; refused unless that source is granted               |
-| D15 | 収集スケジュール → `GET /api/ops/v1/schedules`                                             | `kogane.schedules.read` (new; extends #564's `kogane.schedules.maintenance.read`) | `schedules.read` | scoped by `scheduleSources` (#564's read view); no lease state, no other principal        |
-| D16 | 確認画面 (plan view)                                                                       | `kogane.command.simulate` (W10)                                                   | `commands.plan`  | the plan's own targets                                                                    |
-| D17 | — → `/api/collection-quality`                                                              | `kogane.collection-quality.read` (new)                                            | `summary.read`   | whole-store only                                                                          |
-| D18 | — → `/api/v2/reports/:id`, `/explanation`                                                  | `kogane.reports.read` (new); `/export` not exposed (`report.export` stays absent) | `records.read`   | whole-store only                                                                          |
-| D19 | — → `/api/v2/activity`, `/api/v2/obligations`                                              | `kogane.events.read` (new)                                                        | `records.read`   | whole-store only                                                                          |
-| D20 | 監査ログ (new page) → `GET /api/v2/audit`; `POST /api/agent/v1/audit.search`               | `kogane.audit.search`, `kogane.audit.get` (new)                                   | `audit.read`     | scoped by source (section 6.7); a listed account axis is refused                          |
+| #   | UI page → API                                                                              | Proposed MCP tool                                                                                                                                                                                                            | Capability       | Scope mode                                                                                |
+| --- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- | ----------------------------------------------------------------------------------------- |
+| D1  | 概要 → `/api/overview`, `/api/v2/query?intent=coverage`, `/api/meta`                       | `kogane.financial.query` `coverage` (exists), `kogane.capabilities` (exists)                                                                                                                                                 | `summary.read`   | scoped, after #565's P1 fix (section 7)                                                   |
+| D2  | 取引 → `/api/transactions`, `/api/filter-options`                                          | `kogane.transactions.search` (new)                                                                                                                                                                                           | `records.read`   | whole-store only                                                                          |
+| D3  | 残高 / 残高の推移 → `/api/balances`, `/api/v2/balances/latest`, `/api/v2/balances/history` | `kogane.balances.read` (new); `holdings` intent (exists)                                                                                                                                                                     | `records.read`   | whole-store only; `holdings` is scoped                                                    |
+| D4  | 保有 → `/api/positions`                                                                    | `kogane.positions.read` (new)                                                                                                                                                                                                | `records.read`   | whole-store only                                                                          |
+| D5  | 指定日の状態 → `/api/v2/reported-state`                                                    | `kogane.reported-state.read` (exists)                                                                                                                                                                                        | `records.read`   | whole-store only                                                                          |
+| D6  | 口座・銘柄の整理 → `/api/identity/{accounts,instruments,coverage,connections}`             | `kogane.identity.search` (new)                                                                                                                                                                                               | `records.read`   | whole-store only                                                                          |
+| D7  | ポイント → `/api/v2/rewards/{holdings,expiry,simulations}`                                 | `kogane.rewards.read` (new)                                                                                                                                                                                                  | `records.read`   | whole-store only                                                                          |
+| D8  | カード決済の照合 → `/api/v2/reconciliation/card-settlements`                               | `kogane.reviews.card-settlements.read` (new)                                                                                                                                                                                 | `reviews.read`   | whole-store only; plan payloads only with `commands.decide.card-settlement`               |
+| D9  | 保有者の確認 → `/api/v2/reconciliation/card-settlements/ownership`                         | `kogane.reviews.card-ownership.read` (new)                                                                                                                                                                                   | `reviews.read`   | whole-store only; plan payloads only with `commands.decide.relation`                      |
+| D10 | カード利用 → `/api/v2/card-purchases`                                                      | `kogane.purchases.explain` (exists)                                                                                                                                                                                          | `records.read`   | whole-store only (exists); `actions`/`relation` kept only with `commands.decide.relation` |
+| D11 | 取得記録 → `/api/artifacts`, `/api/artifacts/:id`                                          | `kogane.artifacts.search`, `kogane.artifacts.get` (new)                                                                                                                                                                      | `records.read`   | whole-store only                                                                          |
+| D12 | 観測の詳細 → `/api/observations/:kind/:id`                                                 | `kogane.observations.get` (new)                                                                                                                                                                                              | `records.read`   | whole-store only                                                                          |
+| D13 | 原本 → `/api/raw/:sha256`                                                                  | `kogane.evidence.raw.get` (new, last)                                                                                                                                                                                        | `evidence.read`  | whole-store only; `evidence.read` stays a separate owner decision (ADR 0047)              |
+| D14 | 取得履歴 (evidence browser) → `/api/evidence/v1/…`                                         | `kogane.evidence.runs.search` (new)                                                                                                                                                                                          | `records.read`   | the route's single configured source; refused unless that source is granted               |
+| D15 | 収集スケジュール → `GET /api/ops/v1/schedules`                                             | `kogane.schedules.read` (new; extends #564's `kogane.schedules.maintenance.read`)                                                                                                                                            | `schedules.read` | scoped by `scheduleSources` (#564's read view); no lease state, no other principal        |
+| D16 | 確認画面 (plan view)                                                                       | `kogane.command.simulate` (W10)                                                                                                                                                                                              | `commands.plan`  | the plan's own targets                                                                    |
+| D17 | — → `/api/collection-quality`                                                              | `kogane.collection-quality.read` (new)                                                                                                                                                                                       | `summary.read`   | whole-store only                                                                          |
+| D18 | — → `/api/v2/reports/:id`, `/explanation`                                                  | `kogane.reports.read` (new); `/export` not exposed (`report.export` stays absent); refined by [ADR 0072's amendment](../adr/0072-report-artifact-pages.md#amendment-the-export-link-and-no-agent-report-read-yet-2026-11-06) | `records.read`   | whole-store only                                                                          |
+| D19 | — → `/api/v2/activity`, `/api/v2/obligations`                                              | `kogane.events.read` (new)                                                                                                                                                                                                   | `records.read`   | whole-store only                                                                          |
+| D20 | 監査ログ (new page) → `GET /api/v2/audit`; `POST /api/agent/v1/audit.search`               | `kogane.audit.search`, `kogane.audit.get` (new)                                                                                                                                                                              | `audit.read`     | scoped by source (section 6.7); a listed account axis is refused                          |
 
 Not exposed on any agent path: `GET /api/ops/v1/health` (the release
 postcheck), `POST /api/ops/v1/schedules/bootstrap` (deployment service token),
@@ -591,8 +593,9 @@ routes, H8 the agents' proposal route) and 20 reads (D1–D20). Operations with
    record will be its only durable trace. It stays R3.
 5. Agent-facing contracts for the review queues (D8, D9): only the purchases
    page has one (`validAgentCardPurchasePage`).
-6. D2–D7, D11–D14, D17–D19: the routes exist, no MCP tool does, and none is
-   proven computable inside a listed scope.
+6. D2–D4, D6, D7, D11–D14, D17–D19: the routes exist, no MCP tool does, and
+   none is proven computable inside a listed scope. D5's tool exists,
+   whole-store only.
 7. W1, W2, W4, W5: the writers exist, no agent adapter does.
 8. #564's tool exists only on its branch, with a free-text reason.
 
@@ -1060,6 +1063,12 @@ acceptance and concrete client delegation remain separate owner decisions.
 
 **S7 — `alarm` and `lane` writers** (after S1).
 
+- Status (2026-11-06): implemented in its own pull request, pending its
+  independent review and merge; the details this plan left open are in
+  [ADR 0064's S7 amendment](../adr/0064-common-audit-log.md#amendment-the-alarm-and-lane-writers-slice-s7-2026-11-06)
+  and [the audit log](../audit-log.md#the-processors-own-records-alarm-and-lane).
+  The lane record is written after the lane rather than in its batches, a
+  limit the amendment records.
 - What: one record per claimed `collection`-kind occurrence; one per lane
   tick that wrote decisions, proposals or settings, carrying refs only.
 - ADR: 0064. Migration: none.
@@ -1075,7 +1084,25 @@ acceptance and concrete client delegation remain separate owner decisions.
   confirm pages.
 - ADR: 0064. Migration: none.
 - Tests: browser tests, desktop and mobile.
+- Status: the audit page is implemented — `/audit` over `GET /api/v2/audit`,
+  closed filters in the URL, server cursor paging without a total, strict
+  page validation, a plain refusal for a non-operator, browser tests on a
+  desktop and a phone viewport ([audit log](../audit-log.md#the-監査ログ-page-plan-slice-s8);
+  [ADR 0064 amendment](../adr/0064-common-audit-log.md#amendment-the-operators-page-slice-s8-2026-11-06)).
+  The delegation status is not: no route serves the delegations in force to
+  the browser, and adding one is its own change.
 - Review gate: fresh reviewer.
+- Delegation status (2026-11-06, proposed until its pull request merges): the
+  operator-only `GET /api/v2/delegations` reads `MCP_DELEGATIONS` through the
+  resolver's own parser and answers `none`, `misconfigured` (no entry shown)
+  or `valid` with each entry's role, capabilities, scope, window state
+  (`in_force`, `not_yet_valid`, `expired`), daily write budget and
+  `delegationRef`; the schedules and confirm pages show it as a read-only
+  notice. The route and shape are recorded in
+  [ADR 0063's amendment](../adr/0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06-proposed);
+  [agent API](../agent-api.md#the-operators-delegation-status-s8-2026-11-06).
+  Service, contract and desktop/mobile browser tests cover it. The audit page
+  is a separate pull request.
 
 **Delegation test matrix (S3, S6)**, modelled on #565's:
 

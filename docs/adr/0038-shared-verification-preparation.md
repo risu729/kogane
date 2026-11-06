@@ -89,3 +89,22 @@ release gates and production credential boundaries remain in force.
 See [CI measurements and limits](../ci.md#waiting-time-baseline-and-limits),
 [native mise tasks](https://mise.jdx.dev/tasks/task-configuration.html#wait_for)
 and [native Bun sharding](https://bun.com/docs/test/parallel#splitting-a-suite-across-ci-machines-with-shard).
+
+## Amendment: native browser preparation guard (2026-11-06)
+
+Status: accepted on merge (first proposed 2026-10-15 in #729).
+
+Use mise 2026.10.10 `skip_if` on `//apps/web:browser` to express its existing
+condition before the task body starts: skip when `CI` is not exactly `true`, or
+when `CHROMIUM_PATH` is nonempty. Otherwise run the same locked Playwright
+Chromium install with Linux system dependencies. `skip_if` first shipped in
+mise 2026.10.10, which is the repository's `min_version`; hosted CI pins a
+newer release through `jdx/mise-action`. The web task config uses the same
+unversioned schema as the other `mise.toml` files.
+
+Keeping the shell `if` would preserve behavior but report a completed installer
+body even when no installation was needed. The native guard makes that decision
+visible as a skipped task, while retaining its successful dependency edge. Tests,
+typechecks and builds remain in the full graph; this does not cache test results
+or change browser provisioning policy. Verification exercises unset, false and
+true CI with empty and nonempty browser paths.

@@ -7,7 +7,7 @@ import {
   type CardStatementFact,
   type CardBankDebitFact,
 } from "../src/card-settlement.ts";
-import { exactQuantity, integerDecimal, normalizeDecimal } from "../src/values.ts";
+import { absentQuantity, exactQuantity, integerDecimal, normalizeDecimal } from "../src/values.ts";
 const time = {
   kind: "local-date",
   value: "2026-09-10",
@@ -80,4 +80,49 @@ test("different decimal scales compare exactly and malformed fractions never use
       amount: exactQuantity("JPY", { coefficient: "30000000000000000000000000001", scale: 25 }),
     }),
   ).toBeNull();
+});
+test("a zero, negative or absent amount never becomes a candidate (INV05)", () => {
+  for (const amount of [
+    exactQuantity("JPY", integerDecimal(0)),
+    exactQuantity("JPY", integerDecimal(-3000)),
+    absentQuantity("JPY", "missing", "not_reported"),
+  ]) {
+    expect(cardSettlementCandidate({ ...statement, amount }, bank)).toBeNull();
+    expect(cardSettlementCandidate(statement, { ...bank, amount })).toBeNull();
+  }
+  expect(
+    cardSettlementCandidate(statement, {
+      ...bank,
+      amount: exactQuantity("JPY", integerDecimal(3001)),
+    }),
+  ).toBeNull();
+});
+test("different owners stay a reviewable candidate with owner_differs, never eligible", () => {
+  const facts = cardSettlementCandidate(statement, { ...bank, ownerRef: "party:q" }, ["proof"])!;
+  expect(facts.ownership).toBe("different");
+  expect(facts.rejectionConditions).toContain("owner_differs");
+  expect(cardSettlementEligible(facts)).toBe(false);
+  expect(validCardSettlementFacts(facts)).toBe(true);
+});
+test("stored facts fail closed on any field outside the candidate's own shape", () => {
+  const facts = cardSettlementCandidate(statement, bank, ["proof"])!;
+  expect(validCardSettlementFacts(facts)).toBe(true);
+  const malformed: unknown[] = [
+    null,
+    [],
+    { ...facts, statement: { ...statement, sourceId: "smbc-card" } },
+    { ...facts, statement: { ...statement, sourceAccount: 1 } },
+    { ...facts, bankDebit: { ...bank, sourceId: null } },
+    { ...facts, statement: { ...statement, accountId: 7 } },
+    { ...facts, bankDebit: { ...bank, ownerRef: 7 } },
+    { ...facts, statement: { ...statement, period: 202609 } },
+    { ...facts, ownership: "assumed-same" },
+    { ...facts, feeBreakdown: "none" },
+    { ...facts, rationaleCodes: [1] },
+    { ...facts, ownershipEvidenceRefs: "proof" },
+    { ...facts, statement: { ...statement, ref: { ...statement.ref, kind: "transaction" } } },
+    // Well-formed, but the stored amounts no longer correspond: re-checked, not trusted.
+    { ...facts, bankDebit: { ...bank, amount: exactQuantity("JPY", integerDecimal(2999)) } },
+  ];
+  for (const value of malformed) expect(validCardSettlementFacts(value)).toBe(false);
 });

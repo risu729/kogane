@@ -36,6 +36,8 @@ bun src/cli.ts -- \
   --output /secure/sbi-vc-output
 ```
 
+CLIが標準出力・標準エラーへ出すのはJSON 1行だけである。成功時は`{"status":"success","artifactCount":N}`、失敗時は`{"status":"failed","stage":…,"errorType":…}`（gateway errorなら`httpStatus`も）で、例外message、gatewayが返したstatus文字列、response bodyは出さない（`src/run-cli.ts`）。
+
 outputは実残高・履歴を含むためprivateであり、commit、CI artifact、stdoutへ送らない。出力directoryはmode 700、各fileは作成時からmode 600とし、既存fileやsymlinkを上書きしない。このlocal client自身はsession更新や再認証を行わない。それらと定期収集は隣接する`services/collector-sbi-vc-trade`へ分離している。公開UIが送らない任意date filterはformatを推測せず実装していない。
 
 `tradeReportList`はtyped methodだけを用意し、現行UIが使うstatement typeの意味を値なしで検証できていないためdefault collectionへ入れていない。PDF/ZIP payload取得はread statusを更新する可能性が未確認なので実装しない。

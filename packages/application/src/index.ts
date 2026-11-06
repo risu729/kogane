@@ -15,6 +15,7 @@
 export { parseDelegations } from "./delegation/parse.ts";
 export { resolveDelegation } from "./delegation/resolve.ts";
 export { delegationCapabilities, delegationExecutionReadiness } from "./delegation/readiness.ts";
+export { delegationStatus } from "./delegation/status.ts";
 export * from "./delegation/contract.ts";
 
 // ── command services (A09) ───────────────────────────────────────────
@@ -360,6 +361,7 @@ export {
   AUDIT_COLUMNS,
   type AuditActor,
   type AuditFacts,
+  auditInsertWrite,
   auditInstant,
   AuditRecordError,
   type AuditRow,
@@ -389,13 +391,27 @@ export {
   AUDIT_WRITE_FAILED,
   type AuditPath,
   type AuditResult,
+  AUTOMATIC_PATHS,
+  type AutomaticPath,
   isAuditRef,
+  LANE_PROPOSAL_KINDS,
+  type LaneProposalKind,
   RISK_CLASSES,
   type RiskClass,
   SUBJECT_PATHS,
   type SubjectPath,
   type SubjectPrincipalKind,
 } from "./audit/vocabulary.ts";
+export {
+  type AlarmClaim,
+  alarmClaimWrite,
+  type LaneRange,
+  lanePrincipal,
+  laneTickRecord,
+  laneWroteAny,
+  type LaneWrites,
+  occurrenceRef,
+} from "./audit/automatic.ts";
 export {
   type CatalogueEntry,
   catalogueEntry,
