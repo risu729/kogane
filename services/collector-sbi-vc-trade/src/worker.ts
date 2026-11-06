@@ -76,7 +76,12 @@ export class SbiVcSessionState extends DurableObject<Env> {
     }
   }
   async getHealth(): Promise<HealthState> {
-    return { ...INITIAL_HEALTH, ...(await this.ctx.storage.get<HealthState>("health")) };
+    const health = { ...INITIAL_HEALTH, ...(await this.ctx.storage.get<HealthState>("health")) };
+    // A record written before the status was closed may still hold the
+    // gateway's own string; it is read, and so re-written, as `rejected`.
+    const status: unknown = health.lastGatewayStatus;
+    if (status !== null && status !== "OK") health.lastGatewayStatus = "rejected";
+    return health;
   }
   async runKeepAlive(): Promise<HealthState> {
     return withCollectionLease(this.env, "sbi-vc-trade", async () => {
@@ -373,12 +378,14 @@ export class SbiVcSessionState extends DurableObject<Env> {
       stage = "parse_gateway";
       const meta = parseGatewayMeta(parsed);
       if (meta.status !== "OK") {
+        // The provider's status string is provider text: health keeps only
+        // that the gateway did not answer `OK`, never what it said instead.
         return await this.recordFailure(
           previous,
           attemptAt,
           response.status,
           "gateway_rejected",
-          meta.status,
+          "rejected",
         );
       }
       stage = "apply_cookie";
@@ -391,7 +398,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
         lastAttemptAt: attemptAt,
         lastSuccessAt: attemptAt,
         lastHttpStatus: response.status,
-        lastGatewayStatus: meta.status,
+        lastGatewayStatus: "OK",
         lastCookieUpdateCount: updated.updateCount,
         consecutiveFailures: 0,
         lastErrorCode: null,
@@ -452,7 +459,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
     attemptAt: string,
     httpStatus: number | null,
     errorCode: string,
-    gatewayStatus: string | null = null,
+    gatewayStatus: HealthState["lastGatewayStatus"] = null,
   ): Promise<HealthState> {
     const health: HealthState = {
       ...previous,
