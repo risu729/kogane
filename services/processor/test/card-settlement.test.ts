@@ -1,6 +1,6 @@
 import { beforeAll, afterAll, test, expect } from "bun:test";
 import { type Miniflare } from "miniflare";
-import { startPipeline, seedArtifact, publishParse } from "./harness.ts";
+import { startPipeline, seedArtifact, publishParse, racedBeforeBatch } from "./harness.ts";
 import { smbcDirectTransactions } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
 import { cardSettlementSweep } from "../src/card-settlement-job.ts";
 import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
@@ -59,15 +59,19 @@ async function preparedCommand(kind: ChangeKind, payload: unknown) {
     now,
   });
   if (!approval.ok) throw new Error("approval " + JSON.stringify(approval));
-  return () =>
-    commit(store, {
-      operationId: "test-op-" + ++sequence,
+  const planId = planned.plan.planId;
+  const approvalId = approval.approval.approvalId;
+  // By default a fresh key over this file's database; a race passes its own.
+  const run = (operationId = "test-op-" + ++sequence, via: D1Database = db) =>
+    commit(d1CommandStore(via), {
+      operationId,
       principal: actor,
-      planId: planned.plan.planId,
-      approvalId: approval.approval.approvalId,
-      planners: changeMutationPlanners(db),
+      planId,
+      approvalId,
+      planners: changeMutationPlanners(via),
       now,
     });
+  return Object.assign(run, { planId, approvalId });
 }
 /**
  * An SMBC debit's `extra` as the SMBC parser stores it: the provider id beside
@@ -826,6 +830,155 @@ test("an acceptance planned before its owner changed or its review moved writes 
     (await db
       .prepare("SELECT count(*) AS n FROM card_settlement_decisions WHERE proposal_id=?")
       .bind(twice)
+      .first<{ n: number }>())!.n,
+  ).toBe(1);
+}, 60000);
+
+/** A relation plan no settlement review reads, approved and ready to commit. */
+const raceRelation = (toRef: string) =>
+  preparedCommand("relation.accept", {
+    relationKind: "connection_contains",
+    fromRef: "connection:collector-r2-importer/synthetic-race",
+    toRef,
+    validFrom: null,
+    validTo: null,
+    evidenceRefs: ["synthetic-race-proof"],
+    reason: "synthetic race",
+  });
+
+/** The plan and approval rows a commit closes and spends. */
+async function planState(prepared: { planId: string; approvalId: string }) {
+  return db
+    .prepare(`SELECT (SELECT status FROM change_plans WHERE plan_id=?1) AS plan,
+      (SELECT uses_remaining FROM approvals WHERE approval_id=?2) AS uses`)
+    .bind(prepared.planId, prepared.approvalId)
+    .first<{ plan: string; uses: number }>();
+}
+
+/** The decision and outbox rows written under one operation key. */
+async function keyRows(operationId: string) {
+  return db
+    .prepare(`SELECT (SELECT json_group_array(subject_ref) FROM decision_revisions WHERE operation_id=?1) AS subjects,
+      (SELECT count(*) FROM decision_outbox WHERE operation_id=?1) AS outbox,
+      (SELECT count(*) FROM decision_outbox o WHERE o.operation_id=?1
+        AND o.decision_revision_id<>(SELECT json_extract(result_json,'$.decisionRevisionId') FROM operation_receipts WHERE operation_id=?1)) AS foreign_outbox`)
+    .bind(operationId)
+    .first<{ subjects: string; outbox: number; foreign_outbox: number }>();
+}
+
+test("a relation commit that loses its key to a settlement rejection writes no decision or relation", async () => {
+  const proposalId = await cloneCandidate("race-winner");
+  const reject = await preparedCommand("card-settlement.reject", {
+    proposalId,
+    reason: "raced rejection",
+  });
+  const relation = await raceRelation("party:synthetic-race-loser");
+  const before = await planState(relation);
+  expect(before).toEqual({ plan: "approved", uses: 1 });
+  const raced = racedBeforeBatch(db, async () => {
+    expect(await reject("op-race-settlement-wins")).toMatchObject({ ok: true, replayed: false });
+  });
+  expect(await relation("op-race-settlement-wins", raced)).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+    refs: ["op-race-settlement-wins"],
+  });
+  // The relation's own decision id derives from the key under another prefix
+  // than the rejection's, so nothing but the receipt guard stood in its way.
+  expect(await planState(relation)).toEqual(before);
+  expect(
+    (await db
+      .prepare(
+        "SELECT count(*) AS n FROM entity_relations WHERE to_ref='party:synthetic-race-loser'",
+      )
+      .first<{ n: number }>())!.n,
+  ).toBe(0);
+  const rows = await keyRows("op-race-settlement-wins");
+  expect(JSON.parse(rows!.subjects)).toEqual([`card-settlement:${proposalId}`]);
+  expect(rows!.foreign_outbox).toBe(0);
+  expect(await planState(reject)).toEqual({ plan: "committed", uses: 0 });
+}, 60000);
+
+test("a settlement rejection that loses its key to a relation commit answers a conflict and writes nothing", async () => {
+  const proposalId = await cloneCandidate("race-loser");
+  const reject = await preparedCommand("card-settlement.reject", {
+    proposalId,
+    reason: "raced rejection",
+  });
+  const relation = await raceRelation("party:synthetic-race-winner");
+  const before = await planState(reject);
+  expect(before).toEqual({ plan: "approved", uses: 1 });
+  const raced = racedBeforeBatch(db, async () => {
+    expect(await relation("op-race-relation-wins")).toMatchObject({ ok: true, replayed: false });
+  });
+  // Not a constraint error on the shared ledger row: a conflict, and nothing written.
+  expect(await reject("op-race-relation-wins", raced)).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+    refs: ["op-race-relation-wins"],
+  });
+  expect(await planState(reject)).toEqual(before);
+  expect(
+    (await db
+      .prepare("SELECT status FROM card_settlement_reviews WHERE id=?")
+      .bind(proposalId)
+      .first<{ status: string }>())!.status,
+  ).toBe("proposed");
+  expect(
+    (await db
+      .prepare("SELECT count(*) AS n FROM card_settlement_decisions WHERE proposal_id=?")
+      .bind(proposalId)
+      .first<{ n: number }>())!.n,
+  ).toBe(0);
+  const rows = await keyRows("op-race-relation-wins");
+  expect(JSON.parse(rows!.subjects)).toHaveLength(1);
+  expect(rows!.foreign_outbox).toBe(0);
+  expect(await planState(relation)).toEqual({ plan: "committed", uses: 0 });
+}, 60000);
+
+test("an identical settlement rejection that loses the race returns the stored receipt", async () => {
+  const proposalId = await cloneCandidate("race-replay");
+  const reject = await preparedCommand("card-settlement.reject", {
+    proposalId,
+    reason: "raced rejection",
+  });
+  let first: Awaited<ReturnType<typeof reject>> | undefined;
+  const raced = racedBeforeBatch(db, async () => {
+    first = await reject("op-race-settlement-replay");
+  });
+  const replay = await reject("op-race-settlement-replay", raced);
+  expect(first).toMatchObject({ ok: true, replayed: false });
+  expect(replay).toMatchObject({ ok: true, replayed: true });
+  if (!first?.ok || !replay.ok) throw new Error("unreachable");
+  expect(replay.receipt).toEqual(first.receipt);
+  expect(
+    (await db
+      .prepare("SELECT count(*) AS n FROM card_settlement_decisions WHERE proposal_id=?")
+      .bind(proposalId)
+      .first<{ n: number }>())!.n,
+  ).toBe(1);
+}, 60000);
+
+test("an identical settlement acceptance that loses the race returns the stored receipt", async () => {
+  const proposalId = await ownedPair(1021, "2027-03");
+  const accept = await preparedCommand("card-settlement.accept", {
+    proposalId,
+    reason: "raced acceptance",
+  });
+  let first: Awaited<ReturnType<typeof accept>> | undefined;
+  const raced = racedBeforeBatch(db, async () => {
+    first = await accept("op-race-settlement-accept");
+  });
+  const replay = await accept("op-race-settlement-accept", raced);
+  expect(first).toMatchObject({ ok: true, replayed: false });
+  expect(replay).toMatchObject({ ok: true, replayed: true });
+  if (!first?.ok || !replay.ok) throw new Error("unreachable");
+  expect(replay.receipt).toEqual(first.receipt);
+  expect(await planState(accept)).toEqual({ plan: "committed", uses: 0 });
+  expect(
+    (await db
+      .prepare("SELECT count(*) AS n FROM card_settlement_decisions WHERE proposal_id=?")
+      .bind(proposalId)
       .first<{ n: number }>())!.n,
   ).toBe(1);
 }, 60000);

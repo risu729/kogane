@@ -306,6 +306,43 @@ The commit payload digest is computed server-side over
 `{ planId, approvalId, kind, payload }`. A caller may send
 `idempotencyPayloadDigest`; a mismatch is `idempotency_conflict`.
 
+The lookup is a read, so a second command can take the key between it and
+the commit batch. The batch therefore decides again: its first statement
+reserves the key only while no receipt holds it, and every later statement
+(the planner's mutation, the approval consumption, the plan's `committed`
+status and the outbox rows) is joined to **this command's own receipt** —
+the same operation id, principal and payload digest
+(`receiptExistsGuard` in `packages/storage-d1/src/atomic/decision-commit.ts`;
+the audit record also requires its `created_at`). A command of the same
+principal with another payload that took the key first leaves a receipt none
+of those statements accepts, so the loser writes nothing (its plan stays
+open, its approval unspent, no decision, relation or outbox row) and answers
+`idempotency_conflict`. An identical command that took it first leaves this
+command's own receipt; the statements' own `NOT EXISTS` and status
+conditions keep the loser from writing anything twice — the approval is
+consumed only while its plan is still open, which the batch closes after
+consuming it, so a raced replay spends no second use of a multi-use
+approval — and it answers `replayed: true` with the stored receipt. A
+writer whose statements are not idempotent on their own rows (the card
+settlement writer's ledger row and economic statements) makes that loser's
+batch fail on a trigger instead; D1 rolls it back whole, and `commit`, which
+finds this command's own receipt after any failed batch, answers with that
+receipt rather than the error. Before
+2026-11-06 the join named only the operation id and principal, so such a
+loser could still close its own plan, spend its approval and, where its
+planner derived ids the winner had not written (a relation losing to a card
+settlement, say), write its own decision and relation, or fail on the shared
+`decision_operations` row with an SQL error instead of the conflict.
+`decision-commit-receipt-guard.test.ts` (storage-d1) holds the earlier
+statement text frozen and proves the guarded statements equal to it on random
+and scaled stores wherever no other payload holds the key, silent where one
+does, and searching the receipt by key without table statistics; the
+processor tests race a commit against another payload of the same kind and
+of another kind (a relation against a card settlement, both ways), and
+against an identical commit (a relation, a settlement rejection and a
+settlement acceptance), through a D1 wrapper that commits the winner between
+the loser's reads and its batch.
+
 `accepted` ≠ `published`. `accepted` means the judgement is durable;
 `published` means every outbox row of that operation has been processed. The
 confirmation screen shows them as different states, and neither the UI nor an
@@ -594,7 +631,11 @@ already recorded is never undone by a DELETE — an undo is a new revision
   `idempotency_conflict`; an expired approval on a committed operation still
   returning the receipt, and a receipt invisible outside its principal's
   namespace; two parallel commits of one approved plan → exactly one succeeds;
-  a resent identical commit racing itself → one receipt, one mutation; typed
+  a resent identical commit racing itself → one receipt, one mutation; a
+  commit that loses its key to another payload between its reads and its
+  batch → `idempotency_conflict` with its plan open, its approval unspent and
+  nothing written, and one that loses it to an identical commit → the stored
+  receipt without spending a second approval use; typed
   relations with their own decision and no derived `same_account` (SC06); an
   agent refused approval and commit; approval digest/expiry/scope binding; the
   outbox publishing once and a duplicate delivery changing nothing; an
