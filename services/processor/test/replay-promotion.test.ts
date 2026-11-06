@@ -188,3 +188,38 @@ test("normal replay publishes attached repair work even with candidate mode enab
     ).first<{ n: number }>(),
   ).toEqual({ n: 0 });
 }, 60_000);
+
+test("replay commands read at most 4096 bytes of strict UTF-8 and refuse the rest as request_invalid", async () => {
+  // Synthetic bodies. A readable command for a plan that does not exist is
+  // answered 404 without writing; an unreadable one never gets that far.
+  const send = async (body: string | Uint8Array<ArrayBuffer>) => {
+    const response = await mf.dispatchFetch("https://pipeline.internal/replay/inspect", {
+      method: "POST",
+      body,
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  const missing = { status: 404, body: { error: "plan_not_found" } };
+  const refused = { status: 400, body: { error: "request_invalid" } };
+  const bytes = (text: string) => new TextEncoder().encode(text);
+  const padded = (size: number) => {
+    const head = '{"planId":999999,"pad":"';
+    return `${head}${"x".repeat(size - bytes(head).byteLength - 2)}"}`;
+  };
+  expect(bytes(padded(4096)).byteLength).toBe(4096);
+  expect(await send(padded(4096))).toEqual(missing);
+  expect(await send(padded(4097))).toEqual(refused);
+  // Under 4096 UTF-16 code units, over 4096 bytes.
+  const wide = `{"planId":999999,"pad":"${"あ".repeat(1400)}"}`;
+  expect(wide.length).toBeLessThan(4096);
+  expect(await send(wide)).toEqual(refused);
+  // A UTF-8 byte order mark is dropped, as request.text() drops it.
+  expect(await send(Uint8Array.of(0xef, 0xbb, 0xbf, ...bytes('{"planId":999999}')))).toEqual(
+    missing,
+  );
+  // Malformed UTF-8 is refused, never replaced.
+  expect(
+    await send(Uint8Array.of(...bytes('{"planId":999999,"pad":"'), 0xff, ...bytes('"}'))),
+  ).toEqual(refused);
+  expect(await send("")).toEqual(refused);
+}, 60_000);

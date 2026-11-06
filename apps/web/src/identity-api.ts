@@ -14,6 +14,8 @@ import type {
   IdentityInstrumentRow,
   IdentityPage,
 } from "../../../packages/observation-shared/src/identity-contract.ts";
+import type { InstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
+import { INSTRUMENT_COVERAGE_PATH } from "../../../packages/observation-shared/src/instrument-coverage-contract.ts";
 export function useIdentityAccounts(source: string, offset: number) {
   return useQuery({
     queryKey: ["identity-accounts", source, offset],
@@ -32,6 +34,24 @@ export function useIdentityCoverage(source: string, offset = 0) {
   return useQuery({
     queryKey: ["identity-coverage", source, offset],
     queryFn: ({ signal }) => getJson<IdentityCoverage>(path("coverage", source, offset), signal),
+  });
+}
+/**
+ * Per-source counts of instrument identifiers by their candidate state
+ * (ADR 0073). Its own request, so a refusal or a slow candidate read never
+ * holds back the account coverage above it; a refusal is not retried.
+ */
+export function useInstrumentCoverage(source: string) {
+  return useQuery({
+    queryKey: ["identity-instrument-coverage", source],
+    queryFn: ({ signal }) =>
+      getJson<InstrumentCoverage>(
+        source
+          ? `${INSTRUMENT_COVERAGE_PATH}?${new URLSearchParams({ source })}`
+          : INSTRUMENT_COVERAGE_PATH,
+        signal,
+      ),
+    retry: false,
   });
 }
 function path(collection: string, source: string, offset: number): string {

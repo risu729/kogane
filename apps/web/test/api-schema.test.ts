@@ -84,7 +84,7 @@ describe("shared API schema", () => {
       // stays for the request-time answer of a deployment without one.
       "/api/v2/rewards/expiry": ["program", "offset", "cursor", "limit"],
       "/api/v2/rewards/simulations": ["cursor", "limit"],
-      "/api/v2/rewards/offers/simulate": ["offer", "quantity", "unit", "goal", "depth"],
+      "/api/v2/rewards/offers/simulate": ["offer", "version", "quantity", "unit", "goal", "depth"],
     });
     // The whole route group is gated: with rewardsV2 off no parameter is
     // accepted, because the path itself is not served.
@@ -121,6 +121,7 @@ describe("shared API schema", () => {
       cardPurchaseRecognition: false,
       reportedStateOnDate: false,
       reconstructedStateOnDate: false,
+      reportArtifacts: false,
       eventsV2: false,
       opsApi: false,
     });
@@ -151,6 +152,7 @@ describe("shared API schema", () => {
       cardPurchaseRecognition: false,
       reportedStateOnDate: false,
       reconstructedStateOnDate: false,
+      reportArtifacts: false,
       eventsV2: false,
       opsApi: false,
     });
@@ -320,6 +322,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       cardPurchaseRecognition: false,
       reportedStateOnDate: false,
       reconstructedStateOnDate: false,
+      reportArtifacts: false,
     });
     expect(clientFeatures(withBalancesV2(CENTRAL_STORE_CAPABILITIES, true)).balanceReadModel).toBe(
       true,
@@ -347,6 +350,7 @@ describe("client behaviour depends on capabilities, never on the connection name
       cardPurchaseRecognition: false,
       reportedStateOnDate: false,
       reconstructedStateOnDate: false,
+      reportArtifacts: false,
     });
   });
 });

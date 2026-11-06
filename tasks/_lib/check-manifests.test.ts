@@ -13,6 +13,7 @@ import {
   scriptInvocations,
   toolDownloads,
   trackedGeneratedFiles,
+  trackedWorkerTypes,
   unaccountedConfigs,
   uncoveredWorkspaces,
   workspaceDirectories,
@@ -378,6 +379,27 @@ describe("generated files a workspace imports (unified plan U15)", () => {
   test("a declared file that git tracks is a stale declaration", () => {
     expect(trackedGeneratedFiles(generated, ["README.md"])).toEqual([]);
     expect(trackedGeneratedFiles(generated, ["services/app/demo-snapshot.json"])).toHaveLength(1);
+  });
+});
+
+describe("Wrangler types output", () => {
+  test("a tracked worker-configuration.d.ts is reported, in any workspace or at the root", () => {
+    expect(
+      trackedWorkerTypes([
+        "services/app/worker-configuration.d.ts",
+        "worker-configuration.d.ts",
+        "services/app/src/worker.ts",
+        "services/app/env.d.ts",
+        "services/app/my-worker-configuration.d.ts",
+      ]),
+    ).toEqual([
+      "services/app/worker-configuration.d.ts: Wrangler types output is tracked by git; the workspace types task regenerates it, so remove it from the index and git-ignore it",
+      "worker-configuration.d.ts: Wrangler types output is tracked by git; the workspace types task regenerates it, so remove it from the index and git-ignore it",
+    ]);
+  });
+
+  test("nothing tracked, nothing reported", () => {
+    expect(trackedWorkerTypes([])).toEqual([]);
   });
 });
 

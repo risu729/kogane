@@ -1,12 +1,11 @@
 // A12: migration 0034, the report job, and the facts the review asks these to
 // keep. Every fixture is synthetic: made-up security codes, made-up prices and
 // a made-up account. Nothing is copied from real evidence.
-import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import type { Miniflare } from "miniflare";
 import { canonicalJson } from "../../../packages/domain/src/index.ts";
+import { validReportBody } from "../../../packages/domain/src/reports.ts";
+import { validReportExplanationNode } from "../../../packages/observation-shared/src/report-artifact-contract.ts";
 import {
   instrumentRef,
   purgeRestrictedExplanations,
@@ -22,6 +21,7 @@ import {
   seedArtifact,
   startPipeline,
 } from "./harness.ts";
+import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -33,6 +33,13 @@ beforeAll(async () => {
 afterAll(async () => {
   await mf?.dispose();
 });
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 const NOW = "2026-09-08T00:00:00.000Z";
 const CUTOFF = "2026-12-31T00:00:00.000Z";
@@ -474,18 +481,16 @@ test("a holding is valued only at a price claimed from its own snapshot, never a
   const explanation = JSON.parse(
     await (await env.EVIDENCE.get(`reports/${result.contentDigest}.explanation`))!.text(),
   ) as { inputManifest: { priceObservationIds: string[] } };
+  // What the job stores is what the report page's contract accepts.
+  expect(validReportBody(body)).toBe(true);
+  expect(validReportExplanationNode(explanation)).toBe(true);
   expect(explanation.inputManifest.priceObservationIds).toContain("price:snap:old");
   expect(explanation.inputManifest.priceObservationIds).not.toContain("price:snap:future");
   expect(explanation.inputManifest.priceObservationIds).not.toContain("price:snap:unclaimed");
 });
 
 test("the snapshot price query reaches every table by key without statistics", () => {
-  const migrations = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
-  const db = new Database(":memory:");
-  for (const name of readdirSync(migrations)
-    .filter((entry) => entry.endsWith(".sql"))
-    .sort())
-    db.exec(readFileSync(join(migrations, name), "utf8"));
+  const db = fullCoreDatabase();
   const plan = (
     db
       .query(`EXPLAIN QUERY PLAN ${SNAPSHOT_PRICE_SQL}`)

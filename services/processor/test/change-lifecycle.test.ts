@@ -58,6 +58,7 @@ import {
 } from "./harness.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { envelopeHeaders, testCall } from "./audit-envelope.ts";
+import { maskRandomTokens } from "../../../packages/application/test/random-tokens.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -1245,8 +1246,9 @@ test("each command route writes its effect's record in its own batch; a replay o
     commitSeq: null,
   });
   // Deep scan: no column of any record carries the provider text, its token
-  // or its amount.
-  const stored = JSON.stringify(await auditRows());
+  // or its amount. Audit ids, correlation ids and digests are random hex:
+  // masked, so the amount's digits are found only where a record carries them.
+  const stored = maskRandomTokens(JSON.stringify(await auditRows()));
   for (const needle of ["架空", "eyJ", "c3ludGhldGlj", "123,456", "98765", PROVIDER_TEXT])
     expect(stored).not.toContain(needle);
 });
