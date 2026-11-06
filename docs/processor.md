@@ -72,21 +72,22 @@ remembered position inside a page could.
 
 **What spends one of the five** ([ADR 0024](adr/0024-collection-scan-judged-terminals.md)).
 Only new work does: a registration, a pending run the listing reaches, a
-first verdict, a retry that is due, a missing terminal, a registration that
-threw. The continuations that run before the listing have their own bound of
+first verdict, a retry that is due, a missing terminal. A registration that
+threw spends none (amendment of 2026-11-06, below). The continuations that run before the listing have their own bound of
 five and spend none of these. A terminal
 CORE has already judged under the current registration contract and the same
 terminal digest is answered from its `collection_runs` row and spends
 nothing:
 
-| Listed terminal                                                  | Attempted?                                   | Spends one of the five | Holds the page |
-| ---------------------------------------------------------------- | -------------------------------------------- | ---------------------- | -------------- |
-| no `collection_runs` row yet                                     | always                                       | yes                    | if over budget |
-| registered                                                       | no (`already_registered`)                    | no                     | no             |
-| blocked                                                          | never again under this contract version      | no                     | no             |
-| newest `registered` stage `retryable`, recorded under 24 h ago   | no; its recorded code is counted             | no                     | no             |
-| newest `registered` stage `retryable`, recorded 24 h ago or more | yes, once; a repeat refusal appends a row    | yes                    | if over budget |
-| `pending`                                                        | yes (continued first, and again when listed) | yes, when listed       | if over budget |
+| Listed terminal                                                  | Attempted?                                   | Spends one of the five | Holds the page                |
+| ---------------------------------------------------------------- | -------------------------------------------- | ---------------------- | ----------------------------- |
+| no `collection_runs` row yet                                     | always                                       | yes                    | if over budget                |
+| registered                                                       | no (`already_registered`)                    | no                     | no                            |
+| blocked                                                          | never again under this contract version      | no                     | no                            |
+| newest `registered` stage `retryable`, recorded under 24 h ago   | no; its recorded code is counted             | no                     | no                            |
+| newest `registered` stage `retryable`, recorded 24 h ago or more | yes, once; a repeat refusal appends a row    | yes                    | if over budget                |
+| `pending`                                                        | yes (continued first, and again when listed) | yes, when listed       | if over budget                |
+| its registration throws (nothing recorded)                       | yes, on every walk                           | no                     | if the 500 operations run out |
 
 Such an answer costs three operations of the invocation's budget (the
 terminal read, the conditional insert and the row read) for a registered or
@@ -113,10 +114,23 @@ ADR 0024 every tick counted a page, and a held tick on the first page, whose
 cursor is null, also counted a cycle.
 
 A registration that **throws** — R2 or CORE unavailable, or a refusal CORE
-made that the derivation did not foresee — is counted in the lane's `failed`
-and logged by its error class only; nothing is recorded for that run, the
-page still advances and the next cycle tries it again. One failing run never
-stops the page and never pins the cursor (G1-13). A seal CORE's completeness
+made that the derivation did not foresee — is counted in the lane's `failed`,
+and that count is all the lane's log line and tick record carry: the error
+itself is neither logged nor recorded (`collectionScan` hands its class name
+to an `onFailure` hook, which the deployed cron does not pass). Nothing is
+recorded for that run, the page still advances and the next walk tries it
+again. It spends none of the
+five, so failing runs never stop the page by themselves (G1-13; ADR 0024,
+amendment of 2026-11-06). Before that amendment each throw spent one, and a
+page with five or more terminals that throw on every attempt held the cursor
+for good. **Open limit:** a throw still costs the operations it spent, and
+the invocation's 500 (ADR 0010) still bound the tick. A throw late in a
+registration is expensive — a seal refusal re-verifies the run on every
+attempt, and one that yields at the budget first stays `pending` and is
+continued, and throws, on every tick — so a page whose throwing terminals
+spend the whole operation budget on every tick still holds the cursor:
+measured on the test's synthetic page, eight two-artifact runs refused at the
+seal finish their page and nine hold it. A seal CORE's completeness
 trigger refuses (`run_inventory_incomplete`) is not in this class: it is a
 verdict about the terminal and blocks the run (§3; ADR 0024, amendment of
 2026-09-26).
@@ -716,8 +730,40 @@ of up to five collected executions until they are `published` or
 `unpublished` with a closed reason. The collector call is awaited inside the
 tick, as the alarm awaits its own.
 
-A failed dispatch never deletes the request. An import whose terminal is not
-in the bucket is retried, not failed: the collector may still be running.
+A failed dispatch never deletes the request. How each kind ends:
+
+| Kind                                       | Closed ends                                                                                                                    | Looked at again                                                                                                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `import`                                   | `dispatched` once CORE holds the registration; `blocked` with `operation_payload_invalid` or the registration's own block code | every 5 min, **with no expiry**: `terminal_not_found`, a `pending` (staged) registration, a `retryable` refusal, or `registration_deferred` (budget spent) |
+| `replay`                                   | `dispatched` (`plan:<id>`) on the first look, or `blocked` with `replay_plan_missing`                                          | never                                                                                                                                                      |
+| `projection`                               | `dispatched` on the first look                                                                                                 | never                                                                                                                                                      |
+| `collection`, unattended `session-refresh` | the closed execution states of [ADR 0048](adr/0048-operation-collector-dispatch.md), including `expired` 24 h after acceptance | per the gates above, never past the expiry                                                                                                                 |
+
+An import whose terminal is not in the bucket is retried, not failed: the
+collector may still be running, and a terminal that lands late registers at
+the next look. That is also an open limit: **nothing expires an import**. One
+whose terminal never appears, or whose registration stays `retryable`, stays
+`accepted` / `dispatch_pending` with its `failure_code` and is looked at every
+five minutes for as long as the lane runs; each look adds one to
+`dispatch_attempts` (about 288 a day), spends one of the tick's five
+dispatches when it is due and a few operations of the invocation's shared
+registration budget; a `terminal_not_found` look updates only the request
+row, and a repeated `retryable` refusal appends at most one CORE stage row a
+day (ADR 0024). There is no cancel route, and a request under a new idempotency key is
+a separate operation that does not close the old one. The ADR 0048 expiry
+applies to collector starts only; an import expiry would be a new decision.
+`services/processor/test/operation-dispatch.test.ts` ("an import has no
+expiry") pins this.
+
+**Open limit: an import whose registration throws** (CORE or R2
+unavailable, or a seal refusal no code classifies) has no end either, and
+it is worse than a `retry`: nothing catches the throw, so the whole
+`operation_dispatch` lane fails that tick (`operation_dispatch_failed` with
+the error class), nothing is written to the request, and since its
+`available_at_ms` did not move it is claimed at the same place in the order
+on the next tick.
+While the cause lasts, every request ordered after it, and the collector
+tracking that runs after the claimed requests, waits.
 
 ## 8. Retired legacy import
 
