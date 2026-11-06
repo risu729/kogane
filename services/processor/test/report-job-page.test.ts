@@ -94,3 +94,57 @@ test("positions past the reader's first page are not dropped when late ones are 
     .first<{ n: number }>();
   expect(manifest!.n).toBe(501);
 }, 120_000);
+
+/**
+ * `db`, with `inject` run once right after the first cutoff lookup answers:
+ * after the job read the first positions page and before it reads the next,
+ * as if another invocation published into the store between the two reads.
+ */
+function publishingBetweenPages(db: D1Database, inject: () => Promise<void>): D1Database {
+  let pending = true;
+  return new Proxy(db, {
+    get(target, property) {
+      const value: unknown = Reflect.get(target, property);
+      if (property !== "prepare") return typeof value === "function" ? value.bind(target) : value;
+      return (sql: string) => {
+        const statement = target.prepare(sql);
+        if (!pending || !sql.includes("coalesce(a.recorded_at_ms, a.fetched_at_ms) > ?"))
+          return statement;
+        pending = false;
+        return {
+          bind: (...args: unknown[]) => {
+            const bound = statement.bind(...args);
+            return {
+              all: async <T>() => {
+                const rows = await bound.all<T>();
+                await inject();
+                return rows;
+              },
+            };
+          },
+        };
+      };
+    },
+  });
+}
+
+test("a row the offset shifts onto the next page is read once", async () => {
+  const clean = await runReportJob(jobEnv, { ...options, maxRows: 600 });
+  expect(clean.truncated).toBe(false);
+  // Five positions recorded after the cutoff land between the two reads and
+  // sort before every in-scope one, so the second page starts five rows
+  // earlier and repeats the last five rows of the first.
+  const shifted = await runReportJob(
+    {
+      ...jobEnv,
+      DB: publishingBetweenPages(env.DB, () =>
+        seedPositions(7003, "a-mid", 5, Date.parse("2026-09-21T00:00:00.000Z"), "MID"),
+      ),
+    },
+    { ...options, maxRows: 600 },
+  );
+  // The late rows are excluded and no row is counted twice, so the input set,
+  // and with it the context, is the clean run's (INV06).
+  expect(shifted.contextId).toBe(clean.contextId);
+  expect(shifted.truncated).toBe(false);
+}, 120_000);

@@ -355,8 +355,14 @@ export async function runReportJob(
   // recorded after the cutoff are dropped page by page, so the in-scope set
   // is read until it exceeds the bound or the store ends: dropping late rows
   // from the first page alone would leave the rows behind it unread and the
-  // report would claim a shorter set is the whole scope.
+  // report would claim a shorter set is the whole scope. The pages are
+  // separate reads: a parse published between two of them shifts the offset,
+  // so a row can come back on the next page, and it is kept once (INV06).
+  // A shift the other way (a snapshot replaced between reads) can leave a row
+  // unread; that is a limit of offset pages, and the manifest still names
+  // exactly the ids the report used.
   const all: PositionWithValuations[] = [];
+  const read = new Set<number>();
   for (let offset = 0; ; offset += POSITION_PAGE) {
     const page = await reader.listPositions({ offset });
     const entries = page.slice(0, POSITION_PAGE);
@@ -365,7 +371,11 @@ export async function runReportJob(
       entries.map((entry) => entry.position.id),
       cutoffMs,
     );
-    all.push(...entries.filter((entry) => !late.has(entry.position.id)));
+    for (const entry of entries) {
+      if (late.has(entry.position.id) || read.has(entry.position.id)) continue;
+      read.add(entry.position.id);
+      all.push(entry);
+    }
     if (all.length > maxRows || page.length <= POSITION_PAGE) break;
   }
   const truncated = all.length > maxRows;
