@@ -915,7 +915,15 @@ describe("the operator's read and the never-recorded list", () => {
   it("no record holds provider text, a token-shaped value or an amount", async () => {
     const rows = (await env.DB.prepare("SELECT * FROM audit_records").all()).results;
     expect(rows.length).toBeGreaterThan(10);
-    const stored = JSON.stringify(rows);
+    // Random ids (audit_id, correlation_id) and digests are lowercase hex, so a
+    // digit-only needle such as the amount can occur inside one by chance
+    // (aud_607fa361-217d-44ac-a160-740e72498765). Mask exactly those shapes; no
+    // other needle has only hex characters, so the masking changes no other check.
+    const stored = JSON.stringify(rows).replace(
+      /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[0-9a-f]{64}/g,
+      "<hex>",
+    );
+    expect(stored).toContain("<hex>");
     for (const needle of NEEDLES) expect(stored).not.toContain(needle);
   });
 });
