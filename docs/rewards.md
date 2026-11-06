@@ -185,6 +185,17 @@ common bucketは種類未確認のまま一覧に残り、算定期限は `unava
   `reasonCodes: ["offer_version_not_selected"]`; a `version` that is not stored is
   `no_stored_offer`. A goal search treats each stored version as its own candidate, named
   by its `offerRef`.
+- A goal search starts from one unit: `unit`, or, without it, the single distinct
+  `fromUnitRef` of the matching offers (all stored offers, or the named offer's versions).
+  The stored offers do not say which unit the caller holds, so the route never picks one.
+  A goal search without `unit` over offers with more than one source unit answers
+  `simulation: null`, `searchCoverage: "bounded"`, the `offerCoverage`, `sourceUnits`
+  (every distinct source unit ref, in code-unit order) and
+  `reasonCodes: ["source_unit_not_selected"]`, with no `paths` or `rejected` list. The
+  list counts every source unit, including the goal unit when an offer leaves it, and
+  whether or not a path from it reaches the goal. `unit` is taken as given and is not
+  checked against the list. The bound check runs first, then `no_stored_offer`
+  ([ADR 0049 amendment 2026-11-06](adr/0049-reward-expiry-basis.md#addendum-a-goal-searchs-starting-unit-is-chosen-by-the-caller)).
 
 ## 5. 価値の扱い
 
