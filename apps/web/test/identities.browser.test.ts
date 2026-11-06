@@ -223,8 +223,20 @@ describe.if(runnable)("identity coverage page", () => {
     await coverageRegion(tab).waitFor();
     await tab.getByRole("textbox", { name: "取得元", exact: true }).fill("synthetic-broker");
     await tab.getByRole("button", { name: "絞り込む", exact: true }).click();
-    await coverageRegion(tab).locator("tbody tr").nth(1).waitFor({ state: "detached" });
-    expect(await coverageRegion(tab).locator("tbody tr").count()).toBe(1);
+    // The table unmounts while the filtered read loads, so wait for the
+    // filtered table itself rather than for the second row to go away.
+    await tab.waitForFunction(
+      () =>
+        document.querySelectorAll('[role="region"][aria-label="口座の整理状況"] tbody tr')
+          .length === 1,
+      undefined,
+      { timeout: 10_000 },
+    );
+    const remaining = coverageRegion(tab).locator("tbody tr");
+    expect(await remaining.count()).toBe(1);
+    expect((await remaining.first().locator("td").first().innerText()).trim()).toBe(
+      "synthetic-broker",
+    );
     const coverage = requests.filter((entry) => entry.url.pathname === "/api/identity/coverage");
     expect(coverage.at(-1)?.url.searchParams.get("source")).toBe("synthetic-broker");
     expect(coverage.at(-1)?.url.searchParams.get("offset")).toBe("0");
