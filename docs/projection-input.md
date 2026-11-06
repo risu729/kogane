@@ -130,8 +130,9 @@ r0 != r1  → discard it and retry, bounded (3 attempts, then `pending`)
 A mixture of two contexts is never accepted, and an endlessly moving store
 yields `pending(input_capture_unstable)` instead of spinning (G2-02).
 
-The relations captured are the newest decision of each relation triple, not
-every stored row ([balance read model](balance-read-model.md#how-a-row-gets-its-state),
+The relations captured are the current row of each relation triple (its
+newest decision, or its newest proposal when it has none), not every stored
+row ([balance read model](balance-read-model.md#how-a-row-gets-its-state),
 step 4), so the declared-relation budget below counts current triples.
 
 The canonical bytes are written to the DATA bucket at

@@ -11,8 +11,10 @@
 //   the shipped read minus exactly the rows a later decision of the same
 //   triple supersedes, and equals an independently written model;
 // - the bound counts current triples and still reads one row past it;
-// - without table statistics (D1 never runs ANALYZE) both the candidate rows
-//   and each newer-row check are keyed searches, never a table scan.
+// - without table statistics (D1 never runs ANALYZE) the rows are read once,
+//   by the same keyed search the shipped text used, never a table scan and
+//   never a per-row lookup, so a long history of one triple or many triples
+//   onto one reference stay linear.
 // Every row is synthetic.
 import { Database } from "bun:sqlite";
 import { beforeAll, expect, test } from "bun:test";
@@ -348,7 +350,7 @@ test("the bound counts current triples, and one row past it is still read", () =
   history.close();
 }, 60_000);
 
-test("without table statistics every relation read is keyed, never a scan", () => {
+test("without table statistics the relation rows are read once, by a keyed search", () => {
   const db = migratedDatabase();
   expect(
     db.query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'").get(),
@@ -358,17 +360,65 @@ test("without table statistics every relation read is keyed, never a scan", () =
   const shipped = plan(LEGACY_PROJECTION_RELATIONS_SQL);
   const current = plan(CURRENT_SQL);
   // The shipped text read the projection kinds by a range of a (kind, ref)
-  // index; the current read takes the same range for its candidates...
+  // index; the current read takes the same range...
   expect(shipped.join("\n")).toMatch(
     /SEARCH entity_relations USING INDEX entity_relations_(from|to) \(kind=\?\)/u,
   );
   expect(current.join("\n")).toMatch(
     /SEARCH r USING INDEX entity_relations_(from|to) \(kind=\?\)/u,
   );
-  // ...and looks for a newer decision of each by both index columns.
-  expect(current.join("\n")).toMatch(
-    /SEARCH newer USING INDEX entity_relations_(from|to) \(kind=\? AND (from|to)_ref=\?\)/u,
-  );
-  for (const step of [...shipped, ...current]) expect(step).not.toMatch(/^SCAN /u);
+  // ...and it is the only step that touches the table: no correlated lookup
+  // per row (a newer-row check would read every row sharing one reference,
+  // once per candidate), and nothing but its own ranked rows is scanned.
+  expect(current.filter((step) => /\b(r|entity_relations|newer)\b/u.test(step))).toHaveLength(1);
+  expect(current.join("\n")).not.toMatch(/CORRELATED/u);
+  for (const step of shipped) expect(step).not.toMatch(/^SCAN /u);
+  for (const step of current) expect(step).not.toMatch(/^SCAN (?!\(subquery-\d+\))/u);
   db.close();
 });
+
+test("a long history of one triple and many triples onto one reference read like any other", () => {
+  // Shapes a correlated newer-row check would read quadratically: 6,000 rows
+  // of one triple (an agent re-proposing, say) after its acceptance, and
+  // 4,000 triples onto one reference, each with an acceptance and a rejection.
+  const db = migratedDatabase();
+  const rows: StoredRelation[] = [
+    {
+      id: "rel_long_accepted",
+      kind: "same_account",
+      from_ref: "source_account:long:a",
+      to_ref: "source_account:long:b",
+      status: "accepted",
+      created_at: "2026-10-01T00:00:00.000Z",
+    },
+  ];
+  for (let i = 0; i < 6000; i += 1)
+    rows.push({
+      id: `rel_long_${String(i).padStart(5, "0")}`,
+      kind: "same_account",
+      from_ref: "source_account:long:a",
+      to_ref: "source_account:long:b",
+      status: "proposed",
+      created_at: "2026-10-02T00:00:00.000Z",
+    });
+  for (let i = 0; i < 4000; i += 1)
+    for (const [d, status] of (["accepted", "rejected"] as const).entries())
+      rows.push({
+        id: `rel_hub_${i}_${d}`,
+        kind: "connection_contains",
+        from_ref: `connection:hub/${i}`,
+        to_ref: "source_account:hub",
+        status,
+        created_at: `2026-10-0${1 + d}T00:00:00.000Z`,
+      });
+  insertRelations(db, rows);
+  const started = performance.now();
+  const current = read(db, CURRENT_SQL);
+  const elapsed = performance.now() - started;
+  expect(current).toEqual(model(rows));
+  expect(current).toHaveLength(4001);
+  expect(current.find((row) => row.kind === "same_account")?.id).toBe("rel_long_accepted");
+  // Generous for a loaded runner; the correlated form took seconds here.
+  expect(elapsed).toBeLessThan(1500);
+  db.close();
+}, 60_000);

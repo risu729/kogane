@@ -251,7 +251,15 @@ view that names a triple's current row.
   first, the change lifecycle's order. A triple with no decision reads its
   newest proposal, which adopts nothing. A later `proposed` row never
   replaces a decision. The validity window (`valid_from`, `valid_to`) is not
-  part of the triple and does not order it.
+  part of the triple and does not order it. `released` is the stored form of
+  the domain's `superseded` (`RELATION_STATUS_STORAGE`,
+  `packages/domain/src/decisions.ts`): a judgement that the relation no
+  longer holds, so it withdraws an earlier acceptance as a rejection does. No
+  command writes it today. Relation ids are digests, not a sequence, so the
+  `id` tie-break only makes the order total: each decision's plan pins the
+  triple's row count, so of two commits planned against the same count the
+  second writes nothing, and a tie needs a later plan committed within the
+  same millisecond as the first.
 - The balance projection reads exactly that row per triple
   (`projectionRelationsSql`) and, as before, adopts only `accepted` rows. Rows
   stay in `id` order, so a store with one row per triple captures the same
@@ -280,8 +288,15 @@ view that names a triple's current row.
   (an `id` tie-break against insertion order) or where `created_at` order and
   insertion order disagree. The readers that take the newest row of any
   status would let a later proposal hide a decision; for the ownership
-  readers that makes an owner unresolved rather than wrong. Moving them onto
-  this rule is follow-up work, each with its own equality proof.
+  readers that makes an owner unresolved rather than wrong. Today the only
+  writer of `proposed` rows is `reconcile.propose`, whose two ends are both
+  `source_account:` references, so no proposal can land on an ownership
+  (`account:` or bare account id), `listed_as` (`instrument:` to
+  `identifier:`) or `pending_to_posted` (transaction id) triple; the one
+  visible effect is the plan's current status of a triple between two source
+  accounts, which shows `proposed` once one follows an acceptance. Moving
+  these readers onto this rule is follow-up work, each with its own equality
+  proof.
 
 ### Consequences
 
@@ -299,7 +314,15 @@ view that names a triple's current row.
   else changes: a triple with one row, or whose newest decision is the
   acceptance, reads as before.
 - A store whose relation rows exceed 5,000 but whose current triples do not
-  is now built instead of refused.
+  is now built instead of refused. The read still visits each row of the four
+  kinds once, by the same keyed range of `entity_relations_to` or `_from` on
+  the kind that the shipped text used, and ranks them with one sort
+  (`row_number()` over the triple, as `LISTED_AS_SQL` ranks `listed_as`), so
+  its cost grows with the stored rows as before. A correlated newer-row check
+  was rejected for cost: no index covers the whole triple, so each check reads
+  every row sharing (kind, one reference), which is quadratic in a long
+  history of one triple (an agent re-proposing it, say) or in many triples
+  onto one reference.
 - The rule is per exact triple. Two references to one thing are two triples:
   a `connection_contains` that migration 0029 recorded under a connection key
   the one-time identity-value rewrite (migration 0063) later replaced is not
@@ -320,6 +343,11 @@ store of 4,800 single-row triples and 1,200 rows of other kinds; on 300
 random stores (one to four rows per triple, ties, ids against time) the
 shipped rows minus exactly those a later row of their triple supersedes,
 equal to a model written without SQL, and scope relations that differ only
-by acceptances a later decision withdrew; the bound counted in triples; and,
-without table statistics, a keyed search of `entity_relations_to` or `_from`
-for the candidates and for each newer-row check, never a scan.
+by acceptances a later decision withdrew; the bound counted in triples;
+without table statistics, one keyed search of `entity_relations_to` or `_from`
+as the only step that touches the table (no correlated lookup, no table
+scan); and a store of 6,000 proposals on one accepted triple plus 4,000
+decided triples onto one reference, read in linear time and equal to the
+model. The suite fails when the ranking drops the decision precedence, the
+`id` tie-break, the `to_ref` or `kind` partition, the `id` order or the bound
+(mutations run by hand in review).

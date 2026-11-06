@@ -142,20 +142,25 @@ export interface ProjectionInputsRow {
  *
  * Rows stay in `id` order, so a store with one row per triple reads exactly
  * what the shipped text read. `bound` counts current triples: one row over it
- * is read so the caller refuses rather than cuts. The candidate rows come
- * from a range of `entity_relations_to` or `_from` on the kind, and each
- * newer-row check is a keyed lookup of the same index on (kind, ref).
+ * is read so the caller refuses rather than cuts.
+ *
+ * Cost: the rows of the four kinds are read once, by a range of
+ * `entity_relations_to` or `_from` on the kind, exactly the rows the shipped
+ * text read, and ranked by one sort (as `LISTED_AS_SQL` ranks `listed_as`).
+ * No index covers the whole triple, so a correlated newer-row check would
+ * read every row sharing (kind, one ref) once per candidate: quadratic in a
+ * long history of one triple, or in many triples onto one reference.
  */
 export function projectionRelationsSql(bound: number): string {
   if (!Number.isSafeInteger(bound) || bound < 0)
     throw new Error("read-model: projection relation bound out of range");
-  return `SELECT r.id, r.kind, r.from_ref, r.to_ref, r.status, r.decision_revision_id
+  return `SELECT id, kind, from_ref, to_ref, status, decision_revision_id FROM (
+  SELECT r.id, r.kind, r.from_ref, r.to_ref, r.status, r.decision_revision_id,
+   row_number() OVER (PARTITION BY r.kind, r.from_ref, r.to_ref
+    ORDER BY r.status<>'proposed' DESC, r.created_at DESC, r.id DESC) AS rank
   FROM entity_relations r
   WHERE r.kind IN ('same_account','connection_contains','account_has_pocket','statement_covers')
-   AND NOT EXISTS(SELECT 1 FROM entity_relations newer
-    WHERE newer.kind=r.kind AND newer.from_ref=r.from_ref AND newer.to_ref=r.to_ref
-     AND (newer.status<>'proposed',newer.created_at,newer.id)>(r.status<>'proposed',r.created_at,r.id))
-  ORDER BY r.id LIMIT ${bound + 1}`;
+ ) WHERE rank=1 ORDER BY id LIMIT ${bound + 1}`;
 }
 
 /**
