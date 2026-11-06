@@ -1,8 +1,8 @@
 # ADR 0023: Do not trust a card binding for collector-vpass runs until the collector writes one
 
-- Status: proposed; amended to implement option 3 (see
-  [Amendment](#amendment-option-3-implemented)), accepted when the amending PR
-  merges; amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
+- Status: accepted (merged 2026-09-27 in #260); amended to implement option 3
+  (see [Amendment](#amendment-option-3-implemented)), merged 2026-09-27 in #273;
+  amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
   (the token is derived without a key; see
   [Amendment: ADR 0029](#amendment-adr-0029-the-token-needs-no-key)); noted
   on 2026-09-27 that both stated-total fields are on the live site (see
@@ -198,7 +198,7 @@ its first two points and the hold's release condition.
 
 ## Amendment: option 3 implemented
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (merged 2026-09-27 in #273)
 - Date: 2026-09-26
 - Carried by:
   [identity operations](../identity-operations.md#collector-vpass-runs-bind-in-their-own-run),
@@ -477,7 +477,7 @@ above is left as it was decided.
 
 ## Note (2026-09-27): both stated-total fields are on the live site
 
-- Status: proposed; accepted when the PR that adds it merges
+- Status: accepted (merged 2026-09-28 in #320)
 - Date: 2026-09-27
 - Carried by: `services/collector-vpass/src/provider-count.ts`,
   `services/collector-vpass/src/statement-walk.ts`,
@@ -594,7 +594,7 @@ the cause is how the value is read, which this note checks.
 
 ## Counts-only shape diagnostic amendment (2026-10-10)
 
-Status: proposed until this amendment merges.
+Status: accepted (merged 2026-10-10 in #676).
 
 ### Context and options
 

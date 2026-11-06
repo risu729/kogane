@@ -1,13 +1,15 @@
 # ADR 0064: One append-only audit record per operation, for the human UI and the AI alike, referencing the existing logs
 
-- Status: proposed (accepted when its pull request merges). Slice S1 of the
+- Status: accepted (merged 2026-10-09 in #601). Slice S1 of the
   [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)
-  implements the table, the chokepoint for the existing `ui`, `agent-http` and
-  `mcp` paths, the daily caps with their overflow aggregate and the operator's
-  `GET /api/v2/audit` ([audit log](../audit-log.md)); slice S4 (#564) adds the
-  maintenance read and revision to the catalogue, the revision on `mcp` only
-  as a recorded refusal. The `alarm` and `lane` writers, the agent read and
-  delegated execution (ADR 0063) are not implemented.
+  (#619) implements the table, the chokepoint for the existing `ui`,
+  `agent-http` and `mcp` paths, the daily caps with their overflow aggregate
+  and the operator's `GET /api/v2/audit` ([audit log](../audit-log.md)); slice
+  S4 (#564) adds the maintenance read and revision to the catalogue; the S3
+  execution integration (#660) adds delegated records, two-step
+  preparation/confirmation and the agents' scoped read under `audit.read`
+  (`kogane.audit.search`, `kogane.audit.get`). The `alarm` and `lane` writers
+  are not implemented.
 - Date: 2026-10-09
 - Related: [ADR 0063](0063-delegated-ai-operation-path.md) (the delegated AI
   operation path, whose two-step confirmation and idempotency use this

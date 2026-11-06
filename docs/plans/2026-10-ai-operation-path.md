@@ -1,17 +1,18 @@
 # Plan: AI as a delegated operation path, with a common audit log
 
-- Status: **in progress**. Slice S1 (section 8) and S3 declaration core (#628)
-  are implemented on main. This S3 execution slice implements delegated R1
-  operations, bounded preparation machinery and shared history/audit reads;
-  a separate R2 slice adds command and provider-request adapters, and a
-  settings slice adds job prepare/confirm with linked reversal. The integrated
-  follow-up adds maintenance R1/R2 execution; survey acceptance and
-  real-client activation remain distinct work. See the
+- Status: **in progress**. Slices S1 (section 8, #619), S2 (#565), S4 (#564)
+  and S3 (declaration core #628; execution integration #660, merged
+  2026-10-10) are implemented on main. S3 execution covers delegated R1
+  operations, bounded preparation machinery, shared history/audit reads, R2
+  command and provider-request adapters, job prepare/confirm with linked
+  reversal, and maintenance R1/R2 execution, which deliver parts of S5 and
+  S6. Survey acceptance (S6), the `alarm`/`lane` writers (S7), the audit page
+  (S8) and real-client activation remain open. See the
   [current resume plan](2026-10-mcp-maintenance-followups.md).
   The decisions it rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and
   [ADR 0064](../adr/0064-common-audit-log.md) (common append-only audit log),
-  both `proposed` until their pull request merges. Each implementation slice
+  both accepted (merged 2026-10-09 in #601). Each implementation slice
   (section 8) is its own pull request with its own independent review; merging
   this plan approves none of them.
 - Written: 2026-10-09, from `origin/main` `c4f611d`, by the AI-operation-path

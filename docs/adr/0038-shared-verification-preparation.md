@@ -1,6 +1,6 @@
 # ADR 0038: Isolate complete hosted verification while sharing preparation
 
-- Status: proposed until this PR merges; accepted upon merge
+- Status: accepted (merged 2026-10-04 in #418)
 - Date: 2026-10-04
 
 ## Context

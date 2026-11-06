@@ -1,6 +1,6 @@
 # ADR 0029: Data classification for central storage; Vpass and MoneyForward identities derived without a secret
 
-- Status: proposed
+- Status: accepted (merged 2026-09-27 in #278)
 - Date: 2026-09-27
 - Decided by: the owner (the only user of this deployment), 2026-09-27
 - Carried by:
@@ -28,7 +28,7 @@
 - Amended: 2026-09-27 (amendment 2), class (d) redefined: person names may be
   stored in raw evidence and observations as the provider shows them (see
   [Amendment 2](#amendment-2-2026-09-27-person-names-are-kept-in-stored-evidence));
-  proposed until the amending PR merges
+  merged 2026-09-28 in [#340](https://github.com/risu729/kogane/pull/340)
 
 ## Context
 
@@ -408,7 +408,7 @@ exactly the four responses of its plan, so that object is not stored.
 
 ## Amendment 2 (2026-09-27): person names are kept in stored evidence
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (merged 2026-09-28 in #340)
 - Date: 2026-09-27
 - Decided by: the owner, 2026-09-27: person names in stored evidence are
   acceptable; what is forbidden is payment-instrument numbers such as a full

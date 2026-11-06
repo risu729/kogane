@@ -1,6 +1,6 @@
 # ADR 0022: Give registered shared-R2 artifacts their parser dataset
 
-- Status: proposed
+- Status: accepted (merged 2026-09-27 in #269)
 - Date: 2026-09-26
 - Carried by:
   [processor §3.4](../processor.md#34-artifact-datasets-adr-0022),

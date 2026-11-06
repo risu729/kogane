@@ -1,6 +1,6 @@
 # ADR 0057: Own-transfer proposals under an explicit policy, and planners that stay unregistered behind the production gate
 
-- Status: proposed (accepted when its pull request merges)
+- Status: accepted (merged 2026-10-09 in #620)
 - Date: 2026-10-09
 - Issue: #549 (own-account transfers), stage G3-a of [ADR 0054](0054-economic-consumption-guard.md#staged-plan)
 - Related: [ADR 0053](0053-transaction-family-registry.md) (families),

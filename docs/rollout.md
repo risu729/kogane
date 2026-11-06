@@ -56,16 +56,20 @@ purchase is not counted twice.
 Rollback: set the var back to `"0"`. The lane is skipped; its events and
 decisions stay, and a fix appends revisions, never a DELETE.
 
-## Current release boundary — 2026-10-05
+## Current release boundary — 2026-11-06
 
 The committed configs enable existing boolean App/Processor features and name
-a human operator. Both agent grant variables remain empty. CORE reaches 0065;
-READ reaches 0002. This is repository state, not a live readback.
+a human operator. `AGENT_GRANTS` and `MCP_DELEGATIONS` are empty;
+`AGENT_API_GRANTS` holds one MCP reader entry with `summary.read` and
+`records.read` only. CORE reaches 0080; READ reaches 0005. This is repository
+state, not a live readback.
 
-Scheduling uses fourteen active Processor-owned alarms, with two unsupported
-source jobs disabled. Active Worker Cron arrays are empty. Public maintenance
-rules are operator-edited and not automatically researched again. See
-[schedules](schedules.md) and [current status](current-status.md).
+Scheduling uses fourteen active Processor-owned alarms; the two unsupported
+source jobs and the PRESTIA bank job are disabled. Active Worker Cron arrays
+are empty. Public maintenance rules are operator-edited; the official-site
+re-survey only proposes, and it is off (`MAINTENANCE_SURVEY_ENABLED` unset,
+every page `fetch: disabled`). See [schedules](schedules.md) and
+[current status](current-status.md).
 
 The enablement paragraphs above are dated history. The safe-default column
 below describes suspension behavior, not committed or currently deployed values.

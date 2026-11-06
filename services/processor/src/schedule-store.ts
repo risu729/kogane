@@ -267,15 +267,15 @@ export async function updateSchedule(
 //
 // `writeMaintenanceRevision` is the one place a maintenance rule revision is
 // written (ADR 0046 as amended by ADR 0063, item 8). The operator route
-// (`updateMaintenance`) and an accepted re-survey proposal (ADR 0050) are its
-// adapters; a delegated principal reaches no route to it yet (ADR 0063 slice
-// S3 connects delegated execution). It never throws for a refusal: it answers
+// (`updateMaintenance`), an accepted re-survey proposal (ADR 0050) and the
+// private delegated route (`delegated-maintenance.ts`, ADR 0063 slice S3) are
+// its adapters. It never throws for a refusal: it answers
 // a closed `MaintenanceWriteCode`. What its caller appends (its audit record,
 // a survey decision) is sent in the revision's own batch, so the revision, its
 // provenance and what was appended exist together or not at all (ADR 0064).
 // `prepareMaintenanceRevision` runs the same validation chain and writes
 // nothing; `currentMaintenanceRevision` is the current-revision read both use.
-// They are the contract plan slice S3 builds its confirmation on.
+// They are the contract plan slice S3's confirmation is built on.
 
 /** Every refusal the writer can answer, with the HTTP status the routes use. */
 export const MAINTENANCE_WRITE_CODES = {
@@ -369,8 +369,9 @@ export const CONFIRMED_MAX_DEFERRAL_MS = 31 * 86_400_000;
  * Which deferral bound the writer holds a delegated revision to. Trusted and
  * in-process only: no request field, header, tool argument or grant sets it.
  * The default is `"delegated-7d"`; only Processor-side code may pass
- * `"confirmed-31d"`, and today nothing does (plan slice S3's R2 confirm will,
- * after verifying the confirm). The operator is held to no bound under either.
+ * `"confirmed-31d"`: the private delegated route does so for an R2 prepare
+ * or confirm (`delegated-maintenance.ts`, plan slice S3), after verifying the
+ * confirm. The operator is held to no bound under either.
  */
 export type MaintenanceDeferralBound = "delegated-7d" | "confirmed-31d";
 export interface MaintenanceWriteOptions {
@@ -408,8 +409,8 @@ const SURVEY_DECISION_REF = /^maintenance-survey:proposal:[1-9][0-9]{0,15}$/u;
 const SURVEY_REASON: MaintenanceChangeReason = "maintenance-survey-proposal-accepted";
 /**
  * A delegated revision's decision reference: the audit record that authorizes
- * it (`aud_` + UUID, ADR 0064's `audit_id`), which plan slice S3 reserves
- * before it calls the writer — the prepare record for an R2 confirm, the
+ * it (`aud_` + UUID, ADR 0064's `audit_id`), which the delegated execution
+ * (plan slice S3) reserves before it calls the writer — the prepare record for an R2 confirm, the
  * apply record for an R1 call.
  */
 const DELEGATED_AUDIT_REF =
@@ -771,7 +772,7 @@ function refusalOf(error: unknown): { ok: false; code: MaintenanceWriteCode; sta
  * same chain, the same closed codes — and writes nothing, chooses no id and
  * draws no random value. It answers the rule's current revision, the
  * revision's deferral class and a delegated principal's remaining budget:
- * the contract a confirmation step (plan slice S3) builds on. The write runs
+ * the contract the confirmation step (plan slice S3) is built on. The write runs
  * the same chain again, so a prepare is never an authorization by itself.
  */
 export async function prepareMaintenanceRevision(
@@ -1391,8 +1392,9 @@ function recorded(response: Response, audit: OperationCall): Response {
  * The App has graded the reader's `schedules.read` grant and its schedule
  * scope; the reading principal arrives in its own header, never as an
  * operator, and no other settings function — no write of any kind — is
- * reachable from here. A delegated maintenance write has no route until ADR
- * 0063's delegated execution is connected (plan slice S3).
+ * reachable from here. A delegated maintenance write takes the private
+ * `/internal/delegated-maintenance` route (`delegated-maintenance.ts`), never
+ * this one.
  */
 async function agentRoute(request: Request, env: Env, path: string): Promise<unknown> {
   if (request.headers.has("x-kogane-operator") || request.headers.has(AUDIT_HEADERS.delegationRef))

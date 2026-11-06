@@ -1,6 +1,6 @@
 # ADR 0017: Add card purchase review command kinds with one rebuild, not relation markers
 
-- Status: proposed
+- Status: accepted (merged 2026-09-27 in #261)
 - Date: 2026-09-26
 - Decision owner: the owner accepted decision 1.1 of the
   [next-milestone plan](../plans/2026-09-next-milestone.md#11-add-real-command-kinds-with-one-rebuild-not-more-relation-markers)

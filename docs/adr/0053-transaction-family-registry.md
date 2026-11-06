@@ -200,7 +200,7 @@ Locally with synthetic data only:
 
 ## Amendment: SBI Shinsei records its origin (2026-10-09)
 
-- Status: proposed (accepted when the PR that carries it merges)
+- Status: accepted (merged 2026-10-09 in #613)
 - Date: 2026-10-09
 
 `sbi-shinsei-top-balances-and-activity` 0.1.3 records

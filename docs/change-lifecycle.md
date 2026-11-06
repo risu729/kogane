@@ -407,8 +407,9 @@ POST /api/command/v1/operation  { operationId }                     -> { receipt
 
 ### Grants
 
-Two variables, both **JSON arrays of verified Access subjects**, both empty in
-the committed configuration, and both allow-lists:
+Two variables, both **JSON arrays of verified Access subjects** and both
+allow-lists. The committed configuration names the human operator in
+`OPERATOR_SUBJECTS` and leaves `AGENT_GRANTS` empty:
 
 | Variable            | Names              | Capabilities                                      |
 | ------------------- | ------------------ | ------------------------------------------------- |
@@ -421,7 +422,11 @@ One resolver reads them — `resolvePrincipal` in
 surface: the five command routes and the six `/api/ops/v1` routes call it.
 The six operations MCP tools would too, but `/mcp` refuses them from its
 agent-only caller before they get that far
-([ADR 0047](adr/0047-mcp-client-connection.md)).
+([ADR 0047](adr/0047-mcp-client-connection.md)); the delegated command,
+decision and operations tools (`services/app/src/delegated-command-tools.ts`,
+`delegated-decision-tools.ts`, `ops-tools.ts`) are graded by an MCP delegation
+instead ([ADR 0063](adr/0063-delegated-ai-operation-path.md)), and the
+committed `MCP_DELEGATIONS` is empty.
 
 - A subject in `OPERATOR_SUBJECTS` is the human operator.
 - A subject in `AGENT_GRANTS` is an agent. Its `approve`/`commit` is

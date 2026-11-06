@@ -1,6 +1,6 @@
 # ADR 0065: Collect native coverage by runtime, without a fabricated repository total
 
-- Status: proposed
+- Status: accepted (merged 2026-10-09 in #603)
 - Date: 2026-10-09
 - Review basis: fixed-version Pro design consultation; Bun 1.4.2 microfixture and Workers pool trials.
 

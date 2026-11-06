@@ -108,27 +108,31 @@ carries its closed reason as `reason_code`: `operator-edit` for the operator's
 edit, `maintenance-survey-proposal-accepted` for an accepted proposal.
 `schedules.maintenance.read` (R0) is one `read` record on whichever agent path
 served it. `schedules.maintenance.update` exists on `mcp` as well as on `ui`;
-there it is graded by the caller's delegation, not its grant, and since no
-delegation executes yet every call is one `refused` record (`failed` for
+there it is graded by the caller's delegation, not its grant. A caller with
+no resolved delegation (the committed `MCP_DELEGATIONS` is empty, so every
+caller today) gets one `refused` record (`failed` for
 `503 delegation_misconfigured`) with the delegation's or the schema's code,
-`principal_kind` `agent` and no `delegation_ref`: the builder admits no
-`delegated` record until slice S3, and nothing is relayed to the Processor.
-Its catalogue classes are R1 and, beyond the seven-day bound, R3; no record
-carries R3 today. A refused argument is not echoed: the record holds the code,
-never the reason text, URL or window the caller sent. The maintenance writer
+`principal_kind` `agent` and no `delegation_ref`, and nothing is relayed to
+the Processor. Under a delegation (#660) the call is a `delegated` record
+with its `dlg_` reference: R1 for an apply within the seven-day bound, R2 for
+a prepare and its confirm up to 31 days; its catalogue's R3 is never
+executed. A refused argument is not echoed: the record holds the code, never
+the reason text, URL or window the caller sent. The maintenance writer
 requires a delegated revision's decision reference to be
 `delegated-audit:<audit_id>`, naming the audit record that authorizes it, which
-slice S3 is to reserve before it calls the writer (the prepare record for an
-R2 confirm, the apply record for an R1 call); no such record or revision is
-written today ([schedules](schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3)).
+the delegated execution reserves before it calls the writer (the prepare
+record for an R2 confirm, the apply record for an R1 call)
+([schedules](schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3)).
 
 ### The envelope to the Processor
 
 The App forwards `x-kogane-correlation-id` (its request id) and
 `x-kogane-audit-path` with every command and settings write, beside the actor
 headers. The Processor's command and schedule routes refuse a request without
-them, or with an `x-kogane-delegation-ref` (no delegation exists), exactly as
-they refuse a missing actor (`invalid_command`, `operator_required`). When the
+them, or with an `x-kogane-delegation-ref` outside the closed private
+delegated-execution envelope on `mcp` (`parseAuditEnvelope`,
+`packages/application/src/audit/call.ts`), exactly as they refuse a missing
+actor (`invalid_command`, `operator_required`). When the
 Processor's batch wrote the effect record it answers
 `x-kogane-audit-recorded: 1`; the App strips it from the answer and records
 nothing more. If the Processor's answer is lost (the binding throws or the
@@ -146,7 +150,8 @@ answered, but the event only increments a row of `audit_overflow_counters`
 the subject and principal kind for the aggregate). The cap check and the
 increment read the day's count inside one batch, so exactly one of them
 writes. `applied` and `accepted` records are never capped. The 200 `prepared`
-cap is enforced by the store (`cap_reached`), but nothing prepares yet.
+cap is enforced by the store (`cap_reached`); only delegated two-step
+preparations write `prepared` records.
 
 The Processor's `audit_overflow` lane runs last on every tick: for each
 counter row of a day that has ended it appends one `overflow` record
@@ -254,7 +259,7 @@ a token-shaped value and an amount).
 
 ## S3 maintenance execution and confirmation (2026-10-10)
 
-Status: proposed until the integration PR merges. The implementation reuses
+Status: accepted (merged 2026-10-10 in #660). The implementation reuses
 the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
 against main `c0c4088a`; #652's temporal refusal and #643's release guard are
 preserved. The [integration plan](plans/2026-10-mcp-maintenance-followups.md)

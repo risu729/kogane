@@ -1,6 +1,6 @@
 # ADR 0039: Alarm scheduling and public maintenance rules
 
-Status: proposed until this PR merges; accepted upon merge
+Status: accepted (merged 2026-10-04 in #430)
 Date: 2026-10-04
 
 ## Context
@@ -88,7 +88,7 @@ separate retirement migration; it is not an ordinary old-commit rollback.
 
 ## Amendment: repeated stopped-execution release
 
-Status: proposed until this PR merges; accepted upon merge
+Status: accepted (merged 2026-10-09 in #566)
 Date: 2026-10-09
 
 A confirmed stopped-execution release can be resent after a lost response or a
@@ -118,9 +118,12 @@ and existing Access/operator/same-origin boundaries.
 
 ## Amendment: settings edits by a delegated principal (2026-10-09, ADR 0063)
 
-Status: proposed until the ADR 0063 pull request merges; accepted upon merge.
-Not implemented: until its delegation slice ships, "agents and service tokens
-cannot edit settings" holds as written.
+Status: accepted (ADR 0063 merged 2026-10-09 in #601). Implemented in #660
+(merged 2026-10-10) for `schedules.job.update` and
+`schedules.maintenance.update` (`services/app/src/delegated-schedule-tools.ts`,
+`services/app/src/delegated-maintenance-tools.ts`); `schedules.survey.decide`
+has no delegated adapter. The committed `MCP_DELEGATIONS` is empty, so no
+principal holds a delegation and no agent edits a setting.
 
 [ADR 0063](0063-delegated-ai-operation-path.md) replaces "Agents and service
 tokens cannot edit settings" with: settings are edited by the operator, or by

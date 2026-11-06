@@ -1,6 +1,6 @@
 # ADR 0032: The card provider's stated debit account is settlement evidence, proposed and never accepted by rule
 
-- Status: proposed
+- Status: accepted (merged 2026-09-28 in #330)
 - Date: 2026-09-27
 - Carried by:
   `packages/domain/src/card-debit-account.ts`,
@@ -184,7 +184,7 @@ wiring and the review-page display wait for the round-4 shapes.
 
 ## Amendment 2026-09-27: the observed shapes
 
-- Status: proposed; accepted when the amending PR merges
+- Status: accepted (merged 2026-09-28 in #335)
 - Date: 2026-09-27
 - Carried by:
   `packages/domain/src/myjcb-card-information.ts` (`readMyJcbCardInformation`),

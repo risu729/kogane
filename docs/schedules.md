@@ -152,8 +152,9 @@ only reconciles reservations after release identity checks.
 
 Maintenance changes are made from the management screen using this HTTP API.
 An agent can read maintenance windows through the tool below; revising one
-through MCP is an operation the owner may delegate, which no delegation can
-execute yet. Automatic online research exists only as the proposal-only
+through MCP is an operation the owner may delegate, executed only under a
+delegation; the committed `MCP_DELEGATIONS` is empty, so none is configured.
+Automatic online research exists only as the proposal-only
 re-survey above, which fetches nothing until pages are confirmed. See
 [agent access](agent-api.md) and [current status](current-status.md).
 
@@ -162,9 +163,10 @@ re-survey above, which fetches nothing until pages are confirmed. See
 [ADR 0046](adr/0046-agent-maintenance-windows.md), as amended by
 [ADR 0063](adr/0063-delegated-ai-operation-path.md) item 8 (slice S4 of the
 [AI operation path plan](plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)).
-Job times, enable/disable, lease release and bootstrap stay operator or
-deployment only, and the routes above refuse every agent and every MCP-audience
-caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows).
+Lease release and bootstrap stay operator or deployment only; job times and
+enable/disable are otherwise reachable only through the delegated
+`kogane.schedules.job.update` tool ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)),
+and the routes above refuse every agent and every MCP-audience caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows).
 
 - `kogane.schedules.maintenance.read` (`schedules.read`, scoped by
   `scopes.scheduleSources`; on `/mcp` and `POST /api/agent/v1/schedules.maintenance.read`,
@@ -180,10 +182,12 @@ caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows
   the operator header or a delegation reference; no write is reachable under
   `/internal/schedules/agent/`.
 - `kogane.schedules.maintenance.update` is a delegated operation: no agent-API
-  grant can name it, it is published to nobody, and every call on `/mcp` is
-  refused before anything reaches the Processor — at the latest with
-  `delegation_execution_unavailable`, because no delegation executes until
-  slice S3 connects it. Its arguments are one revision: omit `ruleId` with
+  grant can name it, and it is published only to a principal whose resolved
+  delegation holds `schedules.maintenance.update`. Without one (the committed
+  `MCP_DELEGATIONS` is empty) every call on `/mcp` is refused before anything
+  reaches the Processor; with one, it applies or prepares and confirms
+  through the private delegated route
+  ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)). Its arguments are one revision: omit `ruleId` with
   `revision: 0` to create a rule under an id the server chooses, or name a rule
   of that source with its current revision; a closed `reason`; an https
   `referenceUrl` on the source's registered maintenance host (stored, never
@@ -278,7 +282,7 @@ maintenance writes were not verified by these local synthetic tests.
 
 ## S3 maintenance execution and confirmation (2026-10-10)
 
-Status: proposed until the integration PR merges. The implementation reuses
+Status: accepted (merged 2026-10-10 in #660). The implementation reuses
 the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
 against main `c0c4088a`; #652's temporal refusal and #643's release guard are
 preserved. The [integration plan](plans/2026-10-mcp-maintenance-followups.md)

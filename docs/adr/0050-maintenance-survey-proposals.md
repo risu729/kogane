@@ -230,8 +230,7 @@ changed) reads as not current, and a retry is `revision_conflict`.
 
 ## Amendment: the acceptance is one batch with its revision (ADR 0064)
 
-Status: proposed until the pull request of
-[ADR 0064](0064-common-audit-log.md)'s slice S1 merges; accepted upon merge
+Status: accepted ([ADR 0064](0064-common-audit-log.md)'s slice S1, merged 2026-10-09 in #619)
 Date: 2026-10-09
 
 Slice S1 of the [AI operation path plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)
@@ -263,10 +262,9 @@ acceptance was in flight rolls the revision back.
 
 ## Amendment: #560's writer replaces the adapter (ADR 0046, 2026-10-09)
 
-Status: proposed until the pull request of
-[ADR 0046](0046-agent-maintenance-windows.md) (#564, slice S4 of the
-[AI operation path plan](../plans/2026-10-ai-operation-path.md)) merges;
-accepted upon merge.
+Status: accepted ([ADR 0046](0046-agent-maintenance-windows.md), slice S4 of
+the [AI operation path plan](../plans/2026-10-ai-operation-path.md), merged
+2026-10-10 in #564).
 
 The Decision's "The writer" paragraph and the first Consequences bullet above
 describe the time before #560 merged; with it they no longer hold:

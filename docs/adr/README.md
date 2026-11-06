@@ -23,7 +23,7 @@ for current behavior.
 - [ADR 0010: Bound terminal registration by a per-invocation operation budget](0010-terminal-registration-budget.md)
 - [ADR 0011: Resolve settlement ownership through keyed CTEs, keep the 0044 views as the contract](0011-keyed-ownership-ctes.md)
 - [ADR 0012: Map Mizuho ordinary deposits under identity policy version 2](0012-mizuho-identity-policy-v2.md)
-- [ADR 0013: Give agents card purchases through a separate read-only tool](0013-agent-card-purchase-read.md) — accepted; amended by ADR 0063 (proposed)
+- [ADR 0013: Give agents card purchases through a separate read-only tool](0013-agent-card-purchase-read.md) — accepted; amended by ADR 0063
 - [ADR 0014: A shared-R2 collector's producer is `collector-<collector id>`](0014-collector-producer-ids.md)
 - [ADR 0015: Source authority v2 names CORE source ids](0015-source-authority-v2.md)
 - [ADR 0016: Key MyJCB pending statements by payment month, current while their position shows them](0016-myjcb-pending-statement-slots.md)
@@ -49,13 +49,15 @@ for current behavior.
 - [ADR 0036: Observe covered D1 costs and failures per Processor lane](0036-lane-cost-observability.md)
 - [ADR 0037: Admit reconciliation pages by evidence and reuse clean purchase retirement checks](0037-reconciliation-purchase-cost.md)
 - [ADR 0038: Isolate complete hosted verification while sharing preparation](0038-shared-verification-preparation.md)
-- [ADR 0039: Alarm scheduling and public maintenance rules](0039-alarm-schedule-management.md) — amended by ADR 0063 (proposed)
+- [ADR 0039: Alarm scheduling and public maintenance rules](0039-alarm-schedule-management.md) — accepted; amended by ADR 0063
 - [ADR 0040: Deploy compatible Workers through prebuilt cf versions](0040-compatible-cf-version-deployment.md)
 - [ADR 0041: Separate maintained documentation from historical records](0041-documentation-scope.md)
-- [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — proposed; production verification pending
+- [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — accepted; production verification pending
+- [ADR 0043: Deploy the remaining Container Workers through cf](0043-cf-container-deployment.md) — accepted
+- [ADR 0044: SMBC backfill continuation publication](0044-smbc-resume-publication.md) — accepted
 - [ADR 0045: Collection quality is a per-request read of stored stage states, in closed codes](0045-collection-quality-read.md) — accepted
-- [ADR 0046: Maintenance windows as a separately granted agent capability](0046-agent-maintenance-windows.md) — proposed; amended 2026-10-09 by ADR 0063 (the revision is a delegated operation, refused until delegated execution exists)
-- [ADR 0047: Connect MCP clients through Cloudflare Access Managed OAuth, as an agent-only principal](0047-mcp-client-connection.md) — proposed; no client has connected to a deployment
+- [ADR 0046: Maintenance windows as a separately granted agent capability](0046-agent-maintenance-windows.md) — accepted; amended 2026-10-09 by ADR 0063 (the revision is a delegated operation, executable since #660 only under a delegation; none is configured)
+- [ADR 0047: Connect MCP clients through Cloudflare Access Managed OAuth, as an agent-only principal](0047-mcp-client-connection.md) — accepted; configuration names one MCP reader, a client connection is not asserted
 - [ADR 0048: Run an accepted collection or session refresh once through the named collector RPC](0048-operation-collector-dispatch.md) — accepted; production dispatch unverified
 - [ADR 0049: Keep the displayed and the computed reward expiry apart, each with its basis](0049-reward-expiry-basis.md) — accepted
 - [ADR 0050: Re-survey official maintenance pages as proposals an operator accepts](0050-maintenance-survey-proposals.md) — accepted; no page enabled until the owner confirms it
@@ -63,17 +65,17 @@ for current behavior.
 - [ADR 0052: Reconstructed state is a pure fold over a provisional adopted-event input, compared with reported snapshots](0052-reconstructed-state-fold.md) — accepted; amended by ADR 0058
 - [ADR 0053: A closed transaction-family registry states which families have an event writer and why the others do not](0053-transaction-family-registry.md) — accepted
 - [ADR 0054: One consumption guard for every economic writer: claims, seals and a commit log](0054-economic-consumption-guard.md) — accepted
-- [ADR 0055: Propose cross-identifier instrument candidates from stored identifier facts; adopt only through a person's mapping](0055-instrument-candidates.md) — accepted; route, page and agent read amended 2026-10-09 (proposed)
+- [ADR 0055: Propose cross-identifier instrument candidates from stored identifier facts; adopt only through a person's mapping](0055-instrument-candidates.md) — accepted; route, page and agent read amended 2026-10-09
 - [ADR 0056: Price and FX selection at an as-of under an explicit, versioned policy](0056-as-of-price-fx-selection.md) — accepted; policy values are open questions
-- [ADR 0057: Own-transfer proposals under an explicit policy, and planners that stay unregistered behind the production gate](0057-own-transfer-proposals.md) — proposed; no policy, no lane, planners unregistered
+- [ADR 0057: Own-transfer proposals under an explicit policy, and planners that stay unregistered behind the production gate](0057-own-transfer-proposals.md) — accepted; no policy, no lane, planners unregistered
 - [ADR 0058: A knowledge selector reads adopted events at a commit-log cut, and a B adapter feeds the reconstruction fold](0058-knowledge-selector-and-reconstruction-adapter.md) — accepted; served by `GET /api/v2/reconstructed-state`, `kogane.reconstructed-state.read` and `/reconstruction` (amendment 2026-10-09)
 - [ADR 0059: A C adapter maps selected revisions to lot inputs, and answers unsupported until a securities writer exists](0059-lot-adapter-from-selected-revisions.md) — accepted; no securities writer, no route
 - [ADR 0060: Resume verification of an exact published Container](0060-container-publication-checkpoint.md) — accepted (merged in #602)
-- [ADR 0063: The AI is a delegated operation path: a verified MCP principal the owner names may apply operations within capability, scope, confirmation and audit](0063-delegated-ai-operation-path.md) — proposed; nothing implemented, no delegation exists
-- [ADR 0064: One append-only audit record per operation, for the human UI and the AI alike, referencing the existing logs](0064-common-audit-log.md) — proposed; no table yet, migration number not fixed
-- [ADR 0065: Collect native coverage by runtime, without a fabricated repository total](0065-native-test-coverage.md) — proposed; native measurements, no numerical threshold
-- [ADR 0067: Current economic-row evidence readiness before event writers](0067-economic-row-readiness.md) — proposed; internal read-only diagnostic, no writer activation
-- [ADR 0068: Preserve provider expiry subsets apart from reward holdings](0068-provider-reward-expiry-subsets.md) — proposed; natural production reward capture verification pending
-- [ADR 0069: Retire collector-local public admin bearer entrypoints in bounded slices](0069-collector-admin-retirement.md)
-- [ADR 0070: Validate observed SBI Shinsei history offline before enabling acquisition](0070-sbi-shinsei-observed-history-boundary.md) — proposed; offline-only request and capture inspection, no history acquisition or publication
-- [ADR 0071: Let Renovate own dependency auto-merge](0071-remove-custom-automerge.md) — proposed; remove the unconfigured custom merge workflow
+- [ADR 0063: The AI is a delegated operation path: a verified MCP principal the owner names may apply operations within capability, scope, confirmation and audit](0063-delegated-ai-operation-path.md) — accepted; delegated execution implemented (#660), no delegation configured
+- [ADR 0064: One append-only audit record per operation, for the human UI and the AI alike, referencing the existing logs](0064-common-audit-log.md) — accepted; CORE 0075, no `alarm` or `lane` writer yet
+- [ADR 0065: Collect native coverage by runtime, without a fabricated repository total](0065-native-test-coverage.md) — accepted; native measurements, no numerical threshold
+- [ADR 0067: Current economic-row evidence readiness before event writers](0067-economic-row-readiness.md) — accepted; internal read-only diagnostic, no writer activation
+- [ADR 0068: Preserve provider expiry subsets apart from reward holdings](0068-provider-reward-expiry-subsets.md) — accepted; natural production reward capture verification pending
+- [ADR 0069: Retire collector-local public admin bearer entrypoints in bounded slices](0069-collector-admin-retirement.md) — accepted
+- [ADR 0070: Validate observed SBI Shinsei history offline before enabling acquisition](0070-sbi-shinsei-observed-history-boundary.md) — accepted; offline-only request and capture inspection, no history acquisition or publication
+- [ADR 0071: Let Renovate own dependency auto-merge](0071-remove-custom-automerge.md) — accepted; the custom merge workflow is removed

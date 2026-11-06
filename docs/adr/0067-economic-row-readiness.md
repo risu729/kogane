@@ -1,6 +1,6 @@
 # ADR 0067: Current economic-row evidence readiness before event writers
 
-- Status: proposed
+- Status: accepted (merged 2026-10-10 in #653)
 - Date: 2026-10-10
 - Issues: #549, #550, #556
 - Scope: internal S0 query only; no transport, adoption, policy or writer activation

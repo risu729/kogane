@@ -1,5 +1,6 @@
-// ADR 0063's declarations, not an execution grant. The core slice does not
-// connect a delegated principal to any command, writer or transport gate.
+// ADR 0063's declarations, not an execution grant. A declaration alone
+// executes nothing: execution goes through `execution.ts` and the adapters
+// each transport installs (`readiness.ts`).
 import type { ScopeSet } from "../grants.ts";
 
 export const DELEGATION_CAPABILITIES = [

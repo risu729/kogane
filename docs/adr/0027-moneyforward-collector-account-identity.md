@@ -1,6 +1,6 @@
 # ADR 0027: The MoneyForward collector derives the account identity the parser requires
 
-- Status: proposed; amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
+- Status: accepted (merged 2026-09-27 in #276); amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
   (the identity is derived without a key; see
   [Amendment: ADR 0029](#amendment-adr-0029-the-identity-needs-no-key))
 - Date: 2026-09-27

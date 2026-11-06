@@ -1,6 +1,6 @@
 # ADR 0070: Validate observed SBI Shinsei history offline before enabling acquisition
 
-- Status: proposed
+- Status: accepted (merged 2026-10-10 in #670)
 - Date: 2026-10-10
 - Related: [#447](https://github.com/risu729/kogane/issues/447),
   [implementation plan](../plans/2026-10-sbi-shinsei-history-first-slice.md)
