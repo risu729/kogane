@@ -216,7 +216,10 @@ function InstrumentCoverage({ source }: { source: string }): ReactNode {
           data.rows.length === 0 ? (
             <div className="panel-body">
               <EmptyState>
-                現在の整理済み記録に、株式・暗号資産・商品の識別子を使う取得元がありません。未処理の記録は含まれません。
+                {data.query.source === null
+                  ? "現在の整理済み記録に、株式・暗号資産・商品の識別子を使う取得元がありません。"
+                  : "この取得元の現在の整理済み記録は、株式・暗号資産・商品の識別子を使っていません。"}
+                未処理の記録は含まれません。
               </EmptyState>
             </div>
           ) : (

@@ -167,6 +167,18 @@ describe.if(runnable)("instrument counts on the identity page", () => {
     await tab.close();
   });
 
+  test("a source with no row is named as that source's absence, not as zeros", async () => {
+    refuse = false;
+    const tab = await open(1280);
+    await tab.getByLabel("取得元", { exact: true }).fill("synthetic-no-instruments");
+    await tab.getByRole("button", { name: "絞り込む" }).click();
+    const panel = tab.locator(PANEL);
+    await panel.getByText("この取得元の現在の整理済み記録は", { exact: false }).waitFor();
+    expect(await panel.locator("table").count()).toBe(0);
+    expect(await panel.innerText()).not.toContain("取得元がありません");
+    await tab.close();
+  });
+
   test("a refused read shows its reason, never a row of zeros", async () => {
     refuse = true;
     const tab = await open(390);
