@@ -1,7 +1,15 @@
-import { expect, test } from "bun:test";
+import { beforeAll, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { IDENTITY_AUDIT_QUERIES, validateIdentityAudit } from "../src/identity-audit.ts";
+import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 function fixture() {
   const db = new Database(":memory:");
@@ -170,13 +178,8 @@ test("audit detects duplicate and ineligible exposure if a current view regresse
   }
 });
 test("all queries compile against the complete production schema without compound-select expansion limits", () => {
-  const db = new Database(":memory:");
-  const directory = new URL("../../../packages/storage-d1/migrations/core/", import.meta.url);
+  const db = fullCoreDatabase();
   try {
-    for (const name of readdirSync(directory)
-      .filter((name) => name.endsWith(".sql"))
-      .sort())
-      db.exec(readFileSync(new URL(name, directory), "utf8"));
     const report = validateIdentityAudit(IDENTITY_AUDIT_QUERIES.map((q) => db.query(q.sql).all()));
     const plan = db
       .query<{ detail: string }, []>(

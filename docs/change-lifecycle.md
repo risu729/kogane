@@ -53,6 +53,19 @@ could disagree with it. Any change of kind, payload, expected revision or base
 context produces a different plan id, and an approval bound to the old digest
 can never apply to the new one (SC17, INV09).
 
+### Approval id
+
+```
+approvalId = commandKey("ap", [planId, approver, now, sortedScope, uses])
+```
+
+The approval's lifetime is not part of its id. An `approve` that finds its
+approval row already written (the same approver, plan, instant, scope and use
+count) inserts no second approval and answers with that row: its stored
+`expires_at` and `uses_remaining`, not the lifetime the repeated request asked
+for, so the receipt always equals what `readOwnApproval` and `commit` read.
+The processor route always asks for the default ten-minute lifetime.
+
 ### Expected revisions
 
 Every impact query joins `published_parse_runs`. Since migration 0026 "current"

@@ -249,7 +249,8 @@ describe.if(runnable)("identity coverage page", () => {
       broken = kind;
       const tab = await open();
       await tab
-        .getByText("整理状況を読み込めませんでした", { exact: false })
+        // The account panel's own refusal, not the 銘柄の整理状況 panel beside it.
+        .getByText(/^整理状況を読み込めませんでした/u)
         .waitFor({ timeout: 10_000 });
       expect(await tab.getByRole("region", { name: "口座の整理状況" }).count()).toBe(0);
       // Only the coverage answer is refused; the account list still shows.
