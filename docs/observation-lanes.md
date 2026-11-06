@@ -27,6 +27,24 @@ jobs of that lane, so a 10,000-job replay backlog cannot delay a run sealed a
 minute ago, and a slow history scan cannot delay either. Jobs are ordered by
 `priority DESC, available_at_ms, fetch_artifact_id` inside a lane.
 
+The interrupted-attempt repair (`UPDATE parse_runs ... WHERE status='pending'`)
+reads the partial index `parse_runs_pending` (migration 0081,
+[ADR 0079](adr/0079-pending-parse-run-index.md)), which holds the pending
+parse runs only; before it, every sweep read every parse run. Every statement
+one scheduled tick prepares is explained without table statistics by
+`services/processor/test/tick-query-plan.test.ts`, which lists the whole reads
+a tick still makes and the document that accepts each. Two of them are open
+limits recorded only here, not changed: the identity sweep's candidate page
+(`identitySweepCandidatesSql`, `identity_page`) orders every successful parse
+run by publication before its `LIMIT`, and the reward claim sweep's candidate
+page (`rewardCandidateQuery`) walks `balance_observations` by id from the
+first row and skips the ones outside its scope or already claimed, so when
+fewer than a page are left it reads every balance observation. Both run on
+every tick; their text is pinned by
+`packages/storage-d1/test/identity-sweep-query.test.ts` and
+`services/processor/test/reward-claims-query-differential.test.ts`, and
+neither cost is measured.
+
 Existing rows in `observation_parse_jobs` became `lane='incremental'` through
 the column default; jobs created by the repair scan are `repair`, jobs created
 from a plan are `replay` and carry `replay_plan_id` and `target_release`.

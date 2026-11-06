@@ -82,3 +82,4 @@ for current behavior.
 - [ADR 0074: A pure planner states multi-debit allocations of a card statement and answers unsupported for partial payments and excesses](0074-card-statement-allocation-planner.md) — proposed; nothing calls it, no policy, no writer
 - [ADR 0075: Reported holdings change between two dates, per provider holding key, never totalled](0075-reported-holdings-change-between-dates.md) — proposed; an application query, served by a route, a wire contract and a panel of the `/state` page (2026-11-06 amendment), no agent tool
 - [ADR 0076: Classify SBI Shinsei's FX board and stage references as non-account statements under identity policy version 2](0076-sbi-shinsei-non-account-identity.md) — proposed; the sweep re-identifies SBI Shinsei parses append-only after deployment
+- [ADR 0079: Index pending parse runs so the sweep's maintenance reads only them](0079-pending-parse-run-index.md) — proposed; additive partial index, migration 0081

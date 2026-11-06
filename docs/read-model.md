@@ -126,6 +126,26 @@ authentication gate, that the raw object is reachable through a visible
 artifact. It is independent of any list limit; the R2 read and the integrity
 checks in `src/read.ts` are unchanged.
 
+### Plans of the keyed reads
+
+`test/statement-plans.test.ts` explains the reader's keyed reads on every
+CORE migration with no table statistics, as D1 plans them: `listArtifacts`
+(walks artifact ids down from the cursor, no sort), `getArtifact` (the artifact,
+its parse runs by artifact, each run's observations by parse run),
+`getObservation` and its provenance, `getRawDownload` (by hash) and
+`parsingHealth` (unfinished jobs by status). It does the same for the events
+reader (`src/events.ts`): `activity` and `obligations` walk the live-revision
+partial indexes in key order with no sort, so a page stops at its `LIMIT`;
+legs, allocations, settlements, raw locators and reported balances are reached
+from the ids or account refs given. None reads a growing table from end to
+end. `reconciliationSignals`' leg read is not in that list: without statistics
+it starts from `economic_legs_basis (basis, role)`, every live cash-movement
+increase or decrease leg, and filters the requested subjects afterwards,
+although `economic_legs_subject` exists. The whole-set reads of the evidence
+reader (`overview`'s counts and lists, `filterOptions`, and the grouped
+`listTransactions`, `listLatestBalances`, `listPositions`) group or count first
+by design (the table above) and are not keyed.
+
 ### Card snapshot currentness and current card usage
 
 Which Vpass and MyJCB capture is current is defined once in `src/sql.ts`:
