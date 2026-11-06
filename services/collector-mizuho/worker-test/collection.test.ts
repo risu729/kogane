@@ -110,16 +110,19 @@ describe("Mizuho Worker and shared DATA integration", () => {
         });
         try {
           const result = await createHandler({ login, collect, persist }).alarmCollection(env);
+          // A run whose terminal was not written is not reported as a run.
           expect(result).toEqual({
             status: scenario === "success" ? "completed" : "failed",
-            runIds: [expect.any(String)],
+            runIds: scenario === "persistence-failure" ? [] : [expect.any(String)],
             failureCode: scenario === "success" ? null : "collection_failed",
           });
           expect(login).toHaveBeenCalledTimes(1);
           expect(collect).toHaveBeenCalledTimes(1);
           expect(persist).toHaveBeenCalledTimes(1);
           expect(thrownLogs).toBeGreaterThan(0);
-          const terminal = await readTerminal(env.DATA, "mizuho-bank", result.runIds[0]!);
+          const runId = persist.mock.calls[0]![1].runId;
+          if (scenario !== "persistence-failure") expect(result.runIds).toEqual([runId]);
+          const terminal = await readTerminal(env.DATA, "mizuho-bank", runId);
           if (scenario === "persistence-failure") expect(terminal.outcome).toBe("missing");
           else {
             expect(terminal.outcome).toBe("found");
@@ -194,7 +197,9 @@ describe("Mizuho Worker and shared DATA integration", () => {
         const records = log.mock.calls.map(([value]) => JSON.parse(String(value)));
         const results = records.filter((r) => r.event === "mizuho-collection-result");
         expect(results).toHaveLength(1);
-        expect(results[0].runId).toBe(result.runIds[0]);
+        // The persistence failure wrote no terminal, so the alarm names no run.
+        if (scenario === "persistence") expect(result.runIds).toEqual([]);
+        else expect(results[0].runId).toBe(result.runIds[0]);
         if (scenario === "acquisition")
           expect(results[0]).toMatchObject({
             providerOutcome: "partial",
