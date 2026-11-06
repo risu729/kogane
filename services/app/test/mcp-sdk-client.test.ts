@@ -103,10 +103,12 @@ describe("the official SDK client against /mcp", () => {
           mode === "legacy" ? "2025-11-25" : "2026-07-28",
         );
         const listed = await client.listTools();
-        // The agent tools, the purchase explanation (CORE 0047 is applied; the
+        // The agent tools, the instrument coverage (a whole-store summary.read
+        // grant, ADR 0073), the purchase explanation (CORE 0047 is applied; the
         // retired reader name is not read) and the reconstructed state's read.
         expect(listed.tools.map((tool) => tool.name)).toEqual([
           ...AGENT_TOOL_NAMES,
+          "kogane.instruments.coverage",
           PURCHASES_TOOL_NAME,
           RECONSTRUCTED_STATE_TOOL_NAME,
         ]);

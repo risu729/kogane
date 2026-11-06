@@ -690,8 +690,11 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
     // CORE 0047 and the reported-state views are present, so both reads are
     // published beside the six, whatever the operations flag. Operations
     // tools are not: `/mcp` is agent-only (ADR 0047).
+    // The grant is whole-store summary.read, so the instrument coverage
+    // read is listed too (ADR 0073).
     const reads = [
       ...six,
+      "kogane.instruments.coverage",
       PURCHASES_TOOL_NAME,
       ...RECONSTRUCTED_STATE_MCP_TOOLS.map((tool) => tool.name),
     ];
@@ -829,6 +832,7 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
     const listed = await mcp("tools/list", {}, { ...THROUGH_MCP, ...broken });
     expect((listed.result.tools as { name: string }[]).map((tool) => tool.name)).toEqual([
       ...MCP_TOOLS.map((tool) => tool.name),
+      "kogane.instruments.coverage",
       PURCHASES_TOOL_NAME,
       ...RECONSTRUCTED_STATE_MCP_TOOLS.map((tool) => tool.name),
     ]);

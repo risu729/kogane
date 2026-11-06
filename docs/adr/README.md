@@ -77,4 +77,4 @@ for current behavior.
 - [ADR 0069: Retire collector-local public admin bearer entrypoints in bounded slices](0069-collector-admin-retirement.md)
 - [ADR 0070: Validate observed SBI Shinsei history offline before enabling acquisition](0070-sbi-shinsei-observed-history-boundary.md) — proposed; offline-only request and capture inspection, no history acquisition or publication
 - [ADR 0071: Let Renovate own dependency auto-merge](0071-remove-custom-automerge.md) — proposed; remove the unconfigured custom merge workflow
-- [ADR 0073: Count each source's instrument identifiers by their candidate state, in a read beside the account coverage](0073-instrument-coverage-per-source.md) — proposed; `GET /api/identity/instrument-coverage` and the `銘柄の整理状況` panel
+- [ADR 0073: Count each source's instrument identifiers by their candidate state, in a read beside the account coverage](0073-instrument-coverage-per-source.md) — proposed; `GET /api/identity/instrument-coverage`, the `銘柄の整理状況` panel and (amendment 2026-11-06) the agent read `kogane.instruments.coverage`

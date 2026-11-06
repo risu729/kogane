@@ -181,7 +181,12 @@ and it belongs in its own change.
 
 Six tools, plus a seventh while the deployment serves card purchase
 recognition and an eighth while it serves the reconstructed state, one
-implementation each (`src/agent-service.ts`), reachable two ways. The two
+implementation each (`src/agent-service.ts`), reachable two ways. The read
+tools of `src/read-tools.ts` (`kogane.instruments.history`,
+`kogane.instruments.coverage`, `kogane.audit.search`, `kogane.audit.get`) are
+reachable both ways too, and each is listed only to a grant its service
+would answer ([below](#instrument-coverage),
+[shared history reads](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)). The two
 maintenance tools (`src/schedule-tools.ts`) exist while `SCHEDULES_ENABLED` is
 on: the read is reachable both ways, the revision on `/mcp` only and listed to
 nobody ([below](#maintenance-windows)).
@@ -194,6 +199,7 @@ nobody ([below](#maintenance-windows)).
 | `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                                                 |
 | `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                                       |
 | `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                 |
+| `kogane.instruments.coverage`         | `POST /api/agent/v1/instruments.coverage`       | `kogane.instruments.coverage`         | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                                      |
 | `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                                  |
 | `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                                       |
 | `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                              |
@@ -429,6 +435,51 @@ plan from the page is; under today's lists an agent can plan and cannot
 approve or commit. The server pins only the subject's mapping revision of an
 adoption plan, not the anchor's: read the candidate again right before
 planning, as the page does.
+
+### Instrument coverage
+
+`kogane.instruments.coverage` counts, per source, the security, crypto and
+product identifiers its current organized records use, by their candidate
+state ([identity](identity.md#per-source-counts),
+[ADR 0073 amendment 2026-11-06](adr/0073-instrument-coverage-per-source.md#amendment-2026-11-06-the-agent-read-on-both-agent-paths)).
+It is the browser route's own service (`readInstrumentCoverage`), so an agent
+and the `銘柄の整理状況` panel read one answer; `GET
+/api/identity/instrument-coverage` runs it under the reader grant, this tool
+under the caller's grant, and the two answer equal bodies for the same
+`source`.
+
+Input, a closed object: `source` (optional; 1 to 128 characters, no control
+character; only that source's row). Output: `kogane-instrument-coverage-v1`
+with `policy`, `query.source` (or null) and one row per source of
+`{ source, identifiers, states }`, where `states` holds the five ADR 0055
+states and adds up to `identifiers`. No identifier, label, amount or rate is
+in it, and an identifier two sources use counts under each, so there is no
+total. A source with no row uses no such identifier; that is not a row of
+zeros.
+
+Authorization, in order, after the Access check and the grant lookup:
+`summary.read`, else `403 unauthorized` (`capability:summary.read`); sources
+and accounts both `"*"`, else `403 evidence_restricted` (`scope:source`,
+`scope:account`), because each identifier's state depends on every source.
+Both are decided before the store is read. The candidate read's bounds apply
+unchanged: more than 500,000 current identity observations is
+`413 budget_exceeded` (`budget:identityObservations=500000`) and a store past
+the read's own bounds `413 budget_exceeded` (`budget:instrumentResolution`).
+An unknown key or a malformed `source` is `400 invalid_request`. Over MCP
+each refusal is the same body with `isError: true`. `tools/list` lists the
+tool only to a grant holding `summary.read` over the whole store; a grant it
+is not listed to that calls it anyway gets the refusal above.
+
+Each call walks every current identity observation, as a page load does
+(ADR 0055 amendment, Cost); routine polling needs a written bound first. It
+reads and never writes; its audit record (operation `instruments.coverage`,
+R0 `read`) carries the number of source rows only.
+
+The committed `AGENT_API_GRANTS` entry for the owner's MCP client holds
+`summary.read` and `records.read` over `"*"` sources and accounts, so by
+configuration this tool (and `kogane.instruments.history`) is listed to that
+client. That is configuration, not evidence that a client listed or called
+either.
 
 ### Reconstructed state
 

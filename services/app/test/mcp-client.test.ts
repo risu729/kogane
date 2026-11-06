@@ -69,7 +69,15 @@ function grants(table: Record<string, unknown>): Record<string, string> {
  * `EVENTS_V2_ENABLED` name is not read), and, because this store has the
  * reported state's views, the reconstructed state's read.
  */
-const PUBLISHED = [...AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME, RECONSTRUCTED_STATE_TOOL_NAME];
+/** The tools this deployment lists to a grant that holds no read tool's authority. */
+const BASE = [...AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME, RECONSTRUCTED_STATE_TOOL_NAME];
+/** What it lists to a whole-store `summary.read` grant: the instrument coverage too (ADR 0073). */
+const PUBLISHED = [
+  ...AGENT_TOOL_NAMES,
+  "kogane.instruments.coverage",
+  PURCHASES_TOOL_NAME,
+  RECONSTRUCTED_STATE_TOOL_NAME,
+];
 /** A valid reconstructed-state request for an account the store does not hold. */
 const RECONSTRUCTED = { account: "acct-mcp-synthetic", from: "2026-03-01", to: "2026-03-31" };
 
@@ -904,6 +912,9 @@ describe("tools under each grant shape", () => {
       const environment = grants({ [AGENT]: grant(capabilities) });
       // The list describes this deployment; the grant is enforced on the call
       // and described by kogane.capabilities.
+      // Each read tool is listed only to a grant its service answers: the
+      // history to records.read, the instrument coverage to summary.read,
+      // both over the whole store.
       expect(await listTools({ environment })).toEqual(
         capabilities.includes("records.read")
           ? [
@@ -912,7 +923,9 @@ describe("tools under each grant shape", () => {
               PURCHASES_TOOL_NAME,
               RECONSTRUCTED_STATE_TOOL_NAME,
             ]
-          : PUBLISHED,
+          : capabilities.includes("summary.read")
+            ? PUBLISHED
+            : BASE,
       );
       const report = await callTool("kogane.capabilities", {}, { environment });
       expect(report.structuredContent["capabilities"]).toEqual(capabilities);
