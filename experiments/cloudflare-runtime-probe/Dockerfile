@@ -5,7 +5,7 @@
 # migration, so a frozen install needs the root manifests plus this workspace's
 # own manifest at the path the lockfile records it under. Bun installs the
 # workspaces it can see and says which ones it skipped.
-FROM oven/bun:1.4.3-slim@sha256:14a223fa35747ec728bce300ef85888bc5f7958164d15bbba6a54b22b52a3288
+FROM oven/bun:1.4.4-slim@sha256:1846adf22496bd711036aae8be147e57bdebbaea2e5264e3e0b5af1db187d9a4
 
 WORKDIR /app
 

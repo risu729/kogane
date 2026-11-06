@@ -37,7 +37,12 @@ test("summary refuses failed, missing, stale and truncated native reports", () =
     const directory = join(root, "services/processor/coverage/bun/1-of-2");
     mkdirSync(directory, { recursive: true });
     symlinkSync(join(REPO_ROOT, "node_modules"), join(root, "node_modules"), "dir");
-    copyFileSync(join(REPO_ROOT, "package.json"), join(root, "package.json"));
+    // The summary fixture is independent of the repository's current Bun pin.
+    const fixtureBun = "1.4.2";
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify({ type: "module", packageManager: `bun@${fixtureBun}` }),
+    );
     copyFileSync(
       join(REPO_ROOT, "tasks/_lib/coverage-summary.mjs"),
       join(root, "tasks/_lib/coverage-summary.mjs"),
@@ -78,7 +83,7 @@ test("summary refuses failed, missing, stale and truncated native reports", () =
       requestedHeadSha: "pr-current",
       baseSha: "base-current",
       versions: {
-        bun: "1.4.2",
+        bun: fixtureBun,
         node: execFileSync("node", ["--version"], { encoding: "utf8" }).trim().slice(1),
         provider: "bun-native",
         vitest: null,
@@ -130,8 +135,10 @@ test("summary refuses failed, missing, stale and truncated native reports", () =
       writeFileSync(join(directory, "lcov.info"), lcov);
       expect(run().exitCode).toBe(1);
     }
-    save({ ...metadata, versions: { ...metadata.versions, bun: "old" } });
-    expect(run().exitCode).toBe(1);
+    for (const bun of ["old", "1.4.3"]) {
+      save({ ...metadata, versions: { ...metadata.versions, bun } });
+      expect(run().exitCode).toBe(1);
+    }
     save(metadata);
     for (const malformed of [
       lcov.replace("FNH:0", "FNH:100"),
