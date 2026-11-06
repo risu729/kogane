@@ -177,6 +177,6 @@ describe("the current read against the shipped text", () => {
       /^SEARCH n\b/u.test(detail),
     );
     expect(shippedNewer).toHaveLength(1);
-    expect(reads).toContain(shippedNewer[0]);
+    expect(reads).toContain(shippedNewer[0]!);
   });
 });
