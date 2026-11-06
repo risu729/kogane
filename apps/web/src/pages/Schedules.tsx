@@ -107,15 +107,19 @@ function Occurrence({ value }: { value: ScheduleOccurrence }): ReactNode {
 function ScheduleCard({
   value,
   refresh,
+  message,
+  setMessage,
 }: {
   value: ScheduleView;
   refresh: () => Promise<unknown>;
+  /** Held by the page: the card remounts on each new revision, its result must not. */
+  message: string;
+  setMessage: (message: string) => void;
 }): ReactNode {
   const [enabled, setEnabled] = useState(value.enabled),
     [timezone, setTimezone] = useState(value.timezone),
     [pattern, setPattern] = useState<SchedulePattern>(value.pattern);
-  const [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
   async function save(event: FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -680,6 +684,7 @@ export function SchedulesPage(): ReactNode {
   const [editor, setEditor] = useState<MaintenanceRule | null | undefined>(),
     [filter, setFilter] = useState("collection"),
     [leaseMessage, setLeaseMessage] = useState(""),
+    [cardMessages, setCardMessages] = useState<Record<string, string>>({}),
     [releasingSources, setReleasingSources] = useState<string[]>([]);
   const leaseRequests = useRef(new Set<string>());
   const refresh = () => client.invalidateQueries({ queryKey: ["schedules"] });
@@ -748,7 +753,15 @@ export function SchedulesPage(): ReactNode {
         <>
           <div className="schedule-grid">
             {query.data.schedules.map((s) => (
-              <ScheduleCard key={`${s.id}:${s.revision}`} value={s} refresh={refresh} />
+              <ScheduleCard
+                key={`${s.id}:${s.revision}`}
+                value={s}
+                refresh={refresh}
+                message={cardMessages[s.id] ?? ""}
+                setMessage={(message) =>
+                  setCardMessages((messages) => ({ ...messages, [s.id]: message }))
+                }
+              />
             ))}
           </div>
           <section className="schedule-section">

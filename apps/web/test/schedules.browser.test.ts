@@ -426,6 +426,25 @@ describe.if(runnable)("operator schedule administration", () => {
     });
     await page.close();
   }, 30000);
+  test("a saved schedule keeps its result message after the new revision is read back", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page
+        .locator(".schedule-card")
+        .filter({ has: page.getByRole("heading", { name: "ソニー銀行", exact: true }) });
+      await card.getByLabel("ソニー銀行の実行時刻").fill("06:40");
+      const reads = snapshotReads;
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card.getByRole("button", { name: "設定を保存", exact: true }).waitFor();
+      expect(writes).toHaveLength(1);
+      expect(snapshotReads).toBeGreaterThan(reads);
+      // The card re-reads revision 2; the status announced for the save stays.
+      expect(await card.getByRole("status").innerText()).toBe("保存しました。");
+    } finally {
+      await page.close();
+    }
+  }, 30000);
   test("reopening a maintenance rule after it changed edits the stored revision, not the earlier form", async () => {
     // Synthetic rule and page; no provider page is read.
     const rule = {
