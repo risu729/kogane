@@ -8,14 +8,21 @@ import type {
 import { useEvidenceMeta } from "./evidence-api.ts";
 import { EvidenceBoundary } from "./evidence-ui.tsx";
 import { EvidenceArtifactPage, EvidenceHistory, EvidenceRunPage } from "./pages/Evidence.tsx";
-import { Link, usePath } from "./router.tsx";
+import { Link, trimTrailingSlash, usePath } from "./router.tsx";
 import { AppShell, NAV_ICONS, type NavItem } from "./app-shell.tsx";
 import { EmptyState } from "./ui.tsx";
 import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract.ts";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
 import { GlobalPassEmptyMonthsNotice } from "./global-pass-empty-months.tsx";
 
-function routeFor(path: string) {
+/** Whether the observation app hands this path to the evidence browser's routes. */
+export function isEvidencePath(path: string): boolean {
+  return trimTrailingSlash(path) === "/evidence" || path.startsWith("/runs/");
+}
+
+/** The evidence browser's routes; one trailing slash names the same page, as in matchRoute. */
+export function routeFor(requested: string) {
+  const path = trimTrailingSlash(requested);
   if (path === "/schedules") return { kind: "schedules" as const, title: "収集スケジュール" };
   const artifact = /^\/runs\/(r_[1-9]\d*)\/artifacts\/(a_[1-9]\d*)$/u.exec(path);
   if (artifact)
