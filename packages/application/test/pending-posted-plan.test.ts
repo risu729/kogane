@@ -11,7 +11,7 @@ import type { CardPurchaseCandidate } from "../../domain/src/card-purchase-view.
 import type { SourceFactRef } from "../../domain/src/events.ts";
 import { pendingPostedMarker } from "../../domain/src/pending-posted-review.ts";
 import { exactQuantity, integerDecimal } from "../../domain/src/values.ts";
-import { approve } from "../src/command/approve.ts";
+import { approve, readOwnApproval } from "../src/command/approve.ts";
 import { commit, getReceipt } from "../src/command/commit.ts";
 import type {
   BatchOutcome,
@@ -745,6 +745,42 @@ describe("pending-to-posted review", () => {
       error: "plan_not_open",
     });
     expect(approvals()).toEqual(closed);
+  });
+
+  test("a replayed approval answers with the stored receipt, whatever lifetime the replay asks for", async () => {
+    const s = await scenario();
+    const store = sqliteCommandStore(s.w.db);
+    const payload = payloadOf(await candidateOf(s, s.postedEvent), "same purchase");
+    const plan = await planned(s, "relation.accept", payload);
+    const request = {
+      planId: plan.planId,
+      planDigest: plan.planDigest,
+      actor: OPERATOR,
+      scope: [] as string[],
+      now: T0,
+    };
+    const first = await approve(store, { ...request, ttlSeconds: 30 });
+    if (!first.ok) throw new Error("approval refused");
+    // The same approver, plan, instant, scope and uses name the same approval
+    // row; the replay's own lifetime is not what was stored.
+    const replay = await approve(store, { ...request, ttlSeconds: 3600 });
+    if (!replay.ok) throw new Error("approval refused");
+    expect(replay.approval.approvalId).toBe(first.approval.approvalId);
+    expect(replay.approval).toEqual(first.approval);
+    expect(await readOwnApproval(store, OPERATOR.id, first.approval.approvalId)).toEqual(
+      first.approval,
+    );
+    // So the answer never promises a commit window the approval does not have.
+    expect(
+      await commit(store, {
+        operationId: "op-replayed-approval",
+        principal: OPERATOR,
+        planId: plan.planId,
+        approvalId: replay.approval.approvalId,
+        planners: PLANNERS,
+        now: T1,
+      }),
+    ).toMatchObject({ ok: false, error: "approval_expired" });
   });
 
   test("commit refuses each gate by its own code before any effect, and a receipt answers only its operation", async () => {
