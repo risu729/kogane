@@ -95,6 +95,31 @@ function artifactMonth(filename: string): string | null {
   return MONTHLY_FRAGMENT.exec(filename)?.[2] ?? null;
 }
 
+/** Only join adjacent captured months; a missing fragment is never covered by an envelope. */
+function capturedMonthRanges(unitKey: string, months: readonly string[]): TerminalRange[] {
+  const segments: { start: string; end: string }[] = [];
+  let previousIndex = -1;
+  for (const month of [...new Set(months)].sort()) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/u.test(month)) throw new Error("shared_month_invalid");
+    const index = Number(month.slice(0, 4)) * 12 + Number(month.slice(5));
+    const previous = segments.at(-1);
+    if (previous !== undefined && index === previousIndex + 1) previous.end = month;
+    else segments.push({ start: month, end: month });
+    previousIndex = index;
+  }
+  return segments.map((segment) => ({
+    // Preserve the existing key for one contiguous range. Split ranges name
+    // their own start month, so they remain unique and independent of order.
+    rangeKey: `months-${unitKey}${segments.length === 1 ? "" : `-${segment.start}`}`,
+    rangeKind: "declared_coverage",
+    precision: "month",
+    basis: "manifest",
+    startValue: segment.start,
+    endValue: segment.end,
+    unitKey,
+  }));
+}
+
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
   const copy = new Uint8Array(bytes.byteLength);
   copy.set(bytes);
@@ -240,21 +265,9 @@ export async function moneyForwardRunPlanWithIdentity(
   }));
   // The months a unit actually returned, as the collector saw them: a
   // declaration of what was captured, never of what the provider holds.
-  const ranges: TerminalRange[] = sortedUnits.flatMap((unitKey) => {
-    const months = [...(monthsByUnit.get(unitKey) ?? [])].sort();
-    if (months.length === 0) return [];
-    return [
-      {
-        rangeKey: `months-${unitKey}`,
-        rangeKind: "declared_coverage",
-        precision: "month",
-        basis: "manifest",
-        startValue: months[0]!,
-        endValue: months.at(-1)!,
-        unitKey,
-      } satisfies TerminalRange,
-    ];
-  });
+  const ranges = sortedUnits.flatMap((unitKey) =>
+    capturedMonthRanges(unitKey, monthsByUnit.get(unitKey) ?? []),
+  );
   const reports: TerminalReport[] = [
     {
       reportRef: "terminal",

@@ -1,4 +1,4 @@
--- ADR 0072: the sweep's interrupted-attempt repair reads pending parse runs
+-- ADR 0079: the sweep's interrupted-attempt repair reads pending parse runs
 -- only. `maintenance` (services/processor/src/worker.ts) runs on every sweep:
 -- UPDATE parse_runs ... WHERE status='pending' AND EXISTS(<its failed job>).
 -- Without an index whose rows are the pending runs, D1's unanalyzed planner

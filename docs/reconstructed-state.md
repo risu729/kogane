@@ -3,7 +3,7 @@
 What adopted events imply for an account's balances and holdings, folded from
 a start snapshot and compared with what the provider reported at the end.
 This is phase 11's first piece
-([roadmap](roadmap.md#phases-8--11--dated-reported-and-reconstructed-state)),
+([roadmap](roadmap.md#layers-8--11--dated-reported-and-reconstructed-state)),
 decided in [ADR 0052](adr/0052-reconstructed-state-fold.md). It sits beside
 [reported state on a date](reported-state.md) and never replaces it: the
 reported figure and the reconstructed figure are two columns, and the
@@ -339,7 +339,10 @@ Any input order gives the same output and the same id.
 - No producer states family or history coverage (`coverage-producer-none-v1`),
   so no real account can be `complete` today.
 - Positions carry provider text only and are counted, never folded; only the
-  cash basis and one account are answered.
+  cash basis and one account are answered. How a reported holding changed
+  between two dates is the reported state's own comparison
+  ([holdings changes between two dates](reported-state.md#holdings-changes-between-two-dates),
+  ADR 0075), not a reconstruction: no event moves a security quantity yet.
 - Selection cost: one load reads the whole history of every touched event;
   measured once on `bun` locally (not asserted), 1,500 events with 4,500
   revisions loaded in 63–76 ms and selected in 198–257 ms; not measured on

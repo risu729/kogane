@@ -1,4 +1,4 @@
-# ADR 0072: Index pending parse runs so the sweep's maintenance reads only them
+# ADR 0079: Index pending parse runs so the sweep's maintenance reads only them
 
 - Status: proposed until this PR merges; accepted upon merge
 - Date: 2026-11-06

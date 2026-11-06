@@ -7,7 +7,10 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
-import { collectionQualityAvailable } from "../src/collection-quality-api";
+import { collectionQualityApi, collectionQualityAvailable } from "../src/collection-quality-api";
+import * as agentApi from "../src/agent-api";
+import { queryCollectionQualitySummary } from "../../../packages/application/src/query/collection-quality";
+import { d1Executor } from "../../../packages/read-model/src/d1";
 import worker from "../src/worker";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 
@@ -103,6 +106,89 @@ async function counts() {
 }
 
 describe("collection quality", () => {
+  it("rejects restricted or incapable authority before any schema, source or Alarm enumeration", async () => {
+    const prepare = vi.spyOn(env.DB, "prepare");
+    const grant = agentApi.readerGrant("synthetic-reader");
+    const reader = vi.spyOn(agentApi, "readerGrant");
+    const url = new URL(`https://fixture.test${PATH}`);
+    for (const scopes of [
+      { sources: ["sony-bank"], accounts: "*" as const },
+      { sources: "*" as const, accounts: ["synthetic-account"] },
+    ]) {
+      reader.mockReturnValue({ ...grant, scopes });
+      await expect(
+        collectionQualityApi(new Request(url), env, url, "synthetic-reader"),
+      ).rejects.toMatchObject({ status: 403 });
+      expect(prepare).not.toHaveBeenCalled();
+    }
+    reader.mockReturnValue({ ...grant, capabilities: ["summary.read"] });
+    await expect(
+      collectionQualityApi(new Request(url), env, url, "synthetic-reader"),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it("only matching configurations receive observed alarms; failures and invalid replies remain unknown", async () => {
+    const summary = await queryCollectionQualitySummary(d1Executor(env.DB));
+    const schedules = [
+      ...summary.sources.flatMap((source) => source.schedules),
+      ...summary.otherSchedules,
+    ];
+    const alarms = schedules.map((schedule) => ({
+      id: schedule.id,
+      enabled: schedule.enabled,
+      nextNominalAt: schedule.nextNominalAt,
+      nextRunAt: schedule.nextRunAt,
+      alarm: { status: "observed", actualAt: null },
+    }));
+    const mismatch = alarms.find((alarm) => alarm.id === "vpass")!;
+    mismatch.enabled = !mismatch.enabled;
+    let mode: "ok" | "failed" | "invalid" = "ok";
+    const relay = vi.fn(async (input: RequestInfo | URL) => {
+      const request = new Request(input);
+      expect(request.method).toBe("GET");
+      expect(request.url).toBe(
+        "https://observation-pipeline.internal/internal/collection-quality/alarms",
+      );
+      expect(request.headers.get("x-kogane-internal-caller")).toBe("kogane-evidence-browser");
+      if (mode === "failed") throw new Error("synthetic unavailable");
+      return Response.json(mode === "invalid" ? { alarms: [], unexpected: true } : { alarms });
+    });
+    const pipeline = {
+      fetch: relay,
+      connect() {
+        throw new Error("unexpected synthetic connect");
+      },
+    } satisfies Fetcher;
+    const sourceEnv: Env = { ...env, SCHEDULES_ENABLED: "true", PIPELINE: pipeline };
+    const url = new URL(`https://fixture.test${PATH}`);
+    const before = await counts();
+    const read = async () =>
+      (await (await collectionQualityApi(
+        new Request(url),
+        sourceEnv,
+        url,
+        "synthetic-reader",
+      ))!.json()) as typeof summary;
+    const observed = await read();
+    expect(
+      observed.sources.find((source) => source.sourceId === "sony-bank")!.schedules[0]!.alarm,
+    ).toEqual({ status: "observed", actualAt: null });
+    expect(
+      observed.sources.find((source) => source.sourceId === "vpass")!.schedules[0]!.alarm,
+    ).toEqual({ status: "unavailable", actualAt: null });
+    for (const failing of ["failed", "invalid"] as const) {
+      mode = failing;
+      const result = await read();
+      expect(
+        result.sources
+          .flatMap((source) => source.schedules)
+          .every((schedule) => schedule.alarm.status === "unavailable"),
+      ).toBe(true);
+    }
+    expect(await counts()).toEqual(before);
+    expect(relay).toHaveBeenCalledTimes(3);
+  });
   it("serves a signed-in reader the validated summary and writes nothing", async () => {
     const before = await counts();
     const response = await call(PATH);
