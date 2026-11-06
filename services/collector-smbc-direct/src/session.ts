@@ -354,11 +354,20 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           await this.ctx.storage.put("progress", progress);
         }
         if (progress.completedChunks >= ranges.length) {
-          let logoutSucceeded = false;
-          try {
-            await diagnostic.step("logout", () => profile.logout());
-            logoutSucceeded = true;
-          } catch {
+          // A completion retried after a later step failed has already logged
+          // out: it keeps that outcome rather than logging out a second time.
+          let logoutSucceeded = progress.logoutSucceeded;
+          if (typeof logoutSucceeded !== "boolean") {
+            logoutSucceeded = false;
+            try {
+              await diagnostic.step("logout", () => profile.logout());
+              logoutSucceeded = true;
+            } catch {
+              // Recorded below.
+            }
+            progress = { ...progress, logoutSucceeded };
+          }
+          if (!logoutSucceeded && !failureCodes.includes("logout_failed")) {
             failureCodes.push("logout_failed");
           }
           const completed: BackfillProgress = {
