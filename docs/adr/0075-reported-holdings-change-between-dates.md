@@ -140,6 +140,10 @@ result. What exists, read from the code on main at `f33b121`:
   beside it as the fold does for balances.
 - A parser renamed between the dates would make one holding two keys, each
   `listed_at_*_only`; parser names have not changed so far.
+- The key holds only what the position row states: the foreign positions
+  container names one provider account (`sbi-securities:foreign`), so two
+  rows of one market and code in a capture are one key listed twice
+  (`holding_key_ambiguous_*`), never paired with either.
 - Only the reported state's perimeter is compared: aggregators and provider
   totals stay excluded (ADR 0019, decision 2), and balances are not compared
   here (the reconstructed state sets reported balances at both ends of a
@@ -165,7 +169,9 @@ Synthetic data only; no production data, D1 or Workers.
   containers compared one by one, the refusals and the bound; 40 seeded
   random worlds checking that every key appears once in order, a figure
   exists exactly for `compared` and equals end − start in the key's unit,
-  `listed_at_*_only` faces a `not_listed` side, the filter keeps only keys
+  `listed_at_*_only` faces a `not_listed` side, every `not_listed` and
+  `no_snapshot` side agrees with an independent reading of the inputs (the
+  date's captures of the key's container and fetch unit), the filter keeps only keys
   naming the account, and a shuffled input gives the same output and context
   id; a coverage check that the random worlds reach every status and every
   side's reasons; the context id follows the reported contexts.

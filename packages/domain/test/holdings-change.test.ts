@@ -604,6 +604,45 @@ describe("compareReportedHoldings on random worlds", () => {
           expect(entry.reasons).toContain("no_snapshot_at_start");
         if (entry.end.state === "no_snapshot")
           expect(entry.reasons).toContain("no_snapshot_at_end");
+        // An independent check of every absence (INV05), from the inputs: a
+        // side is `not_listed` only when that date holds a capture of the
+        // key's container and of the one fetch unit its listings came from,
+        // and none of that date's listings is the key; `no_snapshot` only when
+        // that date holds no capture of that container and unit.
+        const isKey = (s: HoldingsChangeSide, h: HoldingsChangeObservation): boolean => {
+          const capture = s.snapshots.find((snap) => snap.ref === h.snapshotRef)!;
+          return (
+            capture.parserName === entry.key.parserName &&
+            capture.dataset === entry.key.dataset &&
+            h.sourceAccount === entry.key.sourceAccount &&
+            h.market === entry.key.market &&
+            h.securityCode === entry.key.securityCode
+          );
+        };
+        const listingUnits = new Set(
+          [start, end].flatMap((s) =>
+            s.holdings
+              .filter((h) => isKey(s, h))
+              .map((h) => s.snapshots.find((snap) => snap.ref === h.snapshotRef)!.unitKey),
+          ),
+        );
+        for (const [dated, state] of [
+          [start, entry.start],
+          [end, entry.end],
+        ] as const) {
+          const sameScope = dated.snapshots.filter(
+            (snap) =>
+              snap.parserName === entry.key.parserName &&
+              snap.dataset === entry.key.dataset &&
+              listingUnits.has(snap.unitKey),
+          );
+          if (state.state === "not_listed") {
+            expect(listingUnits.size).toBe(1);
+            expect(sameScope.map((snap) => snap.ref)).toEqual([state.snapshotRef]);
+            expect(dated.holdings.some((h) => isKey(dated, h))).toBe(false);
+          }
+          if (state.state === "no_snapshot") expect(sameScope).toEqual([]);
+        }
         if (account !== null) {
           const names = [start, end].flatMap((s) =>
             s.holdings.filter(
