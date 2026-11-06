@@ -104,6 +104,12 @@ const ACCEPTED: readonly { statement: string; step: RegExp; reason: string }[] =
     reason: "`o` is the `ranked` CTE here (FROM ranked o); identities are reached by key",
   },
   {
+    statement: "FROM reconciliation_proposals WHERE rowid>?1 AND method='rule' GROUP BY kind",
+    step: /^SCAN reconciliation_proposals USING INDEX reconciliation_proposals_kind_stage$/u,
+    reason:
+      "the lane audit's proposal range walks the kind index for its grouping; an open limit (docs/audit-log.md, Cost)",
+  },
+  {
     statement: "FROM parse_coverage_claims c",
     step: /^SCAN c USING INDEX parse_coverage_claims_parse_run$/u,
     reason: "walks claims newest first and stops at its LIMIT",

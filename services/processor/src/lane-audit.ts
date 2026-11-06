@@ -147,7 +147,10 @@ const range = (row: RangeRow | null | undefined): LaneRange | null =>
 /**
  * The lane's own rows above `mark`: its decisions, its commits in the mark's
  * epoch, and its proposals per kind. Every read is a range on the table's
- * key, so a tick reads only what was written since its mark.
+ * key, so a tick reads only what was written since its mark, except the
+ * `reconciliation_proposals` read: without table statistics it walks
+ * `reconciliation_proposals_kind_stage` whole for its `GROUP BY kind`
+ * (docs/audit-log.md, Cost).
  */
 async function laneWrites(
   db: D1Database,

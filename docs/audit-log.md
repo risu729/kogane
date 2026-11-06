@@ -309,7 +309,13 @@ and by the caps above. Each claimed collection occurrence adds one row (about
 a dozen a day with today's jobs), and each writing tick of an audited lane one
 row; an audited lane adds one mark statement before it runs and one range read
 per table it writes after it, each on the table's key, so it reads only what
-was written since its mark. A claim's one-record-per-occurrence check reads
+was written since its mark, with one exception, not changed and not measured:
+without table statistics the `reconciliation_proposals` read (`rowid>?1 AND
+method='rule' GROUP BY kind`) walks the whole
+`reconciliation_proposals_kind_stage` index for its grouping order and checks
+the rowid on every entry, so each tick of `reconciliation_sweep` and of
+`purchase_recognition` reads every reconciliation proposal once
+(`services/processor/test/tick-query-plan.test.ts`). A claim's one-record-per-occurrence check reads
 the earlier records of its job's target (`schedule:<job id>`) through the
 target index, one more for each claimed occurrence of that job.
 
