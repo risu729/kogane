@@ -168,7 +168,7 @@ export interface ScanOptions {
 }
 
 /** A class or error name only: never the message, which may quote a key. */
-function safeFailureCode(error: unknown): string {
+export function safeFailureCode(error: unknown): string {
   return error instanceof Error ? error.name || error.constructor.name : "unknown";
 }
 
