@@ -44,7 +44,7 @@ import {
 } from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import { RELATION_KINDS } from "../../../packages/domain/src/decisions.ts";
 import { MAX_REQUEST_BYTES, type ToolResult } from "./agent-service";
-import { HttpError } from "./http";
+import { assertOwnOrigin } from "./http";
 
 const MCP_SERVER_INFO = {
   name: "kogane-evidence-browser",
@@ -67,8 +67,7 @@ const MCP_INSTRUCTIONS =
  * not the SDK's hostname allow-list.
  */
 export function assertAgentTransport(request: Request, url: URL): void {
-  const origin = request.headers.get("origin");
-  if (origin !== null && origin !== url.origin) throw new HttpError(403, "origin_not_allowed");
+  assertOwnOrigin(request, url);
 }
 
 const REF = { type: "string", minLength: 1, maxLength: 512 } as const;
