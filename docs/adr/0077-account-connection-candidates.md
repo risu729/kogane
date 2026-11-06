@@ -99,10 +99,27 @@ Policy `account-candidates-v1`:
    `relation.accept` and `relation.reject` of exactly that triple with those
    evidence refs and no validity window.
 3. **Status from stored relations only**: `accepted` or `rejected` when the
-   newest relation of the triple (by `created_at`, then `id`, as the change
-   lifecycle orders it) says so; otherwise (none, `proposed`, `released`)
-   `proposed`. Accept is named unless a hold applies or the pair is accepted;
-   reject (keep apart, or withdraw an acceptance) unless the pair is rejected.
+   newest relation of the pair (by `created_at`, then `id`, as the change
+   lifecycle orders a relation's history) says so; otherwise (none,
+   `proposed`, `released`) `proposed`. A pair is one (identity value, direct
+   source account), and its relations are read under every reference it may
+   have been recorded under, each listed in `recordedContainment` with a
+   closed code: the candidate's own reference (`this-connection`), another
+   producer's current review of the same identity value
+   (`same-identity-value`; decision 4 already treats it as one connection),
+   and a reference migration 0029 backfilled under a key the one-time
+   identity-value rewrite (migration 0063) later replaced on the review row
+   (`legacy-connection-key`). The last mapping is the one 0029 wrote, never a
+   guess: the relation's id `rel_legacy_connection_<review row id>_<index>`
+   and decision `dr_legacy_connection_<review row id>_<index>` name the
+   review row (0063 kept row ids), its `to_ref` must be that row's pinned
+   reference at that index, its `from_ref` must carry the row's producer,
+   and the row's key now differs from the one the relation names. Accept is
+   named unless a hold applies or the pair is accepted under any of them, so
+   a pair decided before the rewrite or under another producer's reference is
+   never offered for a second acceptance; reject (keep apart, or withdraw an
+   acceptance) unless the pair is rejected. Both are planned under the
+   candidate's own reference.
 4. **Holds** withhold acceptance only: `evidence-ineligible` (the view's
    recheck failed) and `direct-account-in-several-connections` (the direct
    account is pinned by current eligible confirmed reviews of two or more
@@ -135,18 +152,25 @@ Policy `account-candidates-v1`:
    `/identities/account-candidates` (`口座の対応候補`) call it. The page reads
    the candidate again before planning and plans nothing if its status, hold
    or commands changed; approval and commit happen on `/confirm/:planId`.
-   Under today's grant lists an agent can plan and cannot approve or commit.
+   Under today's grant lists an agent named in `AGENT_GRANTS` (empty in the
+   committed configuration) can plan and cannot approve or commit, and an
+   MCP client reaches no command route (ADR 0047).
 8. **Bounds.** 64 current reviews (the browser connection reader's bound),
-   1,000 aggregator source accounts, 10,000 newest relation rows; each read
+   1,000 aggregator source accounts, 10,000 newest relation rows and 10,000
+   backfilled relations under a rewritten key; each read
    fetches one row past its bound and a larger store is refused whole
    (`budget_exceeded`, `budget:accountCandidates.<bound>`), never cut.
 
-**Cost.** Four keyed reads, no observation table, no rewrite of shipped SQL:
+**Cost.** Five keyed reads, no observation table, no rewrite of shipped SQL:
 the current review view, as the browser connection reader selects it (one
 pass over the small append-only review table; every newer-revision and
 evidence check is a keyed correlated subquery); `source_accounts` by its
 `UNIQUE(source_id,...)` index; `entity_relations` as one keyed range per kind
-of a `(kind, ref)` index; and the page's named source accounts by primary key
+of a `(kind, ref)` index; the 0029 mapping as one pass over the review
+table, its pinned references and each backfilled relation by primary key
+(`CROSS JOIN` fixes that order; without it, and without statistics, SQLite
+would walk every `connection_contains` row first); and the page's named
+source accounts by primary key
 and `UNIQUE(source_account_id, revision)`. The plan checks run on the whole
 CORE schema without table statistics. Remote D1 is not measured; the inputs
 are bounded by the review table (64 x 100 pairs).
@@ -167,9 +191,17 @@ change lifecycle unchanged.
   or summed, and `same_account` is never derived (SC06).
 - Where the one-time identity-value rewrite (migration 0063) replaced a
   review's importer-era key, the relation migration 0029 backfilled still
-  names the old key (relations are append-only). Such a pair reads as
-  `proposed` again until a person accepts it under the current key. This
-  ADR states the mechanism; it does not assert a production count.
+  names the old key (relations are append-only). The read maps it back to the
+  pair through the review row its id names (decision 3), so such a pair reads
+  as `accepted`, with the old reference listed, and is not offered for a
+  second acceptance. A later decision is planned under the current key and,
+  being newer, decides the pair. This ADR states the mechanism; it does not
+  assert a production count.
+- Rejecting an accepted pair appends a later `rejected` row, and the
+  candidate reads `rejected`. The balance projection reads every `accepted`
+  relation row, not the newest of a pair, so the earlier acceptance stays
+  among its declared inputs; it moves no balance today (a `connection:` scope
+  has no measurement), and changing that projection is not decided here.
 - Reviews are producer-scoped: a collector-era MoneyForward source account is
   listed with a reviewed connection only when its identity value equals the
   review's key; a value no review names is `unreviewed`.
@@ -178,8 +210,10 @@ change lifecycle unchanged.
   `unresolved` until a verifier records a witness for them.
 - No server-side candidate provenance is checked: a `relation.accept` of
   `connection_contains` was plannable before this read and still is. The
-  plan pins the relation's revision, so a decision taken in between makes it
-  stale at approval and commit.
+  plan pins the revision of the candidate's own reference, so a decision
+  taken in between under that reference makes it stale at approval and
+  commit; a decision recorded in between under one of the pair's other
+  references (another producer's, or a pre-rewrite key) does not.
 
 ## Explicitly not decided
 
@@ -204,15 +238,20 @@ Synthetic data only, no production access.
   claims nothing; an unresolved review labelled like a direct account and an
   unreviewed aggregator account propose nothing; accepted, rejected, released
   and other-producer relations; a stored `same_account` in either orientation
-  is reported and never proposed; every bound refuses; input order does not
-  matter.
+  is reported and never proposed; a decision under another producer's
+  reference of the same identity value, or under a 0029 reference whose key
+  0063 rewrote, decides the pair and the newest across references wins;
+  every bound refuses; input order does not matter.
 - `packages/application/test/account-candidates.test.ts`, over CORE with
   reviews inserted through the review triggers: the views, the summary and the
   named source accounts; the read writes nothing; an excluded direct run makes
   a review ineligible and releases the other connection's claim; an agent's
   plan is refused at approval; a person's `relation.accept` and later
   `relation.reject` (withdraw) are two rows and move the pair to `accepted`
-  then `rejected`, and no `same_account` row appears; grant, request, paging
+  then `rejected`, and no `same_account` row appears; a 0029-shaped
+  acceptance under a rewritten key reads `accepted` (a relation whose `to_ref`
+  is not the pinned reference at its id's index maps to nothing), and a
+  withdrawal under the current key is newer; grant, request, paging
   and bound refusals; query plans on the whole CORE schema without statistics.
 - `services/app/test/account-candidates-api.test.ts` on workerd: the route's
   views and refusals, Access gate and GET-only, the agent tool over HTTP and

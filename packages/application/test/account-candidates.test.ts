@@ -11,6 +11,8 @@ import {
   ACCOUNT_RELATIONS_SQL,
   ACCOUNT_SOURCE_FACTS_SQL,
   AGGREGATOR_SOURCE_ACCOUNTS_SQL,
+  LEGACY_CONNECTION_RELATIONS_SQL,
+  readLegacyConnectionRelations as queryLegacyRows,
 } from "../../read-model/src/account-candidates.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { approve } from "../src/command/approve.ts";
@@ -226,6 +228,71 @@ describe("the candidate read over the CORE schema", () => {
     expect((await review(s)).total).toBe(0);
   });
 
+  test("a 0029 backfilled acceptance under a key migration 0063 rewrote still decides the pair", async () => {
+    const s = world();
+    const reviewId = (
+      s.db.query("SELECT id FROM account_connection_reviews WHERE connection_key=?").get(KEY_A) as {
+        id: number;
+      }
+    ).id;
+    // What 0029 wrote for the review row's second pinned reference
+    // (`sa-direct-time`), under the importer-era key that 0063 later replaced
+    // on the review row; and a decoy that does not match the row's pinned
+    // reference at its index, so it maps to nothing.
+    const legacy = (index: number, oldKey: string, direct: string, status: string) => {
+      const id = `rel_legacy_connection_${String(reviewId)}_${String(index)}`;
+      const decision = `dr_legacy_connection_${String(reviewId)}_${String(index)}`;
+      s.db.run(
+        `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+         VALUES(?,'relation',?,1,'accept','legacy-migration','legacy-unknown',NULL,'synthetic','[]',NULL,NULL,'2026-01-01T00:00:00.000Z')`,
+        [decision, id],
+      );
+      s.db.run(
+        `INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
+         VALUES(?,'connection_contains',?,?,NULL,NULL,?,?,'[]','2026-01-01T00:00:00.000Z')`,
+        [id, `connection:${MF_PRODUCER}/${oldKey}`, `source_account:${direct}`, status, decision],
+      );
+    };
+    legacy(1, "synthetic-importer-era-key", "sa-direct-time", "accepted");
+    legacy(0, "synthetic-other-era-key", "sa-direct-time", "rejected");
+    const before = s.snapshot();
+    expect(await queryLegacyRows(s.sql)).toEqual([
+      {
+        fromRef: `connection:${MF_PRODUCER}/synthetic-importer-era-key`,
+        toRef: "source_account:sa-direct-time",
+        producerId: MF_PRODUCER,
+        connectionKey: KEY_A,
+      },
+    ]);
+    // Not offered again for acceptance: it is already accepted.
+    expect((await review(s)).total).toBe(0);
+    const [decided] = candidates(await review(s, { view: "decided" }));
+    expect(decided).toMatchObject({
+      connectionKey: KEY_A,
+      directSourceAccountId: "sa-direct-time",
+      status: "accepted",
+      recordedContainment: [
+        {
+          fromRef: `connection:${MF_PRODUCER}/synthetic-importer-era-key`,
+          reference: "legacy-connection-key",
+          status: "accepted",
+        },
+      ],
+      commands: { accept: null },
+    });
+    expect(s.snapshot()).toBe(before);
+    // Withdrawing it is planned under the current key and is newer.
+    const withdraw = { ...decided!.commands.reject!.payload, reason: "synthetic withdrawal" };
+    expect(withdraw.fromRef).toBe(`connection:${MF_PRODUCER}/${KEY_A}`);
+    expect((await decide(s, OPERATOR, "relation.reject", withdraw)).result.ok).toBe(true);
+    const [after] = candidates(await review(s, { view: "decided" }));
+    expect(after!.status).toBe("rejected");
+    expect(after!.recordedContainment.map((row) => [row.reference, row.status])).toEqual([
+      ["this-connection", "rejected"],
+      ["legacy-connection-key", "accepted"],
+    ]);
+  });
+
   test("a stored same_account decision is reported on the pair, and the policy still proposes none", async () => {
     const s = world();
     const result = await decide(s, OPERATOR, "relation.reject", {
@@ -404,12 +471,13 @@ describe("query plans without table statistics", () => {
     const aggregators = plan(AGGREGATOR_SOURCE_ACCOUNTS_SQL);
     const relations = plan(ACCOUNT_RELATIONS_SQL);
     const facts = plan(ACCOUNT_SOURCE_FACTS_SQL, ['["sa-mf-a"]']);
+    const legacy = plan(LEGACY_CONNECTION_RELATIONS_SQL);
     for (const table of [
       "transaction_observations",
       "balance_observations",
       "identity_observations",
     ])
-      expect([reviews, aggregators, relations, facts].join("\n")).not.toContain(table);
+      expect([reviews, aggregators, relations, facts, legacy].join("\n")).not.toContain(table);
     // The review view is the browser connection reader's own: one pass over
     // the small append-only review table, every newer-revision and evidence
     // check keyed.
@@ -425,6 +493,13 @@ describe("query plans without table statistics", () => {
     expect(
       relations.match(/SEARCH r USING INDEX entity_relations_(from|to) \(kind=\? AND /gu),
     ).toHaveLength(2);
+    // The 0029 mapping: one pass over the review table, each backfilled
+    // relation by its primary key, never a scan of the relations.
+    const legacyScans = legacy.match(/^SCAN .*/gmu) ?? [];
+    expect(legacyScans).toHaveLength(2);
+    expect(legacyScans[0]).toBe("SCAN c");
+    expect(legacyScans[1]).toMatch(/^SCAN j VIRTUAL TABLE INDEX \d+:/u);
+    expect(legacy).toContain("SEARCH r USING INDEX sqlite_autoindex_entity_relations_1 (id=?)");
     expect(facts).not.toMatch(/SCAN (s|m|n)\b/u);
     expect(facts).toContain("SEARCH s USING INDEX sqlite_autoindex_source_accounts_1 (id=?)");
     expect(facts).toContain(

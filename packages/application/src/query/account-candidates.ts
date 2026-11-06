@@ -33,6 +33,7 @@ import {
   AccountCandidateLimitError,
   accountCandidates,
   AGGREGATOR_ACCOUNT_LIMIT,
+  CONTAINMENT_REFERENCES,
   SAME_ACCOUNT_REASONS,
   UNREVIEWED_REASONS,
   type AccountCandidate,
@@ -48,6 +49,7 @@ import {
   readAccountRelations,
   readAccountSourceFacts,
   readAggregatorSourceAccounts,
+  readLegacyConnectionRelations,
   type AccountConnectionReviewRow,
   type AccountSourceFactsRow,
 } from "../../../read-model/src/account-candidates.ts";
@@ -112,6 +114,7 @@ interface AccountCandidatesManifest {
     statuses: readonly string[];
     holds: readonly string[];
     sameAccountReasons: readonly string[];
+    containmentReferences: readonly string[];
     connectionStates: readonly string[];
     unreviewedReasons: readonly string[];
   };
@@ -159,6 +162,7 @@ const ACCOUNT_CANDIDATES_MANIFEST: AccountCandidatesManifest = {
     statuses: ACCOUNT_CANDIDATE_STATUSES,
     holds: ACCOUNT_CANDIDATE_HOLDS,
     sameAccountReasons: SAME_ACCOUNT_REASONS,
+    containmentReferences: CONTAINMENT_REFERENCES,
     connectionStates: ACCOUNT_CONNECTION_STATES,
     unreviewedReasons: UNREVIEWED_REASONS,
   },
@@ -229,6 +233,7 @@ export async function queryAccountCandidates(sql: SqlExecutor): Promise<AccountC
   const reviews = await readAccountConnectionReviews(sql);
   const aggregators = await readAggregatorSourceAccounts(sql);
   const relations = await readAccountRelations(sql);
+  const legacyRelations = await readLegacyConnectionRelations(sql);
   // Each read returns one row past its bound; the domain refuses that row
   // count before it interprets any of them.
   return accountCandidates({
@@ -239,6 +244,7 @@ export async function queryAccountCandidates(sql: SqlExecutor): Promise<AccountC
       connectionKey: connectionKeyOf(row.referenceJson),
     })),
     relations,
+    legacyRelations,
   });
 }
 

@@ -1,5 +1,5 @@
 // The reads behind the account correspondence candidates (ADR 0077,
-// docs/identity.md). Four bounded reads, none of which writes:
+// docs/identity.md). Five bounded reads, none of which writes:
 //
 // - `ACCOUNT_CONNECTION_REVIEWS_SQL`: the current connection reviews with the
 //   view's own evidence recheck (`current_account_connection_reviews`, CORE
@@ -15,6 +15,16 @@
 //   pair of references, ordered as the change lifecycle orders a relation's
 //   history (`created_at` then `id`, newest first). Each kind is one keyed
 //   range of a `(kind, ref)` index (`entity_relations_from` or `_to`).
+// - `LEGACY_CONNECTION_RELATIONS_SQL`: the `connection_contains` relations
+//   migration 0029 backfilled whose `from_ref` no longer names the key of the
+//   review row they were backfilled from (migration 0063 rewrote the
+//   importer's review keys, never a relation), with that row's producer and
+//   key now. The row is named by the relation's own id
+//   (`rel_legacy_connection_<review row id>_<index>`, with its decision
+//   `dr_legacy_connection_<review row id>_<index>`), and the relation's
+//   `to_ref` must be the reference at that index of the row's pinned set, so
+//   the mapping is the one 0029 wrote, never a guess. One pass over the small
+//   review table and a primary-key lookup per pinned reference.
 // - `ACCOUNT_SOURCE_FACTS_SQL`: the named source accounts and each one's
 //   current mapping, by primary key and the `UNIQUE(source_account_id,
 //   revision)` index.
@@ -58,8 +68,8 @@ export interface AggregatorSourceAccountRow {
 
 /** Newest relation rows one read may return before it is refused (domain bound 10,000). */
 const ACCOUNT_RELATION_ROW_BOUND = 10_000;
-export const ACCOUNT_RELATIONS_SQL = `SELECT kind,fromRef,toRef,status FROM (
- SELECT r.kind,r.from_ref AS fromRef,r.to_ref AS toRef,r.status,
+export const ACCOUNT_RELATIONS_SQL = `SELECT kind,fromRef,toRef,status,createdAt,id FROM (
+ SELECT r.kind,r.from_ref AS fromRef,r.to_ref AS toRef,r.status,r.created_at AS createdAt,r.id,
   row_number() OVER (PARTITION BY r.kind,r.from_ref,r.to_ref ORDER BY r.created_at DESC,r.id DESC) AS rank
  FROM entity_relations r
  WHERE (r.kind='connection_contains' AND r.from_ref>='connection:' AND r.from_ref<'connection;'
@@ -73,6 +83,32 @@ export interface AccountRelationRow {
   fromRef: string;
   toRef: string;
   status: "proposed" | "accepted" | "rejected" | "released";
+  createdAt: string;
+  id: string;
+}
+
+/**
+ * The 0029 backfill's relations under a key 0063 rewrote; bounded like the
+ * relation read. `CROSS JOIN` fixes the loop order (reviews, their pinned
+ * references, then each relation by primary key): without it and without
+ * statistics SQLite would walk every `connection_contains` row first.
+ */
+export const LEGACY_CONNECTION_RELATIONS_SQL = `SELECT r.from_ref AS fromRef,r.to_ref AS toRef,
+ c.producer_id AS producerId,c.connection_key AS connectionKey
+FROM account_connection_reviews c CROSS JOIN json_each(c.direct_reference_ids_json) j
+CROSS JOIN entity_relations r ON r.id='rel_legacy_connection_'||c.id||'_'||j.key
+WHERE c.status='confirmed' AND j.type='text' AND r.kind='connection_contains'
+ AND r.decision_revision_id='dr_legacy_connection_'||c.id||'_'||j.key
+ AND r.to_ref='source_account:'||j.value
+ AND substr(r.from_ref,1,length(c.producer_id)+12)='connection:'||c.producer_id||'/'
+ AND r.from_ref<>'connection:'||c.producer_id||'/'||c.connection_key
+ORDER BY r.from_ref,r.to_ref LIMIT ${String(ACCOUNT_RELATION_ROW_BOUND + 1)}`;
+
+export interface LegacyConnectionRelationRow {
+  fromRef: string;
+  toRef: string;
+  producerId: string;
+  connectionKey: string;
 }
 
 /** ?1 a JSON array of source account ids; one row per id that exists. */
@@ -111,6 +147,12 @@ export async function readAggregatorSourceAccounts(
 
 export async function readAccountRelations(sql: SqlExecutor): Promise<AccountRelationRow[]> {
   return sql.all<AccountRelationRow>(ACCOUNT_RELATIONS_SQL, []);
+}
+
+export async function readLegacyConnectionRelations(
+  sql: SqlExecutor,
+): Promise<LegacyConnectionRelationRow[]> {
+  return sql.all<LegacyConnectionRelationRow>(LEGACY_CONNECTION_RELATIONS_SQL, []);
 }
 
 export async function readAccountSourceFacts(

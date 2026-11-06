@@ -38,8 +38,9 @@ type AccountCandidateEvidence = (typeof ACCOUNT_CANDIDATE_EVIDENCE)[number];
 
 /**
  * A candidate's status, from stored relations only: `accepted` or `rejected`
- * when the newest `connection_contains` relation for the pair says so;
- * otherwise (none, proposed or released) `proposed`.
+ * when the newest `connection_contains` relation for the pair (under any
+ * reference of `CONTAINMENT_REFERENCES`) says so; otherwise (none, proposed
+ * or released) `proposed`.
  */
 export const ACCOUNT_CANDIDATE_STATUSES = ["proposed", "accepted", "rejected"] as const;
 type AccountCandidateStatus = (typeof ACCOUNT_CANDIDATE_STATUSES)[number];
@@ -69,6 +70,25 @@ export const SAME_ACCOUNT_REASONS = [
   "several-direct-accounts",
 ] as const;
 type SameAccountReason = (typeof SAME_ACCOUNT_REASONS)[number];
+
+/**
+ * Which reference a stored `connection_contains` relation of a pair was
+ * recorded under. A pair is one (connection identity value, direct source
+ * account); its decisions can sit under more than one `from_ref`:
+ * - `this-connection`: the candidate's own `connection:<producer>/<key>`;
+ * - `same-identity-value`: another producer's current review of the same
+ *   identity value (`connection:<other producer>/<key>`): one connection;
+ * - `legacy-connection-key`: the reference migration 0029 backfilled from a
+ *   review row whose key the one-time identity-value rewrite (migration 0063)
+ *   later replaced; the relation still names the old key, and the review row
+ *   it was backfilled from (named in the relation's id) now carries this key.
+ */
+export const CONTAINMENT_REFERENCES = [
+  "this-connection",
+  "same-identity-value",
+  "legacy-connection-key",
+] as const;
+type ContainmentReference = (typeof CONTAINMENT_REFERENCES)[number];
 
 /** A connection review's state now: the review's status unless its evidence left the views. */
 export const ACCOUNT_CONNECTION_STATES = [
@@ -121,12 +141,30 @@ export interface AccountRelationFact {
   fromRef: string;
   toRef: string;
   status: StoredRelationStatus;
+  /** The newest row's `created_at` and `id`: the change lifecycle's order of a relation's history. */
+  createdAt: string;
+  id: string;
+}
+
+/**
+ * A `connection_contains` relation migration 0029 backfilled (id
+ * `rel_legacy_connection_<review row id>_<index>`) whose `fromRef` no longer
+ * names its review row's key: the row's key was rewritten by migration 0063.
+ * `producerId` and `connectionKey` are that review row's now.
+ */
+export interface LegacyConnectionRelationFact {
+  fromRef: string;
+  toRef: string;
+  producerId: string;
+  connectionKey: string;
 }
 
 export interface AccountCandidateInput {
   reviews: readonly ConnectionReviewFact[];
   aggregatorAccounts: readonly AggregatorAccountFact[];
   relations: readonly AccountRelationFact[];
+  /** Absent means none. */
+  legacyRelations?: readonly LegacyConnectionRelationFact[];
 }
 
 /** The change lifecycle payload (without `reason`) a candidate names. */
@@ -159,6 +197,18 @@ export interface AccountCandidate {
   evidenceEligible: boolean;
   status: AccountCandidateStatus;
   hold: AccountCandidateHold | null;
+  /**
+   * The newest stored `connection_contains` relation of this pair under each
+   * reference it may have been recorded under, sorted by reference; `status`
+   * is the newest of them. A decision recorded under another producer's
+   * reference or a pre-rewrite key decides this pair too, so the pair is
+   * never offered for a second acceptance.
+   */
+  recordedContainment: {
+    fromRef: string;
+    reference: ContainmentReference;
+    status: StoredRelationStatus;
+  }[];
   sameAccount: {
     proposed: false;
     reasons: SameAccountReason[];
@@ -249,7 +299,11 @@ export function accountCandidates(input: AccountCandidateInput): AccountCandidat
     throw new AccountCandidateLimitError("reviews");
   if (input.aggregatorAccounts.length > AGGREGATOR_ACCOUNT_LIMIT)
     throw new AccountCandidateLimitError("aggregatorAccounts");
-  if (input.relations.length > ACCOUNT_RELATION_LIMIT)
+  const legacyRelations = input.legacyRelations ?? [];
+  if (
+    input.relations.length > ACCOUNT_RELATION_LIMIT ||
+    legacyRelations.length > ACCOUNT_RELATION_LIMIT
+  )
     throw new AccountCandidateLimitError("relations");
   const seen = new Set<string>();
   for (const review of input.reviews) {
@@ -258,9 +312,29 @@ export function accountCandidates(input: AccountCandidateInput): AccountCandidat
     seen.add(key);
   }
 
-  const relations = new Map<string, StoredRelationStatus>();
+  const relations = new Map<string, AccountRelationFact>();
   for (const relation of input.relations)
-    relations.set(relationKey(relation.kind, relation.fromRef, relation.toRef), relation.status);
+    relations.set(relationKey(relation.kind, relation.fromRef, relation.toRef), relation);
+
+  // Every reference a pair's containment may be recorded under, by identity
+  // value: each current review's own reference, and each 0029 reference whose
+  // review row's key was rewritten, with the direct account it names.
+  const refsByKey = new Map<string, Set<string>>();
+  for (const review of input.reviews) {
+    const set = refsByKey.get(review.connectionKey) ?? new Set<string>();
+    set.add(connectionRef(review.producerId, review.connectionKey));
+    refsByKey.set(review.connectionKey, set);
+  }
+  const legacyByPair = new Map<string, Set<string>>();
+  for (const legacy of legacyRelations) {
+    const pairKey = JSON.stringify([legacy.connectionKey, legacy.toRef]);
+    const set = legacyByPair.get(pairKey) ?? new Set<string>();
+    set.add(legacy.fromRef);
+    legacyByPair.set(pairKey, set);
+  }
+  // The change lifecycle's order of a relation's history: `created_at`, then `id`.
+  const newer = (a: AccountRelationFact, b: AccountRelationFact): boolean =>
+    a.createdAt !== b.createdAt ? a.createdAt > b.createdAt : a.id > b.id;
 
   const aggregatorsByKey = new Map<string, string[]>();
   for (const account of input.aggregatorAccounts) {
@@ -307,9 +381,25 @@ export function accountCandidates(input: AccountCandidateInput): AccountCandidat
     if (review.status !== "confirmed") continue;
     for (const direct of directs) {
       const toRef = `source_account:${direct}`;
-      const stored = relations.get(relationKey("connection_contains", ref, toRef));
+      const references = new Map<string, ContainmentReference>();
+      for (const other of refsByKey.get(review.connectionKey) ?? [])
+        references.set(other, other === ref ? "this-connection" : "same-identity-value");
+      for (const legacy of legacyByPair.get(JSON.stringify([review.connectionKey, toRef])) ?? [])
+        if (!references.has(legacy)) references.set(legacy, "legacy-connection-key");
+      const recordedContainment: AccountCandidate["recordedContainment"] = [];
+      let newest: AccountRelationFact | undefined;
+      for (const [fromRef, reference] of [...references].sort(([a], [b]) => byText(a, b))) {
+        const stored = relations.get(relationKey("connection_contains", fromRef, toRef));
+        if (stored === undefined) continue;
+        recordedContainment.push({ fromRef, reference, status: stored.status });
+        if (newest === undefined || newer(stored, newest)) newest = stored;
+      }
       const status: AccountCandidateStatus =
-        stored === "accepted" ? "accepted" : stored === "rejected" ? "rejected" : "proposed";
+        newest?.status === "accepted"
+          ? "accepted"
+          : newest?.status === "rejected"
+            ? "rejected"
+            : "proposed";
       const hold: AccountCandidateHold | null = !review.evidenceEligible
         ? "evidence-ineligible"
         : (claims.get(direct)?.size ?? 0) > 1
@@ -334,7 +424,7 @@ export function accountCandidates(input: AccountCandidateInput): AccountCandidat
           [toRef, aggregatorRef],
         ] as const) {
           const same = relations.get(relationKey("same_account", fromRef, sideTo));
-          if (same !== undefined) recorded.push({ fromRef, toRef: sideTo, status: same });
+          if (same !== undefined) recorded.push({ fromRef, toRef: sideTo, status: same.status });
         }
       }
       candidates.push({
@@ -351,6 +441,7 @@ export function accountCandidates(input: AccountCandidateInput): AccountCandidat
         evidenceEligible: review.evidenceEligible,
         status,
         hold,
+        recordedContainment,
         sameAccount: {
           proposed: false,
           reasons:

@@ -50,8 +50,10 @@ function relation(
   fromRef: string,
   toRef: string,
   status: AccountRelationFact["status"],
+  createdAt = "2099-01-01T00:00:00.000Z",
+  id = `rel-${fromRef}-${toRef}`,
 ): AccountRelationFact {
-  return { kind, fromRef, toRef, status };
+  return { kind, fromRef, toRef, status, createdAt, id };
 }
 
 function run(input: Partial<AccountCandidateInput>) {
@@ -265,14 +267,115 @@ describe("status comes from stored relations only", () => {
     expect(statusOf("released").status).toBe("proposed");
     expect(statusOf("proposed").status).toBe("proposed");
   });
-  test("a relation from another producer's connection reference does not decide this pair", () => {
+  test("a relation under a reference no current review of this identity value has does not decide this pair", () => {
     const set = run({
       reviews: [review()],
       relations: [
         relation("connection_contains", connectionRef(MF_IMPORTER, KEY_A), to, "accepted"),
+        relation("connection_contains", connectionRef(MF_COLLECTOR, KEY_B), to, "accepted"),
       ],
     });
     expect(pair(set, "sa-direct-ordinary").status).toBe("proposed");
+    expect(pair(set, "sa-direct-ordinary").recordedContainment).toEqual([]);
+  });
+  test("another producer's review of the same identity value is one connection: its decision decides both pairs", () => {
+    const importerRef = connectionRef(MF_IMPORTER, KEY_A);
+    const set = run({
+      reviews: [review(), review({ producerId: MF_IMPORTER })],
+      relations: [relation("connection_contains", importerRef, to, "accepted")],
+    });
+    for (const producer of [MF_COLLECTOR, MF_IMPORTER]) {
+      const candidate = pair(set, "sa-direct-ordinary", producer);
+      expect(candidate.status).toBe("accepted");
+      // Never offered for a second acceptance under the other reference.
+      expect(candidate.commands.accept).toBeNull();
+      expect(candidate.commands.reject?.payload.fromRef).toBe(connectionRef(producer, KEY_A));
+      expect(candidate.recordedContainment).toEqual([
+        {
+          fromRef: importerRef,
+          reference: producer === MF_IMPORTER ? "this-connection" : "same-identity-value",
+          status: "accepted",
+        },
+      ]);
+    }
+  });
+  test("the newest decision across the pair's references is its status", () => {
+    const importerRef = connectionRef(MF_IMPORTER, KEY_A);
+    const set = run({
+      reviews: [review(), review({ producerId: MF_IMPORTER })],
+      relations: [
+        relation("connection_contains", importerRef, to, "accepted", "2099-01-01T00:00:00.000Z"),
+        relation("connection_contains", ref, to, "rejected", "2099-01-02T00:00:00.000Z"),
+      ],
+    });
+    expect(pair(set, "sa-direct-ordinary").status).toBe("rejected");
+    expect(pair(set, "sa-direct-ordinary", MF_IMPORTER).status).toBe("rejected");
+    // Same instant: the larger id is newer, as the change lifecycle orders it.
+    const tie = run({
+      reviews: [review(), review({ producerId: MF_IMPORTER })],
+      relations: [
+        relation("connection_contains", importerRef, to, "accepted", "2099-01-01", "rel_b"),
+        relation("connection_contains", ref, to, "rejected", "2099-01-01", "rel_a"),
+      ],
+    });
+    expect(pair(tie, "sa-direct-ordinary").status).toBe("accepted");
+  });
+  test("a 0029 relation under a key migration 0063 rewrote decides the pair under the current key", () => {
+    const oldRef = `connection:${MF_IMPORTER}/synthetic-importer-era-key`;
+    const legacy = {
+      fromRef: oldRef,
+      toRef: to,
+      producerId: MF_IMPORTER,
+      connectionKey: KEY_A,
+    };
+    const accepted = run({
+      reviews: [review({ producerId: MF_IMPORTER })],
+      relations: [relation("connection_contains", oldRef, to, "accepted")],
+      legacyRelations: [legacy],
+    });
+    const candidate = pair(accepted, "sa-direct-ordinary", MF_IMPORTER);
+    expect(candidate.status).toBe("accepted");
+    expect(candidate.commands.accept).toBeNull();
+    // A later decision is planned under the current key.
+    expect(candidate.commands.reject?.payload.fromRef).toBe(connectionRef(MF_IMPORTER, KEY_A));
+    expect(candidate.recordedContainment).toEqual([
+      { fromRef: oldRef, reference: "legacy-connection-key", status: "accepted" },
+    ]);
+    // A collector review of the same identity value sees the same decision.
+    const both = run({
+      reviews: [review({ producerId: MF_IMPORTER }), review()],
+      relations: [relation("connection_contains", oldRef, to, "accepted")],
+      legacyRelations: [legacy],
+    });
+    expect(pair(both, "sa-direct-ordinary").status).toBe("accepted");
+    // A withdrawal under the current key is newer than the backfill.
+    const withdrawn = run({
+      reviews: [review({ producerId: MF_IMPORTER })],
+      relations: [
+        relation("connection_contains", oldRef, to, "accepted", "2026-01-01T00:00:00.000Z"),
+        relation(
+          "connection_contains",
+          connectionRef(MF_IMPORTER, KEY_A),
+          to,
+          "rejected",
+          "2099-01-01T00:00:00.000Z",
+        ),
+      ],
+      legacyRelations: [legacy],
+    });
+    expect(pair(withdrawn, "sa-direct-ordinary", MF_IMPORTER).status).toBe("rejected");
+    // The mapping names one direct account: another pair of the same connection is not decided.
+    const other = run({
+      reviews: [
+        review({
+          producerId: MF_IMPORTER,
+          directSourceAccountIds: ["sa-direct-ordinary", "sa-direct-time"],
+        }),
+      ],
+      relations: [relation("connection_contains", oldRef, to, "accepted")],
+      legacyRelations: [legacy],
+    });
+    expect(pair(other, "sa-direct-time", MF_IMPORTER).status).toBe("proposed");
   });
   test("a stored same_account relation is reported in either orientation and never proposed", () => {
     const set = run({
@@ -317,6 +420,16 @@ describe("bounds and determinism", () => {
         relations: Array.from({ length: ACCOUNT_RELATION_LIMIT + 1 }, (_, i) =>
           relation("same_account", `source_account:a${String(i)}`, "source_account:b", "accepted"),
         ),
+      }),
+    ).toThrow(AccountCandidateLimitError);
+    expect(() =>
+      run({
+        legacyRelations: Array.from({ length: ACCOUNT_RELATION_LIMIT + 1 }, (_, i) => ({
+          fromRef: `connection:p/old-${String(i)}`,
+          toRef: "source_account:b",
+          producerId: "p",
+          connectionKey: KEY_A,
+        })),
       }),
     ).toThrow(AccountCandidateLimitError);
     expect(() => run({ reviews: [review(), review()] })).toThrow("duplicate");

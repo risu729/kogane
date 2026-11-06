@@ -218,7 +218,15 @@ Shinsei only. `reviewAccountCandidates`
   pinned), proposing `connection_contains` from `connection:<producer>/<key>`
   to `source_account:<id>`, with evidence `connection-review-confirmed` and
   the review's artifact refs. Status comes from the newest stored relation of
-  that triple (`accepted`, `rejected`, else `proposed`). Acceptance is
+  the pair (`accepted`, `rejected`, else `proposed`) under any reference it
+  may have been recorded under, listed as `recordedContainment`: the
+  candidate's own (`this-connection`), another producer's current review of
+  the same identity value (`same-identity-value`), or a reference migration
+  0029 backfilled under a key the identity-value rewrite (migration 0063)
+  later replaced (`legacy-connection-key`, mapped through the review row the
+  backfilled relation's id names). A pair already accepted under any of them
+  is not offered for acceptance again; new decisions are planned under the
+  candidate's own reference. Acceptance is
   withheld by a `hold`: `evidence-ineligible`, or
   `direct-account-in-several-connections` when current eligible reviews of two
   identity values pin the same direct account (none is chosen). Each names
@@ -248,13 +256,18 @@ buttons plan the named payload with the reason a person writes after reading
 the candidate again; approval and commit happen on the confirmation screen.
 Views `open`, `held`, `decided`, `connections`, `unreviewed`; 50 items a page.
 Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 newest
-relation rows, refused whole past each. Every read is keyed (ADR 0077, Cost).
+relation rows (and 10,000 backfilled relations under a rewritten key),
+refused whole past each. Every read is keyed (ADR 0077, Cost).
 
-Limits today: only SBI Shinsei pairs exist; a relation that migration 0029
-backfilled under an importer-era key the identity-value rewrite later
-replaced does not decide the pair under its current key; reviews are
-producer-scoped; no history view of a pair; no validity period; no
-leaf-account equivalence and no dedup of aggregator against direct rows.
+Limits today: only SBI Shinsei pairs exist; candidates are listed per
+producer's review (two producers' reviews of one identity value are two
+candidates sharing one status); a plan pins only the revision of the
+candidate's own reference, so a decision recorded under one of the pair's
+other references between planning and commit does not make it stale; the
+balance projection reads every accepted relation row, so a later rejection
+does not remove an earlier acceptance from its declared inputs; no history
+view of a pair; no validity period; no leaf-account equivalence and no dedup
+of aggregator against direct rows.
 
 ## Acceptance gates
 

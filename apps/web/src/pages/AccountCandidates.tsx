@@ -53,6 +53,17 @@ const SAME_ACCOUNT_LABELS: Readonly<Record<string, string>> = {
     "集約サービスの記録は連携単位で、個別の口座を示す項目がありません",
   "several-direct-accounts": "この連携には取得元の口座が複数含まれます",
 };
+const REFERENCE_LABELS: Readonly<Record<string, string>> = {
+  "this-connection": "この連携の参照",
+  "same-identity-value": "同じ連携の別の取得経路の参照",
+  "legacy-connection-key": "識別子の書き換え前の連携参照",
+};
+const RELATION_STATUS_LABELS: Readonly<Record<string, string>> = {
+  proposed: "提案のみ",
+  accepted: "採用",
+  rejected: "含まれないと判断",
+  released: "解除",
+};
 const STATE_LABELS: Readonly<Record<string, string>> = {
   confirmed: "同じ取得経路と確認済み",
   unresolved: "根拠不足で未確定",
@@ -188,7 +199,22 @@ function CandidateCard({
       {candidate.sameAccount.recorded.length > 0 ? (
         <p className="footnote">
           同じ口座かどうかの判断が別に保存されています（
-          {candidate.sameAccount.recorded.map((row) => row.status).join("、")}）。
+          {candidate.sameAccount.recorded
+            .map((row) => displayLabel(RELATION_STATUS_LABELS, row.status))
+            .join("、")}
+          ）。
+        </p>
+      ) : null}
+      {candidate.recordedContainment.some((row) => row.reference !== "this-connection") ? (
+        <p className="footnote">
+          この組み合わせの判断は別の参照でも保存されており、最も新しい判断を状態として表示しています（
+          {candidate.recordedContainment
+            .map(
+              (row) =>
+                `${displayLabel(REFERENCE_LABELS, row.reference)}: ${displayLabel(RELATION_STATUS_LABELS, row.status)}`,
+            )
+            .join("、")}
+          ）。
         </p>
       ) : null}
       {candidate.hold === null ? null : (

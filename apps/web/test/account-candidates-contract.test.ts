@@ -68,6 +68,20 @@ describe("the account candidate review contract", () => {
     unknownState.items[0].state = "matched";
     const unknownUnreviewed = copy("unreviewed");
     unknownUnreviewed.items[0].reason = "same-name";
+    const unknownReference = copy("open");
+    unknownReference.items[0].recordedContainment = [
+      { fromRef: "connection:x/y", reference: "label-match", status: "accepted" },
+    ];
+    const unknownRelationStatus = copy("open");
+    unknownRelationStatus.items[0].recordedContainment = [
+      { fromRef: "connection:x/y", reference: "legacy-connection-key", status: "merged" },
+    ];
+    const decidedWithoutRelation = copy("open");
+    decidedWithoutRelation.query.view = "decided";
+    decidedWithoutRelation.items[0].status = "rejected";
+    decidedWithoutRelation.items[0].commands.reject = null;
+    const otherEvidence = copy("open");
+    otherEvidence.items[0].commands.accept.payload.evidenceRefs = ["fetch_artifact:1"];
     const tooMany = copy("open");
     tooMany.items = Array.from({ length: 51 }, () => tooMany.items[0]);
     for (const value of [
@@ -81,6 +95,10 @@ describe("the account candidate review contract", () => {
       wrongView,
       unknownState,
       unknownUnreviewed,
+      unknownReference,
+      unknownRelationStatus,
+      decidedWithoutRelation,
+      otherEvidence,
       tooMany,
       { ...copy("open"), decisions: "operator-only" },
       null,

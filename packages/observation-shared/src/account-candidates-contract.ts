@@ -7,9 +7,11 @@ import {
   ACCOUNT_CANDIDATE_HOLDS,
   ACCOUNT_CANDIDATE_STATUSES,
   ACCOUNT_CONNECTION_STATES,
+  CONTAINMENT_REFERENCES,
   SAME_ACCOUNT_REASONS,
   UNREVIEWED_REASONS,
 } from "../../domain/src/account-candidates.ts";
+import { STORED_RELATION_STATUSES } from "../../domain/src/decisions.ts";
 
 /** The path the browser reads the review from. */
 export const ACCOUNT_CANDIDATES_PATH = "/api/identity/account-candidates";
@@ -49,7 +51,8 @@ function validCommand(
     value.payload.toRef === `source_account:${String(item.directSourceAccountId)}` &&
     value.payload.validFrom === null &&
     value.payload.validTo === null &&
-    texts(value.payload.evidenceRefs, 4)
+    texts(value.payload.evidenceRefs, 4) &&
+    JSON.stringify(value.payload.evidenceRefs) === JSON.stringify(item.evidenceRefs)
   );
 }
 
@@ -69,13 +72,28 @@ function validCandidate(view: string, item: Record<string, any>): boolean {
     typeof item.evidenceEligible === "boolean" &&
     oneOf(ACCOUNT_CANDIDATE_STATUSES)(status) &&
     (item.hold === null || oneOf(ACCOUNT_CANDIDATE_HOLDS)(item.hold)) &&
+    Array.isArray(item.recordedContainment) &&
+    item.recordedContainment.length <= 1_000 &&
+    item.recordedContainment.every(
+      (row: unknown) =>
+        record(row) &&
+        text(row.fromRef) &&
+        oneOf(CONTAINMENT_REFERENCES)(row.reference) &&
+        oneOf(STORED_RELATION_STATUSES)(row.status),
+    ) &&
+    // A pair with no recorded containment has not been decided.
+    (item.recordedContainment.length > 0 || status === "proposed") &&
     record(item.sameAccount) &&
     // This policy never proposes `same_account`.
     item.sameAccount.proposed === false &&
     listOf(SAME_ACCOUNT_REASONS, item.sameAccount.reasons) &&
     Array.isArray(item.sameAccount.recorded) &&
     item.sameAccount.recorded.every(
-      (row: unknown) => record(row) && text(row.fromRef) && text(row.toRef) && text(row.status),
+      (row: unknown) =>
+        record(row) &&
+        text(row.fromRef) &&
+        text(row.toRef) &&
+        oneOf(STORED_RELATION_STATUSES)(row.status),
     ) &&
     record(item.commands) &&
     validCommand(item.commands.accept, "relation.accept", item) &&

@@ -458,8 +458,9 @@ unknown key or malformed value is `400 invalid_request`.
 It reads and never writes, and never proposes `same_account`. A candidate's
 `commands` are the `relation.accept` and `relation.reject` payloads of
 `connection_contains` that would decide it; deciding is a plan of that
-payload, with a reason, through the change lifecycle, where an agent can plan
-and cannot approve or commit. No candidate provenance is checked on the
+payload, with a reason, through the change lifecycle, where an agent named in
+`AGENT_GRANTS` (empty in the committed configuration) can plan and cannot
+approve or commit, and an MCP client reaches no command route. No candidate provenance is checked on the
 server: read the candidate again right before planning, as the page does.
 
 ### Reconstructed state
