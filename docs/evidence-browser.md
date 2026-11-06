@@ -550,7 +550,7 @@ The client links to that route and never fetches it.
 
 ### Money is formatted without float arithmetic
 
-`formatAmount` lives in `src/money.ts` and is imported by the parsers, the
+`formatAmount` lives in `packages/parsers/src/money.ts` and is imported by the parsers, the
 API and the client alike. It widens minor units with `BigInt` and formats
 by string manipulation. A value that is not an integer is printed as
 stored rather than rounded; an instrument with no known minor-unit

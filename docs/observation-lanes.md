@@ -349,7 +349,8 @@ writes. `operation_dispatch` hands
 accepted operations to their executor, so it runs before the outbox — work
 accepted this tick can still reach it — while `decision_outbox` stays after
 every lane that changes what a projection reads; only `audit_overflow`, which
-touches the audit tables alone, runs after it. Its collector branch awaits at most one collector call per
+touches the audit tables alone, runs after it. `operation_dispatch`'s
+collector branch awaits at most one collector call per
 invocation ([ADR 0048](adr/0048-operation-collector-dispatch.md)), so a long
 collection delays `decision_outbox` on that tick by the same amount.
 

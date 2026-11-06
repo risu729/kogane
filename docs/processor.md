@@ -788,8 +788,8 @@ as a stage rather than blocking the run.
 
 GitHub Actions applies CORE then READ migrations. ADR 0039 deploys named collector RPC entrypoints before the Processor and App, replacing the former order of consumers before
 collectors. `services/processor/wrangler.jsonc` declares the collection Queue
-consumer and its DLQ; the R2 notification rule is not in any config file (§10
-lists it), and `config/ingest-clients.json` declares 16 registration routes. Deploying a Worker does not invoke a collector.
+consumer and its DLQ; no config file declares the R2 notification rule (only a comment in that
+file records it; §10 lists it), and `config/ingest-clients.json` declares 16 registration routes. Deploying a Worker does not invoke a collector.
 
 Turning a lane flag off pauses its work; terminals and recorded progress remain.
 Projections use READ only. Select only code compatible with the current schema
