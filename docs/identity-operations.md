@@ -122,6 +122,12 @@ needs a remote D1 measurement first (ADR 0055 amendment, Cost).
 
 - `/api/identity/coverage` compares all eligible current B observations against
   completed C runs by source; organized is not globally identified.
+  The 口座・銘柄 page (`/identities`) shows it as 整理状況: one row per source
+  with the served counts and 未処理 (eligible minus organized) for that row
+  only, no row across sources; an answer whose status counts do not add up to
+  organized, or whose organized exceeds eligible, is refused by the shared
+  validator and not shown
+  (`apps/web/test/identities.browser.test.ts`, desktop and phone width).
 - `/api/identity/accounts` and `/api/identity/instruments` read effective mapping
   revisions, expose their evidence links, and paginate at 100 rows.
 - `/api/identity/instrument-candidates` reads the ADR 0055 candidate set and

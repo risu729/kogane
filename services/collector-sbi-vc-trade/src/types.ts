@@ -20,7 +20,12 @@ export interface HealthState {
   lastAttemptAt: string | null;
   lastSuccessAt: string | null;
   lastHttpStatus: number | null;
-  lastGatewayStatus: string | null;
+  /**
+   * `OK`, or `rejected` for any other gateway status. Closed on purpose: the
+   * status string the provider sent is provider text and never reaches the
+   * stored health record or a log line.
+   */
+  lastGatewayStatus: "OK" | "rejected" | null;
   lastCookieUpdateCount: number;
   consecutiveFailures: number;
   lastErrorCode: string | null;

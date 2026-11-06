@@ -676,6 +676,23 @@
   min-width: 44rem;
 }
 
+/* Holdings change between two dates: each side's capture date and the
+ * holding's provider key sit on their own line under the figure. */
+.holdings-change-table {
+  min-width: 52rem;
+}
+
+.holdings-change-capture {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: normal;
+}
+
+/* A side's capture date and its original link stay on one line. */
+.holdings-change-table td .holdings-change-capture {
+  white-space: nowrap;
+}
+
 /* ── reconstructed state ───────────────────────────────────────────── */
 
 /* Reported, reconstructed, reported and the difference side by side: the
@@ -696,4 +713,38 @@
 .reconstructed-captured {
   display: block;
   font-size: var(--text-sm);
+}
+
+/* ── fixed report artifacts ────────────────────────────────────────── */
+
+/* The catalogue and a report's rows: long references wrap inside their cell,
+ * the table scrolls in its region and the page never scrolls sideways. */
+.report-table {
+  min-width: 44rem;
+}
+
+.report-table .num {
+  white-space: nowrap;
+}
+
+/* The stated figure takes the whole first row, and an exact amount wraps
+ * inside it on a phone rather than being clipped. */
+.report-figures .tile-wide {
+  grid-column: 1 / -1;
+}
+
+.report-figures .tile-value,
+.report-figures .amount {
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* Observation links of an explanation: many short ids, set as a wrapping row. */
+.report-ref-list {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-3);
 }

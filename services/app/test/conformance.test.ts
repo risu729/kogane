@@ -78,6 +78,7 @@ const production: ConformanceTarget = {
     ...CENTRAL_STORE_CAPABILITIES,
     reportedStateOnDate: true,
     reconstructedStateOnDate: true,
+    reportArtifacts: true,
     eventsV2: true,
     rewardsV2: true,
     cardPurchaseRecognition: true,
@@ -220,6 +221,7 @@ describe("shared contract pin", () => {
       cardPurchaseRecognition: false,
       reportedStateOnDate: false,
       reconstructedStateOnDate: false,
+      reportArtifacts: false,
       eventsV2: false,
       opsApi: false,
     });
