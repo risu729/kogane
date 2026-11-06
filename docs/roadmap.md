@@ -5,7 +5,7 @@ not.** The next objective is to turn collected provider displays into connected
 transactions, explainable assets and liabilities, valuations, and eventually
 cost basis, P&L and tax outputs.
 
-The code status was reviewed on 2026-11-06 against main 9342955. It distinguishes implemented
+The code status was reviewed on 2026-11-06 against main `46246f3`. It distinguishes implemented
 contracts and calculation components from a feature that works with real inputs
 through its user interface. This is a repository assessment, not a new production
 acceptance run. Dated production observations in the linked history describe those observations,
@@ -64,6 +64,32 @@ the latest `main` and a fresh CI run.
 | 1h Renovate                    | #822, #856, #932, #960                                                  | #856 and #932 change `.github/workflows/` and need the owner; #960 has native auto-merge on                                              |
 | 1i Older PRs                   | #436, #580, #639, #648, #714, #729, #887, #914, #915                    | Decide per PR: finish, supersede or close. #436 (Container runtime) needs owner approval for a hosted run; #887 has a failing `CI Check` |
 | 1j Status re-baseline          | #922, #955, then a fresh review of `current-status.md` and this roadmap | Runs last, after the other units                                                                                                         |
+
+**Outcome (2026-11-06, 23:10 UTC, main `46246f3`):** of the 45 PRs, 37 were
+merged after an independent review and a green `CI Check`, and 8 were closed with
+a comment giving the reason:
+
+- [#639](https://github.com/risu729/kogane/pull/639), [#729](https://github.com/risu729/kogane/pull/729),
+  [#856](https://github.com/risu729/kogane/pull/856) and [#914](https://github.com/risu729/kogane/pull/914)
+  were superseded by [#968](https://github.com/risu729/kogane/pull/968),
+  [#966](https://github.com/risu729/kogane/pull/966), [#976](https://github.com/risu729/kogane/pull/976)
+  and [#995](https://github.com/risu729/kogane/pull/995), which re-landed them on the current `main`.
+- [#580](https://github.com/risu729/kogane/pull/580), [#648](https://github.com/risu729/kogane/pull/648)
+  and [#887](https://github.com/risu729/kogane/pull/887) were stale snapshots. Most of their still-true content is in
+  [#922](https://github.com/risu729/kogane/pull/922). Three items are not yet on `main`: the
+  MCP recovery runbook from #887 (it survives only in that PR's ref); and, from #580, the
+  synthetic preview's empty state (表示対象の記録がありません) on financial routes and the
+  Docker daemon that Container identity checks need.
+- [#436](https://github.com/risu729/kogane/pull/436) (Container runtime) is closed at the
+  owner's request and tracked in [#988](https://github.com/risu729/kogane/issues/988); the
+  owner decides near 2026-12-31 whether to resume it.
+
+[Current status](current-status.md) was re-reviewed against `main` in #922 and in this
+re-baseline. Phase 1 is done except branch cleanup: cloud sessions cannot delete
+branches, so 28 branches without an open PR remain for the daily cleanup or the owner. The
+29th, `refactor/container-direct-api` (#436), is kept on purpose.
+PRs opened after 12:45 UTC, including the re-landed ones above, are ordinary work in the phase they belong
+to, not Phase 1.
 
 ### Phase 2 — Card usage → statement → bank debit (current milestone)
 

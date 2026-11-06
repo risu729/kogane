@@ -1,6 +1,6 @@
 # Current implementation status
 
-Type: maintained reference. Reviewed: 2026-11-06 against main `7baec1a`.
+Type: maintained reference. Reviewed: 2026-11-06 against main `46246f3`.
 This is a code/configuration assessment, not a fresh production acceptance run.
 Implementation, configured enablement, deployment and verified real-data coverage
 are separate claims. Historical acceptance records are linked from the
