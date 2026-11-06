@@ -203,6 +203,19 @@ Acceptance also requires explicit ownership evidence: the card account's
 party through current accepted decisions. A login, matching account labels,
 amounts or dates do not establish ownership.
 
+A claim is current while no later decision (`accepted`, `rejected` or
+`released`, in insertion order) names the same owner through either alias of
+the account (`<account>` or `account:<account>`). A proposal recorded after it
+changes nothing: it neither retires an accepted owner nor lifts the veto of a
+dated claim
+([ADR 0017's amendment](adr/0017-card-purchase-review-commands.md#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision)).
+Every reader applies this through the keyed ownership CTEs
+(`packages/read-model/src/card-settlement-ownership.ts`). The migration 0044
+view `card_settlement_fact_ownership` (and `card_settlement_readiness` over it)
+keeps the older rule, under which any later row retires a claim; no reader
+queries either view, and they agree with the CTEs on every store where no
+proposal follows a decision of the same owner.
+
 From a proposed candidate, `口座の保有者と根拠を確認` opens an operator-only
 review of both current account mappings and recorded ownership claims. Each
 side starts without a selected owner. The operator supplies a stable identifier
