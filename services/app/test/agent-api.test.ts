@@ -592,6 +592,13 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
+        name: "kogane.instruments.coverage",
+        required: [],
+        closed: false,
+        properties: ["source"],
+        annotations: readOnly,
+      },
+      {
         name: "kogane.purchases.explain",
         required: [],
         closed: false,
@@ -641,6 +648,7 @@ describe("untrusted provider content (AT71)", () => {
       ...AGENT_TOOL_NAMES,
       "kogane.instruments.history",
       REPORTED_STATE_TOOL_NAME,
+      "kogane.instruments.coverage",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -720,6 +728,7 @@ describe("untrusted provider content (AT71)", () => {
       ...AGENT_TOOL_NAMES,
       "kogane.instruments.history",
       REPORTED_STATE_TOOL_NAME,
+      "kogane.instruments.coverage",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
