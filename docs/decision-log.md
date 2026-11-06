@@ -42,6 +42,18 @@ for a mapping subject must name a mapping row that exists at that revision
 with the matching method, and a `release-override` must have an active
 override to release; the trigger aborts the whole D1 batch otherwise.
 
+A relation decision never updates or supersedes an earlier relation row: each
+`relation.accept` or `relation.reject` appends a new `entity_relations` row
+(with its own decision, whose `subject_ref` is that row's id) for the same
+triple (kind, `from_ref`, `to_ref`), and so does an agent proposal
+(`reconcile.propose`, [agent API](agent-api.md#proposals-are-not-adoptions)).
+Which row is in force
+is decided by each reader in its own SQL; there is no view for it.
+[ADR 0001's amendment](adr/0001-domain-axes.md#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
+records the rule adoption uses (the triple's newest decision by `created_at`
+and then `id`; a proposal never supersedes a decision) and lists every
+reader and how it orders a triple's rows.
+
 ## Command contract (`services/processor/src/identity-commands.ts`)
 
 ```ts
