@@ -181,7 +181,9 @@ and it belongs in its own change.
 
 Six tools, plus a seventh while the deployment serves card purchase
 recognition and an eighth while it serves the reconstructed state, one
-implementation each (`src/agent-service.ts`), reachable two ways. The two
+implementation each (`src/agent-service.ts`), reachable two ways. The dated
+reported state's read (`kogane.reported-state.read`, `src/read-tools.ts`) is
+served on the same condition as the eighth and reachable the same two ways. The two
 maintenance tools (`src/schedule-tools.ts`) exist while `SCHEDULES_ENABLED` is
 on: the read is reachable both ways, the revision on `/mcp` only and listed to
 nobody ([below](#maintenance-windows)).
