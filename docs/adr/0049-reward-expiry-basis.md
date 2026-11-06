@@ -542,9 +542,14 @@ With more than one, nothing is computed: the answer is `simulation: null`,
 `searchCoverage: "bounded"`, the `offerCoverage`, `sourceUnits` (every
 distinct source unit ref, in code-unit order, so the list does not depend on
 reader order) and `reasonCodes: ["source_unit_not_selected"]`, with no
-`paths` or `rejected` list. The list is not filtered by reachability or by
-the goal unit: whether a unit reaches the goal is the search's answer, and
-the search has not run. A given `unit` is used as before and is not checked
+`paths` or `rejected` list. The list is not filtered by reachability, by an
+offer's verification or deadline, or by the goal unit: whether a unit reaches
+the goal is the search's answer, and the search has not run. A search from
+the goal unit itself never finds a path (`findConversionPaths` counts the
+start unit as visited, so a return to it is `cycle_rejected`), but the goal
+unit stays in the list: `quantity` is read in the start unit, and dropping
+the goal unit would read a caller's goal-unit quantity as another unit's. A
+given `unit` is used as before and is not checked
 against the list. The bound check and `no_stored_offer` run first, so the
 refusal never applies to an empty or truncated offer set. The single
 simulation form is unchanged: after the version check it has one offer, and
