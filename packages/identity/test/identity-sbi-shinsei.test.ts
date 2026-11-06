@@ -5,6 +5,8 @@
 // classification, never their key.
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "bun:test";
+import { SBI_SHINSEI_CUSTOMER_ACCOUNT } from "../../parsers/src/parsers/sbi-shinsei-balance-summary-and-stage.ts";
+import { SBI_SHINSEI_FX_BOARD_ACCOUNT } from "../../parsers/src/parsers/sbi-shinsei-exchange-rate.ts";
 import { otherIdentity, SBI_SHINSEI_POLICY_VERSION } from "../src/other.ts";
 import type { IdentityInput, IdentityPlan } from "../src/types.ts";
 
@@ -85,6 +87,13 @@ const at = (row: IdentityInput, policyVersion: number | undefined) =>
 describe("SBI Shinsei identity policy versions", () => {
   test("the non-account classification starts at policy 2", () => {
     expect(SBI_SHINSEI_POLICY_VERSION).toBe(2);
+  });
+
+  test("the reclassified references are the parsers' constants", () => {
+    // The rule matches literal strings; a renamed parser constant would
+    // silently fall back to the deposit mapping without this guard.
+    expect(at(input(SBI_SHINSEI_FX_BOARD_ACCOUNT), 2).account.status).toBe("aggregate");
+    expect(at(input(SBI_SHINSEI_CUSTOMER_ACCOUNT), 2).account.status).toBe("aggregate");
   });
 
   test("policy 1 golden: every reference is a provider-local deposit", () => {
