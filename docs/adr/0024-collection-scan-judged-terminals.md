@@ -2,7 +2,9 @@
 
 - Status: accepted (#267); the
   [amendment of 2026-09-26](#amendment-2026-09-26-a-seal-core-refuses-is-a-verdict)
-  is proposed
+  and the
+  [amendment of 2026-11-06](#amendment-2026-11-06-a-registration-that-throws-spends-none-of-the-five)
+  are proposed
 - Date: 2026-09-26
 - Amends: [ADR 0010](0010-terminal-registration-budget.md) (how the scan's
   per-tick registration count is spent; the operation budget is unchanged)
@@ -310,3 +312,96 @@ terminals the [roadmap](../roadmap.md) lists, hit this on every walk.
   Miniflare's D1 (workerd), a collector-vpass-shaped run with the same
   mismatch blocks `run_inventory_incomplete` from the real `D1_ERROR`
   message and is answered `recorded: true` on the next call.
+
+## Amendment 2026-11-06: a registration that throws spends none of the five
+
+- Status: proposed
+- Date: 2026-11-06
+
+### Context
+
+The decision above leaves a registration that throws where it was: the
+scan (`collectionScan`) and [processor §2](../processor.md#2-two-ways-in-one-use-case)
+counted "a failure" among the new work that spends one of the tick's five
+registrations. A registration that throws records nothing, so it is attempted again on every tick that lists its page. A page
+holding five or more terminals that throw on every attempt, with any terminal
+listed after the fifth, therefore spent all five on them on every tick: the
+budget was exhausted, the cursor stayed, and the next tick listed the same
+page again. That is the stall this ADR was written to end, reached through
+throws instead of verdicts, and it contradicted
+[processor §2](../processor.md#2-two-ways-in-one-use-case) ("one failing run
+never stops the page and never pins the cursor", G1-13), which held for one
+failing run only. The amendment of 2026-09-26 leaves exactly such terminals
+behind as an open limit: a seal refusal in a message shape nobody has
+observed is rethrown on every walk, and the production rows that motivated
+it were more than five terminals.
+
+On synthetic data with the code before this amendment: 30 two-artifact
+terminals, the first five or six refused at the seal by an unlisted trigger
+code, register nothing on any tick, and after 20 to 30 ticks the cursor is
+still on the first page; with four such terminals the walk completes.
+
+### Options considered
+
+1. **State the stall as a limit and keep the behaviour.** Rejected: one
+   unclassified seal refusal per page beyond the fourth would stop the scan,
+   the path that finds terminals whose notification was lost, for good.
+2. **Record a closed per-terminal failure state** (a stage row or an
+   operational table) and answer the terminal from it for an interval, like
+   a `retryable` refusal. Rejected for now: a throw is not a verdict about
+   the terminal (CORE or R2 may simply have been unavailable), the stage
+   history is append-only evidence, and a new table needs a migration and a
+   retry policy that nobody has decided. It would also delay the next attempt
+   of a transient failure from the next walk to the interval.
+3. **Remember a position inside the page.** Rejected for the reasons above
+   (option 2 of the decision).
+4. **A registration that threw spends none of the five.** Chosen.
+
+### Decision
+
+- In the listing, a registration that threw (counted in `failed`) does not
+  count against the tick's `maxRegistrations`, exactly like a terminal
+  answered from its row. Nothing else about it changes: nothing is recorded,
+  the error class alone is logged, and the next walk attempts it again
+  (G1-13). Every terminal on the page is still attempted in listing order.
+- The continuations before the listing are unchanged (their own bound of
+  five). A registration that yields at the operation budget (`pending`,
+  `deferred`) still holds the page, as before.
+- **What still bounds a tick** is the invocation's 500 operations (ADR 0010)
+  and the page size: at most 25 attempts that throw per tick.
+
+### Consequences
+
+- A page with any number of terminals that throw cheaply (an R2 or CORE
+  failure on the first statements) is finished in as many ticks as its other
+  new work needs, and the cursor moves on.
+- A throw late in a registration still costs what the attempt spent: a seal
+  refused by an unclassified trigger re-verifies the run each time, and one
+  that yielded at the operation budget first stays `pending`, so it is also
+  continued (and throws) before the listing on every tick. In the test, six
+  such two-artifact runs leave room for two or three registrations per tick,
+  and the page of 25 finishes on the ninth tick. **Open limit:** a page whose
+  throwing terminals together spend the whole operation budget on every tick
+  still holds the cursor. Measured on the same synthetic page, eight
+  two-artifact runs refused at the seal finish it (in 22 ticks) and nine hold
+  it (nothing registers in 30 ticks); larger runs reach the limit with fewer.
+  Only classifying the refusal (a later amendment adding its code to
+  `SEAL_REFUSAL_CODES`) or a per-terminal failure state would end that.
+- During a CORE or R2 outage a tick may attempt all 25 listed terminals
+  instead of five before it ends, each failing; when the outage outlasts the
+  page, the cursor moves past those terminals and the next walk, or their
+  notifications, register them. That was already the documented behaviour
+  for a single failing run.
+- No migration, no new column, no new state: `collection_scan_state` stays
+  `operational-mutable` and nothing is written for a throw.
+
+### Verification
+
+`services/processor/test/collection-scan-convergence.test.ts` ("a page
+holding five or more terminals that always throw still finishes"): 30
+synthetic terminals, the first six refused at the seal by an unlisted
+trigger code. Before the change the walk does not complete in 20 ticks (the
+test fails); after it, the walk completes, the 24 others seal, the six have no verdict and are
+attempted again by the next walk (`failed: 6`) without holding the page, and
+once the trigger is dropped they register. The existing collection scan
+suites pass unchanged.

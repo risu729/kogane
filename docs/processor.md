@@ -72,8 +72,8 @@ remembered position inside a page could.
 
 **What spends one of the five** ([ADR 0024](adr/0024-collection-scan-judged-terminals.md)).
 Only new work does: a registration, a pending run the listing reaches, a
-first verdict, a retry that is due, a missing terminal, a registration that
-threw. The continuations that run before the listing have their own bound of
+first verdict, a retry that is due, a missing terminal. A registration that
+threw spends none (amendment of 2026-11-06, below). The continuations that run before the listing have their own bound of
 five and spend none of these. A terminal
 CORE has already judged under the current registration contract and the same
 terminal digest is answered from its `collection_runs` row and spends
@@ -115,8 +115,18 @@ cursor is null, also counted a cycle.
 A registration that **throws** — R2 or CORE unavailable, or a refusal CORE
 made that the derivation did not foresee — is counted in the lane's `failed`
 and logged by its error class only; nothing is recorded for that run, the
-page still advances and the next cycle tries it again. One failing run never
-stops the page and never pins the cursor (G1-13). A seal CORE's completeness
+page still advances and the next cycle tries it again. It spends none of the
+five, so failing runs never stop the page by themselves (G1-13; ADR 0024,
+amendment of 2026-11-06). Before that amendment each throw spent one, and a
+page with five or more terminals that throw on every attempt held the cursor
+for good. **Open limit:** a throw still costs the operations it spent, and
+the invocation's 500 (ADR 0010) still bound the tick. A throw late in a
+registration is expensive — a seal refusal re-verifies the run on every
+attempt, and one that yields at the budget first stays `pending` and is
+continued, and throws, on every tick — so a page whose throwing terminals
+spend the whole operation budget on every tick still holds the cursor: in the
+test, eight two-artifact runs refused at the seal finish their page and nine
+hold it. A seal CORE's completeness
 trigger refuses (`run_inventory_incomplete`) is not in this class: it is a
 verdict about the terminal and blocks the run (§3; ADR 0024, amendment of
 2026-09-26).
