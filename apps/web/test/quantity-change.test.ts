@@ -11,8 +11,16 @@ const exact = (coefficient: string, scale: number): Quantity => ({
   unitRef: "instrument:synthetic:-:1001",
   value: { status: "exact", value: { coefficient, scale }, normalizationVersion: "decimal-v1" },
 });
-const shown = (value: Quantity): string =>
-  renderToStaticMarkup(createElement(QuantityChange, { value })).replace(/<[^>]+>/gu, "");
+// The rendered text without its tags, stripped until nothing changes so no
+// partial tag can survive one pass.
+const shown = (value: Quantity): string => {
+  let text = renderToStaticMarkup(createElement(QuantityChange, { value }));
+  for (let previous = ""; previous !== text;) {
+    previous = text;
+    text = text.replace(/<[^>]*>/gu, "");
+  }
+  return text;
+};
 
 test("the sign is always written and zero is ±0", () => {
   expect(shown(exact("25", 1))).toBe("+2.5");
