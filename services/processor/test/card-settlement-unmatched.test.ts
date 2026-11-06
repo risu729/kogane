@@ -192,12 +192,13 @@ test("a statement with nothing to compare is `statement_not_comparable`, read or
       statement(1, null, DUE), // no exact total: no bank read
       statement(2, "30000", null), // no due date: no bank read
       statement(3, "0", DUE), // a zero total is read, and never matches
+      { ...statement(4, "30000", DUE), unit_ref: "" }, // no valid unit: read, never matches
     ],
-    [debit(11, "0", DUE)],
+    [debit(11, "0", DUE), debit(12, "30000", DUE)],
   );
   expect(await cardSettlementSweep(db)).toMatchObject({
     proposed: 0,
-    unmatched: { ...NONE, statement_not_comparable: 3 },
+    unmatched: { ...NONE, statement_not_comparable: 4 },
   });
   expect(inserts).toEqual([]);
 });

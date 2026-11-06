@@ -693,9 +693,10 @@ unchanged).
 `services/processor/test/card-settlement-unmatched.test.ts` runs the sweep on
 synthetic rows for each [unmatched code](#unmatched-statements): two debits
 summing to the total and a partial debit, an equal debit four days late and no
-debit, a missing total, a missing due date and a zero total, and an exact match
-whose candidate and digest are pinned to what the sweep wrote before the codes
-existed; its tick row holds the closed codes and integers only.
+debit, a missing total, a missing due date, a zero total and a total with no
+valid unit, and an exact match whose candidate and digest are pinned to what the
+sweep wrote before the codes existed; its tick row holds the closed codes and
+integers only.
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.

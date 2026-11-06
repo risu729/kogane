@@ -7,6 +7,7 @@ import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import {
   exactQuantity,
   normalizeDecimal,
+  validQuantity,
   type Quantity,
 } from "../../../packages/domain/src/values.ts";
 import {
@@ -152,8 +153,13 @@ export interface CardSettlementSweepResult {
   unmatched: Record<CardSettlementUnmatchedCode, number>;
 }
 
-function positive(quantity: Quantity): boolean {
-  return quantity.value.status === "exact" && BigInt(quantity.value.value.coefficient) > 0n;
+/** The statement-side test `cardSettlementCandidate` applies before any comparison. */
+function comparableTotal(quantity: Quantity): boolean {
+  return (
+    validQuantity(quantity) &&
+    quantity.value.status === "exact" &&
+    BigInt(quantity.value.value.coefficient) > 0n
+  );
 }
 
 /** Published source facts only; heuristic candidates always remain unaccepted. */
@@ -324,11 +330,11 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
       if (written >= 500) return { scanned, proposed, written, debitAccountEvidence, unmatched };
     }
     // Classified from the rows read above only: no further read. A total that
-    // is not positive never matches (`cardSettlementCandidate`), whatever the
-    // window holds.
+    // is not a valid positive quantity never matches (`cardSettlementCandidate`),
+    // whatever the window holds.
     if (!matched)
       unmatched[
-        !positive(total)
+        !comparableTotal(total)
           ? "statement_not_comparable"
           : banks.length === 0
             ? "no_debit_in_window"

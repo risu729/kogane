@@ -650,8 +650,9 @@ A lane whose stage is not wired at all records nothing. Only counts, flags and
 the closed code maps above (`purchase_recognition`'s exclusion codes,
 `card_settlement_sweep`'s unmatched codes, `maintenance_survey`'s failure
 codes) are copied, by field name; the 0049 trigger refuses any text value, so
-no amount, key, account label or provider wording can be stored. A tick killed mid-lane (a Worker limit)
-leaves no row for that lane, and the gap is the signal.
+no amount, key, account label or provider wording can be stored. A tick killed
+mid-lane (a Worker limit) leaves no row for that lane, and the gap is the
+signal.
 
 The table is bounded: each insert deletes that lane's rows beyond the latest
 288 (one day of the five-minute alarm) in the same batch. Rows are never

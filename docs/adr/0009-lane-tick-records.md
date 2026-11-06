@@ -116,17 +116,18 @@ same silence in the log line and in its tick row.
   debits and a partially paid one are both `no_equal_amount_debit`, and a
   statement paid outside the three days or from a bank without an adapter is
   `no_debit_in_window` when no other debit falls in its window (and
-  `no_equal_amount_debit` when one does). The bank read stops at 1,000 rows; a statement whose
-  window holds more counts as `no_equal_amount_debit` when none of those
-  rows matches.
+  `no_equal_amount_debit` when one does). The bank read stops at 1,000 rows;
+  a statement whose window holds more counts as `no_equal_amount_debit` when
+  none of those rows matches.
 
 ### Verification
 
 `services/processor/test/card-settlement-unmatched.test.ts` runs the sweep on
 synthetic rows: a statement settled by two debits and a partial one are
 `no_equal_amount_debit`, an equal debit four days late and no debit are
-`no_debit_in_window`, a missing total, a missing due date and a zero total are
-`statement_not_comparable`, and an exact match writes the candidate and digest
-the sweep wrote before the map existed. Its tick row holds closed codes and
-integers only. `services/processor/test/lane-ticks.test.ts` checks that a code
-outside the closed set is dropped from the row and from `/status`.
+`no_debit_in_window`, a missing total, a missing due date, a zero total and a
+total with no valid unit are `statement_not_comparable`, and an exact match
+writes the candidate and digest the sweep wrote before the map existed. Its
+tick row holds closed codes and integers only.
+`services/processor/test/lane-ticks.test.ts` checks that a code outside the
+closed set is dropped from the row and from `/status`.
