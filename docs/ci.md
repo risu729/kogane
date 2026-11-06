@@ -188,7 +188,16 @@ root task-file include.
   excluded from the smart-quote check.
 - Repository guards cover manifests, task coverage, infrastructure ledgers,
   Renovate configuration, shared GitHub API pagination, release decisions,
-  publication gates and import boundaries.
+  publication gates and import boundaries. `tests/log-hygiene.test.ts`
+  keeps exception text out of log calls: across the deployed sources of every
+  service (`src/` and `container/`) and every package under `packages/`, no
+  log call reads an exception's `.message` or `.stack`, stringifies an error
+  or passes the error itself (except to a local wrapper the guard lists,
+  which reduces it to a closed field); no source reads `.stack`; and every
+  `.message` read is listed in the guard with the reason it is safe. The scan
+  is textual, so it proves the call sites, not every value a sanitized field
+  can hold. It does not cover an exception that escapes a Worker handler,
+  which the runtime records with its message.
 - Knip checks unlisted dependencies and unresolved imports as build failures.
   Its broader unused-code report remains advisory because static analysis
   cannot prove every runtime entrypoint. The report and policy are documented
