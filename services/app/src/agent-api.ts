@@ -96,7 +96,7 @@ import {
   isDelegatedCommandTool,
 } from "./delegated-command-tools";
 
-import { readMcpTools } from "./read-tools";
+import { readMcpTools, REPORTED_STATE_TOOL_NAME } from "./read-tools";
 import {
   callDelegatedDecisionTool,
   delegatedDecisionTools,
@@ -245,7 +245,9 @@ export async function agentApi(
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
     // Reads require schedules.read; the write is separately listed to a resolved delegation.
     const schedules = schedulesServed(env);
-    // The reconstructed state likewise exists exactly while its GET route does.
+    // The reconstructed state likewise exists exactly while its GET route does,
+    // and so does the dated reported state: both are served where
+    // `GET /api/v2/reported-state` is (`reconstructedStateAvailable`).
     let reconstructedServed: Promise<boolean> | undefined;
     const reconstructed = (): Promise<boolean> =>
       (reconstructedServed ??= reconstructedStateAvailable(env));
@@ -254,6 +256,7 @@ export async function agentApi(
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
+        if (name === REPORTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         // An MCP client's capabilities also carry its delegation declaration
         // (#628, inert: nothing executes under it); recorded like any call.
         if (name === "kogane.capabilities" && caller.kind === "mcp-client")
@@ -313,7 +316,7 @@ export async function agentApi(
       },
       async () => [
         ...MCP_TOOLS,
-        ...readMcpTools(grant),
+        ...readMcpTools(grant, { reportedState: await reconstructed() }),
         ...(caller.kind === "mcp-client"
           ? [
               ...delegatedCommandTools(env, await delegation()),
@@ -349,7 +352,10 @@ export async function agentApi(
   // Absent, not refused, while the deployment cannot serve it, like its route.
   if (tool === PURCHASES_TOOL_NAME && !(await cardPurchasesAvailable(env)))
     throw new HttpError(404, "not_found");
-  if (tool === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructedStateAvailable(env)))
+  if (
+    (tool === RECONSTRUCTED_STATE_TOOL_NAME || tool === REPORTED_STATE_TOOL_NAME) &&
+    !(await reconstructedStateAvailable(env))
+  )
     throw new HttpError(404, "not_found");
   const body = await boundedJson(request);
   const outcome = (await toolCall(request, env, caller, tool, (audit) =>

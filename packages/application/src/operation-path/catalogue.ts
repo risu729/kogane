@@ -12,7 +12,7 @@
 // no delegation, prepare or confirm exists yet (ADR 0063, later slices).
 //
 // The operation name of an agent tool is the tool name without `kogane.`.
-import type { RiskClass, SubjectPath } from "../audit/vocabulary.ts";
+import type { AuditPath, RiskClass, SubjectPath } from "../audit/vocabulary.ts";
 import type { DelegationCapability } from "../delegation/contract.ts";
 
 export interface CatalogueEntry {
@@ -31,7 +31,7 @@ export interface CatalogueEntry {
    */
   delegation?: DelegationCapability;
   /** The paths the operation exists on today. */
-  paths: readonly SubjectPath[];
+  paths: readonly AuditPath[];
 }
 
 const UI: readonly SubjectPath[] = ["ui"];
@@ -199,6 +199,15 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // The dated reported state (plan D5), served while `GET /api/v2/reported-state`
+  // is; whole-store only (ADR 0063 decision 10).
+  "reported-state.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "purchases.explain": {
     risk: ["R0"],
     effect: null,
@@ -220,6 +229,14 @@ export const OPERATION_CATALOGUE = {
     effect: null,
     quiet: "read",
     capability: "records.read",
+    paths: AGENT,
+  },
+  // Per-source instrument identifier counts by candidate state (ADR 0073).
+  "instruments.coverage": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "summary.read",
     paths: AGENT,
   },
   // Account correspondence candidates (ADR 0077): read-only, the page's service.
@@ -274,6 +291,30 @@ export const OPERATION_CATALOGUE = {
     capability: "",
     paths: ["ui", "agent-http", "mcp"],
   },
+  // ── the Processor's own paths (plan slice S7) ───────────────────────────
+  // `ScheduleAlarm` claims an occurrence of a `collection`-kind job: accepted
+  // for dispatch to a collector, which contacts the provider (R2, the class of
+  // `ops.collection.request`). The outcome stays in the occurrence row. The
+  // `processor` tick and `keepalive` occurrences record nothing.
+  "alarm.occurrence.claim": {
+    risk: ["R2"],
+    effect: "accepted",
+    quiet: "replayed",
+    capability: "",
+    paths: ["alarm"],
+  },
+  // One tick of a lane that wrote rule decisions, economic commits or
+  // proposals: R2 when it wrote a decision or a commit (adopted state, the
+  // class of `command.commit`), R1 when it wrote proposals only (the class of
+  // `reconcile.propose`). A tick that wrote none records nothing; a tick that
+  // threw after writing is `failed`, with the rows it wrote.
+  "lane.tick": {
+    risk: ["R2", "R1"],
+    effect: "applied",
+    quiet: "read",
+    capability: "",
+    paths: ["lane"],
+  },
 } as const satisfies Record<string, CatalogueEntry>;
 
 export type OperationName = keyof typeof OPERATION_CATALOGUE;
@@ -286,8 +327,16 @@ export function catalogueEntry(operation: OperationName): CatalogueEntry {
   return OPERATION_CATALOGUE[operation];
 }
 
-/** Catalogue entries that are not tools: the transport refusal and the daily aggregate. */
-const NOT_TOOLS: readonly OperationName[] = ["mcp.request", "audit.overflow"];
+/**
+ * Catalogue entries that are not tools: the transport refusal, the daily
+ * aggregate and the Processor's own alarm and lane records.
+ */
+const NOT_TOOLS: readonly OperationName[] = [
+  "mcp.request",
+  "audit.overflow",
+  "alarm.occurrence.claim",
+  "lane.tick",
+];
 
 /**
  * The operation an agent tool name records under on `path`, or null for a

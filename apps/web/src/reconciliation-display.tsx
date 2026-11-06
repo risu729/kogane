@@ -57,6 +57,18 @@ export function SettlementQuantity({ value }: { value: Quantity }): ReactNode {
   );
 }
 
+/**
+ * A change between two quantities as the server computed it, exact, with its
+ * sign always written (`+2.5`, `-3.5`, `±0`); the row names its unit. A
+ * change that is not exact is shown as unknown, never as a number.
+ */
+export function QuantityChange({ value }: { value: Quantity }): ReactNode {
+  if (value.value.status !== "exact")
+    return <Nullable value={null} placeholder={`不明（${value.value.reasonCode}）`} />;
+  const text = decimalToString(value.value.value);
+  return <span>{text === "0" ? "±0" : text.startsWith("-") ? text : `+${text}`}</span>;
+}
+
 export function DateValue({ value }: { value: TemporalValue }): ReactNode {
   if (value.kind === "unknown")
     return <Nullable value={null} placeholder={`不明（${value.reasonCode}）`} />;

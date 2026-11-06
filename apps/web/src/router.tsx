@@ -111,6 +111,9 @@ export function isObservationKind(value: string): value is ObservationKind {
 export type Route =
   | { name: "overview" }
   | { name: "schedules" }
+  | { name: "collectionQuality" }
+  /** The operator's read-only audit log (ADR 0064). Filters are query parameters. */
+  | { name: "audit" }
   | { name: "transactions" }
   | { name: "balances" }
   | { name: "summaries" }
@@ -132,10 +135,26 @@ export type Route =
   | { name: "purchase"; eventId: string }
   | { name: "artifacts" }
   | { name: "artifact"; id: number }
+  /** The stored fixed report artifacts, newest first. */
+  | { name: "reports" }
+  /** One stored report, re-displayed by its id; never recomputed. */
+  | { name: "report"; reportId: string }
   | { name: "observation"; kind: ObservationKind; id: number }
   /** A09 change confirmation. The plan id is a 64-hex digest, nothing else. */
   | { name: "confirm"; planId: string }
   | { name: "notFound"; path: string };
+
+/** The report API's own identifier rule (`REPORT_ID` in the report contract). */
+const REPORT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
+
+/** A path segment decoded once, or undefined when it is not valid percent-encoding. */
+function decodeSegment(value: string): string | undefined {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
+}
 
 /** Only plain non-negative integers, matching the API's own id rule. */
 function parseId(value: string | undefined): number | undefined {
@@ -144,10 +163,17 @@ function parseId(value: string | undefined): number | undefined {
   return Number.isSafeInteger(id) ? id : undefined;
 }
 
+/** One trailing slash names the same page. Only one is removed, so `/evidence//` stays distinct. */
+export function trimTrailingSlash(path: string): string {
+  return path.length > 1 && path.endsWith("/") ? path.slice(0, -1) : path;
+}
+
 export function matchRoute(path: string): Route {
-  const ownership = /^\/reconciliation\/([A-Za-z0-9_-]{1,128})\/ownership$/u.exec(path);
+  // As the segment routes below already allow, so do the pattern routes.
+  const trimmed = trimTrailingSlash(path);
+  const ownership = /^\/reconciliation\/([A-Za-z0-9_-]{1,128})\/ownership$/u.exec(trimmed);
   if (ownership) return { name: "cardOwnership", proposalId: ownership[1]! };
-  const purchase = /^\/purchases\/((?:purchase|refund)_[0-9a-f]{64})$/u.exec(path);
+  const purchase = /^\/purchases\/((?:purchase|refund)_[0-9a-f]{64})$/u.exec(trimmed);
   if (purchase) return { name: "purchase", eventId: purchase[1]! };
   const segments = path.split("/").filter((segment) => segment !== "");
   const [first, second, third] = segments;
@@ -156,6 +182,8 @@ export function matchRoute(path: string): Route {
 
   if (segments.length === 1) {
     if (first === "schedules") return { name: "schedules" };
+    if (first === "collection-quality") return { name: "collectionQuality" };
+    if (first === "audit") return { name: "audit" };
     if (first === "transactions") return { name: "transactions" };
     if (first === "balances") return { name: "balances" };
     if (first === "summaries") return { name: "summaries" };
@@ -167,6 +195,12 @@ export function matchRoute(path: string): Route {
     if (first === "reconciliation") return { name: "reconciliation" };
     if (first === "purchases") return { name: "purchases" };
     if (first === "artifacts") return { name: "artifacts" };
+    if (first === "reports") return { name: "reports" };
+  }
+
+  if (first === "reports" && segments.length === 2 && second !== undefined) {
+    const reportId = decodeSegment(second);
+    if (reportId !== undefined && REPORT_ID.test(reportId)) return { name: "report", reportId };
   }
 
   if (first === "identities" && second === "instrument-candidates" && segments.length === 2)

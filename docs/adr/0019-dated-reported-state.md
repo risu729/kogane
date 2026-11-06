@@ -14,7 +14,7 @@
 
 Phase 8 asks what each provider reported at a point in time, including
 positions, provider valuations and card payables, not only today's cash
-balances ([roadmap](../roadmap.md#phases-8--11--dated-reported-and-reconstructed-state)).
+balances ([roadmap](../roadmap.md#layers-8--11--dated-reported-and-reconstructed-state)).
 The current-state reads already choose one complete container snapshot per
 partition (policy table, coverage claims, published parses), but only the
 newest one. The plan's binding decisions 4.1 (what "reported state on D"
@@ -113,3 +113,52 @@ values, exclusions, coverage, payable transitions, bounds),
 statistics; 398 ms today and 346 ms a year back at `STATEMENT_SCALE` on
 `bun:sqlite`), `services/app/test/reported-state-api.test.ts`, and the web
 contract and browser tests, all on synthetic data.
+
+## Agent read amendment — 2026-11-06 (proposed)
+
+- Status: proposed (accepted when the pull request that adds it merges)
+- Date: 2026-11-06
+
+**Context.** The reported state on a date had a route and a page but no agent
+read. The `reported-state` intent of `kogane.financial.query` answers the
+latest balances and positions, not a dated state. Row D5 of the
+[AI operation path plan](../plans/2026-10-ai-operation-path.md#53-reads-searches-and-details)
+plans `kogane.reported-state.read` under `records.read`, whole-store only, and
+[ADR 0063](0063-delegated-ai-operation-path.md) decision 10 requires a new
+read tool to call the route's own reader and to refuse a listed source or
+account grant before any read.
+
+**Options considered.** (1) A new `dated-reported-state` intent of
+`kogane.financial.query`: rejected, because that service's intents are graded
+per scope and paged under a context, and this read is neither scoped nor
+paged. (2) A tool with its own validation over `queryDatedState`: rejected,
+because two copies of the request rules can drift. (3) One function for the
+route's request rules and read, called by the route and by a read tool:
+chosen.
+
+**Decision.** `kogane.reported-state.read` (`POST /api/agent/v1/reported-state.read`
+and MCP `tools/call`) takes `{date, source?, account?}` as a closed object with
+the route's patterns, requires `records.read` over `"*"` sources and accounts
+(else `403 unauthorized` or `403 evidence_restricted` before the body is
+validated), and answers through `readReportedState`
+(`services/app/src/reported-state-api.ts`), which the route also calls: the
+same body (`apiVersion: 2` and the reported state), the same refusals
+(`invalid_date`, `date_in_future`, `413 result_limit_exceeded`) on both agent
+paths. It exists while the route does (`reportedStateOnDate`): otherwise its
+name is `unknown_tool` and its path `404`. It is listed only to a grant that
+can call it. It is R0: one audit record per served call, whose row count is
+the answer's accounts plus payables.
+
+**Consequences.** The committed MCP reader grant (`summary.read` and
+`records.read` over the whole store) is listed the tool. The route's own grant
+check is unchanged (the reader authority's `summary.read`). The grant's
+`budget.maxRows` does not bound the answer; the read's own 5,000-row bound
+does, and is refused rather than cut. A scoped version stays unproven.
+
+**Verification.** `services/app/test/reported-state-api.test.ts` ("the agent
+tool"): both agent paths answer exactly the route's body; listing per grant
+shape and per store; route refusals with equal status and body on HTTP and
+MCP; grant refusals before the body is validated; absence without the views; one
+R0 audit record per served call with a row count and nothing else. The
+pinned tool lists in `services/app/test/agent-api.test.ts` (schema snapshot
+included) and `services/app/test/mcp-client.test.ts`.

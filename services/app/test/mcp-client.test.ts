@@ -29,6 +29,7 @@ import {
 } from "../src/agent-service";
 import { principalFor } from "../src/grants";
 import { HttpError } from "../src/http";
+import { REPORTED_STATE_TOOL_NAME } from "../src/read-tools";
 import { opsContext } from "../src/ops-api";
 import { callOpsTool } from "../src/ops-tools";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
@@ -69,7 +70,15 @@ function grants(table: Record<string, unknown>): Record<string, string> {
  * `EVENTS_V2_ENABLED` name is not read), and, because this store has the
  * reported state's views, the reconstructed state's read.
  */
-const PUBLISHED = [...AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME, RECONSTRUCTED_STATE_TOOL_NAME];
+/** The tools this deployment lists to a grant that holds no read tool's authority. */
+const BASE = [...AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME, RECONSTRUCTED_STATE_TOOL_NAME];
+/** What it lists to a whole-store `summary.read` grant: the instrument coverage too (ADR 0073). */
+const PUBLISHED = [
+  ...AGENT_TOOL_NAMES,
+  "kogane.instruments.coverage",
+  PURCHASES_TOOL_NAME,
+  RECONSTRUCTED_STATE_TOOL_NAME,
+];
 /** A valid reconstructed-state request for an account the store does not hold. */
 const RECONSTRUCTED = { account: "acct-mcp-synthetic", from: "2026-03-01", to: "2026-03-31" };
 
@@ -714,6 +723,7 @@ describe("a token minted for MCP reaches no other route, and /mcp takes no other
       ["GET", "/api/v2/reconciliation/card-settlements/ownership", undefined],
       ["GET", "/api/v2/card-purchases", undefined],
       ["GET", "/api/v2/reported-state", undefined],
+      ["GET", "/api/v2/reported-holdings-change?from=2026-03-01&to=2026-03-31", undefined],
       ["GET", "/api/collection-quality", undefined],
       ["POST", "/api/ops/v1/collections", COLLECTION],
       ["GET", "/api/ops/v1/operations/op_synthetic", undefined],
@@ -904,16 +914,22 @@ describe("tools under each grant shape", () => {
       const environment = grants({ [AGENT]: grant(capabilities) });
       // The list describes this deployment; the grant is enforced on the call
       // and described by kogane.capabilities.
+      // Each read tool is listed only to a grant its service answers: the
+      // history to records.read, the instrument coverage to summary.read,
+      // both over the whole store.
       expect(await listTools({ environment })).toEqual(
         capabilities.includes("records.read")
           ? [
               ...AGENT_TOOL_NAMES,
               "kogane.instruments.history",
+              REPORTED_STATE_TOOL_NAME,
               "kogane.accounts.candidates",
               PURCHASES_TOOL_NAME,
               RECONSTRUCTED_STATE_TOOL_NAME,
             ]
-          : PUBLISHED,
+          : capabilities.includes("summary.read")
+            ? PUBLISHED
+            : BASE,
       );
       const report = await callTool("kogane.capabilities", {}, { environment });
       expect(report.structuredContent["capabilities"]).toEqual(capabilities);

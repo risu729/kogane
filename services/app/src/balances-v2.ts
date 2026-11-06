@@ -176,8 +176,10 @@ function scopeOf(url: URL): V2Scope {
 function pageLimit(url: URL): number {
   const text = url.searchParams.get("limit");
   if (text === null) return DEFAULT_PROJECTION_PAGE_LIMIT;
+  // One of the offered sizes as written: `Number` alone would also read
+  // "0x32", "5e1" or " 50" as 50.
   const limit = Number(text);
-  if (!(PROJECTION_PAGE_LIMITS as readonly number[]).includes(limit))
+  if (String(limit) !== text || !(PROJECTION_PAGE_LIMITS as readonly number[]).includes(limit))
     throw new HttpError(400, "invalid_limit");
   return limit;
 }
