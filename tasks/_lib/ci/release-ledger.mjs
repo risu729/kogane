@@ -444,13 +444,15 @@ export function describeRecord(record) {
  * `inactive`.
  *
  * `inactive` is not an outcome. GitHub adds it by itself to a deployment that
- * had succeeded once a newer deployment of the same environment succeeds —
- * including the empty-payload deployment GitHub opens for a job that declares
- * `environment: production`, which closes a few seconds after the release
- * record's own `success`. GitHub has done this for production deployments too
- * since 2026-11-05 20:31 UTC (older ones kept `success` before then), so the newest successful release record is routinely
- * `inactive` by the time the next run reads it. Reading `inactive` as "did not
- * succeed" made every release since then refuse the ledger as unreadable.
+ * had succeeded as soon as another deployment of the environment reports
+ * `success` later, whichever was created first. The empty-payload deployment
+ * GitHub opens for a job that declares `environment: production` is created
+ * before the release record but closes a few seconds after the record's own
+ * `success`, so the newest successful release record is `inactive` by the time
+ * the next run reads it. GitHub has done this for production deployments since
+ * 2026-11-05 20:31 UTC (older ones kept `success` before then); reading
+ * `inactive` as "did not succeed" made every release since then refuse the
+ * ledger as unreadable.
  * Nothing in this repository posts `inactive`, so skipping it cannot turn a
  * failed or unfinished release into a successful one: a deployment whose
  * newest real status is `failure` or `in_progress` still reads as that.

@@ -264,18 +264,28 @@ is introduced.
 
 The ledger is the GitHub Deployments API: the newest deployment of the
 `production` environment whose latest status other than `inactive` is
-`success`, with the release record in its payload. `inactive` is skipped because
-it is not an outcome: GitHub adds it by itself to a successful deployment once a
-newer one of the same environment succeeds, and the empty-payload deployment of
-the release job's own `environment: production` closes a few seconds after the
-release record's `success`. GitHub has done this for production deployments
-too since 2026-11-05 20:31 UTC (before that, older production deployments kept
-`success`), and reading `inactive` as "did not succeed" stopped every
-release until the read skipped it. Nothing here posts `inactive`, so a failed or
-unfinished release still reads as failed or unfinished. For the same reason a
-resume treats a deployment with a `success` or `inactive` status as already
-completed. It needs no commit (a push would need a signature and
-would not start a workflow) and it does not expire the way a cache does.
+`success`, with the release record in its payload. It needs no commit (a push
+would need a signature and would not start a workflow) and it does not expire
+the way a cache does.
+
+`inactive` is skipped because it is not an outcome. GitHub adds it by itself to
+a successful deployment as soon as another deployment of the environment
+reports `success` later, whichever of the two was created first. The
+empty-payload deployment of the release job's own `environment: production` is
+created before the release record but reports `success` a few seconds after it,
+so the release record is `inactive` by the time the next run reads it. GitHub
+has done this for production deployments since 2026-11-05 20:31 UTC (before
+that, older production deployments kept `success`), and reading `inactive` as
+"did not succeed" stopped every release until the read skipped it. Nothing here
+posts `inactive`, so a failed or unfinished release still reads as failed or
+unfinished. For the same reason a resume treats a deployment with a `success` or
+`inactive` status as already completed.
+
+The ledger step runs from the target commit's checkout, so a release or
+rollback of a commit older than this rule (before
+[#985](https://github.com/risu729/kogane/pull/985)) still reads `inactive` as
+not succeeded and fails closed with "none of the newest 100 production
+deployments succeeded". Roll back only to a commit that contains it.
 
 Concurrency alone would not be enough. GitHub keeps at most one run _pending_
 per group and states that ordering is not guaranteed, so with rapid merges an

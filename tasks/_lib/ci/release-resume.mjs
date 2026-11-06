@@ -143,6 +143,19 @@ const exec = (bin, args, failure = "local_command_failed") => {
   }
 };
 
+/**
+ * Whether a deployment already finished. `inactive` only ever follows a
+ * `success` (GitHub adds it once another deployment of the environment reports
+ * `success` later), so either one means the release completed, even when a
+ * later status says otherwise: refusing a resume is always the safe side.
+ *
+ * @param {readonly {state?: unknown}[]} statuses
+ * @returns {boolean}
+ */
+export function releaseCompleted(statuses) {
+  return statuses.some((status) => status?.state === "success" || status?.state === "inactive");
+}
+
 /** Open once without following symlinks; inspect and read the held descriptor. */
 export function copyPrepared(source, dest, { openImpl = openSync } = {}) {
   const fd = openImpl(source, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -472,10 +485,7 @@ async function main() {
     const statuses = await paginate(`${base}/deployments/${deployment.id}/statuses?per_page=100`, {
       token: client.token,
     });
-    // `inactive` only ever follows a `success` (GitHub adds it once a newer
-    // deployment succeeds), so either one means this release already finished.
-    if (statuses.some((s) => s.state === "success" || s.state === "inactive"))
-      fail("already_completed");
+    if (releaseCompleted(statuses)) fail("already_completed");
     const bound = [...statuses]
       .filter((s) => s.state === "in_progress")
       .sort((a, b) => b.id - a.id)

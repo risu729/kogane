@@ -45,6 +45,16 @@ describe("settledStatus", () => {
     ).toBeUndefined();
   });
 
+  test("reads a failure after a success as the failure, even once inactive", () => {
+    expect(
+      settledStatus([
+        { id: 3, state: "inactive", created_at: "2026-11-05T20:32:00Z" },
+        { id: 2, state: "failure", created_at: "2026-11-05T20:31:30Z" },
+        { id: 1, state: "success", created_at: "2026-11-05T20:31:20Z" },
+      ])?.state,
+    ).toBe("failure");
+  });
+
   test("breaks a same-second tie by status id", () => {
     expect(
       settledStatus([
