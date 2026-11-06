@@ -75,17 +75,20 @@ a comment giving the reason:
   [#966](https://github.com/risu729/kogane/pull/966), [#976](https://github.com/risu729/kogane/pull/976)
   and [#995](https://github.com/risu729/kogane/pull/995), which re-landed them on the current `main`.
 - [#580](https://github.com/risu729/kogane/pull/580), [#648](https://github.com/risu729/kogane/pull/648)
-  and [#887](https://github.com/risu729/kogane/pull/887) were stale snapshots; their still-true
-  content is in [#922](https://github.com/risu729/kogane/pull/922), except the MCP recovery
-  runbook of #887, which still needs its own PR.
+  and [#887](https://github.com/risu729/kogane/pull/887) were stale snapshots. Most of their still-true content is in
+  [#922](https://github.com/risu729/kogane/pull/922). Three items are not yet on `main`: the
+  MCP recovery runbook from #887 (it survives only in that PR's ref); and, from #580, the
+  synthetic preview's empty state (表示対象の記録がありません) on financial routes and the
+  Docker daemon that Container identity checks need.
 - [#436](https://github.com/risu729/kogane/pull/436) (Container runtime) is closed at the
   owner's request and tracked in [#988](https://github.com/risu729/kogane/issues/988); the
   owner decides near 2026-12-31 whether to resume it.
 
 [Current status](current-status.md) was re-reviewed against `main` in #922 and in this
 re-baseline. Phase 1 is done except branch cleanup: cloud sessions cannot delete
-branches, so 29 branches without an open PR remain for the daily cleanup or the owner.
-Agent PRs opened after 12:45 UTC (#972 onward) are ordinary work in the phase they belong
+branches, so 28 branches without an open PR remain for the daily cleanup or the owner. The
+29th, `refactor/container-direct-api` (#436), is kept on purpose.
+PRs opened after 12:45 UTC, including the re-landed ones above, are ordinary work in the phase they belong
 to, not Phase 1.
 
 ### Phase 2 — Card usage → statement → bank debit (current milestone)
