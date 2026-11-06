@@ -145,6 +145,42 @@ describe("activity carries its basis and explains itself", () => {
     expect(cash.nextCursor).toBeNull();
   });
 
+  test("a basis whose leg is not exact keeps its total, unknown with the leg's reason (INV05)", async () => {
+    const db = seededDatabase();
+    // The shape the card settlement command writes: an exact cash leg and an
+    // obligation-change leg whose amount nobody knows yet.
+    db.exec(`${decision("dr_event_settle", "event:ev-settle-1")}
+INSERT INTO economic_event_revisions(event_id,revision,kind,state,unknown_reason,effective_time_json,basis,evidence_support_json,decision_revision_id,superseded_by,created_at)
+ VALUES('ev-settle-1',1,'card_settlement','debited',NULL,${DATE},'cash-movement',
+  '[{"kind":"transaction","id":"transaction:1","revision":"parse_run:1"}]','dr_event_settle',NULL,'2026-03-01T00:00:00Z');
+INSERT INTO economic_legs VALUES('ev-settle-1',1,0,'account:bank','JPY','exact','5000',0,NULL,'decrease','cash-movement');
+INSERT INTO economic_legs VALUES('ev-settle-1',1,1,'account:card','JPY','missing',NULL,NULL,'statement_principal_and_fees_unknown','unresolved','obligation-change');`);
+    const page = await reader(db).activity({ basis: "cash-movement", offset: 0 });
+    const settlement = page.items.find((item) => item.eventId === "ev-settle-1")!;
+    // One total per (basis, unit) present in the legs: the obligation-change
+    // total is not dropped, and it is never zero.
+    expect(settlement.totals).toEqual([
+      {
+        basis: "cash-movement",
+        quantity: {
+          unitRef: "JPY",
+          value: {
+            status: "exact",
+            value: { coefficient: "5000", scale: 0 },
+            normalizationVersion: "exact-arith-v1",
+          },
+        },
+      },
+      {
+        basis: "obligation-change",
+        quantity: {
+          unitRef: "JPY",
+          value: { status: "missing", reasonCode: "statement_principal_and_fees_unknown" },
+        },
+      },
+    ]);
+  });
+
   test("explanation runs event → legs → source facts → raw locator", async () => {
     const db = seededDatabase();
     const page = await reader(db).activity({ basis: "cash-movement", offset: 0 });
@@ -187,6 +223,35 @@ INSERT INTO obligation_revisions(obligation_id,revision,creditor_ref,debtor_ref,
     expect(unknown.outstanding).toBeNull();
     expect(unknown.outstandingReasonCode).toBe("principal_unparsed");
     expect(unknown.unknownReason).toBe("provider_status_absent");
+  });
+
+  test("a fee that is not exact leaves its fee total unknown with a reason, never absent (INV05)", async () => {
+    const db = seededDatabase();
+    const fee = (value: string, confirmed: boolean, unitRef = "JPY") =>
+      `{"code":"instalment-fee","quantity":{"unitRef":"${unitRef}","value":${value}},"confirmed":${String(confirmed)}}`;
+    db.exec(`${decision("dr_obl_3", "obligation:obl-3")}
+INSERT INTO obligation_revisions(obligation_id,revision,creditor_ref,debtor_ref,principal_unit_ref,principal_status,principal_coefficient,principal_scale,fee_components_json,schedule_json,state,unknown_reason,state_evidence_refs_json,decision_revision_id,superseded_by,created_at)
+ VALUES('obl-3',1,'party:issuer','party:self','JPY','exact','12000',0,
+  '[${fee('{"status":"exact","value":{"coefficient":"100","scale":0},"normalizationVersion":"decimal-v1"}', true)},
+    ${fee('{"status":"missing","reasonCode":"fee_not_stated"}', true)},
+    ${fee('{"status":"exact","value":{"coefficient":"2","scale":0},"normalizationVersion":"decimal-v1"}', false, "USD")}]',
+  '[]','open',NULL,'[]','dr_obl_3',NULL,'2026-03-01T00:00:00Z');`);
+    const page = await reader(db).obligations({ offset: 0 });
+    const obligation = page.items.find((item) => item.obligationId === "obl-3")!;
+    // A confirmed fee exists but its amount is unknown: the total says so
+    // rather than reading as "no confirmed fee".
+    expect(obligation.confirmedFees).toEqual({
+      unitRef: "JPY",
+      value: { status: "missing", reasonCode: "fee_not_stated" },
+    });
+    // A fee in another unit is never added to the principal's unit.
+    expect(obligation.projectedFees).toEqual({
+      unitRef: "JPY",
+      value: { status: "unparsed", reasonCode: "unit_mismatch" },
+    });
+    // An obligation without fees still has none.
+    const plain = page.items.find((item) => item.obligationId === "obl-1")!;
+    expect(plain.confirmedFees?.value).toMatchObject({ value: { coefficient: "100" } });
   });
 });
 
