@@ -523,7 +523,8 @@ back byte for byte, hashing to the digest in the URL, and that they carry
 
 Descriptions, counterparty names, security names, and `extra_json` were
 written by an institution, not by us. React escapes every string it
-interpolates, and `dangerouslySetInnerHTML` appears nowhere in `apps/web` —
+interpolates, and `dangerouslySetInnerHTML` is used nowhere in `apps/web`
+(only a comment in `apps/web/src/ui.tsx` names it) —
 that pair is the whole of the argument, which is why it is worth keeping
 greppable. `test/browser.test.ts` plants a description containing
 `<script>window.__xss = true</script>`, loads the transaction list in a
@@ -686,7 +687,7 @@ opts those paths out of the `Sec-Fetch-Mode` heuristic:
 ```
 
 An array of route patterns for `run_worker_first` needs Wrangler 4.20.0 or
-later. The deployed App (`services/app/wrangler.jsonc`) sets
+later. The App Worker's config (`services/app/wrangler.jsonc`) sets
 `run_worker_first: true` instead, so every request, navigations included,
 reaches the Worker first; its assets directory is
 `../../apps/web/dist-production`.

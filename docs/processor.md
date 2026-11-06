@@ -764,8 +764,9 @@ as a stage rather than blocking the run.
 ## 11. Deploy order and rollback
 
 GitHub Actions applies CORE then READ migrations. ADR 0039 deploys named collector RPC entrypoints before the Processor and App, replacing the former order of consumers before
-collectors. The collection Queue and notification rule are declared, and
-`config/ingest-clients.json` declares 16 registration routes. Deploying a Worker does not invoke a collector.
+collectors. `services/processor/wrangler.jsonc` declares the collection Queue
+consumer and its DLQ; the R2 notification rule is not in any config file (§10
+lists it), and `config/ingest-clients.json` declares 16 registration routes. Deploying a Worker does not invoke a collector.
 
 Turning a lane flag off pauses its work; terminals and recorded progress remain.
 Projections use READ only. Select only code compatible with the current schema

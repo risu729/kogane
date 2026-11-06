@@ -19,7 +19,8 @@ Limit: the table lists only the six collectors whose README carries a
 `kogane-moneyforward-collector-poc`, `kogane-prestia-bank-collector`,
 `kogane-sbi-shinsei-collector-poc`, `kogane-sbi-vc-session-poc`,
 `kogane-smbc-direct-backfill-poc`, `kogane-st-george-collector`,
-`kogane-vpoint-pay-collector-poc`) have none yet and are not classified here;
+`kogane-vpoint-pay-collector-poc`) have no such section (PRESTIA bank has no
+README at all) and are not classified here;
 their bindings are in [`../infra/resources.md`](../infra/resources.md).
 
 GLOBAL PASSのWorkerには別にBrowser Run bindingがあるが、旧`/browser-probe`入口は廃止済みでbindingは未使用である。通常のdaily collectorはContainer Chromeを使う。MyJCBは逆に、Browser Runをsession bootstrap直後に閉じ、それ以降は通常のWorker `fetch`だけを使う。

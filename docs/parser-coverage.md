@@ -318,15 +318,18 @@ unit, so a missing page inside a unit is detectable.
 in one run:
 
 - (a) `myJcbRunPlan` writes one terminal unit per connection
-  (`unitKind: "connection"`, `unitKey` the connection id), and the Processor's
-  derivation (`unitRequest` in
-  `packages/application/src/collection/descriptors.ts`) catalogues each as a
+  (`unitKind: "connection"`, `unitKey` the connection id) and, when the
+  connection states a J-POINT outcome other than `unsupported`, a
+  `reward-balance` unit `<connection id>:j-point`; the Processor's derivation
+  (`unitRequest` in `packages/application/src/collection/descriptors.ts`)
+  catalogues each as a
   `fetch_unit` with `terminalReportRequired: true`. `unitReportRequest` gives
   each unit its own terminal report: `failed` with a `safeFailureCode` when the
   unit names a safe error code, `success` when its coverage is `complete`,
   otherwise `partial` or `unknown`. Cards therefore fail one at a time and say
   so individually.
-- (b) Every data artifact names its connection's unit key, and the derivation
+- (b) Every data artifact names its unit key (`jpoint-balance.json` the
+  J-POINT unit's, every other one its connection's), and the derivation
   resolves it to that unit's `fetchUnitId`. Only the run-level
   `manifest.json` (role `collector_manifest`) has no unit, and no parser turns
   it into observations.
