@@ -548,6 +548,50 @@ test("a commit that loses its key to another payload between its reads and its b
   expect(after.outbox - before.outbox).toBe(winner.plan.simulation.outboxTargets?.length ?? 1);
 });
 
+test("an identity assignment that loses its key to a relation writes no mapping", async () => {
+  // The identity statements after its ledger row require a ledger row under
+  // the key; the relation that took the key wrote one. The receipt guard on
+  // each of them keeps the loser from adding a manual mapping no decision
+  // describes.
+  const winnerRef = `source_account:${(await seedParse(264, "smbc-bank:race-relation")).ref}`;
+  const winner = await approvedRelation(winnerRef);
+  const mapping = await seedParse(265, "smbc-bank:race-identity");
+  const loserPlan = await planFor(mapping.ref, await target("target-race-identity"));
+  const loserApproval = await approveFor(loserPlan);
+  const before = await counts();
+  const raced = racedBeforeBatch(db, async () => {
+    expect(
+      await commitWith("op-race-identity", winner.plan, winner.approval.approvalId),
+    ).toMatchObject({ ok: true, replayed: false });
+  });
+  const result = await commit(d1CommandStore(raced), {
+    operationId: "op-race-identity",
+    principal: operator,
+    planId: loserPlan.planId,
+    approvalId: loserApproval.approvalId,
+    planners: changeMutationPlanners(raced),
+    now: NOW,
+  });
+  expect(result).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+    refs: ["op-race-identity"],
+  });
+  const after = await counts();
+  expect(after.mappings).toBe(before.mappings);
+  expect(after.receipts).toBe(before.receipts + 1);
+  expect(after.decisions).toBe(before.decisions + 1);
+  expect(after.relations).toBe(before.relations + 1);
+  const loser = await db
+    .prepare(
+      `SELECT (SELECT status FROM change_plans WHERE plan_id=?1) AS plan,
+        (SELECT uses_remaining FROM approvals WHERE approval_id=?2) AS uses`,
+    )
+    .bind(loserPlan.planId, loserApproval.approvalId)
+    .first<{ plan: string; uses: number }>();
+  expect(loser).toEqual({ plan: "approved", uses: 1 });
+});
+
 test("an identical commit that loses the same race returns the stored receipt and writes nothing", async () => {
   const ref = `source_account:${(await seedParse(262, "smbc-bank:race-replay")).ref}`;
   const { plan, approval } = await approvedRelation(ref);

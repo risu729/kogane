@@ -313,7 +313,14 @@ reserves the key only while no receipt holds it, and every later statement
 status and the outbox rows) is joined to **this command's own receipt** —
 the same operation id, principal and payload digest
 (`receiptExistsGuard` in `packages/storage-d1/src/atomic/decision-commit.ts`;
-the audit record also requires its `created_at`). A command of the same
+the audit record also requires its `created_at`). The identity planner's
+mapping, decision and supersession statements, which the identity command
+joins to a ledger row under the operation id (a row a command of another kind
+under the same key writes too), each carry the receipt guard as well
+(`identityMutation` in `services/processor/src/change-commands.ts`); a
+reviewed pending-to-posted merge or split carries it on its first decision,
+and its later statements require that decision, whose id is derived from the
+operation id and the merged rows. A command of the same
 principal with another payload that took the key first leaves a receipt none
 of those statements accepts, so the loser writes nothing (its plan stays
 open, its approval unspent, no decision, relation or outbox row) and answers
@@ -331,14 +338,16 @@ receipt rather than the error. Before
 2026-11-06 the join named only the operation id and principal, so such a
 loser could still close its own plan, spend its approval and, where its
 planner derived ids the winner had not written (a relation losing to a card
-settlement, say), write its own decision and relation, or fail on the shared
-`decision_operations` row with an SQL error instead of the conflict.
+settlement, say), write its own decision and relation (an identity assignment
+losing to a relation wrote its manual mapping with no decision), or fail on
+the shared `decision_operations` row with an SQL error instead of the conflict.
 `decision-commit-receipt-guard.test.ts` (storage-d1) holds the earlier
 statement text frozen and proves the guarded statements equal to it on random
 and scaled stores wherever no other payload holds the key, silent where one
 does, and searching the receipt by key without table statistics; the
 processor tests race a commit against another payload of the same kind and
-of another kind (a relation against a card settlement, both ways), and
+of another kind (a relation against a card settlement, both ways, and an
+identity assignment against a relation), and
 against an identical commit (a relation, a settlement rejection and a
 settlement acceptance), through a D1 wrapper that commits the winner between
 the loser's reads and its batch.
@@ -634,7 +643,8 @@ already recorded is never undone by a DELETE — an undo is a new revision
   a resent identical commit racing itself → one receipt, one mutation; a
   commit that loses its key to another payload between its reads and its
   batch → `idempotency_conflict` with its plan open, its approval unspent and
-  nothing written, and one that loses it to an identical commit → the stored
+  nothing written (an identity assignment losing to a relation writes no
+  mapping), and one that loses it to an identical commit → the stored
   receipt without spending a second approval use; typed
   relations with their own decision and no derived `same_account` (SC06); an
   agent refused approval and commit; approval digest/expiry/scope binding; the
