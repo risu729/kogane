@@ -467,6 +467,17 @@ describe("a refused debit that could pay still competes (as in ADR 0057)", () =>
     );
     expect(result.outcome.status).toBe("proposed");
   });
+  test("a held debit without a date is refused for the date first and still competes", () => {
+    const result = run(
+      [statement(1, 3000)],
+      [debit(1, 3000), debit(2, 3000, { key: "held-key", ...dateless })],
+      { held: { bankKeys: ["held-key"], aliasClasses: [], statementKeys: [] } },
+    );
+    expect(result.debitExclusions).toEqual([
+      { debitRef: debit(2, 3000).debit.ref, code: "debit_date_missing" },
+    ]);
+    expect(codesOf(only(result))).toEqual(["candidate_not_unique", "excluded_debit_competes"]);
+  });
   test("a statement without a candidate stays unsupported", () => {
     expect(only(run([statement(1, 3000)], [debit(1, 3000, dateless)])).outcome).toEqual({
       status: "unsupported",

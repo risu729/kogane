@@ -176,8 +176,12 @@ provider evidence first.
   across runs loses them, so the caller's ADR must state a partition that
   keeps them together.
 - A debit refused for another reason (`identity_not_admitted`,
-  `amount_not_exact`, `debit_repeated`, `debit_invalid`) does not compete;
-  it is listed in the run's exclusions.
+  `amount_not_exact`, `amount_not_positive`, `debit_repeated`,
+  `debit_invalid`) does not compete; it is listed in the run's exclusions.
+- The refusals are checked in order, so a dateless debit whose key or alias
+  class a live holder holds is refused `debit_date_missing` and still
+  competes, as in ADR 0057; that only makes a statement `needs_review`,
+  never `proposed`.
 
 ## Verification
 
