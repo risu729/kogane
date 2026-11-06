@@ -12,8 +12,8 @@ Related: [#684](https://github.com/risu729/kogane/issues/684),
 
 Tool definitions in a chat may be cached. Their presence does not prove a live
 `tools/list`, successful authentication or Worker health. The host error
-`UNAUTHORIZED` with “This app connection requires reauthentication. Reconnect
-the app and try again.” means the stored app connection needs attention. The
+`UNAUTHORIZED` with "This app connection requires reauthentication. Reconnect
+the app and try again." means the stored app connection needs attention. The
 older #684 observation also carried `oauth_token_invalid_grant` and
 `TRIGGER_REAUTHENTICATION`; those fields were absent from this check. Neither
 response identifies the token failure's cause or proves a Kogane outage.
