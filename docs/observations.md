@@ -44,6 +44,7 @@ was not read for this release, so whether any stored export carries a signed
 amount is not established; if one does, its meaning needs the owner's
 confirmation before any release reads it. Tests:
 `packages/parsers/test/parsers.test.ts`,
+`packages/parsers/test/paypay-csv-refusals.test.ts`,
 `packages/parsers/test/parser-digests.test.ts`.
 
 ## PayPay CSV: a transaction date that does not exist gives no asOf (parser 0.2.1)
