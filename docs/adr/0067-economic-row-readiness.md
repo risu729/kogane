@@ -3,7 +3,8 @@
 - Status: proposed
 - Date: 2026-10-10
 - Issues: #549, #550, #556
-- Scope: internal S0 query only; no transport, adoption, policy or writer activation
+- Scope: S0 current query and the proposed S0b grant-checked diagnostic transport;
+  no adoption, policy or writer activation
 
 ## Context
 
@@ -115,9 +116,10 @@ conservatively invalidate unrelated rows; they are not used as a substitute
 for snapshot coherence. No clock invents an economic ordering or historical
 knowledge cut.
 
-No schema migration, transport/catalogue entry, report retention, operation
-receipt, decision, proposal, claim or event writer is added. A future S0b
-service must authorize row scope before reading. S1/S2 must independently
+The original S0 slice adds no schema migration, transport/catalogue entry,
+report retention, operation receipt, decision, proposal, claim or event writer.
+The S0b amendment below supplies the required authorization before reading.
+S1/S2 must independently
 revalidate current restrictions, publication, mapping, ownership and holders
 inside guarded command entry; this manifest cannot authorize a commit.
 
@@ -144,3 +146,67 @@ check keyed reads without transaction/holder-history scans.
 
 Not verified: remote D1 behavior/performance, production evidence, principal
 ownership mapping, transport authorization or any financial writer activation.
+
+## Amendment: S0b grant-checked read transport — 2026-11-04 (proposed)
+
+### Context and options
+
+The internal S0 query already merged in [#653](https://github.com/risu729/kogane/pull/653).
+Rebuilding it from the earlier unmerged economic-events plan would duplicate
+its coherent SQL, restriction and digest contracts. Exposing it directly to
+an arbitrary row-scoped caller would leak cross-account ownership and live
+holder metadata through reason codes and digests. A separate filtered SQL
+implementation would change those semantics and require a new equivalence
+proof. This amendment instead adds a whole-store read boundary over the
+existing query, using the existing HTTP agent/MCP read-tool and audit paths.
+
+### Decision
+
+`readEconomicRowReadinessForGrant` checks `records.read` and requires both
+`scopes.sources` and `scopes.accounts` to be `"*"` before validation or any
+database access, including schema/existence probes. A narrowed grant is
+refused whole, even when it covers the requested row. The exact S0 request
+contract remains unchanged. Each batch is all-or-refused, bounded by both
+64 distinct observation references and the grant's `maxRows`; there is no
+truncation or implicit pagination. No new capability or grant is introduced.
+
+`POST /api/agent/v1/economic-readiness.read` and
+`kogane.economic-readiness.read` call that one service. The MCP tool is listed
+only to a `records.read` grant with both whole-store axes. A caller that names
+it without authority receives the same closed refusal over either transport.
+The existing bounded-body and verified Access boundaries remain in force.
+An additional browser GET route was not needed for this slice.
+
+Successful results are byte-for-byte the existing S0 diagnostic, including
+its manifest, context/digests, row refs, closed reasons and counts. `ok` means
+the diagnostic completed; it is not economic admission. `ownership_unresolved`
+remains fail-closed; `writerEnabled` and `proposalEnabled` stay false and
+history coverage stays unknown. No SQL, key/alias derivation, digest, financial
+policy, schema migration or writer changes are made.
+
+Capability/scope/budget/request refusals use the existing fixed financial
+error vocabulary. Missing guard dependencies or failed/malformed store reads
+answer HTTP 503 (MCP `isError: true`) with only
+`status: unavailable` and `reason: readiness_store_unavailable`. No exception
+text or partial row result is returned. The existing audit wrapper records
+`economic-readiness.read` as R0, read row count/truncation or closed
+refusal/failure code. It stores no request row refs, financial values or
+provider text from this diagnostic. Financial state remains unchanged; the
+normal append-only read audit is the only effect.
+
+### Verification and remaining limits
+
+Synthetic service tests check capability and both scope axes before every
+read, authority before malformed input, exact current request validation,
+duplicate refs, safe integers, the 64-row bound and grant budgets. The native
+S0 fixture checks parity of the entire safe manifest/digests and unchanged
+financial tables. Worker tests use signed synthetic Access assertions and
+native D1 migrations to check HTTP/MCP/service parity, dynamic listing,
+missing-row reasons, closed store-unavailable results, schema absence hidden
+from unauthorized callers, audit counts and no provider/amount values.
+
+This amendment does not complete #549, #550 or #556. Production deployment,
+real-client tool discovery/read acceptance and production coverage are not
+asserted. It creates no authentication resource, configured grant, delegation,
+proposal, command or financial writer; S1/S2 still require their own guarded
+ownership and writer contracts.
