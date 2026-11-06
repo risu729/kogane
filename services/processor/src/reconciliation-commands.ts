@@ -192,9 +192,13 @@ export async function decideProposal(
     payloadDigest: digest,
   };
   const now = new Date().toISOString();
+  // A decision row needs the ledger row of THIS command: the same key, payload
+  // and actor. A row another command wrote under the same key in between
+  // (an idempotency conflict) must not carry this command's decisions.
   const decisionRow = `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
     SELECT ?,'relation',?,1,?,?,?,?,?,?,NULL,NULL,? FROM decision_operations op
-    WHERE op.operation_id=? AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)`;
+    WHERE op.operation_id=? AND op.payload_digest=? AND op.actor_id=?
+      AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)`;
   const statements: D1PreparedStatement[] = [
     // The ledger row carries every precondition; later statements exist only if it was written.
     db
@@ -225,6 +229,8 @@ export async function decideProposal(
         proposal.evidence_refs_json,
         now,
         command.operationId,
+        digest,
+        command.actorId,
         proposalDecisionId,
       ),
   ];
@@ -243,6 +249,8 @@ export async function decideProposal(
           proposal.evidence_refs_json,
           now,
           command.operationId,
+          digest,
+          command.actorId,
           relationDecisionId,
         ),
       db

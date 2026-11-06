@@ -416,6 +416,57 @@ test("a rejection records the decision and creates no relation", async () => {
   expect(decision).toEqual({ decision_kind: "reject", method: "manual", actor_id: "reviewer" });
 });
 
+test("an accept racing a rejection under the same operation id writes no relation", async () => {
+  const target = (await proposals()).find((row) => row.status === "proposed")!;
+  const command: ProposalCommand = {
+    operationId: "op-race-1",
+    actorId: "reviewer",
+    actorVerification: "server",
+    action: "accept",
+    proposalId: target.id,
+    expectedStatus: "proposed",
+    method: "manual",
+    reason: "reviewed against the statement page",
+  };
+  // The rejection under the same key commits between the accept's reads and
+  // its batch: the accept's ledger row is then not written, and nothing that
+  // depends on it may be either.
+  const racing = new Proxy(db, {
+    get(target_, property) {
+      if (property === "batch")
+        return async (statements: D1PreparedStatement[]) => {
+          expect(
+            await decideProposal(db, { ...command, action: "reject", reason: "not this one" }),
+          ).toMatchObject({ ok: true, replayed: false });
+          return target_.batch(statements);
+        };
+      const value = Reflect.get(target_, property) as unknown;
+      return typeof value === "function" ? (value as Function).bind(target_) : value;
+    },
+  });
+  expect(await decideProposal(racing, command)).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+  });
+  expect((await proposals()).find((row) => row.id === target.id)!.status).toBe("rejected");
+  expect(
+    await db
+      .prepare(
+        "SELECT count(*) AS n FROM decision_revisions WHERE operation_id=? AND subject_kind='relation' AND decision_kind='accept'",
+      )
+      .bind(command.operationId)
+      .first<number>("n"),
+  ).toBe(0);
+  expect(
+    await db
+      .prepare(
+        "SELECT count(*) AS n FROM entity_relations r JOIN decision_revisions d ON d.id=r.decision_revision_id WHERE d.operation_id=?",
+      )
+      .bind(command.operationId)
+      .first<number>("n"),
+  ).toBe(0);
+});
+
 test("a missing proposal and an unknown command are refused without writing", async () => {
   expect(
     await decideProposal(db, {
