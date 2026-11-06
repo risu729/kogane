@@ -197,9 +197,12 @@ characters:
 | `card-installment.unlink` | `{ obligationId, portionKeys, reason }`      | `obl_cp_<sha256>`; 1–36 distinct recognition keys, each the compact JSON text of `[source, producer, namespace or null, account, external id]`, at most 2048 characters as 0047 stores it |
 
 **Limit.** The command API takes a request body of at most 16 KiB
-(`services/app/src/command-api.ts`), so a link or unlink whose 36 entries are
-long keys can exceed it and would need more than one plan; the change that
-adds installment links decides how it splits them.
+(`services/app/src/command-api.ts`); the Processor's private
+`/command/v1/*` routes bound it again at 16 KiB in bytes while reading it,
+stop reading past the limit and answer `400 invalid_command`
+(`services/processor/src/bounded-body.ts`). So a link or unlink whose 36
+entries are long keys can exceed it and would need more than one plan; the
+change that adds installment links decides how it splits them.
 
 The reason codes, the subject prefixes (`card-usage-exclusion:`,
 `card-refund:`, `card-refund-target:`, `card-installment:`) and the
