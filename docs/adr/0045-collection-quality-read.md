@@ -251,7 +251,7 @@ verification of #542 remains separate and is not claimed by these tests.
 
 ## Amendment 2026-10-09: a page, actual reservations and missing-unit states
 
-- Status: proposed (until this PR merges)
+- Status: accepted (merged 2026-11-06)
 - Issue: #542 (implementation; production acceptance remains open)
 
 ### Context and options

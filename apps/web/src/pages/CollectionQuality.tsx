@@ -171,7 +171,10 @@ export function QualityCell({ value }: { value: CollectionQualityCell }): ReactN
               : value.state === "older-current"
                 ? "過去の取得が現在の表示対象"
                 : "現在の表示対象なし"}{" "}
-            · 保存された観測 {n.observations} 件
+            ·{" "}
+            {n.parses.published === 0
+              ? "保存された観測は未集計（公開された解析なし）"
+              : `保存された観測 ${n.observations} 件`}
           </KvRow>
           <KvRow label="現在の表示の取得時刻">
             {instant(value.current?.capturedAt ?? null)}{" "}
@@ -180,8 +183,10 @@ export function QualityCell({ value }: { value: CollectionQualityCell }): ReactN
             ) : null}
           </KvRow>
           <KvRow label="口座の対応">
-            未確定の観測 {n.unresolvedIdentities}{" "}
-            件。取得単位のキーと整理済みの口座は同一とは限りません。
+            {n.parses.published === 0 || value.reasons.includes("identity_not_recorded")
+              ? "未確定の観測は未集計（口座の対応付けの記録なし）。"
+              : `未確定の観測 ${n.unresolvedIdentities} 件。`}
+            取得単位のキーと整理済みの口座は同一とは限りません。
           </KvRow>
           <KvRow label="網羅性">
             不完全な解析の宣言 {n.incompleteCoverage}{" "}

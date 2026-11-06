@@ -101,6 +101,14 @@ describe.if(runnable)("collection quality browser", () => {
       expect(await page.getByText("現在の表示対象なし", { exact: false }).count()).toBeGreaterThan(
         0,
       );
+      // INV05: with no published parse, counts are not 0 but not counted.
+      expect(
+        await page.getByText("保存された観測は未集計", { exact: false }).count(),
+      ).toBeGreaterThan(0);
+      expect(
+        await page.getByText("未確定の観測は未集計", { exact: false }).count(),
+      ).toBeGreaterThan(0);
+      expect(await page.getByText("保存された観測 0 件", { exact: false }).count()).toBe(0);
       expect(
         await page.getByRole("heading", { name: /^データ種別不明/ }).evaluate((heading) => ({
           fits: heading.scrollWidth <= heading.clientWidth,
