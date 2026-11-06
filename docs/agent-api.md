@@ -244,6 +244,10 @@ the call from the caller object (`actor_not_supported`) before any grader runs.
 | `reported-state` | What the provider reported                              | `source`, `account`, `instrument`, `metric`, `view` | `records.read` |
 | `activity`       | Adopted events in a period                              | `source`, `account`, `from`, `to`, `q`              | `records.read` |
 
+`activity`'s `from` and `to` are calendar days (`YYYY-MM-DD`; `2026-02-30` is
+not one) and `from` is not after `to`, as the v1 activity route reads them;
+anything else is `invalid_query` (`parseQueryRequest`).
+
 `coverage` lists each in-scope source — the grant's sources, narrowed by the
 `source` filter — with its `artifactCount` and `collectionRunCount`: the
 exact number of visible fetch artifacts and fetch runs of that source over its
