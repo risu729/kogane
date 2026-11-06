@@ -232,6 +232,20 @@ describe("sbi-vc executions", () => {
     );
   });
 
+  test("a recent view that spans more than its single collected page is truncated", () => {
+    const valid = fixture(RECENT);
+    const list = Array.from({ length: 30 }, (_, index) => ({
+      ...valid.body.list[0]!,
+      CExecutionIdSubNo: String(index + 1),
+    }));
+    expect(() =>
+      executions({ ...valid, body: { ...valid.body, list, totalSize: 31, totalNumOfPages: 2 } }),
+    ).toThrow("recent view exceeds its single collected page");
+    expect(
+      executions({ ...valid, body: { ...valid.body, list, totalSize: 30 } }).observations,
+    ).toHaveLength(30);
+  });
+
   test("leaf type drift is warned about and preserved, never coerced", () => {
     const result = executions(row({ isAuction: "false", markup: 0, executionNotifyId: 7 }));
     expect(result.observations).toHaveLength(1);
