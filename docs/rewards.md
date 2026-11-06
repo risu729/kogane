@@ -172,6 +172,15 @@ common bucketは種類未確認のまま一覧に残り、算定期限は `unava
   carries `budget` but not the search's `expansions`, so it does not say whether
   `maxExpansions` (500 offer examinations across all hops) stopped the search early
   ([ADR 0049 amendment 2026-11-06](adr/0049-reward-expiry-basis.md#amendment-bounded-offer-set-for-offer-simulation)).
+- Offer versions are append-only reference claims (`PRIMARY KEY(offer_id, version)`, a
+  correction is a new version). No adoption pointer marks one version current, and the
+  version text has no defined order, so the route never picks one. `version` (only with
+  `offer`; without it the request is `400 invalid_query`) selects one stored version. A
+  single simulation for an offer with more than one stored version and no `version` is
+  `simulation: null`, `offerVersions` (every stored `offerId@version`, in reader order) and
+  `reasonCodes: ["offer_version_not_selected"]`; a `version` that is not stored is
+  `no_stored_offer`. A goal search treats each stored version as its own candidate, named
+  by its `offerRef`.
 
 ## 5. 価値の扱い
 

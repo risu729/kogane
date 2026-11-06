@@ -443,3 +443,35 @@ offer that reaches the goal, the search answer before this change was
 `paths: []`; it is now `offer_set_too_large` with `truncated: true` and no
 `paths` or `rejected`, while a named-offer simulation of that offer still
 computes.
+
+### Addendum: a named offer's version is chosen by the caller
+
+The named-offer form simulated `offers.rows[0]`: the first stored version in
+`version` text order, whatever other versions were stored. Versions are
+append-only reference claims (`PRIMARY KEY(offer_id, version)`; the triggers
+say "publish a new version"), each with its own validity period. Nothing in
+the schema, the domain or `docs/rewards.md` marks one version current: there
+is no adoption pointer, and version text has no defined order (`v10` sorts
+before `v2`). Choosing the newest by text or by `recorded_at`, or the one in
+force today, would guess a meaning nobody recorded.
+
+Options: keep the first row (answers for a version nobody chose; rejected);
+pick the newest or the one in force (a guessed rule for overlapping or
+corrected versions; rejected); refuse the ambiguity and let the caller name
+the version (chosen).
+
+Decision: `GET /api/v2/rewards/offers/simulate` accepts `version`, only
+together with `offer` (otherwise `400 invalid_query`); `REWARD_REQUEST_SCHEMA`
+lists it. A single simulation of an offer with more than one stored version
+and no `version` answers `simulation: null`, `offerVersions` (every stored
+`offerId@version`) and `reasonCodes: ["offer_version_not_selected"]`. A
+`version` that is not stored answers `no_stored_offer`. A goal search is
+unchanged: every stored version is its own candidate, named by its
+`offerRef`. The bound check of this amendment runs first.
+
+Verification: `services/app/test/rewards-api.test.ts` stores two versions of
+one synthetic offer with rates 1/2 and 1/4. Before this change the unnamed
+request silently simulated `v1`; now it is `offer_version_not_selected` with
+both refs, `version=v1` and `version=v2` receive 1,000 and 500 from 2,000, an
+unstored version is `no_stored_offer`, and `version` without `offer` is 400.
+`apps/web/test/api-schema.test.ts` pins the parameter list.

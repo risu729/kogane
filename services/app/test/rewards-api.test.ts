@@ -184,6 +184,20 @@ async function token() {
     .sign(keys.privateKey);
 }
 
+/** Appends synthetic offers; conversion_offers rejects updates and deletes. */
+async function storeOffers(rows: readonly (typeof OFFER)[]) {
+  await env.DB.batch(
+    rows.map((row) =>
+      env.DB.prepare(
+        `INSERT INTO conversion_offers(${Object.keys(row).join(",")})
+         VALUES(${Object.keys(row)
+           .map((_, index) => `?${index + 1}`)
+           .join(",")})`,
+      ).bind(...Object.values(row)),
+    ),
+  );
+}
+
 async function get(path: string, enabled = true, method = "GET") {
   return worker.fetch(
     new Request(`https://fixture.test${path}`, {
@@ -380,6 +394,63 @@ describe("reward reads", () => {
     expect(none.offerCoverage).toEqual({ limit: 200, truncated: false });
   });
 
+  it("never picks one stored version of a named offer on the caller's behalf", async () => {
+    // Two versions of one synthetic offer with different rates, on units no
+    // other test converts. No adoption pointer exists and version text has no
+    // defined order, so neither version is "the" offer.
+    const versioned = {
+      ...OFFER,
+      offer_id: "offer:synthetic-versioned",
+      from_unit_ref: "points:synthetic-versioned",
+      to_unit_ref: "points:synthetic-versioned-out",
+      fixed_fees_json: "[]",
+    };
+    await storeOffers([
+      { ...versioned, version: "v1", ratio_numerator: "1", ratio_denominator: "2" },
+      { ...versioned, version: "v2", ratio_numerator: "1", ratio_denominator: "4" },
+    ]);
+    const unnamed = await get(
+      "/api/v2/rewards/offers/simulate?offer=offer:synthetic-versioned&quantity=2000",
+    );
+    expect(unnamed.status).toBe(200);
+    expect(await unnamed.json()).toEqual({
+      simulation: null,
+      offerCoverage: { limit: 200, truncated: false },
+      offerVersions: ["offer:synthetic-versioned@v1", "offer:synthetic-versioned@v2"],
+      reasonCodes: ["offer_version_not_selected"],
+      release: "conversion-search-v1",
+    });
+    const receive = async (version: string) =>
+      (
+        (await (
+          await get(
+            `/api/v2/rewards/offers/simulate?offer=offer:synthetic-versioned&version=${version}&quantity=2000`,
+          )
+        ).json()) as {
+          simulation: { offerRef: string; receive: { value: { value: { coefficient: string } } } };
+        }
+      ).simulation;
+    expect(await receive("v1")).toMatchObject({
+      offerRef: "offer:synthetic-versioned@v1",
+      receive: { value: { value: { coefficient: "1000" } } },
+    });
+    expect(await receive("v2")).toMatchObject({
+      offerRef: "offer:synthetic-versioned@v2",
+      receive: { value: { value: { coefficient: "500" } } },
+    });
+    const absent = (await (
+      await get(
+        "/api/v2/rewards/offers/simulate?offer=offer:synthetic-versioned&version=v3&quantity=2000",
+      )
+    ).json()) as { simulation: unknown; reasonCodes: string[] };
+    expect(absent.simulation).toBeNull();
+    expect(absent.reasonCodes).toEqual(["no_stored_offer"]);
+    // A version names a version of an offer; without the offer it means nothing.
+    expect(
+      (await get("/api/v2/rewards/offers/simulate?goal=JPY&version=v1&quantity=2000")).status,
+    ).toBe(400);
+  });
+
   // Last in the file: it stores 200 more offers, and conversion_offers is
   // append-only, so nothing after it may assume the single fixture offer.
   it("refuses a goal search over an offer set larger than its bound instead of answering from part of it", async () => {
@@ -391,16 +462,7 @@ describe("reward reads", () => {
       from_unit_ref: "points:synthetic-filler",
       to_unit_ref: "points:synthetic-filler-out",
     }));
-    await env.DB.batch(
-      filler.map((row) =>
-        env.DB.prepare(
-          `INSERT INTO conversion_offers(${Object.keys(row).join(",")})
-           VALUES(${Object.keys(row)
-             .map((_, index) => `?${index + 1}`)
-             .join(",")})`,
-        ).bind(...Object.values(row)),
-      ),
-    );
+    await storeOffers(filler);
     const response = await get(
       "/api/v2/rewards/offers/simulate?goal=JPY&quantity=2500&unit=points:v-point",
     );
