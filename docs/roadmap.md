@@ -107,7 +107,8 @@ ones for the selected scope. Missing data types remain visible.
 Today `/identities` shows, per source (or for the selected source), the
 account mapping status of eligible observations and how many security, crypto
 and product identifiers are resolved by a person's decision, wait on a
-candidate, were kept apart or have no candidate
+candidate, share an instrument without a recorded decision, were kept apart
+or have no candidate
 ([ADR 0073](adr/0073-instrument-coverage-per-source.md)). These are counts of
 identifiers, not a match rate; money and reward units have no resolution
 state, and a candidate across providers needs a second source whose identity

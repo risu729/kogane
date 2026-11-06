@@ -65,10 +65,13 @@ observation, which ADR 0055's amendment measured (about 0.8 to 0.95 s per
    sources is counted under each, so the rows have no total and none is
    given. A source whose current organized records use no security, crypto
    or product identifier has no row, which is not a row of zeros.
-2. **Grant and bounds** are the candidate review's: `summary.read` (the
-   answer is counts) over the whole store, refused before anything is read
-   otherwise (`unauthorized` / `evidence_restricted`), because the counts
-   depend on sources a listed grant could not see; the observation count is
+2. **Grant and bounds.** The capability is `summary.read`, not the
+   candidate review's `records.read`, because the answer is counts and names
+   no identifier record; the perimeter is the candidate review's: the whole
+   store, refused before anything is read otherwise (`unauthorized` /
+   `evidence_restricted`), because the counts depend on sources a listed
+   grant could not see. No agent tool serves it, so today only the browser's
+   `readerGrant` (which holds both capabilities) reaches it. The observation count is
    checked first and the read's own bounds refuse the whole answer
    (`budget_exceeded` with `budget:identityObservations=500000` or
    `budget:instrumentResolution`), never a part or zeros.
