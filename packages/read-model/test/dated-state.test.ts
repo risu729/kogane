@@ -10,12 +10,14 @@ import {
   DATED_POSITION_CONTAINER_PARSERS,
   DATED_POSITION_QUANTITIES_SQL,
   DATED_POSITIONS_SQL,
+  DATED_SNAPSHOT_UNITS_SQL,
   DATED_SNAPSHOTS_SQL,
   DATED_STATEMENTS_SQL,
   type DatedBalanceRow,
   type DatedPositionQuantityRow,
   type DatedPositionRow,
   type DatedSnapshotRow,
+  type DatedSnapshotUnitRow,
   type DatedStatementRow,
 } from "../src/dated-state";
 import { parserModules } from "../../parsers/scripts/parser-digests";
@@ -487,6 +489,55 @@ describe("the quantities of dated positions", () => {
       ),
     ).toBe(true);
     expect(plan.filter((line) => /^SCAN (po|d)\b/u.test(line))).toEqual([]);
+  });
+});
+
+describe("the fetch units of chosen snapshots", () => {
+  test("each named artifact with its unit key, null for a run without units, as the view gives it", () => {
+    const store = new DatedStore();
+    const unitless = store.capture({
+      ...SBI,
+      fetchedAt: "2026-09-09T01:00:00Z",
+      claim: "complete",
+    });
+    const unit = store.capture({
+      ...SBI,
+      fetchedAt: "2026-09-09T02:00:00Z",
+      claim: "complete",
+      unitKey: "synthetic-unit",
+    });
+    const ids = [unit.artifact, unitless.artifact];
+    const rows = all<DatedSnapshotUnitRow>(store, DATED_SNAPSHOT_UNITS_SQL, JSON.stringify(ids));
+    expect(rows).toEqual([
+      { id: unitless.artifact, unit_key: null },
+      { id: unit.artifact, unit_key: "synthetic-unit" },
+    ]);
+    // The same unit the snapshot CTEs partition by.
+    expect(
+      all<{ id: number; fetch_unit_key: string | null }>(
+        store,
+        "SELECT id,fetch_unit_key FROM observation_fetch_artifacts WHERE id IN (SELECT value FROM json_each(?1)) ORDER BY id",
+        JSON.stringify(ids),
+      ).map((row) => ({ id: row.id, unit_key: row.fetch_unit_key })),
+    ).toEqual(rows);
+    expect(all(store, DATED_SNAPSHOT_UNITS_SQL, JSON.stringify([999_999]))).toEqual([]);
+  });
+
+  test("without table statistics it reaches artifacts and units by primary key only", () => {
+    const store = new DatedStore();
+    expect(
+      store.db
+        .query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'")
+        .get(),
+    ).toEqual({ n: 0 });
+    const plan = (
+      store.db.query(`EXPLAIN QUERY PLAN ${DATED_SNAPSHOT_UNITS_SQL}`).all("[1,2]") as {
+        detail: string;
+      }[]
+    ).map((row) => row.detail);
+    expect(plan.some((line) => /^SEARCH a USING INTEGER PRIMARY KEY/u.test(line))).toBe(true);
+    expect(plan.some((line) => /^SEARCH u USING INTEGER PRIMARY KEY/u.test(line))).toBe(true);
+    expect(plan.filter((line) => /^SCAN (a|u)\b/u.test(line))).toEqual([]);
   });
 });
 

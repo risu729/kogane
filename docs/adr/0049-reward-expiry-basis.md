@@ -373,3 +373,204 @@ Domain/API/web tests keep dated and undated unknown buckets, quantities and
 source refs, refuse computed/converted quantities, and render 種類未確認.
 Migration/promotion tests preserve v1 rows, re-promote with the new release,
 enforce append-only/current-publication guards and bump the source revision.
+
+## Amendment: bounded offer set for offer simulation
+
+- Status: proposed; accepted upon merge
+- Date: 2026-11-06
+
+No ADR recorded the offer read of `GET /api/v2/rewards/offers/simulate`.
+This ADR's rule, that a gap is reported rather than filled, is the one the
+route broke, so the decision is recorded here.
+
+### Context
+
+The route read the offer set through the reward reader's `offers` page:
+`CONVERSION_OFFERS_SQL` in `offer_id, version` order with
+`LIMIT REWARD_PAGE_LIMIT + 1` (201). It used `rows` (at most 200) and ignored
+`coverage.truncated`. With 201 or more stored offers a goal search ran over
+the first 200 only: an offer outside that page could not appear, so a path
+that needed it came back as `paths: []`, indistinguishable from "no path among
+the stored offers", and the candidate and `rejected` lists could be narrower
+than the stored set without saying so. `searchCoverage: "bounded"` described
+the depth and candidate caps, not this. The READ capture already reads the
+same query and refuses a larger set with `offer_set_too_large` (OFFER_BOUND
+200 in `services/processor/src/reward-read-projection.ts`).
+
+### Options considered
+
+1. Keep the single page and answer from it with a `truncated` flag beside
+   the paths. Every existing field would still look complete to a caller that
+   ignores the flag; rejected.
+2. Page through every offer deterministically. This is unbounded D1 work on a
+   GET, while the search itself stops after `maxExpansions` (500) offer
+   examinations across all hops, so it would still not see every offer of a
+   large set; and it would diverge from the READ capture's bound; rejected.
+3. Read once up to the existing bound, report the bound on every answer, and
+   refuse with a closed code when it is exceeded, as the READ capture does.
+
+### Decision
+
+Option 3. Every `/offers/simulate` answer carries
+`offerCoverage: {limit, truncated}` from the reader page (`limit` is
+`REWARD_PAGE_LIMIT`, 200). When `truncated` is true nothing is computed: the
+answer is `simulation: null`, `searchCoverage: "bounded"`, the
+`offerCoverage`, `reasonCodes: ["offer_set_too_large"]` and the search
+release, with no `paths` and no `rejected` list. The check precedes the
+`no_stored_offer` answer and applies to both forms of the request: a goal
+search reads every stored offer, a named offer reads that offer's versions.
+No query, bound, page size, search budget or evaluation calendar changes;
+the reader already reported the truncation. The addenda below add the
+`version` parameter, the search's `stoppedBy` and the goal search's
+`source_unit_not_selected` refusal.
+
+### Consequences
+
+An answer computed from offers always read every matching stored offer
+(`truncated: false`). Beyond 200 stored offers goal search is unavailable
+until the bound is revisited together with the READ capture's `OFFER_BOUND`
+and the search's expansion budget. Whether a budget cap stopped the search
+is reported by the second addendum below. No client
+in the repository reads this route's body (the web app, MCP tools and the
+shared response validators do not; the API conformance harness checks only
+its status and `cache-control`, which the refusal keeps at `200` and
+`no-store`), so the additive field and the refusal change no consumer.
+
+### Verification
+
+`services/app/test/rewards-api.test.ts`: every answer (named offer, goal
+search, no stored offer) carries `offerCoverage {limit: 200, truncated:
+false}`. With 200 synthetic offers stored whose ids sort before the only
+offer that reaches the goal, the search answer before this change was
+`paths: []`; it is now `offer_set_too_large` with `truncated: true` and no
+`paths` or `rejected`, while a named-offer simulation of that offer still
+computes.
+
+### Addendum: a named offer's version is chosen by the caller
+
+The named-offer form simulated `offers.rows[0]`: the first stored version in
+`version` text order, whatever other versions were stored. Versions are
+append-only reference claims (`PRIMARY KEY(offer_id, version)`; the triggers
+say "publish a new version"), each with its own validity period. Nothing in
+the schema, the domain or `docs/rewards.md` marks one version current: there
+is no adoption pointer, and version text has no defined order (`v10` sorts
+before `v2`). Choosing the newest by text or by `recorded_at`, or the one in
+force today, would guess a meaning nobody recorded.
+
+Options: keep the first row (answers for a version nobody chose; rejected);
+pick the newest or the one in force (a guessed rule for overlapping or
+corrected versions; rejected); refuse the ambiguity and let the caller name
+the version (chosen).
+
+Decision: `GET /api/v2/rewards/offers/simulate` accepts `version`, only
+together with `offer` (otherwise `400 invalid_query`); `REWARD_REQUEST_SCHEMA`
+lists it. A single simulation of an offer with more than one stored version
+and no `version` answers `simulation: null`, `offerVersions` (every stored
+`offerId@version`) and `reasonCodes: ["offer_version_not_selected"]`. A
+`version` that is not stored answers `no_stored_offer`. A goal search is
+unchanged: every stored version is its own candidate, named by its
+`offerRef`. The bound check of this amendment runs first.
+
+Verification: `services/app/test/rewards-api.test.ts` stores two versions of
+one synthetic offer with rates 1/2 and 1/4. Before this change the unnamed
+request silently simulated `v1`; now it is `offer_version_not_selected` with
+both refs, `version=v1` and `version=v2` receive 1,000 and 500 from 2,000, an
+unstored version is `no_stored_offer`, and `version` without `offer` is 400.
+`apps/web/test/api-schema.test.ts` pins the parameter list.
+
+### Addendum: the search reports the caps that stopped it
+
+Within the offer bound a search could still end early: `findConversionPaths`
+stops examining offers at `maxExpansions` (500 examinations, counted across
+every hop) and stops adding or expanding at `maxCandidates` (8). The answer
+carried `budget` only, so `paths: []` after an exhausted budget read the same
+as "no stored offer reaches the goal".
+
+Options: report only `expansions` (a caller compares it with the budget, but
+`expansions === maxExpansions` cannot tell a search that stopped from one that
+finished on its last allowed examination; rejected alone); a single boolean
+(loses which cap; rejected); the count plus a closed list of the caps that
+actually stopped it (chosen).
+
+Decision: `ConversionSearchResult` gains `stoppedBy: SearchStop[]`, closed
+codes `max_expansions` (an offer was left unexamined) and `max_candidates` (a
+goal path was dropped, or a state below the depth left unexpanded, because the
+list was full), in `SEARCH_STOPS` order. The goal-search answer of the route
+carries `expansions` and `stoppedBy` beside `budget`. The depth cap is the
+search's definition and is not a stop. The search order, budget values,
+`searchCoverage` (still `bounded`) and the paths found are unchanged, and no
+stored or projected value includes the result.
+
+Verification: `packages/domain/test/rewards.test.ts` runs one offer list three
+times. Examining all three offers finds the path with `stoppedBy: []`, and a
+two-examination budget gives `paths: []` with `expansions: 2` and
+`stoppedBy: ["max_expansions"]`. A one-candidate list with two goal offers
+reports `max_candidates`, at depth 1 and at depth 2. An unverified-only search
+reports `stoppedBy: []`. A seeded property test over 1,500 random small
+offer graphs compares each capped search with the same search uncapped: the
+capped paths are always the first paths of the uncapped search, an empty
+`stoppedBy` always means the same paths, `rejected` list and `expansions`,
+and a reported stop always dropped a path or left an examination undone.
+`services/app/test/rewards-api.test.ts` checks the route reports
+`expansions: 2` and `stoppedBy: []` for the fixture search.
+
+### Addendum: a goal search's starting unit is chosen by the caller
+
+- Date: 2026-11-06
+
+Context: a goal search without `unit` started from
+`matching[0].fromUnitRef`, the source unit of the first offer in the
+reader's `offer_id, version` order. With offers from more than one source
+unit stored, that is an arbitrary pick, the same guess the first addendum
+removed for versions: the stored offers do not say which unit the caller
+holds. The answer depended on which offer id sorts first, and a start from a
+unit that reaches nothing returned `paths: []`, read as "no path to the goal"
+while another stored source unit reached it.
+
+Options: keep the first row's unit (answers for a holding nobody named;
+rejected); search from every source unit and merge the paths (changes the
+answer's meaning, multiplies the expansion budget per start, and still says
+nothing about which unit the caller holds; rejected); pick a unit by a rule
+such as the one with the most paths or the caller's holdings (a guessed rule,
+and holdings are another route's read; rejected); refuse the ambiguity and
+let the caller name `unit` (chosen).
+
+Decision: when a goal search has no `unit`, the route collects the distinct
+`fromUnitRef` values of the matching offers (every stored offer, or the named
+offer's versions). With exactly one, the search starts from it, as before.
+With more than one, nothing is computed: the answer is `simulation: null`,
+`searchCoverage: "bounded"`, the `offerCoverage`, `sourceUnits` (every
+distinct source unit ref, in code-unit order, so the list does not depend on
+reader order) and `reasonCodes: ["source_unit_not_selected"]`, with no
+`paths` or `rejected` list. The list is not filtered by reachability, by an
+offer's verification or deadline, or by the goal unit: whether a unit reaches
+the goal is the search's answer, and the search has not run. A search from
+the goal unit itself never finds a path (`findConversionPaths` counts the
+start unit as visited, so a return to it is `cycle_rejected`), but the goal
+unit stays in the list: `quantity` is read in the start unit, and dropping
+the goal unit would read a caller's goal-unit quantity as another unit's. A
+given `unit` is used as before and is not checked
+against the list. The bound check and `no_stored_offer` run first, so the
+refusal never applies to an empty or truncated offer set. The single
+simulation form is unchanged: after the version check it has one offer, and
+`unit` still defaults to that offer's source unit. No query, schema
+parameter, search budget or domain function changes.
+
+Consequences: a goal search without `unit` succeeds only over a store whose
+matching offers leave one unit; otherwise the caller adds `unit`. The API
+conformance harness requests `goal=points:b&quantity=1000` without `unit`;
+the one target that advertises `rewardsV2` (the worker fixture in
+`services/app/test/conformance.test.ts`) stores no offers, so it receives
+`no_stored_offer` before this check, and the harness still checks only
+status and `cache-control`. No client in the
+repository reads this route's body.
+
+Verification: `services/app/test/rewards-api.test.ts` stores two synthetic
+offers to one goal from two source units, with offer ids sorted opposite to
+the units. Naming either unit returns a different single path. Before this
+change the unnamed request started from the fixture offer's unit, the first
+stored row, and answered `paths: []`; it now answers
+`source_unit_not_selected` with `sourceUnits` equal to the distinct
+`from_unit_ref` values stored, sorted, and no `paths` or `rejected`. A goal
+search naming one of the two offers, which has one source unit, still finds
+its path without `unit`.

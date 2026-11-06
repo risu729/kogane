@@ -64,6 +64,105 @@ function input(overrides: Partial<SharedRunInput> = {}): SharedRunInput {
   };
 }
 
+describe("captured month ranges do not bridge a missing monthly fragment (#452)", () => {
+  const captured = (ordinal: string, month: string) =>
+    page("monthly-transactions", `account-${ordinal}-month-${month}.html`, "<div>synthetic</div>");
+
+  test("sparse partial captures split per account, including a contiguous year boundary", async () => {
+    const run = input({
+      status: "partial",
+      monthlyFragmentCount: 5,
+      artifacts: [
+        captured("01", "2100-04"),
+        captured("02", "2100-02"),
+        captured("01", "2099-12"),
+        captured("01", "2100-03"),
+        captured("01", "2100-01"),
+      ],
+      failures: [{ operation: "collect", errorType: "Synthetic", message: "collector_partial" }],
+    });
+    const bucket = new FakeR2Bucket();
+    const outcome = await persistSharedRun(bucket, run);
+    expect(outcome.result.outcome).toBe("persisted");
+    const terminal = await readTerminal(bucket, "moneyforward-me", runId);
+    if (terminal.outcome !== "found") throw new Error("unreachable");
+    expect(terminal.manifest.ranges).toEqual([
+      {
+        rangeKey: "months-account-01-2099-12",
+        rangeKind: "declared_coverage",
+        precision: "month",
+        basis: "manifest",
+        startValue: "2099-12",
+        endValue: "2100-01",
+        unitKey: "account-01",
+      },
+      {
+        rangeKey: "months-account-01-2100-03",
+        rangeKind: "declared_coverage",
+        precision: "month",
+        basis: "manifest",
+        startValue: "2100-03",
+        endValue: "2100-04",
+        unitKey: "account-01",
+      },
+      {
+        rangeKey: "months-account-02",
+        rangeKind: "declared_coverage",
+        precision: "month",
+        basis: "manifest",
+        startValue: "2100-02",
+        endValue: "2100-02",
+        unitKey: "account-02",
+      },
+    ]);
+    expect(terminal.manifest.providerOutcome).toBe("partial");
+    expect(terminal.manifest.coverageStatus).toBe("partial");
+    expect(terminal.manifest.units.every((unit) => unit.coverageStatus === "partial")).toBe(true);
+    expect(await verifyReferencedObjects(bucket, terminal.manifest)).toMatchObject({
+      outcome: "ok",
+      problems: [],
+    });
+  });
+
+  test("one continuous year-crossing interval retains the existing range key", async () => {
+    const plan = await moneyForwardRunPlan(
+      input({
+        accountDetailCount: 1,
+        monthlyFragmentCount: 3,
+        artifacts: [
+          captured("01", "2100-01"),
+          captured("01", "2099-11"),
+          captured("01", "2099-12"),
+        ],
+      }),
+    );
+    expect(plan.run.ranges).toEqual([
+      {
+        rangeKey: "months-account-01",
+        rangeKind: "declared_coverage",
+        precision: "month",
+        basis: "manifest",
+        startValue: "2099-11",
+        endValue: "2100-01",
+        unitKey: "account-01",
+      },
+    ]);
+    expect(plan.run.providerOutcome).toBe("success");
+    expect(plan.run.coverageStatus).toBe("complete");
+  });
+
+  test.each(["2099-00", "2099-13"])(
+    "invalid calendar month %s is refused before persistence",
+    async (month) => {
+      const bucket = new FakeR2Bucket();
+      await expect(
+        persistSharedRun(bucket, input({ artifacts: [captured("01", month)] })),
+      ).rejects.toThrow("shared_month_invalid");
+      expect(bucket.putKeys).toEqual([]);
+    },
+  );
+});
+
 describe("G1-02 shared mode persists every page and then the terminal", () => {
   test("objects, units and the terminal describe what is stored", async () => {
     const bucket = new FakeR2Bucket();

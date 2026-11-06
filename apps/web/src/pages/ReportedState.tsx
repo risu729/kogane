@@ -15,6 +15,7 @@ import {
   type ReportedState,
 } from "../reported-state-api.ts";
 import { Link } from "../router.tsx";
+import { HoldingsChangePanel } from "./ReportedHoldingsChange.tsx";
 import {
   Badge,
   EmptyState,
@@ -420,6 +421,7 @@ export function ReportedStatePage(): ReactNode {
               )}
             </QueryBoundary>
           )}
+          <HoldingsChangePanel to={date} />
         </>
       )}
     </>

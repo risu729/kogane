@@ -16,8 +16,10 @@ import {
 /**
  * Fixed report artifacts, read-only (architecture addendum A12; AR03, AR17).
  *
- * Three different operations are named in addendum 09 section 9 and only the
- * first is a route here:
+ * The catalogue is listed newest first (`GET /api/v2/reports?offset=N`,
+ * artifact columns only), and one report is re-displayed by id. Three
+ * different operations are named in addendum 09 section 9 and only the first
+ * is a route here:
  *
  *   * `re-display`  — return the stored body of this exact report. That is
  *     this module. It never recomputes and never regenerates: a later rule,
@@ -39,6 +41,71 @@ import {
 const PREFIX = "/api/v2/reports";
 const REPORT_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u;
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
+/** One page of the artifact list; the reader asks for one row more to report `nextCursor`. */
+export const REPORTS_PAGE_SIZE = 50;
+
+/**
+ * The newest artifacts first, ties by id, so paging is deterministic. Catalogue
+ * columns only: listing never reads a body from R2, never derives
+ * replayability and never counts rows, so the list cannot disagree with what
+ * re-displaying one report says about it. `?1` limit, `?2` offset.
+ */
+export const REPORT_LIST_SQL = `SELECT report_id,context_id,purpose,schema_version,content_digest,created_by,created_at
+FROM report_artifacts
+ORDER BY created_at DESC,report_id DESC
+LIMIT ?1 OFFSET ?2`;
+
+/**
+ * The capability is not a static claim: the list is served only where CORE
+ * 0034 created `report_artifacts`, so `/api/meta` never advertises a page the
+ * store cannot answer.
+ */
+export async function reportArtifactsAvailable(env: Env): Promise<boolean> {
+  const row = await env.DB.prepare(
+    "SELECT count(*) AS present FROM sqlite_master WHERE type='table' AND name='report_artifacts'",
+  ).first<{ present: number }>();
+  return row?.present === 1;
+}
+
+function listOffset(url: URL): number {
+  for (const key of url.searchParams.keys()) {
+    const value = url.searchParams.get(key)!;
+    if (key !== "offset" || url.searchParams.getAll(key).length !== 1 || value.length > 16)
+      throw new HttpError(400, "invalid_query");
+  }
+  const text = url.searchParams.get("offset") ?? "0";
+  const offset = Number(text);
+  if (!/^(0|[1-9]\d*)$/u.test(text) || !Number.isSafeInteger(offset) || offset > 1_000_000)
+    throw new HttpError(400, "invalid_offset");
+  return offset;
+}
+
+/**
+ * `GET /api/v2/reports?offset=N`: the stored artifacts, newest first, one
+ * page at a time. There is no total: a count would be a second read the page
+ * could not keep consistent with the rows, and the caller does not need one.
+ */
+async function listReports(env: Env, url: URL): Promise<Response> {
+  const offset = listOffset(url);
+  if (!(await reportArtifactsAvailable(env))) throw new HttpError(404, "not_found");
+  const rows = await env.DB.prepare(REPORT_LIST_SQL)
+    .bind(REPORTS_PAGE_SIZE + 1, offset)
+    .all<Omit<ArtifactRow, "storage_ref">>();
+  const page = rows.results.slice(0, REPORTS_PAGE_SIZE);
+  return json({
+    apiVersion: 2,
+    items: page.map((row) => ({
+      reportId: row.report_id,
+      contextId: row.context_id,
+      purpose: row.purpose,
+      schemaVersion: row.schema_version,
+      contentDigest: row.content_digest,
+      createdBy: row.created_by,
+      createdAt: row.created_at,
+    })),
+    nextCursor: rows.results.length > REPORTS_PAGE_SIZE ? String(offset + REPORTS_PAGE_SIZE) : null,
+  });
+}
 
 interface ArtifactRow {
   report_id: string;
@@ -105,6 +172,7 @@ async function restrictionsFor(
 export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
   if (path !== PREFIX && !path.startsWith(`${PREFIX}/`)) return null;
+  if (path === PREFIX) return listReports(env, url);
   const route = reportsRoute(path);
   if (!route) throw new HttpError(404, "not_found");
   for (const key of url.searchParams.keys())

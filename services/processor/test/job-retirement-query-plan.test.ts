@@ -1,7 +1,8 @@
-import { expect, test } from "bun:test";
-import { Database } from "bun:sqlite";
-import { readdirSync, readFileSync } from "node:fs";
+import { beforeAll, expect, test } from "bun:test";
+import type { Database } from "bun:sqlite";
+import { readFileSync } from "node:fs";
 import { retireReplacedJobsSql } from "../src/job-retirement-sql.ts";
+import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
 
 const legacy = readFileSync(
   new URL("./fixtures/retire-replaced-jobs-legacy.sql", import.meta.url),
@@ -13,13 +14,16 @@ const registry = JSON.stringify([
 ]);
 const now = 1000;
 
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts). Each test used to replay every
+// migration itself and ran past Bun's five-second default under load.
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
+
 function fixture(size: number, seed: number): Database {
-  const db = new Database(":memory:");
-  const dir = new URL("../../../packages/storage-d1/migrations/core/", import.meta.url);
-  for (const file of readdirSync(dir)
-    .filter((f) => f.endsWith(".sql"))
-    .sort())
-    db.exec(readFileSync(new URL(file, dir), "utf8"));
+  const db = fullCoreDatabase();
   // Only synthetic job/parse rows matter here; keep every production index
   // and trigger, with foreign keys off so unrelated evidence need not be seeded.
   db.exec("PRAGMA foreign_keys=OFF");

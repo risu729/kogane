@@ -52,6 +52,8 @@ export interface ClientFeatures {
   readonly reportedStateOnDate: boolean;
   /** One account's balances reconstructed from adopted events beside the reported ones. */
   readonly reconstructedStateOnDate: boolean;
+  /** The stored fixed report artifacts are listed and re-displayed. */
+  readonly reportArtifacts: boolean;
 }
 
 /** Every feature is off until capabilities are known. */
@@ -69,6 +71,7 @@ export const NO_FEATURES: ClientFeatures = {
   cardPurchaseRecognition: false,
   reportedStateOnDate: false,
   reconstructedStateOnDate: false,
+  reportArtifacts: false,
 };
 
 export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
@@ -91,5 +94,6 @@ export function clientFeatures(capabilities: ApiCapabilities): ClientFeatures {
     cardPurchaseRecognition: capabilities.cardPurchaseRecognition === true,
     reportedStateOnDate: capabilities.reportedStateOnDate === true,
     reconstructedStateOnDate: capabilities.reconstructedStateOnDate === true,
+    reportArtifacts: capabilities.reportArtifacts === true,
   };
 }
