@@ -140,7 +140,7 @@ export const CARD_SETTLEMENT_UNMATCHED_CODES = [
   "no_debit_in_window",
   "no_equal_amount_debit",
 ] as const;
-export type CardSettlementUnmatchedCode = (typeof CARD_SETTLEMENT_UNMATCHED_CODES)[number];
+type CardSettlementUnmatchedCode = (typeof CARD_SETTLEMENT_UNMATCHED_CODES)[number];
 
 export interface CardSettlementSweepResult {
   scanned: number;
