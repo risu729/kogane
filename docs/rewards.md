@@ -356,6 +356,12 @@ CORE migration `0041_reward_revision_triggers.sql` が元の5表を0038の依存
 
 digestは入力ではない。今日のofferで計算し直した別物を「同じsimulation」とは呼ばない。
 
+現状、この表に載る行はない。COREの `conversion_simulations` は0042で削除され、それより前にも
+書き込むwriterは無かった。processorのcaptureは保存済みsimulationを空の集合として固定する
+（`services/processor/src/reward-read-projection.ts`）。したがって公開snapshotに対する
+`GET /api/v2/rewards/simulations` は空の `rows` を返し、Web画面はこのrouteを呼ばない
+（ポイント・前払式残高のページに保存済みsimulationの欄は無い）。保存するwriterを作るときに画面も足す。
+
 ### 読み取り
 
 | route                                 | 公開snapshotなし                    | 公開snapshotあり                                                                 |
@@ -424,7 +430,7 @@ COREのclaim・rule・offer、保存済み入力と原本は維持する。
   表示し、根拠がない・壊れている行は「記録がありません」と表示すること。
 
 確認していないこと: 本番D1・本番Workerでの動作、実際のprovider規約の現在の内容、
-本番規模でのpage性能、保存済みsimulationの実データ（現状COREに書き込むwriterは無い）。
+本番規模でのpage性能、保存済みsimulationの実データ（保存するwriterが無く、captureは空の集合を固定する）。
 
 [Vポイントサービス利用規約]: docs/sources/v-point.md
 
