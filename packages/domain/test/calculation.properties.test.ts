@@ -36,6 +36,7 @@ const SEEDS = seeds(1, 3000);
 describe("rounding over random decimals", () => {
   test("each mode moves less than one unit, in its own direction, to the asked scale", () => {
     const broken: string[] = [];
+    let ties = 0;
     for (const seed of SEEDS) {
       const random = seededRandom(seed);
       const value = decimal(random, 6);
@@ -60,7 +61,20 @@ describe("rounding over random decimals", () => {
         (compareDecimals(twice, unit) > 0 || compareDecimals(twice, negateDecimal(unit)) < 0)
       )
         broken.push(`${seed}: not nearest`);
+      // A tie (exactly half a unit) goes away from zero under half-up and to
+      // an even last digit under half-even.
+      if (
+        (mode === "half-up" || mode === "half-even") &&
+        rounded.scale <= scale &&
+        (decimalEquals(twice, unit) || decimalEquals(twice, negateDecimal(unit)))
+      ) {
+        ties += 1;
+        if (mode === "half-up" && direction !== sign) broken.push(`${seed}: half-up tie`);
+        const steps = BigInt(rounded.coefficient) * 10n ** BigInt(scale - rounded.scale);
+        if (mode === "half-even" && steps % 2n !== 0n) broken.push(`${seed}: half-even tie`);
+      }
     }
+    expect(ties).toBeGreaterThan(5);
     expect(broken).toEqual([]);
   });
 

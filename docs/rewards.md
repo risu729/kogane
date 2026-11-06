@@ -77,7 +77,7 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
   - `rule`: rule参照・版・family・確認状態・版の適用期間 `validPeriod`・規約の根拠
     （`evidenceRefs`、`docs/sources` の記録）・対象活動policy参照・期限calendar。
   - `activity`: inactivity ruleが消費した履歴窓・完全性・最古観測日・起算活動（参照と日付）。
-  - `membership`: tier条件つきruleが消費した必要tierと、この保有の該当claim。
+  - `membership`: tier条件つきruleが消費した必要tierと、この保有の該当claim。claimはtierのコードポイント順（`MEMBERSHIP_SQL` の `ORDER BY tier` と同じ順）、同じtierの中はclaimの正規JSON順に並べ、渡された順に依存しない。
   - `uncertaintyCodes`: 算定を妨げないが限定する条件（タイムゾーン仮置き、古い側の履歴欠落、
     自己申告のtier）。
 - `agreement` — `agree` / `disagree` / `not-comparable`。比べられるのは暦日どうしだけで、
