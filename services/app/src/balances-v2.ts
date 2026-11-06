@@ -59,7 +59,7 @@ import {
   type PointerRow,
   type ReadProjectionReader,
 } from "../../../packages/storage-d1/src/read/index.ts";
-import { HttpError, json } from "./http";
+import { HttpError } from "./http";
 import { decimalRows } from "./normalized-decimals";
 import { organizationContext, organizeRows } from "./observation-organization";
 
@@ -160,21 +160,19 @@ export interface V2Scope {
   measureView?: "balances" | "summaries";
 }
 
-function scopeOf(url: URL): V2Scope {
-  const view = url.searchParams.get("view");
+function scopeOf(parameters: URLSearchParams): V2Scope {
+  const view = parameters.get("view");
   return {
-    ...(url.searchParams.get("source") ? { source: url.searchParams.get("source")! } : {}),
-    ...(url.searchParams.get("account") ? { account: url.searchParams.get("account")! } : {}),
-    ...(url.searchParams.get("instrument")
-      ? { instrument: url.searchParams.get("instrument")! }
-      : {}),
-    ...(url.searchParams.get("metric") ? { metric: url.searchParams.get("metric")! } : {}),
+    ...(parameters.get("source") ? { source: parameters.get("source")! } : {}),
+    ...(parameters.get("account") ? { account: parameters.get("account")! } : {}),
+    ...(parameters.get("instrument") ? { instrument: parameters.get("instrument")! } : {}),
+    ...(parameters.get("metric") ? { metric: parameters.get("metric")! } : {}),
     ...(view === "balances" || view === "summaries" ? { measureView: view } : {}),
   };
 }
 
-function pageLimit(url: URL): number {
-  const text = url.searchParams.get("limit");
+function pageLimit(parameters: URLSearchParams): number {
+  const text = parameters.get("limit");
   if (text === null) return DEFAULT_PROJECTION_PAGE_LIMIT;
   // One of the offered sizes as written: `Number` alone would also read
   // "0x32", "5e1" or " 50" as 50.
@@ -473,11 +471,11 @@ interface Continuation {
  */
 async function continuation(
   target: ReadTarget,
-  url: URL,
+  parameters: URLSearchParams,
   digest: string,
 ): Promise<Continuation | null> {
   if (target.contractMismatch) throw new HttpError(503, "read_model_unavailable");
-  const text = url.searchParams.get("cursor");
+  const text = parameters.get("cursor");
   if (text === null) {
     const snapshot = await target.reader.currentSnapshot();
     return snapshot ? { snapshot, afterRowSeq: -1, afterSortKey: "" } : null;
@@ -542,17 +540,17 @@ export async function legacyLatestFromProjection(
  * means, and how many pieces of evidence back it — which is not the number of
  * balances shown (addendum 11 section 4).
  */
-export async function latestBalancePage(
+export async function readLatestBalancePage(
   env: Env,
-  url: URL,
+  parameters: URLSearchParams,
   mode: IdentityReadMode,
-): Promise<Response> {
+): Promise<LatestBalancePage> {
   const target = await readTarget(env);
   const reader = target.reader;
-  const scope = scopeOf(url);
-  const limit = pageLimit(url);
+  const scope = scopeOf(parameters);
+  const limit = pageLimit(parameters);
   const digest = await filterDigest(V2_LATEST_PATH, scope, limit, mode);
-  const resolved = await continuation(target, url, digest);
+  const resolved = await continuation(target, parameters, digest);
   // No published snapshot at all: the read model is unavailable, which is a
   // different answer from "you hold no balances" (05 §7, G3-01).
   if (!resolved) throw new HttpError(503, "read_model_unavailable");
@@ -621,7 +619,7 @@ export async function latestBalancePage(
       organized.map((row) => row.organization),
     ),
   };
-  return json(body);
+  return body;
 }
 
 /**
@@ -629,17 +627,17 @@ export async function latestBalancePage(
  * visible parse results up to the snapshot's published high-water parse run,
  * with its own page budget and its own cursor.
  */
-export async function balanceHistoryPage(
+export async function readBalanceHistoryPage(
   env: Env,
-  url: URL,
+  parameters: URLSearchParams,
   mode: IdentityReadMode,
-): Promise<Response> {
+): Promise<BalanceHistoryPage> {
   const target = await readTarget(env);
   const reader = target.reader;
-  const scope = scopeOf(url);
-  const limit = pageLimit(url);
+  const scope = scopeOf(parameters);
+  const limit = pageLimit(parameters);
   const digest = await filterDigest(V2_HISTORY_PATH, scope, limit, mode);
-  const resolved = await continuation(target, url, digest);
+  const resolved = await continuation(target, parameters, digest);
   if (!resolved) throw new HttpError(503, "read_model_unavailable");
   const refusal = await snapshotRefusal(target, resolved.snapshot);
   if (refusal !== null) throw new HttpError(503, refusal);
@@ -728,5 +726,5 @@ export async function balanceHistoryPage(
       organized.map((row) => row.organization),
     ),
   };
-  return json(body);
+  return body;
 }

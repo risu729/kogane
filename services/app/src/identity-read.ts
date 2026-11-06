@@ -14,7 +14,12 @@ import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/ind
  * tests, which import it) depend on nothing but the schema.
  */
 export function identityReadMode(url: URL): IdentityReadMode {
-  const value = url.searchParams.get("identityRead");
+  return identityReadModeOf(url.searchParams);
+}
+
+/** `identityReadMode` over a request's parameters alone. */
+export function identityReadModeOf(parameters: URLSearchParams): IdentityReadMode {
+  const value = parameters.get("identityRead");
   if (value === null) return DEFAULT_IDENTITY_READ_MODE;
   if (value === "snapshot") throw new HttpError(400, "unsupported_semantics");
   if (!validIdentityReadMode(value, CENTRAL_STORE_CAPABILITIES))

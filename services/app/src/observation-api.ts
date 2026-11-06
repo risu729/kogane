@@ -13,6 +13,10 @@ import {
   organizationKey,
 } from "./observation-organization";
 import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract";
+import type {
+  ApiCapabilities,
+  IdentityReadMode,
+} from "../../../packages/observation-shared/src/api-schema";
 import {
   allowedQueryParameters,
   LIST_PATH_CAPABILITY,
@@ -22,15 +26,15 @@ import {
   withBalancesV2,
 } from "../../../packages/observation-shared/src/api-schema";
 import {
-  balanceHistoryPage,
-  latestBalancePage,
+  readBalanceHistoryPage,
+  readLatestBalancePage,
   balanceReadConfigured,
   legacyLatestFromProjection,
   V2_HISTORY_PATH,
   V2_LATEST_PATH,
 } from "./balances-v2";
 import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/index";
-import { identityReadMode } from "./identity-read";
+import { identityReadModeOf } from "./identity-read";
 
 /** Validated request scope. Each route passes only the keys its reader query accepts. */
 interface RequestScope {
@@ -46,6 +50,11 @@ interface RequestScope {
 }
 
 export function boundedCollections(value: Record<string, unknown>, offset?: number): Response {
+  return json(boundedBody(value, offset));
+}
+
+/** `boundedCollections`'s body: every array cut at 500, and the coverage that says so. */
+function boundedBody(value: Record<string, unknown>, offset?: number): Record<string, unknown> {
   let truncated = false;
   const bounded = Object.fromEntries(
     Object.entries(value).map(([key, rows]) => {
@@ -54,29 +63,38 @@ export function boundedCollections(value: Record<string, unknown>, offset?: numb
       return [key, rows.slice(0, 500)];
     }),
   );
-  return json({
+  return {
     ...bounded,
     coverage: {
       limit: 500,
       truncated,
       ...(offset === undefined ? {} : { nextOffset: truncated ? offset + 500 : null }),
     },
-  });
+  };
 }
 
-// Called only after the existing Access JWT gate and read-only method check.
-export async function observationApi(
-  request: Request,
+/** The list routes this module shares with the agent read tools. */
+export const SHARED_LIST_PATHS = [V2_LATEST_PATH, V2_HISTORY_PATH, "/api/positions"] as const;
+export type SharedListPath = (typeof SHARED_LIST_PATHS)[number];
+function isSharedListPath(path: string): path is SharedListPath {
+  return (SHARED_LIST_PATHS as readonly string[]).includes(path);
+}
+
+/**
+ * The request rules every path of this module applies before it reads:
+ * whether the path exists on this deployment, which parameters it takes, and
+ * the shape of each. Refusals are thrown as `HttpError` with the route's code.
+ */
+async function observationRequest(
   env: Env,
-  url: URL,
-): Promise<Response | null> {
-  const path = url.pathname;
-  if (
-    !/^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options|v2\/balances\/(latest|history))(\/|$)/.test(
-      path,
-    )
-  )
-    return null;
+  path: string,
+  parameters: URLSearchParams,
+): Promise<{
+  capabilities: ApiCapabilities;
+  filter: RequestScope;
+  offset: number;
+  identityRead: IdentityReadMode;
+}> {
   // Accepted parameters come from the shared schema, so a server and a client
   // cannot drift apart. The v2 balance routes are the one place where a
   // deployment-resolved capability also decides whether a path exists and
@@ -100,34 +118,34 @@ export async function observationApi(
   )
     throw new HttpError(404, "not_found");
   const allowed = allowedQueryParameters(path, routing);
-  for (const key of url.searchParams.keys()) {
-    const value = url.searchParams.get(key)!;
+  for (const key of parameters.keys()) {
+    const value = parameters.get(key)!;
     if (
       !allowed.includes(key) ||
-      url.searchParams.getAll(key).length !== 1 ||
+      parameters.getAll(key).length !== 1 ||
       !value ||
       value.length > 512 ||
       /[\u0000-\u001f]/.test(value)
     )
       throw new HttpError(400, "invalid_query");
   }
-  const offsetText = url.searchParams.get("offset") ?? "0";
-  const measureView = url.searchParams.get("view");
+  const offsetText = parameters.get("offset") ?? "0";
+  const measureView = parameters.get("view");
   if (measureView !== null && !validMeasureView(measureView, capabilities))
     throw new HttpError(400, "invalid_query");
-  const identityRead = identityReadMode(url);
+  const identityRead = identityReadModeOf(parameters);
   const offset = Number(offsetText);
   if (!/^(0|[1-9]\d*)$/.test(offsetText) || !Number.isSafeInteger(offset) || offset > 1_000_000)
     throw new HttpError(400, "invalid_offset");
   const filter: RequestScope = {
-    source: url.searchParams.get("source") ?? undefined,
-    account: url.searchParams.get("account") ?? undefined,
+    source: parameters.get("source") ?? undefined,
+    account: parameters.get("account") ?? undefined,
     offset,
-    from: url.searchParams.get("from") ?? undefined,
-    to: url.searchParams.get("to") ?? undefined,
-    q: url.searchParams.get("q")?.trim() || undefined,
-    instrument: url.searchParams.get("instrument") ?? undefined,
-    metric: url.searchParams.get("metric") ?? undefined,
+    from: parameters.get("from") ?? undefined,
+    to: parameters.get("to") ?? undefined,
+    q: parameters.get("q")?.trim() || undefined,
+    instrument: parameters.get("instrument") ?? undefined,
+    metric: parameters.get("metric") ?? undefined,
     measureView: measureView ?? undefined,
   };
   for (const date of [filter.from, filter.to]) {
@@ -141,12 +159,103 @@ export async function observationApi(
   }
   if (filter.from && filter.to && filter.from > filter.to)
     throw new HttpError(400, "invalid_date_range");
+  return { capabilities, filter, offset, identityRead };
+}
+
+/**
+ * `GET /api/v2/balances/latest`, `GET /api/v2/balances/history` and
+ * `GET /api/positions`: the routes' request rules and their read, shared with
+ * the agent tools `kogane.balances.read` and `kogane.positions.read` so both
+ * answer the same body and the same closed refusal codes (thrown as
+ * `HttpError`). Whether the balance pages exist (a READ binding) is decided
+ * here, by the same rule as the route: otherwise `404 not_found`.
+ */
+export async function readObservationList(
+  env: Env,
+  path: SharedListPath,
+  parameters: URLSearchParams,
+): Promise<Record<string, unknown>> {
+  const { filter, offset, identityRead } = await observationRequest(env, path, parameters);
+  if (path === V2_LATEST_PATH)
+    return { ...(await readLatestBalancePage(env, parameters, identityRead)) };
+  if (path === V2_HISTORY_PATH)
+    return { ...(await readBalanceHistoryPage(env, parameters, identityRead)) };
+  const entries = await evidenceReader(env.DB).listPositions({
+    source: filter.source,
+    account: filter.account,
+    offset,
+  });
+  const normalizedPositions = await decimalRows(
+    env.DB,
+    "position",
+    entries.map((entry) => entry.position),
+  );
+  const normalizedValuations = new Map(
+    (
+      await decimalRows(
+        env.DB,
+        "valuation",
+        entries.flatMap((entry) => entry.valuations),
+      )
+    ).map((row) => [row.id, row.normalized]),
+  );
+  const organizations = await observationOrganizations(
+    env.DB,
+    entries.flatMap((entry) => [
+      { kind: "position" as const, id: entry.position.id },
+      ...entry.valuations.map(({ id }) => ({ kind: "valuation" as const, id })),
+    ]),
+    identityRead,
+  );
+  return boundedBody(
+    {
+      positions: entries.map((entry, index) => ({
+        position: {
+          ...entry.position,
+          normalized: normalizedPositions[index]!.normalized,
+          organization: organizations.get(
+            organizationKey({ kind: "position", id: entry.position.id }),
+          )!,
+        },
+        valuations: entry.valuations.map((row) => ({
+          ...row,
+          normalized: normalizedValuations.get(row.id)!,
+          organization: organizations.get(organizationKey({ kind: "valuation", id: row.id }))!,
+        })),
+      })),
+      interpretationContext: organizationContext(identityRead, organizations.values()),
+    },
+    offset,
+  );
+}
+
+// Called only after the existing Access JWT gate and read-only method check.
+export async function observationApi(
+  request: Request,
+  env: Env,
+  url: URL,
+): Promise<Response | null> {
+  const path = url.pathname;
+  if (
+    !/^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options|v2\/balances\/(latest|history))(\/|$)/.test(
+      path,
+    )
+  )
+    return null;
+  // The balance pages and the positions list are also the agent tools'
+  // (`kogane.balances.read`, `kogane.positions.read`): one function answers both.
+  if (isSharedListPath(path)) return json(await readObservationList(env, path, url.searchParams));
+  const { capabilities, filter, offset, identityRead } = await observationRequest(
+    env,
+    path,
+    url.searchParams,
+  );
   const reader = evidenceReader(env.DB);
   if (path === "/api/filter-options") {
     const kind = url.searchParams.get("kind");
     if (!kind || !["transactions", "balances", "positions", "artifacts"].includes(kind))
       throw new HttpError(400, "invalid_query");
-    if (measureView && kind !== "balances") throw new HttpError(400, "invalid_query");
+    if (filter.measureView && kind !== "balances") throw new HttpError(400, "invalid_query");
     return json(
       await organizedFilterOptions(
         env.DB,
@@ -170,8 +279,6 @@ export async function observationApi(
       capabilities,
     } satisfies ApiMetadata);
   }
-  if (path === V2_LATEST_PATH) return await latestBalancePage(env, url, identityRead);
-  if (path === V2_HISTORY_PATH) return await balanceHistoryPage(env, url, identityRead);
   if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });
   if (path === "/api/transactions") {
     const transactions = await organizeRows(
@@ -281,55 +388,6 @@ export async function observationApi(
         latestNextOffset: latest.length > 500 ? latestOffset + 500 : null,
       },
     });
-  }
-  if (path === "/api/positions") {
-    const entries = await reader.listPositions({
-      source: filter.source,
-      account: filter.account,
-      offset,
-    });
-    const normalizedPositions = await decimalRows(
-      env.DB,
-      "position",
-      entries.map((entry) => entry.position),
-    );
-    const normalizedValuations = new Map(
-      (
-        await decimalRows(
-          env.DB,
-          "valuation",
-          entries.flatMap((entry) => entry.valuations),
-        )
-      ).map((row) => [row.id, row.normalized]),
-    );
-    const organizations = await observationOrganizations(
-      env.DB,
-      entries.flatMap((entry) => [
-        { kind: "position" as const, id: entry.position.id },
-        ...entry.valuations.map(({ id }) => ({ kind: "valuation" as const, id })),
-      ]),
-      identityRead,
-    );
-    return boundedCollections(
-      {
-        positions: entries.map((entry, index) => ({
-          position: {
-            ...entry.position,
-            normalized: normalizedPositions[index]!.normalized,
-            organization: organizations.get(
-              organizationKey({ kind: "position", id: entry.position.id }),
-            )!,
-          },
-          valuations: entry.valuations.map((row) => ({
-            ...row,
-            normalized: normalizedValuations.get(row.id)!,
-            organization: organizations.get(organizationKey({ kind: "valuation", id: row.id }))!,
-          })),
-        })),
-        interpretationContext: organizationContext(identityRead, organizations.values()),
-      },
-      offset,
-    );
   }
   if (path === "/api/artifacts") {
     const cursor = url.searchParams.get("cursor");
