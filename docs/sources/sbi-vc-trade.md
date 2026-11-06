@@ -551,6 +551,15 @@ Cronは複数回実発火し、少なくとも2026-08-31 02:00 UTCの時点で�
 
 2026-09-07には同じ6 datasetをLayer Bへsource-separatedに正規化する5 parserを追加した。recent/historicalの約定はprovider上で同じrecord shapeと複合identityを持つため、重複実装せず`CExecutionId`と`CExecutionIdSubNo`の衝突しないtupleを使う単一parserに集約した。cashflowの方向はtype labelから推測せず、signed `cashflowAmount`を正本とする。暗号資産のquantity/amount/priceは10進textとscaleを保持し、法定通貨のような既知minor unitへ推測変換しない。全観測には固定source accountとJSON locator、sanitized gateway meta/page contextを残す。
 
+Timestamps (parsers 0.2.1, 2026-11-06): `meta.timestamp`, `statusDate`,
+`executionDatetime` and `eventDatetime` are read in the audited slash form
+`YYYY/MM/DD hh:mm:ss`, as JST, or as an ISO 8601 date-time with seconds and
+an explicit offset, kept verbatim. The audited captures use only the slash
+form. A value of either form whose date, clock time or offset does not exist
+is refused, never repaired: an execution or cashflow page fails, and a gateway
+timestamp or status date leaves the instant empty. 0.2.0 checked the ISO form
+only for its shape; see [observations](../observations.md#sbi-vc-trade-an-iso-timestamp-that-does-not-exist-is-refused-five-parsers-021).
+
 production R2への再現可能なread-only actual-shape canary
 （`services/collector-r2-importer/scripts/audit-sbi-vc-r2.sh`）では、2026-09-07
 時点の63 object / 9 manifestを走査し、9件すべてがsuccessful run、全artifactが
