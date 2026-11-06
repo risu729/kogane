@@ -695,8 +695,30 @@ of up to five collected executions until they are `published` or
 `unpublished` with a closed reason. The collector call is awaited inside the
 tick, as the alarm awaits its own.
 
-A failed dispatch never deletes the request. An import whose terminal is not
-in the bucket is retried, not failed: the collector may still be running.
+A failed dispatch never deletes the request. How each kind ends:
+
+| Kind                                       | Closed ends                                                                                                                    | Looked at again                                                                                                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `import`                                   | `dispatched` once CORE holds the registration; `blocked` with `operation_payload_invalid` or the registration's own block code | every 5 min, **with no expiry**: `terminal_not_found`, a `pending` (staged) registration, a `retryable` refusal, or `registration_deferred` (budget spent) |
+| `replay`                                   | `dispatched` (`plan:<id>`) on the first look, or `blocked` with `replay_plan_missing`                                          | never                                                                                                                                                      |
+| `projection`                               | `dispatched` on the first look                                                                                                 | never                                                                                                                                                      |
+| `collection`, unattended `session-refresh` | the closed execution states of [ADR 0048](adr/0048-operation-collector-dispatch.md), including `expired` 24 h after acceptance | per the gates above, never past the expiry                                                                                                                 |
+
+An import whose terminal is not in the bucket is retried, not failed: the
+collector may still be running, and a terminal that lands late registers at
+the next look. That is also an open limit: **nothing expires an import**. One
+whose terminal never appears, or whose registration stays `retryable`, stays
+`accepted` / `dispatch_pending` with its `failure_code` and is looked at every
+five minutes for as long as the lane runs; each look adds one to
+`dispatch_attempts` (about 288 a day), spends one of the tick's five
+dispatches when it is due and a few operations of the invocation's shared
+registration budget; a `terminal_not_found` look updates only the request
+row, and a repeated `retryable` refusal appends at most one CORE stage row a
+day (ADR 0024). There is no cancel route, and a request under a new idempotency key is
+a separate operation that does not close the old one. The ADR 0048 expiry
+applies to collector starts only; an import expiry would be a new decision.
+`services/processor/test/operation-dispatch.test.ts` ("an import has no
+expiry") pins this.
 
 ## 8. Retired legacy import
 

@@ -500,6 +500,17 @@ to see what was accepted — the dispatch acts on the durable row, never on the
 contents of a notification. No branch of it completes an operation merely by
 handing the work over.
 
+Only collections and unattended session refreshes expire (24 h,
+[collector execution](#collector-execution-adr-0048)). A replay or projection
+is dispatched or blocked on its first look. **An import has no expiry and no
+other closed end while its terminal is missing** (`terminal_not_found`), its
+registration is staged (`pending`) or `retryable`, or the tick's budget was
+spent (`registration_deferred`): it stays `accepted` / `dispatch_pending` and
+is looked at every five minutes, `dispatch.attempts` growing by one each time,
+until the registration succeeds or is blocked. Nothing cancels it, and a new
+idempotency key is a new operation. This is an open limit, not a policy
+([processor §7](processor.md#7-operations-dispatch)).
+
 The collector execution services are in
 `packages/application/src/operations/collector-dispatch.ts` (writes) and
 `collector-trail.ts` (reads):
