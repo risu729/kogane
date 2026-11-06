@@ -57,7 +57,10 @@ position and valuation observations it read, and see when a restriction or a
 missing body stops the explanation. The list sorts the whole table per page:
 there is no index on `created_at`, which is acceptable while the job writes a
 report only when its inputs change; a migration adds one if the catalogue
-grows. Activity and obligations remain without a page. `/export` is not used
+grows. Paging is by offset: a report stored between two page loads shifts
+the older rows by one, so the next page can repeat a row; none is skipped,
+because `report_artifacts` rows are never updated or deleted. Activity and
+obligations remain without a page. `/export` is not used
 by the UI.
 
 ## Verification

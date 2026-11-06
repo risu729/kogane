@@ -289,7 +289,8 @@ function validEventRow(value: unknown, reportId: string): value is ReportEventRo
     exactKeys(value, ["kind", "actor", "related_report_id", "occurred_at"]) &&
     member(REPORT_EVENT_KINDS)(value.kind) &&
     text(value.actor, 256) &&
-    nullableText(value.related_report_id, 256) &&
+    // The related report is linked by id, so it must be one the API serves.
+    (value.related_report_id === null || validReportId(value.related_report_id)) &&
     // A correction and a supersession name the other report; nothing else does.
     (value.kind === "corrected" || value.kind === "superseded") ===
       (value.related_report_id !== null) &&
@@ -384,10 +385,7 @@ export function validReportExplanationNode(value: unknown): value is ReportExpla
   );
 }
 
-function validReportExplanation(
-  value: unknown,
-  reportId: string,
-): value is ReportExplanation {
+function validReportExplanation(value: unknown, reportId: string): value is ReportExplanation {
   return (
     record(value) &&
     exactKeys(value, [

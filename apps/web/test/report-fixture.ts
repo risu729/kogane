@@ -29,10 +29,7 @@ const interpretationContext = {
   decimalPolicyRelease: "decimal-v1",
 } as const;
 
-function listItem(
-  index: number,
-  reportId = `rpt-synthetic-${String(index)}`,
-): ReportListItem {
+function listItem(index: number, reportId = `rpt-synthetic-${String(index)}`): ReportListItem {
   return {
     reportId,
     contextId: `ctx-synthetic-${String(index)}`,

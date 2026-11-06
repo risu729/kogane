@@ -211,6 +211,13 @@ describe("report detail contract", () => {
         mutated(detail, (copy) => (copy.events[0].related_report_id = "rpt-other")),
       ),
     ).toBe(false);
+    // The related report is linked, so it follows the API's own id rule.
+    expect(
+      validApiResponse(
+        path,
+        mutated(detail, (copy) => (copy.events[1].related_report_id = "../summaries")),
+      ),
+    ).toBe(false);
     expect(
       validApiResponse(
         path,

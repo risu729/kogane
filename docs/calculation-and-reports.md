@@ -499,7 +499,10 @@ the shared exact formatter; a decimal with more places than its unit's minor
 unit is shown as stored, never rounded.
 
 Limits: the list has no index on `created_at` and sorts the table per page;
-the page does not use `/export`; activity and obligations have no page.
+paging is by offset, so a report stored between two page loads shifts the
+older rows by one and the next page can repeat a row (rows are never
+updated or deleted, so none is skipped); the page does not use `/export`;
+activity and obligations have no page.
 
 ## 5. The context is the input set, not a timestamp
 

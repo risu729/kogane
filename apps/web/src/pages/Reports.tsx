@@ -71,7 +71,7 @@ function ReportListRow({ item }: { item: ReportListItem }): ReactNode {
       </td>
       <td>{item.createdBy}</td>
       <td>
-        <Link to={`/reports/${item.reportId}`}>内容を見る</Link>
+        <Link to={`/reports/${encodeURIComponent(item.reportId)}`}>内容を見る</Link>
       </td>
     </tr>
   );
@@ -265,7 +265,7 @@ function ReportEvents({ events }: { events: ReportEventRow[] }): ReactNode {
             <>
               {" "}
               · 関連するレポート:{" "}
-              <Link to={`/reports/${event.related_report_id}`}>
+              <Link to={`/reports/${encodeURIComponent(event.related_report_id)}`}>
                 <code className="wrap-any">{event.related_report_id}</code>
               </Link>
             </>
