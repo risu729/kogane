@@ -453,6 +453,142 @@ describe("conservation, fills and settlement relations", () => {
     });
   });
 
+  test("an empty event and a declared gap that is not an exact same-unit amount are refused", () => {
+    expect(conservationCheck({ legs: [] })).toEqual({
+      ok: false,
+      error: {
+        code: "conservation_violated",
+        message: "an event with no legs conserves nothing",
+        refs: [],
+        difference: null,
+      },
+    });
+    const unbalanced = [
+      leg("ev:x", 0, "account:a", "JPY", "1000", "decrease"),
+      leg("ev:x", 1, "account:b", "JPY", "900", "increase"),
+    ];
+    expect(
+      conservationCheck({ legs: unbalanced, unresolvedDifference: q("USD", "100") }),
+    ).toMatchObject({ ok: false, error: { code: "unit_mismatch", refs: ["JPY", "USD"] } });
+    expect(
+      conservationCheck({
+        legs: unbalanced,
+        unresolvedDifference: {
+          unitRef: "JPY",
+          value: { status: "missing", reasonCode: "not_reported" },
+        },
+      }),
+    ).toMatchObject({ ok: false, error: { code: "value_not_exact", refs: ["JPY"] } });
+    // A declared gap that is exact but wrong is still a violation, with the real gap beside it.
+    const wrong = conservationCheck({ legs: unbalanced, unresolvedDifference: q("JPY", "99") });
+    expect(wrong).toMatchObject({ ok: false, error: { code: "conservation_violated" } });
+    if (!wrong.ok && "difference" in wrong.error)
+      expect(quantityText(wrong.error.difference)).toBe("100");
+  });
+
+  test("an unresolved leg is named, never counted as a decrease, increase or fee", () => {
+    const legs = [
+      leg("ev:x", 0, "account:a", "JPY", "1000", "decrease"),
+      leg("ev:x", 1, "account:b", "JPY", "900", "increase"),
+      leg("ev:x", 2, "account:b", "JPY", "100", "unresolved"),
+    ];
+    // The unresolved leg does not close the gap by itself.
+    expect(conservationCheck({ legs })).toMatchObject({
+      ok: false,
+      error: { code: "conservation_violated" },
+    });
+    const declared = ok(conservationCheck({ legs, unresolvedDifference: q("JPY", "100") }));
+    expect(declared.reasonCodes).toEqual(["unresolved_legs_present", "single_unit_balanced"]);
+    expect(quantityText(declared.units[0]!.fees)).toBe("0");
+    // Across units the reason is kept beside the FX-model reason.
+    const cross = ok(
+      conservationCheck({ legs: [...legs, leg("ev:x", 3, "account:c", "USD", "5", "fee")] }),
+    );
+    expect(cross.reasonCodes).toEqual(["cross_unit_requires_fx_model", "unresolved_legs_present"]);
+  });
+
+  test("a terminal or family-less state has no successor", () => {
+    expect(eventTransition("transfer", "returned", "credited")).toEqual({
+      ok: false,
+      reasonCode: "terminal_state",
+    });
+    expect(eventTransition("fee", "canceled", "confirmed")).toEqual({
+      ok: false,
+      reasonCode: "terminal_state",
+    });
+    expect(eventTransition("unknown", "unknown", "unknown")).toEqual({
+      ok: false,
+      reasonCode: "terminal_state",
+    });
+  });
+
+  test("an obligation with nothing allocated stays open, never settled", () => {
+    const result = ok(settlementCheck({ outstanding: q("JPY", "12000"), settlements: [] }));
+    expect(result.state).toBe("open");
+    expect(quantityText(result.remaining)).toBe("12000");
+    expect(result.unresolvedDifferences).toEqual([]);
+  });
+
+  test("only refund allocations are netted against a purchase", () => {
+    const refund = (id: string, role: Allocation["role"]): Allocation => ({
+      allocationId: id,
+      sourceRef: `leg:${id}#0`,
+      targetRef: "purchase:1",
+      role,
+      quantity: q("JPY", "100"),
+    });
+    expect(
+      refundAllocation({
+        purchase: q("JPY", "1000"),
+        refunds: [refund("r1", "refund"), refund("s1", "settlement"), refund("f1", "fill")],
+      }),
+    ).toEqual({
+      ok: false,
+      error: {
+        code: "conservation_violated",
+        message: "only refund allocations are netted against a purchase",
+        refs: ["s1", "f1"],
+        difference: null,
+      },
+    });
+  });
+
+  test("a rate or a reference gap needs two exact amounts and a finite or rounded ratio", () => {
+    const missing = {
+      unitRef: "JPY",
+      value: { status: "missing" as const, reasonCode: "not_reported" },
+    };
+    expect(effectiveRate({ principal: q("AUD", "1000"), received: missing })).toMatchObject({
+      ok: false,
+      error: { code: "value_not_exact", refs: ["AUD", "JPY"] },
+    });
+    expect(
+      referenceQuoteDifference({
+        principal: q("AUD", "1000"),
+        referenceRate: decimalLiteral("97"),
+        received: missing,
+        referenceRef: "quote:synthetic",
+      }),
+    ).toMatchObject({ ok: false, error: { code: "value_not_exact", refs: ["AUD", "JPY"] } });
+    expect(effectiveRate({ principal: q("AUD", "3"), received: q("JPY", "100") })).toMatchObject({
+      ok: false,
+      error: { code: "inexact_result" },
+    });
+    expect(effectiveRate({ principal: q("AUD", "0"), received: q("JPY", "100") })).toMatchObject({
+      ok: false,
+      error: { code: "division_by_zero" },
+    });
+    expect(
+      ok(
+        effectiveRate({
+          principal: q("AUD", "3"),
+          received: q("JPY", "100"),
+          rounding: { scale: 4, mode: "half-even" },
+        }),
+      ).rate,
+    ).toEqual({ unitRef: "JPY/AUD", value: decimalLiteral("33.3333") });
+  });
+
   test("fills never exceed the executed quantity", () => {
     const fill = (id: string, quantity: string): Allocation => ({
       allocationId: id,

@@ -36,8 +36,9 @@ parser types, the domain coverage contract) and writes
 `src/parsers/digests.ts`, which the registry re-exports. The range is
 deliberately narrower than a repository commit: a UI change must not invalidate
 every historical parse, a change to `src/parsers/util.ts` must. Regenerate with
-`bun run scripts/parser-digests.ts` from `packages/parsers` after a
-deliberate parser change; the generator refuses to record a changed digest for
+`mise run //packages/parsers:digests` after a deliberate parser change; the
+task runs the generator and then Oxfmt over its output, so an unchanged parser
+set rewrites nothing. The generator refuses to record a changed digest for
 an unchanged version, and `test/parser-digests.test.ts` fails when the
 checked-in file no longer matches the sources or a recorded version disagrees
 with the registry.

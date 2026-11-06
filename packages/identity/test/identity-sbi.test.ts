@@ -217,6 +217,53 @@ describe("SBI identity", () => {
     expect(cash.account.key).toEqual(["sbi-securities:foreign", "accountKind", "SPECIFIC"]);
     expect(cash.instruments).toHaveLength(1);
   });
+  test("a missing or conflicting discriminator is an issue and an unresolved account, never a merge", () => {
+    // The row's deposit type disagrees with the account it was filed under:
+    // the conflict is part of the key, so it never joins either account.
+    const conflicting = sbiIdentity(input({ extra: { depositTypeCode: "1" } }));
+    expect(conflicting.issues).toContain("conflicting-depositTypeCode");
+    expect(conflicting.account.key).toEqual([
+      "sbi-securities:domestic:deposit-type=0",
+      "conflicting-depositTypeCode",
+      "1",
+    ]);
+    expect(conflicting.account.status).toBe("unresolved");
+    const agreeing = sbiIdentity(input({ extra: { depositTypeCode: "0" } }));
+    expect(agreeing.issues).not.toContain("conflicting-depositTypeCode");
+    expect(agreeing.account.key).toEqual(["sbi-securities:domestic:deposit-type=0"]);
+
+    const unlabelled = sbiIdentity(
+      input({ kind: "transaction", sourceAccount: "sbi-securities:domestic", extra: {} }),
+    );
+    expect(unlabelled.issues).toContain("missing-accountLabel");
+    expect(unlabelled.account.status).toBe("unresolved");
+    expect(unlabelled.account.label).toContain("未確定");
+
+    const foreign = sbiIdentity(
+      input({
+        kind: "transaction",
+        sourceAccount: "sbi-securities:foreign",
+        currency: "JPY",
+        extra: {
+          specificAccountCode: "SPECIFIC",
+          settlementCurrencyCode: "USD",
+          securities: { securitiesCode: "SYN", countryCode: "US", ric: "SYN.O" },
+        },
+      }),
+    );
+    expect(foreign.issues).toEqual(
+      expect.arrayContaining(["missing-trade-currency", "conflicting-settlement-currency"]),
+    );
+    expect(foreign.instruments.some((item) => item.role === "trade-unit")).toBe(false);
+    const noUnit = sbiIdentity(input({ currency: null }));
+    expect(noUnit.issues).toContain("missing-monetary-unit");
+    expect(noUnit.instruments.some((item) => item.role === "unit")).toBe(false);
+
+    const unknown = sbiIdentity(input({ sourceAccount: "sbi-securities:other" }));
+    expect(unknown.issues).toContain("unknown-sbi-account-scope");
+    expect(unknown.account).toMatchObject({ role: "unknown", status: "unresolved" });
+  });
+
   test("unknown identifiers stay unresolved without invented venue, RIC, or security", () => {
     const foreign = sbiIdentity(
       input({

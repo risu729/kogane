@@ -15,6 +15,12 @@ export interface IdentityInput {
   market: string | null;
   subject: string | null;
   extra: Record<string, unknown>;
+  /**
+   * The identity run's policy version. A rule that changed between versions
+   * applies the version named here, so a run records what its release meant
+   * (SBI Shinsei, ADR 0076). Absent: the newest rules.
+   */
+  policyVersion?: number;
   /** Store-verified sidecar evidence, never sourced from provider extra_json. */
   trustedVpassBinding?: { cardToken: string; bindingArtifactId: number; financialUnitId: number };
 }

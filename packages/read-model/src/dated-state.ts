@@ -342,3 +342,25 @@ CROSS JOIN position_observations po ON po.id=w.value
 LEFT JOIN observation_decimal_values d ON d.kind='position' AND d.observation_id=po.id
  AND d.policy_version='${DATED_POSITION_QUANTITY_POLICY}'
 ORDER BY po.id`;
+
+/** One chosen snapshot's fetch unit. */
+export interface DatedSnapshotUnitRow {
+  id: number;
+  unit_key: string | null;
+}
+
+/**
+ * The fetch unit of each named snapshot artifact (`?1`, a JSON array of the
+ * `snapshot_artifact_id`s a reported state chose). The snapshot CTEs choose
+ * one snapshot per (source, parser, dataset, fetch unit), so two dates'
+ * captures of one container are of the same scope only when their units are
+ * equal (`unit_key` as `observation_fetch_artifacts.fetch_unit_key` gives it;
+ * null for a run without units). Keyed: each id reaches its artifact by
+ * primary key and its unit by the unit's primary key. The caller bounds the
+ * id list.
+ */
+export const DATED_SNAPSHOT_UNITS_SQL = `SELECT a.id,u.unit_key
+FROM json_each(?1) w
+CROSS JOIN fetch_artifacts a ON a.id=w.value
+LEFT JOIN fetch_units u ON u.id=a.fetch_unit_id
+ORDER BY a.id`;

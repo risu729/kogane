@@ -126,7 +126,7 @@ ALTER TABLE fetch_artifacts ADD COLUMN format_version TEXT;`);
   }
   await db.batch([
     db.prepare(
-      "INSERT INTO sources VALUES('smbc-bank','synthetic'),('v-point','synthetic'),('mizuho-bank','synthetic')",
+      "INSERT INTO sources VALUES('smbc-bank','synthetic'),('v-point','synthetic'),('mizuho-bank','synthetic'),('sbi-shinsei-bank','synthetic')",
     ),
     db.prepare("INSERT INTO producers VALUES('synthetic-producer'),('other-producer')"),
   ]);
@@ -390,7 +390,13 @@ function parse(id: number, source = "smbc-bank") {
     fetch_run_id: id,
   };
 }
-async function seed(id: number, count = 1, source = "smbc-bank", success = true) {
+async function seed(
+  id: number,
+  count = 1,
+  source = "smbc-bank",
+  success = true,
+  rows: (id: number) => D1PreparedStatement[] = () => [],
+) {
   await db.batch([
     db
       .prepare("INSERT INTO acquisition_sessions(id,external_session_id) VALUES(?,?)")
@@ -422,10 +428,13 @@ async function seed(id: number, count = 1, source = "smbc-bank", success = true)
           ? "v-point:member"
           : source === "mizuho-bank"
             ? "mizuho-bank:ordinary:001:1234567"
-            : "smbc-bank:ordinary-yen",
+            : source === "sbi-shinsei-bank"
+              ? "sbi-shinsei:synthetic-account"
+              : "smbc-bank:ordinary-yen",
         source === "v-point" ? "V_POINT" : "JPY",
         JSON.stringify(Array.from({ length: count }, (_, i) => i)),
       ),
+    ...rows(id),
     db.prepare("UPDATE parse_runs SET status=? WHERE id=?").bind(success ? "ok" : "error", id),
   ]);
   // A success is published the way the pipeline writer does; the identity
@@ -709,6 +718,129 @@ test("Mizuho parses sealed under policy 1 are re-identified append-only at polic
       policy_version: 2,
     },
   ]);
+});
+
+test("SBI Shinsei parses sealed under policy 1 are re-identified append-only at policy 2", async () => {
+  // Synthetic rows shaped like the parsers' (ADR 0076): one account balance,
+  // two rate cells of the exchange-rate board and the stage category.
+  await seed(130, 1, "sbi-shinsei-bank", true, (id) => [
+    db
+      .prepare(
+        "INSERT INTO valuation_observations(parse_run_id,source_account,subject,metric,currency,raw_locator,extra_json) SELECT ?,'sbi-shinsei:fx-board','USD',value,'JPY','synthetic:'||value,'{}' FROM json_each(?)",
+      )
+      .bind(id, JSON.stringify(["bank_buy_rate", "bank_sell_rate"])),
+    db
+      .prepare(
+        "INSERT INTO valuation_observations(parse_run_id,source_account,subject,metric,currency,raw_locator,extra_json) VALUES(?,'sbi-shinsei:customer','customerCategory','provider_customer_category','XXX','synthetic:stage','{}')",
+      )
+      .bind(id),
+  ]);
+  // A real policy-1 run: the resolver applies the rule the run's version names.
+  expect(await identifyParse(db, parse(130, "sbi-shinsei-bank"), providerIdentity, 1)).toBe(4);
+  const v1 = await identityKey("ir", [130, 1]);
+  const v2 = await identityKey("ir", [130, 2]);
+  const rows = (run: string) =>
+    db
+      .prepare(
+        "SELECT kind,observation_id,source_account_id,account_mapping_id,issues_json FROM identity_observations WHERE identity_run_id=? ORDER BY kind,observation_id",
+      )
+      .bind(run)
+      .all<{ kind: string; observation_id: number; source_account_id: string }>();
+  const mappings = () =>
+    db
+      .prepare(
+        `SELECT json_extract(a.reference_json,'$[0]') reference,m.revision,m.label,m.status,m.reason,m.policy_version
+         FROM account_mappings m JOIN source_accounts a ON a.id=m.source_account_id
+         WHERE a.source_id='sbi-shinsei-bank' ORDER BY reference,m.revision`,
+      )
+      .all();
+  const recorded = await rows(v1);
+  const recordedMappings = (await mappings()).results;
+  const deposit = {
+    label: "SBI新生銀行 預金口座",
+    status: "provider-local",
+    reason: "provider-account-reference-with-native-unit",
+  };
+  expect(recordedMappings).toEqual([
+    { reference: "sbi-shinsei:customer", revision: 1, ...deposit, policy_version: 1 },
+    { reference: "sbi-shinsei:fx-board", revision: 1, ...deposit, policy_version: 1 },
+    { reference: "sbi-shinsei:synthetic-account", revision: 1, ...deposit, policy_version: 1 },
+  ]);
+  // The sealed policy-1 run no longer satisfies the required policy.
+  expect(await identitySweep(db, providerIdentity, 8, "sbi-shinsei-bank")).toEqual({
+    processedRuns: 1,
+    identifiedRuns: 1,
+    identifiedObservations: 4,
+  });
+  expect(await identitySweep(db, providerIdentity, 8, "sbi-shinsei-bank")).toEqual({
+    processedRuns: 0,
+    identifiedRuns: 0,
+    identifiedObservations: 0,
+  });
+  expect(
+    await db
+      .prepare(
+        "SELECT policy_family,policy_release,dependency_set_json FROM identity_run_policies WHERE identity_run_id=?",
+      )
+      .bind(v2)
+      .first(),
+  ).toEqual({
+    policy_family: "identity-default",
+    policy_release: "identity-default-v2",
+    dependency_set_json: "[]",
+  });
+  // Policy-1 rows and mapping revisions stay exactly as recorded.
+  expect((await rows(v1)).results).toEqual(recorded.results);
+  const after = (await mappings()).results;
+  expect(after.filter((m) => (m as { revision: number }).revision === 1)).toEqual(recordedMappings);
+  // Every observation keeps its source account: no second subject, so the
+  // correction is a revision, and the account reference's digest is unchanged.
+  expect(
+    (await rows(v2)).results.map((r) => [r.kind, r.observation_id, r.source_account_id]),
+  ).toEqual(recorded.results.map((r) => [r.kind, r.observation_id, r.source_account_id]));
+  expect(
+    await db
+      .prepare("SELECT count(*) n FROM source_accounts WHERE source_id='sbi-shinsei-bank'")
+      .first<number>("n"),
+  ).toBe(3);
+  expect(
+    await db
+      .prepare(
+        "SELECT count(*) n,count(DISTINCT observation_id||kind) d,min(policy_version) v FROM current_identity_observations WHERE parse_run_id=130",
+      )
+      .first(),
+  ).toEqual({ n: 4, d: 4, v: 2 });
+  expect(after.filter((m) => (m as { revision: number }).revision === 2)).toEqual([
+    {
+      reference: "sbi-shinsei:customer",
+      revision: 2,
+      label: "SBI新生銀行 お客さまステージ",
+      status: "aggregate",
+      reason: "provider-customer-stage-not-an-account",
+      policy_version: 2,
+    },
+    {
+      reference: "sbi-shinsei:fx-board",
+      revision: 2,
+      label: "SBI新生銀行 外貨為替レート",
+      status: "aggregate",
+      reason: "provider-fx-board-quotes-not-an-account",
+      policy_version: 2,
+    },
+    { reference: "sbi-shinsei:synthetic-account", revision: 2, ...deposit, policy_version: 2 },
+  ]);
+  // Account entities are append-only: the policy-1 entity keeps the role it
+  // was written with; the classification lives on the policy-2 revision.
+  expect(
+    (
+      await db
+        .prepare(
+          `SELECT DISTINCT e.role,e.status FROM accounts e JOIN current_account_mappings m ON m.account_id=e.id
+           JOIN source_accounts a ON a.id=m.source_account_id WHERE a.source_id='sbi-shinsei-bank'`,
+        )
+        .all()
+    ).results,
+  ).toEqual([{ role: "deposit", status: "provider-local" }]);
 });
 
 test("all four observation kinds preserve their instrument roles and provenance", async () => {

@@ -386,6 +386,65 @@ describe("S3 declaration core is fail closed, not execution authority", () => {
         .reason,
     ).toBe("delegation_expired");
   });
+  test("an installed adapter makes exactly its own held capability ready, and grants nothing", async () => {
+    const resolution = await resolve();
+    const installed = ["operations.read"] as const;
+    expect(delegationExecutionReadiness(resolution, "operations.read", installed)).toEqual({
+      available: true,
+      reason: "ready",
+      blockedBy: [],
+    });
+    // Another held capability is blocked only by its missing adapter.
+    for (const capability of ["operations.import.request", "schedules.survey.decide"])
+      expect(delegationExecutionReadiness(resolution, capability, installed)).toEqual({
+        available: false,
+        reason: "delegation_execution_unavailable",
+        blockedBy: ["delegation_adapter_unavailable"],
+      });
+    // Installing a writer never adds a capability the delegation does not hold.
+    expect(
+      delegationExecutionReadiness(resolution, "commands.plan", ["commands.plan"]).reason,
+    ).toBe("delegation_capability_denied");
+    expect(delegationExecutionReadiness(resolution, "Access.update", installed).reason).toBe(
+      "unsupported_semantics",
+    );
+    expect(
+      delegationExecutionReadiness(
+        { ok: false, code: "delegation_expired" },
+        "operations.read",
+        installed,
+      ).reason,
+    ).toBe("delegation_expired");
+    const confirmed = [
+      "commands.decide.relation",
+      "operations.collection.request",
+      "operations.session.refresh",
+    ] as const;
+    const delegate = await resolve({
+      configured: configured(
+        entry({
+          capabilities: [...confirmed],
+          scopes: { sources: "*", accounts: "*", scheduleSources: [] },
+        }),
+      ),
+    });
+    expect(delegate.ok).toBe(true);
+    for (const capability of confirmed)
+      expect(delegationExecutionReadiness(delegate, capability, installed)).toEqual({
+        available: false,
+        reason: "delegation_execution_unavailable",
+        blockedBy: ["delegation_adapter_unavailable"],
+      });
+    const report = delegationCapabilities(resolution, installed);
+    expect(report).toMatchObject({ available: true, reason: "ready", configuration: "valid" });
+    expect(
+      report.capabilities.filter((entry) => entry.available).map((entry) => entry.capability),
+    ).toEqual(["operations.read"]);
+    expect(delegationCapabilities({ ok: false, code: "delegation_expired" }, installed)).toEqual(
+      expect.objectContaining({ available: false, reason: "delegation_expired", capabilities: [] }),
+    );
+  });
+
   test("public report never returns identities, scope, expiry, budget or reference", async () => {
     for (const resolution of [
       await resolve(),

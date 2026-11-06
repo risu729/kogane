@@ -14,6 +14,7 @@ import {
 import { LANE_TICK_COUNTS, laneTick } from "../src/lane-ticks.ts";
 import { runScheduled, type ScheduledStages } from "../src/worker.ts";
 import { startPipeline } from "./harness.ts";
+import { maskRandomTokens } from "../../../packages/application/test/random-tokens.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -320,7 +321,9 @@ test("a failed lane records `failed` with its safe code, never the message, and 
   expect(JSON.parse(byLane["reconciliation_sweep"]!.counts_json)).toEqual(RESULTS.reconcile);
   expect(byLane["reward_claims_sweep"]).toMatchObject({ outcome: "ran" });
   expect(byLane["decision_outbox"]).toMatchObject({ outcome: "ran" });
-  expect(JSON.stringify(rows)).not.toMatch(/98765|架空|merchant|not an Error/u);
+  // started_at_ms and finished_at_ms are the clock's milliseconds: masked, so
+  // the amount's digits are found only where a row really carries them.
+  expect(maskRandomTokens(JSON.stringify(rows))).not.toMatch(/98765|架空|merchant|not an Error/u);
   // A code that is not a code is reported as `unknown`, as the 0049 check demands.
   expect(laneTick("purchase_recognition", 1, 2, { outcome: "failed", code: "a message" })).toEqual({
     lane: "purchase_recognition",
