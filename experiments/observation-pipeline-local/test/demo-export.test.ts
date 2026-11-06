@@ -77,6 +77,12 @@ describe("synthetic deployment export", () => {
       expect(
         readdirSync(scratchRoot).filter((name) => name.startsWith("kogane-demo-export-")),
       ).toEqual(before);
+      // The check above sees a leak only if the stores were made under
+      // scratchRoot: an export that ignored it would create them in the shared
+      // temporary root instead. A scratch root that does not exist must fail.
+      await expect(
+        exportDemo(join(directory, "unused.json"), { scratchRoot: join(directory, "missing") }),
+      ).rejects.toThrow();
     } finally {
       const target = resolve(directory);
       if (dirname(target) === temporaryRoot && basename(target).startsWith("kogane-export-test-")) {
