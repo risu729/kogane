@@ -41,13 +41,38 @@ const COLUMNS = [
   { field: "transactionNumber", match: ["取引番号"] },
 ] as const;
 
-/** "2026/08/15 12:34:56" -> "2026-08-15T12:34:56+09:00" (PayPay shows JST). */
+/**
+ * "2026/08/15 12:34:56" -> "2026-08-15T12:34:56+09:00" (PayPay shows JST).
+ * A date or clock time that does not exist ("2026/02/30 25:61:61",
+ * "2026/13/45 00:00") is refused, never rolled over into another instant.
+ */
 function toIsoJst(value: string): string | undefined {
   const match = value
     .trim()
     .match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/u);
   if (!match) return undefined;
   const [, year, month, day, hour, minute, second = "00"] = match;
+  const parts = [year, month, day, hour, minute, second].map(Number) as [
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ];
+  const checked = new Date(
+    Date.UTC(parts[0], parts[1] - 1, parts[2], parts[3], parts[4], parts[5]),
+  );
+  if (
+    checked.getUTCFullYear() !== parts[0] ||
+    checked.getUTCMonth() + 1 !== parts[1] ||
+    checked.getUTCDate() !== parts[2] ||
+    checked.getUTCHours() !== parts[3] ||
+    checked.getUTCMinutes() !== parts[4] ||
+    checked.getUTCSeconds() !== parts[5]
+  ) {
+    return undefined;
+  }
   const pad = (part: string): string => part.padStart(2, "0");
   return `${year}-${pad(month!)}-${pad(day!)}T${pad(hour!)}:${minute}:${second}+09:00`;
 }
@@ -97,7 +122,10 @@ function mapColumns(header: string[]): {
 
 export const paypayCsv: Parser = {
   name: "paypay-csv",
-  version: "0.2.0",
+  // 0.2.1: a transaction date or time that does not exist gives no asOf and
+  // the "not recognized" warning instead of an impossible instant; every
+  // existing date and time reads as in 0.2.0.
+  version: "0.2.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "paypay" && artifact.mime === "text/csv";

@@ -17,6 +17,23 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## PayPay CSV: a transaction date that does not exist gives no asOf (parser 0.2.1)
+
+2026-11-06. `paypay-csv` 0.2.0 read the transaction date column by its shape
+alone, so `2026/02/30 25:61:61` became `2026-02-30T25:61:61+09:00` and
+`2026/13/45 00:00` an equally impossible `asOf`, with no warning. 0.2.1 checks
+the calendar date and clock time and, when either does not exist, leaves
+`asOf` empty and records the existing `row N: datetime ... not recognized`
+warning, as `util.ts`'s refuse-rather-than-guess rule asks; the verbatim
+cell stays in `extra.datetimeVerbatim`. Every date and time that exists reads
+as in 0.2.0, and no other parser's digest changed. **Deploying rewrites
+nothing**: stored 0.2.0 runs stay as they are; the processor registers 0.2.1
+itself and the repair lane re-parses any stored PayPay CSV artifact under it. No
+migration and no operator step: no snapshot policy row names this parser and
+every reader pins it by name. Limits: production was not read for this
+release. Tests: `packages/parsers/test/parsers.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`.
+
 ## SBI VC Trade: an ISO timestamp that does not exist is refused (five parsers 0.2.1)
 
 2026-11-06. `providerTimestamp` in `sbi-vc-common.ts` read an ISO 8601
@@ -1464,7 +1481,10 @@ One parser does cross the line by a small, deliberate step.
 grounds that PayPay displays JST; the CSV states no zone. The verbatim
 string is kept in `extra` as `datetimeVerbatim`, so the addition is
 visible and reversible. Every such step should be this small, this
-documented, and this recoverable.
+documented, and this recoverable. The step never repairs a value: a date or
+clock time that does not exist (`2026/02/30 25:61:61`, `2026/13/45 00:00`)
+gives no `asOf` and the row's `datetime ... not recognized` warning
+(0.2.1; 0.2.0 wrote such a value through as an impossible instant).
 
 ## The parser contract
 
