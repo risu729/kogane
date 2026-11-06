@@ -1187,16 +1187,22 @@ call refuses with `503 delegation_misconfigured` — is shown with no entry and
 no reason. A valid table lists each entry, ordered by principal, with its
 delegator, role, effective capabilities, the `sources`, `accounts` and
 `scheduleSources` axes, `issuedAt`, `notAfter`, `writesPerDay`, a `state` of
-`in_force`, `not_yet_valid` or `expired` (the window `/mcp` enforces, at
-`evaluatedAt`), and the `delegationRef` audit records carry. No secret,
-token, Access setting, read-grant budget or raw configuration is in it; the
-shared contract refuses any key it does not name.
+`in_force`, `not_yet_valid` or `expired` (the resolver's `[issuedAt,
+notAfter)` window `/mcp` enforces, at `evaluatedAt`), and the
+`delegationRef` audit records carry. The delegated writers additionally floor
+a sub-millisecond `notAfter` to its millisecond, so in the last fraction of a
+millisecond before such a bound an `in_force` entry's write is already
+refused as `delegation_expired`. No secret, token, Access setting, read-grant
+budget or raw configuration is in it; the shared contract refuses any key it
+does not name.
 
 The schedules page (`/schedules`) and the confirm page (`/confirm/:planId`)
 show this as a compact, read-only notice **AIへの委任**: no delegation, a
 void configuration, or each entry's principal, state, role, Japan-time window
 and daily write cap, with capabilities, scope and reference behind a
-disclosure. Nothing on it edits, grants or revokes a delegation, and the
-operator's own approval and settings do not depend on it. A failed read says
-the state cannot be confirmed. With the committed empty `MCP_DELEGATIONS`
-both pages say that no delegation exists.
+disclosure, and the Japan time of `evaluatedAt` the states were read at.
+Nothing on it edits, grants or revokes a delegation, and the operator's own
+approval and settings do not depend on it. A failed read, including a failed
+re-read after an earlier answer, says the state cannot be confirmed and shows
+no entry. With the committed empty `MCP_DELEGATIONS` both pages say that no
+delegation exists.

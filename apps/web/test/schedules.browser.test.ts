@@ -21,7 +21,8 @@ describe.if(runnable)("operator schedule administration", () => {
     snapshotStatus = 200,
     leaseResponse: (() => Promise<Response>) | null = null,
     readAfterWrite: (() => Promise<void>) | null = null,
-    delegations: DelegationStatus | null = null;
+    delegations: DelegationStatus | null = null,
+    delegationFailure = 403;
   let writes: {
     path: string;
     body: Record<string, unknown>;
@@ -35,6 +36,7 @@ describe.if(runnable)("operator schedule administration", () => {
     leaseResponse = null;
     readAfterWrite = null;
     delegations = delegationStatusFixture("none");
+    delegationFailure = 403;
     snapshot = {
       schedules: jobs.map((job) => ({
         ...job,
@@ -83,7 +85,9 @@ describe.if(runnable)("operator schedule administration", () => {
         if (url.pathname === "/api/v2/delegations")
           return delegations
             ? Response.json(delegations)
-            : Response.json({ error: "operator_required" }, { status: 403 });
+            : delegationFailure === 403
+              ? Response.json({ error: "operator_required" }, { status: 403 })
+              : Response.json({ error: "unavailable" }, { status: delegationFailure });
         if (url.pathname === "/api/ops/v1/schedules") {
           snapshotReads++;
           if (writes.length && readAfterWrite) await readAfterWrite();
@@ -435,6 +439,25 @@ describe.if(runnable)("operator schedule administration", () => {
           await page.close();
         }
       }, 30000);
+  test("a failed re-read never keeps showing the earlier delegation state as current", async () => {
+    delegations = delegationStatusFixture("valid");
+    const page = await browser.newPage({ viewport: { width: 390, height: 960 } });
+    try {
+      await page.goto(`${origin}/schedules`);
+      await expectDelegationNotice(page, "valid");
+      delegations = null;
+      delegationFailure = 503;
+      // A focus refetch (staleTime 0) that fails replaces the earlier answer.
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      const notice = page.getByRole("region", { name: "AIへの委任" });
+      await notice
+        .getByText("委任の状態を確認できません。時間をおいて再読み込みしてください。")
+        .waitFor();
+      expect(await notice.locator(".delegation-entry").count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
   test("a dated maintenance change uses Japan time and retains provenance", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/schedules`);

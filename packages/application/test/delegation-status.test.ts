@@ -123,6 +123,60 @@ describe("delegation status reads the resolver's table, never more", () => {
     }
   });
 
+  test("`misconfigured` exactly when the resolver refuses the table, for every caller", async () => {
+    const tables: unknown[] = [
+      "",
+      "{}",
+      "{",
+      "null",
+      "[]",
+      { [`mcp-client:${OWNER}`]: entry() },
+      { [`mcp-client:${OWNER}`]: entry(), [`mcp-client:${SECOND}`]: entry(SECOND) },
+      // Key and delegator disagree; delegator is not an operator.
+      { [`mcp-client:${SECOND}`]: entry(OWNER) },
+      { "mcp-client:not-an-operator": entry("not-an-operator") },
+      // An unknown key, a capability outside the vocabulary, a repeated one.
+      { [`mcp-client:${OWNER}`]: { ...entry(), note: "x" } },
+      { [`mcp-client:${OWNER}`]: entry(OWNER, { capabilities: ["grants.update" as never] }) },
+      {
+        [`mcp-client:${OWNER}`]: entry(OWNER, {
+          capabilities: ["operations.read", "operations.read"],
+        }),
+      },
+      // Command capabilities need whole-store scope.
+      {
+        [`mcp-client:${OWNER}`]: entry(OWNER, {
+          scopes: { sources: ["s"], accounts: "*", scheduleSources: [] },
+        }),
+      },
+      // Empty or inverted window, a lifetime over 90 days, a budget out of range.
+      { [`mcp-client:${OWNER}`]: entry(OWNER, { notAfter: "2026-10-01T00:00:00Z" }) },
+      { [`mcp-client:${OWNER}`]: entry(OWNER, { notAfter: "2027-01-01T00:00:00Z" }) },
+      { [`mcp-client:${OWNER}`]: entry(OWNER, { budget: { writesPerDay: 201 } }) },
+      // A valid entry beside an invalid one.
+      { [`mcp-client:${OWNER}`]: entry(), [`mcp-client:${SECOND}`]: entry(OWNER) },
+    ];
+    for (const table of tables) {
+      const configured = typeof table === "string" ? table : JSON.stringify(table);
+      const view = await status(configured);
+      expect(validDelegationStatus(view)).toBe(true);
+      for (const principal of [`mcp-client:${OWNER}`, `mcp-client:${SECOND}`]) {
+        const resolved = await resolveDelegation({
+          configured,
+          operatorSubjects: JSON.stringify([OWNER, SECOND]),
+          readGrants: grants,
+          caller: { kind: "mcp-client", principal },
+          now: NOW,
+        });
+        const refused = !resolved.ok && resolved.code === "delegation_misconfigured";
+        expect(view.configuration === "misconfigured").toBe(refused);
+        // A listed entry is exactly one the resolver honours in its window.
+        const listed = view.delegations.find((row) => row.principal === principal);
+        expect(listed !== undefined).toBe(resolved.ok);
+      }
+    }
+  });
+
   test("a scope list is a copy, never the parsed configuration object", async () => {
     const view = await status({
       [`mcp-client:${OWNER}`]: entry(OWNER, {

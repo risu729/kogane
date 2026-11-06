@@ -4,7 +4,7 @@
 // the capabilities and the reference are the server's.
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getJson } from "./api.ts";
+import { ApiError, getJson } from "./api.ts";
 import {
   DELEGATION_STATUS_PATH,
   type DelegationScopeView,
@@ -94,15 +94,21 @@ function Entry({ value }: { value: DelegationStatusEntry }): ReactNode {
 /** A compact notice; the pages that can be acted on by a delegate show it. */
 export function DelegationStatusNotice(): ReactNode {
   const query = useDelegationStatus();
-  const data = query.data;
+  // A failed refetch keeps the previous answer in the cache; the state it
+  // names was the server's at its `evaluatedAt`, not now, so a failed read is
+  // never shown as a current state.
+  const data = query.isError ? undefined : query.data;
   return (
     <section className="delegation-status" aria-labelledby="delegation-status-heading">
       <h2 id="delegation-status-heading">AIへの委任</h2>
-      {query.isPending ? (
+      {query.isPending && query.fetchStatus !== "paused" ? (
         <p role="status">委任の状態を読み込んでいます…</p>
       ) : data === undefined ? (
         <p role="status">
-          委任の状態を確認できません。管理者としてログインしているか確認してください。
+          委任の状態を確認できません。
+          {query.error instanceof ApiError && query.error.status === 403
+            ? "管理者としてログインしているか確認してください。"
+            : "時間をおいて再読み込みしてください。"}
         </p>
       ) : data.configuration === "misconfigured" ? (
         <p className="notice notice-bad" role="alert">
@@ -115,6 +121,7 @@ export function DelegationStatusNotice(): ReactNode {
           <p>
             ここに表示する委任の権限と範囲・期間の内でのみ、AIが操作を行えます。この画面からは委任を変更できません。
           </p>
+          <p className="delegation-evaluated-at">{time(data.evaluatedAt)} 時点の状態です。</p>
           <ul className="delegation-entries">
             {data.delegations.map((entry) => (
               <Entry key={entry.principal} value={entry} />

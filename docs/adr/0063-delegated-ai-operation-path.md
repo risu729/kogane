@@ -611,8 +611,9 @@ and checks that each state agrees with its window at `evaluatedAt`. Nothing in
 the answer names a secret, a token, an Access audience or issuer, the read
 grant's budget or the raw configuration. Reading it is a page load and is not
 recorded (ADR 0064). The schedules and confirm pages show it as a compact,
-read-only notice with no control; a failed read says the state cannot be
-confirmed rather than showing none.
+read-only notice with no control, stating the time the states were read; a
+failed read, including a failed re-read after an earlier answer, says the
+state cannot be confirmed rather than showing none or the earlier answer.
 
 **Consequences.** The owner sees, on the pages a delegate can act on, exactly
 which delegations a call would honour and when each ends, and sees a void
@@ -628,5 +629,6 @@ against `resolveDelegation` (same reference, capabilities and nanosecond
 window) and the wire vocabulary pinned to the delegation vocabulary, the
 contract's exact-key, closed-code, ordering and state-window refusals, and
 production-bundle browser tests of both pages at 1280 and 390 px for every
-configuration and an unreadable answer. The committed `MCP_DELEGATIONS` stays
-empty; no grant, Access setting, delegation or deployment changes.
+configuration and an unreadable answer, and a failed re-read on the
+schedules page. The committed `MCP_DELEGATIONS` stays empty; no grant, Access
+setting, delegation or deployment changes.

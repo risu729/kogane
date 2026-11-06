@@ -79,7 +79,10 @@ export async function expectDelegationNotice(
   const text = await notice.innerText();
   if (configuration === "none")
     expect(text).toContain("委任はありません。AIは読み取りと提案のみ行い");
-  if (configuration === "unavailable") expect(text).toContain("委任の状態を確認できません");
+  if (configuration === "unavailable")
+    expect(text).toContain(
+      "委任の状態を確認できません。管理者としてログインしているか確認してください。",
+    );
   if (configuration === "misconfigured")
     expect(await notice.getByRole("alert").innerText()).toContain(
       "委任の設定に誤りがあるため、AIへの委任はすべて無効です",
@@ -93,6 +96,8 @@ export async function expectDelegationNotice(
     expect(await live.innerText()).toContain("1日あたりの書き込み上限 30 件");
     // Japan time, as every other time on these pages.
     expect(await live.innerText()).toContain("2026/10/01 9:00 から 2026/11/01 9:00 まで");
+    // The state is the server's at `evaluatedAt`, and says so.
+    expect(text).toContain("2026/10/09 9:00 時点の状態です。");
     expect(await live.getByText("メンテナンス時間の変更").isVisible()).toBe(false);
     await live.getByText("権限と範囲", { exact: true }).click();
     expect(await live.getByText("メンテナンス時間の変更").isVisible()).toBe(true);
