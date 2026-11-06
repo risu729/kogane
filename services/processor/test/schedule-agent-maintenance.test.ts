@@ -12,7 +12,7 @@
 // audit vocabulary). The record's batch is shown with the operator's edit,
 // which is reachable, at the end of this file.
 import { afterAll, beforeAll, describe, expect, spyOn, test } from "bun:test";
-import { Database, type Database as SqliteDatabase } from "bun:sqlite";
+import type { Database as SqliteDatabase } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
 import { Miniflare, convertV4MiniflareOptions } from "miniflare";
 import jobs from "../../../config/alarm-jobs.json";
@@ -51,6 +51,13 @@ const alarms = () =>
   namespace as { getByName(name: string): { reconcile(id: string): Promise<string | null> } };
 /** What a delegated write appends here: nothing (see the header). */
 const NO_RECORD = () => ({ statements: [], settle: () => undefined });
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 beforeAll(async () => {
   const bundle = await Bun.build({
@@ -737,13 +744,8 @@ test("the budget is counted again inside the INSERT: a spent budget that lands a
 });
 
 test("the budget count reads the rewritten partial index, without table statistics", () => {
-  const sqlite = new Database(":memory:");
-  const dir = new URL("../../../packages/storage-d1/migrations/core/", import.meta.url);
+  const sqlite = fullCoreDatabase();
   try {
-    for (const file of readdirSync(dir)
-      .filter((f) => f.endsWith(".sql"))
-      .sort())
-      sqlite.exec(readFileSync(new URL(file, dir), "utf8"));
     expect(
       sqlite
         .query<{ n: number }, []>(

@@ -869,7 +869,11 @@ test("real Node CLI binds and rechecks the image manifest, daemon, source and ta
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
-});
+  // Eleven real Node processes in sequence, each reading the state the one
+  // before it wrote: 1.2 to 1.7 seconds alone and 3 seconds beside the
+  // processor suite, and it ran past Bun's five-second default under the full
+  // verification load.
+}, 30_000);
 
 test("generated dependencies are excluded; every COPY source must remain a regular file", () => {
   const root = mkdtempSync(resolve(tmpdir(), "container-inputs-"));
