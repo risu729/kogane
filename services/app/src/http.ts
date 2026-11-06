@@ -56,6 +56,11 @@ export function secureResponse(response: Response, request: Request, requestId: 
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "no-referrer");
   headers.set("x-frame-options", "DENY");
+  // Every answer is authenticated financial data or the shell that reads it:
+  // another site may not load it as a no-cors subresource, and no window
+  // across origins keeps a handle on this one.
+  headers.set("cross-origin-resource-policy", "same-origin");
+  headers.set("cross-origin-opener-policy", "same-origin");
   headers.set("x-request-id", requestId);
   if (!headers.has("content-security-policy")) {
     headers.set(
