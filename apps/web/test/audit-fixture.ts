@@ -4,10 +4,11 @@
 // Every subject, source, reference and code here is synthetic.
 import type { Database } from "bun:sqlite";
 import {
+  alarmClaimWrite,
+  AUDIT_COLUMNS,
   auditPageFilters,
   buildAuditRecord,
   laneTickRecord,
-  occurrenceRef,
   readAuditPage,
   type AuditActor,
   type AuditFacts,
@@ -217,30 +218,25 @@ export async function auditFixture(): Promise<AuditFixture> {
     },
     at("2026-10-09", 160),
   );
-  // The Processor's own paths: a claimed collection occurrence (the facts of
-  // `alarmClaimWrite`, whose batch also needs the occurrence row) and lane
-  // ticks built by `laneTickRecord` itself, one applied and one failed.
-  add(
+  // The Processor's own paths: a claimed collection occurrence, as
+  // `alarmClaimWrite` builds it (its row is the statement's leading binds; the
+  // statement itself also needs the occurrence row, so only the row is kept),
+  // and lane ticks built by `laneTickRecord` itself, one applied and one failed.
+  n += 1;
+  const claim = alarmClaimWrite(
     {
-      path: "alarm",
-      subject: null,
-      principal: "alarm:synthetic-bank-collect",
-      principalKind: "automatic",
+      jobId: "synthetic-bank-collect",
+      source: "synthetic-bank",
+      occurrenceId: "scheduled:synthetic-bank-collect:1791536400000",
+      scheduleRevision: 3,
+      claimedAt: at("2026-10-09", 200),
     },
-    {
-      operation: "alarm.occurrence.claim",
-      riskClass: "R2",
-      result: "accepted",
-      targetRef: "schedule:synthetic-bank-collect",
-      scope: { namespace: "schedule-source", source: "synthetic-bank" },
-      refs: [
-        occurrenceRef("scheduled:synthetic-bank-collect:1791536400000"),
-        "schedule:synthetic-bank-collect@3",
-      ],
-      diff: { kind: "none" },
-    },
-    at("2026-10-09", 200),
+    uuid(n),
   );
+  const claimed = Object.fromEntries(
+    AUDIT_COLUMNS.map((column, index) => [column, claim.binds[index]]),
+  ) as unknown as AuditRow;
+  rows.push({ ...claimed, audit_id: auditId(n) });
   const lane = (
     name: string,
     writes: LaneWrites,
