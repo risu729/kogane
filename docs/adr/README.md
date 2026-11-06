@@ -19,7 +19,7 @@ for current behavior.
 - [ADR 0006: Keep the reconciliation lane to provider identifiers and the matching window](0006-reconciliation-lane-scope.md)
 - [ADR 0007: Key MyJCB confirmed statements by the payment month the page names](0007-myjcb-statement-identity.md)
 - [ADR 0008: Run 28 repair jobs and 40 identity runs a tick, with the D1 call risk documented](0008-repair-lane-throughput.md)
-- [ADR 0009: Lane tick records are bounded operational state](0009-lane-tick-records.md)
+- [ADR 0009: Lane tick records are bounded operational state](0009-lane-tick-records.md) — accepted; amended 2026-11-06 (proposed: the settlement sweep counts its unmatched statements)
 - [ADR 0010: Bound terminal registration by a per-invocation operation budget](0010-terminal-registration-budget.md)
 - [ADR 0011: Resolve settlement ownership through keyed CTEs, keep the 0044 views as the contract](0011-keyed-ownership-ctes.md)
 - [ADR 0012: Map Mizuho ordinary deposits under identity policy version 2](0012-mizuho-identity-policy-v2.md)
