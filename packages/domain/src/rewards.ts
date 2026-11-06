@@ -10,6 +10,7 @@
 // disagreement is `conflict`, not a silent choice. Nothing in this file
 // performs an exchange; `simulateConversion` and `findConversionPaths` return
 // bounded plans and the conditions that still need checking.
+import { canonicalJson } from "./context.ts";
 import {
   hasExactKeys,
   isArrayOf,
@@ -1185,15 +1186,24 @@ export function estimateExpiry(
 
   // 2. Membership: only a tier-gated rule consumes it.
   const tiers = rule.applicability.tiers;
+  // Claims are listed by tier, then by content, so the basis does not
+  // depend on the order the membership claims were handed in.
+  const claimOrder = (state: MembershipState) =>
+    canonicalJson([state.source, state.valid, [...new Set(state.evidenceRefs)].sort()]);
+  const text = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
   const matching =
     tiers === null
       ? []
-      : membership.filter(
-          (state) =>
-            state.programId === holding.programId &&
-            state.holdingRef === holding.holdingRef &&
-            tiers.includes(state.tier),
-        );
+      : membership
+          .filter(
+            (state) =>
+              state.programId === holding.programId &&
+              state.holdingRef === holding.holdingRef &&
+              tiers.includes(state.tier),
+          )
+          .map((state) => ({ state, order: claimOrder(state) }))
+          .sort((a, b) => text(a.state.tier, b.state.tier) || text(a.order, b.order))
+          .map(({ state }) => state);
   const membershipBasis: ExpiryMembershipBasis | null =
     tiers === null
       ? null

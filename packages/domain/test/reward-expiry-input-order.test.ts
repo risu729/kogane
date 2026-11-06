@@ -202,3 +202,35 @@ describe("a stored basis refuses a repeated reference", () => {
     for (const copy of copies) expect(validBucketExpiryBasis(copy)).toBe(false);
   });
 });
+
+describe("membership claims follow no input order", () => {
+  test("two tiers' claims in either order give one basis", () => {
+    const tiered: ExpiryRule = {
+      ...inactivity,
+      ruleId: "rule:program-a:two-tiers",
+      applicability: { ...inactivity.applicability, tiers: ["gold", "elite"] },
+    };
+    const claim = (tier: string, source: MembershipState["source"]): MembershipState => ({
+      programId: "program:a",
+      holdingRef: "holding:member-1",
+      tier,
+      valid: period("2026-01-01", "2026-12-31"),
+      source,
+      evidenceRefs: [`evidence:tier:${tier}`],
+    });
+    const claims = [claim("gold", "self-reported"), claim("elite", "provider")];
+    const activities = history([
+      { activityRef: "act:earn-1", kind: "earn", postedDate: day("2026-03-01"), usedDate: null },
+    ]);
+    const bases = bothOrders(claims).map(
+      (order) =>
+        estimateExpiry(tiered, holding, activities, order, day("2026-09-09")).expiringBuckets[0]!
+          .expiryBasis,
+    );
+    expect(bases[0]!.computed.membership?.claims.map((entry) => entry.tier)).toEqual([
+      "elite",
+      "gold",
+    ]);
+    expect(bases[1]).toEqual(bases[0]!);
+  });
+});
