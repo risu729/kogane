@@ -11,8 +11,8 @@ import type { CardPurchaseCandidate } from "../../domain/src/card-purchase-view.
 import type { SourceFactRef } from "../../domain/src/events.ts";
 import { pendingPostedMarker } from "../../domain/src/pending-posted-review.ts";
 import { exactQuantity, integerDecimal } from "../../domain/src/values.ts";
-import { approve } from "../src/command/approve.ts";
-import { commit } from "../src/command/commit.ts";
+import { approve, readOwnApproval } from "../src/command/approve.ts";
+import { commit, getReceipt } from "../src/command/commit.ts";
 import type {
   BatchOutcome,
   ChangeKind,
@@ -691,6 +691,193 @@ describe("pending-to-posted review", () => {
       }),
     ).toMatchObject({ ok: false, error: "approval_required" });
     expect(snapshot(s.w.db)).toEqual(frozen);
+  });
+
+  test("approval refuses a malformed request, a changed digest, an expired or closed plan, and writes nothing", async () => {
+    const s = await scenario();
+    const store = sqliteCommandStore(s.w.db);
+    const payload = payloadOf(await candidateOf(s, s.postedEvent), "same purchase");
+    const plan = await planned(s, "relation.accept", payload);
+    const approvals = () => s.w.db.query("SELECT count(*) AS n FROM approvals").get();
+    const none = approvals();
+    const base = {
+      planId: plan.planId,
+      planDigest: plan.planDigest,
+      actor: OPERATOR,
+      scope: [] as string[],
+      ttlSeconds: 600,
+      now: T0,
+    };
+    for (const [input, error] of [
+      [{ ...base, ttlSeconds: 29 }, "invalid_command"],
+      [{ ...base, ttlSeconds: 1.5 }, "invalid_command"],
+      [{ ...base, uses: 0 }, "invalid_command"],
+      [{ ...base, uses: 11 }, "invalid_command"],
+      [{ ...base, scope: [""] }, "invalid_command"],
+      [{ ...base, scope: ["x".repeat(513)] }, "invalid_command"],
+      [{ ...base, planId: "0".repeat(64) }, "plan_not_found"],
+      [{ ...base, planDigest: "0".repeat(64) }, "stale_context"],
+      // The plan's own expiry is exclusive: at that instant it is already expired.
+      [{ ...base, now: plan.expiresAt }, "plan_expired"],
+    ] as const)
+      expect(await approve(store, input)).toMatchObject({ ok: false, error });
+    expect(approvals()).toEqual(none);
+
+    // The bounds themselves are accepted.
+    expect(await approve(store, { ...base, ttlSeconds: 30, uses: 10 })).toMatchObject({
+      ok: true,
+      approval: { usesRemaining: 10 },
+    });
+    const approval = await approved(s, plan.planId, plan.planDigest);
+    expect(
+      await commit(store, {
+        operationId: "op-gates-approve",
+        principal: OPERATOR,
+        planId: plan.planId,
+        approvalId: approval.approvalId,
+        planners: PLANNERS,
+        now: T1,
+      }),
+    ).toMatchObject({ ok: true, replayed: false });
+    const closed = approvals();
+    expect(await approve(store, { ...base, now: T1 })).toMatchObject({
+      ok: false,
+      error: "plan_not_open",
+    });
+    expect(approvals()).toEqual(closed);
+  });
+
+  test("a replayed approval answers with the stored receipt, whatever lifetime the replay asks for", async () => {
+    const s = await scenario();
+    const store = sqliteCommandStore(s.w.db);
+    const payload = payloadOf(await candidateOf(s, s.postedEvent), "same purchase");
+    const plan = await planned(s, "relation.accept", payload);
+    const request = {
+      planId: plan.planId,
+      planDigest: plan.planDigest,
+      actor: OPERATOR,
+      scope: [] as string[],
+      now: T0,
+    };
+    const first = await approve(store, { ...request, ttlSeconds: 30 });
+    if (!first.ok) throw new Error("approval refused");
+    // The same approver, plan, instant, scope and uses name the same approval
+    // row; the replay's own lifetime is not what was stored.
+    const replay = await approve(store, { ...request, ttlSeconds: 3600 });
+    if (!replay.ok) throw new Error("approval refused");
+    expect(replay.approval.approvalId).toBe(first.approval.approvalId);
+    expect(replay.approval).toEqual(first.approval);
+    expect(await readOwnApproval(store, OPERATOR.id, first.approval.approvalId)).toEqual(
+      first.approval,
+    );
+    // So the answer never promises a commit window the approval does not have.
+    expect(
+      await commit(store, {
+        operationId: "op-replayed-approval",
+        principal: OPERATOR,
+        planId: plan.planId,
+        approvalId: replay.approval.approvalId,
+        planners: PLANNERS,
+        now: T1,
+      }),
+    ).toMatchObject({ ok: false, error: "approval_expired" });
+  });
+
+  test("commit refuses each gate by its own code before any effect, and a receipt answers only its operation", async () => {
+    const s = await scenario();
+    const store = sqliteCommandStore(s.w.db);
+    const payload = payloadOf(await candidateOf(s, s.postedEvent), "same purchase");
+    const plan = await planned(s, "relation.accept", payload);
+    const other = await planned(
+      s,
+      "relation.reject",
+      payloadOf(await candidateOf(s, s.postedEvent), "no"),
+    );
+    expect(Object.keys(plan.expectedRevisions).length).toBeGreaterThan(0);
+    const approval = await approved(s, plan.planId, plan.planDigest);
+    const second = await approved(s, plan.planId, plan.planDigest, "2026-09-24T01:00:00.001Z");
+    const otherApproval = await approved(s, other.planId, other.planDigest);
+    const shortLived = await approve(store, {
+      planId: plan.planId,
+      planDigest: plan.planDigest,
+      actor: OPERATOR,
+      scope: [],
+      ttlSeconds: 30,
+      now: "2026-09-24T01:00:00.002Z",
+    });
+    const scoped = await approve(store, {
+      planId: plan.planId,
+      planDigest: plan.planDigest,
+      actor: OPERATOR,
+      scope: [`proposal:${s.proposalId}`],
+      ttlSeconds: 3600,
+      now: T0,
+    });
+    if (!shortLived.ok || !scoped.ok) throw new Error("approval refused");
+    const SECOND_OPERATOR: Principal = { ...OPERATOR, id: "operator-2" };
+    const attempt = (
+      overrides: Partial<Parameters<typeof commit>[1]> = {},
+    ): ReturnType<typeof commit> =>
+      commit(store, {
+        operationId: "op-gates",
+        principal: OPERATOR,
+        planId: plan.planId,
+        approvalId: approval.approvalId,
+        planners: PLANNERS,
+        now: T1,
+        ...overrides,
+      });
+
+    const frozen = snapshot(s.w.db);
+    for (const [overrides, error] of [
+      [{ operationId: "" }, "invalid_command"],
+      [{ operationId: " leading-space" }, "invalid_command"],
+      [{ operationId: "x".repeat(129) }, "invalid_command"],
+      [{ planId: "0".repeat(64) }, "plan_not_found"],
+      // The plan's own expiry comes first, whatever the approval says.
+      [{ now: plan.expiresAt }, "plan_expired"],
+      [{ approvalId: "ap_missing" }, "approval_not_found"],
+      // An approval of another plan is never borrowed.
+      [{ approvalId: otherApproval.approvalId }, "stale_context"],
+      // The same principal approves and commits.
+      [{ principal: SECOND_OPERATOR }, "approval_required"],
+      [{ approvalId: shortLived.approval.approvalId }, "approval_expired"],
+      // A scoped approval covers every pinned subject or none of the commit.
+      [{ approvalId: scoped.approval.approvalId }, "approval_scope_mismatch"],
+      [{ planners: {} }, "unsupported_semantics"],
+    ] as const)
+      expect(await attempt(overrides)).toMatchObject({ ok: false, error });
+    expect(snapshot(s.w.db)).toEqual(frozen);
+
+    const done = await attempt();
+    expect(done).toMatchObject({ ok: true, replayed: false });
+    if (!done.ok) throw new Error("unreachable");
+    // The same operation with the same approval is the same receipt.
+    expect(await attempt()).toEqual({ ok: true, replayed: true, receipt: done.receipt });
+    const committedState = snapshot(s.w.db);
+    // The same operation id with another approval is another payload: refused.
+    expect(await attempt({ approvalId: second.approvalId })).toMatchObject({
+      ok: false,
+      error: "idempotency_conflict",
+    });
+    // A new operation of the committed plan is refused: one plan, one effect.
+    expect(
+      await attempt({ operationId: "op-gates-2", approvalId: second.approvalId }),
+    ).toMatchObject({ ok: false, error: "plan_not_open" });
+    expect(snapshot(s.w.db)).toEqual(committedState);
+
+    expect(await getReceipt(store, OPERATOR.id, "op-gates")).toEqual({
+      ok: true,
+      receipt: done.receipt,
+    });
+    expect(await getReceipt(store, SECOND_OPERATOR.id, "op-gates")).toMatchObject({
+      ok: false,
+      error: "receipt_not_found",
+    });
+    expect(await getReceipt(store, OPERATOR.id, 42)).toMatchObject({
+      ok: false,
+      error: "invalid_command",
+    });
   });
 
   test("a payload the proposal does not give is refused at planning", async () => {
