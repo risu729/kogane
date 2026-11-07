@@ -38,10 +38,12 @@ are separate claims. Historical acceptance records are linked from the
   the [plan](plans/2026-10-prestia-bank-worker.md) and the
   [dated source update](sources/prestia.md#prestia-bank-worker-integration-2026-10-05).
 
-- Vpass collector statement pages remain withheld from a parser dataset pending
-  trustworthy card-identity continuity. Saved pages are not automatically usable
-  financial rows. See [card identity](vpass-card-identity.md) and
-  [ADR 0022](adr/0022-registration-artifact-datasets.md).
+- Vpass collector statement pages are parsed only from a successful card run
+  ([ADR 0083](adr/0083-release-vpass-collector-statement-pages.md)). On
+  2026-11-07 two of seven cards had ever reached `complete` and every card's
+  newest run was `partial` (`stated_total_mismatch`), so five cards still show
+  only importer-era statements and the others their newest successful capture.
+  See [card identity](vpass-card-identity.md).
 - MyJCB partial/unsafe unit coverage is not promoted into complete statement
   evidence. GLOBAL PASS pagination support does not by itself prove that a
   particular production month's capture and parse are complete.
