@@ -4,6 +4,8 @@ import type { ConversionOffer, ConversionPlan, MembershipState } from "./rewards
 import { CONVERSION_SEARCH_RELEASE, REWARD_POLICY_RELEASE } from "./reward-releases.ts";
 import {
   civilFromDays,
+  periodContainsDate,
+  validTemporalValue,
   daysFromCivil,
   formatLocalDate,
   parseLocalDate,
@@ -189,6 +191,42 @@ function dayText(day: number): string {
   return formatLocalDate(civilFromDays(day));
 }
 
+/** Whole-day evidence only; an instant or unknown value proves no day. */
+function coversApplicationDay(
+  value: TemporalValue,
+  day: string,
+  zone: string | null,
+): boolean | null {
+  const date = parseLocalDate(day);
+  if (date === null) return null;
+  if (!validTemporalValue(value) || value.kind === "unknown" || value.kind === "instant")
+    return null;
+  if (zone !== null && value.zone !== null && zone !== value.zone) return null;
+  if (value.kind === "local-date") return value.value === day;
+  return periodContainsDate(value, date);
+}
+
+/** Membership uncertainty remains a review reason, never an inferred entitlement. */
+function offerConditionsAt(
+  offer: ConversionOffer,
+  membership: readonly MembershipState[],
+  day: string,
+  zone: string | null,
+): "offer_not_valid_at_clock" | "needs_rule_verification" | null {
+  const valid = coversApplicationDay(offer.validTime, day, zone);
+  if (valid === null) return "needs_rule_verification";
+  if (!valid) return "offer_not_valid_at_clock";
+  if (offer.eligibleTiers === null) return null;
+  const established = membership.some(
+    (claim) =>
+      claim.programId === offer.sourceProgramRef &&
+      offer.eligibleTiers!.includes(claim.tier) &&
+      claim.source === "provider" &&
+      coversApplicationDay(claim.valid, day, zone) === true,
+  );
+  return established ? null : "needs_rule_verification";
+}
+
 /**
  * Bounded search for 1..maxDepth chains of offers from a start quantity to a
  * goal unit. Remaining balance and time are part of the state, so this is not
@@ -256,6 +294,12 @@ export function findConversionPaths(
         continue;
       }
       const appliedOn = state.day;
+      const zone = start.clock.kind === "unknown" ? null : start.clock.zone;
+      const condition = offerConditionsAt(offer, start.membership ?? [], dayText(appliedOn), zone);
+      if (condition !== null) {
+        rejected.push({ offerRef, reasonCode: condition });
+        continue;
+      }
       const deadlineDay = dayNumber(offer.applicationDeadline);
       if (deadlineDay !== null && appliedOn > deadlineDay) {
         rejected.push({
