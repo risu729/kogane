@@ -486,7 +486,8 @@ describe("card settlement decisions over the page's path and MCP (ADR 0081, unit
       accept(competitor),
       "c-mcp",
     );
-    expect(competingOverHttp.failed).toBe(true);
+    expect(competingOverHttp).toMatchObject({ failed: true, body: { error: "stale_context" } });
+    expect(competingOverHttp.body.refs).toEqual(expect.arrayContaining([expect.any(String)]));
     expect(competingOverMcp).toEqual(competingOverHttp);
     expect([await count("change_plans"), await count("operation_receipts")]).toEqual(before);
 
@@ -513,10 +514,12 @@ describe("card settlement decisions over the page's path and MCP (ADR 0081, unit
     expect(await currentAllocations()).toBe(0);
 
     // A withdrawn candidate cannot be accepted again, on either path.
+    const settled = [await count("change_plans"), await count("operation_receipts")];
     const againOverHttp = await decideOverHttp("card-settlement.accept", accept(owned), "r-http");
     const againOverMcp = await decideOverMcp("card-settlement.accept", accept(owned), "r-mcp");
-    expect(againOverHttp.failed).toBe(true);
+    expect(againOverHttp).toMatchObject({ failed: true, body: { error: "stale_context" } });
     expect(againOverMcp).toEqual(againOverHttp);
+    expect([await count("change_plans"), await count("operation_receipts")]).toEqual(settled);
 
     // Withdrawal retracts the interpretation only: both accepted and both
     // withdrawn revisions stay in history.
