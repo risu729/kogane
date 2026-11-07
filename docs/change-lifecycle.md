@@ -53,6 +53,27 @@ could disagree with it. Any change of kind, payload, expected revision or base
 context produces a different plan id, and an approval bound to the old digest
 can never apply to the new one (SC17, INV09).
 
+Planning the same change again returns the same plan while it is open and
+unexpired (`created: false`). Once a plan has expired while still `planned`
+or `approved`, planning the same change over unchanged data is a **renewal**
+([ADR 0080](adr/0080-renew-expired-change-plans.md)):
+
+```
+planId = canonicalDigest({ kind, payload, expectedRevisions, baseContextId,
+                           renewal: { ttlSeconds, window } })
+window = floor(createdAt in epoch ms / (ttlSeconds * 1000))
+```
+
+`createPlan` answers a renewal of the previous window that has not expired,
+and otherwise creates the current window's; a plan created in window w lives
+until at least window w + 1 begins, so three key lookups decide it. The
+expired plan is kept unchanged and stays unapprovable. A committed, stale or
+rejected plan is never renewed. Two callers whose clocks straddle a window
+boundary can each create a renewal; both pin the same revisions, so at most
+one commits and the other is refused `stale_context`. `simulate` re-derives a renewal's id from its
+own `created_at` and `expires_at`, so a renewal is fresh until a pin moves;
+`resimulatedPlanId` is then the plain digest of the current data.
+
 ### Approval id
 
 ```
@@ -647,6 +668,13 @@ already recorded is never undone by a DELETE — an undo is a new revision
   payloads that reject a caller-supplied impact/approval/revisions, the review
   kinds' exact keys, id shapes, closed reason codes and 1–36 portion lists,
   digest sensitivity to every input, grants, and the error table.
+- `packages/application/test/plan-renewal.test.ts`: a change planned again
+  after its plan expired gets a new open plan that approves and commits, the
+  expired row unchanged; one plan per lifetime across a window boundary;
+  renewal at the exact expiry and window instants; two renewals from clocks
+  either side of a boundary commit once, the other `stale_context`; a
+  renewal fresh in `simulate` until a pin moves; a first plan's digest
+  unchanged; a row whose id is no derivation of its content stale.
 - `packages/application/test/card-review-plan.test.ts`: planning each review
   kind, as a human or an agent, is refused with `unsupported_semantics` and
   writes no row in any command table; a malformed payload is still
