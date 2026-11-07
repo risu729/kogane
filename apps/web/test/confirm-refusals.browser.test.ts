@@ -11,7 +11,6 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
-import { delegationStatusFixture } from "./delegation-status-fixture.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -83,8 +82,6 @@ describe.if(runnable)("change confirmation refusals", () => {
             source: { kind: "central-store", classification: "financial" },
             capabilities: { ...CENTRAL_STORE_CAPABILITIES, commands: true },
           });
-        if (url.pathname === "/api/v2/delegations")
-          return Response.json(delegationStatusFixture("none"));
         if (url.pathname.startsWith("/api/command/v1/")) {
           const command = url.pathname.slice("/api/command/v1/".length);
           const body = (await request.json()) as { planId?: string };
