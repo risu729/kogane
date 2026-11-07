@@ -288,7 +288,11 @@ URL. A record outside it is an error, never a partial trail.
 Each opening and each re-read is an audited `ops.operation.get` read, as an
 HTTP read already was. The page does not make `projected` traced, apply a
 requested window, or show operations the operator cannot find in the audit
-log.
+log. The page makes this read a screen read, so
+[ADR 0081](0081-ui-parity-through-mcp.md) requires it over MCP too: today
+`kogane.ops.operation.get` is not served on `/mcp` (every call is refused
+with `actor_not_supported`), which is the `ops.*` gap ADR 0081 already lists,
+and this page is not parity-complete until that tool is served.
 
 **Verification.** `packages/observation-shared/test/operation-contract.test.ts`
 (the validator); `packages/application/test/operation-record-contract.test.ts`
