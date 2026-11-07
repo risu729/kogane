@@ -1397,7 +1397,7 @@ principals and store; nothing reaches Access, D1 or a client.
 
 Verified with synthetic data only, in `packages/application/test/**` (the
 pure service) and `services/app/test/agent-api.test.ts`
-(25 tests over the real Worker, real D1 migrations and the real read model):
+(28 tests over the real Worker, real D1 migrations and the real read model):
 default-off, the grant denial matrix, scope isolation and non-leakage, the
 cursor and budget rules, proposal validation and non-adoption, the MCP tool
 list and schemas, the untrusted-content rule, and UI/agent agreement.
