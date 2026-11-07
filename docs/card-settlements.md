@@ -1071,10 +1071,12 @@ decision below is in the audit log under principal `mcp-client:169b1b83…`.
 6. **Cash movement.** `kogane.economic-readiness.read` (`bank-movement`) on the
    three debits returns `economic_claim_held` for the two accepted ones and
    not for the withdrawn one, so the withdrawal released its claim.
-   `/api/v2/activity?basis=cash-movement` itself has no MCP read (it is not a
+   `/api/v2/activity?basis=cash-movement` itself had no MCP read then (it is not a
    screen route, so the [parity guard](agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07)
-   does not list it); it was not read in this run, so the roadmap's "the
-   cash-movement view counts the case once" is not yet shown.
+   does not list it as a gap); it was not read in this run, so the roadmap's
+   "the cash-movement view counts the case once" is not yet shown.
+   `kogane.events.read` ([agent API](agent-api.md)), merged after this run,
+   now reads it.
 
 ## Automation prerequisites (ADR 0034)
 

@@ -134,8 +134,9 @@ ten accounts the candidates name and accepted one MyJCB and one Vpass settlement
 debits), withdrawing one Vpass acceptance on the way; purchase totals did not change and only
 the accepted debits hold a cash-movement claim
 ([verification](card-settlements.md#first-production-decisions-2026-11-07)). The done-when is
-not met yet: `/api/v2/activity?basis=cash-movement` has no MCP read, so the cash-movement view
-was not read.
+not met yet: the cash-movement view was not read in that run, when
+`/api/v2/activity?basis=cash-movement` had no MCP read. `kogane.events.read` (#1094) now
+reads it; the view has not been checked against the accepted debits since.
 
 ### Phase 3 — Coverage, collection requests and cross-source identity
 
