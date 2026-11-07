@@ -548,32 +548,49 @@ describe("business-day freshness and calendars", () => {
     expect(freshnessWindowStart(business, monday, null)).toBe("2026-09-13");
   });
 
-  test("a century of business days over a large calendar is counted quickly and exactly", () => {
+  test("a century of business days over a large calendar is counted exactly in reads linear in the calendar", () => {
     const from = "1927-01-01";
     const closedDates: string[] = [];
-    // Every 1st and 15th of each month for a century: 2,400 dates, plus
-    // filler holidays on the 2nd through the 9th, 20,000 in all.
-    for (let year = 1927; year <= 2026 && closedDates.length < 20_000; year += 1)
+    // Thirteen holidays a month (the 1st through the 9th and the 15th
+    // through the 18th) for a century: 15,600 dates.
+    for (let year = 1927; year <= 2026; year += 1)
       for (let month = 1; month <= 12; month += 1)
         for (const day of [1, 2, 3, 4, 5, 6, 7, 8, 9, 15, 16, 17, 18])
           closedDates.push(
             `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`,
           );
+    const sorted = closedDates.sort();
+    // The cost is counted, not timed: every read of a closed date goes
+    // through this proxy. Selection validates the order of the list (two
+    // reads per date) for each use of the calendar, builds the lookup set
+    // once and takes off the closed dates inside the span, so its reads are
+    // linear in the calendar (about seven reads per date today). Checking
+    // each day of the century against the list would read on the order of
+    // 36,000 × 15,600 dates; the proxy stops such a regression at the budget
+    // instead of letting it run.
+    const budget = 10 * sorted.length;
+    let reads = 0;
+    const counted = new Proxy(sorted, {
+      get(target, key, receiver) {
+        if (typeof key === "string" && /^[0-9]+$/u.test(key) && ++reads > budget)
+          throw new Error("closed_date_read_budget_exceeded");
+        return Reflect.get(target, key, receiver);
+      },
+    });
     const century: MarketCalendar = {
       ...CALENDAR,
       coverage: { from, to: "2026-12-31" },
-      closedDates: closedDates.slice(0, 20_000).sort(),
+      closedDates: counted,
     };
     const long = policy({
       freshness: { unit: "business-days", maxAgeDays: 36_600, calendarRef: CALENDAR.calendarRef },
     });
     const old = candidate({ amount: "146", at: "1927-01-03T10:00:00+09:00" });
-    const start = performance.now();
     const result = selectPrice(USD, [old], monday, long, century);
-    const elapsed = performance.now() - start;
+    const selectionReads = reads;
     // Open days in (1927-01-03, 2026-09-14]: every weekday that is not a closed date.
     let open = 0;
-    const closed = new Set(century.closedDates);
+    const closed = new Set(sorted);
     for (let day = 1; ; day += 1) {
       const date = new Date(Date.UTC(1927, 0, 3 + day));
       const text = date.toISOString().slice(0, 10);
@@ -581,7 +598,7 @@ describe("business-day freshness and calendars", () => {
       if (date.getUTCDay() !== 0 && date.getUTCDay() !== 6 && !closed.has(text)) open += 1;
     }
     expect(selected(result).ageDays).toBe(open);
-    expect(elapsed).toBeLessThan(250);
+    expect(selectionReads).toBeLessThanOrEqual(budget);
   });
 
   test("calendars are validated, sorted and evidenced", () => {

@@ -595,8 +595,9 @@ would discard later collection and later decisions (docs/operations.md).
   migrated CORE store, answering `unsupported`.
 - `packages/domain/test/market-data.test.ts` — each exclusion code, the six
   checks in order, date-only and zone rules, freshness at and past the limit,
-  business days over a synthetic calendar (a century counted exactly and
-  quickly), disagreement and corroboration, overlap among possibly fresh
+  business days over a synthetic calendar (a century counted exactly, with
+  closed-date reads counted and bounded linearly in the calendar size),
+  disagreement and corroboration, overlap among possibly fresh
   candidates and priority, FX paths, exact two-hop values, inverse rounding
   once with its inputs, policy mismatches, non-positive prices, validators,
   digests, the manifest, and a guard that no production source, script or task
