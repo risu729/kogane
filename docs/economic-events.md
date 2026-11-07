@@ -1369,7 +1369,11 @@ unrecognised rows. That pass reads every current Vpass/MyJCB capture
 and dominates the cost: on a synthetic store of about 34,000 usage
 observations (180 days of daily captures) and 8,200 live events, the
 unfiltered first page took about 0.4 s in `bun:sqlite`, of which the usage
-pass was about 0.3 s and the selection about 0.04 s. The candidates add two
+pass was about 0.3 s and the selection about 0.04 s. Those figures predate the
+classified columns: on the CI-scale and full-scale synthetic stores
+(`packages/read-model/test/card-usage-scale-fixture.ts`), carrying them makes
+the usage pass about 1.5 times as slow as the key-only pass it replaced
+(measured 2026-11-07, `bun:sqlite`). The candidates add two
 queries: one pass over the stage-B `pending_to_posted` proposals, re-deriving
 each target's recognition key by primary-key lookups
 (`packages/application/src/query/card-purchase-candidates.ts`), and one lookup

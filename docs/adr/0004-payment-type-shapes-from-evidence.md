@@ -153,7 +153,10 @@ means which.
   means no such row is current. It does not mean the provider has none: an
   uncollected statement has no row.
 - The pass materializes the classified columns of every current row instead
-  of only its key. The plan still starts from the current captures.
+  of only its key. The plan still starts from the current captures, and the
+  rows it returns stay bounded, but the pass is about 1.5 times as slow on
+  the synthetic scaled stores
+  ([economic events: cost](../economic-events.md#http)).
 - Above 2,000 unrecognised rows, the excess has no reason, only a count.
 - Partial payments and multiple debits stay statement-side and are not named
   on this page.
