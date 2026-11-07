@@ -13,7 +13,7 @@ import {
 import { EMPTY_FILTERS, matchesSourceAccount, pageWindow } from "../filters.ts";
 import { formatAmount } from "../money.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
-import { useViewState } from "../view-state.tsx";
+import { useListPage, useViewState } from "../view-state.tsx";
 import {
   OrganizedInstrumentContext,
   OrganizedSourceAccount,
@@ -45,7 +45,7 @@ export function PositionsPage(): ReactNode {
 function PositionList({ entries }: { entries: PositionWithValuations[] }): ReactNode {
   // Client-side record controls only when the server cannot filter for us.
   const { serverFilters } = useFeatures();
-  const [page, setPage] = useViewState("positions.page");
+  const [page, setPage] = useListPage("positions.page");
   const [filters, setFilters] = useViewState("positions.filters");
   const filtered = entries.filter((entry) => matchesSourceAccount(entry.position, filters));
   const view = pageWindow(filtered, page);
