@@ -652,6 +652,19 @@ describe("the lease release: listed on /mcp and refused for every caller (ADR 00
     expect(
       await names(OWNER, { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: OPERATOR_DELEGATE }) }),
     ).toContain(RELEASE);
+    // The route's input (`/leases/{source}` with `{leaseRef, confirmedStopped}`), closed.
+    const listed = (
+      (await mcp(OWNER, "tools/list", {})).result.tools as {
+        name: string;
+        inputSchema: Record<string, unknown>;
+      }[]
+    ).find((entry) => entry.name === RELEASE)!;
+    expect(listed.inputSchema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["source", "leaseRef", "confirmedStopped"],
+      properties: { confirmedStopped: { const: true } },
+    });
     expect(await names(OWNER, { SCHEDULES_ENABLED: "false" })).not.toContain(RELEASE);
     const off = await mcp(
       OWNER,
@@ -671,16 +684,17 @@ describe("the lease release: listed on /mcp and refused for every caller (ADR 00
       .run();
     const before = (await records("schedules.lease.release")).length;
     const calls: [string, unknown, Record<string, unknown>?][] = [
-      [OWNER, { source: "vpass", leaseRef: LEASE_REF }],
+      // The page's own body, exactly as its route would release with it.
+      [OWNER, { source: "vpass", leaseRef: LEASE_REF, confirmedStopped: true }],
       // The widest delegation the owner could write does not change the answer.
       [
         OWNER,
-        { source: "vpass", leaseRef: LEASE_REF },
+        { source: "vpass", leaseRef: LEASE_REF, confirmedStopped: true },
         { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: OPERATOR_DELEGATE }) },
       ],
       // Neither does a reader without schedule authority, nor a malformed body.
-      [FINANCIAL, { source: "vpass", leaseRef: LEASE_REF }],
-      [READER, { source: "vpass", leaseRef: LEASE_REF, confirmedStopped: true }],
+      [FINANCIAL, { source: "vpass", leaseRef: LEASE_REF, confirmedStopped: true }],
+      [READER, { source: "vpass", leaseRef: LEASE_REF }],
       [READER, {}],
     ];
     for (const [subject, args, environment] of calls)

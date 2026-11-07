@@ -117,6 +117,8 @@ const leaseReleaseSchema = z.strictObject({
   leaseRef: z
     .string()
     .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u),
+  // The page's confirmation that the execution stopped, as its route requires.
+  confirmedStopped: z.literal(true),
 });
 export const LEASE_RELEASE_MCP_TOOLS = [
   {

@@ -717,7 +717,7 @@ asserts that the execution holding the lease stopped, which the server cannot
 verify ([ADR 0063](adr/0063-delegated-ai-operation-path.md) item 5), and no
 delegation capability names it. While `SCHEDULES_ENABLED` is on the tool is
 listed to every MCP client, with the arguments the page's route takes
-(`source`, `leaseRef`), and every call answers `403 operation_not_delegable`,
+(`source`, `leaseRef`, `confirmedStopped: true`), and every call answers `403 operation_not_delegable`,
 whatever its arguments, grant or delegation. The call reads no store and is
 not relayed to the Processor; it is recorded once as `refused` on `mcp` at R3.
 It has no `/api/agent/v1` route, and a browser session on `/mcp` is not offered
