@@ -8,7 +8,6 @@ import { delegatedMaintenanceRoute } from "../../processor/src/delegated-mainten
 
 const OWNER = "maintenance-cross-auth-owner",
   OTHER = "maintenance-cross-auth-other";
-const principal = (subject = OWNER) => `mcp-client:${subject}`;
 const ISSUER = "https://maintenance-cross-auth.cloudflareaccess.com";
 let signing: Awaited<ReturnType<typeof generateKeyPair>>, jwks: { keys: unknown[] };
 let calls = 0,

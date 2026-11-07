@@ -27,7 +27,6 @@ import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 const APP_AUD = "fixture-app-audience";
 const MCP_AUD = "fixture-mcp-audience";
 const SUBJECT = "00000000-0000-4000-8000-0000000000cc";
-const AGENT = `mcp-client:${SUBJECT}`;
 const ALLOWED = "sony-bank";
 const DENIED = "other-test";
 /** More sealed runs than the overview's 501-run window holds. */

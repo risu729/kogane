@@ -74,8 +74,6 @@ const PUBLISHED = [
   PURCHASES_TOOL_NAME,
   RECONSTRUCTED_STATE_TOOL_NAME,
 ];
-/** A valid reconstructed-state request for an account the store does not hold. */
-const RECONSTRUCTED = { account: "acct-mcp-synthetic", from: "2026-03-01", to: "2026-03-31" };
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let strangerKeys: Awaited<ReturnType<typeof generateKeyPair>>;

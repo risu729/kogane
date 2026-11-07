@@ -38,7 +38,7 @@ async function spendBudget(principal = PRINCIPAL, subject = OWNER) {
     .first<number>("n");
   const missing = MCP_AUTHORITY.writesPerDay - spent!;
   await env.DB.batch(
-    Array.from({ length: missing }, (_, index) =>
+    Array.from({ length: missing }, () =>
       env.DB.prepare(
         `INSERT INTO audit_records (audit_id,recorded_at,path,subject,principal,principal_kind,delegation_ref,operation,risk_class,step,result,correlation_id,idempotency_key,diff_json)
          VALUES (?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'mcp',?,?,'delegated',?,'ops.import.request','R1','call','applied',?,?,'{"kind":"none"}')`,

@@ -21,7 +21,6 @@ import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { maskRandomTokens } from "../../../packages/application/test/random-tokens";
 
 const OWNER = "maintenance-owner-synthetic";
-const OWNER_MCP = `mcp-client:${OWNER}`;
 const READER = "maintenance-reader-synthetic";
 const FINANCIAL = "financial-agent-synthetic";
 const REVIEWER = "reviewer-owner-synthetic";

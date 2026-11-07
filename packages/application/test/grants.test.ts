@@ -10,7 +10,6 @@ import {
   GRANT_LIMITS,
   perimeterRefFor,
   validGrant,
-  type Grant,
 } from "../src/grants.ts";
 import { capabilitiesFor } from "../src/capabilities.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
