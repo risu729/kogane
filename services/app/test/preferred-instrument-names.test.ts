@@ -1,6 +1,7 @@
 import { env } from "cloudflare:test";
+import { d1Executor } from "../../../packages/read-model/src/d1";
 import { beforeAll, expect, it } from "vitest";
-import { preferredInstrumentNames } from "../src/preferred-instrument-names";
+import { preferredInstrumentNames } from "../../../packages/application/src/query/preferred-instrument-names";
 import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import { identifyParse } from "../../processor/src/identity-store";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
@@ -106,7 +107,7 @@ it("prefers an observed Japanese name for the exact listing and keeps B and mapp
     { code: "NAME2", label: "日本企業", market: "NGY" },
   ]);
   const names = await preferredInstrumentNames(
-    env.DB,
+    d1Executor(env.DB),
     data.identifiers.map((row) => row.id),
   );
   const first = data.identifiers.find((row) => row.value === "NAME1")!;
@@ -150,7 +151,7 @@ it("protects manual labels and ignores names from a superseded parse", async () 
     FROM current_instrument_mappings WHERE identifier_id=?`)
     .bind(id)
     .run();
-  expect((await preferredInstrumentNames(env.DB, [id])).get(id)).toEqual({
+  expect((await preferredInstrumentNames(d1Executor(env.DB), [id])).get(id)).toEqual({
     label: "User chosen",
     reason: "manual",
     decisionOrigin: "unknown",
@@ -167,7 +168,7 @@ it("protects manual labels and ignores names from a superseded parse", async () 
   );
   const staleId = stale.identifiers.find((row) => row.value === "STALE")!.id;
   await supersedeParse(stale.parseId, data.parseId);
-  expect((await preferredInstrumentNames(env.DB, [staleId])).get(staleId)).toEqual({
+  expect((await preferredInstrumentNames(d1Executor(env.DB), [staleId])).get(staleId)).toEqual({
     label: "Example",
     reason: "provider-current",
     decisionOrigin: "automatic",
@@ -176,10 +177,10 @@ it("protects manual labels and ignores names from a superseded parse", async () 
 });
 
 it("deduplicates requested IDs and rejects an oversized lookup", async () => {
-  expect((await preferredInstrumentNames(env.DB, [])).size).toBe(0);
+  expect((await preferredInstrumentNames(d1Executor(env.DB), [])).size).toBe(0);
   await expect(
     preferredInstrumentNames(
-      env.DB,
+      d1Executor(env.DB),
       Array.from({ length: 501 }, (_, i) => String(i)),
     ),
   ).rejects.toThrow("preferred_instrument_name_budget_invalid");
@@ -196,7 +197,7 @@ it("uses transaction and valuation name evidence with stable selection across in
     { code: "STABLE", label: "アルファ", kind: "valuation" },
   ]);
   const selected = await preferredInstrumentNames(
-    env.DB,
+    d1Executor(env.DB),
     data.identifiers.map((row) => row.id).reverse(),
   );
   expect(selected.get(data.identifiers.find((row) => row.value === "TXNAME")!.id)).toMatchObject({

@@ -121,17 +121,19 @@ What the code does today (main `02a915a`):
   `sourceParseRuns`, the proposal store is `commandProposalStore` in
   `packages/application/src/propose-store.ts`, and the `sqlite_master` checks
   behind `kogane.capabilities` and the optional routes are `storeHasFeature`
-  in `packages/application/src/query/store-schema.ts`.
+  in `packages/application/src/query/store-schema.ts`. The identity pages
+  that `kogane.identity.read` shares with `GET /api/identity/*` are
+  `readIdentityPage` and `readIdentityConnections` in
+  `packages/application/src/query/identity-pages.ts`, with the account
+  connection reviews and preferred instrument names beside them; the route
+  keeps only its query-parameter checks.
   `tests/mcp-tools-no-sql.test.ts` follows the relative imports from
   `services/app/src/mcp.ts` and fails when a module it reaches calls a store
   or the D1 binding directly or holds a SQL statement. It exempts, by name and
   with the reason, the modules whose remaining SQL only screen routes call
-  (the balance page helpers, the evidence and report routes), and lists the
-  SQL an MCP tool still runs: `kogane.identity.read` shares
-  `readIdentityCollection` in `identity-api.ts` (with `account-connections.ts`
-  and `preferred-instrument-names.ts`) with the identity pages. That moves
-  into `packages/application` next. An exemption fails once its module holds
-  no SQL.
+  (the balance page helpers, the evidence and report routes). No SQL an MCP
+  tool runs is left in `services/app`. An exemption fails once its module
+  holds no SQL.
 - The six `ops.*` tools: `services/app/test/delegated-ops-parity.test.ts`
   checks that a delegation holding every `operations.*` capability is shown
   all six and a narrower one only those it holds, and that each request gives
