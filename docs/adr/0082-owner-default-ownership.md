@@ -77,9 +77,10 @@ in the history; option 2 needs one plan per account, a few in practice.
    (`single_account_scope_unconfirmed`). The commit repeats these checks in
    its receipt guard, as for the self-declaration.
 4. **Who applies it.** Whoever may plan and approve a `relation.accept`: the
-   operator through the command API, or a principal the owner delegated
-   `commands.plan` and `commands.decide.relation` to in `MCP_DELEGATIONS`
-   (ADR 0063). This ADR adds no delegation. The confirmation page shows and
+   operator through the command API, or an MCP client that the delegated
+   `kogane.command.*` tools admit (ADR 0063; the owner decided on 2026-11-07
+   to admit every authenticated MCP client, recorded separately). This ADR
+   adds no delegation. The confirmation page shows and
    approves an owner-default plan; the card-ownership page does not yet offer
    to plan one (it plans only the sole-personal self-declaration).
 5. **What it is not.** Not provider-name verification, KYC or a statement of
@@ -88,8 +89,9 @@ in the history; option 2 needs one plan per account, a few in practice.
    unknown owner is theirs. The page shows it as 所有者の既定 with its date.
 
 The read model answers `ownerDefaultBlockers` beside `selfDeclarationBlockers`
-on each side of the ownership review, so the page and an agent can tell
-before planning whether the default applies.
+on each side of the ownership review, so the page and an agent
+(`kogane.card-settlements.ownership`) can tell before planning whether the
+default applies.
 
 ## Consequences
 
