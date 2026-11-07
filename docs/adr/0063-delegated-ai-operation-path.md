@@ -5,8 +5,9 @@
   integration (#660, merged 2026-10-10) adds delegated R1 operations, shared
   read adapters, R2 command decisions and provider-request confirmation, job
   prepare/confirm with audit-linked reversal, and maintenance R1 apply and R2
-  prepare/confirm through #564's sole writer; survey acceptance remains pending
-  an owner decision. The slices are in the
+  prepare/confirm through #564's sole writer; survey rejection (R1) and
+  acceptance (R2) followed on 2026-11-07 under the owner's adoption conditions
+  ([ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). The slices are in the
   [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
 - Superseded in part (2026-11-07) by
   [ADR 0084](0084-mcp-operator-authority-without-delegation.md): items 2 and 4
@@ -20,7 +21,8 @@
 - Amends: [ADR 0013](0013-agent-card-purchase-read.md) (the read-only
   premise), [ADR 0039](0039-alarm-schedule-management.md) ("agents and service
   tokens cannot edit settings"), ADR 0046 (#564, merged: its framing of the agent
-  maintenance write), ADR 0047 (#565, open: the agent-only attenuation where it
+  maintenance write), [ADR 0050](0050-maintenance-survey-proposals.md) ("no
+  agent decides", by its 2026-11-07 amendment), ADR 0047 (#565, open: the agent-only attenuation where it
   makes MCP read and propose only), and the AGENTS.md rule "Agents never
   approve or commit a change".
 - Depends on: ADR 0047 (#565) for authentication and the `mcp-client:<sub>`
@@ -398,7 +400,7 @@ confirmation index supplies single use in the effect batch. A schedule writer
 must still enforce its native expected revision in that same batch. A tested
 helper alone is not an exposed settings operation. The later settings and
 maintenance amendments install those adapters through the existing writers;
-S6 survey acceptance is still unavailable.
+S6 survey acceptance was still unavailable then (since 2026-11-07: [ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)).
 
 Only installed adapters are advertised: persisted-run import, replay,
 whole-store projection, own operation reads and inert command planning.

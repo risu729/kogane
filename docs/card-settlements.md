@@ -456,6 +456,21 @@ same root can have separate identities under legacy and current producers;
 those counts are not physical card counts. Self-declaration cannot resolve or
 merge these identities, and the operator must identify the account scope first.
 
+**所有者の既定** (owner default, [ADR 0082](adr/0082-owner-default-ownership.md);
+the owner's decision of 2026-11-07, 03:59 UTC, that an account with no recorded
+owner is theirs) is the same review with the closed marker
+`ownership-declaration:owner-default-v1:<role>:<date>` and the fixed party
+`party:owner`, so a card account and its debit account defaulted separately
+name the same owner. It has the same refusals as the self-declaration below,
+except that a `liable_party` default also admits a MyJCB connection root
+(`card-statement-aggregate`, status `aggregate`); an unresolved placeholder is
+never admitted. The ownership review answers `ownerDefaultBlockers` per side.
+It is a recorded decision per account, planned and committed like any other
+claim, by the operator or by an agent the owner delegated `commands.plan` and
+`commands.decide.relation` to; nothing is defaulted at read time. The
+confirmation page shows its provenance and approves it; the card-ownership
+page does not yet offer to plan one, so it is planned through the command API.
+
 The self-declared fallback also refuses any recorded ownership-role history for the
 same resolved account, including rejected or dated claims and the other role.
 It also refuses recorded `contradicts` relations touching the account,

@@ -32,10 +32,7 @@ import { routeServes, uiApiPatterns } from "./ui-routes";
 // ── 1. catalogue operations on `ui` ──────────────────────────────────────
 
 /** Catalogue operations on `ui` with no published MCP tool yet, and why. */
-const OPERATION_GAPS: Readonly<Partial<Record<OperationName, string>>> = {
-  "schedules.survey.decide":
-    "survey proposal accept/reject (POST /api/ops/v1/schedules/proposals/:id); needs a delegated tool over the same writer",
-};
+const OPERATION_GAPS: Readonly<Partial<Record<OperationName, string>>> = {};
 
 /** Catalogue entries on `ui` that are records, not operations anyone calls. */
 const NOT_OPERATIONS: Readonly<Partial<Record<OperationName, string>>> = {
@@ -108,7 +105,7 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
   "/api/v2/reports/:id/explanation": "a report's explanation",
   "/api/v2/reports/:id/export": "a report's export download",
   "/api/ops/v1/schedules":
-    "schedule page snapshot (jobs, leases, survey proposals, maintenance); kogane.schedules.maintenance.read covers maintenance only",
+    "schedule page snapshot (jobs, leases, survey proposals, maintenance); kogane.schedules.maintenance.read covers maintenance and kogane.schedules.survey.read the re-survey section only",
 };
 
 /**
@@ -126,6 +123,8 @@ const TOOLS_WITHOUT_UI_ROUTE: Readonly<Record<string, string>> = {
     "one audit record by id (readAuditRecordForGrant); the audit page reads pages only (readAuditPage, kogane.audit.search)",
   "kogane.schedules.maintenance.read":
     "the maintenance part of /api/ops/v1/schedules (a gap above)",
+  "kogane.schedules.survey.read":
+    "the re-survey part of /api/ops/v1/schedules (a gap above; ADR 0050, 2026-11-07 amendment)",
 };
 
 /** Paths the UI names that are not read routes. */

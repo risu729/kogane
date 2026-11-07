@@ -36,7 +36,6 @@ export interface CatalogueEntry {
   paths: readonly AuditPath[];
 }
 
-const UI: readonly SubjectPath[] = ["ui"];
 const UI_MCP: readonly SubjectPath[] = ["ui", "mcp"];
 const AGENT: readonly SubjectPath[] = ["agent-http", "mcp"];
 // The operations requests of docs/ops-api.md: the operator's HTTP routes, and
@@ -145,13 +144,16 @@ export const OPERATION_CATALOGUE = {
     paths: ["ui", "mcp"],
   },
   // Accepting a proposal changes a rule (R2); rejecting records a decision
-  // only (R1). One route, so one operation recorded under either class.
+  // only (R1). One route, so one operation recorded under either class. On
+  // `mcp` a delegated acceptance of a proposal the owner kept with the
+  // operator is refused and recorded at R3 (ADR 0050, amendment 2026-11-07).
   "schedules.survey.decide": {
-    risk: ["R2", "R1"],
+    risk: ["R2", "R1", "R3"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    delegation: "schedules.survey.decide",
+    paths: UI_MCP,
   },
   // Stopped-execution lease release: the operator in the UI (R3). Its MCP
   // tool exists and refuses every call, recorded here (ADR 0081 point 3).
@@ -225,6 +227,15 @@ export const OPERATION_CATALOGUE = {
     quiet: "read",
     capability: "schedules.read",
     paths: AGENT,
+  },
+  // The schedules page's re-survey section (ADR 0050): the undecided
+  // proposals and page freshness of the granted schedule sources, on `/mcp`.
+  "schedules.survey.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "schedules.read",
+    paths: ["mcp"],
   },
   "instruments.history": {
     risk: ["R0"],

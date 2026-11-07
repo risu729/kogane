@@ -1,6 +1,6 @@
-// The store behind `kogane.reconcile.propose`: the only write this Worker
-// has. It appends one `decision_revisions` row of kind `propose` and one
-// `entity_relations` row with status `proposed` (migration 0029), in one D1
+// The store behind `kogane.reconcile.propose`: the only write the agent paths
+// have. It appends one `decision_revisions` row of kind `propose` and one
+// `entity_relations` row with status `proposed` (migration 0029), in one
 // batch, in that order — the relation's provenance trigger requires its
 // decision to exist first, so a failed guard leaves neither row.
 //
@@ -9,17 +9,17 @@
 // statement in this file writes any other table. Reference resolution reads
 // the same named concepts as every other read (packages/read-model), so a ref
 // that names a row a reader may not see resolves to nothing.
+//
+// Moved here from `services/app/src/proposals.ts` (ADR 0081 point 2): the
+// MCP and HTTP agent adapters pass their command store and never hold this SQL.
 import {
   isObservationKind,
   OBSERVATION_TABLES,
   visibleEvidence,
-} from "../../../packages/read-model/src/index";
-import type {
-  OperationCall,
-  ProposalStore,
-  ResolvedRef,
-  StoredProposal,
-} from "../../../packages/application/src/index";
+} from "../../read-model/src/index.ts";
+import type { OperationCall } from "./audit/call.ts";
+import type { CommandStore } from "./command/contract.ts";
+import type { ProposalStore, ResolvedRef, StoredProposal } from "./propose.ts";
 
 const OBSERVATION_REF =
   /^observation:(transaction|balance|position|valuation):([1-9][0-9]{0,15})$/u;
@@ -38,6 +38,14 @@ function observationSql(kind: keyof typeof OBSERVATION_TABLES): string {
     WHERE o.id = ?`;
 }
 
+const INSERT_DECISION = `INSERT INTO decision_revisions
+ (id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,
+  reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+ VALUES (?1,'relation',?2,1,'propose',?3,?4,NULL,?5,?6,NULL,NULL,?7)`;
+const INSERT_RELATION = `INSERT INTO entity_relations
+ (id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
+ VALUES (?1,?2,?3,?4,NULL,NULL,'proposed',?5,?6,?7)`;
+
 interface ScopeRow {
   sourceId: string;
   account?: string | null;
@@ -49,9 +57,9 @@ interface ScopeRow {
  * decision row this batch wrote, so a proposal exists exactly when its record
  * does.
  */
-export function proposalStore(db: D1Database, audit?: OperationCall): ProposalStore {
+export function commandProposalStore(store: CommandStore, audit?: OperationCall): ProposalStore {
   const resolve = async (sql: string, argument: unknown): Promise<ResolvedRef | null> => {
-    const row = await db.prepare(sql).bind(argument).first<ScopeRow>();
+    const row = await store.first<ScopeRow>(sql, [argument]);
     if (!row || typeof row.sourceId !== "string") return null;
     return {
       sourceId: row.sourceId,
@@ -89,15 +97,10 @@ export function proposalStore(db: D1Database, audit?: OperationCall): ProposalSt
         },
         { kind: "target" },
       );
-      const results = await db.batch([
-        db
-          .prepare(
-            `INSERT INTO decision_revisions
-             (id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,
-              reason,evidence_refs_json,previous_revision,superseded_by,created_at)
-             VALUES (?1,'relation',?2,1,'propose',?3,?4,NULL,?5,?6,NULL,NULL,?7)`,
-          )
-          .bind(
+      const results = await store.batch([
+        {
+          sql: INSERT_DECISION,
+          binds: [
             proposal.decisionRevisionId,
             proposal.relationId,
             proposal.method,
@@ -105,14 +108,11 @@ export function proposalStore(db: D1Database, audit?: OperationCall): ProposalSt
             proposal.reason,
             evidence,
             proposal.recordedAt,
-          ),
-        db
-          .prepare(
-            `INSERT INTO entity_relations
-             (id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
-             VALUES (?1,?2,?3,?4,NULL,NULL,'proposed',?5,?6,?7)`,
-          )
-          .bind(
+          ],
+        },
+        {
+          sql: INSERT_RELATION,
+          binds: [
             proposal.relationId,
             proposal.kind,
             proposal.fromRef,
@@ -120,10 +120,11 @@ export function proposalStore(db: D1Database, audit?: OperationCall): ProposalSt
             proposal.decisionRevisionId,
             evidence,
             proposal.recordedAt,
-          ),
-        ...(record ? [db.prepare(record.sql).bind(...record.binds)] : []),
+          ],
+        },
+        ...(record ? [record] : []),
       ]);
-      audit?.settle(results[2]?.meta.changes);
+      audit?.settle(results[2]?.changes);
     },
   };
 }

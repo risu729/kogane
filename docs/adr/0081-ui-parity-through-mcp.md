@@ -114,15 +114,24 @@ What the code does today (main `02a915a`):
 
 ## Verification
 
-- Today: most MCP tools call shared services. The three that ran their own SQL
-  (above) call `delegatedWritesRemaining` and `ownOperationSource` in
-  `packages/application` instead, and `tests/mcp-tools-no-sql.test.ts` fails
-  when `services/app/src/mcp.ts` or a `*-tools.ts` adapter calls a store
-  directly or holds a SQL statement. SQL still runs on the MCP path in helpers
-  of `services/app/src` that the screens share, outside that guard:
-  `scopedParseRuns` in `agent-service.ts`, the proposal store in
-  `proposals.ts`, and the schema probe in `reported-state-api.ts`. They move
-  into `packages/application` next, and join the guard when they do.
+- Today: the three tools that ran their own SQL (above) call
+  `delegatedWritesRemaining` and `ownOperationSource` in `packages/application`.
+  The helpers they shared with the screens moved too:
+  the agent service's scoped parse-run window is the read model's
+  `sourceParseRuns`, the proposal store is `commandProposalStore` in
+  `packages/application/src/propose-store.ts`, and the `sqlite_master` checks
+  behind `kogane.capabilities` and the optional routes are `storeHasFeature`
+  in `packages/application/src/query/store-schema.ts`.
+  `tests/mcp-tools-no-sql.test.ts` follows the relative imports from
+  `services/app/src/mcp.ts` and fails when a module it reaches calls a store
+  or the D1 binding directly or holds a SQL statement. It exempts, by name and
+  with the reason, the modules whose remaining SQL only screen routes call
+  (the balance page helpers, the evidence and report routes), and lists the
+  SQL an MCP tool still runs: `kogane.identity.read` shares
+  `readIdentityCollection` in `identity-api.ts` (with `account-connections.ts`
+  and `preferred-instrument-names.ts`) with the identity pages. That moves
+  into `packages/application` next. An exemption fails once its module holds
+  no SQL.
 - The six `ops.*` tools: `services/app/test/delegated-ops-parity.test.ts`
   checks that a delegation holding every `operations.*` capability is shown
   all six and a narrower one only those it holds, and that each request gives
@@ -144,3 +153,10 @@ What the code does today (main `02a915a`):
   on `mcp`, whose catalogue paths are now `ui` and `mcp`
   (`services/app/test/schedule-tools.test.ts`;
   [agent access](../agent-api.md#maintenance-windows)).
+- 2026-11-07: `schedules.survey.decide` is on `ui` and `mcp`
+  (`kogane.schedules.survey.decide`, which an MCP client applies as itself under
+  ADR 0084; five review reasons, and any disable, re-enable or overlap, kept
+  with the operator), and the page's re-survey section is read by
+  `kogane.schedules.survey.read`
+  ([ADR 0050 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07);
+  `services/app/test/delegated-survey.test.ts`).

@@ -886,6 +886,51 @@ describe("the reason and decision reference are closed per actor", () => {
     ]);
   });
 
+  test("only with the survey's trusted option may a delegated write give its reason or create its derived id", async () => {
+    const count = await ruleCount();
+    const survey = (id: number, ruleId: string | null, reason: string = ACCEPTED_REASON) => ({
+      ...provenanceWrite("delegated", reason, delegatedRef()),
+      ruleId,
+    });
+    // What the public maintenance tool can send: no option, so neither the
+    // reason nor the derived id, whichever comes with a good audit reference.
+    for (const [write, code] of [
+      [survey(7, null), "invalid_reason"],
+      [survey(7, "vpass-survey-7"), "invalid_reason"],
+      [survey(7, "vpass-survey-7", "correction"), "maintenance_rule_not_found"],
+    ] as const)
+      expect(await writeMaintenanceRevision(processorEnv, write, NO_RECORD)).toEqual({
+        ok: false,
+        code,
+        status: MAINTENANCE_WRITE_CODES[code],
+      });
+    // With the option: exactly the derived id of that proposal, at revision 0,
+    // and only the survey's reason.
+    const option = (id: number, ruleId: string) => ({ surveyProposal: { id, ruleId } });
+    for (const [write, options, code] of [
+      [survey(7, "vpass-survey-8"), option(7, "vpass-survey-7"), "invalid_request"],
+      [survey(7, "myjcb-survey-7"), option(7, "myjcb-survey-7"), "maintenance_rule_not_found"],
+      [survey(7, "vpass-survey-7", "correction"), option(7, "vpass-survey-7"), "invalid_reason"],
+      [
+        { ...survey(7, "vpass-survey-7"), expectedRevision: 1 },
+        option(7, "vpass-survey-7"),
+        "maintenance_rule_not_found",
+      ],
+    ] as const)
+      expect([
+        write.ruleId,
+        await writeMaintenanceRevision(processorEnv, write, NO_RECORD, options),
+      ]).toEqual([write.ruleId, { ok: false, code, status: MAINTENANCE_WRITE_CODES[code] }]);
+    expect(await ruleCount()).toBe(count);
+    const created = await writeMaintenanceRevision(
+      processorEnv,
+      survey(7, "vpass-survey-7"),
+      NO_RECORD,
+      option(7, "vpass-survey-7"),
+    );
+    expect(created).toMatchObject({ ok: true, ruleId: "vpass-survey-7", revision: 1 });
+  });
+
   test("the operator's rules are unchanged: no audit reference, and the survey's reason only with its proposal", async () => {
     const count = await ruleCount();
     const cases: [string, unknown, keyof typeof MAINTENANCE_WRITE_CODES][] = [
@@ -1555,8 +1600,9 @@ describe("prepare and write share one validation (the contract plan slice S3 bui
       await prepareMaintenanceRevision(env, make("delegated", { pattern: span(7 * DAY + 1) })),
     ).toEqual({ ok: false, code: "maintenance_deferral_too_long", status: 422 });
     sqlite.close();
-    // The writer and the private delegated adapter are the only code allowed
-    // to name the trusted option; no public schema/route/grant forwards it.
+    // The writer and the private delegated adapters (maintenance, and survey
+    // acceptance) are the only code allowed to name the trusted option; no
+    // public schema/route/grant forwards it.
     const writerFile = new URL("../src/schedule-store.ts", import.meta.url).pathname;
     const roots = ["../src/", "../../app/src/"].map(
       (dir) => new URL(dir, import.meta.url).pathname,
@@ -1568,12 +1614,30 @@ describe("prepare and write share one validation (the contract plan slice S3 bui
         const text = readFileSync(file, "utf8");
         if (
           file === writerFile ||
-          file === new URL("../src/delegated-maintenance.ts", import.meta.url).pathname
+          file === new URL("../src/delegated-maintenance.ts", import.meta.url).pathname ||
+          file === new URL("../src/delegated-survey.ts", import.meta.url).pathname
         )
           continue;
         expect([name, text.includes("confirmed-31d"), text.includes("deferralBound")]).toEqual([
           name,
           false,
+          false,
+        ]);
+      }
+    // The survey option (a delegated actor's survey reason and derived rule id)
+    // is named by the writer and the private survey adapter alone: not by the
+    // delegated maintenance adapter, nor by any App code.
+    for (const root of roots)
+      for (const name of readdirSync(root, { recursive: true }) as string[]) {
+        if (!/\.tsx?$/u.test(name)) continue;
+        const file = `${root}${name}`;
+        if (
+          file === writerFile ||
+          file === new URL("../src/delegated-survey.ts", import.meta.url).pathname
+        )
+          continue;
+        expect([name, readFileSync(file, "utf8").includes("surveyProposal")]).toEqual([
+          name,
           false,
         ]);
       }

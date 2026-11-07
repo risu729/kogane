@@ -141,8 +141,9 @@ writer reconciles the source's alarms, so the next run and the one run after
 the window come from the existing alarm code; the survey never touches a
 schedule, an alarm or a lease.
 
-**No agent decides.** Accepting or rejecting a proposal is an operator
-settings write; agents never approve or commit a change. The #560 MCP tool
+**No agent decides** (on this route; delegated decisions over MCP are in the
+[2026-11-07 amendment](#amendment-delegated-decisions-over-mcp-2026-11-07)).
+Accepting or rejecting a proposal is an operator settings write; agents never approve or commit a change. The #560 MCP tool
 writes its own bounded revisions through the same writer and neither reads
 nor decides survey proposals; a revision it writes simply moves the rule, and
 a proposal read against the older revision then reads as not current.
@@ -288,3 +289,108 @@ describe the time before #560 merged; with it they no longer hold:
 Verification: `maintenance-survey-decisions.test.ts` accepts a proposal
 through the operator route and `writeMaintenanceRevision` and checks the
 revision's actor kind, reason and decision reference.
+
+## Amendment: delegated decisions over MCP (2026-11-07)
+
+- Status: proposed (accepted when the PR that adds it merges)
+- Date: 2026-11-07
+- Decided by: the owner, 2026-11-07 06:01 UTC, on which proposals an agent may
+  accept (option A below); [ADR 0081](0081-ui-parity-through-mcp.md) (every
+  screen operation is an MCP operation) and
+  [ADR 0063](0063-delegated-ai-operation-path.md) item 5 (rejection R1,
+  acceptance R2, owner-approved 2026-10-10)
+- Amends: "No agent decides" and "Only the configured human operator decides"
+  above, which now hold for the operator route only
+
+**Context.** Issue #561 asked for explicit adoption conditions, MCP and
+operator paths and conflict handling. This ADR answered them for the operator.
+ADR 0063 classed the decisions but kept delegated acceptance unavailable
+"pending the separate owner decision", and ADR 0081 requires the MCP tool.
+
+**Options considered** for which proposals an agent may accept: (A) every
+`proposed` one and every `review_pending` one except five reasons; (B) every
+proposal; (C) `proposed` only. The owner chose A.
+
+**Decision.**
+
+1. _Who._ An MCP client, as itself
+   ([ADR 0084](0084-mcp-operator-authority-without-delegation.md): every MCP
+   client Access verifies resolves with every operation capability over the
+   whole store; this amendment was drafted under ADR 0063's delegations and
+   ADR 0084 replaced them before it merged). The tool is
+   `kogane.schedules.survey.decide`; its private Processor route is
+   `/internal/delegated-survey`, which calls the same `decideSurveyProposal`
+   as the screen.
+2. _Reject (R1)._ One call (`step: "apply"`) with an idempotency key: the
+   decision row (`actor = mcp-client:<sub>`) and its audit record in one batch.
+   An exact retry answers `replayed: true`; another payload under the same key
+   is `idempotency_conflict`. A rejection is final for that reading: the lane
+   does not propose it again until the rule or the page changes, so undoing a
+   wrong rejection is a maintenance revision.
+3. _Accept (R2)._ `prepare`, then `confirm` within ten minutes with the same
+   payload, including the proposal's `baseRevision`. Prepare runs the writer's
+   validation chain and writes nothing; its preview carries the proposal's
+   kind, status, closed reasons, rule, base and current revision, the change,
+   the deferral class and the remaining daily count (the tighter of the
+   writer's count and the delegation's budget). Confirm writes the
+   revision through `writeMaintenanceRevision` with actor kind `delegated`,
+   reason `maintenance-survey-proposal-accepted` and decision reference
+   `delegated-audit:<prepare audit id>`. The proposal link is the decision row
+   (`rule_id`, `rule_revision`) and the audit record
+   (`target_ref = maintenance-survey-proposal:<id>`,
+   `refs = [maintenance-rule:<id>@<rev>]`). CORE 0078 already allows this
+   reason with a delegated actor kind; no migration.
+4. _Bounds._ The delegated maintenance bounds: no newly caused joined deferral
+   over 31 days (`maintenance_deferral_too_long`), the 30-per-day count of
+   delegated revisions (shared with `kogane.schedules.maintenance.update`) and
+   the principal's fixed daily budget. The 31-day ceiling limits lengthening only.
+5. _Kept with the operator (option A)._ An acceptance of a proposal carrying
+   `rule_absent_from_page` (it disables a rule), `rule_disabled_by_operator`
+   (it re-enables one the operator disabled), `ambiguous_rule_match` (a new
+   rule overlapping several), `cancellation_stated` or `contradictory_windows`
+   (the page itself is in doubt) is R3: refused `403 operation_not_delegable`
+   at prepare and confirm, recorded at R3. A delegated rejection of it is
+   allowed. These reasons are `OPERATOR_ONLY_PROPOSAL_REASONS`
+   (`packages/collection/src/maintenance-survey-model.ts`). The reasons were
+   set against the rules when the page was read, so prepare and confirm also
+   judge the change against the source's rules as they stand then
+   (`operatorOnlyAcceptance`): a change that disables a rule, re-enables a
+   disabled one, or equals or overlaps another enabled rule (one accepted or
+   edited since the reading) is refused the same way.
+6. _The writer._ One trusted option, `surveyProposal: { id, ruleId }`, which only
+   the private survey route passes. With it a delegated actor may give the
+   survey's reason, and may create a rule under a named id only when it is
+   `<source>-survey-<id>` at expected revision 0; that id held by another
+   source's rule is `revision_conflict`. The public maintenance tool cannot
+   pass it.
+7. _Reading._ `kogane.schedules.survey.read` (`schedules.read`, MCP only,
+   optionally one `source`) returns the page's re-survey section for the
+   caller's sources: lane state, page freshness and undecided proposals, with
+   closed codes and the page URL, fetch time and SHA-256, never page text.
+   The sources narrow the query before the page's bound on shown proposals,
+   so another source's backlog neither hides these nor shows in `truncated`.
+8. _Conflicts._ An operator and an agent deciding one proposal: the first
+   write wins on the decision's primary key, and the other gets
+   `409 proposal_already_decided` with nothing written. A rule that moved since
+   the proposal is `409 revision_conflict`. A proposal of another source than
+   the call's `source` answers `404 proposal_not_found`, exactly as a missing
+   id does.
+
+**Consequences.** An agent can clear routine proposals. The ones that would
+disable, re-enable or duplicate a rule, or that the page itself puts in doubt,
+stay on the schedules page. With option A no human sits between a page reading
+and an accepted rule, which is what option 1 above was rejected for; the
+preview carries no page text, and the URL an agent may fetch is untrusted
+data. Nothing changes in production while every page in
+`config/maintenance-survey.json` is `"fetch": "disabled"`.
+
+**Verification.** `services/app/test/delegated-survey.test.ts` (real local D1,
+the App adapter, the private route and the unchanged writer): rejection and
+its replay and key conflict; prepare, confirm and replay of an acceptance with
+the revision's actor kind, reason and decision reference; a changed proposal
+and a stale base revision; each of the five reasons refused at R3 while
+rejection stays allowed; another source's proposal not found; the 31-day
+ceiling; closed steps and the capability. `services/app/test/schedule-tools.test.ts`
+covers the read's scope, listing and records.
+`services/processor/test/schedule-agent-maintenance.test.ts` pins that only the
+writer and the private survey route name `surveyProposal`.
