@@ -703,6 +703,8 @@ container was shared with other jobs, so treat these as orders of magnitude):
 | ------------------------------------------ | --------- | ------ |
 | `カード照合` list, first page (50 reviews) | 37,072 ms | 143 ms |
 | one review (`proposalId`)                  | 6,581 ms  | 63 ms  |
+| grouped list, first page (10 statements)   | —         | 130 ms |
+| one statement's list, first page           | —         | 44 ms  |
 | settlement plan read                       | 6,257 ms  | 38 ms  |
 | settlement acceptance commit guard         | 120 ms    | 31 ms  |
 | ownership review guard, candidate term     | 113 ms    | 33 ms  |
@@ -736,7 +738,9 @@ candidate to choose its page (4 ms for 3,763 candidates here; no index). The
 grouped list likewise groups every candidate by `statement_key` to choose its
 ten statements (`statement_page`), then reaches each statement's candidates
 through `card_settlement_candidates_statement` and judges at most its five
-newest and its accepted ones.
+newest and its accepted ones (the two grouped rows of the table above,
+measured 2026-11-07; the flat list's first page measured 104 ms in the same
+run).
 Not changed here, and not measured: the ownership review's account mapping
 reads (`queryCardOwnership`'s mappings, `prepareOwnershipReview`'s mapping read
 and the two mapping terms of its commit guard) still read
