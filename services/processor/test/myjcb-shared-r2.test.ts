@@ -418,7 +418,7 @@ test("ADR 0005 amendment: a connection that stopped at a month registers and sea
     )
       .bind(runId)
       .first<string>("v"),
-  ).toBe("terminal-registration-v2");
+  ).toBe("terminal-registration-v3");
   expect(
     (
       await env.DB.prepare(

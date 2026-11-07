@@ -2,11 +2,15 @@
 // what `latest` shows and never what `as-recorded` shows; every organized
 // response says which interpretation it was computed under; the `latest`
 // read equals the query the browser ran before read modes existed.
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { identityApi } from "../src/identity-api";
 import { observationApi } from "../src/observation-api";
-import { observationOrganizations, ORGANIZATION_QUERY } from "../src/observation-organization";
+import {
+  observationOrganizations,
+  ORGANIZATION_QUERY,
+} from "../../../packages/application/src/query/observation-organization.ts";
 import { validInterpretationContext } from "../../../packages/observation-shared/src/api-schema";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import { validIdentityResponse } from "../../../packages/observation-shared/src/identity-contract";
@@ -188,7 +192,7 @@ it("the latest read equals the query the browser ran before read modes, on the s
     legacy.results,
   );
   expect(current.results[0]!.identity_release).toBe("identity-default-v1");
-  const organized = await observationOrganizations(env.DB, [
+  const organized = await observationOrganizations(d1Executor(env.DB), [
     { kind: "transaction", id: fixture.observationId },
   ]);
   const { mappingRevision, identityRelease, ...rest } = organized.get(

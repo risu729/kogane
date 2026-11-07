@@ -8,9 +8,14 @@ on:
       - main
   workflow_call:
   workflow_dispatch:
+# A pull request's newer push replaces its running CI. A running CI on main is
+# never cancelled: Deploy releases only a successful CI run, so cancelling one
+# would leave its commit undeployed, and back-to-back merges would deploy
+# nothing (owner decision 2026-11-07 17:01 UTC,
+# docs/ci-cd.md#continuous-deployment).
 concurrency:
   group: ci-${{ case(github.event_name == 'pull_request', github.event.pull_request.number, github.ref) }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions: {}
 defaults:
   run:
@@ -35,7 +40,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install mise
-        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: 2026.11.3
       - name: Verify bounded large-artifact restore
@@ -85,7 +90,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Install mise
-        uses: jdx/mise-action@f5be966e4a917d54244728e6a5fdcd1d93a35e6c # v5.2.6
+        uses: jdx/mise-action@b44d12e7d0d8ee7461bb893e1b1993500433185b # v5.2.7
         with:
           version: 2026.11.3
       - name: Run the complete native processor shard

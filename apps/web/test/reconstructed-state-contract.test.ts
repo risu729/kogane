@@ -40,10 +40,10 @@ import {
 } from "../../../packages/observation-shared/src/reconstructed-state-contract.ts";
 import { clientFeatures } from "../src/capabilities.ts";
 import {
-  formProblem,
   RECONSTRUCTION_REASON_LABELS,
   RECONSTRUCTION_REFUSAL_MESSAGES,
 } from "../src/pages/ReconstructedState.tsx";
+import { formProblem } from "../src/reconstruction-form.ts";
 import { reconstructedStateSearch } from "../src/reconstructed-state-api.ts";
 import { matchRoute } from "../src/router.tsx";
 

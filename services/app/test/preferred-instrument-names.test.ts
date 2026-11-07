@@ -1,10 +1,14 @@
 import { env } from "cloudflare:test";
+import { d1Executor } from "../../../packages/read-model/src/d1";
 import { beforeAll, expect, it } from "vitest";
-import { preferredInstrumentNames } from "../src/preferred-instrument-names";
+import { preferredInstrumentNames } from "../../../packages/application/src/query/preferred-instrument-names";
 import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import { identifyParse } from "../../processor/src/identity-store";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
-import { observationOrganizations, organizeRows } from "../src/observation-organization";
+import {
+  observationOrganizations,
+  organizeRows,
+} from "../../../packages/application/src/query/observation-organization.ts";
 
 beforeAll(async () => {
   await seedRegistry();
@@ -106,7 +110,7 @@ it("prefers an observed Japanese name for the exact listing and keeps B and mapp
     { code: "NAME2", label: "日本企業", market: "NGY" },
   ]);
   const names = await preferredInstrumentNames(
-    env.DB,
+    d1Executor(env.DB),
     data.identifiers.map((row) => row.id),
   );
   const first = data.identifiers.find((row) => row.value === "NAME1")!;
@@ -150,7 +154,7 @@ it("protects manual labels and ignores names from a superseded parse", async () 
     FROM current_instrument_mappings WHERE identifier_id=?`)
     .bind(id)
     .run();
-  expect((await preferredInstrumentNames(env.DB, [id])).get(id)).toEqual({
+  expect((await preferredInstrumentNames(d1Executor(env.DB), [id])).get(id)).toEqual({
     label: "User chosen",
     reason: "manual",
     decisionOrigin: "unknown",
@@ -167,7 +171,7 @@ it("protects manual labels and ignores names from a superseded parse", async () 
   );
   const staleId = stale.identifiers.find((row) => row.value === "STALE")!.id;
   await supersedeParse(stale.parseId, data.parseId);
-  expect((await preferredInstrumentNames(env.DB, [staleId])).get(staleId)).toEqual({
+  expect((await preferredInstrumentNames(d1Executor(env.DB), [staleId])).get(staleId)).toEqual({
     label: "Example",
     reason: "provider-current",
     decisionOrigin: "automatic",
@@ -176,10 +180,10 @@ it("protects manual labels and ignores names from a superseded parse", async () 
 });
 
 it("deduplicates requested IDs and rejects an oversized lookup", async () => {
-  expect((await preferredInstrumentNames(env.DB, [])).size).toBe(0);
+  expect((await preferredInstrumentNames(d1Executor(env.DB), [])).size).toBe(0);
   await expect(
     preferredInstrumentNames(
-      env.DB,
+      d1Executor(env.DB),
       Array.from({ length: 501 }, (_, i) => String(i)),
     ),
   ).rejects.toThrow("preferred_instrument_name_budget_invalid");
@@ -196,7 +200,7 @@ it("uses transaction and valuation name evidence with stable selection across in
     { code: "STABLE", label: "アルファ", kind: "valuation" },
   ]);
   const selected = await preferredInstrumentNames(
-    env.DB,
+    d1Executor(env.DB),
     data.identifiers.map((row) => row.id).reverse(),
   );
   expect(selected.get(data.identifiers.find((row) => row.value === "TXNAME")!.id)).toMatchObject({
@@ -224,7 +228,7 @@ it("observation organization shares preferred names and evidence while retaining
   )
     .bind(data.parseId)
     .all<{ id: number; security_name: string; security_code: string }>();
-  const rows = await organizeRows(env.DB, "position", positions.results);
+  const rows = await organizeRows(d1Executor(env.DB), "position", positions.results);
   expect(rows[0]).toMatchObject({
     security_name: "Original English",
     security_code: "INTEGRATED",
@@ -244,7 +248,7 @@ it("observation organization shares preferred names and evidence while retaining
     FROM current_instrument_mappings WHERE identifier_id=?`)
     .bind(reference)
     .run();
-  const manual = await observationOrganizations(env.DB, [
+  const manual = await observationOrganizations(d1Executor(env.DB), [
     { kind: "position", id: positions.results[0]!.id },
   ]);
   expect(
@@ -268,7 +272,7 @@ it("organizes more than 500 distinct instruments without exceeding the name look
     .bind(data.parseId)
     .all<{ id: number }>();
   const result = await observationOrganizations(
-    env.DB,
+    d1Executor(env.DB),
     positions.results.map(({ id }) => ({ kind: "position", id })),
   );
   expect(result.size).toBe(501);

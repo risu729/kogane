@@ -122,14 +122,7 @@ async function call(query = "", method = "GET", authenticated = true) {
 }
 
 /** One agent call: `/api/agent/v1/*` under a browser subject, or `/mcp` as `mcp-client:<sub>`. */
-async function agentCall(
-  path: string,
-  body: unknown,
-  grants: Record<string, unknown> = {
-    "synthetic-agent": SUMMARY_GRANT,
-    "mcp-client:synthetic-agent": SUMMARY_GRANT,
-  },
-) {
+async function agentCall(path: string, body: unknown) {
   const token = await new SignJWT({ type: "app" })
     .setProtectedHeader({ alg: "RS256", kid: "fixture" })
     .setIssuer(issuer)
@@ -152,31 +145,24 @@ async function agentCall(
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: "fixture-audience",
       ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
-      AGENT_API_GRANTS: JSON.stringify(grants),
     } as Env,
   );
 }
 
 /** One `/mcp` message's JSON-RPC answer. */
-async function mcp(message: Record<string, unknown>, grants?: Record<string, unknown>) {
-  const response = await agentCall("/mcp", { jsonrpc: "2.0", id: 1, ...message }, grants);
+async function mcp(message: Record<string, unknown>) {
+  const response = await agentCall("/mcp", { jsonrpc: "2.0", id: 1, ...message });
   expect(response.status).toBe(200);
   return (await response.json()) as Record<string, any>;
 }
 
 /** The tool's MCP result: `structuredContent` and `isError`. */
-async function mcpCoverage(arguments_: unknown, grants?: Record<string, unknown>) {
-  const message = await mcp(
-    { method: "tools/call", params: { name: TOOL, arguments: arguments_ } },
-    grants,
-  );
+async function mcpCoverage(arguments_: unknown) {
+  const message = await mcp({
+    method: "tools/call",
+    params: { name: TOOL, arguments: arguments_ },
+  });
   return message["result"] as { structuredContent: unknown; isError: boolean };
-}
-
-/** The tool names `/mcp` lists to `mcp-client:synthetic-agent` under `grant`. */
-async function listed(grant: unknown): Promise<string[]> {
-  const message = await mcp({ method: "tools/list" }, { "mcp-client:synthetic-agent": grant });
-  return message["result"].tools.map((tool: { name: string }) => tool.name);
 }
 
 /**
@@ -267,8 +253,14 @@ describe("kogane.instruments.coverage", () => {
         for (const accounts of ["*", ["sbi-securities:domestic"]] as const) {
           const grant = { ...SUMMARY_GRANT, scopes: { sources, accounts }, capabilities } as Grant;
           const whole = sources === "*" && accounts === "*";
-          // The dated reported state's read is listed only where its route is served.
-          for (const reportedState of [false, true]) {
+          // The dated reported state's and the card settlement reads are listed
+          // only where their routes are served.
+          for (const [reportedState, cardSettlements] of [
+            [false, false],
+            [false, true],
+            [true, false],
+            [true, true],
+          ] as const) {
             const expected = [
               ...(capabilities.includes("records.read") && whole
                 ? ["kogane.instruments.history"]
@@ -278,35 +270,31 @@ describe("kogane.instruments.coverage", () => {
                 : []),
               ...(capabilities.includes("summary.read") && whole ? [TOOL] : []),
               ...(capabilities.includes("records.read") && whole
-                ? ["kogane.accounts.candidates", "kogane.economic-readiness.read"]
+                ? [
+                    "kogane.accounts.candidates",
+                    "kogane.card-settlements.unmatched",
+                    "kogane.economic-readiness.read",
+                  ]
+                : []),
+              ...(cardSettlements && capabilities.includes("records.read") && whole
+                ? ["kogane.card-settlements.read", "kogane.card-settlements.ownership"]
                 : []),
               ...(capabilities.includes("audit.read") && accounts === "*"
                 ? ["kogane.audit.search", "kogane.audit.get"]
                 : []),
             ];
             expect(
-              readMcpTools(grant, { reportedState }).map((tool) => tool.name),
-              JSON.stringify({ grant, reportedState }),
+              readMcpTools(grant, { reportedState, cardSettlements }).map((tool) => tool.name),
+              JSON.stringify({ grant, reportedState, cardSettlements }),
             ).toEqual(expected);
             shapes += 1;
           }
         }
     }
-    expect(shapes).toBe(8 << AGENT_CAPABILITIES.length);
+    expect(shapes).toBe(16 << AGENT_CAPABILITIES.length);
   });
 
-  it("is listed only to summary.read over the whole store", async () => {
-    expect(await listed(SUMMARY_GRANT)).toContain(TOOL);
-    expect(
-      await listed({ ...SUMMARY_GRANT, capabilities: ["summary.read", "records.read"] }),
-    ).toContain(TOOL);
-    for (const grant of [
-      { ...SUMMARY_GRANT, capabilities: [] },
-      { ...SUMMARY_GRANT, capabilities: ["records.read", "evidence.read"] },
-      { ...SUMMARY_GRANT, scopes: { sources: ["sbi-securities"], accounts: "*" } },
-      { ...SUMMARY_GRANT, scopes: { sources: "*", accounts: ["sbi-securities:domestic"] } },
-    ])
-      expect(await listed(grant), JSON.stringify(grant)).not.toContain(TOOL);
+  it("is listed to every MCP client under the whole-store grant (ADR 0084)", async () => {
     // The published schema is closed and has the route's one parameter.
     const tools = (await mcp({ method: "tools/list" }))["result"].tools as {
       name: string;
@@ -351,34 +339,8 @@ describe("kogane.instruments.coverage", () => {
     expect(await tables({ audit: false })).toEqual(before);
   });
 
-  it("refuses a caller without the authority with the same closed answer on both transports", async () => {
+  it("refuses a malformed input with the same closed answer on both transports", async () => {
     const before = await tables({ audit: false });
-    const both = (grant: unknown) => ({
-      "synthetic-agent": grant,
-      "mcp-client:synthetic-agent": grant,
-    });
-    for (const [grant, expected] of [
-      [
-        { ...SUMMARY_GRANT, capabilities: ["records.read", "evidence.read"] },
-        { code: "unauthorized", refs: ["capability:summary.read"] },
-      ],
-      [
-        { ...SUMMARY_GRANT, scopes: { sources: ["sbi-securities"], accounts: "*" } },
-        { code: "evidence_restricted", refs: ["scope:source"] },
-      ],
-      [
-        { ...SUMMARY_GRANT, scopes: { sources: "*", accounts: ["sbi-securities:domestic"] } },
-        { code: "evidence_restricted", refs: ["scope:account"] },
-      ],
-    ] as const) {
-      const http = await agentCall(AGENT_PATH, {}, both(grant));
-      expect(http.status, JSON.stringify(grant)).toBe(403);
-      const overHttp = await http.json();
-      expect(overHttp).toMatchObject(expected);
-      const overMcp = await mcpCoverage({}, both(grant));
-      expect(overMcp.isError).toBe(true);
-      expect(overMcp.structuredContent).toEqual(overHttp);
-    }
     // The input is a closed object: an unknown key or a malformed source is
     // refused before the service runs, the same way over both transports.
     for (const body of [
@@ -397,10 +359,6 @@ describe("kogane.instruments.coverage", () => {
       expect(overMcp.isError).toBe(true);
       expect(overMcp.structuredContent).toEqual(overHttp);
     }
-    // No grant at all: the agent API's own refusal, before any tool.
-    const none = await agentCall(AGENT_PATH, {}, {});
-    expect(none.status).toBe(403);
-    expect(await none.json()).toMatchObject({ error: "agent_api_not_configured" });
     expect(await tables({ audit: false })).toEqual(before);
   });
 
@@ -420,8 +378,7 @@ describe("kogane.instruments.coverage", () => {
     expect((await call()).status).toBe(200);
     expect((await agentCall(AGENT_PATH, {})).status).toBe(200);
     expect((await mcpCoverage({ source: "sony-bank" })).isError).toBe(false);
-    const narrowed = { ...SUMMARY_GRANT, capabilities: ["records.read"] };
-    expect((await agentCall(AGENT_PATH, {}, { "synthetic-agent": narrowed })).status).toBe(403);
+    expect((await agentCall(AGENT_PATH, { source: "" })).status).toBe(400);
     const read = {
       principal_kind: "agent",
       risk_class: "R0",
@@ -449,7 +406,7 @@ describe("kogane.instruments.coverage", () => {
         principal: "synthetic-agent",
         risk_class: "R0",
         result: "refused",
-        result_code: "unauthorized",
+        result_code: "invalid_request",
       }),
     ]);
     // Counts and closed codes only: no source, identifier or provider text.

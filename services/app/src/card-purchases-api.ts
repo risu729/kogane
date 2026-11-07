@@ -6,6 +6,7 @@
 // agent API's `kogane.purchases.explain` instead, graded by its own grant,
 // served only while `cardPurchasesAvailable` is, and without those actions
 // (packages/application/src/query/purchases-explain.ts, docs/agent-api.md).
+import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
 import {
   CARD_PURCHASE_EVENT_ID,
   CARD_PURCHASE_PERIOD,
@@ -24,12 +25,7 @@ const PARAMETERS = ["offset", "period", "eventId"];
  * migration neither advertises nor serves it.
  */
 export async function cardPurchasesAvailable(env: Env): Promise<boolean> {
-  const row = await env.DB.prepare(
-    `SELECT count(*) AS present FROM sqlite_master
-     WHERE (type='table' AND name='card_purchase_recognitions')
-        OR (type='view' AND name IN ('current_card_purchase_recognitions','current_card_purchase_keys'))`,
-  ).first<{ present: number }>();
-  return row?.present === 3;
+  return storeHasFeature(d1Executor(env.DB), "cardPurchases");
 }
 
 export async function cardPurchasesApi(
