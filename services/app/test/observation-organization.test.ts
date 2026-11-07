@@ -10,8 +10,9 @@ import {
 import {
   preferredInstrumentNames,
   PREFERRED_INSTRUMENT_NAMES_SQL,
-} from "../src/preferred-instrument-names";
+} from "../../../packages/application/src/query/preferred-instrument-names";
 import { env } from "cloudflare:test";
+import { d1Executor } from "../../../packages/read-model/src/d1";
 import { beforeAll, expect, it, vi } from "vitest";
 import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import {
@@ -571,6 +572,6 @@ it("a current delegated name overlay never inherits the actor of the as-recorded
       .all<{ detail: string }>()
   ).results;
   expect(plan.some((row) => /SCAN (origin_d|origin_op)\b/u.test(row.detail))).toBe(false);
-  const names = await preferredInstrumentNames(env.DB, [identifier!.id]);
+  const names = await preferredInstrumentNames(d1Executor(env.DB), [identifier!.id]);
   expect(names.get(identifier!.id)!.decisionOrigin).toBe("delegated");
 });
