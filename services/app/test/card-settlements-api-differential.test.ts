@@ -122,17 +122,21 @@ function requests(): string[] {
 
 describe("the card settlement page route as an adapter over the shared service", () => {
   it("answers as the frozen handler did, except the two recorded changes", async () => {
-    const seen = await compare(requests());
-    // Every class was reached, deep pages that held rows included. A
-    // malformed grouped request was the frozen handler's own refusal, the same
-    // on both, until the grouped list became an adapter too; it is `invalid`
-    // now, so `same` counts the answered list, ownership and grouped reads.
-    expect(seen.same).toBeGreaterThan(25);
-    expect(seen.invalid).toBeGreaterThan(800);
-    expect(seen.budget).toBeGreaterThan(10);
-    expect(seen.groupedBudget).toBeGreaterThan(2);
-    expect(seen.groupedPages).toBeGreaterThan(5);
-    expect(seen.same - seen.groupedPages).toBeGreaterThan(20);
+    // The request set is deterministic, so each class is pinned exactly: a
+    // request that changes class fails here, not only one that changes body.
+    // `same`: 25 list reads (19 pages, 6 not found), 1 ownership review and 8
+    // grouped pages; `invalid`: 253 list, 326 ownership and 289 grouped
+    // requests the frozen handler refused as `invalid_offset` or
+    // `invalid_query`; `budget`: 24 list and 4 grouped reads past offset 950
+    // and 990. The 289 grouped refusals and the 4 grouped deep pages were
+    // `same` while the grouped list kept its own rules.
+    expect(await compare(requests())).toEqual({
+      same: 34,
+      invalid: 868,
+      budget: 28,
+      groupedBudget: 4,
+      groupedPages: 8,
+    });
     const deep = (await answer(frozenCardSettlementsApi, `${PATH}?offset=951`))!;
     expect((JSON.parse(deep.body) as { items: unknown[] }).items).toHaveLength(50);
   });
