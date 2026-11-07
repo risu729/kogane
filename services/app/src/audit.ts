@@ -245,6 +245,15 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // page's `items` or `rows`, else its first list (connections, transactions, …), truncated
   // when the page says more follow; one detail is one row.
   if (operation === "observations.get") return { rows: value["data"] ? 1 : 0, truncated: false };
+  // The report list's items, truncated while a cursor follows (the list has no
+  // `coverage` or `page`); one report or one explanation is one row, never its
+  // events.
+  if (operation === "reports.read") {
+    const data = (value["data"] ?? null) as Record<string, unknown> | null;
+    if (data && Array.isArray(data["items"]))
+      return { rows: data["items"].length, truncated: typeof data["nextCursor"] === "string" };
+    return { rows: data ? 1 : 0, truncated: false };
+  }
   if (
     operation === "identity.read" ||
     operation === "store.read" ||
@@ -253,7 +262,6 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     operation === "rewards.read" ||
     operation === "reported-holdings-change.read" ||
     operation === "events.read" ||
-    operation === "reports.read" ||
     operation === "collection-quality.read"
   ) {
     const data = (value["data"] ?? {}) as Record<string, unknown>;

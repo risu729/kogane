@@ -274,7 +274,9 @@ export async function readReportRoute(
 
   const object = await env.EVIDENCE.get(artifact.storage_ref);
   if (!object) {
-    if (route.view === "export") throw new HttpError(404, "not_found");
+    // A body that left R2 after the `head` above is refused to the agent read
+    // too, as `/export` refuses it, never re-displayed as `unavailable`.
+    if (route.view === "export" || options.refuseRestricted) throw new HttpError(404, "not_found");
     // The catalogue row survives even when the body is gone; say so instead of
     // rebuilding a different report under the same id.
     return {

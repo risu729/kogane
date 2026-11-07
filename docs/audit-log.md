@@ -107,10 +107,12 @@ the answer's accounts plus payables, never truncated; `instruments.history`:
 entries; `audit.search`: records on the page, truncated when a cursor
 follows; `audit.get`: one when a record is shown; `identity.read`,
 `store.read`, `observations.list`, `balances.read`, `rewards.read`,
-`reported-holdings-change.read`, `events.read`, `reports.read` and
-`collection-quality.read`: the page's `items` or `rows`, else its first
+`reported-holdings-change.read`, `events.read` and `collection-quality.read`:
+the page's `items` or `rows`, else its first
 list (connections, transactions, …; one for `meta`, which has none),
-truncated when the page says more follow; `observations.get`: one; the others one).
+truncated when the page says more follow; `reports.read`: the list's items,
+truncated when a cursor follows, and one for a report or its explanation;
+`observations.get`: one; the others one).
 Whole-store and multi-source reads carry no scope. A replay names the earlier
 effect by the id the service answered with.
 

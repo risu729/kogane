@@ -333,7 +333,10 @@ This ADR added no MCP tool. ADR 0081 requires one for every UI read, so
 `/api/collection-quality/{source}` through the route's own reader. Because the
 cells carry the provider fetch-unit keys described above, it requires
 `evidence.read` on `"*"` sources and accounts, the capability of the evidence
-routes, and is published only while the five scheduling and run tables exist.
-The committed MCP grant holds no `evidence.read`, so by configuration it is
-listed to no client. The answer travels under `data`, as untrusted provider
+routes (not the `summary.read` that row D17 of the
+[AI operation path plan](../plans/2026-10-ai-operation-path.md#53-reads-searches-and-details)
+named), and is published only while the five scheduling and run tables exist.
+Every MCP client holds the whole-store grant, `evidence.read` included
+([ADR 0084](0084-mcp-operator-authority-without-delegation.md)), so it is
+listed to every client the MCP Access application admits. The answer travels under `data`, as untrusted provider
 content, and each call is an R0 read in the audit log.

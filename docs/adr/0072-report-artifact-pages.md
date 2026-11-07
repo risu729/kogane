@@ -162,5 +162,6 @@ on every view, and a report whose body has left R2 behind a complete run is
 `404 not_found`, the codes `/export` answers for the same reports. The list
 is the operator's list, so it still names restricted reports; opening one is
 refused. `services/app/test/page-read-reports.test.ts` checks the parity, both
-refusals while the operator page still answers, the closed schema, and that
-the tool is neither listed nor served without the table.
+refusals while the operator page still answers (also for a body that leaves
+R2 while it is read), the closed schema, the audit rows, and that the tool is
+neither listed nor served without the table.

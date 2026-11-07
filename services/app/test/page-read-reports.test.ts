@@ -24,6 +24,19 @@ const EVIDENCE_GRANT = { ...RECORDS_GRANT, capabilities: ["records.read", "evide
 const page = pageReadHarness("report-read");
 
 const bare = pageReadHarness("report-read-bare", { DB: withoutTables(env.DB) });
+/** The open report's body key: under `racing`, it leaves R2 between the reader's `head` and `get`. */
+let vanishing = "";
+const racing = pageReadHarness("report-read-racing", {
+  EVIDENCE: new Proxy(env.EVIDENCE, {
+    get(target, property) {
+      if (property === "get")
+        return (key: string, ...rest: never[]) =>
+          key === vanishing ? Promise.resolve(null) : target.get(key, ...rest);
+      const value = Reflect.get(target, property);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  }),
+});
 
 /** One stored report of `context`, its run complete, its body and explanation in R2. */
 async function storeReport(reportId: string, context: string): Promise<string> {
@@ -78,7 +91,7 @@ async function storeReport(reportId: string, context: string): Promise<string> {
 
 beforeAll(async () => {
   await seedRegistry();
-  await storeReport("rpt:synthetic-open", "ctx-open");
+  vanishing = await storeReport("rpt:synthetic-open", "ctx-open");
   await storeReport("rpt:synthetic-restricted", "ctx-restricted");
   // Its run is complete, but its body has left R2.
   await env.EVIDENCE.delete(await storeReport("rpt:synthetic-gone", "ctx-gone"));
@@ -165,6 +178,20 @@ describe("report page reads", () => {
       const overMcp = await page.mcp(REPORTS, { reportId: "rpt:synthetic-gone", view });
       expect(overMcp).toEqual({ isError: true, body: overHttp.body });
     }
+  });
+
+  it("refuse a report whose body leaves R2 while it is read, where the operator page shows it unavailable", async () => {
+    const operator = await racing.route(
+      `/api/v2/reports/${encodeURIComponent("rpt:synthetic-open")}`,
+    );
+    expect(operator.status).toBe(200);
+    expect(operator.body).toMatchObject({ report: { replayability: "unavailable" }, body: null });
+    const overHttp = await racing.http(REPORTS, { reportId: "rpt:synthetic-open" });
+    expect(overHttp).toEqual({ status: 404, body: { error: "not_found" } });
+    expect(await racing.mcp(REPORTS, { reportId: "rpt:synthetic-open" })).toEqual({
+      isError: true,
+      body: overHttp.body,
+    });
   });
 
   it("refuse what the routes refuse, and what the schema does not take", async () => {
@@ -274,5 +301,64 @@ describe("where the store lacks the tables", () => {
       expect(overHttp.status, tool).toBe(404);
       expect(overHttp.body).toMatchObject({ error: "not_found" });
     }
+  });
+});
+
+describe("the audit rows of the report and collection quality reads", () => {
+  it("count the list's items, truncated while a cursor follows, one report, and a source's cells", async () => {
+    // More reports than one page, so the list's first page has a cursor.
+    await env.DB.batch(
+      Array.from({ length: 50 }, (_, index) =>
+        env.DB.prepare(
+          `INSERT INTO report_artifacts(report_id,context_id,purpose,schema_version,content_digest,storage_ref,created_by,created_at)
+           VALUES (?,?,'holdings-view','report-holdings-v1',?,?,'report-job','2026-08-01T00:00:00.000Z')`,
+        ).bind(
+          `rpt:synthetic-older-${String(index).padStart(2, "0")}`,
+          `ctx-older-${index}`,
+          "d".repeat(64),
+          `reports/${"d".repeat(64)}`,
+        ),
+      ),
+    );
+    const last = (await env.DB.prepare(
+      "SELECT coalesce(max(rowid),0) AS n FROM audit_records",
+    ).first<number>("n"))!;
+    const list = await page.mcp(REPORTS, {});
+    expect(list.body.data.items).toHaveLength(50);
+    expect(list.body.data.nextCursor).toBe("50");
+    expect((await page.http(REPORTS, { offset: 50 })).status).toBe(200);
+    expect((await page.http(REPORTS, { reportId: "rpt:synthetic-open" })).status).toBe(200);
+    expect(
+      (await page.mcp(REPORTS, { reportId: "rpt:synthetic-open", view: "explanation" })).isError,
+    ).toBe(false);
+    const cells = await page.http(QUALITY, { source: "sony-bank" }, EVIDENCE_GRANT);
+    expect(cells.status).toBe(200);
+    const rows = (
+      await env.DB.prepare(
+        "SELECT path,operation,risk_class,result,diff_json FROM audit_records WHERE rowid>? ORDER BY rowid",
+      )
+        .bind(last)
+        .all()
+    ).results;
+    const read = (path: string, operation: string, count: number, truncated = false) => ({
+      path,
+      operation,
+      risk_class: "R0",
+      result: "read",
+      diff_json: JSON.stringify({ kind: "read", rows: count, truncated }),
+    });
+    expect(rows).toEqual([
+      read("mcp", "reports.read", 50, true),
+      read("agent-http", "reports.read", 3),
+      // One report, not its events.
+      read("agent-http", "reports.read", 1),
+      read("mcp", "reports.read", 1),
+      read(
+        "agent-http",
+        "collection-quality.read",
+        cells.body.data.cells.length,
+        cells.body.data.coverage.truncated,
+      ),
+    ]);
   });
 });

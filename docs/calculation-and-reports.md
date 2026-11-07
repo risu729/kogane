@@ -505,8 +505,12 @@ gets no link and a sentence saying why ([ADR 0072, amendment](adr/0072-report-ar
 Limits: the list has no index on `created_at` and sorts the table per page;
 paging is by offset, so a report stored between two page loads shifts the
 older rows by one and the next page can repeat a row (rows are never
-updated or deleted, so none is skipped); no agent or MCP tool lists or
-reads reports; activity and obligations have no page.
+updated or deleted, so none is skipped); activity and obligations have no
+page. `kogane.reports.read` lists reports and reads one report's body or
+explanation for an agent, refusing a restricted or unavailable report on every
+view and never offering `/export`
+([ADR 0072, amendment of 2026-11-07](adr/0072-report-artifact-pages.md#amendment-the-agent-report-read-2026-11-07),
+[agent API](agent-api.md#ui-read-pages)).
 
 ## 5. The context is the input set, not a timestamp
 
