@@ -45,6 +45,10 @@ const TARGETS = [
   `${PATH}/kogane-synthetic`,
   `${PATH}/Sony_Bank`,
   `${PATH}/Sony_Bank?offset=01`,
+  // A malformed source is refused before the query string is read.
+  `${PATH}/Sony_Bank?x=1`,
+  `${PATH}/Sony_Bank?offset=`,
+  `${PATH}/sony-bank/extra?limit=5`,
   `${PATH}/sony-bank/extra`,
   `${PATH}/${"a".repeat(101)}`,
   `${PATH}/sony-bank/accounts`,

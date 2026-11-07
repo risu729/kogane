@@ -834,7 +834,9 @@ tables. Every answer is checked by `validApiResponse` against
 is a thin adapter over one service of
 `packages/application/src/query/collection-quality.ts`, which an agent reads
 through the matching MCP tool (`kogane.collection-quality.summary`, `.cells`,
-`.accounts`), which answers the same body under `data` and the same refusal codes
+`.accounts`), which answers the same body under `data` and, for every refusal
+the service makes, the same status and code; a tool argument outside its
+closed schema is `400 invalid_request` instead
 ([agent API](agent-api.md#collection-quality), ADR 0081).
 
 - **Summary** (`/api/collection-quality`, no parameters): every configured job
