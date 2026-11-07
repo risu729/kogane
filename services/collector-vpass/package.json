@@ -5,7 +5,7 @@
   "dependencies": {
     "@clack/prompts": "1.8.1",
     "impit": "0.14.8",
-    "tough-cookie": "6.0.2"
+    "tough-cookie": "6.1.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261106.1",
