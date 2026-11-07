@@ -35,8 +35,8 @@ export type EvidencePayloadFidelity =
   | "transformed"
   | "generated"
   | "unknown";
-export type EvidenceContainerKind = "single" | "bundle" | "archive" | "multipart" | "unknown";
-export type EvidenceLineageDisposition =
+type EvidenceContainerKind = "single" | "bundle" | "archive" | "multipart" | "unknown";
+type EvidenceLineageDisposition =
   | "linked"
   | "embedded_source_bytes"
   | "source_not_retained_for_security"

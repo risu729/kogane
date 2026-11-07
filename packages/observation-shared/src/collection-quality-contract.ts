@@ -28,20 +28,20 @@ export const COLLECTION_QUALITY_PAGE = 500;
 export const COLLECTION_QUALITY_BOUND = 200;
 
 /** `collection_schedules.kind` (CORE 0065). */
-export const SCHEDULE_KINDS = ["collection", "keepalive", "processor", "manual", "email"] as const;
+const SCHEDULE_KINDS = ["collection", "keepalive", "processor", "manual", "email"] as const;
 /** `collection_schedule_occurrences.status` (CORE 0065). */
-export const OCCURRENCE_STATUSES = ["started", "completed", "failed", "uncertain"] as const;
+const OCCURRENCE_STATUSES = ["started", "completed", "failed", "uncertain"] as const;
 /** `collection_runs.provider_outcome`, the terminal's own claim (CORE 0039). */
-export const PROVIDER_OUTCOMES = ["success", "partial", "failed"] as const;
+const PROVIDER_OUTCOMES = ["success", "partial", "failed"] as const;
 /** `collection_runs.coverage_status` (CORE 0039). */
-export const COVERAGE_STATUSES = ["complete", "partial", "unknown"] as const;
+const COVERAGE_STATUSES = ["complete", "partial", "unknown"] as const;
 /**
  * Where a terminal named by a schedule receipt stands in CORE:
  * `registered` (its run is a visible fetch run), `pending` (seen, neither
  * registered nor blocked), `blocked` (seen and refused with a code),
  * `unrecorded` (no `collection_runs` row yet: the scan has not seen it).
  */
-export const REGISTRATION_STATES = ["registered", "pending", "blocked", "unrecorded"] as const;
+const REGISTRATION_STATES = ["registered", "pending", "blocked", "unrecorded"] as const;
 
 /**
  * Which existing rule decides that a cell's capture is current:
@@ -55,7 +55,7 @@ export const REGISTRATION_STATES = ["registered", "pending", "blocked", "unrecor
  * `published-eligible` a published parse of a parse-eligible run
  * (`activeStateProjection`), the rule every other current list starts from.
  */
-export const CURRENT_RULES = [
+const CURRENT_RULES = [
   "container-snapshot",
   "global-pass-month",
   "vpass-card-month",
@@ -80,7 +80,7 @@ export const CURRENT_RULES = [
  * is its own slot and is shown as stored, as card usage's `statement_period`
  * shows it).
  */
-export const PERIOD_KINDS = [
+const PERIOD_KINDS = [
   "latest",
   "activity-month",
   "statement-month",
@@ -91,7 +91,7 @@ export const PERIOD_KINDS = [
 ] as const;
 
 /** `current`: the newest capture is current; `older-current`: an older one is; `no-current`: none is. */
-export const CELL_STATES = ["current", "older-current", "no-current"] as const;
+const CELL_STATES = ["current", "older-current", "no-current"] as const;
 
 /** Why a source is not shown as collected end to end. Each is read from a stored state. */
 export const SOURCE_REASONS = [
@@ -149,7 +149,6 @@ export type ScheduleKind = (typeof SCHEDULE_KINDS)[number];
 export type OccurrenceStatus = (typeof OCCURRENCE_STATUSES)[number];
 export type ProviderOutcome = (typeof PROVIDER_OUTCOMES)[number];
 export type CoverageStatus = (typeof COVERAGE_STATUSES)[number];
-export type RegistrationState = (typeof REGISTRATION_STATES)[number];
 export type CurrentRule = (typeof CURRENT_RULES)[number];
 export type PeriodKind = (typeof PERIOD_KINDS)[number];
 export type CellState = (typeof CELL_STATES)[number];
@@ -410,18 +409,14 @@ export function validCollectionQualityAlarms(value: unknown): value is Collectio
   return alarms.safeParse(value).success;
 }
 export type CollectionQualityFetchRun = NonNullable<z.output<typeof fetchRun>>;
-export type CollectionQualityUnregistered = z.output<typeof unregistered>;
 export type CollectionQualitySource = z.output<typeof source>;
 export type CollectionQualitySummary = z.output<typeof summary>;
 export type CollectionQualityPeriod = z.output<typeof period>;
-export type CollectionQualityParseCounts = z.output<typeof parses>;
-export type CollectionQualityCapture = z.output<typeof capture>;
-export type CollectionQualityNewest = z.output<typeof newest>;
 export type CollectionQualityCell = z.output<typeof cell>;
 export type CollectionQualityCells = z.output<typeof cells>;
 
 /** `GET /api/collection-quality`. */
-export function validCollectionQualitySummary(value: unknown): value is CollectionQualitySummary {
+function validCollectionQualitySummary(value: unknown): value is CollectionQualitySummary {
   return summary.safeParse(value).success;
 }
 

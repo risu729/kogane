@@ -190,7 +190,7 @@ export async function callOpsTool(
   }
 }
 
-export const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
+const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
   "kogane.ops.collection.request": "operations.collection.request",
   "kogane.ops.import.request": "operations.import.request",
   "kogane.ops.replay.request": "operations.replay.request",

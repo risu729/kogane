@@ -50,7 +50,7 @@ export const HEALTH_PATH = `${OPS_PREFIX}/health`;
 export const DATA_MARKER_KEY = "health/release-marker";
 
 /** The release this Worker was uploaded from, or "" in a local run. */
-export function releaseSha(env: { RELEASE_SHA?: string }): string {
+function releaseSha(env: { RELEASE_SHA?: string }): string {
   const value = env.RELEASE_SHA;
   return typeof value === "string" && /^[0-9a-f]{40}$/u.test(value) ? value : "";
 }
@@ -64,7 +64,7 @@ export function releaseSha(env: { RELEASE_SHA?: string }): string {
  * rule the grant lists follow: an unreadable allow-list is a deployment
  * problem to report, never a shorter list to guess at.
  */
-export function healthProbeTokens(env: { HEALTH_PROBE_TOKENS?: string }): string[] | null {
+function healthProbeTokens(env: { HEALTH_PROBE_TOKENS?: string }): string[] | null {
   return parseSubjectList(env.HEALTH_PROBE_TOKENS);
 }
 
@@ -89,7 +89,7 @@ const ABSENT: D1Health = {
 };
 
 /** `SELECT 1` and the applied-migration list of one database. */
-export async function d1Health(database: D1Database | undefined): Promise<D1Health> {
+async function d1Health(database: D1Database | undefined): Promise<D1Health> {
   if (!database || typeof database.prepare !== "function") return { ...ABSENT };
   const health: D1Health = { ...ABSENT, bound: true };
   try {
@@ -114,7 +114,7 @@ export async function d1Health(database: D1Database | undefined): Promise<D1Heal
 }
 
 /** One `head` of the fixed marker key. Read-only, and never a failure on absence. */
-export async function bucketHealth(
+async function bucketHealth(
   bucket: R2Bucket | undefined,
 ): Promise<{ bound: boolean; ok: boolean; markerPresent: boolean }> {
   if (!bucket || typeof bucket.head !== "function")
@@ -132,7 +132,7 @@ export async function bucketHealth(
  * published on no hostname, so an unreachable binding is reported as such
  * rather than guessed at.
  */
-export async function processorHealth(env: Env): Promise<Record<string, unknown>> {
+async function processorHealth(env: Env): Promise<Record<string, unknown>> {
   const pipeline = env.PIPELINE;
   if (!pipeline || typeof pipeline.fetch !== "function")
     return { ok: false, error: "binding_absent" };
@@ -170,7 +170,7 @@ export async function processorHealth(env: Env): Promise<Record<string, unknown>
  * A `HEALTH_PROBE_TOKENS` that is present but unreadable closes the route to
  * everyone with `503 grants_misconfigured`, as an unreadable grant list does.
  */
-export function authorizeHealth(env: Env, identity: Awaited<ReturnType<typeof accessIdentity>>) {
+function authorizeHealth(env: Env, identity: Awaited<ReturnType<typeof accessIdentity>>) {
   const probeTokens = healthProbeTokens(env);
   if (probeTokens === null) {
     // Reported as a code, as `grants.ts` reports its lists: the value may
@@ -204,7 +204,7 @@ export function authorizeHealth(env: Env, identity: Awaited<ReturnType<typeof ac
  * lists, is not. `grantsUsable` is the Worker's one reporter of that problem
  * (it logs the code); the table is read once more only to name it here.
  */
-export function grantsHealth(env: Env): { usable: true } | { usable: false; problem: string } {
+function grantsHealth(env: Env): { usable: true } | { usable: false; problem: string } {
   if (grantsUsable(env)) return { usable: true };
   const table = subjectGrantTable(env);
   return { usable: false, problem: table.ok ? "unknown" : table.problem };
@@ -218,7 +218,7 @@ export function grantsHealth(env: Env): { usable: true } | { usable: false; prob
  * name is not read. Unreadable grant lists are a deployment that grades
  * nobody, and a release must not certify one.
  */
-export async function healthBody(env: Env): Promise<{ status: number; body: unknown }> {
+async function healthBody(env: Env): Promise<{ status: number; body: unknown }> {
   const grants = grantsHealth(env);
   const core = await d1Health(env.DB);
   const read = await d1Health(env.READ);

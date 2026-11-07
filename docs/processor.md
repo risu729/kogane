@@ -689,21 +689,26 @@ principal `lane:<lane>` (hyphens for underscores), operation `lane.tick`,
 `applied`, or `failed` when the stage threw after writing. Before such a lane
 runs, `runScheduled` reads one high-water mark of the tables it may write;
 after it, the lane's own rows above the mark, by its decision actor, commit
-principal or proposal method. The record's references are inclusive ranges of
-those rows (`decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`,
-`proposals:<kind>:<a>-<b>`) and its diff the number of the lane's own rows in
-each; it copies none of the tick row's counts. An idle tick, a lane whose flag
-is off and every other lane write no record. The mark and the record are read
-and written outside the lane's metered scope, and a failure to read or write
-them is logged as `{"event":"lane_audit_record_failed","lane":…,"code":…}` and
-changes nothing the lane did.
+principal or proposal method, each read a range on the table's key without
+table statistics ([audit log: cost](audit-log.md#cost)). The record's
+references are inclusive ranges of those rows (`decision-revisions:<a>-<b>`,
+`commit-seq:<epoch>:<a>-<b>`, `proposals:<kind>:<a>-<b>`) and its diff the
+number of the lane's own rows in each; it copies none of the tick row's
+counts. An idle tick, a lane whose flag is off and every other lane write no
+record. The mark and the record are read and written outside the lane's
+metered scope, and a failure to read or write them is logged as
+`{"event":"lane_audit_record_failed","lane":…,"code":…}` and changes nothing
+the lane did.
 
 ## 7. Operations dispatch
 
 The App accepts an operations-API request, stores it and answers 202;
 notifying the executor is a separate step that may be lost, so the request
 stays `dispatch_pending` until someone takes it (02 §5,
-[ops-api.md](ops-api.md)). `operation_dispatch` is that someone.
+[ops-api.md](ops-api.md)). `operation_dispatch` is that someone. An import's
+run id is checked at acceptance against the bucket key's run grammar, so the
+App stores no import whose terminal key cannot be formed
+([ops-api.md](ops-api.md#routes)).
 
 | Kind                                       | What the Processor does                                                                                               | What it completes                                                                         |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |

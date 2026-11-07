@@ -298,7 +298,7 @@ export function isChangeKind(value: unknown): value is ChangeKind {
 export const COMMAND_CAPABILITIES = ["interpretation.propose", "interpretation.accept"] as const;
 export type CommandCapability = (typeof COMMAND_CAPABILITIES)[number];
 
-export const PRINCIPAL_KINDS = ["human", "agent", "delegated"] as const;
+const PRINCIPAL_KINDS = ["human", "agent", "delegated"] as const;
 export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number];
 
 /** Always built from a server-verified identity, never from a request body. */
@@ -418,7 +418,7 @@ export const OUTBOX_TARGETS = [
 ] as const;
 export type OutboxTarget = (typeof OUTBOX_TARGETS)[number];
 
-export const PLAN_STATUSES = ["planned", "approved", "committed", "stale", "rejected"] as const;
+const PLAN_STATUSES = ["planned", "approved", "committed", "stale", "rejected"] as const;
 export type PlanStatus = (typeof PLAN_STATUSES)[number];
 
 export interface ChangePlan {
@@ -447,7 +447,7 @@ export interface ApprovalReceipt {
   createdAt: string;
 }
 
-export const OPERATION_RECEIPT_STATUSES = ["accepted", "published", "failed"] as const;
+const OPERATION_RECEIPT_STATUSES = ["accepted", "published", "failed"] as const;
 export type OperationReceiptStatus = (typeof OPERATION_RECEIPT_STATUSES)[number];
 
 /**

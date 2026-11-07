@@ -228,7 +228,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
           </div>
         </>
       ) : null}
-      <div className="table-scroll" role="region" aria-label="取引の記録" tabIndex={0}>
+      <div className="table-scroll" role="region" aria-label="取引の記録の表" tabIndex={0}>
         <table className="transaction-table">
           <caption className="dim">
             解析済みの現行データです。同じ取引に由来する記録が複数含まれる場合があります。

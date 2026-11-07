@@ -6,6 +6,7 @@ import { chromium, type Browser, type Page } from "playwright";
 import { createApi } from "../src/api.ts";
 import { buildFixture, HOSTILE_DESCRIPTION } from "./fixture.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { auditPage, openDisclosures, tabWalk } from "../../../apps/web/test/a11y-audit.ts";
 
 const client = join(import.meta.dir, "../../../apps/web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -23,6 +24,8 @@ describe.if(runnable)("combined production client", () => {
   const requests: string[] = [];
   // Informational only: a test below renames it and expects identical behaviour.
   let sourceKind = "central-store";
+  // Advertised only by the accessibility audit, which visits the rewards page.
+  let rewardsAdvertised = false;
   let server: ReturnType<typeof Bun.serve>;
   let browser: Browser;
   let origin: string;
@@ -38,7 +41,7 @@ describe.if(runnable)("combined production client", () => {
           return Response.json({
             apiVersion: 1,
             source: { kind: sourceKind, classification: "financial" },
-            capabilities: CENTRAL_STORE_CAPABILITIES,
+            capabilities: { ...CENTRAL_STORE_CAPABILITIES, rewardsV2: rewardsAdvertised },
             parsingHealth: { pending: 0, running: 0, failed: 1 },
           });
         if (url.pathname === "/api/filter-options")
@@ -47,6 +50,16 @@ describe.if(runnable)("combined production client", () => {
             accounts: [{ source_id: "demo-bank", source_account: "demo-bank:main" }],
             instruments: ["JPY"],
             metrics: ["ledger"],
+          });
+        if (url.pathname === "/api/v2/rewards/holdings")
+          return Response.json({
+            rows: [],
+            coverage: { limit: 100, truncated: false, nextOffset: null },
+          });
+        if (url.pathname === "/api/v2/rewards/expiry")
+          return Response.json({
+            rows: [],
+            coverage: { limit: 100, truncated: false, nextOffset: null },
           });
         if (url.pathname === "/api/evidence/v1/meta")
           return Response.json({
@@ -357,6 +370,92 @@ describe.if(runnable)("combined production client", () => {
     }
   }, 60_000);
 
+  test("every route passes the accessibility audit at desktop and phone widths", async () => {
+    rewardsAdvertised = true;
+    const findings: string[] = [];
+    try {
+      for (const [width, mobile] of [
+        [1280, false],
+        [390, true],
+      ] as const) {
+        const page = await browser.newPage({ viewport: { width, height: 900 } });
+        for (const [path, expected] of [
+          ["/", "Demo Bank"],
+          ["/transactions", HOSTILE_DESCRIPTION],
+          ["/balances", "248,820"],
+          ["/summaries", "最新取得の期間実績・請求"],
+          ["/positions", "Example <Fund>"],
+          ["/rewards", "ポイント"],
+          ["/artifacts", "statement"],
+          [`/artifacts/${fixture.artifactId}`, "現行の解析"],
+          [`/observations/transaction/${observation.id}`, "json:$.rows[0]"],
+          ["/evidence", "テスト銀行"],
+          ["/no-such-view", "ページが見つかりません"],
+        ] as const) {
+          await openObservation(page, path, expected);
+          await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+          const prefix = `${String(width)}px ${path}: `;
+          for (const finding of await auditPage(page, { mobile })) findings.push(prefix + finding);
+          for (const finding of await tabWalk(page)) findings.push(prefix + finding);
+          await openDisclosures(page);
+          for (const finding of await auditPage(page, { mobile }))
+            findings.push(`${prefix}(disclosures open) ${finding}`);
+        }
+        await page.close();
+      }
+    } finally {
+      rewardsAdvertised = false;
+    }
+    expect(findings).toEqual([]);
+  }, 120_000);
+
+  test("every navigation entry moves focus to the new view's only h1 and names the tab", async () => {
+    rewardsAdvertised = true;
+    const page = await browser.newPage();
+    try {
+      await openObservation(page, "/", "Demo Bank");
+      const nav = page.getByRole("navigation", { name: "メインナビゲーション" });
+      const links = await nav.getByRole("link").evaluateAll((anchors) =>
+        anchors.map((anchor) => ({
+          href: anchor.getAttribute("href")!,
+          name: anchor.textContent!.trim(),
+        })),
+      );
+      expect(links.length).toBeGreaterThan(5);
+      // Start away from home so the first entry is a route change too.
+      await nav.getByRole("link", { name: "取引", exact: true }).click();
+      await page.waitForFunction(() => document.activeElement?.tagName === "H1");
+      for (const link of links) {
+        if (link.href === new URL(page.url()).pathname) continue;
+        await nav.getByRole("link", { name: link.name, exact: true }).click();
+        await page.waitForURL(origin + link.href);
+        await page.waitForFunction(() => document.activeElement?.tagName === "H1", undefined, {
+          timeout: 10_000,
+        });
+        const state = await page.evaluate(() => ({
+          h1s: document.querySelectorAll("h1").length,
+          inMain: document.activeElement?.closest("main") !== null,
+          tabIndex: (document.activeElement as HTMLElement).tabIndex,
+          heading: document.activeElement?.textContent,
+          title: document.title,
+          current: document.querySelector(".nav a[aria-current='page']")?.getAttribute("href"),
+        }));
+        expect({ href: link.href, ...state }).toEqual({
+          href: link.href,
+          h1s: 1,
+          inMain: true,
+          tabIndex: -1,
+          heading: state.heading,
+          title: `${state.heading!} | kogane`,
+          current: link.href,
+        });
+      }
+    } finally {
+      rewardsAdvertised = false;
+      await page.close();
+    }
+  }, 60_000);
+
   test("summary counts come from the shared query service, with its hand-off references", async () => {
     const page = await browser.newPage();
     const before = requests.length;
@@ -398,7 +497,9 @@ describe.if(runnable)("combined production client", () => {
 
   test("evidence navigation preserves observation routes and does not deny available parsing", async () => {
     const page = await browser.newPage();
-    await page.goto(origin + "/transactions", { waitUntil: "networkidle" });
+    // Capture the shell only once the view has rendered its records: an idle
+    // network can precede the metadata that the shell's labels depend on.
+    await openObservation(page, "/transactions", HOSTILE_DESCRIPTION);
     const shell = await page.locator(".app-shell").elementHandle();
     const sidebar = await page.locator(".sidebar").elementHandle();
     const header = await page.locator(".workspace-bar").elementHandle();
@@ -425,9 +526,13 @@ describe.if(runnable)("combined production client", () => {
     expect(await page.locator(".source-notice").innerText()).toBe(noticeText);
     expect(await page.locator("main").count()).toBe(1);
     expect(await page.locator(".nav a[aria-current='page']").innerText()).toBe("取得履歴");
-    expect(await page.title()).toBe("取得履歴と原本 | kogane");
-    expect(await page.evaluate(() => document.activeElement === document.querySelector("h1"))).toBe(
-      true,
+    // An effect sets the title and moves focus after the view renders.
+    await page.waitForFunction(
+      () =>
+        document.title === "取得履歴と原本 | kogane" &&
+        document.activeElement === document.querySelector("h1"),
+      undefined,
+      { timeout: 10_000 },
     );
     expect(await page.locator("body").innerText()).not.toContain("解析結果はまだ提供していません");
     for (const name of ["取引", "残高", "保有資産", "原本・証跡", "ホーム"])

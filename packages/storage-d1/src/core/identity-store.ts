@@ -27,12 +27,7 @@ import {
 } from "./identity-policies/index.ts";
 
 export type IdentityResolver = (input: IdentityInput) => IdentityPlan;
-export {
-  BASE_IDENTITY_POLICY_VERSION,
-  IDENTITY_POLICY_VERSION,
-  identityKey,
-  requiredIdentityPolicySql,
-};
+export { BASE_IDENTITY_POLICY_VERSION, IDENTITY_POLICY_VERSION, identityKey };
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
 
 /** Automatic policy yields to the latest effective decision (migration 0029):
@@ -54,7 +49,7 @@ async function mappingIdBindings(prefix: "am" | "im", ref: string, version: numb
  * card first (ADR 0023). A v2 token (ADR 0029) is anchored to the same
  * producer name, so it too names one entity whichever producer reads it.
  */
-export const VPASS_TOKEN_ENTITY_PRODUCER = "collector-r2-importer";
+const VPASS_TOKEN_ENTITY_PRODUCER = "collector-r2-importer";
 
 /**
  * The producer whose source-account reference names the account entity of a
@@ -62,7 +57,7 @@ export const VPASS_TOKEN_ENTITY_PRODUCER = "collector-r2-importer";
  * every MoneyForward account before the collector (ADR 0027). A v2 identity
  * (ADR 0029) is anchored to the same producer name.
  */
-export const MONEYFORWARD_IDENTITY_ENTITY_PRODUCER = "collector-r2-importer";
+const MONEYFORWARD_IDENTITY_ENTITY_PRODUCER = "collector-r2-importer";
 const MONEYFORWARD_ACCOUNT_REFERENCE = /^moneyforward-me:moneyforward-account-v[12]-[0-9a-f]{64}$/u;
 
 /**

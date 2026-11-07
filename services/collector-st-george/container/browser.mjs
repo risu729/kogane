@@ -13,7 +13,7 @@ const PORTFOLIO = ORIGIN + "/ibank/viewAccountPortfolio.html";
 const MAX_ACCOUNTS = 20;
 const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 const RUN_TIMEOUT_MS = 180_000;
-export const PROXY_HOSTS = new Set([
+const PROXY_HOSTS = new Set([
   "ibanking.stgeorge.com.au",
   "www.stgeorge.com.au",
   "webapps.stgeorge.com.au",
@@ -284,7 +284,7 @@ export function hasExpectedLoginForm() {
 
 // A page.route guard misses server redirect hops. Fetch pauses every main-frame
 // Document GET before sending it, including those hops; auth itself is not replayed.
-export async function navigateReadOnly(page, url) {
+async function navigateReadOnly(page, url) {
   if (routeOf(url) === "unknown") fail("unexpected-route");
   const session = await page.context().newCDPSession(page);
   const pending = [];

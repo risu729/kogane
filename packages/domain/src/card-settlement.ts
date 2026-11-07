@@ -75,7 +75,7 @@ export const CARD_SETTLEMENT_POLICY = "card-statement-settlement-v1";
  * Days between the due date and the bank's debit date. A debit posted later
  * (a long holiday run) yields no candidate: a stated limit, not a guess.
  */
-export const CARD_SETTLEMENT_DAY_WINDOW = 3;
+const CARD_SETTLEMENT_DAY_WINDOW = 3;
 
 function positive(quantity: Quantity): boolean {
   return quantity.value.status === "exact" && BigInt(quantity.value.value.coefficient) > 0n;

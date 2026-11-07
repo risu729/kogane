@@ -25,7 +25,7 @@ export const EXPLANATION_NODE_KINDS = [
   "parse-run",
   "raw-locator",
 ] as const;
-export type ExplanationNodeKind = (typeof EXPLANATION_NODE_KINDS)[number];
+type ExplanationNodeKind = (typeof EXPLANATION_NODE_KINDS)[number];
 
 export interface ExplanationNode {
   ref: string;
