@@ -267,6 +267,63 @@ describe("card settlement readiness reads on a scaled store without statistics",
     TIMEOUT,
   );
 
+  test(
+    "the grouped and per-statement lists read debit-account evidence once, for the reviews they return, as one review's read does",
+    async () => {
+      // The scaled store records no evidence, so the read answers with a
+      // synthetic row for each statement's first candidate.
+      const plain = await queryCardSettlementStatements(executor(false));
+      const marked = new Set(plain.statements.map((group) => group.candidates[0]!.proposalId));
+      const asked: string[][] = [];
+      const withEvidence: SqlExecutor = {
+        ...executor(false),
+        all: async <T>(query: string, args: readonly unknown[]): Promise<T[]> => {
+          if (query !== CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL)
+            return executor(false).all<T>(query, args);
+          const ids = JSON.parse(String(args[0])) as string[];
+          asked.push(ids);
+          return ids
+            .filter((id) => marked.has(id))
+            .map((id) => ({
+              candidate_id: id,
+              statement_id: 7,
+              reader_version: "synthetic-reader-1.0.0",
+              outcome: "not_proposed",
+              reason: "ambiguous_accounts",
+              proposal_json: null,
+              created_at: "2026-09-11T00:00:00Z",
+            })) as T[];
+        },
+      };
+      const grouped = await queryCardSettlementStatements(withEvidence);
+      const judged = grouped.statements.flatMap((group) =>
+        group.candidates.map((item) => item.proposalId),
+      );
+      expect(new Set(judged).size).toBe(judged.length);
+      expect(asked).toHaveLength(1);
+      expect([...asked[0]!].sort()).toEqual([...judged].sort());
+      for (const group of grouped.statements)
+        for (const item of group.candidates) {
+          expect(item.debitAccount.outcome).toBe(
+            marked.has(item.proposalId) ? "not_proposed" : "absent",
+          );
+          expect(item).toEqual(
+            (await queryCardSettlements(withEvidence, { proposalId: item.proposalId })).items[0]!,
+          );
+        }
+      asked.length = 0;
+      const statement = await queryCardSettlements(withEvidence, {
+        statementKey: grouped.statements[0]!.statementKey,
+      });
+      expect(asked).toEqual([statement.items.map((item) => item.proposalId)]);
+      for (const item of statement.items)
+        expect(item.debitAccount.outcome).toBe(
+          marked.has(item.proposalId) ? "not_proposed" : "absent",
+        );
+    },
+    TIMEOUT,
+  );
+
   test("no read walks the store's owners, statements or debits", () => {
     const { id, revision } = sample(1)[0]!;
     const reads: [string, string, unknown[], string[]][] = [

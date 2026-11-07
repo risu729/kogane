@@ -198,12 +198,14 @@ decisions (INV07). The sweep's log line adds `debitAccountEvidence`, the
 number of evidence rows appended.
 
 **On the review page.** Each review in the `カード照合` list and its API
-(`/api/v2/reconciliation/card-settlements`) carries `debitAccount`, read by
-`queryCardSettlements` (`packages/application/src/query/card-settlements.ts`,
+(`/api/v2/reconciliation/card-settlements`, its `statementKey` list and the
+grouped `/statements` list) carries `debitAccount`, read with the decision
+history for every review a read returns
+(`packages/application/src/query/card-settlements.ts`,
 `CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL`): the candidate's latest
 `card_settlement_debit_account_evidence` row under the current policy, found
 through `card_settlement_debit_account_evidence_candidate` for the page's
-candidates only. For example:
+candidates only (the grouped list's judged candidates, in one read). For example:
 
 ```json
 {
@@ -739,8 +741,8 @@ grouped list likewise groups every candidate by `statement_key` to choose its
 ten statements (`statement_page`), then reaches each statement's candidates
 through `card_settlement_candidates_statement` and judges at most its five
 newest and its accepted ones (the two grouped rows of the table above,
-measured 2026-11-07; the flat list's first page measured 104 ms in the same
-run).
+measured 2026-11-07 before the debit-account evidence read was added to every
+list; the flat list's first page measured 104 ms in the same run).
 Not changed here, and not measured: the ownership review's account mapping
 reads (`queryCardOwnership`'s mappings, `prepareOwnershipReview`'s mapping read
 and the two mapping terms of its commit guard) still read

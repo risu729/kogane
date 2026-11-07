@@ -71,8 +71,9 @@ interface DebitAccountRow {
  * candidate under the current policy (`?1` a JSON array of candidate ids,
  * `?2` the policy), with the reader version of the statement it cites. Found
  * through `card_settlement_debit_account_evidence_candidate`
- * (candidate_id, statement_id, policy, id) and the statement's key; the page
- * holds at most 50 candidates, each with a row per changed outcome.
+ * (candidate_id, statement_id, policy, id) and the statement's key; a list
+ * page holds at most 50 candidates and a grouped page its ten statements'
+ * five newest and accepted ones, each with a row per changed outcome.
  */
 export const CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL = `SELECT candidate_id,statement_id,reader_version,outcome,reason,proposal_json,created_at FROM (
  SELECT e.candidate_id,e.statement_id,s.reader_version,e.outcome,e.reason,e.proposal_json,e.created_at,
