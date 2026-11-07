@@ -3,10 +3,12 @@
 // against the handler it replaced (`card-settlements-api-frozen.ts`), on the
 // same synthetic store and the same requests. They must answer byte for byte
 // alike except for the two changes docs/card-settlements.md records (ADR 0081
-// point 2): a malformed list or ownership request is the service's
-// `400 invalid_query` (`financial-error-v1`) where the route said
-// `invalid_offset` or `invalid_query`, and a list read deeper than the reader
-// grant's `maxRows` is `413 budget_exceeded` where the route read on.
+// point 2): a malformed list, grouped list or ownership request is the
+// service's `400 invalid_query` (`financial-error-v1`) where the route said
+// `invalid_offset` or `invalid_query`, and a list or grouped list read deeper
+// than the reader grant's `maxRows` is `413 budget_exceeded` where the route
+// read on. Every page the frozen handler served below that depth, grouped
+// pages included, is served byte for byte alike.
 // Native Worker/D1 only; no production data.
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -20,6 +22,11 @@ const PATH = "/api/v2/reconciliation/card-settlements";
 const SUBJECT = "synthetic-operator";
 /** Past one page at the reader grant's budget, so deep pages hold rows. */
 const BULK = 1_100;
+/**
+ * Statements of one candidate each, so the grouped list's deep pages (ten
+ * statements a page, past offset 990) hold rows too.
+ */
+const SINGLES = 1_000;
 const environment = {
   ...env,
   OPERATOR_SUBJECTS: JSON.stringify([SUBJECT]),
@@ -90,6 +97,13 @@ beforeAll(async () => {
       bankKey: "bank-alone",
       createdAt: "2025-01-01T00:00:00.000Z",
     },
+    // Older than both, so the first grouped pages still lead with them.
+    ...Array.from({ length: SINGLES }, (_, n) => ({
+      id: `cs-single-${String(n).padStart(4, "0")}`,
+      statementKey: `statement-single-${String(n).padStart(4, "0")}`,
+      bankKey: `bank-single-${n}`,
+      createdAt: new Date(Date.UTC(2024, 0, 1) + n * 60_000).toISOString(),
+    })),
   ];
   for (let start = 0; start < rows.length; start += 100)
     await env.DB.batch(
@@ -150,6 +164,8 @@ const OFFSETS = [
   "50",
   "900",
   "950",
+  "990",
+  "991",
   "951",
   "1000",
   "1050",
@@ -224,60 +240,113 @@ function requests(): string[] {
 }
 
 /** What the shipped route must answer, given what the frozen one answered. */
-function expected(query: string, before: Answer): Answer | "budget_exceeded" | "invalid_query" {
+function expected(
+  query: string,
+  before: Answer,
+): Answer | { budget: "card-settlements.read" | "card-settlements.statements" } | "invalid_query" {
   const url = new URL(`https://fixture.test${query}`);
-  if (url.pathname.endsWith("/statements")) return before;
   if (before.status === 400) return "invalid_query";
   const offset = Number(url.searchParams.get("offset") ?? "0");
+  // The grouped list pages ten statements at a time.
+  if (url.pathname === `${PATH}/statements` && before.status === 200 && offset + 10 > 1000)
+    return { budget: "card-settlements.statements" };
   if (
     url.pathname === PATH &&
     !url.searchParams.has("proposalId") &&
     (before.status === 200 || before.status === 404) &&
     offset + 50 > 1000
   )
-    return "budget_exceeded";
+    return { budget: "card-settlements.read" };
   return before;
+}
+
+interface Seen {
+  same: number;
+  invalid: number;
+  budget: number;
+  groupedBudget: number;
+  groupedPages: number;
+}
+/** Runs each request on both handlers and checks the shipped answer against `expected`. */
+async function compare(all: readonly string[]): Promise<Seen> {
+  const seen = { same: 0, invalid: 0, budget: 0, groupedBudget: 0, groupedPages: 0 };
+  for (const request of all) {
+    const before = (await answer(frozenCardSettlementsApi, request))!;
+    const after = (await answer(cardSettlementsApi, request))!;
+    const want = expected(request, before);
+    if (want === "invalid_query") {
+      seen.invalid++;
+      expect({ request, status: after.status, code: after.code }).toEqual({
+        request,
+        status: 400,
+        code: "invalid_query",
+      });
+      expect(JSON.parse(after.body)).toMatchObject({ schemaVersion: "financial-error-v1" });
+    } else if (typeof want === "object" && "budget" in want) {
+      seen.budget++;
+      if (want.budget === "card-settlements.statements") seen.groupedBudget++;
+      expect({ request, after: JSON.parse(after.body) as unknown }).toEqual({
+        request,
+        after: {
+          schemaVersion: "financial-error-v1",
+          code: "budget_exceeded",
+          requestId: want.budget,
+          message: "narrow the scope or the page, or switch to a bounded job",
+          refs: ["budget:maxRows=1000"],
+        },
+      });
+      expect(after.status).toBe(413);
+    } else {
+      seen.same++;
+      if (request.startsWith(`${PATH}/statements`) && after.status === 200) seen.groupedPages++;
+      expect({ request, ...after }).toEqual({ request, ...want });
+    }
+  }
+  return seen;
 }
 
 describe("the card settlement page route as an adapter over the shared service", () => {
   it("answers as the frozen handler did, except the two recorded changes", async () => {
-    const seen = { same: 0, invalid: 0, budget: 0 };
-    for (const request of requests()) {
-      const before = (await answer(frozenCardSettlementsApi, request))!;
-      const after = (await answer(cardSettlementsApi, request))!;
-      const want = expected(request, before);
-      if (want === "invalid_query") {
-        seen.invalid++;
-        expect({ request, status: after.status, code: after.code }).toEqual({
-          request,
-          status: 400,
-          code: "invalid_query",
-        });
-        expect(JSON.parse(after.body)).toMatchObject({ schemaVersion: "financial-error-v1" });
-      } else if (want === "budget_exceeded") {
-        seen.budget++;
-        expect({ request, after: JSON.parse(after.body) as unknown }).toEqual({
-          request,
-          after: {
-            schemaVersion: "financial-error-v1",
-            code: "budget_exceeded",
-            requestId: "card-settlements.read",
-            message: "narrow the scope or the page, or switch to a bounded job",
-            refs: ["budget:maxRows=1000"],
-          },
-        });
-        expect(after.status).toBe(413);
-      } else {
-        seen.same++;
-        expect({ request, ...after }).toEqual({ request, ...want });
-      }
-    }
-    // Every class was reached, deep pages that held rows included.
-    expect(seen.same).toBeGreaterThan(100);
-    expect(seen.invalid).toBeGreaterThan(100);
+    const seen = await compare(requests());
+    // Every class was reached, deep pages that held rows included. A
+    // malformed grouped request was the frozen handler's own refusal, the same
+    // on both, until the grouped list became an adapter too; it is `invalid`
+    // now, so `same` counts the answered list, ownership and grouped reads,
+    // and the next test compares every grouped page.
+    expect(seen.same).toBeGreaterThan(25);
+    expect(seen.invalid).toBeGreaterThan(800);
     expect(seen.budget).toBeGreaterThan(10);
+    expect(seen.groupedBudget).toBeGreaterThan(2);
+    expect(seen.groupedPages).toBeGreaterThan(5);
+    expect(seen.same - seen.groupedPages).toBeGreaterThan(20);
     const deep = (await answer(frozenCardSettlementsApi, `${PATH}?offset=951`))!;
     expect((JSON.parse(deep.body) as { items: unknown[] }).items).toHaveLength(50);
+    // The deepest grouped page the budget serves, and the first it refuses,
+    // both held statements before.
+    for (const offset of [990, 991, 1000]) {
+      const grouped = (await answer(
+        frozenCardSettlementsApi,
+        `${PATH}/statements?offset=${offset}`,
+      ))!;
+      expect(
+        (JSON.parse(grouped.body) as { statements: unknown[] }).statements.length,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("serves every grouped page the budget reaches as the frozen handler did, and refuses past it", async () => {
+    const pages = Array.from(
+      { length: 101 },
+      (_, n) => `${PATH}/statements?offset=${String(n * 10)}`,
+    );
+    // Offsets 0 to 990 byte for byte; 1000 refused although it held statements.
+    expect(await compare(pages)).toEqual({
+      same: 100,
+      invalid: 0,
+      budget: 1,
+      groupedBudget: 1,
+      groupedPages: 100,
+    });
   });
 
   it("keeps the transport's own answers: methods, non-operators and other paths", async () => {

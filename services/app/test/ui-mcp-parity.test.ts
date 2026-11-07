@@ -58,6 +58,7 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reconciliation/card-statements-unmatched": ["kogane.card-settlements.unmatched"],
   "/api/v2/reconciliation/card-settlements": ["kogane.card-settlements.read"],
   "/api/v2/reconciliation/card-settlements/ownership": ["kogane.card-settlements.ownership"],
+  "/api/v2/reconciliation/card-settlements/statements": ["kogane.card-settlements.statements"],
   // UI read pages (src/page-read-tools.ts): each the route's own reader.
   "/api/identity/connections": ["kogane.identity.read"],
   "/api/identity/accounts": ["kogane.identity.read"],
@@ -93,8 +94,6 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
   "/api/v2/rewards/holdings": "reward holdings",
   "/api/v2/rewards/expiry": "reward expiry",
   // Reconciliation and reported state.
-  "/api/v2/reconciliation/card-settlements/statements":
-    "card settlement review grouped by statement; kogane.card-settlements.read returns the same candidates ungrouped",
   "/api/v2/reported-holdings-change": "reported holdings between two dates (ADR 0075)",
   // Reports, quality and schedules.
   "/api/v2/reports": "stored report list",

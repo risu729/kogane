@@ -12,6 +12,7 @@ import {
   financialError,
   readEconomicRowReadinessForGrant,
   readCardSettlementsForGrant,
+  readCardSettlementStatementsForGrant,
   readCardOwnershipForGrant,
   CARD_SETTLEMENT_PROPOSAL_ID,
   CARD_SETTLEMENTS_MAX_OFFSET,
@@ -59,6 +60,7 @@ export const REPORTED_STATE_TOOL_NAME = "kogane.reported-state.read";
  */
 export const CARD_SETTLEMENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "kogane.card-settlements.read",
+  "kogane.card-settlements.statements",
   "kogane.card-settlements.ownership",
 ]);
 
@@ -114,6 +116,11 @@ const schemas = {
     statementKey: z.string().min(1).max(CARD_SETTLEMENT_STATEMENT_KEY_MAX).optional(),
     relatedTo: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID).optional(),
   }),
+  // The grouped route's one parameter: the published shape of the service's
+  // request rules (`readCardSettlementStatementsForGrant`), which decide.
+  "kogane.card-settlements.statements": z.strictObject({
+    offset: z.number().int().min(0).max(CARD_SETTLEMENTS_MAX_OFFSET).optional(),
+  }),
   "kogane.card-settlements.ownership": z.strictObject({
     proposalId: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID),
   }),
@@ -146,6 +153,8 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
   "kogane.card-settlements.read":
     "The card statement to bank debit reviews of the カード照合 pages: one page (offset), one statement's candidates (statementKey, with offset), one review (proposalId, alone), or the candidates a review competes with (relatedTo, with offset: those sharing its statement key, its bank debit key, or its statement's source, resolved account and period, every status, never the review itself; not_found when it names no candidate), with the source facts, evidence references, acceptance blockers, debit-account evidence and decision history, the same answer as GET /api/v2/reconciliation/card-settlements, under records.read and a whole-store read grant. Read-only; deciding a review, or correcting a wrong acceptance by withdrawing it and accepting a competitor, is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
+  "kogane.card-settlements.statements":
+    "One page of the カード照合 page's review list grouped by statement (offset, counted in statements, 10 per page): each statement key with how many candidates it has and its newest five candidates and any accepted one, the one the page leads with first, each with the source facts, evidence references, acceptance blockers, debit-account evidence and decision history; the statement's other candidates are kogane.card-settlements.read with statementKey. The same answer as GET /api/v2/reconciliation/card-settlements/statements, under records.read and a whole-store read grant. Read-only; deciding a review is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
   "kogane.card-settlements.ownership":
     "The ownership review of one card settlement candidate: both accounts' current mappings, recorded ownership claims, self-declaration and owner-default blockers, the same answer as GET /api/v2/reconciliation/card-settlements/ownership, under records.read and a whole-store read grant. Read-only; recording ownership is a relation plan through the change lifecycle, graded there.",
   "kogane.audit.search":
@@ -190,6 +199,7 @@ export function readMcpTools(
       case "kogane.economic-readiness.read":
         return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.card-settlements.read":
+      case "kogane.card-settlements.statements":
       case "kogane.card-settlements.ownership":
         return served.cardSettlements && grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.audit.search":
@@ -274,22 +284,17 @@ export async function callReadTool(
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       }
       case "kogane.card-settlements.read":
+      case "kogane.card-settlements.statements":
       case "kogane.card-settlements.ownership": {
         // The page's own services; capability and perimeter are graded there,
         // before validation or database access, for both transports.
-        const sql = d1Executor(env.DB);
+        const input = { grant, sql: d1Executor(env.DB), request: body };
         const outcome =
           name === "kogane.card-settlements.read"
-            ? await readCardSettlementsForGrant({
-                grant,
-                sql,
-                request: body,
-              })
-            : await readCardOwnershipForGrant({
-                grant,
-                sql,
-                request: body,
-              });
+            ? await readCardSettlementsForGrant(input)
+            : name === "kogane.card-settlements.statements"
+              ? await readCardSettlementStatementsForGrant(input)
+              : await readCardOwnershipForGrant(input);
         if (outcome.status === "refused")
           return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
         if (outcome.status === "not_found") throw new HttpError(404, "not_found");

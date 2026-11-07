@@ -202,6 +202,13 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["items"]) ? value["items"].length : 0,
       truncated: value["nextOffset"] !== null && value["nextOffset"] !== undefined,
     };
+  // Statements on the grouped page, never their candidates; truncated when
+  // another page follows.
+  if (operation === "card-settlements.statements")
+    return {
+      rows: Array.isArray(value["statements"]) ? value["statements"].length : 0,
+      truncated: value["nextOffset"] !== null && value["nextOffset"] !== undefined,
+    };
   if (operation === "card-settlements.ownership") return { rows: 1, truncated: false };
   if (operation === "economic-readiness.read") {
     const manifest = value["manifest"] as { rows?: unknown } | undefined;

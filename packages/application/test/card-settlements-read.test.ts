@@ -1,8 +1,10 @@
 import { expect, test } from "bun:test";
 import {
   readCardOwnershipForGrant,
+  readCardSettlementStatementsForGrant,
   readCardSettlementsForGrant,
 } from "../src/query/card-settlements-read.ts";
+import { CARD_SETTLEMENT_STATEMENT_PAGE_SQL } from "../src/query/card-settlements.ts";
 import type { Grant } from "../src/grants.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 
@@ -41,6 +43,15 @@ test("capability and both whole-store axes precede validation and every read", a
       expect(list).toMatchObject({
         status: "refused",
         error: { code, requestId: "card-settlements.read" },
+      });
+      const statements = await readCardSettlementStatementsForGrant({
+        grant,
+        sql: store.sql,
+        request,
+      });
+      expect(statements).toMatchObject({
+        status: "refused",
+        error: { code, requestId: "card-settlements.statements" },
       });
       const ownership = await readCardOwnershipForGrant({ grant, sql: store.sql, request });
       expect(ownership).toMatchObject({
@@ -181,6 +192,68 @@ test("a statement's or a review's competitors page only as deep as maxRows", asy
     expect(await readCardSettlementsForGrant({ grant, sql: store.sql, request })).toEqual({
       status: "refused",
       error: expect.objectContaining({ code: "budget_exceeded", refs: ["budget:maxRows=99"] }),
+    });
+  expect(store.reads()).toBe(0);
+});
+
+test("the grouped list takes offset alone, an integer from 0 to 1,000,000", async () => {
+  const store = forbiddenStore();
+  for (const request of [
+    [],
+    "x",
+    0,
+    { offset: null },
+    { offset: -1 },
+    { offset: 1.5 },
+    { offset: 1_000_001 },
+    { offset: Number.MAX_SAFE_INTEGER + 1 },
+    { offset: "0" },
+    { offset: 0, proposalId: "a" },
+    { statementKey: "k" },
+    { relatedTo: "a" },
+    { source: "myjcb" },
+  ])
+    expect(
+      await readCardSettlementStatementsForGrant({ grant: GRANT, sql: store.sql, request }),
+    ).toEqual({
+      status: "refused",
+      error: expect.objectContaining({
+        code: "invalid_query",
+        requestId: "card-settlements.statements",
+        refs: ["request"],
+      }),
+    });
+  expect(store.reads()).toBe(0);
+});
+
+test("the grouped list reads the page's own query, and an empty page is an answer", async () => {
+  for (const [request, offset] of [
+    [undefined, 0],
+    [null, 0],
+    [{}, 0],
+    [{ offset: 90 }, 90],
+  ] as const) {
+    const store = emptyStore();
+    expect(
+      await readCardSettlementStatementsForGrant({ grant: GRANT, sql: store.sql, request }),
+    ).toMatchObject({ status: "ok", answer: { statements: [], nextOffset: null } });
+    // The statement page only: no statement, so no candidate is judged.
+    expect(store.calls).toEqual([[CARD_SETTLEMENT_STATEMENT_PAGE_SQL, [11, offset]]]);
+  }
+});
+
+test("the grouped list pages only as deep as maxRows, counted in statements", async () => {
+  const store = forbiddenStore();
+  for (const request of [{ offset: 91 }, { offset: 1_000_000 }])
+    expect(
+      await readCardSettlementStatementsForGrant({ grant: GRANT, sql: store.sql, request }),
+    ).toEqual({
+      status: "refused",
+      error: expect.objectContaining({
+        code: "budget_exceeded",
+        requestId: "card-settlements.statements",
+        refs: ["budget:maxRows=100"],
+      }),
     });
   expect(store.reads()).toBe(0);
 });
