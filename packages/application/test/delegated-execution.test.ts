@@ -7,6 +7,7 @@ import {
   prepareDelegatedOperation,
   confirmDelegatedOperation,
   delegatedBatchFailure,
+  delegatedWritesRemaining,
   parseAuditEnvelope,
   processorCall,
 } from "../src/index.ts";
@@ -113,6 +114,7 @@ describe("delegated writer transaction", () => {
       p = principal(1),
       a = call(),
       b = call();
+    expect(await delegatedWritesRemaining(store, p)).toBe(1);
     for (const [c, key] of [
       [a, "first"],
       [b, "raced"],
@@ -123,6 +125,9 @@ describe("delegated writer transaction", () => {
         payload,
       });
     write(a, db);
+    // The preview's count and the guard's count are one query: zero left means refused.
+    expect(await delegatedWritesRemaining(store, p)).toBe(0);
+    expect(await delegatedWritesRemaining(store, principal(3))).toBe(2);
     expect(() => write(b, db)).toThrow();
     expect(await delegatedBatchFailure(store, b)).toMatchObject({
       code: "delegation_budget_exceeded",

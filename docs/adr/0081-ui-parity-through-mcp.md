@@ -111,8 +111,12 @@ What the code does today (main `02a915a`):
 
 ## Verification
 
-- Today: most MCP tools call shared services; three run their own SQL (above);
-  no guard test exists yet.
+- Today: most MCP tools call shared services. The three that ran their own SQL
+  (above) call `delegatedWritesRemaining` and `ownOperationSource` in
+  `packages/application` instead, and `tests/mcp-tools-no-sql.test.ts` fails
+  when `services/app/src/mcp.ts` or a `*-tools.ts` adapter calls a store
+  directly or holds a SQL statement. No catalogue or read-route guard test
+  exists yet.
 - The six `ops.*` tools: `services/app/test/delegated-ops-parity.test.ts`
   checks that a delegation holding every `operations.*` capability is shown
   all six and a narrower one only those it holds, and that each request gives
