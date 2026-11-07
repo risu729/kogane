@@ -75,6 +75,10 @@ const PUBLISHED = [
   "kogane.audit.search",
   "kogane.audit.get",
   "kogane.identity.read",
+  "kogane.store.read",
+  "kogane.observations.list",
+  "kogane.observations.get",
+  "kogane.balances.read",
   PURCHASES_TOOL_NAME,
   RECONSTRUCTED_STATE_TOOL_NAME,
 ];
