@@ -9,6 +9,10 @@ and limits are in [roadmap](../roadmap.md) and [current status](../current-statu
   partially superseded by later implementation; original migration reservations
   and PR state are historical.
 
+- [2026-11 Phase 2: card usage → statement → bank debit](2026-11-phase2-card-flow.md):
+  accepted by the owner on 2026-11-07 (03:58 UTC); units 2a–2g, each its own pull request,
+  with the production baseline of 2026-11-06 and the owner's decisions of 2026-11-07.
+
 - [2026-10 PRESTIA bank Worker integration](2026-10-prestia-bank-worker.md): implemented
   collector/parser integration, merged in #437; deployment and first production
   verification pending. The seeded schedule remains disabled.
