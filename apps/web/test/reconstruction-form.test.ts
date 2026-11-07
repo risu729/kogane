@@ -37,10 +37,7 @@ describe("reconstruction form knowledge cuts", () => {
       expect([instant, instantProblem(instant)]).toEqual([instant, INSTANT_PROBLEM]);
     for (const commitSeq of ["9007199254740992", "9007199254740993", "9999999999999999"])
       expect(
-        formProblem(
-          { ...BASE, cut: { kind: "sequence", coreEpoch: "epoch", commitSeq } },
-          TODAY,
-        ),
+        formProblem({ ...BASE, cut: { kind: "sequence", coreEpoch: "epoch", commitSeq } }, TODAY),
       ).toBe(SEQUENCE_PROBLEM);
   });
 
@@ -110,10 +107,7 @@ describe("reconstruction form knowledge cuts", () => {
     for (const [commitSeq, valid] of sequences)
       expect([
         commitSeq,
-        formProblem(
-          { ...BASE, cut: { kind: "sequence", coreEpoch: "epoch", commitSeq } },
-          TODAY,
-        ),
+        formProblem({ ...BASE, cut: { kind: "sequence", coreEpoch: "epoch", commitSeq } }, TODAY),
       ]).toEqual([commitSeq, valid ? null : SEQUENCE_PROBLEM]);
   });
 
@@ -132,10 +126,7 @@ describe("reconstruction form knowledge cuts", () => {
         "コミット記録の世代を入力してください。",
       ],
       [{ cut: { kind: "sequence", coreEpoch: "epoch", commitSeq: "1" } }, null],
-      [
-        { cut: { kind: "instant", coreEpoch: "epoch", instant: "2024-02-29T00:00:00Z" } },
-        null,
-      ],
+      [{ cut: { kind: "instant", coreEpoch: "epoch", instant: "2024-02-29T00:00:00Z" } }, null],
     ];
     for (const [change, expected] of cases)
       expect(formProblem({ ...BASE, cut: latest, ...change }, TODAY)).toBe(expected);
