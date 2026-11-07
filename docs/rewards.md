@@ -67,10 +67,10 @@ into `needs-rule-verification`.
 - `{"kind":"unknown"}` keeps its meaning: the period was not established (including
   stored text that does not parse). It is never read as a standing offer, and the
   reader never turns damaged text into `open-ended` or `null`.
-- An `unknown` validity or deadline is still not checked at a clock, as before:
-  `availableForOffer` adds no code for it, and route search does not reject on it. A
-  standing offer stores `open-ended` and `null` instead of relying on that, so
-  tightening the unknown case later cannot drop standing offers.
+- An `unknown` deadline is not checked, and `availableForOffer` adds no code for an
+  `unknown` validity. Route search rejects an `unknown` validity as
+  `needs_rule_verification` (see "Search eligibility at each hop"), which is why a
+  standing offer stores `open-ended` and `null` instead of `unknown`.
 - No migration: both columns already hold JSON text, and nothing writes offer rows
   today (§3).
 
