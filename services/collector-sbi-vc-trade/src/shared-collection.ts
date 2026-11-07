@@ -38,13 +38,13 @@ const JSON_MEDIA_TYPE = "application/json";
 const UNIT_KEY = "account";
 const UNIT_KIND = "collection";
 
-export const COLLECTOR_DERIVED_ROLE = "collector_derived";
-export const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
+const COLLECTOR_DERIVED_ROLE = "collector_derived";
+const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
 
 /** The run could not start because the session needs a person, not a retry. */
-export const HUMAN_REQUIRED_CODE = "human_required_reauth";
+const HUMAN_REQUIRED_CODE = "human_required_reauth";
 /** The session is unhealthy for a reason re-authentication may still fix. */
-export const SESSION_UNHEALTHY_CODE = "session_unhealthy";
+const SESSION_UNHEALTHY_CODE = "session_unhealthy";
 
 const encoder = new TextEncoder();
 
@@ -58,7 +58,7 @@ export interface SharedCapture {
 }
 
 /** Where the ops API's operation and this attempt enter the terminal (03 §3). */
-export interface SharedRunIdentity {
+interface SharedRunIdentity {
   readonly operationId?: string;
   readonly attemptId: string;
   /**

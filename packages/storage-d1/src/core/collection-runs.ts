@@ -203,23 +203,6 @@ export async function appendCollectionStage(
   );
 }
 
-/** The newest attempt of each stage of one run. */
-export function readCollectionStages(
-  db: D1Like,
-  collectionRunId: number,
-): Promise<CollectionStageRow[]> {
-  return all<CollectionStageRow>(
-    db,
-    `SELECT id, collection_run_id, stage, state, evidence_ref, failure_code, recorded_at
-       FROM collection_run_stages s
-      WHERE collection_run_id = ?1
-        AND id = (SELECT max(id) FROM collection_run_stages
-                   WHERE collection_run_id = s.collection_run_id AND stage = s.stage)
-      ORDER BY id`,
-    [collectionRunId],
-  );
-}
-
 /** The newest attempt of one stage of one run, or null when it has none. */
 export function readLatestCollectionStage(
   db: D1Like,

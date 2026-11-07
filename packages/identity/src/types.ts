@@ -25,7 +25,7 @@ export interface IdentityInput {
   trustedVpassBinding?: { cardToken: string; bindingArtifactId: number; financialUnitId: number };
 }
 
-export type ResolutionStatus = "identified" | "provider-local" | "aggregate" | "unresolved";
+type ResolutionStatus = "identified" | "provider-local" | "aggregate" | "unresolved";
 export interface AccountIdentity {
   /** Exact provider reference + discriminators, not a display label. */
   key: string[];

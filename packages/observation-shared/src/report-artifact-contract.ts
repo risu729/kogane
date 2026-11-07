@@ -55,7 +55,7 @@ export interface ReportListPage {
   nextCursor: string | null;
 }
 
-export interface ReportCalculationRun {
+interface ReportCalculationRun {
   runId: string;
   policyRefs: string[];
   inputManifestDigest: string;
@@ -64,7 +64,7 @@ export interface ReportCalculationRun {
   completedAt: string | null;
 }
 
-export interface ReportCapabilities {
+interface ReportCapabilities {
   explain: boolean;
   export: boolean;
   recompute: boolean;
@@ -112,7 +112,7 @@ export type ReportDetail =
       body: null;
     };
 
-export interface ReportInputManifest {
+interface ReportInputManifest {
   schemaVersion: typeof REPORT_INPUT_MANIFEST_SCHEMA;
   perimeterRef: string;
   unitRef: string;
@@ -125,7 +125,7 @@ export interface ReportInputManifest {
   priceObservationIds: string[];
 }
 
-export interface ReportExplanationPrice {
+interface ReportExplanationPrice {
   id: string;
   baseInstrumentRef: string;
   quoteUnitRef: string;

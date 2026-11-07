@@ -25,8 +25,6 @@ export const CORE_MIGRATIONS_URL = new URL("../migrations/core/", import.meta.ur
 /** Absolute URL of the READ migration directory (trailing slash). */
 export const READ_MIGRATIONS_URL = new URL("../migrations/read/", import.meta.url);
 
-/** Repository-relative path of the CORE directory, for wrangler configs and docs. */
-export const CORE_MIGRATIONS_PATH = "packages/storage-d1/migrations/core";
 /** Repository-relative path of the READ directory. */
 export const READ_MIGRATIONS_PATH = "packages/storage-d1/migrations/read";
 
@@ -112,28 +110,4 @@ function insideTriggerBody(statement: string): boolean {
     }
   }
   return true;
-}
-
-/** Every statement of the READ migrations, in application order. */
-export function readMigrationStatements(): string[] {
-  return migrationFiles(READ_MIGRATIONS_URL).flatMap((file) =>
-    splitSqlStatements(migrationSql(READ_MIGRATIONS_URL, file)),
-  );
-}
-
-/** The minimum a test database has to offer: run one statement at a time. */
-export interface StatementRunner {
-  prepare(sql: string): { run(): Promise<unknown> };
-}
-
-/**
- * Apply the READ migrations to a test database (D1 under Miniflare, or any
- * `bun:sqlite` wrapper with the same two methods). Production migrations are
- * applied by CD through `wrangler d1 migrations apply` against the READ
- * configuration, never by this helper.
- */
-export async function applyReadMigrations(db: StatementRunner): Promise<number> {
-  const statements = readMigrationStatements();
-  for (const statement of statements) await db.prepare(statement).run();
-  return statements.length;
 }
