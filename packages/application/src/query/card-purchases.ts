@@ -214,6 +214,7 @@ interface CurrentRow extends CurrentCardUsageRow {
   on_page: number;
   unrecognized: number;
   unrecognized_total: number;
+  position: number;
 }
 
 /**
@@ -343,7 +344,7 @@ export const SETTLEMENT_SQL = `SELECT account_id,source_id,period,id,facts_json,
  * (`classifyCardUsage`, the writer's own rule); `unrecognized_total` counts
  * them all, before that bound.
  */
-const CURRENT_SQL = `WITH usage AS MATERIALIZED (
+export const CURRENT_SQL = `WITH usage AS MATERIALIZED (
   SELECT * FROM (${CURRENT_CARD_USAGE_SQL})
  ), marked AS (
   SELECT u.*,
@@ -630,7 +631,11 @@ export async function queryCardPurchases(
   if (!Number.isSafeInteger(unrecognizedCurrentRows) || unrecognizedCurrentRows < 0)
     throw new Error("card_usage_count_missing");
   const unrecognizedReasons = unrecognizedReasonCounts(
-    current.filter((row) => row.unrecognized === 1),
+    // A row on the page is returned past the bound too; only the first `?4`
+    // unrecognised rows by observation id are classified.
+    current.filter(
+      (row) => row.unrecognized === 1 && row.position <= CARD_PURCHASE_UNRECOGNIZED_LIMIT,
+    ),
     unrecognizedCurrentRows,
   );
 

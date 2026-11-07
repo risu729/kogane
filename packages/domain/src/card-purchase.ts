@@ -124,7 +124,8 @@ export type CardUsageExclusion = (typeof CARD_USAGE_EXCLUSIONS)[number];
  * list: one of the exclusions above, or `recognition_pending` when
  * `classifyCardUsage` accepts the row but no live revision holds its key yet
  * (the writer reaches every current row within one cursor cycle; a row whose
- * write conflicted stays here until it is written). Closed, like the exclusions.
+ * write conflicted, including one whose re-derived key differs from the read
+ * model's, stays here while it conflicts). Closed, like the exclusions.
  */
 export const CARD_USAGE_UNRECOGNIZED_REASONS = [
   ...CARD_USAGE_EXCLUSIONS,
