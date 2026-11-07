@@ -246,9 +246,9 @@ Limits:
 - **The review page does not show the displayed bank name, branch or
   digits** of the reading, only the outcome, the bank account the proposal
   names and how many leading digits were compared.
-- **Agents do not read it yet.** The review route is operator-only, and the
-  agent API has no card settlement review read; the evidence reaches agents
-  only when that read exists.
+- **Agents read it through `kogane.card-settlements.read`**
+  ([agent reads](#agent-reads)): each candidate carries `debitAccount` with its
+  outcome, reason, bank source account and compared digit count.
 - **Historical SMBC and SBI Shinsei references remain uncomparable.**
   SMBC's legacy reference carries no account digits. New captures retain the
   successful request's branch, ordinary account type and number in normalized
@@ -388,7 +388,9 @@ Limits:
 The `カード照合` page shows the source facts, evidence links, candidate rationale,
 current readiness blockers and decision history. An authenticated human operator
 can plan an acceptance or rejection; the confirmation page then simulates,
-approves and commits the pinned plan. Agents do not acquire acceptance rights.
+approves and commits the pinned plan. An MCP client does the same through the
+`kogane.command.*` tools with the page's authority
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 
 The page lists statements, not candidates
 (`GET /api/v2/reconciliation/card-settlements/statements`,
@@ -466,8 +468,9 @@ except that a `liable_party` default also admits a MyJCB connection root
 (`card-statement-aggregate`, status `aggregate`); an unresolved placeholder is
 never admitted. The ownership review answers `ownerDefaultBlockers` per side.
 It is a recorded decision per account, planned and committed like any other
-claim, by the operator or by an agent the owner delegated `commands.plan` and
-`commands.decide.relation` to; nothing is defaulted at read time. The
+claim, by the operator or by an MCP client
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)); nothing is
+defaulted at read time. The
 confirmation page shows its provenance and approves it; the card-ownership
 page does not yet offer to plan one, so it is planned through the command API.
 
@@ -495,9 +498,8 @@ joint ownership is not inferred. A correction appends a rejection or a new
 explicit claim and retains prior evidence. Saving ownership does **not** accept
 a settlement: the next scheduled reconciliation pass (normally every five
 minutes) creates a fresh immutable candidate with the new evidence. Refreshing
-the page only reads that state. The operator must review and separately approve
-the resulting settlement candidate. Agents cannot approve these financial
-decisions.
+the page only reads that state. The resulting settlement candidate is reviewed
+and approved separately, by the operator or by an MCP client.
 
 The commit rechecks the source publication/currentness, ownership, allocation
 availability, claim availability and expected candidate revision in the same
@@ -726,8 +728,8 @@ Approval is refused while any of these is missing or changed: a pin, the offered
 action, or the candidate itself. The route is operator-only. An agent reads the
 same candidates through the agent API's `kogane.purchases.explain`
 ([agent API](agent-api.md#card-purchase-explanation)) with every fact and
-blocker but without `actions` or `relation`, so it can report a candidate and
-never review one: the decision stays on this page.
+blocker but without `actions` or `relation`, so it can report a candidate but
+not review it through that read; the review is this page's.
 
 ## Cost
 
@@ -961,13 +963,14 @@ Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.
 
-### Production run of 2026-11-07 (Phase 2 unit 2g-4)
+### First production decisions (2026-11-07)
 
-The first live decisions, made by an MCP client through the Cloudflare MCP
-Portal (`https://mcp.takuk.me/mcp`) with the `kogane.command.*` tools, under the
-owner's approval of 2026-11-07, 16:47 UTC. Counts and identifiers only; no
-amount or account value is recorded here. Every decision below is in the audit
-log under principal `mcp-client:169b1b83…`.
+The first live ownership and card-settlement decisions, the verification of the
+[Phase 2 plan](plans/2026-11-phase2-card-flow.md#2g-settlement-decisions-by-an-agent-and-verification-code--adrs)'s
+unit 2g. An MCP client made them through the Cloudflare MCP Portal with the
+`kogane.command.*` tools, under the owner's approval of 2026-11-07, 16:47 UTC.
+Counts and identifiers only; no amount or account value is recorded here. Every
+decision below is in the audit log under principal `mcp-client:169b1b83…`.
 
 1. **Before.** 426 candidates, all `proposed`, every one blocked by
    `owner_not_established`. Ten resolved accounts had no ownership claim and
@@ -977,35 +980,40 @@ log under principal `mcp-client:169b1b83…`.
 2. **Owner default.** Ten `relation.accept` decisions (16:48 to 16:53 UTC) with
    marker `ownership-declaration:owner-default-v1:<role>:2026-11-07` and party
    `party:owner`: `liable_party` on the seven card accounts,
-   `beneficial_owner` on the three debit accounts. Each plan cited one
-   blocker-free candidate as its review marker.
-3. **Sweep.** The 16:57 UTC sweep proposed 55 candidates citing the new
-   ownership evidence: `ownership: established-same` and no acceptance
-   blocker (14 MyJCB, 41 Vpass). Candidates proposed before it keep
-   `owner_not_established`; the sweep appends, it does not rewrite them.
+   `beneficial_owner` on the three debit accounts. Each plan cited, as its
+   review marker, a candidate whose only blocker was `owner_not_established`.
+3. **Sweep.** A sweep at 16:52 UTC, while the ten were being recorded, proposed
+   7 MyJCB candidates that still carry `owner_not_established` (they cite only
+   the ownership recorded by then). The sweep of 16:56 to 16:57 UTC proposed 55
+   candidates with `ownership: established-same` and no acceptance blocker (14
+   MyJCB, 41 Vpass). Earlier candidates keep their blockers; the sweep
+   appends, it does not rewrite them.
 4. **Decisions.** Accepted one MyJCB candidate (`cs_be06321d`, 2026-09,
    `collector-myjcb` statement, SMBC debit, debit-account statement
    `supports`) and one Vpass candidate (`cs_93bffe03`, card-005 2026-08,
-   importer-era statement, SMBC debit) at 17:04 UTC. Withdrew `cs_93bffe03` at
-   17:05 UTC, then accepted a fresh Vpass candidate (`cs_6c1a79c8`, card-005
-   2026-09, SMBC debit) at 17:07 UTC. A withdrawn candidate keeps its history
-   (`accepted` then `withdrawn`); the 2026-08 statement's lead became the next
-   proposed candidate.
+   importer-era statement, SMBC debit) at 17:04 UTC. Withdrew the
+   `cs_93bffe03` acceptance at 17:05 UTC; it keeps its history (`accepted`
+   then `withdrawn`), and the 2026-08 statement's lead became the next proposed
+   candidate (`cs_80687b69`), which is left undecided. Then accepted a Vpass
+   candidate for another statement (`cs_6c1a79c8`, card-005 2026-09, SMBC
+   debit, proposed by the 16:56 sweep) at 17:07 UTC, so one Vpass and one
+   MyJCB settlement stay accepted.
 5. **Purchases.** `kogane.purchases.explain` for 2026-08 and 2026-09 returned
    the same captured, authorized and refund totals, event counts and zero
    unresolved before, after acceptance and after withdrawal;
-   `settlementAddsPurchaseExpense` stayed `false` and each accepted candidate's
+   `settlementAddsPurchaseExpense` stayed `false` and each decided candidate's
    `impact.addedPurchaseExpense` and `addedCashMovement` are zero. Of the 80
    events of 2026-09, the 11 MyJCB and 68 Vpass card-005 ones name their
    accepted settlement and its bank debit (利用 → 請求 → 引落); the 22 events
-   of the withdrawn 2026-08 statement name the next proposed candidate and no
-   bank debit.
-6. **Cash movement.** `kogane.economic-readiness.read` (`bank-movement`) shows
-   `economic_claim_held` on both accepted debits and not on the withdrawn one,
-   so the withdrawal released its claim and each accepted debit has one claim.
+   of 2026-08, whose acceptance was withdrawn, name the next proposed candidate
+   and no bank debit.
+6. **Cash movement.** `kogane.economic-readiness.read` (`bank-movement`) on the
+   three debits returns `economic_claim_held` for the two accepted ones and
+   not for the withdrawn one, so the withdrawal released its claim.
    `/api/v2/activity?basis=cash-movement` itself has no MCP read (it is not a
    screen route, so the [parity guard](agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07)
-   does not list it); it was not read in this run.
+   does not list it); it was not read in this run, so the roadmap's "the
+   cash-movement view counts the case once" is not yet shown.
 
 ## Automation prerequisites (ADR 0034)
 
