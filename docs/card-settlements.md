@@ -225,8 +225,10 @@ candidates only. For example:
 `not_proposed` carries the rule's closed reason and no bank account. A
 candidate without a row is `absent` with a closed reason, never blank:
 `source_has_no_debit_account_statement` (Vpass, which has no reader) or
-`evidence_not_recorded` (a MyJCB candidate the sweep recorded nothing for,
-for example when its bank has more known accounts than the rule is given). A
+`evidence_not_recorded` (a MyJCB candidate the sweep has recorded nothing for
+under the current policy: its page has no `read` row under the current reader
+version yet or was `refused`, its bank has more known accounts than the rule
+is given, or the sweep has not revisited it since the policy changed). A
 malformed row fails the read (`card_settlement_debit_account_evidence_invalid`).
 The page shows it as `カード会社が示す引落口座`. It is evidence for the
 reviewer only: it adds no acceptance blocker, removes none, and the plan and

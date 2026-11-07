@@ -50,12 +50,12 @@ const DEBIT_ACCOUNT_REASONS: Record<string, string> = {
   account_type_not_resolved: "表示された預金種目が普通・当座のどちらでもありません",
   account_digits_not_shown: "口座番号の先頭桁が表示されていません",
   no_comparable_bank_account: "その銀行の口座番号を比較できる口座がありません",
-  no_matching_account: "先頭桁が一致する口座がありません",
-  ambiguous_accounts: "先頭桁が一致する口座が複数あります",
+  no_matching_account: "預金種目と口座番号の先頭桁が一致する口座がありません",
+  ambiguous_accounts: "預金種目と口座番号の先頭桁が一致する口座が複数あります",
   uncomparable_account_at_bank:
     "その銀行に口座番号を比較できない口座もあるため、一意と判断できません",
   source_has_no_debit_account_statement: "このカード会社の画面には引落口座の表示がありません",
-  evidence_not_recorded: "この候補にはまだ引落口座の記録がありません",
+  evidence_not_recorded: "この候補についての判定はまだ記録されていません",
 };
 
 function debitAccountReason(code: string): string {
@@ -77,12 +77,12 @@ function DebitAccountEvidence({
   const bank = `${bankSourceLabel(evidence.bankSourceId)} · ${evidence.bankSourceAccount}`;
   return evidence.outcome === "supports" ? (
     <span>
-      <Badge tone="ok">この銀行口座を指しています</Badge> · {bank}（口座番号の先頭
+      <Badge tone="ok">照合した銀行口座と同じ</Badge> · {bank}（口座番号の先頭
       {evidence.visibleDigitCount}桁が一致）
     </span>
   ) : (
     <span>
-      <Badge tone="warn">別の口座を指しています</Badge> · {bank}
+      <Badge tone="warn">照合した銀行口座とは別の口座</Badge> · {bank}
     </span>
   );
 }
