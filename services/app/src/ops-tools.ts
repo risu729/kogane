@@ -1,6 +1,6 @@
 // The operations API as MCP tools (unified plan 02 §4, U06).
 //
-// Six tools, one per route, and not one line of semantics of its own: each
+// Seven tools, one per route, and not one line of semantics of its own: each
 // tool validates with the *same* Zod schema its HTTP route uses and calls the
 // same application service with the same verified principal, so the two
 // transports write one operation record for one request (G3-05). The tool
@@ -41,6 +41,8 @@ import {
   collectionSchema,
   importSchema,
   operationIdSchema,
+  operationListQuery,
+  operationListSchema,
   opsContext,
   opsServices,
   parseRequest,
@@ -57,6 +59,7 @@ export const OPS_TOOL_NAMES = [
   "kogane.ops.projection.request",
   "kogane.ops.session.refresh",
   "kogane.ops.operation.get",
+  "kogane.ops.operation.list",
 ] as const;
 export type OpsToolName = (typeof OPS_TOOL_NAMES)[number];
 
@@ -135,6 +138,14 @@ export const OPS_MCP_TOOLS = [
     inputSchema: inputSchema(operationIdSchema),
     annotations: READ_HINTS,
   },
+  {
+    name: "kogane.ops.operation.list",
+    title: "List this principal's accepted operations",
+    description:
+      "List one page of the operations this principal accepted, newest first, as summaries without stages or execution (ADR 0086). Filter by kind or status; pass nextCursor as cursor for the next page. Follow one with kogane.ops.operation.get.",
+    inputSchema: inputSchema(operationListSchema),
+    annotations: READ_HINTS,
+  },
 ] as const;
 
 /**
@@ -177,6 +188,11 @@ export async function callOpsTool(
           context,
           parseRequest(operationIdSchema, argument).operationId,
         );
+      case "kogane.ops.operation.list":
+        return await opsServices.list(
+          context,
+          operationListQuery(parseRequest(operationListSchema, argument)),
+        );
     }
   } catch (error) {
     if (!(error instanceof HttpError)) throw error;
@@ -197,6 +213,7 @@ export const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, Delegation
   "kogane.ops.projection.request": "operations.projection.request",
   "kogane.ops.session.refresh": "operations.session.refresh",
   "kogane.ops.operation.get": "operations.read",
+  "kogane.ops.operation.list": "operations.read",
 };
 export const EXECUTABLE_OPS_CAPABILITIES = [
   "operations.import.request",
@@ -419,6 +436,15 @@ export async function callDelegatedOpsTool(
       )
         throw new HttpError(400, "target_missing");
       return await opsServices.operation(context, input.operationId);
+    }
+    if (name === "kogane.ops.operation.list") {
+      const input = parseRequest(operationListSchema, body ?? {});
+      // The page is the caller's own requests, of any source; a principal
+      // scoped to fewer sources or accounts would be shown rows outside its
+      // scope, so it is refused like a read it may not make (ADR 0086).
+      if (principal.scopes.sources !== "*" || principal.scopes.accounts !== "*")
+        throw new HttpError(400, "target_missing");
+      return await opsServices.list(context, operationListQuery(input));
     }
     if (name === "kogane.ops.import.request") {
       const input = parseRequest(importSchema, body ?? {});

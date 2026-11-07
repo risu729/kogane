@@ -442,8 +442,8 @@ allow-lists. The committed configuration names the human operator in
 One resolver reads them — `resolvePrincipal` in
 `packages/application/src/command/grants.ts`, through the Worker's adapter
 `services/app/src/grants.ts` — and it is the only grading on any command
-surface: the five command routes and the six `/api/ops/v1` routes call it.
-The six operations MCP tools would too, but `/mcp` refuses them from its
+surface: the five command routes and the seven `/api/ops/v1` routes call it.
+The seven operations MCP tools would too, but `/mcp` refuses them from its
 agent-only caller before they get that far
 ([ADR 0047](adr/0047-mcp-client-connection.md)); the delegated command,
 decision and operations tools (`services/app/src/delegated-command-tools.ts`,

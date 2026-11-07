@@ -125,14 +125,14 @@ export const OPERATION_CATALOGUE = {
     capability: "interpretation.accept",
     paths: OPS,
   },
-  // The operator's list of its own requests (ADR 0086). On `ui` only: it has
-  // no MCP tool yet, so no `/mcp` call can name it.
+  // A principal's list of its own requests (ADR 0086): the list route and
+  // `kogane.ops.operation.list`, over one service.
   "ops.operation.list": {
     risk: ["R0"],
     effect: null,
     quiet: "read",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: OPS,
   },
   // ── schedule settings (W1–W6) ──────────────────────────────────────────
   "schedules.job.update": {

@@ -226,7 +226,7 @@ reported state's views), otherwise `unknown_tool` and `404 not_found`.
 `kogane.reported-state.read` follows `GET /api/v2/reported-state` on the same
 condition (`reportedStateOnDate`, the same views); it is listed after
 `kogane.instruments.history`, and only to a grant that holds `records.read`
-over every source and account. The six
+over every source and account. The seven
 `kogane.ops.*` tools of [ops-api.md](ops-api.md) are published on `/mcp`,
 whose callers are all agent-only, to every MCP client, which applies them as
 itself ([ops-api](ops-api.md#mcp), ADR 0084): with `OPS_API_ENABLED` off an
@@ -1439,9 +1439,10 @@ owner's agreement.
 1. **Catalogue operations.** Every `OPERATION_CATALOGUE` entry whose paths
    include `ui` also lists `mcp` and has its `kogane.<operation>` tool
    published, unless it is R4. `audit.overflow` is a record, not an
-   operation, and is excluded by name. The six `ops.*` operations pass: since
+   operation, and is excluded by name. The seven `ops.*` operations pass: since
    #660 `delegatedOpsTools` publishes them, and since ADR 0084 to every MCP
-   client, and `schedules.lease.release` passes with a tool
+   client (`ops.operation.list` with its tool since
+   [ADR 0086](adr/0086-operator-operations-list.md)), and `schedules.lease.release` passes with a tool
    that refuses every call (ADR 0081 point 3). One gap remains:
    `schedules.survey.decide`, which needs a delegated tool over the survey
    proposal writer.

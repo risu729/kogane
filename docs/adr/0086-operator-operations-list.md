@@ -1,11 +1,17 @@
-# ADR 0086: The operator lists its own operations requests, newest first, through the indexes of migration 0040
+# ADR 0086: A principal lists its own operations requests, newest first, through the indexes of migration 0040, on the route and over MCP
 
 - Status: proposed (accepted when the PR that carries it merges)
 - Date: 2026-11-07
 - Builds on: [ADR 0048](0048-operation-collector-dispatch.md) (an operation's
   collector execution trail), [ADR 0064](0064-common-audit-log.md) (one audit
   record per operations request), [ADR 0081](0081-ui-parity-through-mcp.md)
-  (screen and MCP share one service)
+  (screen and MCP share one service),
+  [ADR 0084](0084-mcp-operator-authority-without-delegation.md) (every MCP
+  client applies operations as itself)
+- Revised 2026-11-07 before merge, after #1027, #1030 and #1034 landed on
+  main: the MCP tool `kogane.ops.operation.list` is part of this decision, and
+  the catalogue entry lists `mcp`. The first draft had no MCP tool and named
+  the gap.
 
 ## Context
 
@@ -17,6 +23,13 @@ nothing listed the requests an operator holds. A request's id was in the 202
 answer that accepted it, and later only in the audit log
 ([audit log](../audit-log.md)): an operator who lost the answer had to search
 the log to follow the request.
+
+Since [ADR 0084](0084-mcp-operator-authority-without-delegation.md) every MCP
+client applies operations as `mcp-client:<sub>`, and `kogane.ops.operation.get`
+reads one of that principal's own operations through `readOperation`, the
+same service as the read route. Since #1030,
+`services/app/test/ui-mcp-parity.test.ts` fails when a catalogue entry on `ui`
+has no `mcp` path and published tool.
 
 What the store already has (`packages/storage-d1/migrations/core/0040_operations_api.sql`):
 
@@ -49,13 +62,18 @@ compound SELECT"; seen in the `services/app` workerd tests).
 
 ## Decision
 
-1. **Route.** `GET /api/ops/v1/operations` serves one page of the caller's own
-   requests. It sits behind `OPS_API_ENABLED` and the same operator grading as
-   the other operations routes (`opsContext`): an agent gets
-   `403 approval_required`, and a subject in neither grant list gets
-   `403 subject_not_granted`. It is read-only and has no MCP tool. Its
-   catalogue entry (point 6) and any later MCP tool are catalogue changes,
-   which need the owner's approval before merge.
+1. **Route and tool.** `GET /api/ops/v1/operations` serves one page of the
+   caller's own requests. It sits behind `OPS_API_ENABLED` and the same
+   operator grading as the other operations routes (`opsContext`): an agent
+   gets `403 approval_required`, and a subject in neither grant list gets
+   `403 subject_not_granted`. The MCP tool `kogane.ops.operation.list` calls
+   the same service (`listOperations`) for the MCP client's own principal
+   `mcp-client:<sub>`, like `kogane.ops.operation.get`, under the
+   `operations.read` capability every MCP client holds (ADR 0084). Each
+   principal lists only the requests it accepted: the MCP client is not shown
+   the operator's browser requests, and the operator is not shown the MCP
+   client's. Both are read-only. The catalogue entry (point 6) and the tool
+   are catalogue changes, which need the owner's approval before merge.
 2. **Order and paging.** Newest first by `created_at` descending, then
    `operation_id` descending. `operation_id` is unique and neither column
    changes after insert, so this is a stable total order. The cursor is the
@@ -66,10 +84,15 @@ compound SELECT"; seen in the `services/app` workerd tests).
    does not exist.
 3. **Closed query.** The keys are `kind` (the five kinds), `status` (the six
    statuses), `cursor` (`op_` and 64 hex characters) and `limit` (1 to 50,
-   default 20). Each key appears at most once. An unknown key is
-   `400 invalid_query` with no ref, because the key name is the caller's text.
-   A repeated key or a value outside its list is `400 invalid_query` with the
-   key as its only ref. The value is never echoed. No new error code is added.
+   default 20). One Zod schema, `operationListSchema` in
+   `services/app/src/ops-api.ts`, validates both transports. On the route each
+   key appears at most once. An unknown key is `400 invalid_query` with no
+   ref, because the key name is the caller's text. A repeated key or a value
+   outside its list is `400 invalid_query` with the key as its only ref. The
+   tool takes the same keys as arguments, `limit` as an integer, and refuses
+   like the other operations tools: `400 invalid_request` with the field
+   paths, or `(body)` for an unknown key. The value is never echoed. No new
+   error code is added.
 4. **Summary only.** Each row carries the operation id, kind, status, source
    id, dispatch state and attempts, failure code and the two timestamps. These
    are identifiers, closed codes, a count and timestamps. The stored request
@@ -86,10 +109,11 @@ compound SELECT"; seen in the `services/app` workerd tests).
      principal is written `+principal=?1` so that the planner stays on
      `ops_requests_open`, and is checked on the rows each arm reads. Arms are
      nested so that no compound has more than five terms.
-6. **Audit.** Each list request is recorded once as a new catalogue operation
-   `ops.operation.list` (R0, path `ui` only), with result `read`, the number of
-   rows shown and whether a next page exists. The record names no operation of
-   the page. The web audit page shows the operation as 依頼の一覧.
+6. **Audit.** Each list request or tool call is recorded once as a new
+   catalogue operation `ops.operation.list` (R0, paths `ui` and `mcp`), with
+   result `read`, the number of rows shown and whether a next page exists. The
+   record names no operation of the page. The web audit page shows the
+   operation as 依頼の一覧.
 
 ## Consequences
 
@@ -104,27 +128,25 @@ compound SELECT"; seen in the `services/app` workerd tests).
   to the end of its range. The bound of a filtered page is therefore every
   row of the allowed (status, kind) pairs below the cursor, of all
   principals, not the page size. Today the committed deployment names one
-  operator and an agent cannot create an operation, so the caller's rows are
-  all the rows. A second principal that creates requests (for example an MCP
-  principal applying operations) makes this cost grow with that principal's
-  history; option 3's index, or a principal-first index per filter, is then
-  the fix, and it needs a migration.
-- The query and paging live in `packages/application`
-  (`listOperations`), not in the route, so that a later MCP read can call the
-  same service with the store it is given, without SQL of its own (ADR 0081,
-  decision 2). The route only parses the query string and maps the result.
-- The route has no web page, so ADR 0081's parity rule for screen operations
-  does not strictly apply. Its catalogue entry `ops.operation.list` is still
-  a `ui` entry without an `mcp` path or tool, which ADR 0081, decision 4, asks
-  for. That gap closes when the owner approves an MCP tool
-  `kogane.ops.operation.list` over `listOperations`, with the authority the
-  MCP path has then for `kogane.ops.operation.get` (today the `operations.read`
-  delegation capability). ADR 0081's guard test does not exist yet, so nothing
-  fails today. Until then the entry is a new known gap of ADR 0081, point 4.
-  Dropping it would leave the route without the audit record ADR 0064 asks of
-  every operations request, because an audit record may name only a catalogue
-  operation. A guard test that lists the known gaps must list this entry,
-  which needs the owner's agreement, as the entry itself does.
+  operator, and since ADR 0084 each MCP client that applies an operation is a
+  second principal (`mcp-client:<sub>`), so a filtered page of one grows with
+  the other's history of the same status and kind. Option 3's index, or a
+  principal-first index per filter, is the fix when that cost shows, and it
+  needs a migration.
+- The query and paging live in `packages/application` (`listOperations`), not
+  in the route or the tool: both adapters pass the store they are given and
+  issue no SQL of their own (ADR 0081, decision 2). The route parses the query
+  string, the tool its arguments, and both map the result.
+- The catalogue entry is on `ui` and `mcp` and its tool is published to every
+  MCP client, so the catalogue guard of
+  `services/app/test/ui-mcp-parity.test.ts` passes with no new known gap. No
+  web page names the route yet, so the read-route guard has nothing to map;
+  a page that does maps it to this tool.
+- Neither read tool reaches an operation the operator requested in the
+  browser: each principal follows its own requests. Reading the operator's
+  requests over MCP would widen what an MCP client is shown beyond what it
+  applied, and is not part of this decision.
+- The MCP tool list grows by one tool (seven operations tools).
 - The audit catalogue gains one name, and the web audit page's label table
   gains one entry.
 
@@ -141,6 +163,14 @@ compound SELECT"; seen in the `services/app` workerd tests).
   - Without `sqlite_stat1`, every shape, first page and later page, reads
     `ops_requests` only through the index named above. There is no table
     scan, and the unfiltered page has no sort beyond the last order term.
+- `services/app/test/delegated-ops-parity.test.ts` (workerd, real
+  migrations, the MCP transport): the tool lists the MCP client's own
+  requests in the stored order and none of the operator's, the summary of a
+  request equals the route's for the same request, a bad limit, an unknown
+  key and the operator's operation as a cursor are refused, and the call is
+  recorded once as `read` on `mcp` with its row count.
+- `services/app/test/ui-mcp-parity.test.ts`: the catalogue guard passes with
+  `ops.operation.list` on `ui` and `mcp`.
 - `services/app/test/ops-api.test.ts` (workerd, real migrations):
   - The route answers newest first, scoped to the caller, without the
     rebuild reason.

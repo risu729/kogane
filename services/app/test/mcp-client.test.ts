@@ -586,6 +586,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
     "kogane.ops.projection.request",
     "kogane.ops.session.refresh",
     "kogane.ops.operation.get",
+    "kogane.ops.operation.list",
   ];
   it("offers the operations tools to every MCP client, whatever the command lists say", async () => {
     for (const environment of [

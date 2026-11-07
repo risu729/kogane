@@ -1,4 +1,4 @@
-// ADR 0081 for the six operations requests: each is served on `/mcp` to an
+// ADR 0081 for the operations requests and their reads: each is served on `/mcp` to an
 // MCP client acting as itself (ADR 0063, ADR 0084) by the same service as its HTTP route, so the
 // two transports give the same answer and store the same request for the
 // same input. Real Worker, official MCP transport; identities, configuration
@@ -132,7 +132,7 @@ async function delegatedRecord(operation: string, idempotencyKey: string) {
 }
 
 describe("operations requests over MCP, as the MCP client (ADR 0081, ADR 0084)", () => {
-  it("publishes all six tools to every MCP client, whatever the operator list says (ADR 0084)", async () => {
+  it("publishes every operations tool to every MCP client, whatever the operator list says (ADR 0084)", async () => {
     expect((await listed(configuration())).sort()).toEqual([...OPS_TOOL_NAMES].sort());
     expect((await listed({ ...configuration(), OPERATOR_SUBJECTS: "[]" })).sort()).toEqual(
       [...OPS_TOOL_NAMES].sort(),
@@ -243,5 +243,83 @@ describe("operations requests over MCP, as the MCP client (ADR 0081, ADR 0084)",
         receipt(followedOverHttp.body),
       );
     }
+  });
+
+  it("lists the MCP client's own requests as the route lists the operator's (ADR 0086)", async () => {
+    const reason = "synthetic rebuild for list parity";
+    const overHttp = await route("/projections", { reason, idempotencyKey: "list-parity-http" });
+    expect(overHttp.status).toBe(202);
+    const overMcp = await tool("kogane.ops.projection.request", {
+      reason,
+      idempotencyKey: "list-parity-mcp",
+    });
+    expect(overMcp.isError).not.toBe(true);
+    const httpId = String(overHttp.body["operationId"]);
+    const mcpId = String(overMcp.structuredContent["operationId"]);
+
+    const httpList = await route("/operations?kind=projection&limit=50");
+    expect(httpList.status).toBe(200);
+    const mcpList = await tool("kogane.ops.operation.list", { kind: "projection", limit: 50 });
+    expect(mcpList.isError).not.toBe(true);
+    type Page = {
+      schemaVersion: string;
+      operations: Record<string, unknown>[];
+      nextCursor: unknown;
+    };
+    const httpPage = httpList.body as unknown as Page;
+    const mcpPage = mcpList.structuredContent as unknown as Page;
+    expect(mcpPage.schemaVersion).toBe(httpPage.schemaVersion);
+    const ids = (page: Page) => page.operations.map((entry) => entry["operationId"]);
+    // Each principal holds its own list: the MCP client is never shown the
+    // operator's browser requests, nor the operator the MCP client's.
+    const ownMcp = (
+      await env.DB.prepare(
+        "SELECT operation_id FROM ops_requests WHERE principal=? AND kind='projection' ORDER BY created_at DESC,operation_id DESC",
+      )
+        .bind(DELEGATE)
+        .all<{ operation_id: string }>()
+    ).results.map((row) => row.operation_id);
+    expect(ids(mcpPage)).toEqual(ownMcp);
+    expect(ids(mcpPage)).toContain(mcpId);
+    expect(ids(mcpPage)).not.toContain(httpId);
+    expect(ids(httpPage)).toContain(httpId);
+    expect(ids(httpPage)).not.toContain(mcpId);
+    // One service, one summary for the same request.
+    const summary = (page: Page, id: string) =>
+      receipt(page.operations.find((entry) => entry["operationId"] === id)!);
+    expect(summary(mcpPage, mcpId)).toEqual(summary(httpPage, httpId));
+    expect(JSON.stringify(mcpPage)).not.toContain(reason);
+
+    // Refusals are the service's and the schema's, never the refused value.
+    expect((await tool("kogane.ops.operation.list", { limit: 0 })).structuredContent).toEqual({
+      error: "invalid_request",
+      refs: ["limit"],
+    });
+    expect((await tool("kogane.ops.operation.list", { order: "asc" })).structuredContent).toEqual({
+      error: "invalid_request",
+      refs: ["(body)"],
+    });
+    // The operator's operation is no cursor of the MCP client's list.
+    expect((await tool("kogane.ops.operation.list", { cursor: httpId })).structuredContent).toEqual(
+      { error: "receipt_not_found", refs: ["cursor"] },
+    );
+
+    const recorded = await env.DB.prepare(
+      "SELECT principal_kind,path,subject,result,target_ref,diff_json FROM audit_records WHERE principal=? AND operation='ops.operation.list' AND result='read' ORDER BY recorded_at DESC,audit_id DESC LIMIT 1",
+    )
+      .bind(DELEGATE)
+      .first<Record<string, unknown>>();
+    expect(recorded).toMatchObject({
+      principal_kind: "delegated",
+      path: "mcp",
+      subject: OWNER,
+      result: "read",
+      target_ref: null,
+    });
+    expect(JSON.parse(String(recorded!["diff_json"]))).toEqual({
+      kind: "read",
+      rows: ownMcp.length,
+      truncated: false,
+    });
   });
 });

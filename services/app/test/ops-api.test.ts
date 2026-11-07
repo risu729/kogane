@@ -707,6 +707,7 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
       "kogane.ops.projection.request",
       "kogane.ops.session.refresh",
       "kogane.ops.operation.get",
+      "kogane.ops.operation.list",
     ]);
   });
 

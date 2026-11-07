@@ -38,9 +38,7 @@ import {
   OPERATION_LIST_MAX_LIMIT,
   OPERATION_STATUSES,
   type OperationContext,
-  type OperationKind,
   type OperationListQuery,
-  type OperationStatus,
   principalCan,
   type ProjectionRequest,
   readOperation,
@@ -152,8 +150,32 @@ export const operationIdSchema = z.strictObject({
   operationId: z.string().regex(/^op_[0-9a-f]{64}$/u),
 });
 
+/**
+ * The list's query (ADR 0086), one schema for both transports: the MCP tool
+ * `kogane.ops.operation.list` validates its arguments with it, and the list
+ * route validates its query string with it after reading each key once.
+ */
+export const operationListSchema = z.strictObject({
+  kind: z.enum(OPERATION_KINDS).optional(),
+  status: z.enum(OPERATION_STATUSES).optional(),
+  cursor: operationIdSchema.shape.operationId.optional(),
+  limit: z.number().int().min(1).max(OPERATION_LIST_MAX_LIMIT).optional(),
+});
+type OperationListInput = z.infer<typeof operationListSchema>;
+
+/** The service's query for a validated list input; absent keys take their defaults. */
+export function operationListQuery(input: OperationListInput): OperationListQuery {
+  return {
+    kind: input.kind ?? null,
+    status: input.status ?? null,
+    cursor: input.cursor ?? null,
+    limit: input.limit ?? OPERATION_LIST_DEFAULT_LIMIT,
+  };
+}
+
 /** The keys the list route reads from its query string; each at most once. */
 const LIST_QUERY_KEYS = ["kind", "status", "cursor", "limit"] as const;
+/** A limit as the query string spells it: no sign, no leading zero, no fraction. */
 const LIST_LIMIT = /^[1-9][0-9]?$/u;
 
 /**
@@ -166,30 +188,21 @@ function parseListQuery(params: URLSearchParams): OperationListQuery {
   const keys = [...params.keys()];
   if (keys.some((key) => !(LIST_QUERY_KEYS as readonly string[]).includes(key)))
     throw new HttpError(400, "invalid_query");
-  const value = (key: (typeof LIST_QUERY_KEYS)[number]): string | null => {
+  const candidate: Record<string, string | number> = {};
+  for (const key of LIST_QUERY_KEYS) {
     const values = params.getAll(key);
-    if (values.length === 0) return null;
+    if (values.length === 0) continue;
     if (values.length > 1) throw new HttpError(400, "invalid_query", [key]);
-    return values[0]!;
-  };
-  const kind = value("kind");
-  if (kind !== null && !(OPERATION_KINDS as readonly string[]).includes(kind))
-    throw new HttpError(400, "invalid_query", ["kind"]);
-  const status = value("status");
-  if (status !== null && !(OPERATION_STATUSES as readonly string[]).includes(status))
-    throw new HttpError(400, "invalid_query", ["status"]);
-  const cursor = value("cursor");
-  if (cursor !== null && !operationIdSchema.shape.operationId.safeParse(cursor).success)
-    throw new HttpError(400, "invalid_query", ["cursor"]);
-  const limit = value("limit");
-  if (limit !== null && (!LIST_LIMIT.test(limit) || Number(limit) > OPERATION_LIST_MAX_LIMIT))
-    throw new HttpError(400, "invalid_query", ["limit"]);
-  return {
-    kind: kind as OperationKind | null,
-    status: status as OperationStatus | null,
-    cursor,
-    limit: limit === null ? OPERATION_LIST_DEFAULT_LIMIT : Number(limit),
-  };
+    const value = values[0]!;
+    if (key === "limit" && !LIST_LIMIT.test(value))
+      throw new HttpError(400, "invalid_query", [key]);
+    candidate[key] = key === "limit" ? Number(value) : value;
+  }
+  const outcome = operationListSchema.safeParse(candidate);
+  if (outcome.success) return operationListQuery(outcome.data);
+  // Every key is known here, so the first failing key is a closed name.
+  const key = outcome.error.issues[0]?.path[0];
+  throw new HttpError(400, "invalid_query", typeof key === "string" ? [key] : []);
 }
 
 /** A window has to be a window: `to` before `from` is not a narrow request. */

@@ -14,12 +14,12 @@ the alarm uses, and only for a connection the Processor's
 ([collector execution](#collector-execution-adr-0048),
 [ADR 0048](adr/0048-operation-collector-dispatch.md)).
 
-The six things an operator asks this system to _do_ — collect a source,
+The things an operator asks this system to _do_ — collect a source,
 re-register a persisted run, replay a parse, rebuild the read model, refresh a
-session, and read what happened — as one authenticated API under
-`/api/ops/v1`, served by the same Worker that serves the reads. Their MCP tool
-definitions are published only to a delegated `/mcp` caller and refuse every
-other one ([MCP](#mcp)).
+session — and the two reads of what happened (one request, and the list of
+one's own requests) as one authenticated API under `/api/ops/v1`, served by
+the same Worker that serves the reads. Each route has an MCP tool over the
+same service, which every MCP client uses as itself ([MCP](#mcp)).
 
 This implements unified plan 02 §4-5 and the U06 backlog row. Everything here
 is **off by default**: with `OPS_API_ENABLED` unset these paths answer exactly
@@ -275,7 +275,7 @@ already does:
    `AGENT_GRANTS`, resolved by the one resolver described in
    [change-lifecycle.md](change-lifecycle.md), "Grants"). Both are allow-lists:
 
-   | Verified subject                    | All seven routes and six tools               |
+   | Verified subject                    | All seven routes                             |
    | ----------------------------------- | -------------------------------------------- |
    | listed in `OPERATOR_SUBJECTS`       | served                                       |
    | listed in `AGENT_GRANTS`            | `403 approval_required`                      |
@@ -329,7 +329,7 @@ misconfiguration is logged once as
 
 ## MCP
 
-The six operations have MCP tool definitions (`src/ops-tools.ts`), each
+The seven routes have MCP tool definitions (`src/ops-tools.ts`), each
 generated from the Zod schema its route validates with:
 
 | Tool                            | Route                                        |
@@ -340,6 +340,7 @@ generated from the Zod schema its route validates with:
 | `kogane.ops.projection.request` | `POST /api/ops/v1/projections`               |
 | `kogane.ops.session.refresh`    | `POST /api/ops/v1/sessions/{source}/refresh` |
 | `kogane.ops.operation.get`      | `GET /api/ops/v1/operations/{id}`            |
+| `kogane.ops.operation.list`     | `GET /api/ops/v1/operations`                 |
 
 **Every `/mcp` principal uses them as itself.** Since
 [ADR 0047](adr/0047-mcp-client-connection.md), `/mcp` accepts only an identity
@@ -355,18 +356,22 @@ lists still grade only the browser's routes. `delegatedOpsTools` (#660, ADR 0063
 S3) publishes each tool to a resolved principal holding its `operations.*`
 capability, and `callDelegatedOpsTool` runs it through the same services; a
 collection request or session refresh needs a prepare and an exact
-confirmation. Every MCP client holds all six.
+confirmation. Every MCP client holds all seven.
 For the same input, a call over MCP and its route give the same receipt and
 store the same request ([ADR 0081](adr/0081-ui-parity-through-mcp.md),
 `services/app/test/delegated-ops-parity.test.ts`).
 
-The list route has no MCP tool ([ADR 0086](adr/0086-operator-operations-list.md)):
-adding one changes the tool catalogue, which needs the owner's approval.
-
-`kogane.ops.operation.get` is defined over the same service as the read
-route; on `/mcp` it reads only the calling principal's own operations, so an operation the operator requested
-in the browser is followed on the HTTP read route, `execution` block included. No agent-API grant capability reads
-an operation.
+`kogane.ops.operation.get` and `kogane.ops.operation.list` are defined over
+the same services as the two read routes (`readOperation` and
+`listOperations`). On `/mcp` both read only the calling principal's own
+operations, those `mcp-client:<sub>` accepted: an operation the operator
+requested in the browser is neither listed nor read over MCP, and is followed
+on the HTTP routes, `execution` block included. The list tool takes the
+route's query as arguments (`kind`, `status`, `cursor`, `limit`, with `limit`
+a number), validated by the same schema (`operationListSchema` in
+`src/ops-api.ts`); a refusal is `invalid_request` with the field paths, as on
+the other tools, where the route answers `invalid_query` naming the key. No
+agent-API grant capability reads an operation.
 
 ## Session refresh and human-required states
 
@@ -589,7 +594,18 @@ Synthetic data only.
   for an accepted and for a collected request, and that `/mcp` publishes the
   operations to every MCP client, which applies them as itself and never sees
   the operator's browser receipt, while HTTP still grades the operator lists
-  (G3-05, ADR 0047, ADR 0084).
+  (G3-05, ADR 0047, ADR 0084). Its list checks (ADR 0086) cover scoping,
+  cursor paging, the filters, every refusal, the audit record and the list's
+  query plans on D1 without table statistics.
+- `services/app/test/delegated-ops-parity.test.ts`: the list tool lists the
+  MCP client's own requests in the stored order, never the operator's browser
+  requests, gives the same summary as the route for the same request, refuses
+  a bad limit, an unknown key and the operator's operation as a cursor, and
+  records one `read` with its row count on `mcp`.
+- `packages/application/test/operations-list.test.ts`: the list paged to its
+  end for every filter shape on random synthetic stores against an in-memory
+  reference, the summary shape, foreign cursors, and the query plans without
+  table statistics.
 - `packages/application/test/operations.test.ts` (10 checks; the SQL half
   runs against the real migrations in `bun:sqlite`): request identity,
   principal binding, the stage table per kind, the session policy's safe
@@ -644,7 +660,7 @@ Flag defaults when absent (not the current committed settings):
 
 | Variable                             | Worker    | Default | Effect                                                                                    |
 | ------------------------------------ | --------- | ------- | ----------------------------------------------------------------------------------------- |
-| `OPS_API_ENABLED`                    | app       | `""`    | `"true"` serves the six routes and publishes their tools to every MCP client (ADR 0084)   |
+| `OPS_API_ENABLED`                    | app       | `""`    | `"true"` serves the seven routes and publishes their tools to every MCP client (ADR 0084) |
 | `SESSION_REFRESH_POLICY`             | app       | `""`    | Sources a collector may refresh unattended; absent = a person                             |
 | `OPS_DISPATCH_ENABLED`               | processor | `""`    | `"1"`/`"true"` runs the `operation_dispatch` lane                                         |
 | `OPS_COLLECTOR_DISPATCH_CONNECTIONS` | processor | `""`    | JSON array of connection ids whose collector the lane may call; empty or malformed = none |
