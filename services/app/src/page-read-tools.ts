@@ -27,17 +27,25 @@ import { HttpError } from "./http";
 import { IDENTITY_COLLECTIONS } from "../../../packages/application/src/query/identity-pages.ts";
 import { readIdentityCollection } from "./identity-api";
 import { parseRequest } from "./ops-api";
+import { readObservationRoute } from "./observation-api";
 import { catalogue } from "./read";
 
 /** The result envelope of every page read: the route's answer, under `data`. */
 const PAGE_READ_SCHEMA_VERSION = "kogane-page-read-v1";
 
-/** An identity-page `source` or any other bounded free string the route accepts. */
-const ROUTE_TEXT = z
-  .string()
-  .min(1)
-  .max(128)
-  .regex(/^[^\u0000-\u001f]+$/u);
+/** A free query value a route accepts: bounded, non-empty, no control character. */
+const routeText = (max: number) =>
+  z
+    .string()
+    .min(1)
+    .max(max)
+    .regex(/^[^\u0000-\u001f]+$/u);
+/** The identity pages' bound on a query value. */
+const ROUTE_TEXT = routeText(128);
+/** The observation routes' bound on a query value. */
+const FILTER_TEXT = routeText(512);
+const IDENTITY_READ = z.enum(["latest", "as-recorded"]);
+const MEASURE_VIEW = z.enum(["balances", "summaries"]);
 const OFFSET = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
 interface PageReadTool<Schema extends z.ZodType> {
@@ -73,14 +81,98 @@ const TOOLS = {
       collection: z.enum(IDENTITY_COLLECTIONS),
       source: ROUTE_TEXT.optional(),
       offset: OFFSET.optional(),
-      identityRead: z.enum(["latest", "as-recorded"]).optional(),
+      identityRead: IDENTITY_READ.optional(),
     }),
     capability: "records.read",
     routes: IDENTITY_COLLECTIONS.map((collection) => `/api/identity/${collection}`),
     read: (env, { collection, ...params }) =>
       readIdentityCollection(env, collection, query(params)),
   }),
+  "kogane.store.read": tool({
+    title: "Store metadata, overview and filter options",
+    description:
+      "One of the evidence browser's page reads: `meta` (what this deployment serves, parsing health and months with no rows), `overview` (row counts per table, the sources with their artifact counts, and the latest fetch and parse runs), or `filter-options` (the sources, accounts, instruments and metrics a `kind` of list can be filtered by; `view` only for balances). The same answer as GET /api/meta, /api/overview or /api/filter-options, under records.read and a whole-store read grant. Read-only.",
+    schema: z.strictObject({
+      page: z.enum(["meta", "overview", "filter-options"]),
+      kind: z.enum(["transactions", "balances", "positions", "artifacts"]).optional(),
+      view: MEASURE_VIEW.optional(),
+    }),
+    capability: "records.read",
+    routes: ["/api/meta", "/api/overview", "/api/filter-options"],
+    read: (env, { page, ...params }) => observationBody(env, `/api/${page}`, params),
+  }),
+  "kogane.observations.list": tool({
+    title: "Lists of transactions, balances, positions or artifacts",
+    description:
+      "One page of an evidence browser list: `transactions`, `balances` (the latest grouped balances and their history), `positions` (with valuations) or `artifacts` (stored captures, newest first). Each observation row carries its normalized decimal and its identity organization. The same answer as GET /api/<kind>, under records.read and a whole-store read grant. Filters are the route's: `source`, `account`, `from`/`to` (YYYY-MM-DD) and `q` for transactions; `instrument`, `metric` and `view` for balances; `offset` (and `latestOffset` for balances) pages up to 500 rows; `cursor` pages artifacts. A filter the list does not take is refused, as on the route. Read-only.",
+    schema: z.strictObject({
+      kind: z.enum(["transactions", "balances", "positions", "artifacts"]),
+      source: FILTER_TEXT.optional(),
+      account: FILTER_TEXT.optional(),
+      from: FILTER_TEXT.optional(),
+      to: FILTER_TEXT.optional(),
+      q: FILTER_TEXT.optional(),
+      instrument: FILTER_TEXT.optional(),
+      metric: FILTER_TEXT.optional(),
+      view: MEASURE_VIEW.optional(),
+      offset: OFFSET.optional(),
+      latestOffset: OFFSET.optional(),
+      cursor: FILTER_TEXT.optional(),
+      identityRead: IDENTITY_READ.optional(),
+    }),
+    capability: "records.read",
+    routes: ["/api/transactions", "/api/balances", "/api/positions", "/api/artifacts"],
+    read: (env, { kind, ...params }) => observationBody(env, `/api/${kind}`, params),
+  }),
+  "kogane.observations.get": tool({
+    title: "One observation or artifact with its detail",
+    description:
+      "One stored observation (`transaction`, `balance`, `position` or `valuation`) with its normalized decimal, identity organization and evidence links, or one `artifact` with its run and its parse runs with the observations each produced. The same answer as GET /api/observations/<kind>/<id> or /api/artifacts/<id>, under records.read and a whole-store read grant. An id the store does not hold is 404 not_found. Read-only; raw bytes are not part of it.",
+    schema: z.strictObject({
+      kind: z.enum(["transaction", "balance", "position", "valuation", "artifact"]),
+      id: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    }),
+    capability: "records.read",
+    routes: ["/api/observations/:kind/:id", "/api/artifacts/:id"],
+    read: (env, { kind, id }) =>
+      observationBody(
+        env,
+        kind === "artifact" ? `/api/artifacts/${id}` : `/api/observations/${kind}/${id}`,
+        {},
+      ),
+  }),
+  "kogane.balances.read": tool({
+    title: "Latest balances and balance history of the published snapshot",
+    description:
+      "One page of the v2 balance read: `latest` (each adopted balance of the published snapshot with its quantity, metric, adoption state, evidence, freshness, coverage and known-asset subtotals) or `history` (the visible balance observations up to that snapshot). The same answer as GET /api/v2/balances/latest or /api/v2/balances/history, under records.read and a whole-store read grant. Filters `source`, `account`, `instrument`, `metric`, `view`; `limit` is one of the route's page sizes; `cursor` is the previous page's `nextCursor`. 503 read_model_unavailable while no snapshot is published. Read-only.",
+    schema: z.strictObject({
+      collection: z.enum(["latest", "history"]),
+      source: FILTER_TEXT.optional(),
+      account: FILTER_TEXT.optional(),
+      instrument: FILTER_TEXT.optional(),
+      metric: FILTER_TEXT.optional(),
+      view: MEASURE_VIEW.optional(),
+      identityRead: IDENTITY_READ.optional(),
+      limit: z.number().int().min(1).max(1000).optional(),
+      cursor: FILTER_TEXT.optional(),
+    }),
+    capability: "records.read",
+    routes: ["/api/v2/balances/latest", "/api/v2/balances/history"],
+    read: (env, { collection, ...params }) =>
+      observationBody(env, `/api/v2/balances/${collection}`, params),
+  }),
 } as const;
+
+/** The JSON answer of one observation route; a raw download is not a page read. */
+async function observationBody(
+  env: Env,
+  pathname: string,
+  params: Record<string, string | number | undefined>,
+): Promise<unknown> {
+  const answer = await readObservationRoute(env, { pathname, searchParams: query(params) });
+  if ("raw" in answer) throw new HttpError(404, "not_found");
+  return answer.body;
+}
 
 export type PageReadToolName = keyof typeof TOOLS;
 
