@@ -21,6 +21,7 @@ import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
 import { readEvents } from "./events-api";
+import { catalogue } from "./read";
 
 /**
  * `kogane.events.read` (plan D19): `GET /api/v2/activity` and
@@ -169,7 +170,7 @@ export async function callReadTool(
         const parameters = new URLSearchParams();
         if (input.basis !== undefined) parameters.set("basis", input.basis);
         if (input.offset !== undefined) parameters.set("offset", String(input.offset));
-        const page = await readEvents(env, `/api/v2/${input.list}`, parameters);
+        const page = await catalogue(() => readEvents(env, `/api/v2/${input.list}`, parameters));
         return {
           status: 200,
           body: grantAllows(grant, "evidence.read") ? page : withoutRawObjects(page),

@@ -502,6 +502,10 @@ side, 1,000 coverage rows) and the reported state's 5,000 rows a read.
 
 ### Economic events and obligations
 
+Unexpected store failures, including the projection availability check, use
+the UI routes' `503 catalogue_read_failed` answer on both agent transports.
+Explicit validation refusals keep their existing codes.
+
 `kogane.events.read` is `GET /api/v2/activity` and `GET /api/v2/obligations`
 for an agent (plan D19,
 [ADR 0063](adr/0063-delegated-ai-operation-path.md#whole-store-record-reads-amendment--2026-11-06-proposed)):

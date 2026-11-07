@@ -126,6 +126,26 @@ function withoutEventsTable(db: D1Database): D1Database {
   });
 }
 
+/** Keep audit writes usable while one selected read path fails. */
+function failingEventReads(db: D1Database, availability = false): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) => {
+          if (
+            availability
+              ? sql.includes("sqlite_master") && sql.includes("economic_event_revisions")
+              : /FROM (economic_event_revisions|obligation_revisions)\b/u.test(sql)
+          )
+            throw new Error("synthetic event store failure");
+          return target.prepare(sql);
+        };
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 async function call(
   path: string,
   options: {
@@ -331,6 +351,44 @@ describe("the agent tool", () => {
               (SELECT count(*) FROM settlement_relations) AS settlements,
               (SELECT count(*) FROM decision_revisions) AS decisions`,
     ).first();
+
+  it("normalizes failed event reads to the route's closed 503 on both agent paths", async () => {
+    const environment = { ...granted, DB: failingEventReads(env.DB) };
+    for (const list of ["activity", "obligations"]) {
+      const route = await call(`/api/v2/${list}`, { environment });
+      expect(route.status, list).toBe(503);
+      expect(await route.json()).toMatchObject({ error: "catalogue_read_failed" });
+      const response = await http({ list }, { environment });
+      expect(response.status, list).toBe(503);
+      expect(await response.json()).toEqual({ error: "catalogue_read_failed" });
+      const viaMcp = await mcpCall({ list }, { environment });
+      expect(viaMcp.result?.isError, list).toBe(true);
+      expect(viaMcp.result?.structuredContent, list).toEqual({ error: "catalogue_read_failed" });
+    }
+  });
+
+  it("normalizes failed availability checks on both agent paths and MCP listing", async () => {
+    const environment = { ...granted, DB: failingEventReads(env.DB, true) };
+    const requests = [
+      ["/api/v2/activity", undefined],
+      [TOOL_PATH, { list: "activity" }],
+      ["/mcp", { jsonrpc: "2.0", id: 1, method: "tools/list" }],
+      [
+        "/mcp",
+        {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: EVENTS_TOOL_NAME, arguments: { list: "activity" } },
+        },
+      ],
+    ] as const;
+    for (const [path, body] of requests) {
+      const response = await call(path, { subject: "agent-principal", body, environment });
+      expect(response.status, path).toBe(503);
+      expect(await response.json()).toMatchObject({ error: "catalogue_read_failed" });
+    }
+  });
 
   it("answers on both agent paths exactly what the routes answer, and writes nothing", async () => {
     const before = await counts();
