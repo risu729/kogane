@@ -1656,43 +1656,42 @@ owner's agreement.
    the scan cannot resolve is not seen. Every other published tool that is
    not a `ui` operation is listed with its reason (`kogane.capabilities`,
    `kogane.explain`, `kogane.reconcile.propose`,
-   `kogane.economic-readiness.read`, `kogane.events.read`, `kogane.audit.get`,
-   `kogane.schedules.maintenance.read`), so a new read tool is mapped to its
-   route and that route leaves the gaps.
+   `kogane.economic-readiness.read`, `kogane.events.read`, `kogane.audit.get`),
+   so a new read tool is mapped to its route and that route leaves the gaps.
 
-   | UI read route                                                                                                 | MCP read                                                                 |
-   | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-   | `/api/v2/query`                                                                                               | `kogane.financial.query`, `kogane.context.open`                          |
-   | `/api/identity/instrument-candidates`                                                                         | `kogane.instruments.candidates`                                          |
-   | `/api/identity/account-candidates`                                                                            | `kogane.accounts.candidates`                                             |
-   | `/api/identity/instrument-history`                                                                            | `kogane.instruments.history`                                             |
-   | `/api/identity/instrument-coverage`                                                                           | `kogane.instruments.coverage`                                            |
-   | `/api/v2/card-purchases`                                                                                      | `kogane.purchases.explain`                                               |
-   | `/api/v2/reported-state`                                                                                      | `kogane.reported-state.read`                                             |
-   | `/api/v2/reconstructed-state`                                                                                 | `kogane.reconstructed-state.read`                                        |
-   | `/api/v2/audit`                                                                                               | `kogane.audit.search`                                                    |
-   | `/api/v2/reconciliation/card-statements-unmatched`                                                            | `kogane.card-settlements.unmatched`                                      |
-   | `/api/v2/reconciliation/card-settlements`                                                                     | `kogane.card-settlements.read`                                           |
-   | `/api/v2/reconciliation/card-settlements/ownership`                                                           | `kogane.card-settlements.ownership`                                      |
-   | `/api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage`  | `kogane.identity.read` ([UI read pages](#ui-read-pages))                 |
-   | `/api/meta`, `/api/overview`, `/api/filter-options`                                                           | `kogane.store.read` ([UI read pages](#ui-read-pages))                    |
-   | `/api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`                                      | `kogane.observations.list` ([UI read pages](#ui-read-pages))             |
-   | `/api/artifacts/:id`, `/api/observations/:kind/:id`                                                           | `kogane.observations.get` ([UI read pages](#ui-read-pages))              |
-   | `/api/v2/balances/latest`, `/api/v2/balances/history`                                                         | `kogane.balances.read` ([UI read pages](#ui-read-pages))                 |
-   | `/api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                          | `kogane.rewards.read` ([UI read pages](#ui-read-pages))                  |
-   | `/api/v2/reported-holdings-change`                                                                            | `kogane.reported-holdings-change.read` ([UI read pages](#ui-read-pages)) |
-   | `/api/v2/reports`, `/api/v2/reports/:id`, `/api/v2/reports/:id/explanation`                                   | `kogane.reports.read` ([UI read pages](#ui-read-pages))                  |
-   | `/api/collection-quality`, `/api/collection-quality/:source`                                                  | `kogane.collection-quality.read` ([UI read pages](#ui-read-pages))       |
-   | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact` | `kogane.evidence.read` ([UI read pages](#ui-read-pages))                 |
+   | UI read route                                                                                                 | MCP read                                                                                                                                                       |
+   | ------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | `/api/v2/query`                                                                                               | `kogane.financial.query`, `kogane.context.open`                                                                                                                |
+   | `/api/identity/instrument-candidates`                                                                         | `kogane.instruments.candidates`                                                                                                                                |
+   | `/api/identity/account-candidates`                                                                            | `kogane.accounts.candidates`                                                                                                                                   |
+   | `/api/identity/instrument-history`                                                                            | `kogane.instruments.history`                                                                                                                                   |
+   | `/api/identity/instrument-coverage`                                                                           | `kogane.instruments.coverage`                                                                                                                                  |
+   | `/api/v2/card-purchases`                                                                                      | `kogane.purchases.explain`                                                                                                                                     |
+   | `/api/v2/reported-state`                                                                                      | `kogane.reported-state.read`                                                                                                                                   |
+   | `/api/v2/reconstructed-state`                                                                                 | `kogane.reconstructed-state.read`                                                                                                                              |
+   | `/api/v2/audit`                                                                                               | `kogane.audit.search`                                                                                                                                          |
+   | `/api/v2/reconciliation/card-statements-unmatched`                                                            | `kogane.card-settlements.unmatched`                                                                                                                            |
+   | `/api/v2/reconciliation/card-settlements`                                                                     | `kogane.card-settlements.read`                                                                                                                                 |
+   | `/api/v2/reconciliation/card-settlements/ownership`                                                           | `kogane.card-settlements.ownership`                                                                                                                            |
+   | `/api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage`  | `kogane.identity.read` ([UI read pages](#ui-read-pages))                                                                                                       |
+   | `/api/meta`, `/api/overview`, `/api/filter-options`                                                           | `kogane.store.read` ([UI read pages](#ui-read-pages))                                                                                                          |
+   | `/api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`                                      | `kogane.observations.list` ([UI read pages](#ui-read-pages))                                                                                                   |
+   | `/api/artifacts/:id`, `/api/observations/:kind/:id`                                                           | `kogane.observations.get` ([UI read pages](#ui-read-pages))                                                                                                    |
+   | `/api/v2/balances/latest`, `/api/v2/balances/history`                                                         | `kogane.balances.read` ([UI read pages](#ui-read-pages))                                                                                                       |
+   | `/api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                          | `kogane.rewards.read` ([UI read pages](#ui-read-pages))                                                                                                        |
+   | `/api/v2/reported-holdings-change`                                                                            | `kogane.reported-holdings-change.read` ([UI read pages](#ui-read-pages))                                                                                       |
+   | `/api/v2/reports`, `/api/v2/reports/:id`, `/api/v2/reports/:id/explanation`                                   | `kogane.reports.read` ([UI read pages](#ui-read-pages))                                                                                                        |
+   | `/api/collection-quality`, `/api/collection-quality/:source`                                                  | `kogane.collection-quality.read` ([UI read pages](#ui-read-pages))                                                                                             |
+   | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact` | `kogane.evidence.read` ([UI read pages](#ui-read-pages))                                                                                                       |
+   | `/api/raw/:sha256`, `/api/evidence/v1/runs/:run/artifacts/:artifact/raw`                                      | `kogane.evidence.raw.read` ([UI read pages](#ui-read-pages))                                                                                                   |
+   | `/api/ops/v1/schedules`                                                                                       | `kogane.schedules.read` ([UI read pages](#ui-read-pages)) without the survey proposals, `kogane.schedules.maintenance.read` and `kogane.schedules.survey.read` |
 
-   The 5 gaps, by group:
+   The 2 gaps, by group:
 
-   | Group            | Routes with no MCP read                                                                                                                            |
-   | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | Raw downloads    | `/api/raw/:sha256`, `/api/evidence/v1/runs/:run/artifacts/:artifact/raw`                                                                           |
-   | Card settlements | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped)                       |
-   | Report export    | `/api/v2/reports/:id/export` (not served over MCP, [ADR 0072](adr/0072-report-artifact-pages.md) amendment)                                        |
-   | Operator pages   | `/api/ops/v1/schedules` (`kogane.schedules.maintenance.read` covers the maintenance part and `kogane.schedules.survey.read` the re-survey section) |
+   | Group            | Routes with no MCP read                                                                                                      |
+   | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+   | Card settlements | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped) |
+   | Report export    | `/api/v2/reports/:id/export` (not served over MCP, [ADR 0072](adr/0072-report-artifact-pages.md) amendment)                  |
 
 ADR 0081 point 2 (no SQL in an MCP adapter) has its own guard,
 [`tests/mcp-tools-no-sql.test.ts`](../tests/mcp-tools-no-sql.test.ts).
