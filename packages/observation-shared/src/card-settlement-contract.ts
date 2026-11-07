@@ -1,6 +1,7 @@
-import type {
-  CardSettlementReviewPage,
-  CardSettlementStatementPage,
+import {
+  CARD_SETTLEMENT_DEBIT_ACCOUNT_ABSENCES,
+  type CardSettlementReviewPage,
+  type CardSettlementStatementPage,
 } from "../../domain/src/card-settlement-review.ts";
 import { validQuantity } from "../../domain/src/values.ts";
 import { validTemporalValue } from "../../domain/src/time.ts";
@@ -22,9 +23,7 @@ function validDebitAccount(value: unknown): boolean {
   if (!record(value) || !text(value.policy)) return false;
   if (value.outcome === "absent")
     return (
-      ["source_has_no_debit_account_statement", "evidence_not_recorded"].includes(
-        String(value.reason),
-      ) &&
+      (CARD_SETTLEMENT_DEBIT_ACCOUNT_ABSENCES as readonly unknown[]).includes(value.reason) &&
       [
         value.statementRef,
         value.bankSourceId,

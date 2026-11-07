@@ -42,7 +42,7 @@ const ALL_LABELS = new Set<string>([...Object.values(READ_LABELS), ...UNREAD_LAB
 const ACCOUNT_VALUE = /^(普通|当座) ([0-9]{4})(\*{1,12})$/u;
 const MAX_NAME_LENGTH = 64;
 
-const CARD_INFORMATION_REFUSALS = [
+export const CARD_INFORMATION_REFUSALS = [
   /** No heading element whose text is 「カード情報」. */
   "card_information_absent",
   /** More than one such heading. */
@@ -57,7 +57,16 @@ const CARD_INFORMATION_REFUSALS = [
   /** The account value is not 「普通|当座 ####*…」. */
   "card_information_account_invalid",
 ] as const;
-type CardInformationRefusal = (typeof CARD_INFORMATION_REFUSALS)[number];
+type CardInformationRefusal =(typeof CARD_INFORMATION_REFUSALS)[number];
+
+/**
+ * The version of `readMyJcbCardInformation` a `card_debit_account_statement`
+ * row records (migration 0060). A changed reading is a new version and new
+ * rows; old rows stay. The `card_debit_account_sweep` lane writes it, the
+ * settlement sweep looks a page's reading up under it, and the settlement
+ * review counts only evidence citing a reading under it.
+ */
+export const CARD_INFORMATION_READER_VERSION = "myjcb-card-information-1.0.0";
 
 interface CardInformation {
   bankName: string;

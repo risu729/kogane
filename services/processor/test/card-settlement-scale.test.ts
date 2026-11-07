@@ -1,4 +1,4 @@
-import { CARD_INFORMATION_READER_VERSION } from "../src/card-debit-account-job.ts";
+import { CARD_INFORMATION_READER_VERSION } from "../../../packages/domain/src/myjcb-card-information.ts";
 import { CORE_REVISION_SQL } from "../../../packages/read-model/src/source-revision.ts";
 // The settlement sweep's statement and bank reads (src/card-settlement-job.ts)
 // on the scaled store with statement history of

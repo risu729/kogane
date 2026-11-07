@@ -8,11 +8,11 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
 import {
-  CARD_INFORMATION_READER_VERSION,
   cardDebitAccountSweep,
   parseCardInformation,
   knownBankAccounts,
 } from "../src/card-debit-account-job.ts";
+import { CARD_INFORMATION_READER_VERSION } from "../../../packages/domain/src/myjcb-card-information.ts";
 import { cardSettlementSweep } from "../src/card-settlement-job.ts";
 import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
 import { smbcDirectTransactions } from "../../../packages/parsers/src/parsers/smbc-direct.ts";

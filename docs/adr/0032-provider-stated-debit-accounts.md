@@ -14,6 +14,9 @@
 - Amended: [2026-09-27](#amendment-2026-09-27-the-observed-shapes), with the
   round-4 observation this decision waited for: MyJCB shows a bank name, a
   branch name and the leading digits; Vpass shows no debit account.
+  [2026-11-07](#amendment-2026-11-07-the-review-shows-the-evidence-under-the-current-reader),
+  proposed: the review shows the evidence only under the current reader
+  version, and a refused page as its refusal code.
 
 ## Context
 
@@ -336,3 +339,118 @@ unobserved.
   table mirrors the reported shape); whether Mizuho's branch-name rendering
   equals MyJCB's; the relation between the mask length and a bank's account
   number length.
+
+## Amendment 2026-11-07: the review shows the evidence under the current reader
+
+- Status: proposed
+- Date: 2026-11-07
+- Carried by:
+  `packages/application/src/query/card-settlements.ts`
+  (`CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL`),
+  `packages/domain/src/card-settlement-review.ts`
+  (`CardSettlementDebitAccountReview`,
+  `CARD_SETTLEMENT_DEBIT_ACCOUNT_ABSENCES`),
+  `packages/domain/src/myjcb-card-information.ts`
+  (`CARD_INFORMATION_READER_VERSION`),
+  `packages/observation-shared/src/card-settlement-contract.ts`,
+  `apps/web/src/reconciliation-display.tsx`,
+  [card settlements: provider-stated debit accounts](../card-settlements.md#provider-stated-debit-accounts)
+- Related: [ADR 0081](0081-ui-parity-through-mcp.md) (every read the web UI
+  offers is also an MCP read)
+
+### Context
+
+The 2026-09-27 amendment left the evidence off the review page. #1019
+(merged 2026-11-07) put it there: each review of the `カード照合` list and
+its API carries `debitAccount`, the candidate's newest
+`card_settlement_debit_account_evidence` row under the current policy, or
+`absent` with a closed reason (`source_has_no_debit_account_statement` for
+Vpass, `evidence_not_recorded` otherwise), with the cited reading as
+`statementRef`. It is evidence only: no blocker, owner or eligibility
+changes (INV07). Two gaps remained in that read:
+
+- **Reader version.** It joined the cited `card_debit_account_statement`
+  reading only to print its `reader_version` in `statementRef`, and never
+  required the current one. A reader-version bump writes new readings and
+  leaves the old ones (append-only), and the evidence index is keyed by
+  candidate, statement, policy and id, so a row built on an earlier reader's
+  reading stayed the newest row under the policy and still showed as
+  `supports` or `names_other_account`, even when the current reader refused
+  the same page. The settlement sweep only ever cites readings under the
+  current version (`STATEMENT_FOR_PARSE_SQL`), so the review disagreed with
+  what the sweep would write today. The version constant lived in the
+  processor, where the application layer cannot import it.
+- **Refused pages.** The evidence trigger lets a row cite only a `read`
+  reading, so a page whose table the lane refused never has a row, and the
+  review said `evidence_not_recorded`, which hides the closed code the lane
+  stored and reads as "not yet".
+
+### Options considered
+
+1. **Filter the reader version after choosing the newest row.** Rejected: a
+   stale later row would hide a valid earlier row citing a current reading,
+   and the review would say `evidence_not_recorded` while current evidence
+   exists.
+2. **A new `statement_refused` outcome.** Rejected: it changes the wire
+   shape #1019 shipped (its outcomes and the `absent` invariant) for what is
+   one more closed reason.
+3. **Require the current reader version inside the newest-row choice, and
+   surface a refused page as `absent` with the lane's own refusal code
+   (chosen).**
+
+### Decision
+
+- `CARD_INFORMATION_READER_VERSION` moves to
+  `packages/domain/src/myjcb-card-information.ts`, beside the reader; the
+  `card_debit_account_sweep` lane, the settlement sweep and the review read
+  the one constant.
+- `CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL` chooses, for each candidate a read
+  returns, the newest row under the current policy whose cited reading has
+  the current reader version: the version is a condition of the choice, so a
+  later stale row neither wins nor hides an earlier current one. In the same
+  read it takes the refusal code of the current reader's reading of the
+  candidate's own statement page (the raw object its statement parse run
+  read, for its card). Every step is a keyed lookup: the evidence index, the
+  reading's primary key, the parse run's and artifact's keys and the unique
+  `(raw_sha256, card_source_account, reader_version)` index.
+- With no such row and a refused page, `debitAccount` is `absent` with the
+  lane's code as `reason` (the closed set of migration 0060's `refusal_code`
+  CHECK: the six `card_information_*` codes, `page_not_utf8`,
+  `raw_object_unreadable`). The `absent` shape is #1019's: no statement
+  reference, bank account or time. `evidence_not_recorded` now means no
+  current row and no current refusal. An unknown code fails the read, as a
+  malformed row does.
+- The shared contract accepts exactly these `absent` reasons, and the page
+  names each refusal in Japanese after 記録なし.
+
+### Consequences
+
+- After a reader-version bump the review shows `evidence_not_recorded` (or
+  the refusal) until the lane rereads the page and the sweep appends a row
+  citing the new reading; rows citing the earlier reading stay in the table.
+- The plan and acceptance still never read the evidence; no blocker,
+  eligibility or owner changes.
+- No migration and no new outcome: clients that branch on `outcome` keep
+  working, and a client that lists `absent` reasons must accept eight more.
+- ADR 0081: the `カード照合` read has no MCP read yet. This amendment
+  adds none; an MCP read of the review list wraps the same
+  `queryCardSettlements`, so it carries this field as the page does.
+
+### Verification
+
+- `packages/application/test/card-settlement-query.test.ts`: a later row
+  citing an earlier reader's reading neither wins nor hides an earlier current
+  row, and on its own is `evidence_not_recorded` (fails on #1019's read); a
+  page refused under the current reader is `absent` with its code; a refusal
+  under an earlier reader, of another page or of another card's reading is
+  not; an unknown refusal code fails the read; no blocker changes.
+- `packages/application/test/card-settlement-review-scale.test.ts`: on the
+  scaled store without statistics, the read's plan has no whole-store step
+  and searches `card_settlement_debit_account_evidence_candidate` and
+  `card_debit_account_statement_object`.
+- `apps/web/test/card-settlement-contract.test.ts` and
+  `card-settlement.browser.test.ts`: the contract accepts the refusal codes
+  as `absent` reasons and refuses them as rule reasons or invented codes; the
+  page shows a refusal's text.
+- This changes what the read returns on purpose, so it is not a rewrite
+  proven equal to the shipped text; the plan check above is kept.

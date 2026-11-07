@@ -7,6 +7,7 @@ import {
 } from "../src/query/card-settlements.ts";
 import { LEGACY_CARD_SETTLEMENT_REVIEWS_SQL } from "./card-settlement-readiness-legacy-sql.ts";
 import { settlementFacts } from "./card-settlement-fixture.ts";
+import { CARD_INFORMATION_READER_VERSION } from "../../domain/src/myjcb-card-information.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 
 const databases: Database[] = [];
@@ -17,7 +18,15 @@ function store() {
     decision_revision_id TEXT,event_id TEXT,obligation_id TEXT,settlement_id TEXT,created_at TEXT);
     CREATE VIEW card_settlement_readiness AS SELECT id,1 AS statement_current,1 AS bank_current,1 AS ownership_current,1 AS allocation_available FROM card_settlement_reviews;
     CREATE TABLE card_settlement_decisions(proposal_id TEXT,revision INTEGER,status TEXT,decision_revision_id TEXT,created_at TEXT);
-    CREATE TABLE card_debit_account_statement(id INTEGER PRIMARY KEY,reader_version TEXT);
+    CREATE TABLE candidate_pages(id TEXT PRIMARY KEY,parse_run_id INTEGER);
+    CREATE VIEW card_settlement_candidates AS SELECT r.id,coalesce(p.parse_run_id,1) AS statement_parse_run_id,r.facts_json
+      FROM card_settlement_reviews r LEFT JOIN candidate_pages p ON p.id=r.id;
+    CREATE TABLE parse_runs(id INTEGER PRIMARY KEY,fetch_artifact_id INTEGER);
+    CREATE TABLE fetch_artifacts(id INTEGER PRIMARY KEY,sha256 TEXT);
+    INSERT INTO parse_runs VALUES(1,1),(2,2);
+    INSERT INTO fetch_artifacts VALUES(1,'synthetic-sha-1'),(2,'synthetic-sha-2');
+    CREATE TABLE card_debit_account_statement(id INTEGER PRIMARY KEY,raw_sha256 TEXT,card_source_account TEXT,
+      reader_version TEXT,outcome TEXT,refusal_code TEXT);
     CREATE TABLE card_settlement_debit_account_evidence(id INTEGER PRIMARY KEY,candidate_id TEXT,statement_id INTEGER,
       policy TEXT,outcome TEXT,reason TEXT,proposal_json TEXT,created_at TEXT);`);
   // The stub schema stands in for the readiness view, so the keyed reads run
@@ -45,6 +54,24 @@ function insert(db: Database, id: string, unknownOwner = false, status = "propos
     revision,
     status,
     "2026-09-11T00:00:00Z",
+  );
+}
+/**
+ * A `card_debit_account_statement` reading of the synthetic card's page that
+ * parse run 1 (or `page`) read, `read` unless a refusal code is given.
+ */
+function reading(
+  db: Database,
+  id: number,
+  options: { version?: string; refusal?: string; page?: 1 | 2; card?: string } = {},
+) {
+  db.prepare("INSERT INTO card_debit_account_statement VALUES(?,?,?,?,?,?)").run(
+    id,
+    `synthetic-sha-${options.page ?? 1}`,
+    options.card ?? "synthetic-card",
+    options.version ?? CARD_INFORMATION_READER_VERSION,
+    options.refusal === undefined ? "read" : "refused",
+    options.refusal ?? null,
   );
 }
 afterEach(() => {
@@ -135,8 +162,8 @@ describe("provider-stated debit-account evidence", () => {
   test("the latest row under the current policy is shown, older and other-policy rows are not", async () => {
     const { db, sql } = store();
     insert(db, "myjcb");
-    db.exec(`INSERT INTO card_debit_account_statement VALUES(3,'synthetic-reader-1.0.0');
-      INSERT INTO card_settlement_debit_account_evidence VALUES
+    reading(db, 3);
+    db.exec(`INSERT INTO card_settlement_debit_account_evidence VALUES
        (1,'myjcb',3,'card-debit-account-statement-v3','not_proposed','no_comparable_bank_account',NULL,'2026-09-10'),
        (2,'myjcb',3,'card-debit-account-statement-v3','supports',NULL,'${proposal}','2026-09-11'),
        (3,'myjcb',3,'card-debit-account-statement-v2','names_other_account',NULL,'${proposal}','2026-09-12');`);
@@ -148,7 +175,7 @@ describe("provider-stated debit-account evidence", () => {
       statementRef: {
         kind: "typed-claim",
         id: "card_debit_account_statement:3",
-        revision: "reader:synthetic-reader-1.0.0",
+        revision: `reader:${CARD_INFORMATION_READER_VERSION}`,
       },
       bankSourceId: "smbc-bank",
       bankSourceAccount: "synthetic-bank",
@@ -161,8 +188,8 @@ describe("provider-stated debit-account evidence", () => {
   test("a closed reason is kept, and no row is a reason by source, never a blank", async () => {
     const { db, sql } = store();
     insert(db, "myjcb", true);
-    db.exec(`INSERT INTO card_debit_account_statement VALUES(3,'synthetic-reader-1.0.0');
-      INSERT INTO card_settlement_debit_account_evidence VALUES
+    reading(db, 3);
+    db.exec(`INSERT INTO card_settlement_debit_account_evidence VALUES
        (1,'myjcb',3,'card-debit-account-statement-v3','not_proposed','ambiguous_accounts',NULL,'2026-09-10');`);
     let [item] = (await queryCardSettlements(sql, { proposalId: "myjcb" })).items;
     expect(item?.debitAccount).toMatchObject({
@@ -191,9 +218,71 @@ describe("provider-stated debit-account evidence", () => {
   test("a malformed evidence row fails the read", async () => {
     const { db, sql } = store();
     insert(db, "myjcb");
-    db.exec(`INSERT INTO card_debit_account_statement VALUES(3,'synthetic-reader-1.0.0');
-      INSERT INTO card_settlement_debit_account_evidence VALUES
+    reading(db, 3);
+    db.exec(`INSERT INTO card_settlement_debit_account_evidence VALUES
        (1,'myjcb',3,'card-debit-account-statement-v3','supports',NULL,'{}','2026-09-10');`);
+    await expect(queryCardSettlements(sql)).rejects.toThrow(
+      "card_settlement_debit_account_evidence_invalid",
+    );
+  });
+  test("only a row citing a reading under the current reader version counts, and a later stale row hides none", async () => {
+    const { db, sql } = store();
+    insert(db, "myjcb");
+    insert(db, "stale-only");
+    reading(db, 3);
+    // The same page read by an earlier reader version.
+    reading(db, 4, { version: "myjcb-card-information-0.9.0" });
+    db.exec(`INSERT INTO card_settlement_debit_account_evidence VALUES
+       (1,'myjcb',3,'card-debit-account-statement-v3','supports',NULL,'${proposal}','2026-09-10'),
+       (2,'myjcb',4,'card-debit-account-statement-v3','names_other_account',NULL,'${proposal}','2026-09-11'),
+       (3,'stale-only',4,'card-debit-account-statement-v3','supports',NULL,'${proposal}','2026-09-12');`);
+    let [item] = (await queryCardSettlements(sql, { proposalId: "myjcb" })).items;
+    expect(item?.debitAccount).toMatchObject({
+      outcome: "supports",
+      statementRef: { id: "card_debit_account_statement:3" },
+      recordedAt: "2026-09-10",
+    });
+    [item] = (await queryCardSettlements(sql, { proposalId: "stale-only" })).items;
+    expect(item?.debitAccount).toMatchObject({
+      outcome: "absent",
+      reason: "evidence_not_recorded",
+      statementRef: null,
+    });
+  });
+  test("a page the lane refused under the current reader version is absent with its refusal code", async () => {
+    const { db, sql } = store();
+    insert(db, "refused");
+    insert(db, "old-refusal");
+    insert(db, "other-page");
+    insert(db, "other-card");
+    db.exec(
+      `INSERT INTO candidate_pages VALUES('old-refusal',2),('other-page',2),('other-card',2)`,
+    );
+    reading(db, 3, { refusal: "card_information_table_invalid" });
+    // Page 2: refused only by an earlier reader, or for another card.
+    reading(db, 4, { page: 2, version: "myjcb-card-information-0.9.0", refusal: "page_not_utf8" });
+    reading(db, 5, { page: 2, card: "synthetic-other-card", refusal: "page_not_utf8" });
+    const page = await queryCardSettlements(sql);
+    const reason = (id: string) => page.items.find((item) => item.proposalId === id)?.debitAccount;
+    expect(reason("refused")).toEqual({
+      outcome: "absent",
+      reason: "card_information_table_invalid",
+      policy: "card-debit-account-statement-v3",
+      statementRef: null,
+      bankSourceId: null,
+      bankSourceAccount: null,
+      visibleDigitCount: null,
+      recordedAt: null,
+    });
+    for (const id of ["old-refusal", "other-page", "other-card"])
+      expect(reason(id)).toMatchObject({ outcome: "absent", reason: "evidence_not_recorded" });
+    // Evidence only: the refusal adds no blocker.
+    expect(page.items.every((item) => item.acceptanceBlockers.length === 0)).toBe(true);
+  });
+  test("an unknown refusal code fails the read instead of passing as a reason", async () => {
+    const { db, sql } = store();
+    insert(db, "refused");
+    reading(db, 3, { refusal: "card_information_invented" });
     await expect(queryCardSettlements(sql)).rejects.toThrow(
       "card_settlement_debit_account_evidence_invalid",
     );

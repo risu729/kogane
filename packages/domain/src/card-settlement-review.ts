@@ -5,21 +5,40 @@ import type {
 } from "./card-settlement.ts";
 import type { CardDebitAccountReason } from "./card-debit-account.ts";
 import type { SourceFactRef } from "./events.ts";
+import { CARD_INFORMATION_REFUSALS } from "./myjcb-card-information.ts";
 
 /**
- * Why a review carries no provider-stated debit-account evidence: the card
- * source has no debit-account statement (Vpass, ADR 0032), or the sweep has
- * recorded no evidence row for this candidate under the current policy.
+ * Why the `card_debit_account_sweep` lane refused a MyJCB page's 「カード情報」
+ * table: the reader's own codes and the lane's two page-level codes, the
+ * closed set of migration 0060's `refusal_code` CHECK.
  */
-type CardSettlementDebitAccountAbsence =
-  | "source_has_no_debit_account_statement"
-  | "evidence_not_recorded";
+export const CARD_DEBIT_ACCOUNT_STATEMENT_REFUSALS = [
+  ...CARD_INFORMATION_REFUSALS,
+  "page_not_utf8",
+  "raw_object_unreadable",
+] as const;
+
+/**
+ * Why a review carries no provider-stated debit-account evidence, a closed
+ * set: the card source has no debit-account statement (Vpass, ADR 0032); the
+ * lane refused the candidate's own statement page under the current reader
+ * version, with the lane's refusal code; or the sweep has recorded no
+ * evidence row for this candidate under the current policy and reader
+ * version, and the page has no refusal either.
+ */
+export const CARD_SETTLEMENT_DEBIT_ACCOUNT_ABSENCES = [
+  "source_has_no_debit_account_statement",
+  "evidence_not_recorded",
+  ...CARD_DEBIT_ACCOUNT_STATEMENT_REFUSALS,
+] as const;
+type CardSettlementDebitAccountAbsence = (typeof CARD_SETTLEMENT_DEBIT_ACCOUNT_ABSENCES)[number];
 
 /**
  * What the card provider's own statement of the debit account says about the
  * candidate (`card_settlement_debit_account_evidence`, the latest row under
- * `CARD_DEBIT_ACCOUNT_POLICY`). Read-only evidence for the reviewer: it sets
- * no owner and changes no blocker or eligibility (INV07).
+ * `CARD_DEBIT_ACCOUNT_POLICY` that cites a reading under
+ * `CARD_INFORMATION_READER_VERSION`). Read-only evidence for the reviewer: it
+ * sets no owner and changes no blocker or eligibility (INV07).
  */
 export type CardSettlementDebitAccountReview =
   | {

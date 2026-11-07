@@ -301,6 +301,22 @@ describe.if(runnable)("card settlement review", () => {
       "記録なし（この候補についての判定はまだ記録されていません）",
     );
     await page.close();
+    review = settlementReview();
+    review.debitAccount = {
+      outcome: "absent",
+      reason: "card_information_table_invalid",
+      policy: "card-debit-account-statement-v3",
+      statementRef: null,
+      bankSourceId: null,
+      bankSourceAccount: null,
+      visibleDigitCount: null,
+      recordedAt: null,
+    };
+    page = await open();
+    expect(await page.locator("main").innerText()).toContain(
+      "記録なし（「カード情報」の表の形が想定と異なります）",
+    );
+    await page.close();
   });
 
   test("server impact remains separate from purchase expense and requires approve then commit", async () => {
