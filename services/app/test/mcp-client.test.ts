@@ -81,6 +81,7 @@ const PUBLISHED = [
   "kogane.balances.read",
   "kogane.rewards.read",
   "kogane.reported-holdings-change.read",
+  "kogane.events.read",
   PURCHASES_TOOL_NAME,
   RECONSTRUCTED_STATE_TOOL_NAME,
 ];

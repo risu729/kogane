@@ -221,7 +221,11 @@ describe("card purchase explanation boundary", () => {
         },
       ],
       summary: { unresolved: 0, events: 1, settlementAddsPurchaseExpense: false },
-      coverage: { scope: "card-purchase-recognition", completeTransactionHistory: false },
+      coverage: {
+        scope: "card-purchase-recognition",
+        completeTransactionHistory: false,
+        refundsAllocated: false,
+      },
     });
     expect((await call(`${PATH}?eventId=${eventId}`)).status).toBe(200);
     expect((await call(`${PATH}?eventId=refund_${"0".repeat(64)}`)).status).toBe(404);

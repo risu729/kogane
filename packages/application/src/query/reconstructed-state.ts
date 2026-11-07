@@ -124,7 +124,7 @@ export const RECONSTRUCTED_STATE_STATUSES = [
   "incomplete",
   "complete",
 ] as const;
-export type ReconstructedStateStatus = (typeof RECONSTRUCTED_STATE_STATUSES)[number];
+type ReconstructedStateStatus = (typeof RECONSTRUCTED_STATE_STATUSES)[number];
 
 /** Closed reason codes, in order of the status they decide. */
 const UNAVAILABLE_REASONS = ["economic_guard_missing", "no_reported_container"] as const;
@@ -161,17 +161,17 @@ export const RECONSTRUCTED_STATE_REASONS = [
   ),
   ...INCOMPLETE_EXTRA,
 ] as const;
-export type ReconstructedStateReason = (typeof RECONSTRUCTED_STATE_REASONS)[number];
+type ReconstructedStateReason = (typeof RECONSTRUCTED_STATE_REASONS)[number];
 
 export const LATE_UNAVAILABLE_REASONS = [
   "no_end_capture",
   "end_captures_differ",
   "baseline_after_cut",
 ] as const;
-export type LateUnavailableReason = (typeof LATE_UNAVAILABLE_REASONS)[number];
+type LateUnavailableReason = (typeof LATE_UNAVAILABLE_REASONS)[number];
 
 /** Everything the answer depends on, pinned (ADR 0054, "Manifest pins"). */
-export interface ReconstructedStateManifest {
+interface ReconstructedStateManifest {
   schemaVersion: typeof RECONSTRUCTED_STATE_QUERY_SCHEMA;
   selectorRelease: typeof KNOWLEDGE_SELECTOR_RELEASE;
   adapterRelease: typeof RECONSTRUCTION_ADAPTER_RELEASE;
@@ -191,7 +191,7 @@ export interface ReconstructedStateManifest {
   innerManifestDigest: string;
 }
 
-export interface ReconstructedStateKnowledge {
+interface ReconstructedStateKnowledge {
   setVersion: string;
   coverage: AdoptedSelection["coverage"];
   revisions: number;

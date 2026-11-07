@@ -88,7 +88,7 @@ function runDto(row: RunRow): EvidenceRun {
     artifactCount: row.expected_artifact_count,
   };
 }
-export function artifactDto(row: ArtifactRow): EvidenceArtifact {
+function artifactDto(row: ArtifactRow): EvidenceArtifact {
   return {
     id: `a_${row.id}`,
     runId: `r_${row.fetch_run_id}`,

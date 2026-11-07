@@ -23,7 +23,7 @@ import {
 import type { TerminalRunFields } from "../../../packages/collection/src/manifest.ts";
 
 export const SOURCE = "kogane-synthetic";
-export const PRODUCER = "synthetic-collector";
+const PRODUCER = "synthetic-collector";
 export const CLIENT = "processor-shared-r2";
 export const ACCOUNT_ID = "0123456789abcdef0123456789abcdef";
 export const DATA_BUCKET = "kogane-raw-evidence";

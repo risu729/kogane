@@ -12,8 +12,8 @@ import {
 } from "../../../packages/parsers/src/parsers/myjcb.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { currentTransactions, latestBalances } from "../src/queries.ts";
-import { openStore } from "../src/store.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
+import { freshTestStore } from "./test-store.ts";
 
 const RUN = join(
   import.meta.dir,
@@ -335,7 +335,7 @@ describe("MyJCB provider statement balances", () => {
 
 describe("MyJCB end-to-end run gate", () => {
   test("ingests repeated datasets by artifact key and parses only the canonical financial artifacts", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-myjcb-")));
+    const store = freshTestStore("kogane-myjcb-");
     const ingested = ingestRunDirectory(store, RUN, { id: "myjcb", provider: "MyJCB" });
     expect(ingested.artifacts).toBe(7);
     const parsed = runParsers(store);
@@ -353,7 +353,7 @@ describe("MyJCB end-to-end run gate", () => {
   });
 
   test("a newer ledger snapshot replaces duplicate and disappeared pending rows", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-myjcb-current-")));
+    const store = freshTestStore("kogane-myjcb-current-");
     ingestRunDirectory(store, RUN, { id: "myjcb", provider: "MyJCB" });
     runParsers(store);
 
@@ -412,7 +412,7 @@ describe("MyJCB end-to-end run gate", () => {
       artifact.sha256 = createHash("sha256").update(bytes).digest("hex");
       artifact.bytes = bytes.byteLength;
     });
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-myjcb-mixed-period-")));
+    const store = freshTestStore("kogane-myjcb-mixed-period-");
     ingestRunDirectory(store, mixedRun, { id: "myjcb", provider: "MyJCB" });
     runParsers(store);
     expect(latestBalances(store).filter((row) => row.source_id === "myjcb")).toMatchObject([
@@ -444,7 +444,7 @@ describe("MyJCB end-to-end run gate", () => {
         failures: [{ operation: "collect" }],
       }),
     );
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-myjcb-failed-store-")));
+    const store = freshTestStore("kogane-myjcb-failed-store-");
     ingestRunDirectory(store, directory, { id: "myjcb", provider: "MyJCB" });
     expect(runParsers(store)).toMatchObject({ parsed: 0, blocked: 1, observations: 0 });
   });

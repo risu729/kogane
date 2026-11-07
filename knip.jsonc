@@ -16,6 +16,13 @@
     "data/**"
   ],
 
+  "ignoreIssues": {
+    // Frozen shipped SQL and read paths that a rewrite is proven equal to
+    // (AGENTS.md toolchain; docs/read-model.md "Cost"): these files keep the
+    // shape they shipped with, exports included.
+    "**/test/*legacy*.ts": ["exports", "types"]
+  },
+
   "ignoreDependencies": [
     // `cloudflare:workers` and `cloudflare:test` are workerd's built-in
     // modules; there is no `cloudflare` package to depend on.
@@ -36,7 +43,12 @@
       "entry": ["scripts/*.{ts,mjs}", "tasks/_lib/**/*.{ts,mjs}", "tests/**/*.test.ts"],
       "project": ["scripts/**/*.{ts,mjs}", "tasks/**/*.{ts,mjs}", "tests/**/*.ts"],
       // This binary is spawned by tasks/_lib/depcruise.ts, not a shell task.
-      "ignoreDependencies": ["dependency-cruiser"]
+      // `vitest` (#177) and `cf` (#433) are root tool pins that no root file
+      // imports: #177 declared the root tools so that `node_modules/.bin` exists
+      // at the root, because the shared deploy action resolves its CLI by
+      // walking up from a workspace directory. Removing them is a tooling
+      // decision, not dead-code cleanup.
+      "ignoreDependencies": ["dependency-cruiser", "cf", "vitest"]
     },
     "experiments/*": {
       // An experiment's Worker entry comes from its wrangler config; the rest
@@ -50,7 +62,10 @@
     "services/collector-vpass": {
       "entry": [
         "test/**/*.test.ts",
-        "src/{cli,mobile-cli,live-smoke,mobile-auth-probe,fingerprint}.ts"
+        "src/{cli,mobile-cli,live-smoke,mobile-auth-probe,fingerprint}.ts",
+        // Read by `cf build` (the `cf-build` task), as for every `services/*`.
+        "cloudflare.config.ts",
+        "wrangler.config.ts"
       ],
       "wrangler": { "config": ["wrangler*.jsonc"] }
     },
@@ -69,6 +84,21 @@
       "entry": ["server.mjs", "*.node-test.mjs"],
       // Xvfb is installed by the image; the missing executable is a test fixture.
       "ignoreBinaries": ["Xvfb", "kogane-synthetic-missing-executable"]
+    },
+    "services/collector-sbi-shinsei": {
+      // The `services/*` settings, plus one dependency: the `test` task runs
+      // `node --test container/*.node-test.mjs` from this directory, before
+      // and independently of the container's own `npm ci`, so their `ws`
+      // import resolves through this workspace's manifest.
+      "entry": [
+        "test/**/*.{test.ts,test.mjs,node.mjs}",
+        "scripts/**/*.{ts,mjs}",
+        "src/local/*.ts",
+        "cloudflare.config.ts",
+        "wrangler.config.ts"
+      ],
+      "wrangler": { "config": ["wrangler*.jsonc"] },
+      "ignoreDependencies": ["ws"]
     },
     "services/collector-st-george/container": {
       "entry": ["server.mjs", "*.node-test.mjs", "*.test.mjs"],

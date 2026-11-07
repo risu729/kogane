@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { chromium } from "playwright";
+import { auditPage, tabWalk } from "./a11y-audit.ts";
 import { classifyActivity } from "../../../packages/observation-shared/src/activity-semantics.ts";
 import type { TransactionRow } from "../../../packages/observation-shared/src/api-contract.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
@@ -107,6 +108,8 @@ test("activity page distinguishes positive withdrawals, card payments, and quant
         expect(body).toContain(label);
       expect(await table.locator(".amount-pos,.amount-neg").count()).toBe(0);
       expect(body).not.toContain("記帳済み");
+      expect(await auditPage(page, { mobile: width === 390 })).toEqual([]);
+      expect(await tabWalk(page)).toEqual([]);
       await page.close();
     }
   } finally {

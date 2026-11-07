@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { expect, test } from "bun:test";
 import { randomSettlementStore } from "../../../packages/read-model/test/card-settlement-random-store.ts";
+import { withProposalRule } from "../../../packages/read-model/test/card-settlement-ownership-legacy-sql.ts";
 import {
   CORE_REVISION_SQL,
   type CoreRevisionRow,
@@ -111,10 +112,14 @@ test("real source revisions invalidate bank rows, ownership, mappings and visibi
 }, 60000);
 
 test("the shared bank read is byte-identical to the query before caching", () => {
+  // But for the embedded ownership CTEs' one change of ADR 0017's amendment of
+  // 2026-11-06 (proved in packages/read-model/test/card-settlement-ownership.test.ts).
   expect(CARD_SETTLEMENT_BANK_DEBITS_SQL).toBe(
-    readFileSync(
-      new URL("./fixtures/card-bank-debits-before-sharing.sql", import.meta.url),
-      "utf8",
+    withProposalRule(
+      readFileSync(
+        new URL("./fixtures/card-bank-debits-before-sharing.sql", import.meta.url),
+        "utf8",
+      ),
     ),
   );
 });

@@ -29,7 +29,7 @@ export async function eventsV2Available(env: Env): Promise<boolean> {
   return storeHasFeature(d1Executor(env.DB), "economicEvents");
 }
 
-function offsetOf(url: URL): number {
+function offsetOf(url: Pick<URL, "searchParams">): number {
   const text = url.searchParams.get("offset") ?? "0";
   const offset = Number(text);
   if (!/^(0|[1-9]\d*)$/u.test(text) || !Number.isSafeInteger(offset) || offset > 1_000_000)
@@ -39,8 +39,22 @@ function offsetOf(url: URL): number {
 
 /** Called only after the Access gate and the read-only method check of `worker.ts`. */
 export async function eventsApi(env: Env, url: URL): Promise<Response | null> {
+  if (!(V2_PATHS as readonly string[]).includes(url.pathname)) return null;
+  return json(await readEventsRoute(env, url));
+}
+
+/**
+ * One events route's answer for this path and query: the reader both
+ * `GET /api/v2/{activity,obligations}` and `kogane.events.read` call
+ * (ADR 0081), with the route's refusals as `HttpError`s. Absent (404) where
+ * the projection is not in this database, like the routes.
+ */
+export async function readEventsRoute(
+  env: Env,
+  url: { pathname: string; searchParams: URLSearchParams },
+): Promise<unknown> {
   const path = url.pathname;
-  if (!(V2_PATHS as readonly string[]).includes(path)) return null;
+  if (!(V2_PATHS as readonly string[]).includes(path)) throw new HttpError(404, "not_found");
   if (!(await eventsV2Available(env))) throw new HttpError(404, "not_found");
   const allowed = path === "/api/v2/activity" ? ["basis", "offset"] : ["offset"];
   for (const key of url.searchParams.keys()) {
@@ -56,10 +70,10 @@ export async function eventsApi(env: Env, url: URL): Promise<Response | null> {
   const offset = offsetOf(url);
   const reader = createEventsReader(d1Executor(env.DB), { pageSize: EVENTS_PAGE_SIZE });
   if (path === "/api/v2/obligations")
-    return json({ apiVersion: 2, ...(await reader.obligations({ offset })) });
+    return { apiVersion: 2, ...(await reader.obligations({ offset })) };
   const basisParam = url.searchParams.get("basis");
   if (basisParam !== null && !isActivityBasis(basisParam))
     throw new HttpError(400, "invalid_query");
   const basis: ActivityBasis = basisParam ?? DEFAULT_ACTIVITY_BASIS;
-  return json({ apiVersion: 2, basis, ...(await reader.activity({ basis, offset })) });
+  return { apiVersion: 2, basis, ...(await reader.activity({ basis, offset })) };
 }

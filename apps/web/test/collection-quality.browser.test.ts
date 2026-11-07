@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import type { SQLQueryBindings } from "bun:sqlite";
 import { QualityStore } from "../../../packages/read-model/test/collection-quality-fixture.ts";
 import {
@@ -142,4 +143,21 @@ describe.if(runnable)("collection quality browser", () => {
       await page.close();
     }
   }, 30000);
+  test("the scope picker and a chosen source pass the accessibility audit", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await page.goto(`${origin}/collection-quality`);
+      await page
+        .getByText("取得元を選ぶと、対象を限定して状態を読み込みます。", { exact: true })
+        .waitFor();
+      expect(await auditView(page)).toEqual([]);
+      await page.getByRole("link", { name: "vpass", exact: true }).click();
+      await page
+        .getByText("この口座・カードの原本ファイルがありません", { exact: false })
+        .waitFor();
+      expect(await auditView(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 60000);
 });

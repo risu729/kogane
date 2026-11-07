@@ -74,7 +74,11 @@ import {
   rollbackRelease,
   type AdoptionRequest,
 } from "./release-adoption.ts";
-import { collectionScan, handleTerminalNotification } from "./collection/index.ts";
+import {
+  collectionScan,
+  handleTerminalNotification,
+  type ScanSummary,
+} from "./collection/index.ts";
 import {
   invocationContext,
   invocationProbe,
@@ -1811,8 +1815,7 @@ const defaultStages: ScheduledStages = {
   identity: (env) => identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
   // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
   // scan returns `skipped` without touching R2 or CORE (docs/processor.md).
-  collection: (env, context) =>
-    collectionScan(collectionEnv(env), { budget: context.registration }),
+  collection: (env, context) => collectionScanStage(env, context),
   // Off unless BALANCE_PROJECTION_ENABLED is "1"; the job itself returns
   // `skipped` rather than the caller branching on the flag.
   balanceProjection: (env) => runBalanceProjection(env),
@@ -1858,6 +1861,30 @@ const defaultStages: ScheduledStages = {
     maintenanceSurveyLane(env, { transport: (url, init) => fetch(url, init) }),
   auditOverflow: (env) => auditOverflowStage(env),
 };
+
+/**
+ * The deployed `collection_scan` stage. A registration that throws is counted
+ * in the scan's `failed` and never stops the page (G1-13); each one is also
+ * logged here as one `collection_scan_registration_failed` line carrying the
+ * error's class as a closed code (the 0049 grammar, else `unknown`), never
+ * its message, which may quote a key.
+ */
+export function collectionScanStage(
+  env: Env,
+  context: InvocationContext,
+  log: (line: string) => void = (line) => console.log(line),
+): Promise<ScanSummary> {
+  return collectionScan(collectionEnv(env), {
+    budget: context.registration,
+    onFailure: (code) =>
+      log(
+        JSON.stringify({
+          event: "collection_scan_registration_failed",
+          code: /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(code) ? code : "unknown",
+        }),
+      ),
+  });
+}
 
 /**
  * The Worker `Env` as the collection and dispatch lanes need it. The vars are

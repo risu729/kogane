@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createApi } from "../src/api.ts";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
@@ -10,14 +9,15 @@ import {
   insertFetchRun,
   insertObservation,
   insertParseRun,
-  openStore,
   publishParseRun,
   putRawObject,
   upsertSource,
+  type Store,
 } from "../src/store.ts";
 import { formatAmount, amountSign } from "../../../packages/parsers/src/money.ts";
 import { buildFixture, HOSTILE_DESCRIPTION, RETIRED_DESCRIPTION, type Fixture } from "./fixture.ts";
 import { LOCAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { freshTestStore } from "./test-store.ts";
 
 const fixture: Fixture = buildFixture();
 const app = createApi(fixture.store);
@@ -476,7 +476,7 @@ describe("invariants that a shared label could break", () => {
     // `source_account` is only the provider's own name for an account. Two
     // sources both calling one "main" must stay two rows in the latest-balance
     // view, or one institution's balance silently replaces the other's.
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-collide-")));
+    const store = freshTestStore("kogane-collide-");
     for (const sourceId of ["bank-a", "bank-b"]) {
       upsertSource(store, {
         id: sourceId,
@@ -532,7 +532,7 @@ describe("invariants that a shared label could break", () => {
   test("a content type carrying CRLF cannot reach the response header", async () => {
     // The stored content type is provider-derived. A CR or LF in it would
     // otherwise split the response or throw out of the handler.
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-crlf-")));
+    const store = freshTestStore("kogane-crlf-");
     upsertSource(store, { id: "s", provider: "S", ingestion: "file-export" });
     const fetchRunId = insertFetchRun(store, {
       sourceId: "s",
@@ -566,10 +566,10 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
   // source and its only superseded run produced a transaction. These build the
   // missing cases.
   function storeWithRetiredAndFailed(): {
-    store: ReturnType<typeof openStore>;
+    store: Store;
     artifactId: number;
   } {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-current-")));
+    const store = freshTestStore("kogane-current-");
     upsertSource(store, { id: "s", provider: "S", ingestion: "collector-r2" });
     const fetchRunId = insertFetchRun(store, {
       sourceId: "s",
@@ -705,7 +705,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
   test("an amount past the safe integer range survives the API intact", async () => {
     // bun:sqlite returns an INTEGER column as a JS number, which would round
     // this silently. The queries cast amounts to text for that reason.
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-big-")));
+    const store = freshTestStore("kogane-big-");
     upsertSource(store, { id: "s", provider: "S", ingestion: "file-export" });
     const fetchRunId = insertFetchRun(store, {
       sourceId: "s",
@@ -749,7 +749,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
   });
 
   test("an unreadable warnings value is reported, not silently empty", async () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-warn-")));
+    const store = freshTestStore("kogane-warn-");
     upsertSource(store, { id: "s", provider: "S", ingestion: "file-export" });
     const fetchRunId = insertFetchRun(store, {
       sourceId: "s",
@@ -787,7 +787,7 @@ describe("rule: only a successful, unsuperseded parse run is current", () => {
   });
 
   test("raw bytes that no longer match their digest are refused", async () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-tamper-")));
+    const store = freshTestStore("kogane-tamper-");
     const stored = putRawObject(store, new TextEncoder().encode("original evidence"), "text/plain");
     // Replace the blob on disk, leaving the row claiming the original digest.
     const row = store.db

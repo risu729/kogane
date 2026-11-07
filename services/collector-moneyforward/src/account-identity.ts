@@ -36,7 +36,7 @@ import { parse, type DefaultTreeAdapterMap } from "parse5";
 import type { RawArtifact } from "./types";
 
 /** The domain string hashed with the tuple, and the identity's prefix (ADR 0029). */
-export const MONEYFORWARD_IDENTITY_CONTRACT = "moneyforward-account-v2";
+const MONEYFORWARD_IDENTITY_CONTRACT = "moneyforward-account-v2";
 const OPAQUE = /^[A-Za-z0-9_-]{1,4096}$/u;
 const DETAIL = /^account-detail-(\d{2})\.html$/u;
 const SHOW_PATH = /^\/accounts\/show\/([A-Za-z0-9_-]+)(?:[?#].*)?$/u;

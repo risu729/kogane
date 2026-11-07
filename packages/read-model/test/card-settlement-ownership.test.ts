@@ -2,13 +2,23 @@
 // migration 0044 view they stand in for, row for row, on small random stores
 // (card-settlement-random-store.ts) that draw every identity, mapping and
 // ownership-claim state the view distinguishes. The last test checks that the
-// seeds together drew every one of those states. Every value is synthetic.
+// seeds together drew every one of those states. The random stores record no
+// ownership proposal, so there the CTEs and the view agree; the last describe
+// covers the one rule they deliberately differ in (ADR 0017's amendment of
+// 2026-11-06). Every value is synthetic.
 import type { Database, SQLQueryBindings } from "bun:sqlite";
 import { beforeAll, describe, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { cardSettlementOwnershipCtes, type OwnershipKind } from "../src/card-settlement-ownership";
 import { explain } from "./card-usage-plan";
 import { fullCoreSchema } from "./card-usage-scale-fixture";
 import {
+  LEGACY_OWNERSHIP_CTES,
+  LEGACY_OWNERSHIP_CTES_SHA256,
+  withProposalRule,
+} from "./card-settlement-ownership-legacy-sql";
+import {
+  LATER_PROPOSAL_STATES,
   RANDOM_STATES,
   randomSettlementStore,
   type RandomSettlementStore,
@@ -118,5 +128,79 @@ describe("keyed card settlement ownership on random stores", () => {
       "transaction row without ownership",
     ];
     expect(required.filter((state) => !drawn.has(state))).toEqual([]);
+  });
+});
+
+// ADR 0017's amendment of 2026-11-06: a proposal recorded after a decision of
+// the same owner changes nothing. The same seed's store with ownership
+// proposals appended last (`laterProposals`) must read exactly as the store
+// without them. The shipped CTEs (frozen in
+// card-settlement-ownership-legacy-sql.ts) and the 0044 view let such a
+// proposal retire an accepted claim or lift a dated claim's veto.
+describe("a later ownership proposal changes no owner", () => {
+  const legacy = (kind: OwnershipKind): string =>
+    `WITH observed AS (SELECT value AS observation_id FROM json_each(?1)),
+ ${LEGACY_OWNERSHIP_CTES[kind]}
+ SELECT ${COLUMNS} FROM ownership ORDER BY observation_id`;
+  const proposalsDrawn = new Set<string>();
+  const changes = new Set<string>();
+  type Owned = { observation_id: number; owner_ref: string | null };
+
+  beforeAll(() => {
+    fullCoreSchema().close();
+  }, 60_000);
+
+  test("the frozen texts are the texts that shipped", () => {
+    for (const kind of ["balance", "transaction"] as const)
+      expect(createHash("sha256").update(LEGACY_OWNERSHIP_CTES[kind]).digest("hex")).toBe(
+        LEGACY_OWNERSHIP_CTES_SHA256[kind],
+      );
+  });
+
+  test("the current texts are the frozen ones with only the two newer-row checks changed", () => {
+    for (const kind of ["balance", "transaction"] as const) {
+      expect(cardSettlementOwnershipCtes(kind)).not.toBe(LEGACY_OWNERSHIP_CTES[kind]);
+      expect(withProposalRule(LEGACY_OWNERSHIP_CTES[kind])).toBe(cardSettlementOwnershipCtes(kind));
+    }
+  });
+
+  test.each(SEEDS)(
+    "seed %i: the store with later proposals reads as the store without",
+    (seed) => {
+      const plain = randomSettlementStore(seed, new Set());
+      const proposed = randomSettlementStore(seed, proposalsDrawn, { laterProposals: true });
+      expect(proposed.balances).toEqual(plain.balances);
+      expect(proposed.transactions).toEqual(plain.transactions);
+      for (const [kind, ids] of [
+        ["balance", plain.balances],
+        ["transaction", plain.transactions],
+      ] as const) {
+        const list = JSON.stringify(ids);
+        const current = all(plain.db, keyed(kind), [list]) as Owned[];
+        // Without proposals the current CTEs are the shipped ones, row for row.
+        expect(current).toEqual(all(plain.db, legacy(kind), [list]) as Owned[]);
+        // With them, the current CTEs still read the store without them.
+        expect(all(proposed.db, keyed(kind), [list])).toEqual(current);
+        // The shipped CTEs read as the view does there, and moved.
+        const before = all(proposed.db, legacy(kind), [list]) as Owned[];
+        expect(before).toEqual(all(proposed.db, shipped, [list, kind]) as Owned[]);
+        const now = new Map(current.map((row) => [row.observation_id, row.owner_ref]));
+        for (const row of before) {
+          const owner = now.get(row.observation_id) ?? null;
+          if (owner !== null && row.owner_ref === null) changes.add("shipped lost an owner");
+          if (owner === null && row.owner_ref !== null) changes.add("shipped gained an owner");
+        }
+        // The plan stays keyed with the proposals in the store.
+        expect(statementPlanProblems(explain(proposed.db, keyed(kind), [list]))).toEqual([]);
+      }
+      plain.db.close();
+      proposed.db.close();
+    },
+    30_000,
+  );
+
+  test("the seeds drew every proposal state, and the shipped read was wrong both ways", () => {
+    expect(LATER_PROPOSAL_STATES.filter((state) => !proposalsDrawn.has(state))).toEqual([]);
+    expect([...changes].sort()).toEqual(["shipped gained an owner", "shipped lost an owner"]);
   });
 });

@@ -51,8 +51,8 @@ const JSON_MEDIA_TYPE = "application/json";
 const UNIT_KEY = "account";
 const UNIT_KIND = "collection";
 
-export const PROVIDER_CAPTURE_ROLE = "sanitized_provider_capture";
-export const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
+const PROVIDER_CAPTURE_ROLE = "sanitized_provider_capture";
+const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
 
 const encoder = new TextEncoder();
 
@@ -65,7 +65,7 @@ export interface SharedCapture {
 }
 
 /** Where the ops API's operation and this attempt enter the terminal (03 §3). */
-export interface SharedRunIdentity {
+interface SharedRunIdentity {
   readonly operationId?: string;
   readonly attemptId: string;
 }

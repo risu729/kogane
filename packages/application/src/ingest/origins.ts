@@ -16,13 +16,13 @@ import {
 } from "../../../storage-d1/src/core/origins.ts";
 import { IngestError, type IngestEnv } from "./contract.ts";
 
-export { parseOrigins, type Origins } from "../../../evidence-contract/src/origins.ts";
+export { type Origins } from "../../../evidence-contract/src/origins.ts";
 
 /**
  * Deny wins over allow, and nothing is allowed by default. A rule matches on
  * host (optionally including subdomains), scheme, port and path prefix.
  */
-export function httpScopeAllowed(
+function httpScopeAllowed(
   rules: readonly HttpScopeRule[],
   scheme: string,
   host: string,

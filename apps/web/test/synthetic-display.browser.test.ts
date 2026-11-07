@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 import { chromium } from "playwright";
+import { auditPage } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 
 test("synthetic sources never mount financial, evidence or command views", async () => {
@@ -64,6 +65,7 @@ test("synthetic sources never mount financial, evidence or command views", async
       expect(await page.locator("main").innerText()).toBe(
         "表示対象の記録がありません\n\n接続先を確認してください。",
       );
+      expect(await auditPage(page)).toEqual([]);
     }
     await page.getByRole("link", { name: "取引", exact: true }).click();
     await page.waitForFunction(() => document.activeElement?.tagName === "H1");
