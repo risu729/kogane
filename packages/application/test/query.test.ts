@@ -503,7 +503,14 @@ describe("holdings from the adopted projection", () => {
             behind,
             rows: [adopted()],
             coverage: stale
-              ? [{ state: "stale", reason_code: "no_new_observation", freshness: "stale", count: 1 }]
+              ? [
+                  {
+                    state: "stale",
+                    reason_code: "no_new_observation",
+                    freshness: "stale",
+                    count: 1,
+                  },
+                ]
               : [],
           }),
         );
@@ -511,7 +518,9 @@ describe("holdings from the adopted projection", () => {
         if (!outcome.ok) return;
         expect(validFinancialResult(outcome.result, anyData)).toBe(true);
         expect(outcome.result.completeness).toBe(behind || stale ? "partial" : "complete");
-        expect(outcome.result.quality.freshness.state).toBe(behind || stale ? "partial" : "verified");
+        expect(outcome.result.quality.freshness.state).toBe(
+          behind || stale ? "partial" : "verified",
+        );
         const expected = [
           ...(behind ? ["snapshot:behind_published_evidence"] : []),
           ...(stale ? ["scope_not_re_observed"] : []),

@@ -384,8 +384,7 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
     const gaps: { reasonCode: string; scopeRef: string | null }[] = [];
     let stale = false;
     let unresolved = false;
-    if (servable.behind)
-      gaps.push({ reasonCode: "snapshot:behind_published_evidence", scopeRef });
+    if (servable.behind) gaps.push({ reasonCode: "snapshot:behind_published_evidence", scopeRef });
     for (const pair of holdingPairs) {
       const scope = {
         ...(pair.source === undefined ? {} : { source: pair.source }),
