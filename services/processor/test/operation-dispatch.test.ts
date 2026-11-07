@@ -204,6 +204,46 @@ test("an import of a blocked terminal records the block and does not complete", 
   });
 });
 
+test("an import whose run id no terminal key can carry ends with a closed code", async () => {
+  // The App's run grammar admits `:`, the bucket key grammar does not, and the
+  // key builder throws on it. Before, that throw left dispatchImport
+  // unclassified: the whole lane failed every tick and the request, never
+  // updated, stayed at the head of the queue.
+  const harness = withDispatch();
+  await persistSyntheticRun(harness);
+  const operations: string[] = [];
+  for (const runId of ["run:001", "run-001"]) {
+    const accepted = await requestImport({
+      store: harness.store,
+      principal: PRINCIPAL,
+      now: NOW,
+      request: { source: SOURCE, runId },
+    });
+    if (!accepted.ok) throw new Error("acceptance failed");
+    operations.push(accepted.receipt.operationId);
+  }
+  const at = () => new Date("2026-09-11T00:01:00Z");
+  expect(await dispatchOperations(harness.env, { now: at })).toMatchObject({
+    claimed: 2,
+    dispatched: 1,
+    failed: 1,
+  });
+  const refused = await receipt(harness, operations[0]!);
+  if (!refused.ok) throw new Error("receipt missing");
+  expect(refused.receipt.status).toBe("blocked");
+  expect(refused.receipt.dispatch.state).toBe("dispatch_failed");
+  expect(refused.receipt.failureCode).toBe("operation_payload_invalid");
+  // Nothing was judged about a terminal: no stage row was written.
+  expect(stageStates(refused.receipt.stages).every((entry) => entry.endsWith(":pending"))).toBe(
+    true,
+  );
+  const registered = await receipt(harness, operations[1]!);
+  if (!registered.ok) throw new Error("receipt missing");
+  expect(stageOf(registered.receipt.stages, "registered")).toMatchObject({ state: "completed" });
+  // A closed end: the refused request is not taken again.
+  expect(await dispatchOperations(harness.env, { now: at })).toMatchObject({ claimed: 0 });
+});
+
 test("a throwing CORE registration backs off while the next import progresses", async () => {
   const harness = withDispatch();
   for (const runId of ["run-001", "run-002"]) {

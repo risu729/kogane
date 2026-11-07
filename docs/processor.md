@@ -114,7 +114,10 @@ cursor is null, also counted a cycle.
 
 A registration that **throws** — R2 or CORE unavailable, or a refusal CORE
 made that the derivation did not foresee — is counted in the lane's `failed`
-and logged by its error class only; nothing is recorded for that run, the
+and logged by its error class only, one
+`{"event":"collection_scan_registration_failed","code":…}` line per throw
+(`collectionScanStage` in `src/worker.ts`; the code is one of the finite
+built-in class labels of §7, never the error's writable name or message); nothing is recorded for that run, the
 page still advances and the next cycle tries it again. One failing run never
 stops the page and never pins the cursor (G1-13). A seal CORE's completeness
 trigger refuses (`run_inventory_incomplete`) is not in this class: it is a
@@ -735,6 +738,10 @@ tick, as the alarm awaits its own.
 
 A failed dispatch never deletes the request. An import whose terminal is not
 in the bucket is retried, not failed: the collector may still be running.
+An import whose stored payload names no source or run, or a source or run id
+the bucket key grammar refuses (the App's run grammar also admits `:`, which
+no terminal key can carry), fails at once with `operation_payload_invalid`
+and writes no stage row; it is not looked at again.
 
 An import whose registration **throws** — R2 or CORE unavailable, or a
 refusal CORE made that the derivation did not foresee — is treated as the
