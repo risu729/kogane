@@ -99,3 +99,22 @@ test("an empty page is an answer, a missing proposal is not found", async () => 
     }),
   ).toEqual({ status: "not_found" });
 });
+
+test("the grant's maxRows bounds the page depth before any read", async () => {
+  const store = forbiddenStore();
+  const grant = { ...GRANT, budget: { ...GRANT.budget, maxRows: 99 } };
+  for (const request of [{ offset: 50 }, { offset: 1_000_000 }])
+    expect(await readCardSettlementsForGrant({ grant, sql: store.sql, request })).toEqual({
+      status: "refused",
+      error: expect.objectContaining({ code: "budget_exceeded", refs: ["budget:maxRows=99"] }),
+    });
+  expect(store.reads()).toBe(0);
+  const one = emptyStore();
+  expect(
+    await readCardSettlementsForGrant({
+      grant: { ...GRANT, budget: { ...GRANT.budget, maxRows: 1 } },
+      sql: one.sql,
+      request: { proposalId: "missing" },
+    }),
+  ).toEqual({ status: "not_found" });
+});

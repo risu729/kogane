@@ -408,11 +408,18 @@ answers as the page, over MCP or the agent HTTP route
 `kogane.card-settlements.ownership` (`{"proposalId": id}`) is its
 `/ownership` read. Both call the page's services
 (`packages/application/src/query/card-settlements-read.ts`), answer exactly
-the route's body, write only the R0 audit record of the call and are refused
+the route's body and write only the R0 audit record of the call. They exist
+exactly while the route does: where its views are absent they are not listed,
+the HTTP path is `404` and the MCP name `unknown_tool`. They are refused
 `unauthorized` without `records.read` and `evidence_restricted` on a narrowed
-source or account scope, before any database read: a review joins a card
-account to a bank account, so a narrowed grant could see an account outside
-it. Deciding a review or recording ownership stays a plan through the change
+source or account scope, before the request is validated: a review joins a
+card account to a bank account, so a narrowed grant could see an account
+outside it. A list read deeper than the grant's `maxRows` (`offset + 50`
+above it) is `413 budget_exceeded` (`budget:maxRows=<n>`); a page's
+`nextOffset` is the route's, so the next page may be refused. A malformed
+request is `400 invalid_query`, and a `proposalId` that names no candidate is
+`404 not_found`. None of these refusals reads a store row; the only statement
+before them is the `sqlite_master` check the route also runs. Deciding a review or recording ownership stays a plan through the change
 lifecycle, graded there; on MCP that needs a delegation
 ([ADR 0063](adr/0063-delegated-ai-operation-path.md)), and
 `MCP_DELEGATIONS` is empty. This is the read half of the owner's UI-parity

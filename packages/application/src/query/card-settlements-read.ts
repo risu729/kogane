@@ -11,7 +11,7 @@ import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
 import { grantAllows, type Grant } from "../grants.ts";
 import { queryCardOwnership } from "./card-ownership.ts";
-import { queryCardSettlements } from "./card-settlements.ts";
+import { CARD_SETTLEMENT_PAGE_SIZE, queryCardSettlements } from "./card-settlements.ts";
 
 /** The route's proposal id pattern (`services/app/src/card-settlements-api.ts`). */
 export const CARD_SETTLEMENT_PROPOSAL_ID = /^[A-Za-z0-9_-]{1,128}$/u;
@@ -39,7 +39,11 @@ function refusal(
   return narrowed.length ? fail("evidence_restricted", narrowed) : null;
 }
 
-/** One page of reviews (`offset`) or one review (`proposalId`), as the page reads them. */
+/**
+ * One page of reviews (`offset`) or one review (`proposalId`), as the page reads
+ * them. The grant's `maxRows` bounds how deep a caller pages: `offset + 50`
+ * (one for a `proposalId` read) above it is `budget_exceeded`, before any read.
+ */
 export async function readCardSettlementsForGrant(input: {
   grant: Grant;
   sql: SqlExecutor;
@@ -71,6 +75,14 @@ export async function readCardSettlementsForGrant(input: {
       (!CARD_SETTLEMENT_PROPOSAL_ID.test(proposalId) || offset !== undefined))
   )
     return invalid;
+  const reach = proposalId === undefined ? (offset ?? 0) + CARD_SETTLEMENT_PAGE_SIZE : 1;
+  if (reach > input.grant.budget.maxRows)
+    return {
+      status: "refused",
+      error: financialError("budget_exceeded", "card-settlements.read", [
+        `budget:maxRows=${String(input.grant.budget.maxRows)}`,
+      ]),
+    };
   const page = await queryCardSettlements(input.sql, {
     offset: offset ?? 0,
     ...(proposalId === undefined ? {} : { proposalId }),

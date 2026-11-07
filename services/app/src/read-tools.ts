@@ -46,6 +46,15 @@ import {
  * path is 404 and the MCP name `unknown_tool`.
  */
 export const REPORTED_STATE_TOOL_NAME = "kogane.reported-state.read";
+/**
+ * The カード照合 reads: served exactly while
+ * `GET /api/v2/reconciliation/card-settlements` is (its views exist); otherwise
+ * the path is 404 and the MCP name `unknown_tool`.
+ */
+export const CARD_SETTLEMENT_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "kogane.card-settlements.read",
+  "kogane.card-settlements.ownership",
+]);
 
 const schemas = {
   "kogane.instruments.history": z.strictObject({
@@ -145,9 +154,13 @@ const wholeStore = (grant: Grant) => grant.scopes.sources === "*" && grant.scope
  * The read tools listed to this grant: each only to a grant its service would
  * answer. A call by any other grant is refused by the service itself, with the
  * same closed code on both transports. `reportedState`: whether this deployment
- * serves `GET /api/v2/reported-state`.
+ * serves `GET /api/v2/reported-state`; `cardSettlements`: whether it serves
+ * `GET /api/v2/reconciliation/card-settlements` (`cardSettlementsAvailable`).
  */
-export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
+export function readMcpTools(
+  grant: Grant,
+  served: { reportedState: boolean; cardSettlements: boolean },
+) {
   return READ_MCP_TOOLS.filter((tool) => {
     switch (tool.name as ReadToolName) {
       case "kogane.instruments.history":
@@ -158,9 +171,10 @@ export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
         return grantAllows(grant, "summary.read") && wholeStore(grant);
       case "kogane.accounts.candidates":
       case "kogane.economic-readiness.read":
+        return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.card-settlements.read":
       case "kogane.card-settlements.ownership":
-        return grantAllows(grant, "records.read") && wholeStore(grant);
+        return served.cardSettlements && grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.audit.search":
       case "kogane.audit.get":
         return grantAllows(grant, "audit.read") && grant.scopes.accounts === "*";

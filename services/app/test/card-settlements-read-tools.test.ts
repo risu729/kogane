@@ -92,9 +92,30 @@ beforeEach(() => {
 });
 afterEach(() => vi.restoreAllMocks());
 
+/** The store with the settlement views not yet applied, as the route's test builds it. */
+function withoutSettlementViews(db: D1Database): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) =>
+          target.prepare(
+            sql.includes("sqlite_master") && sql.includes("card_settlement_reviews")
+              ? "SELECT 0 AS present"
+              : sql,
+          );
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+let schemaAhead = false;
+afterEach(() => {
+  schemaAhead = false;
+});
 const environment = (grant: unknown) =>
   ({
     ...env,
+    DB: schemaAhead ? withoutSettlementViews(env.DB) : env.DB,
     ACCESS_ISSUER: issuer,
     ACCESS_AUDIENCE: APP_AUD,
     ACCESS_MCP_AUDIENCE: MCP_AUD,
@@ -236,6 +257,44 @@ describe("card settlement reads for agents", () => {
         expect(await viaHttp.json()).toEqual(viaMcp.structuredContent);
         expect(viaMcp.structuredContent).toMatchObject({ code });
       }
+    }
+  });
+
+  it("page only as deep as the grant's maxRows, before any read", async () => {
+    const shallow = { ...GRANT, budget: { ...GRANT.budget, maxRows: 50 } };
+    expect((await http(LIST, { offset: 0 }, shallow)).status).toBe(200);
+    expect(
+      (await http(LIST, { proposalId: ID }, { ...GRANT, budget: { ...GRANT.budget, maxRows: 1 } }))
+        .status,
+    ).toBe(200);
+    const viaHttp = await http(LIST, { offset: 1 }, shallow);
+    const viaMcp = await call(LIST, { offset: 1 }, shallow);
+    expect(viaHttp.status).toBe(413);
+    expect(viaMcp.isError).toBe(true);
+    expect(await viaHttp.json()).toEqual(viaMcp.structuredContent);
+    expect(viaMcp.structuredContent).toMatchObject({
+      code: "budget_exceeded",
+      refs: ["budget:maxRows=50"],
+    });
+  });
+
+  it("are absent, not refused, while the route is not served", async () => {
+    schemaAhead = true;
+    const names = await listed();
+    expect(names).not.toContain(LIST);
+    expect(names).not.toContain(OWNERSHIP);
+    for (const [tool, args] of [
+      [LIST, {}],
+      [OWNERSHIP, { proposalId: ID }],
+    ] as const) {
+      expect((await http(tool, args)).status).toBe(404);
+      const response = await mcp({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: tool, arguments: args },
+      });
+      expect(JSON.stringify(response)).toContain("unknown_tool");
     }
   });
 
