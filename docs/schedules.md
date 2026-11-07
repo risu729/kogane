@@ -52,24 +52,28 @@ executions release their own leases on completion.
 
 A live execution does not leave its own lease behind because one D1 statement
 failed (`packages/collection/src/schedule-lease.ts`). A claim whose answer was
-lost clears its own reference before it reports the failure, so nothing
-contacts a provider and the next run is not refused as busy. The release on
-completion is tried up to three times; a failed release keeps the
-collection's own result. When every attempt fails, the lease stays held and
-the collector logs `collection_lease_release_failed` with the source id only.
-Both statements clear only the execution's own reference, never a lease another
-execution acquired. A process that dies mid-collection still needs the release
-above.
+lost clears its own reference and then reports the failure as
+`collection_failed`, so nothing contacts a provider and the next run is not
+refused as busy. A failed release on completion keeps the collection's own
+result. Either clearing statement is tried up to three times, with no wait
+between attempts. When every attempt fails, the lease stays held and the
+collector logs `collection_lease_release_failed` with only the source id and
+the attempt count; later runs are refused as busy until the release above. Both statements clear only the
+execution's own reference, never a lease another execution acquired. A process
+that dies mid-collection still needs the release above.
 
-On 2026-11-07 two leases had been held this way for weeks: `vpass` since
+On 2026-11-07 two leases had been held for weeks: `vpass` since
 2026-10-12 21:00 UTC and `sbi-vc-trade` since 2026-10-23 18:15 UTC. Every later
 occurrence of those sources failed `collection_busy`. The vpass occurrence had
 ended `uncertain` with no `finished_at`, so the Processor alarm waiting on the
-collector had itself stopped. The sbi-vc-trade keepalive had finished
-`collection_failed` 0.25 s after its claim, which matches one of the two
-failed-statement cases above. With the owner's go-ahead (2026-11-07 04:17 UTC), both were cleared at
-about 04:25 UTC by an exact-reference UPDATE on CORE D1, not through the
-page. These two releases therefore have no audit record.
+collector had itself stopped; that is the stopped-execution case, which only
+the release above clears. The sbi-vc-trade keepalive had finished
+`collection_failed` 0.25 s after its claim. That is consistent with either
+failed-statement case above, and also with the session object stopping between
+claim and release; the records do not say which. With the owner's go-ahead
+(2026-11-07 04:17 UTC), both were cleared at about 04:25 UTC by an
+exact-reference UPDATE on CORE D1, not through the page. These two releases
+therefore have no audit record.
 
 An accepted operations-API collection or session refresh runs through the same
 named collector RPC and the same lease

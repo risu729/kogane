@@ -1,9 +1,10 @@
 // Shared by manual and alarm entrypoints. An interrupted call never expires
 // into another provider login. The operator must explicitly clear an old lease.
 //
-// A live call never leaves its own lease behind because one D1 statement
+// A live call does not leave its own lease behind because one D1 statement
 // failed: a claim whose answer was lost clears its own reference before it
-// reports the failure, and the release is retried. Both clear only this call's
+// reports the failure, and the release is retried. Only when every attempt to
+// clear fails does the lease stay held (logged). Both clear only this call's
 // own reference, so neither can free a lease another execution holds.
 export interface ScheduleLeaseDatabase {
   prepare(sql: string): {

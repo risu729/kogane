@@ -4,6 +4,7 @@ import {
   withCollectionLease,
   type ScheduleLeaseDatabase,
 } from "../src/schedule-lease";
+import { scheduledFailure } from "../src/schedule-result";
 
 /**
  * One source's lease row in memory, with the three statements the lease uses.
@@ -75,6 +76,7 @@ test("a claim whose answer is lost clears its own lease and contacts nobody", as
   ).rejects.toThrow("synthetic lost answer");
   expect(calls).toBe(0);
   expect(state.ref).toBeNull();
+  expect(logged).toEqual([]);
   // The next execution is not refused as busy.
   state.failClaimAfterCommit = false;
   await withCollectionLease({ SCHEDULE_DB: db }, "synthetic", async () => {
@@ -82,6 +84,42 @@ test("a claim whose answer is lost clears its own lease and contacts nobody", as
   });
   expect(calls).toBe(1);
   expect(state.ref).toBeNull();
+});
+
+test("a lost claim answer is a failed collection, not a busy source", async () => {
+  const { db, state } = leaseStore();
+  state.failClaimAfterCommit = true;
+  const error = await withCollectionLease(
+    { SCHEDULE_DB: db },
+    "synthetic",
+    async () => undefined,
+  ).then(
+    () => null,
+    (caught: unknown) => caught,
+  );
+  expect(scheduledFailure(error).failureCode).toBe("collection_failed");
+});
+
+test("a lost claim answer whose clearing fails every attempt reports the claim's error and logs", async () => {
+  const { db, state } = leaseStore();
+  state.failClaimAfterCommit = true;
+  state.failReleases = LEASE_RELEASE_ATTEMPTS;
+  let calls = 0;
+  await expect(
+    withCollectionLease({ SCHEDULE_DB: db }, "synthetic", async () => {
+      calls += 1;
+    }),
+  ).rejects.toThrow("synthetic lost answer");
+  expect(calls).toBe(0);
+  expect(state.ref).not.toBeNull();
+  expect(state.releaseCalls).toBe(LEASE_RELEASE_ATTEMPTS);
+  expect(logged.map((line) => JSON.parse(line))).toEqual([
+    {
+      event: "collection_lease_release_failed",
+      source: "synthetic",
+      attempts: LEASE_RELEASE_ATTEMPTS,
+    },
+  ]);
 });
 
 test("a claim that failed before writing leaves another execution's lease intact", async () => {
