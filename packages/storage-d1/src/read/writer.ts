@@ -40,9 +40,9 @@ import {
 import { runBatch, type D1Like, type D1StatementLike } from "../d1.ts";
 
 /** Rows written in one batch with the checkpoint that records them. */
-export const READ_WRITE_CHUNK = 100;
+const READ_WRITE_CHUNK = 100;
 /** Complete snapshots kept besides the published one, so an open cursor survives a rebuild. */
-export const READ_RETAINED_SNAPSHOTS = 2;
+const READ_RETAINED_SNAPSHOTS = 2;
 
 export interface ReadInstance {
   read_instance_id: string;

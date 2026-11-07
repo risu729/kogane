@@ -1,4 +1,4 @@
-import type { CollectionManifest, CollectorArtifact, StoredArtifact } from "./types";
+import type { CollectorArtifact, StoredArtifact } from "./types";
 
 export function runPrefix(startedAt: string, runId: string): string {
   const date = startedAt.slice(0, 10).replaceAll("-", "/");
@@ -45,28 +45,6 @@ export async function storeArtifact(options: {
   });
   if (!stored) throw new Error("artifact_key_already_exists");
   return record;
-}
-
-export async function storeManifest(options: {
-  bucket: R2Bucket;
-  prefix: string;
-  manifest: CollectionManifest;
-}): Promise<string> {
-  const key = `${options.prefix}/manifest.json`;
-  const encoded = new TextEncoder().encode(JSON.stringify(options.manifest));
-  const sha256 = await sha256Hex(encoded);
-  const stored = await options.bucket.put(key, encoded, {
-    onlyIf: { etagDoesNotMatch: "*" },
-    sha256,
-    httpMetadata: { contentType: "application/json" },
-    customMetadata: {
-      source: options.manifest.source,
-      runId: options.manifest.runId,
-      status: options.manifest.status,
-    },
-  });
-  if (!stored) throw new Error("manifest_key_already_exists");
-  return key;
 }
 
 async function sha256Hex(value: Uint8Array): Promise<string> {

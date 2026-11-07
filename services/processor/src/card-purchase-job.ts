@@ -745,6 +745,19 @@ WHERE proposal_digest IN (SELECT value FROM json_each(?1))`,
   return linked;
 }
 
+/**
+ * The in-batch state of a pair the reconciliation lane accepted by rule and
+ * nobody merged: ?1 the proposal, ?2 the relation kind, ?3 and ?4 its ends.
+ * The triple's current status is read as the candidates read it
+ * (`CANDIDATE_RELATIONS_SQL`): its newest decision by creation time and then
+ * insertion order, so a proposal recorded after the acceptance does not hold
+ * the merge back (ADR 0017's amendment of 2026-11-06).
+ */
+export const ACCEPTED_APART_GUARD_SQL = `EXISTS(SELECT 1 FROM reconciliation_proposals p JOIN decision_revisions d ON d.id=p.decision_revision_id
+  WHERE p.id=? AND p.status='accepted' AND d.method='rule')
+ AND (SELECT r.status FROM entity_relations r WHERE r.kind=? AND r.from_ref=? AND r.to_ref=?
+  ORDER BY r.status<>'proposed' DESC,r.created_at DESC,r.rowid DESC LIMIT 1)='accepted'`;
+
 /** A decision someone other than a rule recorded about either of two events (`event:<id>`). */
 const REVIEWED_EVENT_SQL = `SELECT d.id FROM decision_revisions d
  WHERE d.subject_kind='relation' AND d.subject_ref IN (?,?) AND d.method<>'rule' LIMIT 1`;
@@ -802,10 +815,7 @@ async function mergeLinked(
           binds: [proposalId],
         }
       : {
-          sql: `EXISTS(SELECT 1 FROM reconciliation_proposals p JOIN decision_revisions d ON d.id=p.decision_revision_id
-  WHERE p.id=? AND p.status='accepted' AND d.method='rule')
- AND (SELECT r.status FROM entity_relations r WHERE r.kind=? AND r.from_ref=? AND r.to_ref=?
-  ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1)='accepted'`,
+          sql: ACCEPTED_APART_GUARD_SQL,
           binds: [proposalId, PENDING_POSTED_RELATION_KIND, relation.fromRef, relation.toRef],
         };
     // Re-checked inside the batch: a review committed since the read above

@@ -4,9 +4,7 @@ import type { ReportedState } from "../../../packages/domain/src/reported-state.
 
 export type {
   ReportedAccount,
-  ReportedBalance,
   ReportedPayable,
-  ReportedPosition,
   ReportedSnapshot,
   ReportedState,
 } from "../../../packages/domain/src/reported-state.ts";

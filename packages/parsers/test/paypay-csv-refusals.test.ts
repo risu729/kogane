@@ -41,7 +41,13 @@ describe("paypay-csv refuses or flags what it cannot read exactly", () => {
       ['"1,00"', "", 'row 2: outgoing "1,00" unparseable'],
       ["100.5", "", 'row 2: outgoing "100.5" unparseable'],
       ["", "abc", 'row 2: incoming "abc" unparseable'],
-      ["", "△-5", 'row 2: incoming "△-5" unparseable'],
+      // A sign marker is refused before the value is read (0.2.2), so a
+      // doubly signed cell gets the closed sign warning, not "unparseable".
+      [
+        "",
+        "△-5",
+        "row 2: incoming amount carries a sign; provider-signed amounts are unsupported, amount left empty",
+      ],
     ] as const) {
       const { observation, warnings } = only(
         `${HEADER}\n${row("2026/08/01 00:00:00", outgoing, incoming)}\n`,
@@ -51,13 +57,20 @@ describe("paypay-csv refuses or flags what it cannot read exactly", () => {
     }
   });
 
-  test("a marker-signed amount keeps its display text when it has no decimal form", () => {
-    // Only the display-text fallback is pinned. Whether a signed value in a
-    // directional column is accepted (and with which sign) is unobserved
-    // provider semantics, so neither amountMinor nor the warnings are pinned.
-    const { observation } = only(`${HEADER}\n${row("2026/08/01 00:00:00", "", "△5")}\n`);
-    expect(observation.amountText).toBe("△5");
+  test("an amount with no decimal form keeps its display text; a signed one keeps none", () => {
+    // The display-text fallback holds for an unsigned value that has no
+    // decimal form.
+    const { observation } = only(`${HEADER}\n${row("2026/08/01 00:00:00", "", '"1,00"')}\n`);
+    expect(observation.amountText).toBe("1,00");
     expect(observation.amountScale).toBeUndefined();
+    // A sign in a directional column is unobserved provider semantics
+    // (ADR 0004): since 0.2.2 such a row carries no amount at all, and only
+    // its verbatim cells keep the value.
+    const signed = only(`${HEADER}\n${row("2026/08/01 00:00:00", "", "△5")}\n`).observation;
+    expect(signed.amountMinor).toBeUndefined();
+    expect(signed.amountText).toBeUndefined();
+    expect(signed.amountScale).toBeUndefined();
+    expect(signed.extra["cells"]).toContain("△5");
     // A zero outgoing amount is zero, never negative zero.
     const zero = only(`${HEADER}\n${row("2026/08/01 00:00:00", "0", "")}\n`).observation;
     expect(Object.is(zero.amountMinor, 0)).toBe(true);

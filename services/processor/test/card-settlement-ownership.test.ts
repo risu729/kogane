@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { startPipeline, seedArtifact, publishParse } from "./harness.ts";
 import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
+import { cardSettlementOwnershipCtes } from "../../../packages/read-model/src/card-settlement-ownership.ts";
 
 let mf: Miniflare,
   env: Env,
@@ -125,4 +126,59 @@ test("a dated claim rejected through another alias no longer vetoes an independe
   expect(await owner(observationId)).toBeNull();
   await relation(accountId, "party:other", "rejected");
   expect(await owner(observationId)).toBe("party:original");
+});
+
+/** A later ownership proposal, as any proposal writer appends one. */
+async function propose(from: string, to: string) {
+  const id = "ownership-proposal-" + ++sequence,
+    decision = "decision-" + id;
+  await db.batch([
+    db
+      .prepare(`INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,reason,evidence_refs_json,created_at)
+  VALUES(?,'relation',?,1,'propose','ai','synthetic-agent','Synthetic proposal','[]','2026-09-14')`)
+      .bind(decision, id),
+    db
+      .prepare(`INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
+  VALUES(?,'liable_party',?,?,NULL,NULL,'proposed',?,'[]','2026-09-14')`)
+      .bind(id, from, to, decision),
+  ]);
+}
+/** The owner every reader takes: the keyed CTEs of packages/read-model. */
+async function keyedOwner(observationId: number): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `WITH observed AS (SELECT ? AS observation_id), ${cardSettlementOwnershipCtes("balance")}
+      SELECT owner_ref FROM ownership WHERE observation_id=?`,
+    )
+    .bind(observationId, observationId)
+    .first<{ owner_ref: string | null }>();
+  return row?.owner_ref ?? null;
+}
+// ADR 0017's amendment of 2026-11-06. The 0044 view, which no reader
+// queries, keeps the shipped rule: its answers are asserted only to show what
+// the readers no longer do.
+test("a proposal recorded after an accepted owner leaves that owner in force", async () => {
+  const { accountId, observationId } = await account();
+  await relation(accountId, "party:original", "accepted");
+  expect(await keyedOwner(observationId)).toBe("party:original");
+  await propose("account:" + accountId, "party:original");
+  expect(await keyedOwner(observationId)).toBe("party:original");
+  expect(await owner(observationId)).toBeNull();
+});
+test("a proposal recorded after a dated claim does not lift its veto", async () => {
+  const { accountId, observationId } = await account();
+  await relation("account:" + accountId, "party:original", "accepted");
+  await relation("account:" + accountId, "party:other", "accepted", true);
+  expect(await keyedOwner(observationId)).toBeNull();
+  await propose(accountId, "party:other");
+  expect(await keyedOwner(observationId)).toBeNull();
+  expect(await owner(observationId)).toBe("party:original");
+});
+test("a later decision still retires a claim, as before", async () => {
+  const { accountId, observationId } = await account();
+  await relation(accountId, "party:original", "accepted");
+  await propose(accountId, "party:original");
+  await relation("account:" + accountId, "party:original", "rejected");
+  expect(await keyedOwner(observationId)).toBeNull();
+  expect(await owner(observationId)).toBeNull();
 });

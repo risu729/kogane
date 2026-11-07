@@ -27,6 +27,7 @@ import {
   gitIsAncestor,
   isReleaseRecord,
   latestRelease,
+  main as ledgerMain,
   normalizeRecord,
   readLedger,
   recordedWorkerShas,
@@ -966,5 +967,75 @@ describe("what a run actually did (finding 2)", () => {
       expect.objectContaining({ outcome: "kept", sha: "e".repeat(40) }),
     ]);
     expect(String(releaseProgress(kept, {}).summary)).toContain("0/0 deployed");
+  });
+
+  test("the status writer refuses success without a readable progress record", async () => {
+    // The progress check is the belt to the workflow's `success()` braces; a
+    // rewiring that loses or renames the progress file must not turn it off.
+    const posted: { path: string; body: unknown }[] = [];
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      async fetch(request) {
+        posted.push({ path: new URL(request.url).pathname, body: await request.json() });
+        return Response.json({ id: 1 }, { status: 201 });
+      },
+    });
+    const directory = temporaryDirectory("kogane-status-");
+    const env = {
+      GITHUB_TOKEN: "synthetic",
+      GITHUB_REPOSITORY: "owner/repo",
+      GITHUB_API_URL: `http://127.0.0.1:${String(server.port)}`,
+    };
+    const status = (progress: string | undefined, state = "success") =>
+      ledgerMain(
+        [
+          "status",
+          "--deployment",
+          "9",
+          "--state",
+          state,
+          "--description",
+          "synthetic",
+          ...(progress === undefined ? [] : ["--progress", progress]),
+        ],
+        env,
+      );
+    const write = (name: string, value: unknown): string => {
+      const file = join(directory, name);
+      writeFileSync(file, `${JSON.stringify(value)}\n`);
+      return file;
+    };
+    try {
+      const missing = join(directory, "absent.json");
+      for (const progress of [
+        undefined,
+        "",
+        missing,
+        write("null.json", null),
+        write("shapeless.json", { summary: "1/1 deployed" }),
+        write("wrong-version.json", { progressVersion: "other", workers: [] }),
+      ])
+        await expect(status(progress)).rejects.toThrow(
+          /refusing to record deployment 9 as success/u,
+        );
+      expect(posted).toEqual([]);
+
+      // A failure status never needs the progress record: the run that most
+      // needs an account of itself is the one that stopped before writing it.
+      expect(await status(missing, "failure")).toBe(0);
+      const deployed = releaseProgress(record, { "deploy-processor": { outcome: "success" } });
+      expect(await status(write("deployed.json", deployed))).toBe(0);
+      expect(posted.map((entry) => entry.path)).toEqual([
+        "/repos/owner/repo/deployments/9/statuses",
+        "/repos/owner/repo/deployments/9/statuses",
+      ]);
+      expect(posted.map((entry) => (entry.body as { state: string }).state)).toEqual([
+        "failure",
+        "success",
+      ]);
+    } finally {
+      await server.stop(true);
+    }
   });
 });

@@ -14,7 +14,7 @@ for current behavior.
 - [ADR 0001: Keep A/B/C/D as provenance, add independent domain axes](0001-domain-axes.md)
 - [ADR 0002: Recognise card purchases per provider row, one live holder per key](0002-card-purchase-recognition.md)
 - [ADR 0003: Relative period labels are evidence; the month is derived afterwards](0003-relative-period-labels.md)
-- [ADR 0004: Accept only the payment-type shapes production evidence shows](0004-payment-type-shapes-from-evidence.md)
+- [ADR 0004: Accept only the payment-type shapes production evidence shows](0004-payment-type-shapes-from-evidence.md) — accepted; amendment 2026-11-07 (accepted): closed reasons for unrecognised rows and `refundsAllocated: false` on the purchases read and `kogane.purchases.explain`
 - [ADR 0005: Decide the MyJCB statement state from the page, not export links](0005-myjcb-statement-state-from-page.md)
 - [ADR 0006: Keep the reconciliation lane to provider identifiers and the matching window](0006-reconciliation-lane-scope.md)
 - [ADR 0007: Key MyJCB confirmed statements by the payment month the page names](0007-myjcb-statement-identity.md)
@@ -86,6 +86,7 @@ for current behavior.
 - [ADR 0076: Classify SBI Shinsei's FX board and stage references as non-account statements under identity policy version 2](0076-sbi-shinsei-non-account-identity.md) — accepted; the sweep re-identifies SBI Shinsei parses append-only after deployment
 - [ADR 0077: Propose aggregator-to-direct account containment from confirmed connection reviews; never propose the same account without leaf evidence](0077-account-connection-candidates.md) — accepted; read, route, agent tool and page; decisions through `relation.accept` / `relation.reject`
 - [ADR 0079: Index pending parse runs so the sweep's maintenance reads only them](0079-pending-parse-run-index.md) — accepted; additive partial index, migration 0083
+- [ADR 0080: A change planned again after its plan expired is a renewal with its own id](0080-renew-expired-change-plans.md) — accepted; `createPlan` renews by lifetime-long window, `simulate` re-derives the id
 - [ADR 0081: Every operation the web UI offers is also an MCP operation, served by the same application service](0081-ui-parity-through-mcp.md) — accepted; two screen-only `ui` entries and some read pages still lack MCP tools (the six `ops.*` tools are served to every MCP client since ADR 0084), all MCP-path SQL is in packages (import-graph guard test); catalogue and read-route guard tests with allow-listed gaps (`ui-mcp-parity.test.ts`); point 3 amended by ADR 0084
 - [ADR 0082: An account with no recorded owner is the owner's, recorded per account as an owner-default ownership decision](0082-owner-default-ownership.md) — accepted; a closed marker on the existing ownership review, no read-time default
 - [ADR 0083: Release the Vpass collector's statement pages under `terminal-registration-v3`; only a successful card run is parsed](0083-release-vpass-collector-statement-pages.md) — accepted; ends ADR 0022's Vpass withholding

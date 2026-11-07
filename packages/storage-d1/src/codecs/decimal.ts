@@ -22,7 +22,7 @@ export interface DecimalColumns {
 }
 
 /** The reason recorded beside a non-exact value; never provider content. */
-export const UNKNOWN_REASON = "value_not_exact";
+const UNKNOWN_REASON = "value_not_exact";
 
 /**
  * The columns a value writes. An exact value writes both parts; anything else
@@ -51,7 +51,7 @@ export function decodeDecimal(
 }
 
 /** Whether a column value is one of the four statuses decimal-v1 defines. */
-export function isValueStatus(value: unknown): value is ValueStatus {
+function isValueStatus(value: unknown): value is ValueStatus {
   return typeof value === "string" && (VALUE_STATUSES as readonly string[]).includes(value);
 }
 

@@ -19,7 +19,7 @@ export interface ArtifactSpec {
   role?: string;
 }
 
-export interface UnitSpec {
+interface UnitSpec {
   outcome: "success" | "partial" | "failed" | "human_required" | "unknown";
   code?: string;
 }

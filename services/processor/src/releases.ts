@@ -25,9 +25,9 @@ import {
 } from "./metadata-extractors/index.ts";
 
 /** The metadata a parser may read besides the raw bytes (`ArtifactMeta`). */
-export const PARSER_INPUT_CONTRACT_VERSION = "artifact-meta-v1";
+const PARSER_INPUT_CONTRACT_VERSION = "artifact-meta-v1";
 /** Observations plus typed issues and coverage claims (contract v2, A03). */
-export const PARSER_OUTPUT_CONTRACT_VERSION = "parse-result-v2";
+const PARSER_OUTPUT_CONTRACT_VERSION = "parse-result-v2";
 
 /** Release ids are used as `observation_parse_jobs.target_release`, so they
  * must satisfy that route's pattern: letters, digits, dot, underscore, dash. */
@@ -45,7 +45,7 @@ export interface ReleaseRow {
   registered_at: string;
 }
 
-export function transformManifest(
+function transformManifest(
   parser: Pick<Parser, "name" | "version">,
   metadataExtractorRelease: MetadataExtractorRelease = LEGACY_METADATA_RELEASE,
 ): TransformManifest {
@@ -95,7 +95,7 @@ export async function releaseIdentity(
  * the raw digest are not here: the digest is a separate fingerprint input and
  * the row id is not an input at all.
  */
-export function parserVisibleMetadata(meta: ArtifactMeta): Record<string, unknown> {
+function parserVisibleMetadata(meta: ArtifactMeta): Record<string, unknown> {
   return {
     artifactKey: meta.artifactKey ?? null,
     dataset: meta.dataset,
@@ -140,7 +140,7 @@ export interface RegisteredRelease extends ParserReleaseIdentity {
 }
 
 /** Release identities of the deployed registry under one extractor release. */
-export async function deployedReleases(
+async function deployedReleases(
   metadataExtractorRelease: MetadataExtractorRelease = LEGACY_METADATA_RELEASE,
   parsers: readonly Pick<Parser, "name" | "version">[] = PARSERS,
 ): Promise<RegisteredRelease[]> {
@@ -199,11 +199,6 @@ export async function registerDeployedReleases(
   const results = await db.batch(releases.map((release) => releaseInsert(db, release, now)));
   registered = true;
   return results.reduce((total, result) => total + result.meta.changes, 0);
-}
-
-/** Test seam: forget that this isolate already registered its releases. */
-export function resetReleaseRegistration(): void {
-  registered = false;
 }
 
 export async function lookupRelease(db: D1Database, releaseId: string): Promise<ReleaseRow | null> {

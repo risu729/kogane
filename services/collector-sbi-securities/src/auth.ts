@@ -162,7 +162,7 @@ export async function requestPasskeyAccessToken(options: {
   return decryptPasskeyToken(encryptedToken, handshake.privateKeyPem);
 }
 
-export class CookieBag {
+class CookieBag {
   readonly #values = new Map<string, string>();
 
   absorb(response: Response): void {

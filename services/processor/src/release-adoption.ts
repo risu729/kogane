@@ -28,10 +28,10 @@ export function candidatesEnabled(env: unknown): boolean {
   );
 }
 
-export const SOURCE_PATTERN = /^[a-z0-9-]{1,100}$/u;
-export const DATASET_PATTERN = /^[A-Za-z0-9._-]{1,200}$/u;
-export const PARSER_NAME_PATTERN = /^[a-z0-9-]{1,100}$/u;
-export const COMPARISON_SAMPLE_LIMIT = 50;
+const SOURCE_PATTERN = /^[a-z0-9-]{1,100}$/u;
+const DATASET_PATTERN = /^[A-Za-z0-9._-]{1,200}$/u;
+const PARSER_NAME_PATTERN = /^[a-z0-9-]{1,100}$/u;
+const COMPARISON_SAMPLE_LIMIT = 50;
 
 export class ReleaseCommandError extends Error {}
 const fail = (code: string): never => {

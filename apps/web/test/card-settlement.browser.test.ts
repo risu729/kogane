@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { settlementReview } from "../../../packages/application/test/card-settlement-fixture.ts";
 import { cardSettlementImpact } from "../../../packages/domain/src/card-settlement.ts";
@@ -582,6 +583,17 @@ describe.if(runnable)("card settlement review", () => {
     ).toBe(true);
     await page.close();
   });
+
+  test("the review and its confirmation pass the accessibility audit", async () => {
+    const page = await open();
+    expect(await auditView(page)).toEqual([]);
+    await page.getByLabel("判断の理由", { exact: true }).fill("同一保有者の根拠がないため");
+    await page.getByRole("button", { name: "却下内容を確認" }).click();
+    await page.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
   test("one statement's earlier candidates are collapsed under the one to review and stay reachable", async () => {
     const stale = (n: number) => ({
       ...settlementReview(),
@@ -605,6 +617,7 @@ describe.if(runnable)("card settlement review", () => {
     // The full list adds the one the group did not carry, and repeats none.
     expect(await page.locator(".settlement-older section.panel").count()).toBe(2);
     expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(3);
+    expect(await auditView(page)).toEqual([]);
     await page.setViewportSize({ width: 390, height: 844 });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),

@@ -125,8 +125,10 @@ export type CandidateGap = (typeof CANDIDATE_GAPS)[number];
 /**
  * Where a candidate stands, read from stored records only:
  * - `adopted`: both identifiers currently map to one instrument;
- * - `rejected`: the latest `listed_as` relation between one identifier and the
- *   other's current instrument is rejected, and they do not share one;
+ * - `rejected`: the current `listed_as` relation between one identifier and
+ *   the other's current instrument is rejected, and they do not share one (the
+ *   current relation is its newest decision; a later proposal does not
+ *   replace it);
  * - `proposed`: neither.
  */
 export const CANDIDATE_STATUSES = ["proposed", "adopted", "rejected"] as const;
@@ -212,8 +214,9 @@ export type InstrumentCandidateResult =
   | { ok: false; error: "candidate_limit_exceeded" | "duplicate_identifier" };
 
 /**
- * The latest `listed_as` status per relation, keyed by `listedAsKey`. The
- * caller reads the newest row per (from, to) as the change lifecycle does.
+ * The current `listed_as` status per relation, keyed by `listedAsKey`. The
+ * caller reads, per (from, to), the newest decision as the change lifecycle
+ * orders a relation's history, or the newest proposal when there is none.
  */
 export type ListedAsStatuses = ReadonlyMap<string, StoredRelationStatus>;
 

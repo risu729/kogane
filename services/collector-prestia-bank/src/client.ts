@@ -16,7 +16,7 @@ const MAX_BYTES = 1024 * 1024;
 const CORE = ["_FRAMEID", "_TARGETID", "_LUID", "_TOKEN", "_FORMID", "_SUBINDEX", "LOCALE"];
 // Derived Android WebView profile used by the successful local HTTP trial;
 // this is not a claim that a Worker's TLS stack equals Android's.
-export const PRESTIA_USER_AGENT =
+const PRESTIA_USER_AGENT =
   "Mozilla/5.0 (Linux; Android 15; XIG03 Build/AQ3A.240912.001; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/153.0.8010.36 Mobile Safari/537.36";
 export const PRESTIA_ERROR_CODES = [
   "credentials-missing",

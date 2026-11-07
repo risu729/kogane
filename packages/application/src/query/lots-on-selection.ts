@@ -47,9 +47,9 @@ import {
 } from "../../../read-model/src/economic-selector.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 
-export const LOTS_ON_SELECTION_QUERY_SCHEMA = "lots-on-selection-query-v1";
+const LOTS_ON_SELECTION_QUERY_SCHEMA = "lots-on-selection-query-v1";
 /** The most instrument identifiers one query asks about. */
-export const LOTS_QUERY_MAX_INSTRUMENTS = 16;
+const LOTS_QUERY_MAX_INSTRUMENTS = 16;
 /**
  * The most identifiers one query reads for its instruments (the asked ones and
  * every other identifier currently mapped to the same instruments); the
@@ -95,10 +95,13 @@ export const LOT_INSTRUMENT_IDENTIFIERS_SQL = `SELECT m.identifier_id,
  WHERE m.instrument_id IN (SELECT value FROM json_each(?1))
  GROUP BY m.identifier_id ORDER BY m.identifier_id LIMIT ${LOTS_QUERY_MAX_IDENTIFIERS + 1}`;
 
-/** Closed codes of `LotsOnSelectionRefusedError` raised by the query itself. */
+/**
+ * Closed codes of `LotsOnSelectionRefusedError` raised by the query itself.
+ * @public ADR 0059 names this refusal vocabulary; no module imports it.
+ */
 export const LOTS_ON_SELECTION_REFUSALS = ["instrument_identifier_bound_exceeded"] as const;
 
-export const LOTS_ON_SELECTION_INPUT_ERRORS = ["invalid_query", "cut_in_future"] as const;
+const LOTS_ON_SELECTION_INPUT_ERRORS = ["invalid_query", "cut_in_future"] as const;
 export type LotsOnSelectionInputErrorCode = (typeof LOTS_ON_SELECTION_INPUT_ERRORS)[number];
 
 export class LotsOnSelectionInputError extends Error {
@@ -139,11 +142,11 @@ export interface LotsOnSelectionInput {
   now: string;
 }
 
-export type LotsOnSelectionQueryStatus = "unavailable" | LotsOnSelectionStatus;
-export type LotsOnSelectionQueryReason = "economic_guard_missing" | LotsOnSelectionReason;
+type LotsOnSelectionQueryStatus = "unavailable" | LotsOnSelectionStatus;
+type LotsOnSelectionQueryReason = "economic_guard_missing" | LotsOnSelectionReason;
 
 /** The query's own pins around the adapter's outer manifest. */
-export interface LotsOnSelectionQueryManifest {
+interface LotsOnSelectionQueryManifest {
   schemaVersion: typeof LOTS_ON_SELECTION_QUERY_SCHEMA;
   account: string;
   /** The asked instrument identifiers, sorted. */

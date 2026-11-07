@@ -8,6 +8,7 @@ import { readInstrumentHistoryForGrant } from "../../../packages/application/src
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import {
   reviewInstrumentCandidates,
   type InstrumentCandidateView,
@@ -438,4 +439,10 @@ describe.if(runnable)("instrument candidate review", () => {
     expect(posted).toEqual([]);
     await tab.close();
   });
+
+  test("the candidate review passes the accessibility audit", async () => {
+    const tab = await open();
+    expect(await auditView(tab)).toEqual([]);
+    await tab.close();
+  }, 60_000);
 });

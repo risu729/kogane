@@ -1,5 +1,4 @@
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
@@ -11,12 +10,13 @@ import { currentTransactions, observationDetail } from "../src/queries.ts";
 import {
   insertFetchArtifact,
   insertFetchRun,
-  openStore,
   putRawObject,
   upsertSource,
+  type Store,
 } from "../src/store.ts";
 import { runParsers } from "../src/parse.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
+import { freshTestStore } from "./test-store.ts";
 
 const fixture = (name: string): Uint8Array =>
   readFileSync(
@@ -241,7 +241,7 @@ describe("moneyforward Layer B parsers", () => {
   });
 
   test("latest successful empty monthly snapshot clears older current rows", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-current-")));
+    const store = freshTestStore("kogane-moneyforward-current-");
     upsertSource(store, {
       id: "moneyforward-me",
       provider: "MoneyForward ME",
@@ -268,7 +268,7 @@ describe("moneyforward Layer B parsers", () => {
   });
 
   test("rejects incomplete and unrecognized empty snapshots without clearing complete rows", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-incomplete-")));
+    const store = freshTestStore("kogane-moneyforward-incomplete-");
     upsertSource(store, {
       id: "moneyforward-me",
       provider: "MoneyForward ME",
@@ -302,11 +302,11 @@ describe("moneyforward Layer B parsers", () => {
     store.db.close();
   });
 
-  // Twelve on-disk stores and twelve parser passes: the slowest test in this
-  // file, ~0.4-1.0s locally but an order of magnitude more on a loaded CI
-  // runner. An explicit budget keeps that from reading as a failure.
+  // Twelve parser passes over one disposable on-disk store (test-store.ts):
+  // the slowest test in this file, and slower still on a loaded CI runner.
+  // An explicit budget keeps that from reading as a failure.
   test("preserves identical occurrences across twelve-month overlap and refetches", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-overlap-")));
+    const store = freshTestStore("kogane-moneyforward-overlap-");
     upsertSource(store, {
       id: "moneyforward-me",
       provider: "MoneyForward ME",
@@ -346,7 +346,7 @@ describe("moneyforward Layer B parsers", () => {
   }, 30_000);
 
   test("failed and partial runs cannot emit or clear a complete month", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-failed-")));
+    const store = freshTestStore("kogane-moneyforward-failed-");
     upsertSource(store, {
       id: "moneyforward-me",
       provider: "MoneyForward ME",
@@ -412,7 +412,7 @@ describe("moneyforward Layer B parsers", () => {
       moneyForwardMonthlyTransactions.parse(invalidNeighbor, meta({ artifactKey: februaryKey })),
     ).toThrow(/signed JPY/u);
 
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-edges-")));
+    const store = freshTestStore("kogane-moneyforward-edges-");
     upsertSource(store, {
       id: "moneyforward-me",
       provider: "MoneyForward ME",
@@ -509,7 +509,7 @@ describe("moneyforward Layer B parsers", () => {
   });
 
   test("account identity survives ordinal changes and legacy ordinal metadata fails closed", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-moneyforward-identity-")));
+    const store = freshTestStore("kogane-moneyforward-identity-");
     upsertSource(store, {
       id: "moneyforward-me",
       provider: "MoneyForward ME",
@@ -569,7 +569,7 @@ function tooltip(date: string, occurrences = 1): string {
 }
 
 function addSnapshot(
-  store: ReturnType<typeof openStore>,
+  store: Store,
   externalRunId: string,
   fetchedAt: string,
   bytes: Uint8Array,
