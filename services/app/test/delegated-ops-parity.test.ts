@@ -152,6 +152,7 @@ async function delegatedRecord(operation: string, idempotencyKey: string) {
 describe("operations requests over MCP under a delegation (ADR 0081)", () => {
   it("publishes all six tools to a delegation holding every operations capability, and only those it holds", async () => {
     expect((await listed(configuration())).sort()).toEqual([...OPS_TOOL_NAMES].sort());
+    // A maintainer holds import, replay and read by its role; projection is the one added.
     expect(await listed(configuration(["operations.projection.request"]))).toEqual([
       "kogane.ops.import.request",
       "kogane.ops.replay.request",
@@ -256,6 +257,14 @@ describe("operations requests over MCP under a delegation (ADR 0081)", () => {
       expect((await delegatedRecord(operation, `${key}-mcp`)).results, name).toEqual([
         { principal_kind: "delegated", path: "mcp", subject: OWNER, operation },
       ]);
+      const followedOverHttp = await route(`/operations/${String(overHttp.body["operationId"])}`);
+      const followedOverMcp = await tool("kogane.ops.operation.get", {
+        operationId: overMcp.structuredContent["operationId"],
+      });
+      expect(followedOverMcp.isError, name).not.toBe(true);
+      expect(receipt(followedOverMcp.structuredContent), name).toEqual(
+        receipt(followedOverHttp.body),
+      );
     }
   });
 });
