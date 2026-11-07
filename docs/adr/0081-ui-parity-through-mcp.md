@@ -119,14 +119,18 @@ What the code does today (main `02a915a`):
   of `services/app/src` that the screens share, outside that guard:
   `scopedParseRuns` in `agent-service.ts`, the proposal store in
   `proposals.ts`, and the schema probe in `reported-state-api.ts`. They move
-  into `packages/application` next, and join the guard when they do. No
-  catalogue or read-route guard test exists yet.
+  into `packages/application` next, and join the guard when they do.
 - The six `ops.*` tools: `services/app/test/delegated-ops-parity.test.ts`
   checks that a delegation holding every `operations.*` capability is shown
   all six and a narrower one only those it holds, and that each request gives
   the same receipt and stores the same request over MCP as over its HTTP
   route (collection and session refresh after prepare and confirm), and that
   following it with `kogane.ops.operation.get` reads the same receipt.
+- 2026-11-07 (first slice): the catalogue and read-route guards are in
+  [`ui-mcp-parity.test.ts`](../../services/app/test/ui-mcp-parity.test.ts),
+  with allow-lists of the gaps they found, among them 35 UI read routes with
+  no MCP read
+  ([agent API: parity guards](../agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07)).
 - After the first slice: the catalogue test fails when a `ui` entry lacks a
   published `mcp` tool, and the read-route test fails when a UI read route has
   no MCP read. A test per new tool compares its result with the HTTP route's result
