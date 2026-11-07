@@ -15,7 +15,7 @@ export async function cardSettlementsAvailable(env: Env): Promise<boolean> {
   return row?.present === 2;
 }
 
-/** Operator-only until the agent query service can enforce per-candidate source scopes. */
+/** Operator-only; agents read the same answers through `kogane.card-settlements.*` on a whole-store grant. */
 export async function cardSettlementsApi(
   request: Request,
   env: Env,

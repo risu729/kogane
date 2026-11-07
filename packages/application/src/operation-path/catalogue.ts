@@ -249,6 +249,22 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // The カード照合 page's reads (ADR 0081): its review list or one review, and
+  // one candidate's ownership review, through the page's own services.
+  "card-settlements.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  "card-settlements.ownership": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "economic-readiness.read": {
     risk: ["R0"],
     effect: null,

@@ -398,6 +398,26 @@ retracts the interpretation, never the bank movement or original evidence.
 Rejected and withdrawn candidates remain in history; a different correspondence
 is reviewed as a different candidate. Historical citations keep resolving.
 
+### Agent reads
+
+An agent holding `records.read` on a whole-store grant reads the same two
+answers as the page, over MCP or the agent HTTP route
+([agent API](agent-api.md)): `kogane.card-settlements.read` (`{}` or
+`{"offset": n}` for a page, `{"proposalId": id}` for one review) is
+`GET /api/v2/reconciliation/card-settlements`, and
+`kogane.card-settlements.ownership` (`{"proposalId": id}`) is its
+`/ownership` read. Both call the page's services
+(`packages/application/src/query/card-settlements-read.ts`), answer exactly
+the route's body, write only the R0 audit record of the call and are refused
+`unauthorized` without `records.read` and `evidence_restricted` on a narrowed
+source or account scope, before any database read: a review joins a card
+account to a bank account, so a narrowed grant could see an account outside
+it. Deciding a review or recording ownership stays a plan through the change
+lifecycle, graded there; on MCP that needs a delegation
+([ADR 0063](adr/0063-delegated-ai-operation-path.md)), and
+`MCP_DELEGATIONS` is empty. This is the read half of the owner's UI-parity
+decision of 2026-11-07 (ADR 0081).
+
 ## Financial meaning and limits
 
 Acceptance allocates the observed payment to a statement. It adds no new cash

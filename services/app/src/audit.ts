@@ -195,6 +195,14 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // One row per source the coverage answer counts; never the counts themselves.
   if (operation === "instruments.coverage")
     return { rows: Array.isArray(value["rows"]) ? value["rows"].length : 0, truncated: false };
+  // Reviews on the page; truncated when another page follows. An ownership
+  // review is one candidate.
+  if (operation === "card-settlements.read")
+    return {
+      rows: Array.isArray(value["items"]) ? value["items"].length : 0,
+      truncated: value["nextOffset"] !== null && value["nextOffset"] !== undefined,
+    };
+  if (operation === "card-settlements.ownership") return { rows: 1, truncated: false };
   if (operation === "economic-readiness.read") {
     const manifest = value["manifest"] as { rows?: unknown } | undefined;
     return { rows: Array.isArray(manifest?.rows) ? manifest.rows.length : 0, truncated: false };

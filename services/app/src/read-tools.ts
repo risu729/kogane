@@ -10,6 +10,10 @@ import {
   auditPageFilters,
   financialError,
   readEconomicRowReadinessForGrant,
+  readCardSettlementsForGrant,
+  readCardOwnershipForGrant,
+  CARD_SETTLEMENT_PROPOSAL_ID,
+  CARD_SETTLEMENTS_MAX_OFFSET,
 } from "../../../packages/application/src/index";
 import {
   readAuditForGrant,
@@ -82,6 +86,14 @@ const schemas = {
       .max(64),
     knowledge: z.literal("current"),
   }),
+  // The route's query parameters, as a body; the patterns are the route's own.
+  "kogane.card-settlements.read": z.strictObject({
+    offset: z.number().int().min(0).max(CARD_SETTLEMENTS_MAX_OFFSET).optional(),
+    proposalId: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID).optional(),
+  }),
+  "kogane.card-settlements.ownership": z.strictObject({
+    proposalId: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID),
+  }),
   "kogane.audit.search": z.strictObject({
     filters: z.record(z.string(), z.string()).optional(),
     cursor: z.string().min(1).max(400).nullable().optional(),
@@ -107,6 +119,10 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "One page of the ADR 0077 account correspondence candidates: which direct provider source accounts a reviewed aggregator connection contains, on which evidence, with closed status, hold and same-account reasons, under records.read and a whole-store read grant. Read-only; never proposes same_account. A candidate names the relation.accept or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
+  "kogane.card-settlements.read":
+    "The card statement to bank debit reviews of the カード照合 page: one page (offset) or one review (proposalId), with the source facts, evidence references, acceptance blockers and decision history, the same answer as GET /api/v2/reconciliation/card-settlements, under records.read and a whole-store read grant. Read-only; deciding a review is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
+  "kogane.card-settlements.ownership":
+    "The ownership review of one card settlement candidate: both accounts' current mappings, recorded ownership claims and self-declaration blockers, the same answer as GET /api/v2/reconciliation/card-settlements/ownership, under records.read and a whole-store read grant. Read-only; recording ownership is a relation plan through the change lifecycle, graded there.",
   "kogane.audit.search":
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
   "kogane.audit.get":
@@ -142,6 +158,8 @@ export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
         return grantAllows(grant, "summary.read") && wholeStore(grant);
       case "kogane.accounts.candidates":
       case "kogane.economic-readiness.read":
+      case "kogane.card-settlements.read":
+      case "kogane.card-settlements.ownership":
         return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.audit.search":
       case "kogane.audit.get":
@@ -223,6 +241,28 @@ export async function callReadTool(
         return outcome.ok
           ? { status: 200, body: outcome.review }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
+      case "kogane.card-settlements.read":
+      case "kogane.card-settlements.ownership": {
+        // The page's own services; capability and perimeter are graded there,
+        // before validation or database access, for both transports.
+        const sql = d1Executor(env.DB);
+        const outcome =
+          name === "kogane.card-settlements.read"
+            ? await readCardSettlementsForGrant({
+                grant,
+                sql,
+                request: body,
+              })
+            : await readCardOwnershipForGrant({
+                grant,
+                sql,
+                request: body,
+              });
+        if (outcome.status === "refused")
+          return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+        if (outcome.status === "not_found") throw new HttpError(404, "not_found");
+        return { status: 200, body: { apiVersion: 2, ...outcome.answer } };
       }
       case "kogane.economic-readiness.read": {
         // The shared service grades scope before validation or database access.
