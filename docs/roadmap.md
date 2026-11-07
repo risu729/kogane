@@ -76,10 +76,13 @@ a comment giving the reason:
   and [#995](https://github.com/risu729/kogane/pull/995), which re-landed them on the current `main`.
 - [#580](https://github.com/risu729/kogane/pull/580), [#648](https://github.com/risu729/kogane/pull/648)
   and [#887](https://github.com/risu729/kogane/pull/887) were stale snapshots. Most of their still-true content is in
-  [#922](https://github.com/risu729/kogane/pull/922). Three items are not yet on `main`: the
-  MCP recovery runbook from #887 (it survives only in that PR's ref); and, from #580, the
-  synthetic preview's empty state (表示対象の記録がありません) on financial routes and the
-  Docker daemon that Container identity checks need.
+  [#922](https://github.com/risu729/kogane/pull/922). The three items still missing from `main`
+  landed afterwards: the MCP recovery runbook from #887 in
+  [#998](https://github.com/risu729/kogane/pull/998); and, from #580, the synthetic
+  preview's empty state (表示対象の記録がありません) on financial routes in
+  [#999](https://github.com/risu729/kogane/pull/999) and the Docker daemon that Container
+  identity checks need as an AGENTS.md rule in
+  [#1000](https://github.com/risu729/kogane/pull/1000).
 - [#436](https://github.com/risu729/kogane/pull/436) (Container runtime) is closed at the
   owner's request and tracked in [#988](https://github.com/risu729/kogane/issues/988); the
   owner decides near 2026-12-31 whether to resume it.
