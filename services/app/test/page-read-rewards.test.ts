@@ -303,3 +303,54 @@ describe("reward and holdings-change page reads", () => {
     ]);
   });
 });
+
+/** A store before CORE 0044: the views the reported state reads are absent. */
+function withoutViews(db: D1Database): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) =>
+          target.prepare(
+            sql.includes("sqlite_master") && sql.includes("card_statement_facts")
+              ? "SELECT 2 AS present"
+              : sql,
+          );
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
+describe("where the store lacks the reported state's views", () => {
+  const bare = pageReadHarness("reward-read-no-views", {
+    get DB() {
+      return withoutViews(env.DB);
+    },
+  });
+
+  it("the holdings change is neither listed nor callable, and nothing is recorded", async () => {
+    const audited = () =>
+      env.DB.prepare(
+        "SELECT count(*) AS n FROM audit_records WHERE operation='reported-holdings-change.read'",
+      ).first<number>("n");
+    const before = await audited();
+    const args = { from: "2026-09-03", to: "2026-09-09" };
+    expect(
+      (await bare.route("/api/v2/reported-holdings-change?from=2026-09-03&to=2026-09-09")).status,
+    ).toBe(404);
+    const listed = await bare.listed();
+    expect(listed).toContain(REWARDS);
+    expect(listed).not.toContain(CHANGE);
+    const called = await bare.mcpMessage({
+      method: "tools/call",
+      params: { name: CHANGE, arguments: args },
+    });
+    expect(called["error"]).toEqual({ code: -32602, message: "unknown_tool" });
+    const overHttp = await bare.http(CHANGE, args);
+    expect(overHttp.status).toBe(404);
+    expect(overHttp.body).toMatchObject({ error: "not_found" });
+    // The reward pages do not depend on those views.
+    expect((await bare.http(REWARDS, { collection: "holdings" })).status).toBe(200);
+    expect(await audited()).toBe(before);
+  });
+});
