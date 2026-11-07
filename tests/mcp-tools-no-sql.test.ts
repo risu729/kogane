@@ -89,15 +89,18 @@ describe("MCP tools issue no SQL of their own (ADR 0081)", () => {
     for (const [target, allowed] of Object.entries(ALLOWED_IMPORTS)) {
       const specifier = target.replace(/\.ts$/u, "");
       const named = new RegExp(
-        String.raw`import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']\./${specifier}(?:\.ts)?["']`,
+        String.raw`(?:import|export)\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']\./${specifier}(?:\.ts)?["']`,
         "gu",
       );
       const names = new Set<string>();
       for (const name of adapters) {
         const text = readFileSync(resolve(source, name), "utf8");
-        // A namespace or side-effect import would bring in everything.
+        // A namespace, side-effect, dynamic or star re-export brings in everything.
         expect(text).not.toMatch(
-          new RegExp(String.raw`import\s*(?:\*|["'])[^;]*\./${specifier}(?:\.ts)?["']`, "u"),
+          new RegExp(
+            String.raw`(?:import\s*(?:\*|["']|\(\s*["'])|export\s*\*)[^;]*\./${specifier}(?:\.ts)?["']`,
+            "u",
+          ),
         );
         for (const match of text.matchAll(named))
           for (const part of match[1]!.split(",")) {
