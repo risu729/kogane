@@ -9,7 +9,6 @@ import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { getJson } from "./api.ts";
 import {
   OPERATION_ID,
-  OPERATION_RECORD_PATH_PREFIX,
   type OperationRecordWire,
 } from "../../../packages/observation-shared/src/operation-contract.ts";
 
@@ -39,7 +38,10 @@ export function useOperation(operationId: string): UseQueryResult<OperationRecor
   return useQuery({
     queryKey: ["operation", operationId],
     queryFn: ({ signal }) =>
-      getJson<OperationRecordWire>(`${OPERATION_RECORD_PATH_PREFIX}${operationId}`, signal),
+      // Spelled out, not built from OPERATION_RECORD_PATH_PREFIX: the UI/MCP
+      // parity guard reads this as `/api/ops/v1/operations/:id`, while the bare
+      // prefix would name the list route, which no page reads (ADR 0086).
+      getJson<OperationRecordWire>(`/api/ops/v1/operations/${operationId}`, signal),
     retry: false,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
