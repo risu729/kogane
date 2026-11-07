@@ -1245,7 +1245,11 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   is published as one closed object: every property, the discriminator as an
   enum, only the properties every shape requires as required, and which
   property belongs to which shape in the descriptions. The Zod schema still
-  validates each call against its exact shape. `test/mcp-sdk-client.test.ts`
+  validates each call against its exact shape. A `pattern` must not use a
+  Unicode property escape such as `\p{Cc}`: ChatGPT refuses that tool and
+  then imports none of the server's tools (2026-11-07, through the MCP
+  Portal), so spell the ranges out; `mcpInputSchema` throws on one.
+  `test/mcp-sdk-client.test.ts`
   lists the whole catalogue with every tool-adding flag on through the
   official SDK client, in both negotiation modes.
 - **Identity.** The dispatcher has the `AgentCaller` the boundary proved

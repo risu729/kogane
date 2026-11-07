@@ -20,6 +20,7 @@ const COMBINATORS = ["oneOf", "anyOf", "allOf", "not"] as const;
 export function mcpInputSchema(schema: z.ZodType): JsonSchema {
   const generated = z.toJSONSchema(schema) as JsonSchema;
   delete generated["$schema"];
+  assertPortablePatterns(generated);
   if (generated["type"] === "object" && !COMBINATORS.some((key) => key in generated))
     return generated;
   const keys = Object.keys(generated);
@@ -130,4 +131,22 @@ function describe(property: JsonSchema): string {
   return values
     ? values.map((value) => JSON.stringify(value)).join(" or ")
     : JSON.stringify(property);
+}
+
+/**
+ * A `pattern` is read by each client's own regular-expression engine. ChatGPT
+ * refuses a tool whose pattern uses a Unicode property escape (`\p{Cc}`) and
+ * then imports none of the server's tools; spell the ranges out instead.
+ */
+function assertPortablePatterns(node: unknown): void {
+  if (Array.isArray(node)) {
+    for (const item of node) assertPortablePatterns(item);
+    return;
+  }
+  if (typeof node !== "object" || node === null) return;
+  for (const [key, value] of Object.entries(node)) {
+    if (key === "pattern" && typeof value === "string" && /\\[pP]\{/u.test(value))
+      throw new Error(`An MCP input schema pattern must not use \\p{…}: ${value}`);
+    assertPortablePatterns(value);
+  }
 }
