@@ -150,9 +150,17 @@ describe("the events page read", () => {
       "cash-movement",
       "obligation-change",
     ]);
-    // Only the exact cash decrease is totalled; the unvalued leg is not.
+    // The exact cash decrease is totalled; the unvalued leg's total keeps
+    // its reason instead of a figure (#1001).
     expect(debit.totals).toEqual([
       expect.objectContaining({ basis: "cash-movement", quantity: expect.anything() }),
+      {
+        basis: "obligation-change",
+        quantity: {
+          unitRef: "JPY",
+          value: { status: "missing", reasonCode: "statement_principal_and_fees_unknown" },
+        },
+      },
     ]);
     expect(debit.allocations).toEqual([
       expect.objectContaining({ allocationId: "al-ev-debit", role: "settlement" }),
