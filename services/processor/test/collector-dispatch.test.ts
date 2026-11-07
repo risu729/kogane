@@ -503,6 +503,19 @@ test("lease conflict found by the collector itself declines with collection_busy
   expect(rows(w.db, "SELECT count(*) AS n FROM collection_execution_leases")).toEqual([{ n: 0 }]);
 });
 
+test("a collector that stopped itself after it may have reached the provider ends uncertain", async () => {
+  // ADR 0085: the holder hit its deadline (or lost its lease) mid-collection,
+  // so the provider attempt may have happened; it is never replayed.
+  for (const code of ["collection_deadline_exceeded", "collection_lease_lost"]) {
+    const w = world();
+    w.answer = async () => ({ status: "failed", runIds: [], failureCode: code });
+    const operationId = await collect(w);
+    await w.tick(T0 + MINUTE);
+    const receipt = await read(w, operationId);
+    expect(receipt.execution).toMatchObject({ state: "uncertain", reasonCode: code });
+  }
+});
+
 test("unsupported session refresh ends with a closed terminal code and contacts nobody", async () => {
   const w = world({ connections: [COLLECT] });
   const operationId = await refresh(w, "unattended");

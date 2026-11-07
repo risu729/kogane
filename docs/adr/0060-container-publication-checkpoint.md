@@ -293,7 +293,7 @@ it does not establish live success for this new deadline policy.
 
 ## Amendment: type Docker image identities before publication (2026-10-10)
 
-- Status: proposed
+- Status: accepted (merged 2026-10-10 in #658)
 
 The registry guard assumed Docker inspect `.Id` was always a config digest.
 The containerd image store instead returns its target descriptor digest
@@ -345,7 +345,7 @@ paths. Local tests do not establish a successful hosted release or recovery.
 
 ## Amendment: retain pending manual rollback requests (2026-10-15)
 
-- Status: proposed
+- Status: accepted (merged 2026-10-15 in #722)
 
 The manual rollback caller now declares its own non-cancellable concurrency
 group keyed by SHA and targets. It never acquires `production-deploy` itself,

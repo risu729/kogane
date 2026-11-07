@@ -98,9 +98,13 @@ export function safeCode(value: string | null): string | null {
   return SAFE_CODE.test(value) ? value : "unclassified";
 }
 
-/** A collector's own "a person must act" codes (`HUMAN_REQUIRED_CODE` and MyJCB's `human_required`). */
+/**
+ * A collector's own "a person must act" codes: `HUMAN_REQUIRED_CODE`, MyJCB's
+ * `human_required`, and SBI VC's `manual_agreement_required` (the provider's
+ * terms wait for the owner's agreement; owner, 2026-11-07 06:28 UTC).
+ */
 const userActionRequired = (code: string | null): boolean =>
-  code !== null && code.startsWith("human_required");
+  code !== null && (code.startsWith("human_required") || code === "manual_agreement_required");
 
 function ordered<T extends string>(reasons: Set<T>, order: readonly T[]): T[] {
   return order.filter((reason) => reasons.has(reason));

@@ -5,7 +5,7 @@ import {
   OperationCall,
   createPlan,
   d1CommandStore,
-  parseGrants,
+  fullGrant,
   type OperationName,
 } from "../../../packages/application/src/index";
 import { callDelegatedOpsTool, type OpsToolName } from "../src/ops-tools";
@@ -22,37 +22,51 @@ import { changeCommandRoute } from "../../processor/src/change-commands";
 const OWNER = "cross-auth-owner";
 const OTHER = "cross-auth-other";
 const key = (owner = OWNER) => `mcp-client:${owner}`;
-const scopes = { sources: ["sony-bank", "other-test"], accounts: "*", scheduleSources: [] };
-const grant = {
-  scopes,
-  capabilities: ["summary.read"],
-  budget: { maxRows: 50, maxProposalTargets: 2, maxExplainDepth: 2 },
+type Scopes = {
+  sources: "*" | string[];
+  accounts: "*" | string[];
+  scheduleSources: "*" | string[];
 };
-const entry = (owner = OWNER) => ({
-  delegatedBy: owner,
-  role: "maintainer",
-  capabilities: ["operations.collection.request", "operations.session.refresh"],
-  scopes,
-  issuedAt: new Date(Date.now() - 60000).toISOString(),
-  notAfter: new Date(Date.now() + 3600000).toISOString(),
-  budget: { writesPerDay: 100 },
-});
-function config(owner = OWNER) {
-  return {
-    ...env,
-    OPS_API_ENABLED: "true",
-    SESSION_REFRESH_POLICY: "",
-    OPERATOR_SUBJECTS: JSON.stringify([OWNER, OTHER]),
-    AGENT_API_GRANTS: JSON.stringify({ [key(owner)]: grant }),
-    MCP_DELEGATIONS: JSON.stringify({ [key(owner)]: entry(owner) }),
-  } as Env;
+function config() {
+  return { ...env, OPS_API_ENABLED: "true", SESSION_REFRESH_POLICY: "" } as Env;
 }
-async function invoke(name: OpsToolName, body: unknown, configuration: Env, owner = OWNER) {
-  const resolution = await resolveMcpDelegation(
+/**
+ * No configuration narrows an MCP client (ADR 0084), but the execution path
+ * still checks the scope its principal carries and binds a confirmation to
+ * its reference. These cases hand it a principal with other scopes, and a
+ * reference that names them, as a future narrowing would.
+ */
+async function withScopes(
+  resolution: Awaited<ReturnType<typeof resolveMcpDelegation>>,
+  scopes: Scopes,
+) {
+  if (!resolution.ok) return resolution;
+  const bytes = new TextEncoder().encode(
+    JSON.stringify({ ref: resolution.principal.delegationRef, scopes }),
+  );
+  const digest = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+  return {
+    ...resolution,
+    principal: { ...resolution.principal, scopes, delegationRef: `dlg_${digest}` },
+  };
+}
+const WHOLE: Scopes = { sources: "*", accounts: "*", scheduleSources: "*" };
+const OTHER_TEST_ONLY: Scopes = { ...WHOLE, sources: ["other-test"] };
+async function invoke(
+  name: OpsToolName,
+  body: unknown,
+  configuration: Env,
+  owner = OWNER,
+  scopes?: Scopes,
+) {
+  const resolved = await resolveMcpDelegation(
     configuration,
     { kind: "mcp-client", principal: key(owner) },
     new Date().toISOString(),
   );
+  const resolution = scopes ? await withScopes(resolved, scopes) : resolved;
   const audit = new OperationCall(name.slice(7) as OperationName, {
     path: "mcp",
     subject: owner,
@@ -70,7 +84,7 @@ const count = async () =>
 beforeAll(seedRegistry);
 afterEach(() => vi.unstubAllGlobals());
 
-it("scope shrink after provider prepare and read-grant shrink on exact replay both deny before another effect", async () => {
+it("a scope shrink after provider prepare denies before another effect", async () => {
   const configuration = config();
   const request = {
     source: "sony-bank",
@@ -84,18 +98,13 @@ it("scope shrink after provider prepare and read-grant shrink on exact replay bo
   );
   expect(preparation.status).toBe(200);
   const digest = content(preparation).confirmation.digest;
-  const declaration = JSON.parse(configuration.MCP_DELEGATIONS);
-  const narrowed = {
-    ...configuration,
-    MCP_DELEGATIONS: JSON.stringify({
-      [key()]: { ...declaration[key()], scopes: { ...scopes, sources: ["other-test"] } },
-    }),
-  } as Env;
   const before = await count();
   const denied = await invoke(
     "kogane.ops.collection.request",
     { ...request, step: "confirm", confirmationDigest: digest },
-    narrowed,
+    configuration,
+    OWNER,
+    OTHER_TEST_ONLY,
   );
   expect(content(denied)).toEqual({ error: "target_missing", refs: ["source"] });
   expect(await count()).toBe(before);
@@ -105,22 +114,18 @@ it("scope shrink after provider prepare and read-grant shrink on exact replay bo
     configuration,
   );
   expect(accepted.status).toBe(202);
-  const smallerRead = {
-    ...configuration,
-    AGENT_API_GRANTS: JSON.stringify({
-      [key()]: { ...grant, scopes: { ...scopes, sources: ["other-test"] } },
-    }),
-  } as Env;
-  const revoked = await invoke(
+  const replayedNarrow = await invoke(
     "kogane.ops.collection.request",
     { ...request, step: "confirm", confirmationDigest: digest },
-    smallerRead,
+    configuration,
+    OWNER,
+    OTHER_TEST_ONLY,
   );
-  expect(content(revoked)).toEqual({ error: "delegation_misconfigured" });
+  expect(content(replayedNarrow)).toEqual({ error: "target_missing", refs: ["source"] });
   expect(await count()).toBe(before! + 1);
 });
 
-it("changing only the declaration budget invalidates an old prepare and completed confirmation replay", async () => {
+it("changing only the authority's reference invalidates an old prepare and completed confirmation replay", async () => {
   const configuration = config();
   const request = { source: "sony-bank", idempotencyKey: "cross-auth-declaration" };
   const preparation = await invoke(
@@ -129,17 +134,15 @@ it("changing only the declaration budget invalidates an old prepare and complete
     configuration,
   );
   const digest = content(preparation).confirmation.digest;
-  const declaration = JSON.parse(configuration.MCP_DELEGATIONS);
-  const changed = {
-    ...configuration,
-    MCP_DELEGATIONS: JSON.stringify({
-      [key()]: { ...declaration[key()], budget: { writesPerDay: 99 } },
-    }),
-  } as Env;
+  // A schedule axis the session refresh never uses still changes the
+  // authority's reference, so the old prepare no longer binds.
+  const changed: Scopes = { ...WHOLE, scheduleSources: ["sony-bank"] };
   const before = await count();
   const rejected = await invoke(
     "kogane.ops.session.refresh",
     { ...request, step: "confirm", confirmationDigest: digest },
+    configuration,
+    OWNER,
     changed,
   );
   expect(content(rejected)).toEqual({ error: "confirmation_invalid" });
@@ -153,6 +156,8 @@ it("changing only the declaration budget invalidates an old prepare and complete
   const replay = await invoke(
     "kogane.ops.session.refresh",
     { ...request, step: "confirm", confirmationDigest: digest },
+    configuration,
+    OWNER,
     changed,
   );
   expect(content(replay)).toEqual({ error: "confirmation_invalid" });
@@ -200,7 +205,7 @@ it("provider key namespace separates operation and principal and conflicts acros
     configuration,
   );
   expect(session.status).toBe(202);
-  const other = await apply("kogane.ops.collection.request", request, config(OTHER), OTHER);
+  const other = await apply("kogane.ops.collection.request", request, configuration, OTHER);
   expect(other.status).toBe(202);
   const ids = [collection, session, other].map((x) => content(x).operationId);
   expect(new Set(ids).size).toBe(3);
@@ -216,24 +221,18 @@ it("R1 exact import replay does not return a denied-source receipt after scope s
   };
   const accepted = await invoke("kogane.ops.import.request", request, configuration);
   expect(accepted.status).toBe(202);
-  const declaration = JSON.parse(configuration.MCP_DELEGATIONS);
-  const narrowed = {
-    ...configuration,
-    MCP_DELEGATIONS: JSON.stringify({
-      [key()]: { ...declaration[key()], scopes: { ...scopes, sources: ["other-test"] } },
-    }),
-  } as Env;
   const before = await count();
-  const replay = await invoke("kogane.ops.import.request", request, narrowed);
+  const narrow = [configuration, OWNER, OTHER_TEST_ONLY] as const;
+  const replay = await invoke("kogane.ops.import.request", request, ...narrow);
   const receipt = await invoke(
     "kogane.ops.operation.get",
     { operationId: content(accepted).operationId },
-    narrowed,
+    ...narrow,
   );
   const missing = await invoke(
     "kogane.ops.operation.get",
     { operationId: `op_${"0".repeat(64)}` },
-    narrowed,
+    ...narrow,
   );
   expect(content(replay)).toEqual({ error: "target_missing", refs: ["source"] });
   expect(content(receipt)).toEqual(content(missing));
@@ -257,22 +256,6 @@ it("a real delegated identity assignment and audit-linked reversal retain immuta
     ),
   ]);
   const configuration = config();
-  const declarations = JSON.parse(configuration.MCP_DELEGATIONS);
-  configuration.MCP_DELEGATIONS = JSON.stringify({
-    [key()]: {
-      ...declarations[key()],
-      role: "operator-delegate",
-      scopes: { sources: "*", accounts: "*", scheduleSources: [] },
-    },
-  });
-  configuration.AGENT_API_GRANTS = JSON.stringify({
-    [key()]: {
-      ...grant,
-      scopes: { sources: "*", accounts: "*", scheduleSources: [] },
-      capabilities: ["records.read"],
-      budget: { ...grant.budget, maxRows: 200 },
-    },
-  });
   configuration.COMMANDS_ENABLED = "true";
   let capturedApproval: Request | undefined;
   let loseFirstCommit = true;
@@ -457,7 +440,7 @@ it("a real delegated identity assignment and audit-linked reversal retain immuta
     return content(applied).receipt;
   }
   const receipt = await adopt(original.plan, "cross-auth-identity-assign");
-  const historyGrant = parseGrants(configuration.AGENT_API_GRANTS).get(key())!;
+  const historyGrant = fullGrant(key());
   const read = () =>
     readInstrumentHistoryForGrant({
       grant: historyGrant,
@@ -527,107 +510,6 @@ it("a real delegated identity assignment and audit-linked reversal retain immuta
     after.history.entries.find((e) => e.recordId === releaseReceipt.decisionRevisionId)
       ?.decisionOrigin,
   ).toBe("delegated");
-});
-
-it("real MCP provider confirmation after declaration scope shrink is refused and audited without a native request", async () => {
-  const configuration = config();
-  const issuer = "https://cross-auth-provider.cloudflareaccess.com";
-  configuration.ACCESS_ISSUER = issuer;
-  configuration.ACCESS_AUDIENCE = "cross-auth-provider-browser";
-  configuration.ACCESS_MCP_AUDIENCE = "cross-auth-provider-mcp";
-  const signing = await generateKeyPair("RS256", { extractable: true });
-  const jwks = {
-    keys: [
-      { ...(await exportJWK(signing.publicKey)), kid: "provider-auth", alg: "RS256", use: "sig" },
-    ],
-  };
-  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
-    const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    if (url === issuer + "/cdn-cgi/access/certs") return Response.json(jwks);
-    throw new Error("unexpected external request");
-  });
-  const token = await new SignJWT({ type: "app" })
-    .setProtectedHeader({ alg: "RS256", kid: "provider-auth" })
-    .setIssuer(issuer)
-    .setAudience(configuration.ACCESS_MCP_AUDIENCE!)
-    .setSubject(OWNER)
-    .setIssuedAt()
-    .setExpirationTime("5m")
-    .sign(signing.privateKey);
-  let id = 0;
-  async function send(body: object, cfg = configuration) {
-    const response = await worker.fetch(
-      new Request("https://fixture.test/mcp", {
-        method: "POST",
-        headers: {
-          ...MCP_CLIENT_HEADERS,
-          "mcp-protocol-version": "2025-11-25",
-          "cf-access-jwt-assertion": token,
-        },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: ++id,
-          method: "tools/call",
-          params: { name: "kogane.ops.collection.request", arguments: body },
-        }),
-      }),
-      cfg,
-    );
-    expect(response.status).toBe(200);
-    return (
-      (await response.json()) as {
-        result: { structuredContent: Record<string, any>; isError?: boolean };
-      }
-    ).result;
-  }
-  const request = {
-    source: "sony-bank",
-    requestedScope: { from: "2026-10-01", to: "2026-10-02" },
-    idempotencyKey: "cross-auth-real-provider-scope",
-  };
-  const prepared = await send({ ...request, step: "prepare" });
-  expect(prepared.isError).not.toBe(true);
-  const declarations = JSON.parse(configuration.MCP_DELEGATIONS);
-  const narrowed = {
-    ...configuration,
-    MCP_DELEGATIONS: JSON.stringify({
-      [key()]: {
-        ...declarations[key()],
-        scopes: { ...scopes, sources: ["other-test"] },
-      },
-    }),
-  } as Env;
-  const before = await count();
-  const auditCount = await env.DB.prepare(
-    "SELECT count(*) n FROM audit_records WHERE principal=? AND operation='ops.collection.request' AND result='refused' AND result_code='target_missing'",
-  )
-    .bind(key())
-    .first<number>("n");
-  const refused = await send(
-    {
-      ...request,
-      step: "confirm",
-      confirmationDigest: prepared.structuredContent.confirmation.digest,
-    },
-    narrowed,
-  );
-  expect(refused.isError).toBe(true);
-  expect(refused.structuredContent).toEqual({ error: "target_missing", refs: ["source"] });
-  expect(await count()).toBe(before);
-  expect(
-    await env.DB.prepare(
-      "SELECT count(*) n FROM audit_records WHERE principal=? AND operation='ops.collection.request' AND result='refused' AND result_code='target_missing'",
-    )
-      .bind(key())
-      .first<number>("n"),
-  ).toBe(auditCount! + 1);
-  expect(
-    await env.DB.prepare(
-      "SELECT operation_id FROM ops_requests WHERE principal=? AND idempotency_key=?",
-    )
-      .bind(key(), request.idempotencyKey)
-      .first(),
-  ).toBeNull();
 });
 
 it("completed collection confirmation retry returns its native receipt after source becomes inactive", async () => {

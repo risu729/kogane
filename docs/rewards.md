@@ -159,6 +159,43 @@ common bucketは種類未確認のまま一覧に残り、算定期限は `unava
 - 未確認の条件は「不可能」ではなく `needs_rule_verification` の別候補として返す。
 - 手数料は各hopの `fixedFees` をそのまま積む。変動手数料は `variableFeePolicyRef` の参照のみで、
   金額は計算しない。
+- The offer set is read once and bounded by one reader page: `CONVERSION_OFFERS_SQL` reads
+  `REWARD_PAGE_LIMIT + 1` (201) rows in `offer_id, version` order, the same read and bound
+  (200) as the READ capture. Every `/offers/simulate` answer carries
+  `offerCoverage: {limit: 200, truncated}`. When more than 200 offers match (all stored
+  offers for a goal search, or the named offer's versions), nothing is computed: the answer
+  is `simulation: null`, `searchCoverage: "bounded"`, `offerCoverage.truncated: true` and
+  `reasonCodes: ["offer_set_too_large"]`, with no `paths` or `rejected` list, so an unread
+  offer never reads as "no path" or as a shorter candidate list (INV05). The route does not
+  page past the bound. An answer with `truncated: false` read every matching stored offer;
+  the depth, candidate and expansion caps still make it `bounded`. A goal search answer also
+  carries `expansions` (offer examinations used across every hop, against
+  `budget.maxExpansions` = 500) and `stoppedBy`, the closed list of caps that ended the
+  search early (`max_expansions`: an offer was left unexamined; `max_candidates`: a goal
+  path was dropped or a state left unexpanded because the 8-candidate list was full). An
+  empty `stoppedBy` means every offer was examined at every reachable state within the
+  depth, so an empty `paths` is the offers' answer; a non-empty one means it may be the cap
+  ([ADR 0049 amendment 2026-11-06](adr/0049-reward-expiry-basis.md#amendment-bounded-offer-set-for-offer-simulation)).
+- Offer versions are append-only reference claims (`PRIMARY KEY(offer_id, version)`, a
+  correction is a new version). No adoption pointer marks one version current, and the
+  version text has no defined order, so the route never picks one. `version` (only with
+  `offer`; without it the request is `400 invalid_query`) selects one stored version. A
+  single simulation for an offer with more than one stored version and no `version` is
+  `simulation: null`, `offerVersions` (every stored `offerId@version`, in reader order) and
+  `reasonCodes: ["offer_version_not_selected"]`; a `version` that is not stored is
+  `no_stored_offer`. A goal search treats each stored version as its own candidate, named
+  by its `offerRef`.
+- A goal search starts from one unit: `unit`, or, without it, the single distinct
+  `fromUnitRef` of the matching offers (all stored offers, or the named offer's versions).
+  The stored offers do not say which unit the caller holds, so the route never picks one.
+  A goal search without `unit` over offers with more than one source unit answers
+  `simulation: null`, `searchCoverage: "bounded"`, the `offerCoverage`, `sourceUnits`
+  (every distinct source unit ref, in code-unit order) and
+  `reasonCodes: ["source_unit_not_selected"]`, with no `paths` or `rejected` list. The
+  list counts every source unit, including the goal unit when an offer leaves it, and
+  whether or not a path from it reaches the goal. `unit` is taken as given and is not
+  checked against the list. The bound check runs first, then `no_stored_offer`
+  ([ADR 0049 amendment 2026-11-06](adr/0049-reward-expiry-basis.md#addendum-a-goal-searchs-starting-unit-is-chosen-by-the-caller)).
 
 ## 5. 価値の扱い
 
@@ -222,6 +259,8 @@ route を広告することはない。未知の reward path は 404 であり�
 | `GET /api/v2/rewards/offers/simulate` | 純粋なquery。offer指定なら単発simulation、goal指定なら深さ制限つき経路探索 |
 
 すべて GET で、書き込みも外部通信も行わない。`Page<T>` = `{rows, coverage:{limit,truncated,nextOffset}}`。
+`/offers/simulate` is not paged: it reads at most 200 offers and reports the bound in
+`offerCoverage`, refusing with `offer_set_too_large` beyond it (§4).
 `offset` はbucket行を歩く。読み取りは公開済みparse runに結び付いたclaimだけを見るため、
 publication pointerの巻き戻しはreward側の表示からも同時に消える。
 
@@ -325,7 +364,9 @@ digestなので、**評価日時が変われば別のsnapshotになる**。既�
 COREの `projection_input_records` が参照する。表・prefix・記録の仕組みを増やしていない。
 
 captureが読む各集合には上限があり、超えたら**切り詰めず拒否**する（`rule_set_too_large`、
-`claim_set_too_large`、`offer_set_too_large`、`simulation_set_too_large`）。
+`claim_set_too_large`、`offer_set_too_large`）。Fresh captures read no saved
+simulations (`captureRewardInput` in `services/processor/src/reward-read-projection.ts`
+captures an empty set), so there is no simulation bound.
 
 CORE migration `0041_reward_revision_triggers.sql` が元の5表を0038の依存台帳へ追加し、
 `0077_reward_bucket_claims_v2.sql` が現在のclaim表とrevision triggerを追加する。これが
@@ -435,7 +476,7 @@ COREのclaim・rule・offer、保存済み入力と原本は維持する。
 確認していないこと: 本番D1・本番Workerでの動作、実際のprovider規約の現在の内容、
 本番規模でのpage性能、保存済みsimulationの実データ（保存するwriterが無く、captureは空の集合を固定する）。
 
-[Vポイントサービス利用規約]: docs/sources/v-point.md
+[Vポイントサービス利用規約]: sources/v-point.md
 
 [W09]: 設計レビュー追補99 W09（ANAマイル口座グループ）
 [W10]: 同 W10（ANAマイル有効期限）

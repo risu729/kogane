@@ -1,17 +1,18 @@
 # ADR 0064: One append-only audit record per operation, for the human UI and the AI alike, referencing the existing logs
 
-- Status: proposed (accepted when its pull request merges). Slice S1 of the
+- Status: accepted (merged 2026-10-09 in #601). Slice S1 of the
   [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)
-  implements the table, the chokepoint for the existing `ui`, `agent-http` and
-  `mcp` paths, the daily caps with their overflow aggregate and the operator's
-  `GET /api/v2/audit` ([audit log](../audit-log.md)); slice S4 (#564) adds the
-  maintenance read and revision to the catalogue, the revision on `mcp` only
-  as a recorded refusal. Slice S7 adds the `alarm` and `lane` writers
+  (#619) implements the table, the chokepoint for the existing `ui`,
+  `agent-http` and `mcp` paths, the daily caps with their overflow aggregate
+  and the operator's `GET /api/v2/audit` ([audit log](../audit-log.md)); slice
+  S4 (#564) adds the maintenance read and revision to the catalogue; the S3
+  execution integration (#660) adds delegated records, two-step
+  preparation/confirmation and the agents' scoped read under `audit.read`
+  (`kogane.audit.search`, `kogane.audit.get`). Slice S7 adds the `alarm` and
+  `lane` writers
   ([amendment](#amendment-the-alarm-and-lane-writers-slice-s7-2026-11-06)),
   and slice S8 adds the operator's `監査ログ` page
-  ([amendment](#amendment-the-operators-page-slice-s8-2026-11-06)). The agent
-  read (`audit.read`) and the state of delegated execution (ADR 0063) are
-  described in the [audit log](../audit-log.md).
+  ([amendment](#amendment-the-operators-page-slice-s8-2026-11-06)).
 - Date: 2026-10-09
 - Related: [ADR 0063](0063-delegated-ai-operation-path.md) (the delegated AI
   operation path, whose two-step confirmation and idempotency use this
@@ -266,7 +267,7 @@ test files.
 
 ## Amendment: the operator's page (slice S8, 2026-11-06)
 
-Status: proposed until its pull request merges. The "(and a page)" of
+Status: accepted (merged 2026-11-06 in #923). The "(and a page)" of
 _Reading_ is the web UI's `監査ログ` page at `/audit`, a read-only view of
 `GET /api/v2/audit`; nothing about what is recorded or who may read it
 changes. Four details are fixed by it:
@@ -302,7 +303,7 @@ delegation status of plan slice S8 is not part of this amendment.
 
 ## Amendment: the `alarm` and `lane` writers, slice S7 (2026-11-06)
 
-- Status: proposed (accepted when the slice's pull request merges).
+- Status: accepted (merged 2026-11-06 in #925).
 
 The decision named the two Processor paths and what each records; slice S7
 implements them and settles the details it left open. Nothing here changes

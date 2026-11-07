@@ -1,6 +1,6 @@
 # Collector refusal and persistence diagnostics
 
-Status: implemented locally; independent review, PR CI and deployment pending.
+Status: implemented; merged 2026-10-10 in #655. Deployment is not asserted here.
 
 Date: 2026-10-10
 

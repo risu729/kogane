@@ -65,6 +65,12 @@ must only run after the browser's existing Access gate. `listAccountConnections`
 also includes connections with no parsed observations, such as the audited
 Shinsei MF calendar, so absence of transactions does not hide its evidence.
 
+Reviews appended after migration 0029 write no relation. The account
+candidate read ([identity](identity.md#aggregator-to-direct-account-candidates),
+ADR 0077) proposes one `connection_contains` relation per current confirmed
+review and pinned direct reference, for a person to accept or reject through
+the change lifecycle; it never proposes leaf-account equivalence.
+
 ## Display preference and completion boundary
 
 For a verified individual account and the same period, item, currency and

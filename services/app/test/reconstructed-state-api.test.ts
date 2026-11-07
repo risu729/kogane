@@ -21,11 +21,6 @@ const PATH = "/api/v2/reconstructed-state";
 const ACCOUNT = "acct-reconstructed-synthetic";
 const RANGE = `account=${ACCOUNT}&from=2026-03-01&to=2026-03-31`;
 const TOOL_PATH = "/api/agent/v1/reconstructed-state.read";
-const FULL_GRANT = {
-  scopes: { sources: "*", accounts: "*" },
-  capabilities: ["summary.read", "records.read"],
-  budget: { maxRows: 500, maxProposalTargets: 5, maxExplainDepth: 3 },
-};
 /** The MCP Access application's audience (ADR 0047); `/mcp` accepts nothing else. */
 const MCP_AUDIENCE = "fixture-mcp-audience";
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
@@ -247,14 +242,8 @@ describe("reconstructed state over HTTP", () => {
 });
 
 describe("the agent tool", () => {
-  // Through `/mcp` the same subject is the agent-only `mcp-client:<sub>`
-  // (ADR 0047), so it has a grant under that name too.
-  const granted = {
-    AGENT_API_GRANTS: JSON.stringify({
-      "agent-principal": FULL_GRANT,
-      "mcp-client:agent-principal": FULL_GRANT,
-    }),
-  };
+  // Every proved caller reads with the whole-store grant (ADR 0084).
+  const granted = {};
   const body = { account: ACCOUNT, from: "2026-03-01", to: "2026-03-31" };
 
   it("is listed while the route is served and answers what the route answers", async () => {
@@ -313,37 +302,9 @@ describe("the agent tool", () => {
       code: "invalid_query",
       refs: ["refusal:range_too_long", "maxDays:366"],
     });
-    const summaryOnly = await call(TOOL_PATH, {
-      subject: "agent-principal",
-      body,
-      environment: {
-        AGENT_API_GRANTS: JSON.stringify({
-          "agent-principal": { ...FULL_GRANT, capabilities: ["summary.read"] },
-        }),
-      },
-    });
-    expect(summaryOnly.status).toBe(403);
-    expect(await summaryOnly.json()).toMatchObject({
-      code: "unauthorized",
-      refs: ["refusal:capability_missing", "capability:records.read"],
-    });
-    const narrowed = await call(TOOL_PATH, {
-      subject: "agent-principal",
-      body,
-      environment: {
-        AGENT_API_GRANTS: JSON.stringify({
-          "agent-principal": { ...FULL_GRANT, scopes: { sources: ["smbc-bank"], accounts: "*" } },
-        }),
-      },
-    });
-    expect(narrowed.status).toBe(403);
-    expect(await narrowed.json()).toMatchObject({
-      code: "evidence_restricted",
-      refs: ["refusal:scope_restricted", "scope:source"],
-    });
   });
 
-  it("is neither a tool nor a path where the route is absent, and needs a grant", async () => {
+  it("is neither a tool nor a path where the route is absent, and needs Access", async () => {
     const absent = (await (
       await call("/mcp", {
         subject: "agent-principal",
@@ -368,7 +329,6 @@ describe("the agent tool", () => {
         })
       ).status,
     ).toBe(404);
-    expect((await call(TOOL_PATH, { subject: "agent-principal", body })).status).toBe(403);
     expect((await call(TOOL_PATH, { body, subject: null, environment: granted })).status).toBe(401);
   });
 

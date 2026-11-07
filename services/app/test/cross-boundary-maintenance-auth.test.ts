@@ -8,26 +8,7 @@ import { delegatedMaintenanceRoute } from "../../processor/src/delegated-mainten
 
 const OWNER = "maintenance-cross-auth-owner",
   OTHER = "maintenance-cross-auth-other";
-const principal = (subject = OWNER) => `mcp-client:${subject}`;
 const ISSUER = "https://maintenance-cross-auth.cloudflareaccess.com";
-const scopes = { sources: ["sony-bank"], accounts: "*", scheduleSources: ["vpass"] };
-const grant = {
-  scopes,
-  capabilities: ["summary.read"],
-  budget: { maxRows: 50, maxProposalTargets: 2, maxExplainDepth: 2 },
-};
-const interval = {
-  issuedAt: new Date(Date.now() - 60000).toISOString(),
-  notAfter: new Date(Date.now() + 3600000).toISOString(),
-};
-const entry = (subject = OWNER) => ({
-  delegatedBy: subject,
-  role: "maintainer",
-  capabilities: ["schedules.maintenance.update", "schedules.survey.decide"],
-  scopes,
-  ...interval,
-  budget: { writesPerDay: 100 },
-});
 let signing: Awaited<ReturnType<typeof generateKeyPair>>, jwks: { keys: unknown[] };
 let calls = 0,
   alarms = 0;
@@ -63,7 +44,7 @@ beforeAll(async () => {
   } as unknown as Parameters<typeof delegatedMaintenanceRoute>[1];
 });
 afterEach(() => vi.unstubAllGlobals());
-function config(subject = OWNER): Record<string, unknown> {
+function config(): Record<string, unknown> {
   return {
     ...env,
     SCHEDULES_ENABLED: "true",
@@ -71,9 +52,6 @@ function config(subject = OWNER): Record<string, unknown> {
     ACCESS_ISSUER: ISSUER,
     ACCESS_AUDIENCE: "maintenance-cross-browser",
     ACCESS_MCP_AUDIENCE: "maintenance-cross-mcp",
-    OPERATOR_SUBJECTS: JSON.stringify([OWNER, OTHER]),
-    AGENT_API_GRANTS: JSON.stringify({ [principal(subject)]: grant }),
-    MCP_DELEGATIONS: JSON.stringify({ [principal(subject)]: entry(subject) }),
     PIPELINE: {
       fetch: async (request: Request) => {
         calls++;
@@ -149,7 +127,7 @@ const payload = () => ({
   reason: "correction",
   idempotencyKey: crypto.randomUUID(),
 });
-test("signed MCP uses schedule scope; current auth is mandatory before reading a completed receipt", async () => {
+test("signed MCP replays a completed receipt whatever the operator lists say, and only to its own principal", async () => {
   const cfg = config();
   const input = { ...payload(), step: "apply" };
   const saved = await invoke(TOOL, input, cfg);
@@ -164,67 +142,23 @@ test("signed MCP uses schedule scope; current auth is mandatory before reading a
     reconciliation: null,
   });
   expect({ calls, alarms }).toEqual(after);
-  const expired = {
-    ...entry(),
-    issuedAt: new Date(Date.now() - 7200000).toISOString(),
-    notAfter: new Date(Date.now() - 3600000).toISOString(),
-  };
-  for (const [change, error] of [
-    [{ MCP_DELEGATIONS: "" }, "delegation_not_configured"],
-    [{ MCP_DELEGATIONS: JSON.stringify({ [principal()]: expired }) }, "delegation_expired"],
-    [{ OPERATOR_SUBJECTS: "[]" }, "delegation_misconfigured"],
-    [
-      {
-        MCP_DELEGATIONS: JSON.stringify({
-          [principal()]: {
-            ...entry(),
-            role: "reviewer",
-            capabilities: [],
-            scopes: { ...scopes, sources: "*" },
-          },
-        }),
-        AGENT_API_GRANTS: JSON.stringify({
-          [principal()]: { ...grant, scopes: { ...scopes, sources: "*" } },
-        }),
-      },
-      "delegation_capability_denied",
-    ],
-    [
-      {
-        MCP_DELEGATIONS: JSON.stringify({
-          [principal()]: { ...entry(), scopes: { ...scopes, scheduleSources: [] } },
-        }),
-      },
-      "source_not_granted",
-    ],
-    [
-      {
-        AGENT_API_GRANTS: JSON.stringify({
-          [principal()]: { ...grant, scopes: { ...scopes, scheduleSources: [] } },
-        }),
-      },
-      "delegation_misconfigured",
-    ],
-  ] as const) {
-    const denied = await invoke(TOOL, input, { ...cfg, ...change });
-    expect([denied.isError, denied.structuredContent.error]).toEqual([true, error]);
+  // The operator lists grade the UI only (ADR 0084).
+  for (const change of [
+    { OPERATOR_SUBJECTS: JSON.stringify([OTHER]) },
+    { OPERATOR_SUBJECTS: "[]" },
+    { OPERATOR_SUBJECTS: "{" },
+  ]) {
+    const again = await invoke(TOOL, input, { ...cfg, ...change });
+    expect(again.structuredContent).toEqual(replay.structuredContent);
   }
-  const removed = await invoke(TOOL, input, { ...cfg, AGENT_API_GRANTS: "" });
-  expect(removed.isError).toBe(true);
-  expect(removed.structuredContent.error).toBeDefined();
-  const other = await invoke(
-    TOOL,
-    input,
-    {
-      ...cfg,
-      AGENT_API_GRANTS: JSON.stringify({ [principal()]: grant, [principal(OTHER)]: grant }),
-    },
-    OTHER,
-  );
-  expect(other.structuredContent.error).toBe("delegation_not_configured");
   expect({ calls, alarms }).toEqual(after);
+  // Another MCP client never gets this principal's receipt: its key is its own,
+  // so the same request is a new call of its own, relayed and judged anew.
+  const other = await invoke(TOOL, input, cfg, OTHER);
+  expect(other.structuredContent.replayed).not.toBe(true);
+  expect(calls).toBe(after.calls + 1);
 });
-test("signed R2 retry checks scope before receipt and never permits delegated survey acceptance", async () => {
+test("signed R2 retry replays its receipt; survey decisions are installed beside it", async () => {
   const cfg = config(),
     input = payload();
   const prepared = await invoke(TOOL, { ...input, step: "prepare" }, cfg);
@@ -242,15 +176,6 @@ test("signed R2 retry checks scope before receipt and never permits delegated su
     replayed: true,
     reconciliation: null,
   });
-  const narrowed = {
-    ...cfg,
-    MCP_DELEGATIONS: JSON.stringify({
-      [principal()]: { ...entry(), scopes: { ...scopes, scheduleSources: [] } },
-    }),
-  };
-  expect((await invoke(TOOL, confirm, narrowed)).structuredContent.error).toBe(
-    "source_not_granted",
-  );
   const capabilities = await invoke("kogane.capabilities", {}, cfg);
   const delegation = capabilities.structuredContent.delegation as {
     capabilities: { capability: string; available: boolean }[];
@@ -258,8 +183,10 @@ test("signed R2 retry checks scope before receipt and never permits delegated su
   expect(
     delegation.capabilities.find((x) => x.capability === "schedules.maintenance.update")?.available,
   ).toBe(true);
+  // The owner allowed delegated survey decisions on 2026-11-07 (ADR 0050
+  // amendment); their adapter is installed, so the capability is available.
   expect(
     delegation.capabilities.find((x) => x.capability === "schedules.survey.decide")?.available,
-  ).toBe(false);
+  ).toBe(true);
   expect({ calls, alarms }).toEqual(after);
 });

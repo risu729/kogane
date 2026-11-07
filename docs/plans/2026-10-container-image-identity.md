@@ -1,6 +1,6 @@
 # Typed Container image identity verification
 
-Status: implemented locally; independent review and hosted CI pending.
+Status: implemented; merged 2026-10-10 in #658.
 
 Date: 2026-10-10
 

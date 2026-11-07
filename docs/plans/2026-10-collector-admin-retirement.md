@@ -1,6 +1,7 @@
 # Collector admin bearer retirement
 
-- Status: implementation in progress; first slice covers 13 of 15 registrations
+- Status: in progress; the first slice (13 of 15 registrations) merged
+  2026-10-10 in #665, and the St.George saved-only preparation in #680
 - Date: 2026-10-10
 - Decision: [ADR 0069](../adr/0069-collector-admin-retirement.md)
 

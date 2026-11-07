@@ -42,11 +42,14 @@ import {
   readCollectionScanState,
   readPendingRegistrations,
 } from "../../../../packages/storage-d1/src/core/collection-runs.ts";
+import { safeFailureCode } from "./failure-code.ts";
 import {
   parseTerminalNotification,
   CollectionNotificationError,
   type TerminalNotification,
 } from "./notifications.ts";
+
+export { safeFailureCode } from "./failure-code.ts";
 
 /** Terminals listed in one cron tick. */
 export const DEFAULT_SCAN_PAGE = 25;
@@ -165,11 +168,6 @@ export interface ScanOptions {
   now?: () => Date;
   /** Told the safe code of each registration that threw. */
   onFailure?: (code: string) => void;
-}
-
-/** A class or error name only: never the message, which may quote a key. */
-export function safeFailureCode(error: unknown): string {
-  return error instanceof Error ? error.name || error.constructor.name : "unknown";
 }
 
 /** Adds one registration's outcome to the tick's counts. */
