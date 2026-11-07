@@ -24,7 +24,7 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
 | ExpiryRule           | `expiry_rules`                                                  | 計算方式のfamilyと、根拠・確認状態・適用範囲               |
 | ConversionOffer      | `conversion_offers`                                             | 倍率は整数比。キャンペーン・会員別は別offer                |
 
-計算は `packages/domain/src/rewards.ts` の純関数で行う。DB・時計・HTTPへ依存しない。
+計算は `packages/domain/src/rewards.ts` と、換算・経路探索を分けた `reward-conversion.ts` の純関数で行う。DB・時計・HTTPへ依存しない。
 
 - `summarizeHolding(holding, qualifications)` — 消費できるbucketだけをプログラム自身の単位で合計し、
   `pending-award` と `qualification` は理由コードつきで除外する。単位違い・未解析があれば合計は
@@ -588,7 +588,14 @@ an admitted tier and a validity date/period covering that same day. Missing,
 self-reported, another program's or out-of-period claims remain
 `needs_rule_verification`, rather than proving entitlement. These rejection rows
 describe an unestablished condition, not proof that a future application is impossible.
-No provider terms, quota, fee or acceptance policy is inferred.
+No provider terms, quota, fee or acceptance policy is inferred. The `/offers/simulate`
+route passes no membership claims, so every tier-limited offer is
+`needs_rule_verification` there until membership is supplied.
+
+`CONVERSION_SEARCH_RELEASE` is part of the reward projection's build digest
+(`packages/read-model/src/reward-projection.ts`), so the bump to `conversion-search-v2`
+builds a new projection snapshot once; stored snapshots are not rewritten and no
+migration is needed.
 
 The exhaustive eligibility test covers all 960 combinations of ten validity shapes
 (including three standing-offer shapes), eight membership scenarios,
