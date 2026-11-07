@@ -1,5 +1,5 @@
-import { readFileSync } from "node:fs";
-import { pathToFileURL } from "node:url";
+import { readFileSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 export const HEALTH_POLICY = Object.freeze({
   totalMs: 205000,
@@ -275,7 +275,22 @@ export async function main(env = process.env) {
   console.log(line);
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/**
+ * Whether node was started with this module, compared by real path: node
+ * resolves the main module through symlinks but leaves `argv[1]` as given, and
+ * a raw comparison would skip the command and exit 0 through a symlinked path.
+ */
+function invokedDirectly() {
+  try {
+    return (
+      process.argv[1] !== undefined &&
+      realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
+}
+if (invokedDirectly()) {
   try {
     await main();
   } catch (error) {

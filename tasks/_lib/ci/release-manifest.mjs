@@ -24,7 +24,14 @@
 // migrations apply` reads (unified plan D3: the directory moves in U05 and no
 // workflow or script changes with it).
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+  realpathSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJsonc } from "../../../scripts/jsonc.ts";
@@ -481,10 +488,24 @@ export async function main(argv, env) {
   throw new Error(`Unknown command ${String(command)}`);
 }
 
-// Not `import.meta.main`: that is only defined from node 24.2, and the
-// runner's preinstalled interpreter must not be able to turn a guard into a
-// silent no-op.
-if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+/**
+ * Whether node was started with this module, compared by real path: node
+ * resolves the main module through symlinks but leaves `argv[1]` as given, and
+ * a raw comparison would skip the command and exit 0 through a symlinked path.
+ * Not `import.meta.main`: that is only defined from node 24.2, and the runner's
+ * preinstalled interpreter must not be able to turn a guard into a silent no-op.
+ */
+function invokedDirectly() {
+  try {
+    return (
+      process.argv[1] !== undefined &&
+      realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
+}
+if (invokedDirectly()) {
   try {
     process.exitCode = await main(process.argv.slice(2), process.env);
   } catch (error) {
