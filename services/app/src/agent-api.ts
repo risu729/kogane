@@ -56,6 +56,7 @@ import {
 import { auditContext, auditedTool, recordThrown, recordTransportStatus } from "./audit";
 import { type AgentCaller, authenticate } from "./auth";
 import { cardPurchasesAvailable } from "./card-purchases-api";
+import { cardSettlementsAvailable } from "./card-settlements-api";
 import { grantsUsable } from "./grants";
 import {
   assertAgentTransport,
@@ -67,6 +68,9 @@ import {
 import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { opsApiEnabled } from "./ops-api";
 import {
+  LEASE_RELEASE_MCP_TOOLS,
+  LEASE_RELEASE_TOOL,
+  leaseReleaseTool,
   readScheduleTool,
   SCHEDULE_READ_TOOL,
   SCHEDULE_UPDATE_TOOL,
@@ -96,7 +100,8 @@ import {
   isDelegatedCommandTool,
 } from "./delegated-command-tools";
 
-import { readMcpTools, REPORTED_STATE_TOOL_NAME } from "./read-tools";
+import { CARD_SETTLEMENT_TOOL_NAMES, readMcpTools, REPORTED_STATE_TOOL_NAME } from "./read-tools";
+import { pageReadMcpTools } from "./page-read-tools";
 import {
   callDelegatedDecisionTool,
   delegatedDecisionTools,
@@ -236,12 +241,17 @@ export async function agentApi(
     let reconstructedServed: Promise<boolean> | undefined;
     const reconstructed = (): Promise<boolean> =>
       (reconstructedServed ??= reconstructedStateAvailable(env));
+    // The card settlement reads exist exactly while the カード照合 route does.
+    let settlementsServed: Promise<boolean> | undefined;
+    const settlements = (): Promise<boolean> =>
+      (settlementsServed ??= cardSettlementsAvailable(env));
     const message = await handleMcp(
       request,
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (name === REPORTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
+        if (CARD_SETTLEMENT_TOOL_NAMES.has(name) && !(await settlements())) return null;
         // An MCP client's capabilities also carry the operation authority
         // derived for it (ADR 0084), as a safe status; recorded like any call.
         if (name === "kogane.capabilities" && caller.kind === "mcp-client")
@@ -269,6 +279,10 @@ export async function agentApi(
             if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
             return callDelegatedMaintenanceTool(body, env, await delegation(), audit);
           });
+        // Listed while the settings routes exist, and refused for every caller
+        // (ADR 0081 point 3): the release stays the operator's in the UI.
+        if (schedules && name === LEASE_RELEASE_TOOL && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async () => leaseReleaseTool());
         if (isDelegatedScheduleTool(name) && caller.kind === "mcp-client")
           return toolCall(request, env, caller, name, async (audit) => {
             if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
@@ -301,13 +315,18 @@ export async function agentApi(
       },
       async () => [
         ...MCP_TOOLS,
-        ...readMcpTools(grant, { reportedState: await reconstructed() }),
+        ...readMcpTools(grant, {
+          reportedState: await reconstructed(),
+          cardSettlements: await settlements(),
+        }),
+        ...pageReadMcpTools(grant),
         ...(caller.kind === "mcp-client"
           ? [
               ...delegatedCommandTools(env, await delegation()),
               ...delegatedDecisionTools(env, await delegation()),
               ...delegatedScheduleTools(env, await delegation()),
               ...delegatedMaintenanceTools(env, await delegation()),
+              ...(schedules ? LEASE_RELEASE_MCP_TOOLS : []),
             ]
           : []),
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),
@@ -341,6 +360,8 @@ export async function agentApi(
     (tool === RECONSTRUCTED_STATE_TOOL_NAME || tool === REPORTED_STATE_TOOL_NAME) &&
     !(await reconstructedStateAvailable(env))
   )
+    throw new HttpError(404, "not_found");
+  if (CARD_SETTLEMENT_TOOL_NAMES.has(tool) && !(await cardSettlementsAvailable(env)))
     throw new HttpError(404, "not_found");
   const body = await boundedJson(request);
   const outcome = (await toolCall(request, env, caller, tool, (audit) =>

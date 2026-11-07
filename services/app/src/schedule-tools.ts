@@ -100,3 +100,37 @@ export async function readScheduleTool(
   if (!grantAllowsScheduleSource(grant, source)) return refusal(403, "source_not_granted");
   return relayRead(env, grant.principal, { sources: [source] });
 }
+
+/**
+ * `kogane.schedules.lease.release` on `/mcp` (ADR 0081 point 3): the schedules
+ * page's 停止した実行を解除 button exists as a tool, and refuses every call. Releasing a
+ * lease asserts that its execution stopped, which the server cannot verify, so
+ * the release stays R3, the operator's in the UI (ADR 0063 item 5). The tool
+ * reads no argument, relays nothing to the Processor and touches no store; the
+ * call is recorded as refused under `schedules.lease.release` on `mcp`.
+ */
+export const LEASE_RELEASE_TOOL = "kogane.schedules.lease.release";
+/** The one answer of the lease release tool: the delegation layer's code for an R3 operation. */
+export const LEASE_RELEASE_REFUSAL = "operation_not_delegable";
+const leaseReleaseSchema = z.strictObject({
+  source: sourceId,
+  leaseRef: z
+    .string()
+    .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u),
+  // The page's confirmation that the execution stopped, as its route requires.
+  confirmedStopped: z.literal(true),
+});
+export const LEASE_RELEASE_MCP_TOOLS = [
+  {
+    name: LEASE_RELEASE_TOOL,
+    title: "Release a stopped collection's lease (operator only)",
+    description:
+      "Refuses every call with operation_not_delegable. Releasing a collection lease asserts that the execution holding it stopped, which the server cannot verify, so only the operator releases it on the schedules page (risk class R3). The call is recorded; nothing is released and the Processor is not contacted.",
+    inputSchema: inputSchema(leaseReleaseSchema),
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  },
+] as const;
+/** Every call, whatever its arguments or its caller's grant and delegation. */
+export function leaseReleaseTool(): ToolResult {
+  return refusal(403, LEASE_RELEASE_REFUSAL);
+}

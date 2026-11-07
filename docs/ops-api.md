@@ -307,6 +307,9 @@ S3) publishes each tool to a resolved principal holding its `operations.*`
 capability, and `callDelegatedOpsTool` runs it through the same services; a
 collection request or session refresh needs a prepare and an exact
 confirmation. Every MCP client holds all six.
+For the same input, a call over MCP and its route give the same receipt and
+store the same request ([ADR 0081](adr/0081-ui-parity-through-mcp.md),
+`services/app/test/delegated-ops-parity.test.ts`).
 
 `kogane.ops.operation.get` is defined over the same service as the read
 route; on `/mcp` it reads only the calling principal's own operations, so an operation the operator requested

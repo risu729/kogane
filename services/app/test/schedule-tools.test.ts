@@ -473,3 +473,95 @@ describe("the operator's edit is the one revision path that runs today", () => {
     });
   });
 });
+
+describe("the lease release: listed on /mcp and refused for every caller (ADR 0081 point 3)", () => {
+  const RELEASE = "kogane.schedules.lease.release";
+  const LEASE_REF = "0b6f1c3e-8d2a-4f5b-9c7e-1a2b3c4d5e6f";
+  const names = async (subject: string, environment?: Record<string, unknown>) =>
+    ((await mcp(subject, "tools/list", {}, environment)).result.tools as { name: string }[]).map(
+      (entry) => entry.name,
+    );
+
+  it("is listed to every MCP client while the settings routes exist, and absent without them", async () => {
+    for (const subject of [OWNER, READER, FINANCIAL])
+      expect(await names(subject)).toContain(RELEASE);
+    // Whatever the operator list says (ADR 0084: no table grades MCP).
+    expect(await names(OWNER, { OPERATOR_SUBJECTS: "[]" })).toContain(RELEASE);
+    // The route's input (`/leases/{source}` with `{leaseRef, confirmedStopped}`), closed.
+    const listed = (
+      (await mcp(OWNER, "tools/list", {})).result.tools as {
+        name: string;
+        inputSchema: Record<string, unknown>;
+      }[]
+    ).find((entry) => entry.name === RELEASE)!;
+    expect(listed.inputSchema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["source", "leaseRef", "confirmedStopped"],
+      properties: { confirmedStopped: { const: true } },
+    });
+    expect(await names(OWNER, { SCHEDULES_ENABLED: "false" })).not.toContain(RELEASE);
+    const off = await mcp(
+      OWNER,
+      "tools/call",
+      { name: RELEASE, arguments: { source: "vpass", leaseRef: LEASE_REF } },
+      { SCHEDULES_ENABLED: "false" },
+    );
+    expect(off.error).toEqual({ code: -32602, message: "unknown_tool" });
+  });
+
+  it("refuses every call before any store or Processor is reached, and records it at R3", async () => {
+    // A held lease that a release would clear.
+    await env.DB.prepare(
+      "INSERT INTO collection_execution_leases(source,lease_ref,started_at) VALUES('vpass',?,?) ON CONFLICT(source) DO UPDATE SET lease_ref=excluded.lease_ref,started_at=excluded.started_at",
+    )
+      .bind(LEASE_REF, iso(Date.now() - DAY))
+      .run();
+    const before = (await records("schedules.lease.release")).length;
+    const calls: [string, unknown, Record<string, unknown>?][] = [
+      // The page's own body, exactly as its route would release with it.
+      [OWNER, { source: "vpass", leaseRef: LEASE_REF, confirmedStopped: true }],
+      // The whole-store authority every MCP client holds does not change it,
+      // whatever the operator list says.
+      [
+        OWNER,
+        { source: "vpass", leaseRef: LEASE_REF, confirmedStopped: true },
+        { OPERATOR_SUBJECTS: "[]" },
+      ],
+      // Neither does a reader without schedule authority, nor a malformed body.
+      [FINANCIAL, { source: "vpass", leaseRef: LEASE_REF, confirmedStopped: true }],
+      [READER, { source: "vpass", leaseRef: LEASE_REF }],
+      [READER, {}],
+    ];
+    for (const [subject, args, environment] of calls)
+      expect(await tool(subject, RELEASE, args, environment)).toMatchObject({
+        isError: true,
+        structuredContent: { error: "operation_not_delegable" },
+      });
+    expect(relayed).toEqual([]);
+    const lease = await env.DB.prepare(
+      "SELECT lease_ref FROM collection_execution_leases WHERE source='vpass'",
+    ).first<string>("lease_ref");
+    expect(lease).toBe(LEASE_REF);
+    const written = (await records("schedules.lease.release")).slice(before);
+    expect(written.map((row) => row["principal"])).toEqual(
+      calls.map(([subject]) => `mcp-client:${subject}`),
+    );
+    for (const row of written)
+      expect(row).toMatchObject({
+        path: "mcp",
+        principal_kind: "agent",
+        delegation_ref: null,
+        risk_class: "R3",
+        result: "refused",
+        result_code: "operation_not_delegable",
+        target_ref: null,
+      });
+  });
+
+  it("has no HTTP agent route", async () => {
+    const refused = await http(OWNER, RELEASE, { source: "vpass", leaseRef: LEASE_REF });
+    expect(refused).toMatchObject({ status: 404, body: { error: "not_found" } });
+    expect(relayed).toEqual([]);
+  });
+});

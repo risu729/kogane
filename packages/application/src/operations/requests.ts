@@ -600,6 +600,24 @@ export async function readOperation(
   return { ok: true, receipt };
 }
 
+/**
+ * The source an accepted operation is bound to, read only from the caller's
+ * own row: `null` when the operation does not exist or another principal
+ * accepted it, so the two answer alike. `sourceId` is `null` for an operation
+ * that names no source (a projection rebuild).
+ */
+export async function ownOperationSource(
+  store: CommandStore,
+  operationId: string,
+  principalId: string,
+): Promise<{ sourceId: string | null } | null> {
+  const row = await store.first<{ source_id: string | null }>(
+    "SELECT source_id FROM ops_requests WHERE operation_id=?1 AND principal=?2",
+    [operationId, principalId],
+  );
+  return row ? { sourceId: row.source_id } : null;
+}
+
 // ── executor hooks (U08, U09) ───────────────────────────────────────────
 //
 // The Processor and the collectors are the other side of this contract. They

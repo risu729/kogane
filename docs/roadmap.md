@@ -195,9 +195,10 @@ Grants (`AGENT_GRANTS`, `OPERATOR_SUBJECTS`), Access policies and secrets are ow
 decisions and never part of an agent PR; there is no delegation table and no agent read
 grant table since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md).
 Every screen operation also exists as an MCP operation over the same
-application service ([ADR 0081](adr/0081-ui-parity-through-mcp.md)); the first
-unit of this track inventories screen operations against MCP tools and adds
-the catalogue guard test.
+application service ([ADR 0081](adr/0081-ui-parity-through-mcp.md)). The
+inventory and its guard tests landed on 2026-11-07 with allow-lists of the
+known gaps ([agent API: parity guards](agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07));
+each later unit of this track closes gaps and shrinks those lists.
 
 ### New sources
 
@@ -247,8 +248,14 @@ slice is implemented, and so is the first purchase-event writer for supported
 single-payment card usage (on in production since 2026-09-24), and so is the
 pending-to-posted link review: the purchases page lists the open candidates
 and reviews each purchase's link (accept, reject, withdraw) through the change
-lifecycle. Source ownership, supported bank coverage, partial payments and
-refund handling still need completion.
+lifecycle. Statements without a settlement candidate are listed on
+`カード照合` (and to agents through `kogane.card-settlements.unmatched`) with
+a closed reason, refund and zero totals under their own code, and the ADR 0074
+planner's read-only answer for statements whose window holds no equal debit
+([card settlements](card-settlements.md#statements-without-a-candidate)); a
+multi-debit allocation is shown but cannot be accepted. Source ownership,
+supported bank coverage, partial payments and refund handling still need
+completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
 The [2026-09 next-milestone plan](plans/2026-09-next-milestone.md) is a

@@ -161,6 +161,7 @@ export {
   type OperationStage,
   type OperationStageReport,
   type OperationStatus,
+  ownOperationSource,
   pendingDispatches,
   type ProjectionRequest,
   readOperation,
@@ -434,6 +435,7 @@ export {
   executionFor,
   delegatedCan,
   delegatedReplay,
+  delegatedWritesRemaining,
   bindDelegatedWrite,
   type ConfirmationInput,
   prepareDelegatedOperation,
@@ -464,3 +466,11 @@ export {
   readEconomicRowReadinessForGrant,
   type EconomicRowReadinessReadOutcome,
 } from "./query/economic-row-readiness-read.ts";
+
+export {
+  readCardSettlementsForGrant,
+  readCardOwnershipForGrant,
+  CARD_SETTLEMENT_PROPOSAL_ID,
+  CARD_SETTLEMENTS_MAX_OFFSET,
+  type CardSettlementsReadOutcome,
+} from "./query/card-settlements-read.ts";

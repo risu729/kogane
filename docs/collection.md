@@ -289,13 +289,15 @@ artifact key, its role and its media type — through the closed table
 [ADR 0022](adr/0022-registration-artifact-datasets.md)). The artifact tables
 below are its source: a collector that renames an artifact, changes its role
 or declares another media type leaves that artifact without a dataset, and so
-unparsed, until the table follows. Vpass statement pages are withheld and
-registered without a dataset until the collector derives the trusted card
-binding ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). The table is
-registration contract `terminal-registration-v2`: a run registered under v1
-whose artifacts gain a dataset registers again under v2 (its v1 artifacts were
-never parsed), and every other v1 registration is carried over unchanged, so
-no capture is parsed twice.
+unparsed, until the table follows. Vpass statement pages were withheld until
+the collector's card binding matched the importer's
+([ADR 0023](adr/0023-vpass-collector-card-binding.md)) and carry
+`statement-page` since registration contract `terminal-registration-v3`
+([ADR 0083](adr/0083-release-vpass-collector-statement-pages.md)); only a
+successful card run's pages are parsed. A run registered under an earlier
+version whose artifacts gain a dataset registers again under the new version
+(its earlier artifacts were never parsed), and every other registration is
+carried over unchanged, so no capture is parsed twice.
 
 ### Sony Bank (`services/collector-sony-bank`, `kogane-sony-bank-collector-poc`)
 

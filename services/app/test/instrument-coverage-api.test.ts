@@ -253,8 +253,14 @@ describe("kogane.instruments.coverage", () => {
         for (const accounts of ["*", ["sbi-securities:domestic"]] as const) {
           const grant = { ...SUMMARY_GRANT, scopes: { sources, accounts }, capabilities } as Grant;
           const whole = sources === "*" && accounts === "*";
-          // The dated reported state's read is listed only where its route is served.
-          for (const reportedState of [false, true]) {
+          // The dated reported state's and the card settlement reads are listed
+          // only where their routes are served.
+          for (const [reportedState, cardSettlements] of [
+            [false, false],
+            [false, true],
+            [true, false],
+            [true, true],
+          ] as const) {
             const expected = [
               ...(capabilities.includes("records.read") && whole
                 ? ["kogane.instruments.history"]
@@ -264,21 +270,28 @@ describe("kogane.instruments.coverage", () => {
                 : []),
               ...(capabilities.includes("summary.read") && whole ? [TOOL] : []),
               ...(capabilities.includes("records.read") && whole
-                ? ["kogane.accounts.candidates", "kogane.economic-readiness.read"]
+                ? [
+                    "kogane.accounts.candidates",
+                    "kogane.card-settlements.unmatched",
+                    "kogane.economic-readiness.read",
+                  ]
+                : []),
+              ...(cardSettlements && capabilities.includes("records.read") && whole
+                ? ["kogane.card-settlements.read", "kogane.card-settlements.ownership"]
                 : []),
               ...(capabilities.includes("audit.read") && accounts === "*"
                 ? ["kogane.audit.search", "kogane.audit.get"]
                 : []),
             ];
             expect(
-              readMcpTools(grant, { reportedState }).map((tool) => tool.name),
-              JSON.stringify({ grant, reportedState }),
+              readMcpTools(grant, { reportedState, cardSettlements }).map((tool) => tool.name),
+              JSON.stringify({ grant, reportedState, cardSettlements }),
             ).toEqual(expected);
             shapes += 1;
           }
         }
     }
-    expect(shapes).toBe(8 << AGENT_CAPABILITIES.length);
+    expect(shapes).toBe(16 << AGENT_CAPABILITIES.length);
   });
 
   it("is listed to every MCP client under the whole-store grant (ADR 0084)", async () => {

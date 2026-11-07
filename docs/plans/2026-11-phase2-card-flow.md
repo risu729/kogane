@@ -62,6 +62,8 @@ Today unmatched statements are only tick counts. Show each statement that has no
 
 ### 2f Release the Vpass collector's statement pages (code + ADR, [#445](https://github.com/risu729/kogane/issues/445); approved 2026-11-07)
 
+**Outcome (2026-11-07):** (b) did not hold (2 of 7 cards ever `complete`, every card's newest run `partial`). The owner chose (04:16 UTC) to release anyway, limited to successful runs, which run-scope eligibility already enforces; recorded in [ADR 0083](../adr/0083-release-vpass-collector-statement-pages.md) (`terminal-registration-v3`). The text below is the plan as approved.
+
 The real release condition is in ADR 0023's amendment, updated by ADR 0029: (a) the collector's tokens equal the importer's, which migration 0063 made true for 6 of the 7 cards; and (b) the persist diagnostics show the collector's card units reaching `complete`. (b) is not checked yet; 2f checks it read-only first. The "binding key" wording in descriptors.ts:390-404 is stale and is corrected in 2f's pull request.
 
 Mechanism: `terminal-registration-v2` maps to `ARTIFACT_DATASETS` itself (descriptors.ts:439-444), so moving the rule there would change what an existing registration version means. Fetch artifacts are append-only, so the collector-vpass terminals already registered keep dataset NULL; parsing them needs a `terminal-registration-v3` bump with carry-over, which re-walks every source's terminals (a cost and blocked-run analysis like ADR 0022's, and a change to the `scripts/artifact-datasets.test.ts` pin). Effects to verify on synthetic data and then with counts:
