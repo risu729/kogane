@@ -28,6 +28,7 @@ export function validCardOwnershipReview(v: unknown): v is CardOwnershipReview {
         texts(s.evidenceRefs) &&
         texts(s.blockers) &&
         texts(s.selfDeclarationBlockers) &&
+        texts(s.ownerDefaultBlockers) &&
         typeof s.claimsTruncated === "boolean" &&
         Array.isArray(s.claims) &&
         s.claims.length <= 50 &&

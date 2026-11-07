@@ -18,7 +18,11 @@ import {
   ownershipReviewPartyRef,
 } from "../../../packages/domain/src/ownership-review.ts";
 import type { CardSettlementFacts } from "../../../packages/domain/src/card-settlement.ts";
-import { ownershipDeclarationRef } from "../../../packages/domain/src/ownership-declaration.ts";
+import {
+  OWNER_DEFAULT_PARTY,
+  ownershipDeclarationRef,
+} from "../../../packages/domain/src/ownership-declaration.ts";
+import type { CardOwnershipSide } from "../../../packages/domain/src/card-ownership-review.ts";
 import { queryCardOwnership } from "../../../packages/application/src/query/card-ownership.ts";
 
 let mf: Miniflare,
@@ -398,15 +402,122 @@ test("an aggregate or unresolved connection root requires explicit scope review,
   }
 });
 
-for (const conflictKind of ["beneficial_owner", "contradicts"] as const) {
-  test(`a ${conflictKind} judgement arriving inside commit blocks self-declaration atomically`, async () => {
-    const c = await candidate(),
+test("the owner default (ADR 0082) names the owner on both sides, admits a card root and never an unresolved one", async () => {
+  for (const status of ["aggregate", "unresolved"] as const) {
+    const c = await candidate((input) => ({
+      account: {
+        key: [input.sourceAccount],
+        label: "synthetic",
+        reason: "synthetic-owner-default",
+        role: input.sourceId === "myjcb" ? "card-statement-aggregate" : "deposit",
+        status: input.sourceId === "myjcb" ? status : "provider-local",
+      },
+      instruments: [],
+      issues: [],
+    }));
+    const store = d1CommandStore(db);
+    const review = (await queryCardOwnership(store, c.proposalId))!;
+    const [card, bank] = review.sides as [CardOwnershipSide, CardOwnershipSide];
+    expect(card.selfDeclarationBlockers).toContain("single_account_scope_unconfirmed");
+    expect(bank.ownerDefaultBlockers).toEqual([]);
+    const defaultPayload = (side: CardOwnershipSide, toRef = OWNER_DEFAULT_PARTY) => ({
+      ...c.payload,
+      relationKind: side.role,
+      fromRef: "account:" + side.accountId,
+      toRef,
+      evidenceRefs: [
+        ...side.evidenceRefs,
+        ownershipDeclarationRef(side.role, "2026-11-07", "owner-default")!,
+      ],
+      reason: "Owner default: an account with no recorded owner is the owner's",
+    });
+    // Another party name is not the owner default.
+    expect(
+      (
+        await createPlan(
+          "relation.accept",
+          defaultPayload(bank, "party:someone-else"),
+          { actor: human, baseContextId: "synthetic", now, ttlSeconds: 600 },
+          store,
+        )
+      ).ok,
+    ).toBe(false);
+    if (status === "unresolved") {
+      expect(card.ownerDefaultBlockers).toContain("single_account_scope_unconfirmed");
+      expect(
+        (
+          await createPlan(
+            "relation.accept",
+            defaultPayload(card),
+            { actor: human, baseContextId: "synthetic", now, ttlSeconds: 600 },
+            store,
+          )
+        ).ok,
+      ).toBe(false);
+      continue;
+    }
+    expect(card.ownerDefaultBlockers).toEqual([]);
+    for (const side of [card, bank]) {
+      const p = await prepared(defaultPayload(side));
+      expect(p.plan.simulation.ownershipDeclaration).toEqual({
+        kind: "self-declared",
+        scope: "owner-default",
+        role: side.role,
+        declaredOn: "2026-11-07",
+        providerNameVerified: false,
+      });
+      expect((await p.run()).ok).toBe(true);
+    }
+    const after = (await queryCardOwnership(store, c.proposalId))!;
+    for (const side of after.sides) {
+      expect(side.claims[0]!.partyRef).toBe(OWNER_DEFAULT_PARTY);
+      // A recorded claim now wins over another default.
+      expect(side.ownerDefaultBlockers).toContain("ownership_claims_require_review");
+    }
+    // The next sweep proposes the same match with the owner established.
+    await cardSettlementSweep(db);
+    const owned = await db
+      .prepare(
+        "SELECT facts_json FROM card_settlement_candidates WHERE statement_parse_run_id=? ORDER BY created_at DESC,id DESC LIMIT 1",
+      )
+      .bind(c.statement)
+      .first<{ facts_json: string }>();
+    expect(JSON.parse(owned!.facts_json)).toMatchObject({
+      ownership: "established-same",
+      statement: { ownerRef: OWNER_DEFAULT_PARTY },
+      bankDebit: { ownerRef: OWNER_DEFAULT_PARTY },
+    });
+  }
+});
+
+const aggregateRootResolver: IdentityResolver = (input) => ({
+  account: {
+    key: [input.sourceAccount],
+    label: "synthetic",
+    reason: "synthetic-owner-default",
+    role: input.sourceId === "myjcb" ? "card-statement-aggregate" : "deposit",
+    status: input.sourceId === "myjcb" ? "aggregate" : "provider-local",
+  },
+  instruments: [],
+  issues: [],
+});
+for (const [conflictKind, scope] of [
+  ["beneficial_owner", "sole-personal"],
+  ["contradicts", "sole-personal"],
+  // The owner default on a MyJCB root (ADR 0082): the receipt guard re-checks
+  // the default's own account scope, not the sole-personal one.
+  ["beneficial_owner", "owner-default"],
+  ["contradicts", "owner-default"],
+] as const) {
+  test(`a ${conflictKind} judgement arriving inside commit blocks a ${scope} declaration atomically`, async () => {
+    const c = await candidate(scope === "owner-default" ? aggregateRootResolver : resolver),
       store = d1CommandStore(db);
     const payload = {
       ...c.payload,
+      ...(scope === "owner-default" ? { toRef: OWNER_DEFAULT_PARTY } : {}),
       evidenceRefs: [
         ...c.payload.evidenceRefs,
-        ownershipDeclarationRef("liable_party", "2026-10-10")!,
+        ownershipDeclarationRef("liable_party", "2026-10-10", scope)!,
       ],
     };
     const p = await prepared(payload);

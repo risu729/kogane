@@ -53,8 +53,7 @@ let jwks: { keys: unknown[] };
 let sequence = 0;
 
 /**
- * The flag on, the two operators named, and a read grant that lets the same
- * subject reach `/mcp`. `OPERATOR_SUBJECTS` has to be explicit: the command
+ * The flag on and the two operators named. `OPERATOR_SUBJECTS` has to be explicit: the command
  * path's grant lists are allow-lists, so an authenticated subject that neither
  * names is refused with `subject_not_granted` rather than graded the operator
  * (docs/ops-api.md, "Authorization").
@@ -62,13 +61,6 @@ let sequence = 0;
 const ENABLED = {
   OPS_API_ENABLED: "true",
   OPERATOR_SUBJECTS: JSON.stringify([OPERATOR, SECOND_OPERATOR]),
-  AGENT_API_GRANTS: JSON.stringify({
-    [OPERATOR]: {
-      scopes: { sources: "*", accounts: "*" },
-      capabilities: ["summary.read"],
-      budget: { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 3 },
-    },
-  }),
 };
 
 beforeAll(async () => {
@@ -746,45 +738,35 @@ describe("stage progress is evidence, not a guess", () => {
   });
 });
 
-describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () => {
+describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)", () => {
   // Through the MCP Access application every caller is `mcp-client:<sub>`,
-  // the operator included. Give that name a read grant so `/mcp` answers at
-  // all; the operations must still be absent and refused.
-  const THROUGH_MCP = {
-    ...ENABLED,
-    AGENT_API_GRANTS: JSON.stringify({
-      [`mcp-client:${OPERATOR}`]: {
-        scopes: { sources: "*", accounts: "*" },
-        capabilities: ["summary.read"],
-        budget: { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 3 },
-      },
-    }),
-  };
+  // the operator included. Every such principal is published the operations
+  // as itself (ADR 0084); none is ever graded as the operator, and the
+  // operator lists grade the browser's routes only.
+  const THROUGH_MCP = ENABLED;
   const opsRows = async () =>
     env.DB.prepare("SELECT count(*) AS n FROM ops_requests").first<number>("n");
+  const opsOf = (names: string[]) => names.filter((name) => name.startsWith("kogane.ops."));
 
-  it("publishes no operations tool to the operator's own MCP client, flag on or off", async () => {
-    const six = MCP_TOOLS.map((tool) => tool.name);
-    expect(six).toHaveLength(6);
-    // CORE 0047 and the reported-state views are present, so both reads are
-    // published beside the six, whatever the operations flag. Operations
-    // tools are not: `/mcp` is agent-only (ADR 0047).
-    // The grant is whole-store summary.read, so the instrument coverage
-    // read is listed too (ADR 0073).
-    const reads = [
-      ...six,
-      "kogane.instruments.coverage",
-      PURCHASES_TOOL_NAME,
-      ...RECONSTRUCTED_STATE_MCP_TOOLS.map((tool) => tool.name),
-    ];
-    for (const flag of ["", "true"]) {
-      const listed = await mcp("tools/list", {}, { ...THROUGH_MCP, OPS_API_ENABLED: flag });
-      expect(
-        listed.result.tools.map((tool: any) => tool.name),
-        flag,
-      ).toEqual(reads);
-    }
-    // The definitions still exist, generated from the routes' schemas.
+  it("publishes the operations tools to every MCP principal, and only with the flag on", async () => {
+    expect(MCP_TOOLS.map((tool) => tool.name)).toHaveLength(6);
+    const names = async (environment: Record<string, unknown>, subject = OPERATOR) =>
+      (await mcp("tools/list", {}, environment, subject)).result.tools.map(
+        (tool: any) => tool.name,
+      ) as string[];
+    expect(opsOf(await names({ ...THROUGH_MCP, OPS_API_ENABLED: "" }))).toEqual([]);
+    for (const subject of [OPERATOR, AGENT, STRANGER])
+      expect(opsOf(await names(THROUGH_MCP, subject)), subject).toEqual(OPS_TOOL_NAMES);
+    // The read tools are the same whatever the flag says.
+    const reads = (list: string[]) => list.filter((name) => !name.startsWith("kogane.ops."));
+    expect(reads(await names(THROUGH_MCP))).toEqual(
+      reads(await names({ ...THROUGH_MCP, OPS_API_ENABLED: "" })),
+    );
+    for (const name of [...MCP_TOOLS.map((tool) => tool.name), PURCHASES_TOOL_NAME])
+      expect(await names(THROUGH_MCP)).toContain(name);
+    for (const tool of RECONSTRUCTED_STATE_MCP_TOOLS)
+      expect(await names(THROUGH_MCP)).toContain(tool.name);
+    // The definitions are generated from the routes' schemas.
     expect(OPS_TOOL_NAMES).toEqual([
       "kogane.ops.collection.request",
       "kogane.ops.import.request",
@@ -795,27 +777,31 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
     ]);
   });
 
-  it("refuses every operation over MCP without writing a row, and serves it over HTTP", async () => {
+  it("records an operation by a subject the UI does not list under its own MCP principal", async () => {
     const before = await opsRows();
-    const accepted = await ops("/imports", { source: "sony-bank", runId: "run-read-over-http" });
-    const calls: [string, Record<string, unknown>][] = [
-      ["kogane.ops.collection.request", { ...COLLECTION, idempotencyKey: "over-mcp" }],
-      ["kogane.ops.import.request", { source: "sony-bank", runId: "run-over-mcp" }],
-      ["kogane.ops.replay.request", { source: "sony-bank" }],
-      ["kogane.ops.projection.request", { reason: "over mcp" }],
-      ["kogane.ops.session.refresh", { source: "sony-bank" }],
-      ["kogane.ops.operation.get", { operationId: accepted.json.operationId }],
-    ];
-    for (const [name, args] of calls) {
-      const called = await mcp("tools/call", { name, arguments: args }, THROUGH_MCP);
-      expect(called.result.isError, name).toBe(true);
-      expect(called.result.structuredContent, name).toEqual({ error: "delegation_not_configured" });
-    }
-    // Only the HTTP import above was written.
+    const called = await mcp(
+      "tools/call",
+      {
+        name: "kogane.ops.import.request",
+        arguments: { source: "sony-bank", runId: "run-over-mcp", idempotencyKey: "stranger-mcp" },
+      },
+      THROUGH_MCP,
+      STRANGER,
+    );
+    expect(called.result.isError).not.toBe(true);
     expect(await opsRows()).toBe((before ?? 0) + 1);
-    // The operator keeps the operations over HTTP, with the browser application.
-    const overHttp = await ops("/collections", { ...COLLECTION, idempotencyKey: "over-http" });
-    expect(overHttp.status).toBe(202);
+    expect(
+      await env.DB.prepare("SELECT principal FROM ops_requests WHERE idempotency_key=?")
+        .bind("stranger-mcp")
+        .first<string>("principal"),
+    ).toBe(`mcp-client:${STRANGER}`);
+    // The stranger is still nobody on the browser's operations routes.
+    const overHttp = await call(`${OPS}/projections`, {
+      body: { reason: "stranger over http" },
+      subject: STRANGER,
+      environment: ENABLED,
+    });
+    expect(overHttp.status).toBe(403);
   });
 
   it("refuses a token minted for the browser application on /mcp", async () => {
@@ -836,7 +822,7 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
     expect(response.status).toBe(401);
   });
 
-  it("grades route refusals over HTTP and stops before them over MCP", async () => {
+  it("gives every MCP principal the service's own refusals", async () => {
     const refused = await ops("/collections", { ...COLLECTION, source: "not-a-source" });
     expect(refused.status).toBe(400);
     expect(refused.json).toMatchObject({ error: "target_missing", refs: ["source"] });
@@ -847,81 +833,65 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
     });
     expect(invalid.status).toBe(400);
     expect((await invalid.json()).error).toBe("invalid_request");
-    const readable = JSON.stringify({
-      [AGENT]: {
-        scopes: { sources: "*", accounts: "*" },
-        capabilities: ["summary.read"],
-        budget: { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 3 },
-      },
-      [STRANGER]: {
-        scopes: { sources: "*", accounts: "*" },
-        capabilities: ["summary.read"],
-        budget: { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 3 },
-      },
-    });
-    const agent = await call(`${OPS}/projections`, {
-      body: { reason: "agent attempt" },
-      subject: AGENT,
-      environment: {
-        ...ENABLED,
-        AGENT_GRANTS: JSON.stringify([AGENT]),
-        AGENT_API_GRANTS: readable,
-      },
-    });
-    expect(agent.status).toBe(403);
-    expect((await agent.json()).error).toBe("approval_required");
-    const stranger = await call(`${OPS}/projections`, {
-      body: { reason: "stranger attempt" },
-      subject: STRANGER,
-      environment: { ...ENABLED, AGENT_API_GRANTS: readable },
-    });
-    expect(stranger.status).toBe(403);
-    expect((await stranger.json()).error).toBe("subject_not_granted");
-    // The same payloads over `/mcp` never reach those graders: the caller
-    // object is refused first, including when the MCP client has a read grant.
-    const mcpGrants = JSON.stringify({
-      [`mcp-client:${OPERATOR}`]: JSON.parse(readable)[AGENT],
-      [`mcp-client:${AGENT}`]: JSON.parse(readable)[AGENT],
-      [`mcp-client:${STRANGER}`]: JSON.parse(readable)[STRANGER],
-    });
-    for (const [subject, name, args] of [
-      [OPERATOR, "kogane.ops.collection.request", { ...COLLECTION, source: "not-a-source" }],
-      [OPERATOR, "kogane.ops.session.refresh", { source: "sony-bank", extra: "no" }],
-      [AGENT, "kogane.ops.projection.request", { reason: "agent attempt" }],
-      [STRANGER, "kogane.ops.projection.request", { reason: "stranger attempt" }],
+    const agentLists = { ...THROUGH_MCP, AGENT_GRANTS: JSON.stringify([AGENT]) };
+    const before = await opsRows();
+    for (const [subject, name, args, error] of [
+      [
+        OPERATOR,
+        "kogane.ops.collection.request",
+        {
+          ...COLLECTION,
+          source: "not-a-source",
+          idempotencyKey: "bogus-source-key",
+          step: "prepare",
+        },
+        "target_missing",
+      ],
+      [
+        OPERATOR,
+        "kogane.ops.session.refresh",
+        { source: "sony-bank", extra: "no" },
+        "invalid_request",
+      ],
+      [
+        AGENT,
+        "kogane.ops.session.refresh",
+        { source: "sony-bank", extra: "no" },
+        "invalid_request",
+      ],
+      [
+        STRANGER,
+        "kogane.ops.collection.request",
+        {
+          ...COLLECTION,
+          source: "not-a-source",
+          idempotencyKey: "stranger-bogus-source-key",
+          step: "prepare",
+        },
+        "target_missing",
+      ],
     ] as const) {
-      const called = await mcp(
-        "tools/call",
-        { name, arguments: args },
-        { ...ENABLED, AGENT_API_GRANTS: mcpGrants },
-        subject,
-      );
+      const called = await mcp("tools/call", { name, arguments: args }, agentLists, subject);
       expect(called.result.isError, name).toBe(true);
-      expect(called.result.structuredContent, `${subject} ${name}`).toEqual({
-        error: "delegation_not_configured",
-      });
+      expect(called.result.structuredContent.error, `${subject} ${name}`).toBe(error);
+      expect(JSON.stringify(called.result.structuredContent)).not.toContain("not-a-source");
     }
+    expect(await opsRows()).toBe(before);
   });
 
-  // One resolver on HTTP. An MCP client is refused from the caller object
-  // before that resolver runs, so a broken grant list cannot make the two
-  // transports agree on `grants_misconfigured`.
-  it("keeps the read tools listed and refuses operations while the grant lists cannot be read", async () => {
+  // The operator lists grade the browser's routes only: a broken list is a
+  // misconfiguration there, and changes nothing over MCP.
+  it("answers MCP alike whatever the operator lists say, while HTTP refuses a broken list", async () => {
     const broken = { AGENT_GRANTS: JSON.stringify({ [AGENT]: 1 }) };
-    const listed = await mcp("tools/list", {}, { ...THROUGH_MCP, ...broken });
-    expect((listed.result.tools as { name: string }[]).map((tool) => tool.name)).toEqual([
-      ...MCP_TOOLS.map((tool) => tool.name),
-      "kogane.instruments.coverage",
-      PURCHASES_TOOL_NAME,
-      ...RECONSTRUCTED_STATE_MCP_TOOLS.map((tool) => tool.name),
-    ]);
-    const called = await mcp(
-      "tools/call",
-      { name: "kogane.ops.projection.request", arguments: { reason: "misconfigured" } },
-      { ...THROUGH_MCP, ...broken },
-    );
-    expect(called.result.isError).toBe(true);
-    expect(called.result.structuredContent).toEqual({ error: "delegation_not_configured" });
+    const missing = (environment: Record<string, unknown>) =>
+      mcp(
+        "tools/call",
+        { name: "kogane.ops.operation.get", arguments: { operationId: `op_${"0".repeat(64)}` } },
+        environment,
+      );
+    const healthy = await missing(THROUGH_MCP);
+    const misconfigured = await missing({ ...THROUGH_MCP, ...broken });
+    expect(misconfigured.result.structuredContent).toEqual(healthy.result.structuredContent);
     const overHttp = await call(`${OPS}/projections`, {
       body: { reason: "misconfigured" },
       environment: { ...ENABLED, ...broken },
@@ -930,7 +900,7 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
     expect((await overHttp.json()).error).toBe("grants_misconfigured");
   });
 
-  it("reads an operation over HTTP and refuses that read over MCP", async () => {
+  it("never shows the operator's browser receipt to its MCP principal", async () => {
     const accepted = await ops("/imports", {
       source: "sony-bank",
       runId: "run-read-through-http",
@@ -944,16 +914,16 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
       operationId: accepted.json.operationId,
       status: "accepted",
     });
-    const read = await mcp(
-      "tools/call",
-      {
-        name: "kogane.ops.operation.get",
-        arguments: { operationId: accepted.json.operationId },
-      },
-      THROUGH_MCP,
-    );
+    const get = (operationId: string) =>
+      mcp(
+        "tools/call",
+        { name: "kogane.ops.operation.get", arguments: { operationId } },
+        THROUGH_MCP,
+      );
+    const read = await get(accepted.json.operationId);
+    const missing = await get(`op_${"0".repeat(64)}`);
     expect(read.result.isError).toBe(true);
-    expect(read.result.structuredContent).toEqual({ error: "delegation_not_configured" });
+    expect(read.result.structuredContent).toEqual(missing.result.structuredContent);
     expect(read.result.structuredContent).not.toEqual(receipt);
   });
 });

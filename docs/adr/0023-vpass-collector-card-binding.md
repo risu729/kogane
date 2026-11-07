@@ -6,7 +6,9 @@
   (the token is derived without a key; see
   [Amendment: ADR 0029](#amendment-adr-0029-the-token-needs-no-key)); noted
   on 2026-09-27 that both stated-total fields are on the live site (see
-  [Note](#note-2026-09-27-both-stated-total-fields-are-on-the-live-site))
+  [Note](#note-2026-09-27-both-stated-total-fields-are-on-the-live-site));
+  the hold released by [ADR 0083](0083-release-vpass-collector-statement-pages.md)
+  (2026-11-07, see the last amendment)
 - Date: 2026-09-26
 - Carried by:
   [identity operations](../identity-operations.md#collector-vpass-runs-bind-in-their-own-run),
@@ -644,3 +646,14 @@ tests compare stored bytes, write calls and persistence outcomes against the
 same plan persisted without the diagnostic; the card stays partial and a
 network trap records no added fetch. No real provider request or production
 payload was used to implement or test this amendment.
+
+## Amendment (2026-11-07, ADR 0083): released with condition (a) only
+
+Read in production on 2026-11-07 (counts only), condition (a) of
+[the hold](#decision-1) held for 6 of 7 cards and condition (b) did not: two
+cards had ever reached `complete` and every card's newest run was `partial`.
+The owner chose to release the statement pages anyway, limited to successful
+runs ([ADR 0083](0083-release-vpass-collector-statement-pages.md)). Condition
+(b) is replaced by the per-run rule the run-scope eligibility already
+enforces: a run whose card unit is `partial` is never parsed, so it neither
+binds nor displaces the importer-era snapshot of its card-month.

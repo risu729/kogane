@@ -119,6 +119,18 @@ payments, partial payments and refund allocation are either supported or shown
 as unsupported with a closed reason
 ([acceptance criteria, layers 6–7](#layers-67--reconciliation-and-economic-event-generation)).
 
+The [Phase 2 plan](plans/2026-11-phase2-card-flow.md) (accepted 2026-11-07, 03:58 UTC) holds
+the units and the production baseline of 2026-11-06: candidates exist for Vpass → SMBC,
+Vpass → SBI Shinsei and MyJCB → SMBC statements, none was ever decided, and recorded
+ownership was the only blocker. On 2026-11-07 the owner decided that an account with no
+recorded owner is assumed to be the owner's, and that settlement decisions are delegated
+to agents through MCP over the same API as the screens
+([plan, section 4](plans/2026-11-phase2-card-flow.md#4-owner-decisions-2026-11-07)).
+Neither is implemented yet: no ownership default exists and the operation catalogue has no
+settlement operation. Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) no delegation entry or grant is needed: an MCP client the MCP Access
+application admits acts with the UI's authority, as itself.
+
 ### Phase 3 — Coverage, collection requests and cross-source identity
 
 Issues: [#542](https://github.com/risu729/kogane/issues/542),
@@ -179,7 +191,14 @@ Issues: [#559](https://github.com/risu729/kogane/issues/559),
 [#560](https://github.com/risu729/kogane/issues/560),
 [#561](https://github.com/risu729/kogane/issues/561). Each phase's feature is
 done only when it also works from the UI and MCP (layer 16 criteria).
-Delegations and grants are owner decisions and never part of an agent PR.
+Grants (`AGENT_GRANTS`, `OPERATOR_SUBJECTS`), Access policies and secrets are owner
+decisions and never part of an agent PR; there is no delegation table and no agent read
+grant table since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md).
+Every screen operation also exists as an MCP operation over the same
+application service ([ADR 0081](adr/0081-ui-parity-through-mcp.md)). The
+inventory and its guard tests landed on 2026-11-07 with allow-lists of the
+known gaps ([agent API: parity guards](agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07));
+each later unit of this track closes gaps and shrinks those lists.
 
 ### New sources
 
@@ -198,7 +217,7 @@ New collectors (#455–#510) start only when the owner asks, or after Phase 3.
 | 11: derived balances and positions      | Difference contracts and reconciliation readers; a pure fold from a start snapshot and adopted events, a commit-log knowledge selector, a one-account query, its route, agent tool, page ([ADR 0052](adr/0052-reconstructed-state-fold.md), [ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md))                                                                                                             | Applying adopted events to a starting snapshot to reconstruct balances and quantities                                                |
 | 12 + 14: cost basis and P&L             | Input gates, some P&L decomposition functions, a pure lot/disposal-allocation engine over provisional inputs, and an adapter from selected revisions that answers unsupported until a securities writer exists ([ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md))                                                                                                                                                   | A securities writer, transfers with carried cost, fee and FX evidence, persisted results, realized and unrealized P&L                |
 | 15: tax                                 | Refusal when required policy or inputs are missing                                                                                                                                                                                                                                                                                                                                                                             | Verified rules and tested outputs for a named jurisdiction, period and asset/account class                                           |
-| 16: AI / MCP                            | Shared query/explanation/proposal service and transports; scoped audit, instrument-history, instrument-coverage, account-candidate, economic-readiness and dated reported-state reads; delegated MCP operations that run only under an owner's delegation, none configured ([ADR 0063](adr/0063-delegated-ai-operation-path.md)); the operator's audit page                                                                    | Complete analysis and correction flows using the same services as the UI; a first delegation and delegated survey acceptance         |
+| 16: AI / MCP                            | Shared query/explanation/proposal service and transports; scoped audit, instrument-history, instrument-coverage, account-candidate, economic-readiness and dated reported-state reads; MCP operations applied by any MCP client Access admits, as itself ([ADR 0063](adr/0063-delegated-ai-operation-path.md), [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md))                                              | Complete analysis and correction flows using the same services as the UI                                                             |
 
 Current implementation and limits are maintained in [current status](current-status.md).
 The detailed source-by-source fixes and dated rollout observations previously
@@ -229,8 +248,14 @@ slice is implemented, and so is the first purchase-event writer for supported
 single-payment card usage (on in production since 2026-09-24), and so is the
 pending-to-posted link review: the purchases page lists the open candidates
 and reviews each purchase's link (accept, reject, withdraw) through the change
-lifecycle. Source ownership, supported bank coverage, partial payments and
-refund handling still need completion.
+lifecycle. Statements without a settlement candidate are listed on
+`カード照合` (and to agents through `kogane.card-settlements.unmatched`) with
+a closed reason, refund and zero totals under their own code, and the ADR 0074
+planner's read-only answer for statements whose window holds no equal debit
+([card settlements](card-settlements.md#statements-without-a-candidate)); a
+multi-debit allocation is shown but cannot be accepted. Source ownership,
+supported bank coverage, partial payments and refund handling still need
+completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
 The [2026-09 next-milestone plan](plans/2026-09-next-milestone.md) is a

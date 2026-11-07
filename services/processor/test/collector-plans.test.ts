@@ -999,10 +999,9 @@ test("vpass: one card's sanitized envelopes and the run manifest register and se
     "sanitized_provider_capture/transformed/source_not_retained_for_security",
   ]);
   expect(registered.units).toEqual([{ unit_key: "card-001", artifacts: 4, declared: 4 }]);
-  // ADR 0022/0023 withhold Vpass from a parser dataset until the collector's
-  // binding key is set and its tokens match the importer's. The pages' role
-  // must not lift that hold.
-  expect(registered.datasets).toEqual([null]);
+  // Since ADR 0083 (`terminal-registration-v3`) the statement page carries
+  // `statement-page`; the card list, selection, discovery and manifest none.
+  expect(registered.datasets).toEqual([null, "statement-page"]);
 });
 
 test("ADR 0026: a successful plan's units state what the parse gate reads", () => {
