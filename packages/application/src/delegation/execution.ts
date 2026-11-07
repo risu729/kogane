@@ -201,10 +201,7 @@ export function guardDelegatedEffect(
   )
     throw new DelegatedOperationError("confirmation_required");
   const clock = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
-  const conditions = [
-    `? > ${clock}`,
-    `(SELECT count(*) FROM audit_records WHERE principal=? AND principal_kind='delegated' AND result IN ('applied','accepted') AND recorded_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')) < ?`,
-  ];
+  const conditions = [`? > ${clock}`, `(${DELEGATED_WRITES_24H}) < ?`];
   const binds: unknown[] = [auth.notAfter, row.principal, auth.writesPerDay];
   if (auth.confirmsAuditId) {
     conditions.push(
@@ -234,6 +231,23 @@ export function guardDelegatedEffect(
     ),
     binds: [...binds, ...write.binds],
   };
+}
+
+/**
+ * How many writes this delegated principal has applied or accepted in the last
+ * 24 hours. The budget guard on every effect write and the preview's
+ * `budgetRemaining` count the same rows, so the preview never promises a write
+ * the guard would refuse.
+ */
+const DELEGATED_WRITES_24H = `SELECT count(*) n FROM audit_records WHERE principal=? AND principal_kind='delegated' AND result IN ('applied','accepted') AND recorded_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')`;
+
+/** The writes left in the principal's rolling 24-hour budget, never below zero. */
+export async function delegatedWritesRemaining(
+  store: CommandStore,
+  principal: DelegatedPrincipal,
+): Promise<number> {
+  const used = await store.first<{ n: number }>(DELEGATED_WRITES_24H, [principal.id]);
+  return Math.max(0, principal.budget.writesPerDay - (used?.n ?? 0));
 }
 
 const EFFECT = `SELECT * FROM audit_records WHERE principal=? AND operation=? AND idempotency_key=? AND result IN ('applied','accepted','replayed') ORDER BY recorded_at,audit_id LIMIT 1`;

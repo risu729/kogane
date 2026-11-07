@@ -1,6 +1,6 @@
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
-import { identityQuery } from "../src/identity-api";
+import { identityQuery } from "../../../packages/application/src/query/identity-pages";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
