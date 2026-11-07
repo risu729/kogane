@@ -307,11 +307,19 @@ export async function prepareIdentityCommand(
         },
   );
   if (!assign)
-    // The one permitted update: each active override is superseded exactly once, by this release.
+    // The one permitted update: each override the release cites is superseded
+    // exactly once, by this release. The release decision's evidence names the
+    // overrides that were active when it was written, in this same batch, so
+    // the set is the one the release decided about. "The decision exists" alone
+    // is not enough: a second delivery of this batch (a resend that read the
+    // ledger before the first one committed, or a change-lifecycle commit
+    // replayed under its receipt guard) finds the decision too, and would
+    // otherwise release an override someone made after the release.
     writes.push({
       sql: `UPDATE decision_revisions SET superseded_by=? WHERE subject_kind=? AND subject_ref=?
         AND decision_kind='assign' AND method IN ('manual','legacy-migration') AND superseded_by IS NULL
-        AND EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)`,
+        AND 'decision_revision:'||id IN (SELECT cited.value FROM decision_revisions released,
+          json_each(released.evidence_refs_json) cited WHERE released.id=?)`,
       binds: [decisionId, subjectKind, command.referenceId, decisionId],
     });
   return { receipt, digest, writes };
