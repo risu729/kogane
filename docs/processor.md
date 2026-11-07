@@ -724,7 +724,12 @@ refusal CORE made that the derivation did not foresee — is treated as the
 collection scan treats one (§2): it is not a verdict about the terminal, so no
 stage row is written for it. It is counted in the tick's `failed` and logged
 as `{"event":"operation_dispatch_registration_failed","code":…}` with the
-error's class only, never its message. The request stays `dispatch_pending`
+error's class only, never its message. Collection and dispatch diagnostic callbacks
+share `safeFailureCode`, which uses built-in type checks and never reads the
+exception's writable name, constructor or message. Its finite labels are
+`AggregateError`, `EvalError`, `RangeError`, `ReferenceError`, `SyntaxError`,
+`TypeError`, `URIError` and `Error`; a custom Error is generic `Error`, and
+unclassifiable or non-error throws become `unknown`. The request stays `dispatch_pending`
 and `accepted`: its `dispatch_attempts` goes up by one, its `failure_code` is
 `registration_failed` and its `available_at_ms` moves five minutes ahead.
 The queue is ordered by `available_at_ms`, so the request moves behind every
