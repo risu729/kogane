@@ -16,7 +16,7 @@ import {
   loadSurveyConfig,
   maintenanceSurveyEnabled,
 } from "../src/maintenance-survey/config.ts";
-import { diffWindows } from "../src/maintenance-survey/diff.ts";
+import { diffWindows, operatorOnlyAcceptance } from "../src/maintenance-survey/diff.ts";
 import { extractWindows, type Extraction } from "../src/maintenance-survey/extract.ts";
 import {
   MAX_PAGE_BYTES,
@@ -477,5 +477,70 @@ describe("comparing with the current rules", () => {
       ["changed", "off", ["rule_disabled_by_operator"]],
       ["new", null, ["ambiguous_rule_match"]],
     ]);
+  });
+
+  test("a delegated acceptance is the operator's when, against the rules now, it disables, re-enables or overlaps", () => {
+    const weekly: MaintenancePattern = {
+      kind: "weekly",
+      weekdays: [3],
+      start: "03:00",
+      end: "04:00",
+    };
+    const rules = [
+      rule("wed", weekly),
+      rule(
+        "off",
+        { kind: "weekly", weekdays: [5], start: "01:00", end: "02:00" },
+        { enabled: false },
+      ),
+    ];
+    const change = (pattern: MaintenanceRule["pattern"], enabled = true) => ({
+      timezone: "Asia/Tokyo",
+      pattern,
+      enabled,
+    });
+    const elsewhere: MaintenancePattern = {
+      kind: "weekly",
+      weekdays: [1],
+      start: "03:00",
+      end: "04:00",
+    };
+    // A new rule clear of every enabled rule, or a revision of its own rule, is not.
+    expect(operatorOnlyAcceptance(change(elsewhere), "synthetic-source-survey-1", rules)).toBe(
+      false,
+    );
+    expect(
+      operatorOnlyAcceptance(
+        change({ kind: "weekly", weekdays: [3], start: "03:30", end: "05:00" }),
+        "wed",
+        rules,
+      ),
+    ).toBe(false);
+    // A disable, a re-enable, and a rule beside one it equals or overlaps are.
+    expect(operatorOnlyAcceptance(change(weekly, false), "wed", rules)).toBe(true);
+    expect(operatorOnlyAcceptance(change(elsewhere), "off", rules)).toBe(true);
+    expect(operatorOnlyAcceptance(change(weekly), "synthetic-source-survey-2", rules)).toBe(true);
+    expect(
+      operatorOnlyAcceptance(
+        change({ kind: "weekly", weekdays: [3], start: "03:30", end: "05:00" }),
+        "synthetic-source-survey-3",
+        rules,
+      ),
+    ).toBe(true);
+    // A disabled rule it overlaps does not count; another timezone does not overlap.
+    expect(
+      operatorOnlyAcceptance(
+        change({ kind: "weekly", weekdays: [5], start: "01:00", end: "02:00" }),
+        "synthetic-source-survey-4",
+        rules,
+      ),
+    ).toBe(false);
+    expect(
+      operatorOnlyAcceptance(
+        { ...change(weekly), timezone: "UTC" },
+        "synthetic-source-survey-5",
+        rules,
+      ),
+    ).toBe(false);
   });
 });

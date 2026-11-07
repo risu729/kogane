@@ -195,6 +195,14 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // One row per source the coverage answer counts; never the counts themselves.
   if (operation === "instruments.coverage")
     return { rows: Array.isArray(value["rows"]) ? value["rows"].length : 0, truncated: false };
+  // Reviews on the page; truncated when another page follows. An ownership
+  // review is one candidate.
+  if (operation === "card-settlements.read")
+    return {
+      rows: Array.isArray(value["items"]) ? value["items"].length : 0,
+      truncated: value["nextOffset"] !== null && value["nextOffset"] !== undefined,
+    };
+  if (operation === "card-settlements.ownership") return { rows: 1, truncated: false };
   if (operation === "economic-readiness.read") {
     const manifest = value["manifest"] as { rows?: unknown } | undefined;
     return { rows: Array.isArray(manifest?.rows) ? manifest.rows.length : 0, truncated: false };
@@ -232,6 +240,19 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
         (Array.isArray(value["accounts"]) ? value["accounts"].length : 0) +
         (Array.isArray(value["payables"]) ? value["payables"].length : 0),
       truncated: false,
+    };
+  // One identity page (`{ schemaVersion, data }`): its rows (or connections),
+  // truncated when the page says more follow.
+  if (operation === "identity.read") {
+    const data = (value["data"] ?? {}) as Record<string, unknown>;
+    const coverage = (data["coverage"] ?? {}) as Record<string, unknown>;
+    return { rows: countOf(data), truncated: coverage["truncated"] === true };
+  }
+  // A page of statements; a named next page means more remain.
+  if (operation === "card-settlements.unmatched")
+    return {
+      rows: Array.isArray(value["items"]) ? value["items"].length : 0,
+      truncated: typeof value["nextOffset"] === "number",
     };
   if (operation === "instruments.candidates" || operation === "accounts.candidates") {
     const items = Array.isArray(value["items"]) ? value["items"].length : 0;

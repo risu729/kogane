@@ -36,14 +36,12 @@ export interface CatalogueEntry {
   paths: readonly AuditPath[];
 }
 
-const UI: readonly SubjectPath[] = ["ui"];
 const UI_MCP: readonly SubjectPath[] = ["ui", "mcp"];
 const AGENT: readonly SubjectPath[] = ["agent-http", "mcp"];
-// The operations tools of docs/ops-api.md are never served on `/mcp` now: its
-// only caller is an MCP client, which is agent-only (ADR 0047), so the tools
-// are not published to it and every call is refused `actor_not_supported`
-// before any grader runs. That refusal is recorded under the tool's operation
-// on `mcp`, which is why the path stays listed.
+// The operations requests of docs/ops-api.md: the operator's HTTP routes, and
+// on `/mcp` a delegated caller only (ADR 0063, `services/app/src/ops-tools.ts`),
+// both over the same services. A call without a delegation is refused and
+// recorded under the tool's operation on `mcp`.
 const OPS: readonly SubjectPath[] = ["ui", "mcp"];
 
 export const OPERATION_CATALOGUE = {
@@ -146,21 +144,25 @@ export const OPERATION_CATALOGUE = {
     paths: ["ui", "mcp"],
   },
   // Accepting a proposal changes a rule (R2); rejecting records a decision
-  // only (R1). One route, so one operation recorded under either class.
+  // only (R1). One route, so one operation recorded under either class. On
+  // `mcp` a delegated acceptance of a proposal the owner kept with the
+  // operator is refused and recorded at R3 (ADR 0050, amendment 2026-11-07).
   "schedules.survey.decide": {
-    risk: ["R2", "R1"],
+    risk: ["R2", "R1", "R3"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    delegation: "schedules.survey.decide",
+    paths: UI_MCP,
   },
-  // Stopped-execution lease release: operator in the UI only (R3).
+  // Stopped-execution lease release: the operator in the UI (R3). Its MCP
+  // tool exists and refuses every call, recorded here (ADR 0081 point 3).
   "schedules.lease.release": {
     risk: ["R3"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: UI_MCP,
   },
   // ── agent API tools (docs/agent-api.md) ─────────────────────────────────
   capabilities: { risk: ["R0"], effect: null, quiet: "read", capability: "", paths: AGENT },
@@ -226,6 +228,15 @@ export const OPERATION_CATALOGUE = {
     capability: "schedules.read",
     paths: AGENT,
   },
+  // The schedules page's re-survey section (ADR 0050): the undecided
+  // proposals and page freshness of the granted schedule sources, on `/mcp`.
+  "schedules.survey.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "schedules.read",
+    paths: ["mcp"],
+  },
   "instruments.history": {
     risk: ["R0"],
     effect: null,
@@ -243,6 +254,41 @@ export const OPERATION_CATALOGUE = {
   },
   // Account correspondence candidates (ADR 0077): read-only, the page's service.
   "accounts.candidates": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  // The カード照合 page's reads (ADR 0081): its review list or one review, and
+  // one candidate's ownership review, through the page's own services.
+  "card-settlements.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  // Card statements without a settlement candidate, with the ADR 0074
+  // planner's read-only answer (ADR 0074, 2026-11-07 amendment): the
+  // カード照合 page's service.
+  "card-settlements.unmatched": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  "card-settlements.ownership": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  // The UI's read pages over MCP (ADR 0081): each the route's own reader,
+  // whole-store only (services/app/src/page-read-tools.ts).
+  "identity.read": {
     risk: ["R0"],
     effect: null,
     quiet: "read",
@@ -312,6 +358,16 @@ export const OPERATION_CATALOGUE = {
     capability: "",
     paths: ["alarm"],
   },
+  // The `processor-tick` alarm frees a collection lease whose holder went
+  // silent (ADR 0085): applied, and R2 because the next execution may then
+  // contact the provider. A tick that frees nothing records nothing.
+  "alarm.lease.expire": {
+    risk: ["R2"],
+    effect: "applied",
+    quiet: "replayed",
+    capability: "",
+    paths: ["alarm"],
+  },
   // One tick of a lane that wrote rule decisions, economic commits or
   // proposals: R2 when it wrote a decision or a commit (adopted state, the
   // class of `command.commit`), R1 when it wrote proposals only (the class of
@@ -344,6 +400,7 @@ const NOT_TOOLS: readonly OperationName[] = [
   "mcp.request",
   "audit.overflow",
   "alarm.occurrence.claim",
+  "alarm.lease.expire",
   "lane.tick",
 ];
 

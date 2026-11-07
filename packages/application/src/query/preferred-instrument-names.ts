@@ -1,5 +1,11 @@
-import { mappingDecisionOriginSql } from "../../../packages/read-model/src/decision-origin.ts";
-import type { DecisionOrigin } from "../../../packages/domain/src/decision-origin.ts";
+// The preferred display name of each instrument identifier
+// (docs/instrument-display-names.md), shared by the identity page, the
+// organization read and `kogane.identity.read`. Moved here from
+// `services/app/src/preferred-instrument-names.ts` (ADR 0081 point 2), so no
+// adapter holds this SQL.
+import type { DecisionOrigin } from "../../../domain/src/decision-origin.ts";
+import { mappingDecisionOriginSql } from "../../../read-model/src/decision-origin.ts";
+import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 export interface PreferredInstrumentName {
   label: string;
   reason: "manual" | "provider-current" | "observed-japanese-script";
@@ -62,22 +68,22 @@ export const PREFERRED_INSTRUMENT_NAMES_SQL = `WITH requested AS MATERIALIZED (
 
 /** One set-oriented query per bounded response page; no process-global cache. */
 export async function preferredInstrumentNames(
-  db: D1Database,
+  sql: SqlExecutor,
   referenceIds: readonly string[],
 ): Promise<Map<string, PreferredInstrumentName>> {
   const ids = [...new Set(referenceIds)];
   if (ids.length > 500) throw new Error("preferred_instrument_name_budget_invalid");
   if (!ids.length) return new Map();
-  const result = await db.prepare(PREFERRED_INSTRUMENT_NAMES_SQL).bind(JSON.stringify(ids)).all<{
+  const rows = await sql.all<{
     referenceId: string;
     label: string;
     reason: PreferredInstrumentName["reason"];
     decisionOrigin: DecisionOrigin;
     kind: "transaction" | "position" | "valuation" | null;
     observationId: number | null;
-  }>();
+  }>(PREFERRED_INSTRUMENT_NAMES_SQL, [JSON.stringify(ids)]);
   return new Map(
-    result.results.map((row) => [
+    rows.map((row) => [
       row.referenceId,
       {
         label: row.label,
