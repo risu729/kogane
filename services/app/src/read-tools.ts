@@ -142,7 +142,7 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
   "kogane.card-settlements.read":
     "The card statement to bank debit reviews of the カード照合 page: one page (offset) or one review (proposalId), with the source facts, evidence references, acceptance blockers and decision history, the same answer as GET /api/v2/reconciliation/card-settlements, under records.read and a whole-store read grant. Read-only; deciding a review is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
   "kogane.card-settlements.ownership":
-    "The ownership review of one card settlement candidate: both accounts' current mappings, recorded ownership claims and self-declaration blockers, the same answer as GET /api/v2/reconciliation/card-settlements/ownership, under records.read and a whole-store read grant. Read-only; recording ownership is a relation plan through the change lifecycle, graded there.",
+    "The ownership review of one card settlement candidate: both accounts' current mappings, recorded ownership claims, self-declaration and owner-default blockers, the same answer as GET /api/v2/reconciliation/card-settlements/ownership, under records.read and a whole-store read grant. Read-only; recording ownership is a relation plan through the change lifecycle, graded there.",
   "kogane.audit.search":
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
   "kogane.audit.get":
