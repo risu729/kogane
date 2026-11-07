@@ -1,11 +1,11 @@
 // Pure reward conversion arithmetic and bounded route traversal.
 // Contracts remain exported from rewards.ts for existing callers.
 import type { ConversionOffer, ConversionPlan, MembershipState, OfferValidity } from "./rewards.ts";
+import { validOpenEndedPeriodValue } from "./open-ended-period.ts";
 import { CONVERSION_SEARCH_RELEASE, REWARD_POLICY_RELEASE } from "./reward-releases.ts";
 import {
   civilFromDays,
   periodContainsDate,
-  validOpenEndedPeriodValue,
   validTemporalValue,
   daysFromCivil,
   formatLocalDate,
