@@ -1036,11 +1036,12 @@ adapter is compared with the handler it replaced
 (`services/app/test/card-settlements-api-frozen.ts`) on a store of 1,101
 candidates, over every offset alone and beside each filter plus a fixed
 sample of 600 combinations of offsets, filters, unknown and repeated keys, on
-the list, `/ownership` and `/statements`, and on every grouped page from
-offset 0 to 1,000 over 1,002 statements: every answer is byte-identical
+the list, `/ownership` and `/statements`, and on every tenth grouped
+offset from 0 to 1,000 over 1,002 statements: every answer is byte-identical
 except the two changes recorded under [Agent reads](#agent-reads), and
 methods and non-operators answer as before
-(`services/app/test/card-settlements-api-differential.test.ts`). The grouped
+(`services/app/test/card-settlements-api-differential.test.ts`,
+`card-settlement-statements-differential.test.ts`). The grouped
 list's offsets 0, 990, 991, 1,000,000 and malformed ones give one status and
 one body on the route, the agent HTTP route and MCP, and its tool returns the
 page's grouped answer and writes one R0 audit record counting the statements

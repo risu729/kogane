@@ -296,8 +296,10 @@ statements on the page.
 
 `services/app/test/card-settlements-api-differential.test.ts` compares the
 route with the frozen handler (`card-settlements-api-frozen.ts`) on the
-existing requests and on every grouped page from offset 0 to 1,000 over 1,002
-statements. `services/app/test/card-settlements-read-tools.test.ts` sends the
+existing requests, and `card-settlement-statements-differential.test.ts` on
+every tenth grouped offset from 0 to 1,000 over 1,002 statements, and finds
+every page below offset 990 byte-identical and every deeper one, which the
+frozen handler served, refused. `services/app/test/card-settlements-read-tools.test.ts` sends the
 grouped list's offsets 0, 990, 991, 1,000,000, malformed offsets and every
 other key to the route, the agent HTTP route and MCP and gets one status and
 body on all three, and checks the listing, the absence while the route is not
