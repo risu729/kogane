@@ -607,7 +607,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
     }
   });
 
-  it("never offers an operations tool on /mcp, and refuses one from the caller object", async () => {
+  it("never offers an operations tool on /mcp without a delegation, and refuses one from the caller object", async () => {
     expect(await listTools({ environment: HOSTILE })).toEqual(PUBLISHED);
     const before = await opsRowCount();
     for (const [name, args] of [
