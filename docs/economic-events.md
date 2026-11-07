@@ -1339,9 +1339,13 @@ answer for a set too large to return complete ([read model](read-model.md)),
 rather than partly summed; a statement period narrows it. The provider
 statement totals are listed beside the figures and are never subtracted from
 or compared with them, and `settlementAddsPurchaseExpense` is `false`.
-`coverage` says the list is not a complete transaction history, names the
-excluded shapes, and counts the current provider rows no live event holds,
-across every statement month whatever the filter. `unrecognizedReasons` splits
+`coverage` says the list is not a complete transaction history, says no
+refund is allocated to a purchase (`refundsAllocated: false`: nothing plans or
+writes `card-refund.allocate`, [above](#review-commands-for-purchases-migration-0051),
+so a refund is summed apart and never subtracted from a purchase, as the page
+says beside each refund), names the excluded shapes, and counts the current
+provider rows no live event holds, across every statement month whatever the
+filter. `unrecognizedReasons` splits
 that count per source and closed reason: each such row is classified when the
 page is read by `classifyCardUsage`, the writer's own rule, through the same
 row-to-fact mapping (`packages/application/src/card-usage-fact.ts`), so the
