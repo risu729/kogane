@@ -138,12 +138,17 @@ export function isAgentPath(path: string): boolean {
   return path === MCP_PATH || path.startsWith(AGENT_PREFIX);
 }
 
+/**
+ * Route label for the request log: a closed code. A path that names no tool
+ * is `agent_unknown`, so the caller's path text never reaches the log.
+ */
 export function classifyAgentPath(path: string): string | null {
   if (path === MCP_PATH) return "mcp";
   if (path === SHARED_QUERY_PATH) return "shared_query";
-  if (path.startsWith(AGENT_PREFIX))
-    return `agent_${path.slice(AGENT_PREFIX.length).replace(/\W/gu, "_")}`;
-  return null;
+  if (!path.startsWith(AGENT_PREFIX)) return null;
+  const rest = path.slice(AGENT_PREFIX.length);
+  const known = toolForPath(path) !== null || `kogane.${rest}` === SCHEDULE_READ_TOOL;
+  return `agent_${known ? rest.replace(/\W/gu, "_") : "unknown"}`;
 }
 
 /** Read a bounded JSON body. An oversized or malformed body never reaches a tool. */

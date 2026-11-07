@@ -49,6 +49,8 @@ import {
   type BalanceProjectionReader,
   type BalanceSnapshotRow,
   type ProjectionPageRow,
+  snapshotIsBehind,
+  type CoreRevisionRow,
   type ServableSnapshot,
   type SnapshotRefusal,
 } from "../../../packages/read-model/src/index";
@@ -141,8 +143,9 @@ async function targetOf(reader: BalanceProjectionReader): Promise<ReadTarget> {
 async function snapshotRefusal(
   target: ReadTarget,
   snapshot: BalanceSnapshotRow,
+  currentRevision?: CoreRevisionRow,
 ): Promise<SnapshotRefusal | null> {
-  const revision = await target.reader.coreRevision();
+  const revision = currentRevision ?? (await target.reader.coreRevision());
   // The published snapshot is vouched for by the pointer: a build whose
   // content did not change still re-captured it at the current revision and
   // moved the watermark, so the pointer is what says "this was verified under
@@ -172,8 +175,11 @@ export async function servableSnapshot(reader: BalanceProjectionReader): Promise
   if (target.contractMismatch) return { refusal: "read_model_unavailable" };
   const snapshot = await reader.currentSnapshot();
   if (!snapshot) return null;
-  const refusal = await snapshotRefusal(target, snapshot);
-  return refusal === null ? { snapshot } : { refusal };
+  const revision = await reader.coreRevision();
+  const refusal = await snapshotRefusal(target, snapshot, revision);
+  return refusal === null
+    ? { snapshot, behind: snapshotIsBehind(target.pointer, snapshot.snapshot_id, revision) }
+    : { refusal };
 }
 
 /** The scope the routes accept; the same allow-listed keys the v1 list uses. */
@@ -395,12 +401,7 @@ async function snapshotBehind(
   snapshot: BalanceSnapshotRow,
 ): Promise<boolean> {
   const [pointer, revision] = await Promise.all([reader.activePointer(), reader.coreRevision()]);
-  return (
-    pointer === null ||
-    pointer.snapshot_id !== snapshot.snapshot_id ||
-    pointer.source_revision !== revision.source_revision ||
-    pointer.core_epoch !== revision.core_epoch
-  );
+  return snapshotIsBehind(pointer, snapshot.snapshot_id, revision);
 }
 
 async function dataCoverage(

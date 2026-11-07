@@ -298,6 +298,12 @@ at the new visibility revision; filtering rows out of it would leave every
 figure at its old value. `packages/application/test/query.test.ts` and
 `services/app/test/holdings-read.test.ts` pin each case.
 
+A valid snapshot that trails CORE's source revision remains readable as a fixed
+context. Holdings marks it `partial`, sets freshness to `partial`, and names
+`snapshot:behind_published_evidence` in both the freshness reasons and coverage
+gaps, like the v2 balance page. A later build that verifies the current revision
+clears that reason; stale measures still carry `scope_not_re_observed`.
+
 With a sealed snapshot it returns the adopted set of that snapshot as one
 figure per unit, in exact integer arithmetic, with the number of adopted
 measurements behind each one. Only `sum-disjoint` currency stocks qualify
