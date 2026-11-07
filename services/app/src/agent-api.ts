@@ -68,6 +68,9 @@ import {
 import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { opsApiEnabled } from "./ops-api";
 import {
+  LEASE_RELEASE_MCP_TOOLS,
+  LEASE_RELEASE_TOOL,
+  leaseReleaseTool,
   readScheduleTool,
   SCHEDULE_READ_TOOL,
   SCHEDULE_UPDATE_TOOL,
@@ -98,6 +101,7 @@ import {
 } from "./delegated-command-tools";
 
 import { CARD_SETTLEMENT_TOOL_NAMES, readMcpTools, REPORTED_STATE_TOOL_NAME } from "./read-tools";
+import { pageReadMcpTools } from "./page-read-tools";
 import {
   callDelegatedDecisionTool,
   delegatedDecisionTools,
@@ -205,8 +209,10 @@ export async function agentApi(
     // inside `callOpsTool`, exactly as their HTTP routes are. With
     // `OPS_API_ENABLED` off they are neither listed nor callable, so the MCP
     // surface matches the routes this deployment actually serves. An MCP
-    // client is never an operator (ADR 0047): they are not published to one,
-    // and `callOpsTool` refuses its caller object before any grader runs.
+    // client is never an operator (ADR 0047): it is shown and served only the
+    // tools its delegation holds (ADR 0063, `delegatedOpsTools` and
+    // `callDelegatedOpsTool`), and `callOpsTool` refuses its caller object
+    // before any grader runs.
     const ops = opsApiEnabled(env);
     // A deployment whose command grant lists cannot be read grades nobody, so
     // it can authorize none of the operations tools; publishing them would
@@ -268,6 +274,10 @@ export async function agentApi(
             if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
             return callDelegatedMaintenanceTool(body, env, await delegation(), audit);
           });
+        // Listed while the settings routes exist, and refused for every caller
+        // (ADR 0081 point 3): the release stays the operator's in the UI.
+        if (schedules && name === LEASE_RELEASE_TOOL && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async () => leaseReleaseTool());
         if (isDelegatedScheduleTool(name) && caller.kind === "mcp-client")
           return toolCall(request, env, caller, name, async (audit) => {
             if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
@@ -304,12 +314,14 @@ export async function agentApi(
           reportedState: await reconstructed(),
           cardSettlements: await settlements(),
         }),
+        ...pageReadMcpTools(grant),
         ...(caller.kind === "mcp-client"
           ? [
               ...delegatedCommandTools(env, await delegation()),
               ...delegatedDecisionTools(env, await delegation()),
               ...delegatedScheduleTools(env, await delegation()),
               ...delegatedMaintenanceTools(env, await delegation()),
+              ...(schedules ? LEASE_RELEASE_MCP_TOOLS : []),
             ]
           : []),
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),

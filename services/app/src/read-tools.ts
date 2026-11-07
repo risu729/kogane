@@ -1,6 +1,7 @@
 // Additional read adapters over the existing history, instrument coverage
 // (ADR 0073), dated reported state, account correspondence candidates
-// (ADR 0077) and common audit readers.
+// (ADR 0077), card statements without a settlement candidate (ADR 0074's
+// 2026-11-07 amendment) and common audit readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -25,6 +26,10 @@ import {
   ACCOUNT_SOURCE_ACCOUNT_ID,
   reviewAccountCandidates,
 } from "../../../packages/application/src/query/account-candidates.ts";
+import {
+  reviewUnmatchedCardStatements,
+  UNMATCHED_MAX_OFFSET,
+} from "../../../packages/application/src/query/card-statements-unmatched.ts";
 import { readInstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
 import { ECONOMIC_ROW_READINESS_SCHEMA } from "../../../packages/domain/src/economic-row-readiness.ts";
@@ -81,6 +86,10 @@ const schemas = {
     offset: z.number().int().min(0).max(ACCOUNT_CANDIDATES_MAX_OFFSET).optional(),
     sourceAccountId: z.string().regex(ACCOUNT_SOURCE_ACCOUNT_ID).optional(),
   }),
+  // The route's one parameter, with the service's own limit.
+  "kogane.card-settlements.unmatched": z.strictObject({
+    offset: z.number().int().min(0).max(UNMATCHED_MAX_OFFSET).optional(),
+  }),
   "kogane.economic-readiness.read": z.strictObject({
     schema: z.literal(ECONOMIC_ROW_READINESS_SCHEMA),
     family: z.enum(["bank-movement", "securities-execution"]),
@@ -126,6 +135,8 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "Count each source's instrument identifiers by candidate state, the same counts as the owner UI, under summary.read and a whole-store read grant.",
   "kogane.accounts.candidates":
     "One page of the ADR 0077 account correspondence candidates: which direct provider source accounts a reviewed aggregator connection contains, on which evidence, with closed status, hold and same-account reasons, under records.read and a whole-store read grant. Read-only; never proposes same_account. A candidate names the relation.accept or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
+  "kogane.card-settlements.unmatched":
+    "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit.",
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
   "kogane.card-settlements.read":
@@ -170,6 +181,7 @@ export function readMcpTools(
       case "kogane.instruments.coverage":
         return grantAllows(grant, "summary.read") && wholeStore(grant);
       case "kogane.accounts.candidates":
+      case "kogane.card-settlements.unmatched":
       case "kogane.economic-readiness.read":
         return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.card-settlements.read":
@@ -277,6 +289,19 @@ export async function callReadTool(
           return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
         if (outcome.status === "not_found") throw new HttpError(404, "not_found");
         return { status: 200, body: { apiVersion: 2, ...outcome.answer } };
+      }
+      case "kogane.card-settlements.unmatched": {
+        // The page's own service: capability, perimeter and bounds are
+        // decided there, once for both transports.
+        const input = parseRequest(schemas[name], body ?? {});
+        const outcome = await reviewUnmatchedCardStatements({
+          grant,
+          sql: d1Executor(env.DB),
+          request: { offset: input.offset ?? 0 },
+        });
+        return outcome.ok
+          ? { status: 200, body: { apiVersion: 2, ...outcome.review } }
+          : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       }
       case "kogane.economic-readiness.read": {
         // The shared service grades scope before validation or database access.

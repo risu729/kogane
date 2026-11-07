@@ -50,6 +50,31 @@ the release and its state readback finish. The page refreshes after success or
 failure, and keeps the result visible after the released lease disappears. Normal
 executions release their own leases on completion.
 
+A live execution does not leave its own lease behind because one D1 statement
+failed (`packages/collection/src/schedule-lease.ts`). A claim whose answer was
+lost clears its own reference and then reports the failure as
+`collection_failed`, so nothing contacts a provider and the next run is not
+refused as busy. A failed release on completion keeps the collection's own
+result. Either clearing statement is tried up to three times, with no wait
+between attempts. When every attempt fails, the lease stays held and the
+collector logs `collection_lease_release_failed` with only the source id and
+the attempt count; later runs are refused as busy until the release above. Both statements clear only the
+execution's own reference, never a lease another execution acquired. A process
+that dies mid-collection still needs the release above.
+
+On 2026-11-07 two leases had been held for weeks: `vpass` since
+2026-10-12 21:00 UTC and `sbi-vc-trade` since 2026-10-23 18:15 UTC. Every later
+occurrence of those sources failed `collection_busy`. The vpass occurrence had
+ended `uncertain` with no `finished_at`, so the Processor alarm waiting on the
+collector had itself stopped; that is the stopped-execution case, which only
+the release above clears. The sbi-vc-trade keepalive had finished
+`collection_failed` 0.25 s after its claim. That is consistent with either
+failed-statement case above, and also with the session object stopping between
+claim and release; the records do not say which. With the owner's go-ahead
+(2026-11-07 04:17 UTC), both were cleared at about 04:25 UTC by an
+exact-reference UPDATE on CORE D1, not through the page. These two releases
+therefore have no audit record.
+
 An accepted operations-API collection or session refresh runs through the same
 named collector RPC and the same lease
 ([ADR 0048](adr/0048-operation-collector-dispatch.md),
@@ -185,7 +210,10 @@ re-survey above, which fetches nothing until pages are confirmed. See
 [ADR 0046](adr/0046-agent-maintenance-windows.md), as amended by
 [ADR 0063](adr/0063-delegated-ai-operation-path.md) item 8 (slice S4 of the
 [AI operation path plan](plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)).
-Lease release and bootstrap stay operator or deployment only; job times and
+Lease release and bootstrap stay operator or deployment only (the MCP tool
+`kogane.schedules.lease.release` exists and refuses every call with
+`operation_not_delegable`, [ADR 0081](adr/0081-ui-parity-through-mcp.md)
+point 3; [agent access](agent-api.md#maintenance-windows)); job times and
 enable/disable are otherwise reachable only through the delegated
 `kogane.schedules.job.update` tool ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)),
 and the routes above refuse every agent and every MCP-audience caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows).

@@ -640,6 +640,13 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
+        name: "kogane.card-settlements.unmatched",
+        required: [],
+        closed: false,
+        properties: ["offset"],
+        annotations: readOnly,
+      },
+      {
         name: "kogane.economic-readiness.read",
         required: ["schema", "family", "rows", "knowledge"],
         closed: false,
@@ -658,6 +665,13 @@ describe("untrusted provider content (AT71)", () => {
         required: ["proposalId"],
         closed: false,
         properties: ["proposalId"],
+        annotations: readOnly,
+      },
+      {
+        name: "kogane.identity.read",
+        required: ["collection"],
+        closed: false,
+        properties: ["collection", "identityRead", "offset", "source"],
         annotations: readOnly,
       },
       {
@@ -712,9 +726,11 @@ describe("untrusted provider content (AT71)", () => {
       REPORTED_STATE_TOOL_NAME,
       "kogane.instruments.coverage",
       "kogane.accounts.candidates",
+      "kogane.card-settlements.unmatched",
       "kogane.economic-readiness.read",
       "kogane.card-settlements.read",
       "kogane.card-settlements.ownership",
+      "kogane.identity.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -796,9 +812,11 @@ describe("untrusted provider content (AT71)", () => {
       REPORTED_STATE_TOOL_NAME,
       "kogane.instruments.coverage",
       "kogane.accounts.candidates",
+      "kogane.card-settlements.unmatched",
       "kogane.economic-readiness.read",
       "kogane.card-settlements.read",
       "kogane.card-settlements.ownership",
+      "kogane.identity.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
