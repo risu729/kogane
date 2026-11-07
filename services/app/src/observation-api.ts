@@ -1,7 +1,8 @@
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { evidenceReader, type FilterOptionsKind, type ObservationKind } from "./observations";
-import { decimalRows } from "./normalized-decimals";
-import { describeActivities } from "./activity-presentation";
-import { organizedFilterOptions } from "./organized-filter-options";
+import { decimalRows } from "../../../packages/application/src/query/normalized-decimals.ts";
+import { describeActivities } from "../../../packages/application/src/query/activity-presentation.ts";
+import { organizedFilterOptions } from "../../../packages/application/src/query/organized-filter-options.ts";
 import { presentLatestBalances, describeBalanceRows } from "./balance-presentation";
 import { HttpError, json } from "./http";
 import { centralStoreCapabilities } from "./capabilities";
@@ -11,7 +12,7 @@ import {
   observationOrganizations,
   organizationContext,
   organizationKey,
-} from "./observation-organization";
+} from "../../../packages/application/src/query/observation-organization.ts";
 import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract";
 import {
   allowedQueryParameters,
@@ -46,6 +47,11 @@ interface RequestScope {
 }
 
 export function boundedCollections(value: Record<string, unknown>, offset?: number): Response {
+  return json(boundedPage(value, offset));
+}
+
+/** The body `boundedCollections` answers: each collection cut to 500 rows, with its coverage. */
+function boundedPage(value: Record<string, unknown>, offset?: number): Record<string, unknown> {
   let truncated = false;
   const bounded = Object.fromEntries(
     Object.entries(value).map(([key, rows]) => {
@@ -54,15 +60,30 @@ export function boundedCollections(value: Record<string, unknown>, offset?: numb
       return [key, rows.slice(0, 500)];
     }),
   );
-  return json({
+  return {
     ...bounded,
     coverage: {
       limit: 500,
       truncated,
       ...(offset === undefined ? {} : { nextOffset: truncated ? offset + 500 : null }),
     },
-  });
+  };
 }
+
+const OBSERVATION_PATH =
+  /^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options|v2\/balances\/(latest|history))(\/|$)/;
+
+/** A route request: its path and query, which is all the observation readers read. */
+export interface RouteRequest {
+  pathname: string;
+  searchParams: URLSearchParams;
+}
+
+/** What an observation route answers: a JSON body, or one raw object to stream. */
+type ObservationAnswer = { body: unknown } | { raw: RawDownload };
+type RawDownload = NonNullable<
+  Awaited<ReturnType<ReturnType<typeof evidenceReader>["getRawDownload"]>>
+>;
 
 // Called only after the existing Access JWT gate and read-only method check.
 export async function observationApi(
@@ -70,13 +91,24 @@ export async function observationApi(
   env: Env,
   url: URL,
 ): Promise<Response | null> {
+  if (!OBSERVATION_PATH.test(url.pathname)) return null;
+  const answer = await readObservationRoute(env, url);
+  return "raw" in answer
+    ? raw(env.EVIDENCE, answer.raw, request.method === "HEAD")
+    : json(answer.body);
+}
+
+/**
+ * One observation route's answer for this path and query: the reader both
+ * `GET /api/<route>` and the MCP page reads call (ADR 0081), so the page and
+ * an agent get one answer and one set of refusal codes (`HttpError`s).
+ */
+export async function readObservationRoute(
+  env: Env,
+  url: RouteRequest,
+): Promise<ObservationAnswer> {
   const path = url.pathname;
-  if (
-    !/^\/api\/(meta|overview|transactions|balances|positions|artifacts|observations|raw|filter-options|v2\/balances\/(latest|history))(\/|$)/.test(
-      path,
-    )
-  )
-    return null;
+  if (!OBSERVATION_PATH.test(path)) throw new HttpError(404, "not_found");
   // Accepted parameters come from the shared schema, so a server and a client
   // cannot drift apart. The v2 balance routes are the one place where a
   // deployment-resolved capability also decides whether a path exists and
@@ -147,41 +179,43 @@ export async function observationApi(
     if (!kind || !["transactions", "balances", "positions", "artifacts"].includes(kind))
       throw new HttpError(400, "invalid_query");
     if (measureView && kind !== "balances") throw new HttpError(400, "invalid_query");
-    return json(
-      await organizedFilterOptions(
-        env.DB,
+    return {
+      body: await organizedFilterOptions(
+        d1Executor(env.DB),
         kind,
         await reader.filterOptions({
           kind: kind as FilterOptionsKind,
           measureView: filter.measureView,
         }),
       ),
-    );
+    };
   }
   if (path === "/api/meta") {
-    return json({
-      apiVersion: 1,
-      parsingHealth: await reader.parsingHealth(),
-      globalPassEmptyMonths: await reader.globalPassEmptyMonths(),
-      source: { kind: "central-store", classification: "financial" },
-      // What this server can actually serve, not what the contract defaults
-      // to: the object resolved above, which the agent API reads through the
-      // same helper (src/capabilities.ts).
-      capabilities,
-    } satisfies ApiMetadata);
+    return {
+      body: {
+        apiVersion: 1,
+        parsingHealth: await reader.parsingHealth(),
+        globalPassEmptyMonths: await reader.globalPassEmptyMonths(),
+        source: { kind: "central-store", classification: "financial" },
+        // What this server can actually serve, not what the contract defaults
+        // to: the object resolved above, which the agent API reads through the
+        // same helper (src/capabilities.ts).
+        capabilities,
+      } satisfies ApiMetadata,
+    };
   }
-  if (path === V2_LATEST_PATH) return await latestBalancePage(env, url, identityRead);
-  if (path === V2_HISTORY_PATH) return await balanceHistoryPage(env, url, identityRead);
-  if (path === "/api/overview") return boundedCollections({ ...(await reader.overview()) });
+  if (path === V2_LATEST_PATH) return { body: await latestBalancePage(env, url, identityRead) };
+  if (path === V2_HISTORY_PATH) return { body: await balanceHistoryPage(env, url, identityRead) };
+  if (path === "/api/overview") return { body: boundedPage({ ...(await reader.overview()) }) };
   if (path === "/api/transactions") {
     const transactions = await organizeRows(
-      env.DB,
+      d1Executor(env.DB),
       "transaction",
       await decimalRows(
-        env.DB,
+        d1Executor(env.DB),
         "transaction",
         await describeActivities(
-          env.DB,
+          d1Executor(env.DB),
           await reader.listTransactions({
             source: filter.source,
             account: filter.account,
@@ -194,16 +228,18 @@ export async function observationApi(
       ),
       identityRead,
     );
-    return boundedCollections(
-      {
-        transactions,
-        interpretationContext: organizationContext(
-          identityRead,
-          transactions.slice(0, 500).map((row) => row.organization),
-        ),
-      },
-      offset,
-    );
+    return {
+      body: boundedPage(
+        {
+          transactions,
+          interpretationContext: organizationContext(
+            identityRead,
+            transactions.slice(0, 500).map((row) => row.organization),
+          ),
+        },
+        offset,
+      ),
+    };
   }
   if (path === "/api/balances") {
     const value = url.searchParams.get("latestOffset") ?? "0";
@@ -249,7 +285,7 @@ export async function observationApi(
     const projected =
       compat ??
       presentLatestBalances(
-        await organizeRows(env.DB, "balance", candidates, identityRead),
+        await organizeRows(d1Executor(env.DB), "balance", candidates, identityRead),
         filter.metric,
       );
     const latest = compat ?? projected.slice(latestOffset, latestOffset + 501);
@@ -262,25 +298,31 @@ export async function observationApi(
       offset,
     });
     const organizedHistory = await organizeRows(
-      env.DB,
+      d1Executor(env.DB),
       "balance",
       history.slice(0, 500),
       identityRead,
     );
-    return json({
-      latest: await decimalRows(env.DB, "balance", latest.slice(0, 500)),
-      history: await decimalRows(env.DB, "balance", describeBalanceRows(organizedHistory)),
-      interpretationContext: organizationContext(identityRead, [
-        ...latest.slice(0, 500).map((row) => row.organization),
-        ...organizedHistory.map((row) => row.organization),
-      ]),
-      coverage: {
-        limit: 500,
-        truncated: latest.length > 500 || history.length > 500,
-        nextOffset: history.length > 500 ? offset + 500 : null,
-        latestNextOffset: latest.length > 500 ? latestOffset + 500 : null,
+    return {
+      body: {
+        latest: await decimalRows(d1Executor(env.DB), "balance", latest.slice(0, 500)),
+        history: await decimalRows(
+          d1Executor(env.DB),
+          "balance",
+          describeBalanceRows(organizedHistory),
+        ),
+        interpretationContext: organizationContext(identityRead, [
+          ...latest.slice(0, 500).map((row) => row.organization),
+          ...organizedHistory.map((row) => row.organization),
+        ]),
+        coverage: {
+          limit: 500,
+          truncated: latest.length > 500 || history.length > 500,
+          nextOffset: history.length > 500 ? offset + 500 : null,
+          latestNextOffset: latest.length > 500 ? latestOffset + 500 : null,
+        },
       },
-    });
+    };
   }
   if (path === "/api/positions") {
     const entries = await reader.listPositions({
@@ -289,47 +331,49 @@ export async function observationApi(
       offset,
     });
     const normalizedPositions = await decimalRows(
-      env.DB,
+      d1Executor(env.DB),
       "position",
       entries.map((entry) => entry.position),
     );
     const normalizedValuations = new Map(
       (
         await decimalRows(
-          env.DB,
+          d1Executor(env.DB),
           "valuation",
           entries.flatMap((entry) => entry.valuations),
         )
       ).map((row) => [row.id, row.normalized]),
     );
     const organizations = await observationOrganizations(
-      env.DB,
+      d1Executor(env.DB),
       entries.flatMap((entry) => [
         { kind: "position" as const, id: entry.position.id },
         ...entry.valuations.map(({ id }) => ({ kind: "valuation" as const, id })),
       ]),
       identityRead,
     );
-    return boundedCollections(
-      {
-        positions: entries.map((entry, index) => ({
-          position: {
-            ...entry.position,
-            normalized: normalizedPositions[index]!.normalized,
-            organization: organizations.get(
-              organizationKey({ kind: "position", id: entry.position.id }),
-            )!,
-          },
-          valuations: entry.valuations.map((row) => ({
-            ...row,
-            normalized: normalizedValuations.get(row.id)!,
-            organization: organizations.get(organizationKey({ kind: "valuation", id: row.id }))!,
+    return {
+      body: boundedPage(
+        {
+          positions: entries.map((entry, index) => ({
+            position: {
+              ...entry.position,
+              normalized: normalizedPositions[index]!.normalized,
+              organization: organizations.get(
+                organizationKey({ kind: "position", id: entry.position.id }),
+              )!,
+            },
+            valuations: entry.valuations.map((row) => ({
+              ...row,
+              normalized: normalizedValuations.get(row.id)!,
+              organization: organizations.get(organizationKey({ kind: "valuation", id: row.id }))!,
+            })),
           })),
-        })),
-        interpretationContext: organizationContext(identityRead, organizations.values()),
-      },
-      offset,
-    );
+          interpretationContext: organizationContext(identityRead, organizations.values()),
+        },
+        offset,
+      ),
+    };
   }
   if (path === "/api/artifacts") {
     const cursor = url.searchParams.get("cursor");
@@ -337,14 +381,16 @@ export async function observationApi(
     if ((cursor !== null && !/^[1-9]\d*$/.test(cursor)) || !Number.isSafeInteger(before))
       throw new HttpError(400, "invalid_cursor");
     const rows = await reader.listArtifacts({ before, source: filter.source });
-    return json({
-      artifacts: rows.slice(0, 500),
-      coverage: {
-        limit: 500,
-        truncated: rows.length > 500 || cursor !== null,
-        nextCursor: rows.length > 500 ? String(rows[499].id) : null,
+    return {
+      body: {
+        artifacts: rows.slice(0, 500),
+        coverage: {
+          limit: 500,
+          truncated: rows.length > 500 || cursor !== null,
+          nextCursor: rows.length > 500 ? String(rows[499].id) : null,
+        },
       },
-    });
+    };
   }
   const artifact = /^\/api\/artifacts\/([1-9]\d*)$/.exec(path);
   const observation =
@@ -359,19 +405,21 @@ export async function observationApi(
     if (observation) {
       // Detail routes accept no parameters, so they always read `latest`.
       const ref = { kind: observation[1] as ObservationKind, id };
-      const organizations = await observationOrganizations(env.DB, [ref]);
-      const [decimal] = await decimalRows(env.DB, ref.kind, [{ id }]);
-      return json({
-        ...result,
-        normalized: decimal!.normalized,
-        organization: organizations.get(organizationKey(ref))!,
-        interpretationContext: organizationContext(
-          DEFAULT_IDENTITY_READ_MODE,
-          organizations.values(),
-        ),
-      });
+      const organizations = await observationOrganizations(d1Executor(env.DB), [ref]);
+      const [decimal] = await decimalRows(d1Executor(env.DB), ref.kind, [{ id }]);
+      return {
+        body: {
+          ...result,
+          normalized: decimal!.normalized,
+          organization: organizations.get(organizationKey(ref))!,
+          interpretationContext: organizationContext(
+            DEFAULT_IDENTITY_READ_MODE,
+            organizations.values(),
+          ),
+        },
+      };
     }
-    return json(result);
+    return { body: result };
   }
   const hash = /^\/api\/raw\/([a-f0-9]{64})$/.exec(path);
   if (hash) {
@@ -379,7 +427,7 @@ export async function observationApi(
     // The reader re-checks that for this one hash, independent of list limits.
     const row = await reader.getRawDownload({ sha256: hash[1] });
     if (!row) throw new HttpError(404, "not_found");
-    return raw(env.EVIDENCE, row, request.method === "HEAD");
+    return { raw: row };
   }
   throw new HttpError(404, "not_found");
 }
