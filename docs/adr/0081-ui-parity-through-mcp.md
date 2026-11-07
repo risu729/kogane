@@ -153,3 +153,10 @@ What the code does today (main `02a915a`):
   on `mcp`, whose catalogue paths are now `ui` and `mcp`
   (`services/app/test/schedule-tools.test.ts`;
   [agent access](../agent-api.md#maintenance-windows)).
+- 2026-11-07: `schedules.survey.decide` is on `ui` and `mcp`
+  (`kogane.schedules.survey.decide`, which an MCP client applies as itself under
+  ADR 0084; five review reasons, and any disable, re-enable or overlap, kept
+  with the operator), and the page's re-survey section is read by
+  `kogane.schedules.survey.read`
+  ([ADR 0050 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07);
+  `services/app/test/delegated-survey.test.ts`).

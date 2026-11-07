@@ -565,3 +565,132 @@ describe("the lease release: listed on /mcp and refused for every caller (ADR 00
     expect(relayed).toEqual([]);
   });
 });
+
+describe("the re-survey read and decision tools on /mcp (ADR 0050, amendment 2026-11-07)", () => {
+  const SURVEY_READ = "kogane.schedules.survey.read";
+  const SURVEY_DECIDE = "kogane.schedules.survey.decide";
+  const names = async (subject: string, environment?: Record<string, unknown>) =>
+    ((await mcp(subject, "tools/list", {}, environment)).result.tools as { name: string }[]).map(
+      (entry) => entry.name,
+    );
+  /** One stored fetch and one undecided proposal for `source`, as the lane writes them. */
+  async function seed(source: string): Promise<number> {
+    const sha = crypto.randomUUID().replaceAll("-", "").padEnd(64, "0");
+    const fetchId = await env.DB.prepare(
+      `INSERT INTO maintenance_survey_fetches(target_id,source,url,fetched_at,outcome,http_status,media_type,byte_size,sha256,object_key,extractor_version,windows)
+       VALUES(?,?,?,?, 'extracted',200,'text/html',100,?,?, 'synthetic-1',1) RETURNING id`,
+    )
+      .bind(
+        source,
+        source,
+        `${REFERENCE}/${source}`,
+        iso(Date.now() - 60_000),
+        sha,
+        `maintenance-survey/objects/${sha.slice(0, 2)}/${sha}`,
+      )
+      .first<number>("id");
+    return (await env.DB.prepare(
+      `INSERT INTO maintenance_survey_proposals(fetch_id,target_id,source,kind,rule_id,base_revision,timezone,pattern_json,enabled,scope,status,reasons_json,proposal_key,created_at)
+       VALUES(?,?,?,'new',NULL,0,'Asia/Tokyo',?,1,'collection','review_pending','["year_inferred"]',?,?) RETURNING id`,
+    )
+      .bind(
+        fetchId,
+        source,
+        source,
+        JSON.stringify({
+          kind: "once",
+          from: iso(Date.now() + DAY),
+          to: iso(Date.now() + DAY + HOUR),
+        }),
+        crypto.randomUUID().replaceAll("-", "").padEnd(64, "b"),
+        iso(Date.now()),
+      )
+      .first<number>("id"))!;
+  }
+
+  it("lists the read and the decision to every MCP client while the settings routes exist (ADR 0084)", async () => {
+    for (const subject of [OWNER, READER, FINANCIAL]) {
+      expect(await names(subject)).toContain(SURVEY_READ);
+      expect(await names(subject)).toContain(SURVEY_DECIDE);
+    }
+    const off = await names(OWNER, { SCHEDULES_ENABLED: "false" });
+    expect(off).not.toContain(SURVEY_READ);
+    expect(off).not.toContain(SURVEY_DECIDE);
+  });
+
+  it("reads the page's own view, narrowed to one source when asked, and records the read", async () => {
+    const mine = await seed("vpass");
+    const theirs = await seed("sony-bank");
+    const before = (await records("schedules.survey.read")).length;
+    const all = await tool(READER, SURVEY_READ, {});
+    expect(all.isError).toBe(false);
+    const every = all.structuredContent.proposals.map((entry: { id: number }) => entry.id);
+    expect(every).toEqual(expect.arrayContaining([mine, theirs]));
+    const read = await tool(READER, SURVEY_READ, { source: "vpass" });
+    expect(read.isError).toBe(false);
+    const ids = read.structuredContent.proposals.map((entry: { id: number }) => entry.id);
+    expect(ids).toContain(mine);
+    expect(ids).not.toContain(theirs);
+    expect(
+      read.structuredContent.proposals.find((entry: { id: number }) => entry.id === mine),
+    ).toMatchObject({
+      source: "vpass",
+      kind: "new",
+      baseRevision: 0,
+      current: true,
+      status: "review_pending",
+      reasons: ["year_inferred"],
+    });
+    expect(
+      read.structuredContent.targets.every((entry: { source: string }) => entry.source === "vpass"),
+    ).toBe(true);
+    expect(read.structuredContent).toMatchObject({ truncated: false });
+    // A malformed source is refused before anything is relayed.
+    expect(await tool(READER, SURVEY_READ, { source: "Not A Source" })).toMatchObject({
+      isError: true,
+      structuredContent: { error: "invalid_request" },
+    });
+    const written = (await records("schedules.survey.read")).slice(before);
+    expect(written.map((row) => [row["path"], row["result"], row["risk_class"]])).toEqual([
+      ["mcp", "read", "R0"],
+      ["mcp", "read", "R0"],
+      ["mcp", "refused", "R0"],
+    ]);
+    expect(relayed.filter((entry) => entry.path === "/internal/schedules/agent/survey")).toEqual([
+      { path: "/internal/schedules/agent/survey", agent: `mcp-client:${READER}`, operator: null },
+      { path: "/internal/schedules/agent/survey", agent: `mcp-client:${READER}`, operator: null },
+    ]);
+  });
+
+  it("narrows by source before the page's bound: another source's backlog neither hides nor shows", async () => {
+    // More undecided proposals of another source than the page shows, all older.
+    const first = await seed("sony-bank");
+    const [row] = (
+      await env.DB.prepare("SELECT * FROM maintenance_survey_proposals WHERE id=?")
+        .bind(first)
+        .all<Record<string, unknown>>()
+    ).results;
+    await env.DB.batch(
+      Array.from({ length: 200 }, () =>
+        env.DB.prepare(
+          `INSERT INTO maintenance_survey_proposals(fetch_id,target_id,source,kind,rule_id,base_revision,timezone,pattern_json,enabled,scope,status,reasons_json,proposal_key,created_at)
+           VALUES(?,?,?,'new',NULL,0,'Asia/Tokyo',?,1,'collection','proposed','[]',?,?)`,
+        ).bind(
+          row!["fetch_id"],
+          "sony-bank",
+          "sony-bank",
+          row!["pattern_json"],
+          crypto.randomUUID().replaceAll("-", "").padEnd(64, "c"),
+          iso(Date.now()),
+        ),
+      ),
+    );
+    const mine = await seed("vpass");
+    const read = await tool(READER, SURVEY_READ, { source: "vpass" });
+    expect(read.isError).toBe(false);
+    const shown = read.structuredContent.proposals as { id: number; source: string }[];
+    expect(shown.map((entry) => entry.id)).toContain(mine);
+    expect(shown.every((entry) => entry.source === "vpass")).toBe(true);
+    expect(read.structuredContent).toMatchObject({ truncated: false });
+  });
+});
