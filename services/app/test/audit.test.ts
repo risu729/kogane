@@ -26,6 +26,8 @@ import {
   RECONSTRUCTED_STATE_TOOL_NAME,
 } from "../src/agent-service";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
+import { maskRandomTokens } from "../../../packages/application/test/random-tokens";
+import { validAuditPage } from "../../../packages/observation-shared/src/audit-contract";
 import { OPS_MCP_TOOLS } from "../src/ops-tools";
 
 /** A provider line with a token-shaped value and an amount in it. */
@@ -33,11 +35,6 @@ const PROVIDER_TEXT = "架空商店 eyJhbGciOiJIUzI1NiJ9.c3ludGhldGlj.dG9rZW4 ¥
 const NEEDLES = ["架空", "eyJ", "c3ludGhldGlj", "123,456", "98765"];
 const OPERATOR = "operator@synthetic.test";
 const AGENT = "agent@synthetic.test";
-const GRANT = {
-  scopes: { sources: "*", accounts: "*" },
-  capabilities: ["summary.read", "records.read", "interpretation.propose"],
-  budget: { maxRows: 500, maxProposalTargets: 20, maxExplainDepth: 6 },
-};
 const sourceAccounts: string[] = [];
 let artifactId = 0;
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
@@ -140,7 +137,6 @@ async function call(path: string, options: Call = {}) {
     ACCESS_MCP_AUDIENCE: MCP_AUD,
     OPERATOR_SUBJECTS: JSON.stringify([OPERATOR]),
     AGENT_GRANTS: JSON.stringify([AGENT]),
-    AGENT_API_GRANTS: JSON.stringify({ [AGENT]: GRANT, [MCP_AGENT]: GRANT }),
     COMMANDS_ENABLED: "true",
     OPS_API_ENABLED: "true",
     ...options.environment,
@@ -577,15 +573,19 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
         .bind(receipt.decisionRevisionId)
         .first<number>("n"),
     ).toBe(1);
-    // No grant: refused on the tool the path names.
-    const ungranted = await call("/api/agent/v1/capabilities", {
+    // Any proved subject is served, and recorded as itself (ADR 0084).
+    const stranger = await call("/api/agent/v1/capabilities", {
       subject: "stranger@synthetic.test",
       body: {},
     });
-    expect(ungranted.response.status).toBe(403);
+    expect(stranger.response.status).toBe(200);
     expect(
-      (await recordsOf(ungranted.requestId)).map((row) => [row["operation"], row["result_code"]]),
-    ).toEqual([["capabilities", "agent_api_not_configured"]]);
+      (await recordsOf(stranger.requestId)).map((row) => [
+        row["principal"],
+        row["operation"],
+        row["result"],
+      ]),
+    ).toEqual([["stranger@synthetic.test", "capabilities", "read"]]);
     // A path no tool serves is not an operation.
     const unknown = await call("/api/agent/v1/not-served", { subject: AGENT, body: {} });
     expect(unknown.response.status).toBe(404);
@@ -631,25 +631,25 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
         resultCode: null,
       },
     ]);
-    // The MCP client's capabilities carry the inert delegation status (#628);
-    // its record is the same read of one row and names nothing of it.
+    // The MCP client's capabilities carry its operation status (#628, ADR
+    // 0084); its record is the same read of one row and names nothing of it.
     const answered = (await tool.response.json()) as {
       result: { structuredContent: { delegation?: unknown } };
     };
     expect(answered.result.structuredContent.delegation).toMatchObject({
-      available: false,
-      reason: "delegation_not_configured",
+      available: true,
+      reason: "ready",
     });
     const [capabilities] = await recordsOf(tool.requestId);
     expect(capabilities!["diff_json"]).toBe('{"kind":"read","rows":1,"truncated":false}');
-    expect(JSON.stringify(capabilities)).not.toContain("delegation_not_configured");
+    expect(JSON.stringify(capabilities)).not.toContain("ready");
     const unknown = await mcp({
       method: "tools/call",
       params: { name: "kogane.nothing", arguments: {} },
     });
     expect(await recordsOf(unknown.requestId)).toEqual([]);
-    // An MCP client is never an operator: an operations tool is refused before
-    // any grader, and the refusal is recorded under the tool; nothing is stored.
+    // An MCP client is never the operator: an operation it asks for is its
+    // own, recorded under its MCP principal as an operation it applied.
     const ops = await mcp({
       method: "tools/call",
       params: {
@@ -663,30 +663,21 @@ describe("the agent routes (agent-http) and MCP (mcp)", () => {
         path: "mcp",
         subject: AGENT,
         principal: MCP_AGENT,
-        principalKind: "agent",
+        principalKind: "delegated",
         operation: "ops.import.request",
-        result: "refused",
-        resultCode: "delegation_not_configured",
+        result: "accepted",
+        resultCode: null,
       },
     ]);
     expect(
       await env.DB.prepare("SELECT count(*) AS n FROM ops_requests WHERE principal=?")
         .bind(MCP_AGENT)
         .first<number>("n"),
-    ).toBe(0);
-    // No grant: refused on the transport, before any tool is named.
-    const ungranted = await mcp({ method: "tools/list" }, { subject: "stranger@synthetic.test" });
-    expect(ungranted.response.status).toBe(403);
-    expect(
-      (await recordsOf(ungranted.requestId)).map((row) => [
-        row["path"],
-        row["principal"],
-        row["operation"],
-        row["result_code"],
-      ]),
-    ).toEqual([
-      ["mcp", "mcp-client:stranger@synthetic.test", "mcp.request", "agent_api_not_configured"],
-    ]);
+    ).toBe(1);
+    // Any proved subject reaches the transport; a protocol message records nothing.
+    const stranger = await mcp({ method: "tools/list" }, { subject: "stranger@synthetic.test" });
+    expect(stranger.response.status).toBe(200);
+    expect(await recordsOf(stranger.requestId)).toEqual([]);
   });
 
   it("records the MCP transport's own HTTP refusals once, as mcp.request", async () => {
@@ -854,7 +845,7 @@ describe("daily caps", () => {
     const capped = "capped-agent@synthetic.test";
     await seedDay(capped, "read", AUDIT_DAILY_CAPS.read);
     await seedDay(capped, "refused", AUDIT_DAILY_CAPS.refused);
-    const environment = { AGENT_API_GRANTS: JSON.stringify({ [capped]: GRANT }) };
+    const environment = {};
     const served = await call("/api/agent/v1/capabilities", {
       subject: capped,
       body: {},
@@ -897,6 +888,8 @@ describe("the operator's read and the never-recorded list", () => {
       cursor: string | null;
     };
     expect(body.schemaVersion).toBe("kogane-audit-page-v1");
+    // The 監査ログ page's own check accepts what the route serves.
+    expect(validAuditPage(body)).toBe(true);
     expect(body.records.length).toBeGreaterThan(0);
     expect(body.records.length).toBeLessThanOrEqual(50);
     expect(body.records.every((record) => record.result === "refused")).toBe(true);
@@ -912,7 +905,9 @@ describe("the operator's read and the never-recorded list", () => {
   it("no record holds provider text, a token-shaped value or an amount", async () => {
     const rows = (await env.DB.prepare("SELECT * FROM audit_records").all()).results;
     expect(rows.length).toBeGreaterThan(10);
-    const stored = JSON.stringify(rows);
+    // Audit and correlation ids and digests are random hex: masked, so the
+    // amount's digits are found only where a record really carries them.
+    const stored = maskRandomTokens(JSON.stringify(rows));
     for (const needle of NEEDLES) expect(stored).not.toContain(needle);
   });
 });

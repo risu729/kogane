@@ -37,7 +37,7 @@ export function identitySweepFixture(
     INSERT INTO ingest_client_producers VALUES('identity-client','identity-fixture',1);
     INSERT INTO raw_objects VALUES('${SHA}',3,'objects/aa/${SHA}',1000);
   `);
-  for (const source of ["identity-fixture", "mizuho-bank", "vpass"]) {
+  for (const source of ["identity-fixture", "mizuho-bank", "sbi-shinsei-bank", "vpass"]) {
     db.run(
       "INSERT OR IGNORE INTO sources(id,provider,display_name) VALUES(?1,'Fixture','Fixture')",
       [source],
@@ -49,7 +49,10 @@ export function identitySweepFixture(
   }
   db.transaction(() => {
     for (let id = 1; id <= size; id += 1) {
-      const source = ["identity-fixture", "mizuho-bank", "vpass"][random(3)]!;
+      const drawn = ["identity-fixture", "mizuho-bank", "vpass"][random(3)]!;
+      // Half of the policy-2 source rows are SBI Shinsei (ADR 0076), chosen by
+      // id so the random stream, and every other row, stays as it was.
+      const source = drawn === "mizuho-bank" && id % 2 === 1 ? "sbi-shinsei-bank" : drawn;
       const outcome = random(9) === 0 ? "failed" : "success";
       const sealed = id % 17 !== 0;
       const excluded = id % 19 === 0;
@@ -93,8 +96,10 @@ export function identitySweepFixture(
         [id, status],
       );
       if (completed) {
-        // Some Mizuho rows retain policy 1 and must remain eligible for policy 2.
-        const version = source === "mizuho-bank" && id % 23 !== 0 ? 2 : 1;
+        // Some Mizuho and SBI Shinsei rows retain policy 1 and must remain
+        // eligible for policy 2.
+        const version =
+          (source === "mizuho-bank" || source === "sbi-shinsei-bank") && id % 23 !== 0 ? 2 : 1;
         db.run(
           "INSERT INTO identity_runs(id,parse_run_id,policy_version,created_at) VALUES(?1,?2,?3,'2026-01-01T00:00:00Z')",
           [`identity-${id}`, id, version],

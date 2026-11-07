@@ -54,6 +54,7 @@ export {
   type ReaderOptions,
   ResultLimitExceededError,
   type SourceFetchRunCount,
+  type SourceParseRun,
   type SqlExecutor,
   type TransactionQuery,
 } from "./reader";
@@ -143,6 +144,7 @@ export {
   type ProjectionInputsRow,
   type ProjectionPageRow,
   PROJECTION_INPUTS_SQL,
+  projectionRelationsSql,
   SUBTOTAL_ROW_BOUND,
   balanceHistoryKeysetSql,
   projectionCoverageSql,

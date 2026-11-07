@@ -206,8 +206,8 @@ describe.if(runnable)("change confirmation screen", () => {
     server?.stop(true);
   });
 
-  const open = async () => {
-    const page = await browser.newPage();
+  const open = async (viewport?: { width: number; height: number }) => {
+    const page = await browser.newPage(viewport ? { viewport } : {});
     await page.goto(`${origin}/confirm/${PLAN_ID}`);
     await page.getByRole("heading", { name: "変更の確認" }).waitFor();
     // The page head renders before the plan resolves; wait for every loading

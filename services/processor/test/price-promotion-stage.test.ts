@@ -3,15 +3,14 @@
 // summary of the same collection run states. Synthetic boards and pages are
 // parsed by the deployed parsers through the sweep, then promoted; every value
 // is synthetic.
-import { Database } from "bun:sqlite";
 import { afterAll, beforeAll, beforeEach, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import type { Miniflare } from "miniflare";
 import { SBI_SHINSEI_FX_PER_UNIT_CURRENCIES } from "../../../packages/domain/src/price-sources.ts";
 import { pricePromotionSweep, STAGE_SQL } from "../src/price-promotion-job.ts";
 import { sweep } from "../src/worker.ts";
 import { seedArtifact, startPipeline } from "./harness.ts";
+import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -21,6 +20,13 @@ beforeAll(async () => {
 afterAll(async () => {
   await mf?.dispose();
 });
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 const NOW = "2026-09-07T00:05:00.000Z";
 const FETCHED_MS = Date.parse("2026-09-07T00:02:00.000Z");
@@ -407,12 +413,7 @@ test("a stage job out of attempts, of another version or of a stopped replay pla
 }, 60000);
 
 test("the stage read reaches every table by key without statistics", () => {
-  const migrations = join(import.meta.dir, "../../../packages/storage-d1/migrations/core");
-  const db = new Database(":memory:");
-  for (const name of readdirSync(migrations)
-    .filter((entry) => entry.endsWith(".sql"))
-    .sort())
-    db.exec(readFileSync(join(migrations, name), "utf8"));
+  const db = fullCoreDatabase();
   const plan = (
     db.query(`EXPLAIN QUERY PLAN ${STAGE_SQL}`).all("[1,2,3]") as { detail: string }[]
   ).map((row) => row.detail);

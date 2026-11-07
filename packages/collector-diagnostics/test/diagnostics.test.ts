@@ -111,6 +111,18 @@ describe("safe collector diagnostics", () => {
     expect(JSON.stringify(records)).not.toMatch(/secret|example|private/u);
   });
 
+  test("keeps the shared-persist stage a collector reports its terminal write failure under", () => {
+    // services/collector-vpass reports a failed shared DATA write as
+    // `diagnostic.failure("shared-persist", ...)`; an unlisted stage would
+    // read as `unknown` and hide that the provider collection had succeeded.
+    const records = capture();
+    createDiagnostics("vpass", runId).failure(
+      "shared-persist",
+      new Error("shared_persist_incomplete"),
+    );
+    expect(records[0]).toMatchObject({ source: "vpass", stage: "shared-persist" });
+  });
+
   test("exception accessors and proxies cannot replace the original failure", async () => {
     capture();
     for (const key of ["name", "message", "httpStatus", "status", "code"]) {

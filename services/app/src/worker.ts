@@ -23,14 +23,25 @@ import {
   cardSettlementsApi,
   CARD_SETTLEMENT_PATH,
   CARD_OWNERSHIP_PATH,
+  CARD_SETTLEMENT_STATEMENTS_PATH,
 } from "./card-settlements-api";
 import { cardPurchasesApi, CARD_PURCHASES_PATH } from "./card-purchases-api";
 import { reportedStateApi, REPORTED_STATE_PATH } from "./reported-state-api";
+import {
+  reportedHoldingsChangeApi,
+  REPORTED_HOLDINGS_CHANGE_PATH,
+} from "./reported-holdings-change-api";
 import { reconstructedStateApi, RECONSTRUCTED_STATE_PATH } from "./reconstructed-state-api";
 import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
+import { accountCandidatesApi } from "./account-candidates-api";
+import {
+  CARD_STATEMENTS_UNMATCHED_PATH,
+  cardStatementsUnmatchedApi,
+} from "./card-statements-unmatched-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
 import { instrumentHistoryApi } from "./instrument-history-api";
+import { instrumentCoverageApi } from "./instrument-coverage-api";
 import { reportsApi } from "./reports-api";
 import { cursor, HttpError, identifier, json, secureResponse } from "./http";
 import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
@@ -43,10 +54,16 @@ function classify(path: string): string {
   if (ops !== null) return ops;
   if (isCommandPath(path)) return "command";
   if (path === AUDIT_PATH) return "audit";
-  if (path === CARD_SETTLEMENT_PATH || path === CARD_OWNERSHIP_PATH)
+  if (
+    path === CARD_SETTLEMENT_PATH ||
+    path === CARD_OWNERSHIP_PATH ||
+    path === CARD_SETTLEMENT_STATEMENTS_PATH ||
+    path === CARD_STATEMENTS_UNMATCHED_PATH
+  )
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
   if (path === REPORTED_STATE_PATH) return "reported_state";
+  if (path === REPORTED_HOLDINGS_CHANGE_PATH) return "reported_holdings_change";
   if (path === RECONSTRUCTED_STATE_PATH) return "reconstructed_state";
   if (path === "/api/collection-quality" || path.startsWith("/api/collection-quality/"))
     return "collection_quality";
@@ -56,6 +73,7 @@ function classify(path: string): string {
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+\/raw$/.test(path)) return "artifact_raw";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+$/.test(path)) return "artifact_detail";
   if (path === "/api/v2/activity" || path === "/api/v2/obligations") return "events_v2";
+  if (path === "/api/v2/reports") return "report";
   if (/^\/api\/v2\/reports\/[^/]+(?:\/(?:explanation|export))?$/.test(path)) return "report";
   if (path.startsWith("/api/v2/rewards")) return "rewards";
   return path.startsWith("/api/") ? "unknown_api" : "assets";
@@ -108,6 +126,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (auditResponse) return auditResponse;
   const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
   if (settlementResponse) return settlementResponse;
+  const unmatchedResponse = await catalogue(() =>
+    cardStatementsUnmatchedApi(request, env, url, subject),
+  );
+  if (unmatchedResponse) return unmatchedResponse;
   // Operator-only and read-only; 404 unless CORE 0047 exists
   // (docs/economic-events.md, HTTP).
   const purchaseResponse = await catalogue(() => cardPurchasesApi(request, env, url, subject));
@@ -116,6 +138,11 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // joins (docs/reported-state.md).
   const reportedStateResponse = await catalogue(() => reportedStateApi(request, env, url, subject));
   if (reportedStateResponse) return reportedStateResponse;
+  // Two dates of the same reported state, side by side; served where it is (ADR 0075).
+  const holdingsChangeResponse = await catalogue(() =>
+    reportedHoldingsChangeApi(request, env, url, subject),
+  );
+  if (holdingsChangeResponse) return holdingsChangeResponse;
   const reconstructedResponse = await catalogue(() =>
     reconstructedStateApi(request, env, url, subject),
   );
@@ -128,8 +155,16 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     instrumentCandidatesApi(request, env, url, subject),
   );
   if (candidatesResponse) return candidatesResponse;
+  const accountCandidatesResponse = await catalogue(() =>
+    accountCandidatesApi(request, env, url, subject),
+  );
+  if (accountCandidatesResponse) return accountCandidatesResponse;
   const historyResponse = await catalogue(() => instrumentHistoryApi(request, env, url, subject));
   if (historyResponse) return historyResponse;
+  const instrumentCoverageResponse = await catalogue(() =>
+    instrumentCoverageApi(request, env, url, subject),
+  );
+  if (instrumentCoverageResponse) return instrumentCoverageResponse;
   const identityResponse = await catalogue(() => identityApi(request, env, url));
   if (identityResponse) return identityResponse;
   // Fixed report artifacts (A12). Re-display only; recomputing and sharing a

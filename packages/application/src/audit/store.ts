@@ -10,6 +10,7 @@ import type { ScopeSet } from "../grants.ts";
 import type { CommandStore } from "../command/contract.ts";
 import type { SqlWrite } from "../../../storage-d1/src/core/operations.ts";
 import { canonicalDigest } from "../../../domain/src/context.ts";
+import { validLocalDateText } from "../../../domain/src/time.ts";
 import {
   AUDIT_COLUMNS,
   type AuditRow,
@@ -229,10 +230,13 @@ export type AuditPageOutcome =
   | { ok: true; records: AuditRecordView[]; cursor: string | null }
   | { ok: false; code: "invalid_query" | "stale_context" };
 
-const DAY = /^\d{4}-\d{2}-\d{2}$/u;
-
+/**
+ * A calendar day `YYYY-MM-DD`. Read by the domain's civil-date parser, so a
+ * month or day outside the calendar (`2026-13-01`, `2026-02-30`) is false;
+ * `Date` would throw on the first and roll the second over.
+ */
 function validDay(value: string): boolean {
-  return DAY.test(value) && new Date(`${value}T00:00:00.000Z`).toISOString().startsWith(value);
+  return validLocalDateText(value);
 }
 
 /** The filters, checked against the closed vocabulary; null when any is outside it. */

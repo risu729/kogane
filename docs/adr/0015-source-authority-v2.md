@@ -1,6 +1,6 @@
 # ADR 0015: Source authority v2 names CORE source ids
 
-- Status: proposed
+- Status: accepted (merged 2026-09-27 in #262)
 - Date: 2026-09-26
 - Carried by:
   [balance read model](../balance-read-model.md#how-a-row-gets-its-state),

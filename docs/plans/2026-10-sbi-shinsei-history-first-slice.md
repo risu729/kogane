@@ -3,7 +3,7 @@
 Status: in progress; offline validation/evidence adapter implemented, acquisition not enabled.
 Date: 2026-10-10.
 Issue: [#447](https://github.com/risu729/kogane/issues/447).
-Decision: [ADR 0070](../adr/0070-sbi-shinsei-observed-history-boundary.md), proposed.
+Decision: [ADR 0070](../adr/0070-sbi-shinsei-observed-history-boundary.md), accepted.
 
 ## Current boundary
 

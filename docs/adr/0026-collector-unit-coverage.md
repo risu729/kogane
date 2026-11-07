@@ -1,8 +1,60 @@
 # ADR 0026: A collector's unit coverage is a claim about what the run set out to collect
 
+## Amendment: SBI VC retries the login while a terms agreement is pending (2026-11-07)
+
+Status: proposed (accepted when the PR that carries it merges).
+
+Context. The 2026-10-10 amendment below made SBI VC's
+`manual_agreement_required` stop every unattended login, leaving the owner's
+forced `POST /reauth` as the only way back. That bearer token is a write-only
+Worker secret, so each terms agreement meant a secret rotation by hand. In
+production the keepalive reported `manual_agreement_required` at 2026-10-23
+18:00 UTC and again from 2026-11-07 04:30 UTC, and the health record held 1,604
+consecutive keepalive failures. The owner asked (2026-11-07 06:05 UTC) for
+collection to resume automatically.
+
+Options considered: (A) retry the passkey login slowly while the agreement is
+pending; (B) also send the provider's `setAgreement` event; (C) an owner
+operation "I agreed, retry now"; (D) flag the code as needing the owner, with
+any of these. B agrees to terms nobody read and is a provider write that the
+source policy forbids. C still needs a manual step after every agreement.
+
+Decision (owner, 2026-11-07 06:28 UTC): A and D. While the stored code is
+`manual_agreement_required`, the usual re-authentication triggers apply again,
+as does the gateway's 3xx `http_rejected` answer to the stale session (which
+stays a trigger until a login succeeds, also after a retry that failed for
+another reason); an unforced login waits 1 hour after the previous attempt for
+72 hours from the first refused login since the last successful login, then
+the usual 6 hours.
+The collector still never sends `setAgreement`. Collection quality reports
+`manual_agreement_required` as `user_action_required`. This replaces the
+2026-10-10 sentence that the code "prevents repeated automatic login
+attempts", and narrows its rejected
+alternative: what stays rejected is resuming blocked logins without a bound
+or without an owner act, not a bounded retry that succeeds only after the
+owner has agreed.
+
+Consequences. Recovery takes up to about 1 h 15 min after the owner agrees at
+simple.sbivc.co.jp, with no token or `/reauth`. At most 72 unattended logins,
+about 60 at the usual cadence, happen in the 72-hour window; the owner's
+decision approves them, with the account-lock and rate-limit unknowns recorded
+in the
+[source note §16](../sources/sbi-vc-trade.md#16-resuming-after-a-terms-agreement-2026-11-07).
+The blocked collection itself is still recorded as failed, never retried, and
+no coverage is promoted.
+
+Verification: `services/collector-sbi-vc-trade/test/session-policy.test.ts`
+(triggers, cooldown and window), `worker-test/schedule-result.test.ts` (the
+alarm retries the login, keeps the reason, resumes the collection after a
+successful login, the Durable Object's cooldown at 30 minutes, 61 minutes
+and past 72 hours, and a login stopped at `isAgreed` that opens the window once,
+keeps it and is cleared by a successful login), and
+`packages/application/test/collection-quality-query.test.ts` (the source and
+the blocked unit carry `user_action_required`).
+
 ## Amendment: distinguish refusal, pending reauthentication and terminal write failure (2026-10-10)
 
-Status: proposed until this amendment merges.
+Status: accepted (merged 2026-10-10 in #655).
 
 Operational alarm results must preserve a persisted failed-run reference and a
 closed reason without promoting the run's coverage. SBI VC's explicit
@@ -1263,7 +1315,7 @@ and settlement do not read them.
 
 ## Amendment 2026-10-08: GLOBAL PASS replay compares records with detail tables
 
-- Status: proposed
+- Status: accepted (merged 2026-10-09 in #574)
 - Date: 2026-10-08
 - Carried by: `services/processor/scripts/parser-rejection.ts`
   (`globalPassActivityShape`: `detailTables`, `detailContainer`,

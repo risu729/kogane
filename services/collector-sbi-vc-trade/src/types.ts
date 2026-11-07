@@ -20,13 +20,24 @@ export interface HealthState {
   lastAttemptAt: string | null;
   lastSuccessAt: string | null;
   lastHttpStatus: number | null;
-  lastGatewayStatus: string | null;
+  /**
+   * `OK`, or `rejected` for any other gateway status. Closed on purpose: the
+   * status string the provider sent is provider text and never reaches the
+   * stored health record or a log line.
+   */
+  lastGatewayStatus: "OK" | "rejected" | null;
   lastCookieUpdateCount: number;
   consecutiveFailures: number;
   lastErrorCode: string | null;
   lastReauthAttemptAt: string | null;
   lastReauthSuccessAt: string | null;
   lastReauthErrorCode: string | null;
+  /**
+   * The first `manual_agreement_required` refusal since the last successful
+   * login; it bounds the hourly retries. Null until such a refusal, and again
+   * after a successful login.
+   */
+  manualAgreementPendingSince: string | null;
 }
 
 export interface GatewayMeta {

@@ -2,9 +2,9 @@
 
 - Status: accepted (#267); the
   [amendment of 2026-09-26](#amendment-2026-09-26-a-seal-core-refuses-is-a-verdict)
-  and the
+  is accepted (merged 2026-09-27 in #271), and the
   [amendment of 2026-11-06](#amendment-2026-11-06-a-registration-that-throws-spends-none-of-the-five)
-  are proposed
+  is proposed
 - Date: 2026-09-26
 - Amends: [ADR 0010](0010-terminal-registration-budget.md) (how the scan's
   per-tick registration count is spent; the operation budget is unchanged)
@@ -181,7 +181,7 @@ The existing collection and registration-budget suites pass unchanged.
 
 ## Amendment 2026-09-26: a seal CORE refuses is a verdict
 
-- Status: proposed
+- Status: accepted (merged 2026-09-27 in #271)
 - Date: 2026-09-26
 
 ### Context

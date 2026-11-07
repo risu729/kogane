@@ -1069,6 +1069,10 @@ names under `summary.responseParam` in R2, kept as the provider shows them
   branch are validated only (nothing uses the names; the top page already
   reports the balances).
 - No snapshot policy row: no current or dated state selects the observation.
+- Identity: from policy 2 neither `sbi-shinsei:customer` nor
+  `sbi-shinsei:fx-board` is an account; they map as `aggregate` statements,
+  not deposits ([ADR 0076](../adr/0076-sbi-shinsei-non-account-identity.md),
+  [identity sources](../identity-sources.md)).
 
 **Price rule.** A board row of one of the 13 per-1-unit currencies is
 promoted when its `customerCategory` is strictly equal (same JSON type and

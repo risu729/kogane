@@ -77,7 +77,10 @@ from the historical scan; nothing needs backfilling.
 
 Internal `POST` routes on the pipeline Worker at the same trust level as
 `/sweep` (private service binding, no public route). Bodies are JSON, at most
-4 KiB, and responses contain identifiers and counts only.
+4 KiB counted in bytes as they are read (reading stops and the stream is
+cancelled past the limit; `services/processor/src/bounded-body.ts`), and
+responses contain identifiers and counts only. A larger body, malformed UTF-8
+or anything but a JSON object is refused with `400 request_invalid`.
 
 | Route             | Body                                                                                                                              | Effect                                                                                                                                                                                                                                                                                        |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -326,10 +329,12 @@ run…"):
 | 8   | `purchase_recognition`     | Only when `PURCHASE_RECOGNITION_ENABLED` is `"1"` or `"true"`; otherwise the stage is not run and logs nothing. Turns adopted Vpass/MyJCB usage rows into purchase and refund events, then writes pending-to-posted candidates for the groups it read and merges only provider-linked pairs (`docs/economic-events.md`).                                                                                 |
 | 9   | `reward_claims_sweep`      | Only when `REWARD_CLAIMS_ENABLED` is `"1"` or `"true"` (`docs/rewards.md`).                                                                                                                                                                                                                                                                                                                              |
 | 10  | `reward_read_projection`   | Only when `REWARD_READ_PROJECTION_ENABLED` is `"1"` or `"true"` (U16, `docs/rewards.md` §12).                                                                                                                                                                                                                                                                                                            |
-| 11  | `price_promotion`          | Always; no flag. Promotes provider prices to `price_observations` by the closed rule list of `packages/domain/src/price-sources.ts`, at most 500 claims a tick, one cursor per claim kind; logs `scanned`, `promoted`, `basis_unverified`, `unsupported_currency` and `written` (ADR 0020, `docs/calculation-and-reports.md` §1).                                                                        |
+| 11  | `price_promotion`          | Always; no flag. Promotes provider prices to `price_observations` by the closed rule list of `packages/domain/src/price-sources.ts`, at most 500 claims a tick, one cursor per claim kind; logs `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending` and `written` (ADR 0020, ADR 0031, `docs/calculation-and-reports.md` §1).         |
 | 12  | `report_job`               | Only when `REPORTS_ENABLED` is `"true"` (`docs/calculation-and-reports.md`).                                                                                                                                                                                                                                                                                                                             |
-| 13  | `operation_dispatch`       | Always; dispatches only when `OPS_DISPATCH_ENABLED` is `"1"` or `"true"`, otherwise logs `status: "skipped"` (U06/U08, `docs/processor.md`, `docs/ops-api.md`).                                                                                                                                                                                                                                          |
-| 14  | `decision_outbox`          | Always, and last: it runs after the projections a decision may have invalidated (A09, `docs/change-lifecycle.md`).                                                                                                                                                                                                                                                                                       |
+| 13  | `maintenance_survey`       | Only when `MAINTENANCE_SURVEY_ENABLED` is `"1"` or `"true"`; not declared in `wrangler.jsonc`, so off. Re-reads allowed official maintenance pages and appends proposals only (ADR 0050, `docs/schedules.md`).                                                                                                                                                                                           |
+| 14  | `operation_dispatch`       | Always; dispatches only when `OPS_DISPATCH_ENABLED` is `"1"` or `"true"`, otherwise logs `status: "skipped"` (U06/U08, `docs/processor.md`, `docs/ops-api.md`).                                                                                                                                                                                                                                          |
+| 15  | `decision_outbox`          | Always, after every lane that changes what a projection reads: it runs after the projections a decision may have invalidated (A09, `docs/change-lifecycle.md`).                                                                                                                                                                                                                                          |
+| 16  | `audit_overflow`           | Always; no flag. Turns each ended UTC day's `audit_overflow_counters` row into one `overflow` audit record (`docs/audit-log.md`).                                                                                                                                                                                                                                                                        |
 
 Why those positions. `collection_scan` registers terminals the shared DATA
 bucket already holds, so it runs before `identity_sweep`: a run it finds this
@@ -342,8 +347,10 @@ so a row whose card was resolved this tick can be recognised on it.
 `identity_sweep` and right before `report_job`, which reads the prices it
 writes. `operation_dispatch` hands
 accepted operations to their executor, so it runs before the outbox — work
-accepted this tick can still reach it — while `decision_outbox` keeps its
-place at the end. Its collector branch awaits at most one collector call per
+accepted this tick can still reach it — while `decision_outbox` stays after
+every lane that changes what a projection reads; only `audit_overflow`, which
+touches the audit tables alone, runs after it. `operation_dispatch`'s
+collector branch awaits at most one collector call per
 invocation ([ADR 0048](adr/0048-operation-collector-dispatch.md)), so a long
 collection delays `decision_outbox` on that tick by the same amount.
 
@@ -367,8 +374,8 @@ load budgets and the recovery drills for these stages are in
 The lanes that keep no state of their own — `identity_sweep`,
 `reconciliation_sweep`, `card_debit_account_sweep`, `card_settlement_sweep`,
 `purchase_recognition`, `reward_claims_sweep`, `price_promotion`,
-`operation_dispatch` and
-`decision_outbox` — also
+`maintenance_survey`, `operation_dispatch`, `decision_outbox` and
+`audit_overflow` — also
 record every tick in `processor_lane_ticks` (migration 0049): `ran` with its
 counts, `failed` with the same safe code, or `skipped-by-flag` when the gate
 above is off, which still logs nothing. The last day per lane is kept
@@ -391,9 +398,10 @@ Synthetic fixtures only, under Miniflare D1/R2 (`services/processor/test`):
 | Migration 0035 applies after 0017–0024 through D1; full chain 0001–0035 compiles; old Worker's insert still works    | `harness.ts`, `pipeline.test.ts` "all production migrations compile…"                                  |
 | Existing lease, retry, supersession, retirement, metadata and parser behaviour                                       | all pre-existing tests in `pipeline.test.ts`, `job-retirement.test.ts`, `identity-*.test.ts` unchanged |
 
-`services/raw-evidence` tests load every migration including 0035; the seal
-paths in `store.ts` are unchanged and its suites cover sealing with the new
-trigger present.
+When this change landed, the `services/raw-evidence` tests loaded every
+migration including 0035 and covered sealing with the new trigger present;
+that Worker and its suites were retired on 2026-09-13
+([legacy-retirement.md](legacy-retirement.md)).
 
 ## Deploy order and rollback
 

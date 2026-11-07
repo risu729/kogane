@@ -13,7 +13,7 @@ import { DEFAULT_IDENTITY_READ_MODE } from "../../../packages/read-model/src/ind
  * observation routes so the identity catalogue (and the pipeline's query-plan
  * tests, which import it) depend on nothing but the schema.
  */
-export function identityReadMode(url: URL): IdentityReadMode {
+export function identityReadMode(url: Pick<URL, "searchParams">): IdentityReadMode {
   const value = url.searchParams.get("identityRead");
   if (value === null) return DEFAULT_IDENTITY_READ_MODE;
   if (value === "snapshot") throw new HttpError(400, "unsupported_semantics");

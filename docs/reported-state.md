@@ -2,7 +2,7 @@
 
 What each provider last reported, per account, on a date the owner chooses,
 beside the card statements due around that date. This is phase 8's first
-slice ([roadmap](roadmap.md#phases-8--11--dated-reported-and-reconstructed-state)),
+slice ([roadmap](roadmap.md#layers-8--11--dated-reported-and-reconstructed-state)),
 decided in [ADR 0019](adr/0019-dated-reported-state.md). It is a list of
 provider figures, never a total: nothing is added, converted or netted, and a
 container without a capture is named, never shown as zero.
@@ -10,15 +10,20 @@ container without a capture is named, never shown as zero.
 What adopted events imply from a start snapshot, compared with these figures,
 is [reconstructed state](reconstructed-state.md) (served by `GET /api/v2/reconstructed-state`, an agent read and the `/reconstruction` page).
 
-| Layer        | Where                                                                                                   |
-| ------------ | ------------------------------------------------------------------------------------------------------- |
-| Snapshot CTE | `SnapshotCteOptions.cutoffParam` in `packages/parsers/src/snapshot-query.ts`                            |
-| SQL          | `packages/read-model/src/dated-state.ts`                                                                |
-| Policies     | `packages/domain/src/reported-state.ts` (cutoff, freshness, payable status, perimeter)                  |
-| Query        | `queryDatedState` in `packages/application/src/query/dated-state.ts`                                    |
-| HTTP         | `GET /api/v2/reported-state?date=YYYY-MM-DD` (`services/app/src/reported-state-api.ts`)                 |
-| Contract     | `validReportedState` in `packages/observation-shared/src/reported-state-contract.ts`                    |
-| Page         | 基準日の保有状況 at `/state` (`apps/web/src/pages/ReportedState.tsx`), capability `reportedStateOnDate` |
+| Layer               | Where                                                                                                                       |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Snapshot CTE        | `SnapshotCteOptions.cutoffParam` in `packages/parsers/src/snapshot-query.ts`                                                |
+| SQL                 | `packages/read-model/src/dated-state.ts`                                                                                    |
+| Policies            | `packages/domain/src/reported-state.ts` (cutoff, freshness, payable status, perimeter)                                      |
+| Query               | `queryDatedState` in `packages/application/src/query/dated-state.ts`                                                        |
+| HTTP                | `GET /api/v2/reported-state?date=YYYY-MM-DD` (`services/app/src/reported-state-api.ts`)                                     |
+| Agent tool          | `kogane.reported-state.read` (`services/app/src/read-tools.ts`), the route's `readReportedState`                            |
+| Contract            | `validReportedState` in `packages/observation-shared/src/reported-state-contract.ts`                                        |
+| Page                | 基準日の保有状況 at `/state` (`apps/web/src/pages/ReportedState.tsx`), capability `reportedStateOnDate`                     |
+| Two dates           | `queryHoldingsChange` in `packages/application/src/query/holdings-change.ts` ([below](#holdings-changes-between-two-dates)) |
+| Two dates, HTTP     | `GET /api/v2/reported-holdings-change` (`services/app/src/reported-holdings-change-api.ts`)                                 |
+| Two dates, contract | `validReportedHoldingsChange` in `packages/observation-shared/src/reported-holdings-change-contract.ts`                     |
+| Two dates, page     | panel 保有数量の変化 on `/state` (`apps/web/src/pages/ReportedHoldingsChange.tsx`)                                          |
 
 ## The cutoff
 
@@ -133,6 +138,86 @@ and sets it beside the balances reconstructed from adopted events; it is
 served, and `reconstructedStateOnDate` advertised, on the same condition
 ([reconstructed state](reconstructed-state.md#http-agent-tool-and-page)).
 
+## Holdings changes between two dates
+
+`queryHoldingsChange(sql, { from, to, today, source?, account? })` in
+`packages/application/src/query/holdings-change.ts` sets the reported
+holdings of two dates side by side
+([ADR 0075](adr/0075-reported-holdings-change-between-dates.md)); the rules
+are `compareReportedHoldings` in `packages/domain/src/holdings-change.ts`
+(`holdings-change-v1`). A route, a wire contract and a panel of the `/state`
+page serve it ([below](#http-contract-and-page)); no agent tool does.
+
+It reads the reported state on both dates (narrowed by `source` only, so a
+capture whose identity is not recorded yet still lists its holdings), each
+listed position's decimal-v1 quantity (`DATED_POSITION_QUANTITIES_SQL`, as
+valuation on a date reads it) and each chosen snapshot's fetch unit
+(`DATED_SNAPSHOT_UNITS_SQL`, keyed by artifact id). A holding is the
+provider's own key: source, container (parser and dataset), provider account,
+market and security code. On each date it is `listed`,
+`listed_more_than_once`, `not_listed` (the complete capture of its container
+and fetch unit does not list it), `snapshot_scope_ambiguous` (listed in
+captures of several fetch units) or `no_snapshot` (no complete capture of its
+container and fetch unit before the end of the date).
+
+| Status                 | When                                                                                  | Figure                          |
+| ---------------------- | ------------------------------------------------------------------------------------- | ------------------------------- |
+| `compared`             | Listed once on both dates, in different captures, with exact quantities and no reason | `end − start`, exact, zero kept |
+| `listed_at_start_only` | Listed on `from`; the capture of its container and unit on `to` does not list it      | None (not a zero)               |
+| `listed_at_end_only`   | Listed on `to`; the capture of its container and unit on `from` does not list it      | None (not a zero)               |
+| `not_comparable`       | Any reason below                                                                      | None                            |
+
+Reasons, in this order: `no_snapshot_at_start|end`,
+`snapshot_scope_ambiguous_at_start|end`, `holding_key_ambiguous_at_start|end`,
+`same_capture_both_dates` (no capture between the dates), `capture_order_inverted`,
+`account_differs` and `instrument_differs` (both dates name a resolved id and
+they differ), `quantity_not_exact_at_start|end`.
+
+`account` keeps a key a listing on either date names for that account; its
+other side is still judged on that date's whole listing. The answer lists the
+holdings in key order with counts per status, the position containers
+without a capture on either date and the stale snapshots, and states
+`total: "not-computed"` and `valuation: "not-computed"`: holdings are never
+added or valued. The change is between the two chosen captures; a stale one is
+shown with its age. The manifest pins both reported context ids and every
+key's side refs, status and reasons; `contextId` is its digest. More than 500
+positions on a date is refused (`holding_limit_exceeded`), as is a reported
+state past its own bound (`dated_state_limit_exceeded`); a malformed request,
+`from` not before `to`, `to` after today, and an unknown source or account
+have their own codes.
+
+### HTTP, contract and page
+
+`GET /api/v2/reported-holdings-change?from=YYYY-MM-DD&to=YYYY-MM-DD[&source=…][&account=…]`
+(ADR 0075, 2026-11-06 amendment) is exposed as the reported state is: GET and
+HEAD only, served to every signed-in reader, and `404` exactly where
+`/api/v2/reported-state` is not served. `400 invalid_query` for any other,
+repeated or empty parameter or a malformed source or account, `400
+invalid_date` for a missing, malformed or impossible date, `400
+invalid_range` when `from` is not before `to`, `400 date_in_future` when `to`
+is after today in Tokyo, `404 unknown_source` and `404 unknown_account`, and
+`413 result_limit_exceeded` (with `refs` naming `holding_limit_exceeded` or
+`dated_state_limit_exceeded`) rather than a cut answer. The body is
+`{ apiVersion: 2, …HoldingsChange }`.
+
+`validReportedHoldingsChange`, which the browser applies through
+`validApiResponse`, refuses any field it does not name (a total, a
+valuation, a sum), any status, reason or side state outside the closed lists,
+reasons out of the domain's order or missing a side's own reason, a change on
+a row that is not `compared`, a change that is not an exact decimal in the
+holding's unit, counts that do not match the holdings, and a manifest that
+does not describe the body (its dates, filters, and each holding's key, side
+references, status and reasons, in the body's order).
+
+The `/state` page carries a panel 保有数量の変化 while `reportedStateOnDate`
+is advertised (no capability of its own: the route is served on the same
+condition). It asks nothing until a start date 比較の開始日 before the page's
+基準日 is chosen, then lists each holding key with each side's provider text
+and capture date, the server's change with its sign (`+2.5`, `±0`, `-3.5`)
+for `compared` rows, `数値なし` for rows listed on one date only and for
+`not_comparable` rows, whose reasons it states in words. It shows counts per
+status and the coverage notes, never a total, valuation or sum of changes.
+
 ## Cost
 
 Measured on `bun:sqlite` with every CORE migration and no table statistics, on
@@ -166,6 +251,18 @@ smaller `STATEMENT_CI_SCALE` in CI, checks each date's snapshot and statements
 against independent queries, fails on a plan that scans an observation, parse,
 run or identity table whole, and requires each answer under one second.
 
+A holdings change between two dates is two of these answers (run
+concurrently through the executor) plus two keyed reads: the position
+quantities by primary key and `DATED_SNAPSHOT_UNITS_SQL` (artifacts and fetch
+units by primary key; its plan is checked in
+`packages/read-model/test/dated-state.test.ts`). At `STATEMENT_SCALE`, a month
+ending today took 1,198 ms (median of three, one run on `bun:sqlite` on a
+machine shared with other test processes; the store holds no position
+container). `packages/application/test/holdings-change-scale.test.ts` records
+every statement one answer runs on `STATEMENT_CI_SCALE` and fails on a whole
+scan beyond what the dated reads' own scale test accepts, and requires an
+answer under two seconds.
+
 ## Limits
 
 - Not measured on workerd or D1 itself. The scaled store holds balance
@@ -192,3 +289,9 @@ run or identity table whole, and requires each answer under one second.
   total across sources.
 - Nothing is stored: a reported state has no fixed report or
   `calculation_runs` row yet.
+- Holdings changes between two dates have no agent tool yet (the reported
+  state on a date has one, `kogane.reported-state.read`; a change tool would
+  follow it), and the page compares only up to its own 基準日
+  without the route's `source` and `account` filters. A change is what two captures report, not attributed to any trade or
+  transfer (no event moves a security quantity); a parser renamed between the
+  dates would make one holding two keys; balances are not compared there.

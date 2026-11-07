@@ -42,6 +42,21 @@ for a mapping subject must name a mapping row that exists at that revision
 with the matching method, and a `release-override` must have an active
 override to release; the trigger aborts the whole D1 batch otherwise.
 
+A relation decision never updates or supersedes an earlier relation row: each
+`relation.accept` or `relation.reject` appends a new `entity_relations` row
+(with its own decision, whose `subject_ref` is that row's id) for the same
+triple (kind, `from_ref`, `to_ref`), and so do a reconciliation proposal's
+acceptance (`services/processor/src/reconciliation-commands.ts`), the card
+purchase provider link (`services/processor/src/card-purchase-job.ts`) and an
+agent proposal
+(`reconcile.propose`, [agent API](agent-api.md#proposals-are-not-adoptions)).
+Which row is in force
+is decided by each reader in its own SQL; there is no view for it.
+[ADR 0001's amendment](adr/0001-domain-axes.md#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
+records the rule adoption uses (the triple's newest decision by `created_at`
+and then `id`; a proposal never supersedes a decision) and lists every
+reader and how it orders a triple's rows.
+
 ## Command contract (`services/processor/src/identity-commands.ts`)
 
 ```ts
@@ -164,6 +179,11 @@ version 1 with `eligibility.status = "fallback"` and the reason. The
 version 2 (`identity-default-v2`) for every Mizuho parse, so parses sealed
 before the resolver's Mizuho rule are re-identified
 ([identity-operations.md](identity-operations.md#policy-2-mizuho-rule-re-identification)).
+The `sbi-shinsei-bank` module is the same shape: `identity-default-v2` for
+every SBI Shinsei parse, no evidence, so parses sealed while policy 1 mapped
+the exchange-rate board and the stage category as deposits are re-identified
+([ADR 0076](adr/0076-sbi-shinsei-non-account-identity.md),
+[identity-operations.md](identity-operations.md#policy-2-sbi-shinsei-non-account-references)).
 Sources without a module get `identity-default`. The standard request
 (`IDENTITY_POLICY_VERSION`) runs the default family at the base version, as
 before; an explicit other version is stored as requested, so the numeric

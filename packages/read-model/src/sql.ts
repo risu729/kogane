@@ -87,6 +87,13 @@ export const SOURCE_FETCH_RUN_COUNTS_SQL = `SELECT f.source_id, COUNT(*) AS run_
  GROUP BY f.source_id
  ORDER BY f.source_id`;
 
+/** `sourceParseRuns`: the overview's parse-run window over the listed sources only. */
+export const SOURCE_PARSE_RUNS_SQL = `SELECT p.id, p.parser_name, p.parser_version
+  FROM ${visibleEvidence.parseRuns} p
+  JOIN observation_fetch_artifacts a ON a.id = p.fetch_artifact_id
+ WHERE a.source_id IN (SELECT value FROM json_each(?1))
+ ORDER BY p.id DESC LIMIT ${PAGE_LIMIT}`;
+
 export const OVERVIEW_PARSE_RUNS_SQL = `SELECT id, fetch_artifact_id, parser_name, parser_version, parsed_at, status,
        error, warnings_json, superseded_by_parse_run_id
   FROM ${visibleEvidence.parseRuns} ORDER BY id DESC LIMIT ${PAGE_LIMIT}`;
