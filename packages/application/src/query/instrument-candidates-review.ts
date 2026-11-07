@@ -3,7 +3,8 @@
 // (`queryInstrumentResolution`) for whoever the grant allows, whether the
 // caller is the `銘柄の同一性の候補` page (`GET /api/identity/instrument-candidates`,
 // under the reader grant a signed-in browser has) or an agent
-// (`kogane.instruments.candidates`, under its `AGENT_API_GRANTS` entry). Both
+// (`kogane.instruments.candidates`, under the whole-store agent grant, ADR
+// 0084). Both
 // transports call this function and nothing else, so a page and an agent read
 // one answer.
 //

@@ -46,14 +46,18 @@ interface DescriptorContract {
 }
 ```
 
-- **Server** (`store.ts` `addArtifact`): `digest(encode(normalize(parseRequest(body))))`.
-  The server always re-validates and recomputes. A client-declared
-  `descriptorSha256` in an inventory item or seal is only ever compared against
-  the stored value; it is never taken on trust (`inventory_artifact_conflict`,
-  `inventory_mismatch`).
-- **Client** (`central.ts` `centralDescriptorSha256`): `digest(encode(normalize(request)))`
-  without `parseRequest`, exactly as before A02. The importer sends the request
-  as given and fails closed if the server's digest differs.
+- **Catalogue** (`packages/application/src/ingest/catalogue.ts` `addArtifact`;
+  `store.ts` `addArtifact` in the retired Worker):
+  `digest(encode(normalize(parseRequest(body))))`. The catalogue always
+  re-validates and recomputes. A client-declared `descriptorSha256` in an
+  inventory item or seal is only ever compared against the stored value; it is
+  never taken on trust (`inventory_artifact_conflict`, `inventory_mismatch`).
+- **Registration** (`packages/application/src/collection/register-terminal.ts`
+  `descriptorDigest`): the same `digest(encode(normalize(parseRequest(request))))`,
+  so the Processor's expected digest and the catalogue's agree by construction;
+  registration still compares them. The retired importer's client path
+  (`central.ts` `centralDescriptorSha256`) was `digest(encode(normalize(request)))`
+  without `parseRequest`, and failed closed if the server's digest differed.
 
 ## Request schemas
 
@@ -72,10 +76,14 @@ interface DescriptorContract {
 | `POST /v1/runs/{id}/seal`                   | `SealRunRequest`             | `parseSealRunRequest`             | inventory v1      |
 | `POST /v1/runs/{id}/attempts`               | `RecordAttemptRequest`       | `parseRecordAttemptRequest`       | no                |
 
-Every parser rejects unknown keys (`unknown_field`) and keeps the historical
-`invalid_<field>` and pair-mismatch codes; the Worker maps `ContractError` to
-HTTP 400 with the same code. Database-dependent checks (routes, scope rules,
-template policies, parent rows, conflicts) stay in the Worker.
+The endpoints are the retired HTTP wire names the request types keep; today the
+same requests are built and parsed in process. Every parser rejects unknown keys
+(`unknown_field`) and keeps the historical `invalid_<field>` and pair-mismatch
+codes; registration blocks a terminal whose derived request the contract refuses
+with that code (`ContractError` in `register-terminal.ts`), where the retired
+Worker answered HTTP 400. Database-dependent checks (routes, scope rules,
+template policies, parent rows, conflicts) stay in
+`packages/application/src/ingest/`.
 
 The inventory digest (`inventory_digest_version` v1) is
 `sha256(canonicalJsonV1(items sorted by artifactKey))` over

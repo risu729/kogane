@@ -1,6 +1,6 @@
 # ADR 0017: Add card purchase review command kinds with one rebuild, not relation markers
 
-- Status: proposed; the
+- Status: accepted (merged 2026-09-27 in #261); the
   [2026-11-06 amendment](#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision)
   is proposed until the PR that carries it merges, then accepted
 - Date: 2026-09-26; amended 2026-11-06

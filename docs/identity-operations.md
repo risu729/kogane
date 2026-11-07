@@ -118,6 +118,21 @@ The read is refused with `budget:identityObservations=500000` once the
 store holds more current identity observations than that; raising the bound
 needs a remote D1 measurement first (ADR 0055 amendment, Cost).
 
+### Account candidates
+
+`/identities/account-candidates` lists which direct source accounts a
+reviewed MoneyForward connection may contain ([identity](identity.md#aggregator-to-direct-account-candidates),
+ADR 0077). Accepting is `relation.accept` of `connection_contains` from the
+connection to the direct source account; keeping apart, or withdrawing an
+acceptance, is `relation.reject` of the same triple. Both are planned with
+the reason you write, after the page reads the candidate again, and approved
+and committed on `/confirm/:planId`; a decision made in between makes the
+plan stale. A held candidate (evidence no longer eligible, or the direct
+account pinned by two connections) offers keeping apart only. Nothing is
+proposed as the same account. New confirmed reviews come from
+`review-account-connections.ts` ([account connections](account-connections.md));
+an agent reads the same list through `kogane.accounts.candidates`.
+
 ## Verification and rollback
 
 - `/api/identity/coverage` compares all eligible current B observations against
@@ -138,6 +153,8 @@ needs a remote D1 measurement first (ADR 0055 amendment, Cost).
   It shares the candidate read's bounds and refusals; an identifier two
   sources use counts under each, so there is no cross-source total. It writes
   nothing.
+- `/api/identity/account-candidates` reads the ADR 0077 account candidate set
+  and pages it at 50 items per view; it writes nothing.
 - Preserve the original pinned decision IDs to audit what was recorded at the
   time, even after a manual correction.
 - Old B parses/failed acquisitions remain in their own history and never
@@ -268,10 +285,11 @@ WHERE r.source_id='vpass' AND u.unit_key GLOB 'vpass-card-v[12]-*'
 GROUP BY r.producer_id, version;
 ```
 
-The collector's statement pages are not parsed today: registration gives them
-no parser dataset, and the change that introduces parser datasets for
-shared-R2 artifacts (ADR 0022) withholds the Vpass one. Releasing it is a
-later change, made once the v1 and v2 entities of each card are decided.
+The collector's statement pages are parsed since
+[ADR 0083](adr/0083-release-vpass-collector-statement-pages.md)
+(`terminal-registration-v3`), from successful card runs only: a run whose
+card unit is `partial` is never parsed, so it never displaces the
+importer-era snapshot of a card-month.
 
 ## MoneyForward collector runs carry the account identity
 

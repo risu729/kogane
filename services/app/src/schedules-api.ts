@@ -9,7 +9,7 @@
 import { accessIdentity } from "./auth";
 import { type Answer, auditContext, auditedRoute, UpstreamLost, upstreamOutcome } from "./audit";
 import { principalFor } from "./grants";
-import { HttpError } from "./http";
+import { boundedText, HttpError } from "./http";
 import {
   type OperationCall,
   type OperationName,
@@ -56,20 +56,13 @@ export async function scheduleBootstrapApi(
   enabled(env);
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
   if (url.search) throw new HttpError(400, "invalid_request");
-  if (request.body) {
-    const reader = request.body.getReader();
-    try {
-      for (;;) {
-        const part = await reader.read();
-        if (part.done) break;
-        if (part.value.byteLength > 0) {
-          await reader.cancel();
-          throw new HttpError(400, "invalid_request");
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
+  // Bodyless: a bound of zero bytes, whose overflow (the first byte, read no
+  // further) is this route's `400 invalid_request`, not a `413`.
+  try {
+    await boundedText(request, 0);
+  } catch (error) {
+    if (error instanceof HttpError) throw new HttpError(400, "invalid_request");
+    throw error;
   }
   const identity = await accessIdentity(request, env);
   const tokens = parseSubjectList(env.DEPLOYMENT_SCHEDULE_TOKENS);
@@ -142,31 +135,8 @@ export async function scheduleBootstrapApi(
 async function boundedBody(request: Request): Promise<string> {
   if (request.headers.get("content-type")?.split(";", 1)[0] !== "application/json")
     throw new HttpError(415, "json_required");
-  const reader = request.body?.getReader();
-  if (!reader) throw new HttpError(400, "invalid_request");
-  let size = 0;
-  const chunks: Uint8Array[] = [];
-  try {
-    for (;;) {
-      const part = await reader.read();
-      if (part.done) break;
-      size += part.value.byteLength;
-      if (size > 16 * 1024) {
-        await reader.cancel();
-        throw new HttpError(413, "request_too_large");
-      }
-      chunks.push(part.value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const bytes = new Uint8Array(size);
-  let offset = 0;
-  for (const part of chunks) {
-    bytes.set(part, offset);
-    offset += part.byteLength;
-  }
-  const text = new TextDecoder().decode(bytes);
+  if (!request.body) throw new HttpError(400, "invalid_request");
+  const text = await boundedText(request, 16 * 1024);
   try {
     JSON.parse(text);
   } catch {
