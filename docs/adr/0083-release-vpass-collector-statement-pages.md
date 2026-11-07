@@ -1,6 +1,6 @@
 # ADR 0083: Release the Vpass collector's statement pages under `terminal-registration-v3`; only a successful card run is parsed
 
-- Status: proposed
+- Status: accepted (merged 2026-11-07 in [#1025](https://github.com/risu729/kogane/pull/1025))
 - Date: 2026-11-07
 - Issue: part of [#445](https://github.com/risu729/kogane/issues/445) (Phase 2
   of the [roadmap](../roadmap.md#phase-2--card-usage--statement--bank-debit-current-milestone))
