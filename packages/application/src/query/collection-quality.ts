@@ -13,6 +13,8 @@ import {
   ACCOUNT_COVERAGE_SQL,
   CELL_QUALITY_SQL,
   COLLECTION_QUALITY_ROW_BOUND,
+  COLLECTION_QUALITY_TABLES,
+  COLLECTION_QUALITY_TABLES_SQL,
   ONE_SOURCE_QUALITY_SQL,
   SCHEDULE_QUALITY_SQL,
   SOURCE_QUALITY_SQL,
@@ -64,6 +66,7 @@ import {
   type ProviderOutcome,
   type ScheduleKind,
   type SourceReason,
+  validCollectionQualityAlarms,
 } from "../../../observation-shared/src/collection-quality-contract.ts";
 
 /** More jobs or sources than the bound is refused (413), never cut. */
@@ -574,53 +577,251 @@ export async function queryAccountCoverage(
   };
 }
 
-/** Errors of the account read carry this request id: no context is opened for it. */
-const ACCOUNT_COVERAGE_REQUEST = "collection-quality.accounts";
+// ── the three reads under a grant (ADR 0081) ──────────────────────────────
+
 /** A CORE source id as the collection quality routes accept one. */
 export const COLLECTION_QUALITY_SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
-
-export type AccountCoverageOutcome =
-  | { ok: true; coverage: AccountCoverage }
-  | { ok: false; error: FinancialError };
+/** The largest cell offset: seven digits, as the route's query has always accepted. */
+export const COLLECTION_QUALITY_MAX_OFFSET = 9_999_999;
 
 /**
- * `queryAccountCoverage` under a grant: the one service both the page's route
- * and the agent read call (ADR 0081). The grant needs `evidence.read` over
- * the whole store, as every collection quality read does, decided before
- * anything is read; a malformed or invisible source is `invalid_query`
- * (`source`), and more cells or periods than the bounds is `budget_exceeded`,
- * never a cut answer.
+ * Why a collection quality read was refused, in closed codes. Each transport
+ * maps these to its own answer: the page's route to the HTTP errors it has
+ * always answered, the agent read to `error` (a `FinancialError`).
+ */
+export type CollectionQualityRefusal =
+  /** The grant lacks `evidence.read`. */
+  | "unauthorized"
+  /** The grant is narrowed to sources or accounts. */
+  | "scope_restricted"
+  /** The store lacks a table of `COLLECTION_QUALITY_TABLES` (before CORE 0065). */
+  | "unavailable"
+  /** A malformed source id, or one that is not a visible CORE source. */
+  | "unknown_source"
+  /** A request key the read does not take. */
+  | "invalid_query"
+  /** An offset that is not an integer from 0 to `COLLECTION_QUALITY_MAX_OFFSET`. */
+  | "invalid_offset"
+  /** More rows than the read's bound: refused whole, never cut. */
+  | "limit_exceeded";
+
+export type CollectionQualityOutcome<T> =
+  | { ok: true; value: T }
+  | { ok: false; refusal: CollectionQualityRefusal; error: FinancialError };
+
+/** A refusal; it fits every read's outcome. */
+type Refused = Extract<CollectionQualityOutcome<never>, { ok: false }>;
+
+/** The operation each read is recorded as, and the request id its errors carry. */
+type ReadName =
+  | "collection-quality.summary"
+  | "collection-quality.cells"
+  | "collection-quality.accounts";
+
+const ERROR_CODES = {
+  unauthorized: "unauthorized",
+  scope_restricted: "evidence_restricted",
+  unavailable: "unsupported_semantics",
+  unknown_source: "invalid_query",
+  invalid_query: "unsupported_semantics",
+  invalid_offset: "invalid_query",
+  limit_exceeded: "budget_exceeded",
+} as const satisfies Record<CollectionQualityRefusal, FinancialError["code"]>;
+
+function refuse(
+  read: ReadName,
+  refusal: CollectionQualityRefusal,
+  refs: readonly string[],
+): Refused {
+  // No context is opened for these reads: errors carry the operation as request id.
+  return { ok: false, refusal, error: financialError(ERROR_CODES[refusal], read, refs) };
+}
+
+/** Whether the store has every table of `COLLECTION_QUALITY_TABLES`. */
+export async function collectionQualityServed(sql: SqlExecutor): Promise<boolean> {
+  const row = await sql.first<{ present: number }>(COLLECTION_QUALITY_TABLES_SQL, []);
+  return row?.present === COLLECTION_QUALITY_TABLES.length;
+}
+
+/**
+ * What every collection quality read decides first, in this order:
+ * `evidence.read`, then sources and accounts both `"*"` (the aggregation
+ * cannot answer a narrowed grant, even for one known source), both before
+ * anything is read; then whether the store has the scheduling tables.
+ */
+async function gate(read: ReadName, grant: Grant, sql: SqlExecutor): Promise<Refused | null> {
+  if (!grantAllows(grant, "evidence.read"))
+    return refuse(read, "unauthorized", ["capability:evidence.read"]);
+  const narrowed = [
+    ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
+    ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
+  ];
+  if (narrowed.length > 0) return refuse(read, "scope_restricted", narrowed);
+  if (!(await collectionQualityServed(sql)))
+    return refuse(read, "unavailable", ["store:collection-scheduling"]);
+  return null;
+}
+
+/** The request as a record: absent is `{}`; anything but a plain object has no keys to read. */
+function record(value: unknown): Record<string, unknown> | null {
+  if (value === undefined) return {};
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+/** A refusal when the request has a key other than `keys`, or is not an object. */
+function closed(read: ReadName, value: unknown, keys: readonly string[]): Refused | null {
+  const request = record(value);
+  return request === null || Object.keys(request).some((key) => !keys.includes(key))
+    ? refuse(read, "invalid_query", ["query"])
+    : null;
+}
+
+/** The request's `source`, or `unknown_source` when it is not a source id. */
+function sourceOf(read: ReadName, value: unknown): string | Refused {
+  const source = record(value)?.["source"];
+  return typeof source === "string" && COLLECTION_QUALITY_SOURCE.test(source)
+    ? source
+    : refuse(read, "unknown_source", ["source"]);
+}
+
+/** Runs a read, refusing a `CollectionQualityLimitError` whole as `limit_exceeded`. */
+async function bounded<T>(
+  read: ReadName,
+  budget: readonly string[],
+  run: () => Promise<CollectionQualityOutcome<T>>,
+): Promise<CollectionQualityOutcome<T>> {
+  try {
+    return await run();
+  } catch (error) {
+    if (error instanceof CollectionQualityLimitError) return refuse(read, "limit_exceeded", budget);
+    throw error;
+  }
+}
+
+/**
+ * Overlay the actual Alarm reservations a relay reports onto the summary's
+ * jobs, only where the job's stored settings match the reply exactly. A relay
+ * that throws or answers off-contract leaves every job `unavailable`: no
+ * reservation is inferred from stored settings.
+ */
+async function overlayAlarms(
+  summary: CollectionQualitySummary,
+  alarms: () => Promise<unknown>,
+): Promise<void> {
+  let value: unknown;
+  try {
+    value = await alarms();
+  } catch {
+    return;
+  }
+  if (!validCollectionQualityAlarms(value)) return;
+  for (const job of [
+    ...summary.sources.flatMap((source) => source.schedules),
+    ...summary.otherSchedules,
+  ]) {
+    const found = value.alarms.find((alarm) => alarm.id === job.id);
+    if (
+      found &&
+      found.enabled === job.enabled &&
+      found.nextRunAt === job.nextRunAt &&
+      found.nextNominalAt === job.nextNominalAt
+    )
+      job.alarm = found.alarm;
+  }
+}
+
+/**
+ * `queryCollectionQualitySummary` under a grant: the one service both
+ * `GET /api/collection-quality` and `kogane.collection-quality.summary` call
+ * (ADR 0081). The request takes no key. `alarms`, when given, reads the
+ * actual Alarm reservations (the App's relay to the Observation Pipeline);
+ * without it every job's alarm stays `unavailable`. More jobs or sources than
+ * `COLLECTION_QUALITY_ROW_BOUND` is `limit_exceeded`, never a cut answer.
+ */
+export async function readCollectionQualitySummaryForGrant(input: {
+  grant: Grant;
+  sql: SqlExecutor;
+  request?: unknown;
+  alarms?: (() => Promise<unknown>) | undefined;
+}): Promise<CollectionQualityOutcome<CollectionQualitySummary>> {
+  const read = "collection-quality.summary";
+  const refused = (await gate(read, input.grant, input.sql)) ?? closed(read, input.request, []);
+  if (refused) return refused;
+  const budget = [
+    `budget:jobs=${String(COLLECTION_QUALITY_ROW_BOUND)}`,
+    `budget:sources=${String(COLLECTION_QUALITY_ROW_BOUND)}`,
+  ];
+  return bounded(read, budget, async () => {
+    const summary = await queryCollectionQualitySummary(input.sql);
+    if (input.alarms) await overlayAlarms(summary, input.alarms);
+    return { ok: true, value: summary };
+  });
+}
+
+/**
+ * `queryCollectionQualityCells` under a grant: the one service both
+ * `GET /api/collection-quality/<source>` and `kogane.collection-quality.cells`
+ * call (ADR 0081). The request is `{ source, offset? }`, checked in this
+ * order: the source id, then the keys, then the offset (an integer from 0 to
+ * `COLLECTION_QUALITY_MAX_OFFSET`, 0 when absent), then whether the source is
+ * a visible CORE source. One page of `COLLECTION_QUALITY_PAGE` cells.
+ */
+export async function readCollectionQualityCellsForGrant(input: {
+  grant: Grant;
+  sql: SqlExecutor;
+  request: unknown;
+}): Promise<CollectionQualityOutcome<CollectionQualityCells>> {
+  const read = "collection-quality.cells";
+  const refused = await gate(read, input.grant, input.sql);
+  if (refused) return refused;
+  const sourceId = sourceOf(read, input.request);
+  if (typeof sourceId !== "string") return sourceId;
+  const extra = closed(read, input.request, ["source", "offset"]);
+  if (extra) return extra;
+  const keys = record(input.request)!;
+  const offset = Object.hasOwn(keys, "offset") ? keys["offset"] : 0;
+  if (
+    typeof offset !== "number" ||
+    !Number.isSafeInteger(offset) ||
+    offset < 0 ||
+    offset > COLLECTION_QUALITY_MAX_OFFSET
+  )
+    return refuse(read, "invalid_offset", ["offset"]);
+  // Paged, so never over a bound: the page says whether more cells follow.
+  const cells = await queryCollectionQualityCells(input.sql, { sourceId, offset });
+  return cells === null ? refuse(read, "unknown_source", ["source"]) : { ok: true, value: cells };
+}
+
+/**
+ * `queryAccountCoverage` under a grant: the one service both
+ * `GET /api/collection-quality/<source>/accounts` and
+ * `kogane.collection-quality.accounts` call (ADR 0081, ADR 0082). The request
+ * is `{ source }`, checked in this order: the source id, then the keys, then
+ * whether the source is a visible CORE source. More cells or account periods
+ * than the bounds is `limit_exceeded`, never a cut answer.
  */
 export async function readAccountCoverageForGrant(input: {
   grant: Grant;
   sql: SqlExecutor;
-  sourceId: unknown;
-}): Promise<AccountCoverageOutcome> {
-  const fail = (
-    code: "unauthorized" | "evidence_restricted" | "invalid_query" | "budget_exceeded",
-    refs: string[],
-  ): AccountCoverageOutcome => ({
-    ok: false,
-    error: financialError(code, ACCOUNT_COVERAGE_REQUEST, refs),
-  });
-  if (!grantAllows(input.grant, "evidence.read"))
-    return fail("unauthorized", ["capability:evidence.read"]);
-  const narrowed = [
-    ...(input.grant.scopes.sources === "*" ? [] : ["scope:source"]),
-    ...(input.grant.scopes.accounts === "*" ? [] : ["scope:account"]),
+  request: unknown;
+}): Promise<CollectionQualityOutcome<AccountCoverage>> {
+  const read = "collection-quality.accounts";
+  const refused = await gate(read, input.grant, input.sql);
+  if (refused) return refused;
+  const sourceId = sourceOf(read, input.request);
+  if (typeof sourceId !== "string") return sourceId;
+  const extra = closed(read, input.request, ["source"]);
+  if (extra) return extra;
+  const budget = [
+    `budget:cells=${String(ACCOUNT_COVERAGE_CELL_BOUND)}`,
+    `budget:periods=${String(ACCOUNT_COVERAGE_ENTRY_BOUND)}`,
   ];
-  if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
-  if (typeof input.sourceId !== "string" || !COLLECTION_QUALITY_SOURCE.test(input.sourceId))
-    return fail("invalid_query", ["source"]);
-  try {
-    const coverage = await queryAccountCoverage(input.sql, { sourceId: input.sourceId });
-    return coverage === null ? fail("invalid_query", ["source"]) : { ok: true, coverage };
-  } catch (error) {
-    if (error instanceof CollectionQualityLimitError)
-      return fail("budget_exceeded", [
-        `budget:cells=${String(ACCOUNT_COVERAGE_CELL_BOUND)}`,
-        `budget:periods=${String(ACCOUNT_COVERAGE_ENTRY_BOUND)}`,
-      ]);
-    throw error;
-  }
+  return bounded(read, budget, async () => {
+    const coverage = await queryAccountCoverage(input.sql, { sourceId });
+    return coverage === null
+      ? refuse(read, "unknown_source", ["source"])
+      : { ok: true, value: coverage };
+  });
 }

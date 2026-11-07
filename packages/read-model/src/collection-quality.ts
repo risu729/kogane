@@ -68,6 +68,24 @@ import {
 /** More configured jobs or sources than this in one read is refused, never cut. */
 export const COLLECTION_QUALITY_ROW_BOUND = 200;
 
+/**
+ * The scheduling and collection tables the collection quality reads join
+ * (CORE 0065 and CORE 0039), as names. A store that lacks any of them does
+ * not serve collection quality.
+ */
+export const COLLECTION_QUALITY_TABLES = [
+  "collection_schedules",
+  "collection_schedule_occurrences",
+  "collection_execution_leases",
+  "collection_runs",
+  "collection_run_stages",
+] as const;
+
+/** How many of `COLLECTION_QUALITY_TABLES` the store has, as `present`. */
+export const COLLECTION_QUALITY_TABLES_SQL = `SELECT count(*) AS present FROM sqlite_master
+     WHERE type='table' AND name IN ('collection_schedules','collection_schedule_occurrences',
+       'collection_execution_leases','collection_runs','collection_run_stages')`;
+
 // Kept as an explicit future-rule guard: every narrowed parser must be
 // composed or named by the test which inspects the shipped read texts.
 export const UNCOMPOSED_QUERY_RULE_PARSERS: readonly string[] = [];

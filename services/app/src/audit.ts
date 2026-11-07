@@ -195,6 +195,20 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // One row per source the coverage answer counts; never the counts themselves.
   if (operation === "instruments.coverage")
     return { rows: Array.isArray(value["rows"]) ? value["rows"].length : 0, truncated: false };
+  // One row per source the summary lists; never a source, a job or a code.
+  if (operation === "collection-quality.summary")
+    return {
+      rows: Array.isArray(value["sources"]) ? value["sources"].length : 0,
+      truncated: false,
+    };
+  // One row per cell on the page, truncated when more pages follow; never a source.
+  if (operation === "collection-quality.cells") {
+    const coverage = (value["coverage"] ?? {}) as Record<string, unknown>;
+    return {
+      rows: Array.isArray(value["cells"]) ? value["cells"].length : 0,
+      truncated: coverage["truncated"] === true,
+    };
+  }
   // One row per cell the account read covered; never an account or a period.
   if (operation === "collection-quality.accounts")
     return { rows: typeof value["cells"] === "number" ? value["cells"] : 0, truncated: false };

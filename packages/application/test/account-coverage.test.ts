@@ -6,7 +6,11 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import type { SQLQueryBindings } from "bun:sqlite";
 import { QualityStore } from "../../read-model/test/collection-quality-fixture.ts";
 import { fullCoreSchema } from "../../read-model/test/card-usage-scale-fixture.ts";
-import { ACCOUNT_COVERAGE_CELL_BOUND as SQL_CELL_BOUND } from "../../read-model/src/collection-quality.ts";
+import {
+  ACCOUNT_COVERAGE_CELL_BOUND as SQL_CELL_BOUND,
+  COLLECTION_QUALITY_TABLES,
+  COLLECTION_QUALITY_TABLES_SQL,
+} from "../../read-model/src/collection-quality.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import type { Grant } from "../src/grants.ts";
 import {
@@ -34,6 +38,17 @@ function executor(store: QualityStore): SqlExecutor {
       store.db.query(sql).all(...(args as SQLQueryBindings[])) as T[],
     first: async <T>(sql: string, args: readonly unknown[]) =>
       (store.db.query(sql).get(...(args as SQLQueryBindings[])) as T | null) ?? null,
+  };
+}
+
+/** A store that has the scheduling tables every collection quality read checks for first. */
+function scheduled(sql: SqlExecutor): SqlExecutor {
+  return {
+    all: (text, args) => sql.all(text, args),
+    first: async <T>(text: string, args: readonly unknown[]) =>
+      text === COLLECTION_QUALITY_TABLES_SQL
+        ? ({ present: COLLECTION_QUALITY_TABLES.length } as T)
+        : sql.first<T>(text, args),
   };
 }
 
@@ -543,8 +558,8 @@ describe("account coverage", () => {
     };
     const refused = await readAccountCoverageForGrant({
       grant,
-      sql: bounded(ACCOUNT_COVERAGE_CELL_BOUND + 1),
-      sourceId: "vpass",
+      sql: scheduled(bounded(ACCOUNT_COVERAGE_CELL_BOUND + 1)),
+      request: { source: "vpass" },
     });
     expect(refused.ok).toBe(false);
     expect(!refused.ok && refused.error.code).toBe("budget_exceeded");
@@ -613,9 +628,9 @@ describe("account coverage", () => {
     );
   });
 
-  test("under a grant: capability, perimeter and source are refused before anything is read", async () => {
+  test("under a grant: capability, perimeter and source are refused before any cell is read", async () => {
     let reads = 0;
-    const counting: SqlExecutor = {
+    const counting: SqlExecutor = scheduled({
       all: async <T>() => {
         reads += 1;
         return [] as T[];
@@ -624,7 +639,7 @@ describe("account coverage", () => {
         reads += 1;
         return null as T | null;
       },
-    };
+    });
     const whole: Grant = {
       principal: "synthetic-agent",
       scopes: { sources: "*", accounts: "*" },
@@ -656,7 +671,7 @@ describe("account coverage", () => {
       const outcome = await readAccountCoverageForGrant({
         grant: grant as Grant,
         sql: counting,
-        sourceId,
+        request: { source: sourceId },
       });
       expect(outcome).toMatchObject({ ok: false, error: { code, refs } });
     }
@@ -665,7 +680,7 @@ describe("account coverage", () => {
     const unknown = await readAccountCoverageForGrant({
       grant: whole,
       sql: counting,
-      sourceId: "no-such-source",
+      request: { source: "no-such-source" },
     });
     expect(unknown).toMatchObject({
       ok: false,

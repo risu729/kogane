@@ -146,11 +146,12 @@ No migration, index, writer or grant is added.
   than the Worker gets 404 in the account view only.
 - The agent read adds an `operation-path/catalogue.ts` entry and a read
   tool, which needs the owner's approval before merge (AGENTS.md, Merging).
-  The two collection quality routes this view extends still have no MCP
-  read; they stay [ADR 0081](0081-ui-parity-through-mcp.md) gaps.
-- The account read does not check for CORE 0065's scheduling tables on the
-  agent path, because it reads none of them; the page's route keeps the
-  check every collection quality route makes.
+  The two collection quality routes this view extends get their MCP reads
+  in the amendment below.
+- As first proposed, the account read did not check for CORE 0065's
+  scheduling tables on the agent path, because it reads none of them. The
+  amendment below moves that check into the service, so every collection
+  quality read makes it on every transport.
 
 ## Verification
 
@@ -200,3 +201,69 @@ Synthetic data only, no production access:
 - `mise run //packages/read-model:ci`, `//packages/application:ci`,
   `//packages/observation-shared:ci`, `//services/app:ci`, `//apps/web:ci`,
   `//experiments/observation-pipeline-local:ci`, `mise run ci:root`.
+
+## Amendment 2026-11-07: the summary and cell reads over MCP, one gate
+
+- Status: proposed (stacked on the PR that proposes this ADR)
+
+Context. [ADR 0081](0081-ui-parity-through-mcp.md) requires every read page
+to have an MCP read over the same application service. Of the three
+collection quality routes, only the account view had one; the summary
+(`GET /api/collection-quality`) and the cell page
+(`GET /api/collection-quality/<source>`) did their grant, scope, store,
+query and bound checks in the App route itself, and the account read checked
+the store's scheduling tables in the route only, so on a store without them
+the route answered 404 and the agent read an uncaught SQL error.
+
+Options considered. (1) One service per read that grades grant, scope,
+store, request and bound, with both transports as thin adapters (chosen).
+(2) MCP tools that call the routes' query functions after their own checks:
+two copies of the checks, which ADR 0081 point 2 rules out. (3) Keep the
+table check in the route: the transports would answer one store
+differently.
+
+Decision.
+
+- `readCollectionQualitySummaryForGrant`, `readCollectionQualityCellsForGrant`
+  and `readAccountCoverageForGrant` (`packages/application/src/query/collection-quality.ts`)
+  each decide, in order: `evidence.read`, whole-store scope (both before any
+  statement), the scheduling and collection tables
+  (`COLLECTION_QUALITY_TABLES_SQL`, read model), the request, the bound. Each
+  refusal is one closed `CollectionQualityRefusal` with its
+  `FinancialError`; the account read's request becomes `{ source }`.
+- `GET /api/collection-quality*` turns the URL into the service's request
+  and the refusal into the HTTP error it has always answered; its bodies,
+  statuses and headers are unchanged.
+- `kogane.collection-quality.summary` (`{}`) and
+  `kogane.collection-quality.cells` (`{ source, offset? }`) are new read
+  tools, R0 `read` under `evidence.read` on a whole-store grant, listed only
+  to such a grant, with catalogue entries `collection-quality.summary` and
+  `collection-quality.cells`; their audit records carry row counts only.
+  Like the account tool, they need the owner's approval before merge
+  (AGENTS.md, Merging).
+- The summary's Alarm relay (`services/app/src/collection-quality-alarms.ts`)
+  is passed to the service by both transports; the service overlays it.
+- A store without the tables is `400 unsupported_semantics`
+  (`store:collection-scheduling`) on the agent transports, for all three
+  reads, and stays `404` on the route.
+
+Consequences. The three routes have their MCP reads, so the parity guard's
+route-to-tool map can name `kogane.collection-quality.summary` and
+`kogane.collection-quality.cells` for the two routes it lists as gaps. The
+summary read over MCP waits up to the relay's five-second deadline when
+schedules are enabled, as the page does. The committed `AGENT_API_GRANTS`
+grants no client `evidence.read`, so no configured client is offered the
+tools.
+
+Verification. `packages/application/test/collection-quality-read.test.ts`
+(the gate's order and statement counts for each read, the summary's alarm
+overlay and bound, the cell request's order of refusals, each service equal
+to its query); `services/app/test/collection-quality-parity.test.ts` (every
+route answer, across paths, query strings, methods, reader grants, stores
+with and without the tables, relay modes and the row bound, byte-equal to the
+frozen pre-refactor route in `legacy-collection-quality-api.ts`);
+`services/app/test/collection-quality-api.test.ts` (both tools listed only to
+whole-store `evidence.read`, answering the routes' bodies over HTTP and MCP
+and passing the web client's wire check, every refusal equal on both
+transports including the missing tables and the summary bound, audit records
+with counts only).
