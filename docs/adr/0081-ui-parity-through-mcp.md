@@ -27,9 +27,13 @@ What the code does today (main `02a915a`):
 - [`catalogue.ts`](../../packages/application/src/operation-path/catalogue.ts)
   lists each recorded operation with the paths it exists on. Two operations are
   on `ui` only: `schedules.survey.decide` and `schedules.lease.release`. The six
-  `ops.*` entries list `mcp` only so that a refusal is recorded: the operations
-  tools are never served on `/mcp`, and every such call is refused with
-  `actor_not_supported`. In practice they are screen-only too. The catalogue
+  `ops.*` entries list `ui` and `mcp`. On `/mcp` their tools are published to
+  and run for a delegated caller only (since #660, ADR 0063 slice S3:
+  `delegatedOpsTools` and `callDelegatedOpsTool` in `ops-tools.ts`, over the
+  same `opsServices` as the HTTP routes). Without a delegation a call is
+  refused with `delegation_not_configured` and recorded. (Corrected
+  2026-11-07: this ADR first said they were never served and were refused
+  with `actor_not_supported`.) The catalogue
   lists recorded operations only, not read pages. Read pages
   such as card purchases, card settlements and the evidence browser have HTTP
   routes for the UI; some have an MCP read tool and some do not
@@ -83,8 +87,8 @@ What the code does today (main `02a915a`):
    delegations, secrets and deployment are R4 too.
 4. **The inventory.** For recorded operations, each catalogue entry whose paths
    include `ui` also includes `mcp`, and its tool is published in the MCP tool
-   list, refusing only as point 3 allows, unless it is R4. A repository test enforces both, so
-   the `ops.*` entries no longer pass on a recorded refusal alone. Read pages
+   list, refusing only as point 3 allows, unless it is R4. A repository test
+   enforces both. Read pages
    are not catalogue entries: a second test compares the App's UI read routes
    with the MCP read tools through an explicit route-to-tool map, and fails on
    a route with no tool.
@@ -93,9 +97,8 @@ What the code does today (main `02a915a`):
 
 - Before the guard tests pass: `schedules.survey.decide` and
   `schedules.lease.release` need MCP tools (the second refusing as point 3
-  says); the six `ops.*` operations need a served MCP tool under a delegation;
-  read pages such as card settlements and the evidence browser need MCP reads;
-  and the three tools that run their own SQL move it into `packages/application`.
+  says); read pages such as card settlements and the evidence browser need MCP
+  reads. (The three tools that ran their own SQL now call `packages/application`.)
   An inventory of screen operations and read pages against MCP tools is the first
   slice. It goes on the roadmap's parallel track A.
 - Phase 2's card settlement accept and withdraw, and the ownership review, are
@@ -108,8 +111,22 @@ What the code does today (main `02a915a`):
 
 ## Verification
 
-- Today: most MCP tools call shared services; three run their own SQL (above);
-  no guard test exists yet.
+- Today: most MCP tools call shared services. The three that ran their own SQL
+  (above) call `delegatedWritesRemaining` and `ownOperationSource` in
+  `packages/application` instead, and `tests/mcp-tools-no-sql.test.ts` fails
+  when `services/app/src/mcp.ts` or a `*-tools.ts` adapter calls a store
+  directly or holds a SQL statement. SQL still runs on the MCP path in helpers
+  of `services/app/src` that the screens share, outside that guard:
+  `scopedParseRuns` in `agent-service.ts`, the proposal store in
+  `proposals.ts`, and the schema probe in `reported-state-api.ts`. They move
+  into `packages/application` next, and join the guard when they do. No
+  catalogue or read-route guard test exists yet.
+- The six `ops.*` tools: `services/app/test/delegated-ops-parity.test.ts`
+  checks that a delegation holding every `operations.*` capability is shown
+  all six and a narrower one only those it holds, and that each request gives
+  the same receipt and stores the same request over MCP as over its HTTP
+  route (collection and session refresh after prepare and confirm), and that
+  following it with `kogane.ops.operation.get` reads the same receipt.
 - After the first slice: the catalogue test fails when a `ui` entry lacks a
   published `mcp` tool, and the read-route test fails when a UI read route has
   no MCP read. A test per new tool compares its result with the HTTP route's result

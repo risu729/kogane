@@ -119,6 +119,16 @@ payments, partial payments and refund allocation are either supported or shown
 as unsupported with a closed reason
 ([acceptance criteria, layers 6–7](#layers-67--reconciliation-and-economic-event-generation)).
 
+The [Phase 2 plan](plans/2026-11-phase2-card-flow.md) (accepted 2026-11-07, 03:58 UTC) holds
+the units and the production baseline of 2026-11-06: candidates exist for Vpass → SMBC,
+Vpass → SBI Shinsei and MyJCB → SMBC statements, none was ever decided, and recorded
+ownership was the only blocker. On 2026-11-07 the owner decided that an account with no
+recorded owner is assumed to be the owner's, and that settlement decisions are delegated
+to agents through MCP over the same API as the screens
+([plan, section 4](plans/2026-11-phase2-card-flow.md#4-owner-decisions-2026-11-07)).
+Neither is implemented yet: no ownership default exists, the operation catalogue has no
+settlement operation and `MCP_DELEGATIONS` is empty.
+
 ### Phase 3 — Coverage, collection requests and cross-source identity
 
 Issues: [#542](https://github.com/risu729/kogane/issues/542),

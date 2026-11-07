@@ -362,8 +362,10 @@ field for field: the figures of the whole filter per unit with captured,
 authorized, captured refunds and authorized refunds apart and no combined
 total, the unresolved count, the provider statement totals beside them and
 `settlementAddsPurchaseExpense: false`; `coverage`, which says the list is not
-a complete transaction history and counts the current provider rows no event
-holds; and per event its state and amount (or last known amount), its provider
+a complete transaction history, counts the current provider rows no event
+holds and splits that count per source and closed reason
+(`unrecognizedReasons`, [economic events](economic-events.md#http)); and per
+event its state and amount (or last known amount), its provider
 rows and whether the provider still shows them, the statement it was posted to
 or the reason there is none, the settlement review of that statement with the
 bank debit an accepted one cites, its newest revisions, its candidates and its

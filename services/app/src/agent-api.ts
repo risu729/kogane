@@ -207,8 +207,10 @@ export async function agentApi(
     // inside `callOpsTool`, exactly as their HTTP routes are. With
     // `OPS_API_ENABLED` off they are neither listed nor callable, so the MCP
     // surface matches the routes this deployment actually serves. An MCP
-    // client is never an operator (ADR 0047): they are not published to one,
-    // and `callOpsTool` refuses its caller object before any grader runs.
+    // client is never an operator (ADR 0047): it is shown and served only the
+    // tools its delegation holds (ADR 0063, `delegatedOpsTools` and
+    // `callDelegatedOpsTool`), and `callOpsTool` refuses its caller object
+    // before any grader runs.
     const ops = opsApiEnabled(env);
     // A deployment whose command grant lists cannot be read grades nobody, so
     // it can authorize none of the operations tools; publishing them would

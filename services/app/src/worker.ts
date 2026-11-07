@@ -24,6 +24,7 @@ import {
   cardSettlementsApi,
   CARD_SETTLEMENT_PATH,
   CARD_OWNERSHIP_PATH,
+  CARD_SETTLEMENT_STATEMENTS_PATH,
 } from "./card-settlements-api";
 import { cardPurchasesApi, CARD_PURCHASES_PATH } from "./card-purchases-api";
 import { reportedStateApi, REPORTED_STATE_PATH } from "./reported-state-api";
@@ -51,7 +52,11 @@ function classify(path: string): string {
   if (isCommandPath(path)) return "command";
   if (path === AUDIT_PATH) return "audit";
   if (path === DELEGATION_STATUS_PATH) return "delegations";
-  if (path === CARD_SETTLEMENT_PATH || path === CARD_OWNERSHIP_PATH)
+  if (
+    path === CARD_SETTLEMENT_PATH ||
+    path === CARD_OWNERSHIP_PATH ||
+    path === CARD_SETTLEMENT_STATEMENTS_PATH
+  )
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
   if (path === REPORTED_STATE_PATH) return "reported_state";

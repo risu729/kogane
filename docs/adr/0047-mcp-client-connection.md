@@ -194,7 +194,12 @@ Coverage run counts (fact 5):
      caller with `403 actor_not_supported` before `opsContext` or
      `principalFor` runs, and the operations tools are not published on
      `/mcp`; `principalFor` also refuses the `mcp-client:` name as a string,
-     whatever `OPERATOR_SUBJECTS` and `AGENT_GRANTS` say;
+     whatever `OPERATOR_SUBJECTS` and `AGENT_GRANTS` say (amended
+     2026-11-07: since #660, ADR 0063, `/mcp` sends an `mcp-client` call of
+     an operations tool to `callDelegatedOpsTool`, which publishes and runs
+     only what the caller's `MCP_DELEGATIONS` entry holds and otherwise
+     refuses with `delegation_not_configured`; `callOpsTool`'s own refusal
+     of the caller object is now `delegation_not_configured` too);
    - it reaches no route but `/mcp`;
    - the agent-API capability vocabulary has no acceptance, so at most it
      records an inert proposal whose actor is `mcp-client:<sub>`.

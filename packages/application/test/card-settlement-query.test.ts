@@ -16,7 +16,10 @@ function store() {
   db.exec(`CREATE TABLE card_settlement_reviews(id TEXT,facts_json TEXT,revision INTEGER,status TEXT,
     decision_revision_id TEXT,event_id TEXT,obligation_id TEXT,settlement_id TEXT,created_at TEXT);
     CREATE VIEW card_settlement_readiness AS SELECT id,1 AS statement_current,1 AS bank_current,1 AS ownership_current,1 AS allocation_available FROM card_settlement_reviews;
-    CREATE TABLE card_settlement_decisions(proposal_id TEXT,revision INTEGER,status TEXT,decision_revision_id TEXT,created_at TEXT);`);
+    CREATE TABLE card_settlement_decisions(proposal_id TEXT,revision INTEGER,status TEXT,decision_revision_id TEXT,created_at TEXT);
+    CREATE TABLE card_debit_account_statement(id INTEGER PRIMARY KEY,reader_version TEXT);
+    CREATE TABLE card_settlement_debit_account_evidence(id INTEGER PRIMARY KEY,candidate_id TEXT,statement_id INTEGER,
+      policy TEXT,outcome TEXT,reason TEXT,proposal_json TEXT,created_at TEXT);`);
   // The stub schema stands in for the readiness view, so the keyed reads run
   // as the shipped text over it; card-settlement-review-differential.test.ts
   // proves the two equal on the complete schema.
@@ -121,4 +124,78 @@ test("history never races ahead of the revision whose status was read", async ()
   const page = await queryCardSettlements(sql);
   expect(page.items[0]?.revision).toBe(0);
   expect(page.items[0]?.history).toEqual([]);
+});
+
+describe("provider-stated debit-account evidence", () => {
+  const proposal = JSON.stringify({
+    bankSourceId: "smbc-bank",
+    bankSourceAccount: "synthetic-bank",
+    visibleDigitCount: 4,
+  });
+  test("the latest row under the current policy is shown, older and other-policy rows are not", async () => {
+    const { db, sql } = store();
+    insert(db, "myjcb");
+    db.exec(`INSERT INTO card_debit_account_statement VALUES(3,'synthetic-reader-1.0.0');
+      INSERT INTO card_settlement_debit_account_evidence VALUES
+       (1,'myjcb',3,'card-debit-account-statement-v3','not_proposed','no_comparable_bank_account',NULL,'2026-09-10'),
+       (2,'myjcb',3,'card-debit-account-statement-v3','supports',NULL,'${proposal}','2026-09-11'),
+       (3,'myjcb',3,'card-debit-account-statement-v2','names_other_account',NULL,'${proposal}','2026-09-12');`);
+    const [item] = (await queryCardSettlements(sql)).items;
+    expect(item?.debitAccount).toEqual({
+      outcome: "supports",
+      reason: null,
+      policy: "card-debit-account-statement-v3",
+      statementRef: {
+        kind: "typed-claim",
+        id: "card_debit_account_statement:3",
+        revision: "reader:synthetic-reader-1.0.0",
+      },
+      bankSourceId: "smbc-bank",
+      bankSourceAccount: "synthetic-bank",
+      visibleDigitCount: 4,
+      recordedAt: "2026-09-11",
+    });
+    // Evidence only: the blockers are the facts' and readiness's, unchanged.
+    expect(item?.acceptanceBlockers).toEqual([]);
+  });
+  test("a closed reason is kept, and no row is a reason by source, never a blank", async () => {
+    const { db, sql } = store();
+    insert(db, "myjcb", true);
+    db.exec(`INSERT INTO card_debit_account_statement VALUES(3,'synthetic-reader-1.0.0');
+      INSERT INTO card_settlement_debit_account_evidence VALUES
+       (1,'myjcb',3,'card-debit-account-statement-v3','not_proposed','ambiguous_accounts',NULL,'2026-09-10');`);
+    let [item] = (await queryCardSettlements(sql, { proposalId: "myjcb" })).items;
+    expect(item?.debitAccount).toMatchObject({
+      outcome: "not_proposed",
+      reason: "ambiguous_accounts",
+    });
+    expect(item?.acceptanceBlockers).toEqual(["owner_not_established"]);
+    insert(db, "unrecorded");
+    [item] = (await queryCardSettlements(sql, { proposalId: "unrecorded" })).items;
+    expect(item?.debitAccount).toMatchObject({
+      outcome: "absent",
+      reason: "evidence_not_recorded",
+    });
+    const vpass = settlementFacts();
+    vpass.statement.sourceId = "vpass";
+    db.prepare(
+      "INSERT INTO card_settlement_reviews VALUES(?,?,0,'proposed',NULL,NULL,NULL,NULL,?)",
+    ).run("vpass", JSON.stringify(vpass), "2026-09-11T00:00:00Z");
+    [item] = (await queryCardSettlements(sql, { proposalId: "vpass" })).items;
+    expect(item?.debitAccount).toMatchObject({
+      outcome: "absent",
+      reason: "source_has_no_debit_account_statement",
+      statementRef: null,
+    });
+  });
+  test("a malformed evidence row fails the read", async () => {
+    const { db, sql } = store();
+    insert(db, "myjcb");
+    db.exec(`INSERT INTO card_debit_account_statement VALUES(3,'synthetic-reader-1.0.0');
+      INSERT INTO card_settlement_debit_account_evidence VALUES
+       (1,'myjcb',3,'card-debit-account-statement-v3','supports',NULL,'{}','2026-09-10');`);
+    await expect(queryCardSettlements(sql)).rejects.toThrow(
+      "card_settlement_debit_account_evidence_invalid",
+    );
+  });
 });

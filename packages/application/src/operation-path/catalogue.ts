@@ -39,11 +39,10 @@ export interface CatalogueEntry {
 const UI: readonly SubjectPath[] = ["ui"];
 const UI_MCP: readonly SubjectPath[] = ["ui", "mcp"];
 const AGENT: readonly SubjectPath[] = ["agent-http", "mcp"];
-// The operations tools of docs/ops-api.md are never served on `/mcp` now: its
-// only caller is an MCP client, which is agent-only (ADR 0047), so the tools
-// are not published to it and every call is refused `actor_not_supported`
-// before any grader runs. That refusal is recorded under the tool's operation
-// on `mcp`, which is why the path stays listed.
+// The operations requests of docs/ops-api.md: the operator's HTTP routes, and
+// on `/mcp` a delegated caller only (ADR 0063, `services/app/src/ops-tools.ts`),
+// both over the same services. A call without a delegation is refused and
+// recorded under the tool's operation on `mcp`.
 const OPS: readonly SubjectPath[] = ["ui", "mcp"];
 
 export const OPERATION_CATALOGUE = {

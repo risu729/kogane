@@ -309,6 +309,9 @@ same services; a collection request or session refresh needs a prepare and an
 exact confirmation. The committed `MCP_DELEGATIONS` is empty, so an operation
 is requested over the routes above, with the browser application's identity,
 where the operator is graded as before.
+For the same input, a delegated call and its route give the same receipt and
+store the same request ([ADR 0081](adr/0081-ui-parity-through-mcp.md),
+`services/app/test/delegated-ops-parity.test.ts`).
 
 `kogane.ops.operation.get` is defined over the same service as the read
 route; only a delegation holding `operations.read` reaches it on `/mcp`, so
