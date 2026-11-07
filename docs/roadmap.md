@@ -190,6 +190,10 @@ Issues: [#559](https://github.com/risu729/kogane/issues/559),
 [#561](https://github.com/risu729/kogane/issues/561). Each phase's feature is
 done only when it also works from the UI and MCP (layer 16 criteria).
 Delegations and grants are owner decisions and never part of an agent PR.
+Every screen operation also exists as an MCP operation over the same
+application service ([ADR 0081](adr/0081-ui-parity-through-mcp.md)); the first
+unit of this track inventories screen operations against MCP tools and adds
+the catalogue guard test.
 
 ### New sources
 
