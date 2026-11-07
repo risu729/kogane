@@ -35,6 +35,8 @@ import {
   parseAuditEnvelope,
   processorCall,
   delegatedBatchFailure,
+  decisionFamilyOf,
+  type DecisionFamily,
 } from "../../../packages/application/src/index.ts";
 import { IDENTITY_POLICY_VERSION } from "./identity-store.ts";
 import { identitySubjectRef } from "../../../packages/application/src/operations/sql.ts";
@@ -165,6 +167,24 @@ async function body(request: Request): Promise<CommandBody | null> {
 }
 
 /**
+ * A delegated MCP client may plan only a kind whose family it could then
+ * decide: `DECISION_FAMILIES`, the list the App's decision tools and the
+ * delegated envelope read (ADR 0063, ADR 0081).
+ */
+export function delegatedPlanAllowed(kind: unknown): boolean {
+  return typeof kind === "string" && decisionFamilyOf(kind) !== null;
+}
+
+/** A delegated approve or commit of a plan of `kind`, under the envelope's attenuated families. */
+export function delegatedDecisionAllowed(
+  kind: string,
+  commandFamilies: readonly ("plan" | DecisionFamily)[],
+): boolean {
+  const family = decisionFamilyOf(kind);
+  return family !== null && commandFamilies.includes(family);
+}
+
+/**
  * The principal, from the private binding's verified-actor headers. The
  * evidence browser proved the identity with its Access JWT; this route trusts
  * those headers at the same level as `/sweep` and `/identity-revise`, and
@@ -264,20 +284,12 @@ export async function changeCommandRoute(
       const plan = await loadPlan(d1CommandStore(env.DB), input.planId);
       if (!plan) return fail("plan_not_found");
       if (auth.revertsAuditId !== input.revertsAuditId) return fail("invalid_command");
-      const family = plan.kind.split(".")[0];
-      if (
-        (family !== "identity" && family !== "relation" && family !== "card-settlement") ||
-        !auth.commandFamilies.includes(family)
-      )
+      if (!delegatedDecisionAllowed(plan.kind, auth.commandFamilies))
         return Response.json({ error: "capability_not_delegated" }, { status: 403 });
     } else if (!auth.commandFamilies.includes("plan"))
       return Response.json({ error: "capability_not_delegated" }, { status: 403 });
     if (match[1] === "plan" || decision) {
-      if (
-        match[1] === "plan" &&
-        (typeof input.kind !== "string" ||
-          !["identity", "relation", "card-settlement"].includes(input.kind.split(".")[0]!))
-      )
+      if (match[1] === "plan" && !delegatedPlanAllowed(input.kind))
         return fail("unsupported_semantics");
       if (
         auth.idempotencyKey !==

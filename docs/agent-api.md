@@ -853,7 +853,13 @@ commit decide only the `identity`, `relation` and `card-settlement` kinds; any
 other kind is refused `operation_not_delegable`, and the Processor refuses to
 plan it for an MCP client with `unsupported_semantics`. Those are the kinds
 whose planners exist: the card purchase review and economic-event kinds are
-refused `unsupported_semantics` for every caller. A `prepare` checks the plan
+refused `unsupported_semantics` for every caller. The three families are one
+list, `DECISION_FAMILIES` in `packages/application/src/delegation/contract.ts`:
+the App's capability check (`decisionCapabilityFor`), the delegated envelope's
+`commandFamilies`, the Processor route's plan and decision checks
+(`delegatedPlanAllowed`, `delegatedDecisionAllowed`) and the writer's
+`delegatedCommandFamilyAllowed` all derive from it, so a family is decidable at
+every gate or at none. A `prepare` checks the plan
 (open, not expired, digest unchanged, simulation not stale) and the approval,
 and returns a `cfm_` digest; it writes no approval and no decision. A
 `confirm` with that digest within ten minutes applies it, and a repeated
@@ -1640,7 +1646,13 @@ owner's agreement.
    and economic-event kinds today). It fails when the published
    `kogane.command.plan` schema does not accept one of them, or when
    `kogane.command.approve` and `kogane.command.commit` do not decide its
-   family ([change lifecycle decisions](#change-lifecycle-decisions)).
+   family ([change lifecycle decisions](#change-lifecycle-decisions)). It
+   calls the gates a decision passes rather than reading a list beside them:
+   the App's `decisionCapabilityFor` against the MCP client's resolved
+   authority, the Processor route's `delegatedPlanAllowed` and
+   `delegatedDecisionAllowed` on the envelope `executionFor` builds, and the
+   writer's `delegatedCommandFamilyAllowed` on a confirmed approve and commit
+   call.
    Registering a card purchase review planner without an MCP decision path
    therefore fails here.
 

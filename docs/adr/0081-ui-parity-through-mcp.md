@@ -114,7 +114,9 @@ What the code does today (main `02a915a`):
   decision on the page's path and over MCP and compares the receipts and
   refusals. A third guard in `ui-mcp-parity.test.ts` fails when a change kind
   becomes plannable that the MCP decision tools do not decide
-  ([agent API](../agent-api.md#change-lifecycle-decisions)).)
+  ([agent API](../agent-api.md#change-lifecycle-decisions)). It calls the
+  App's, the Processor's and the writer's family gates, which all derive
+  from one list, `DECISION_FAMILIES`.)
 - New screens cost one more adapter each. Because both adapters call one service,
   the service's tests cover both paths. Each adapter tests only its own
   translation and authorization.
