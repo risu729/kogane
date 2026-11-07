@@ -214,16 +214,39 @@ describe("kogane.identity.read", () => {
     ).first<number>("n"))!;
     expect((await page.http(TOOL, { collection: "coverage" })).status).toBe(200);
     expect((await page.mcp(TOOL, { collection: "coverage" })).isError).toBe(false);
+    expect((await page.http(TOOL, { collection: "accounts", source: "absent" })).status).toBe(200);
     const rows = (
       await env.DB.prepare(
-        "SELECT path,principal,risk_class,result FROM audit_records WHERE operation='identity.read' AND rowid>? ORDER BY rowid",
+        "SELECT path,principal,risk_class,result,diff_json FROM audit_records WHERE operation='identity.read' AND rowid>? ORDER BY rowid",
       )
         .bind(last)
         .all()
     ).results;
+    // Coverage has one source row here (`other-test`), an absent source none:
+    // the record counts the page's rows.
+    const diff = JSON.stringify({ kind: "read", rows: 1, truncated: false });
     expect(rows).toEqual([
-      { path: "agent-http", principal: "synthetic-agent", risk_class: "R0", result: "read" },
-      { path: "mcp", principal: "mcp-client:synthetic-agent", risk_class: "R0", result: "read" },
+      {
+        path: "agent-http",
+        principal: "synthetic-agent",
+        risk_class: "R0",
+        result: "read",
+        diff_json: diff,
+      },
+      {
+        path: "mcp",
+        principal: "mcp-client:synthetic-agent",
+        risk_class: "R0",
+        result: "read",
+        diff_json: diff,
+      },
+      {
+        path: "agent-http",
+        principal: "synthetic-agent",
+        risk_class: "R0",
+        result: "read",
+        diff_json: JSON.stringify({ kind: "read", rows: 0, truncated: false }),
+      },
     ]);
   });
 });

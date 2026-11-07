@@ -647,10 +647,12 @@ and accounts both `"*"`, else `403 evidence_restricted` (`scope:source`,
 `scope:account`). These readers take no grant scope, so a narrower grant is
 refused, never served a filtered page. Both checks run before the argument is
 validated. An argument outside the closed schema is `400 invalid_request` with
-the offending keys as refs. `tools/list` lists each tool only to a grant that
+the offending keys as refs, even where the route would answer another code
+for the same value (`identityRead=snapshot` is `unsupported_semantics` there,
+an unsafe `offset` `invalid_offset`). `tools/list` lists each tool only to a grant that
 passes both checks. Each call is recorded as an R0 `read` under the tool name
-without `kogane.` (`identity.read`); the browser route records nothing, as
-before.
+without `kogane.` (`identity.read`), with the page's row count
+([audit log](audit-log.md)); the browser route records nothing, as before.
 
 The committed owner MCP grant holds `records.read` over `"*"`, so by
 configuration `kogane.identity.read` is listed to that client.

@@ -150,6 +150,9 @@ export async function identityApi(request: Request, env: Env, url: URL): Promise
   const collection = url.pathname.slice("/api/identity/".length);
   if (!(IDENTITY_COLLECTIONS as readonly string[]).includes(collection))
     throw new HttpError(404, "not_found");
+  // Any query text, even one with no parameters (`?&`), as before the reader
+  // was shared; `readIdentityCollection` sees only the parsed parameters.
+  if (collection === "connections" && url.search) throw new HttpError(400, "invalid_query");
   return json(
     await readIdentityCollection(env, collection as IdentityCollection, url.searchParams),
   );
