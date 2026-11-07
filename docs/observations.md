@@ -2670,6 +2670,38 @@ recognition accepts the web code `1` and, on the owner's confirmation
 value stays unsupported until it is observed and confirmed
 ([single payment, per source](economic-events.md#single-payment-per-source)).
 
+The finalized web family's header (`webMeisaiTopK3Vo`) also yields one
+`credit_statement_payment_amount` balance per card-month, on page zero only
+and not while `saiseiStatus` is `1` (still being created): the amount from
+`payTotal`, `_kogane.period` from `seikyuYm` (which must equal the artifact's
+month) and `_kogane.paymentDate` from `shiharaiDate` (a `YYYY年M月D日` calendar
+date). The customized family's `shiharaiKin1/2/3` yield no total. The total's
+`as_of` is the first day of the `seikyuYm` month (`YYYY-MM-01`), not
+`shiharaiDate`. The MyJCB statement total differs: its `as_of` is the dated
+`お支払い金額合計` due date and its period is that date's month. The Vpass
+parser does not require `shiharaiDate` to fall in the `seikyuYm` month; a
+synthetic test (`vpass-statement-total.test.ts`) keeps a `2026-09-01` payment
+date under a `2026-08` period.
+
+No statement consumer reads this `as_of`. The view `card_statement_facts`
+(migration 0044) and the dated statement facts take `_kogane.period` and
+`_kogane.paymentDate`, and so do the settlement sweep's three-day debit window
+and readiness ([card settlements](card-settlements.md)), reported-state
+payables and the card purchase statement links. The due date and both sides of
+the debit window are civil dates in `Asia/Tokyo`, so no instant conversion or
+month boundary is involved. Only the generic balance and observation views
+read `as_of`: the latest-balance query ranks a card's statement totals by it
+(its fetch unit is the card), so the newest statement month is the one listed,
+the balance projection types `YYYY-MM-01` as a provider local date, and the
+balance history and observation detail pages print the stored value. Those
+pages therefore show the statement month's first day as the 基準日 (on the
+latest-balance page with local-date precision), which is a day the provider
+did not state; the due date is not shown there. This is a limit of the parser
+today. Moving `as_of` to `shiharaiDate` would be a parser release: like
+[1.2.0](#vpass-page-qualified-external-ids-statement-parser-120), its re-parse
+would give every Vpass statement row a new observation under a new parse run
+and rewrite nothing stored.
+
 The provider issues no row id. A transaction's external id is
 `vpass:<card>:<month>:<family>:<fingerprint>:<occurrence>` on the first page
 (`top-000`) and `vpass:<card>:<month>:<family>:<fingerprint>:<page>:<occurrence>`
