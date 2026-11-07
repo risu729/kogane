@@ -15,8 +15,10 @@ import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { baseWorld, myjcbRoot } from "../../read-model/test/card-usage-fixture.ts";
 import { factOf } from "../../storage-d1/test/card-purchase-fixture.ts";
 import { myJcbCreditStatement } from "../../parsers/src/parsers/myjcb.ts";
+import { cardUsageFactOf } from "../src/card-usage-fact.ts";
 import {
   CARD_PURCHASE_PAGE_SIZE,
+  CARD_PURCHASE_UNRECOGNIZED_LIMIT,
   CardPurchaseLimitError,
   queryCardPurchases,
 } from "../src/query/card-purchases.ts";
@@ -209,6 +211,8 @@ describe("card purchase explanation", () => {
         "installment_amount_differs",
       ]),
       unrecognizedCurrentRows: 0,
+      unrecognizedReasons: { complete: true, counts: [] },
+      refundsAllocated: false,
       limit: CARD_PURCHASE_PAGE_SIZE,
     });
   });
@@ -880,9 +884,54 @@ describe("current provider rows", () => {
       const current = read();
       const held = new Set(recognisable.map((fact) => JSON.stringify(recognitionKey(fact))));
       const result = await queryCardPurchases(sql);
-      expect(result.coverage.unrecognizedCurrentRows).toBe(
-        current.filter((row) => !held.has(row.recognition_key!)).length,
+      const unheld = current.filter((row) => !held.has(row.recognition_key!));
+      expect(result.coverage.unrecognizedCurrentRows).toBe(unheld.length);
+      // Each unheld row under the reason the writer's own rule gives it: an
+      // exclusion, or `recognition_pending` for a row it would recognise
+      // (here the newer MyJCB capture, which no tick has reached yet).
+      const expected = new Map<string, number>();
+      for (const row of unheld) {
+        const classified = classifyCardUsage(cardUsageFactOf(row));
+        const reason = classified.ok ? "recognition_pending" : classified.reasonCode;
+        const pair = `${row.source_id}/${reason}`;
+        expected.set(pair, (expected.get(pair) ?? 0) + 1);
+      }
+      const reasons = result.coverage.unrecognizedReasons;
+      expect(reasons.complete).toBe(true);
+      const counted = reasons.counts.map((entry) => [
+        `${entry.sourceId}/${entry.reasonCode}`,
+        entry.rows,
+      ]);
+      expect(new Map(counted as [string, number][])).toEqual(expected);
+      expect(reasons.counts.map((entry) => entry.reasonCode)).toEqual(
+        expect.arrayContaining(["recognition_pending", "payment_type_unsupported"]),
       );
+      // Vpass before MyJCB, each in the closed reason order.
+      const order = reasons.counts.map((entry) => entry.sourceId);
+      expect(order).toEqual([...order].sort((a, b) => (a === b ? 0 : a === "vpass" ? -1 : 1)));
+
+      // Beyond the bound the total stays exact and the reasons say they are partial.
+      const bound = 2;
+      expect(unheld.length).toBeGreaterThan(bound);
+      expect(CARD_PURCHASE_UNRECOGNIZED_LIMIT).toBeGreaterThan(bound);
+      const bounded: SqlExecutor = {
+        ...sql,
+        all: async <T>(query: string, args: readonly unknown[]) =>
+          sql.all<T>(
+            query,
+            args.length === 4 && args[3] === CARD_PURCHASE_UNRECOGNIZED_LIMIT
+              ? [...args.slice(0, 3), bound]
+              : args,
+          ),
+      };
+      const partial = await queryCardPurchases(bounded);
+      expect(partial.coverage.unrecognizedCurrentRows).toBe(unheld.length);
+      expect(partial.coverage.unrecognizedReasons.complete).toBe(false);
+      expect(
+        partial.coverage.unrecognizedReasons.counts.reduce((sum, entry) => sum + entry.rows, 0),
+      ).toBe(bound);
+      // The page's own current flags do not depend on that bound.
+      expect(partial.items).toEqual(result.items);
       expect(result.items).toHaveLength(recognisable.length);
       for (const item of result.items)
         expect(item.sourceRows.every((row) => row.current)).toBe(!replaced.has(item.eventId));

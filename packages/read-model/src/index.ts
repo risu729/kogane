@@ -54,6 +54,7 @@ export {
   type ReaderOptions,
   ResultLimitExceededError,
   type SourceFetchRunCount,
+  type SourceParseRun,
   type SqlExecutor,
   type TransactionQuery,
 } from "./reader";
@@ -151,11 +152,15 @@ export {
   projectionPageSql,
   projectionSubtotalSql,
 } from "./balance-projection-sql";
+export { snapshotIsBehind } from "./snapshot-freshness";
 export {
   type ActivePointerRow,
   type BalanceProjectionReader,
   type BalanceSnapshotRow,
   type ProjectionCoverageRow,
+  type ServableSnapshot,
+  SNAPSHOT_REFUSALS,
+  type SnapshotRefusal,
   type SubtotalRow,
   createCoreProjectionSource,
 } from "./balance-projection-reader";

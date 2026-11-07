@@ -40,8 +40,6 @@ import { createD1ObservationReader } from "../../../packages/read-model/src/d1";
 import { PAGE_LIMIT } from "../../../packages/read-model/src/scope";
 import type { PositionWithValuations } from "../../../packages/observation-shared/src/api-contract.ts";
 
-/** The report body version this job writes; it is the schema of the stored bytes. */
-export const REPORT_JOB_RELEASE = "report-job-v1";
 const INPUT_MANIFEST_VERSION = "report-inputs-v1";
 const DEFAULT_MAX_ROWS = 500;
 /** Positions one reader page returns with their valuations (`PAGE_LIMIT` less its probe row). */
@@ -282,7 +280,7 @@ async function snapshotPrices(
  * corrected price or a later observation produces a new context instead of
  * silently changing an existing one.
  */
-export interface ReportInputManifest {
+interface ReportInputManifest {
   schemaVersion: typeof INPUT_MANIFEST_VERSION;
   perimeterRef: string;
   unitRef: string;
@@ -666,9 +664,6 @@ export async function runReportJob(
     truncated,
   };
 }
-
-/** Positions the job would read, exposed so a test can assert what the manifest covers. */
-export type ReportJobPositions = PositionWithValuations[];
 
 export interface PurgeResult {
   downgradedRuns: number;

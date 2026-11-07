@@ -28,6 +28,7 @@ import {
   replayDelegatedConfirmation,
   previewProviderOperation,
   operationIdFor,
+  ownOperationSource,
   SESSION_REFRESH_MODES,
   statusForCommandError,
 } from "../../../packages/application/src/index";
@@ -48,6 +49,7 @@ import {
   sessionRefreshSchema,
   type OpsContext,
 } from "./ops-api";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 export const OPS_TOOL_NAMES = [
   "kogane.ops.collection.request",
@@ -65,8 +67,7 @@ export function isOpsToolName(value: string): value is OpsToolName {
 
 /** The published JSON Schema of one request schema, without the meta key. */
 function inputSchema(schema: z.ZodType): Record<string, unknown> {
-  const generated = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete generated["$schema"];
+  const generated = mcpInputSchema(schema);
   return generated;
 }
 
@@ -189,7 +190,7 @@ export async function callOpsTool(
   }
 }
 
-export const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
+const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
   "kogane.ops.collection.request": "operations.collection.request",
   "kogane.ops.import.request": "operations.import.request",
   "kogane.ops.replay.request": "operations.replay.request",
@@ -409,15 +410,12 @@ export async function callDelegatedOpsTool(
     if (name === "kogane.ops.operation.get") {
       const input = parseRequest(operationIdSchema, body ?? {});
       // Resolve the caller's own row before reading progress; denied and absent are identical.
-      const row = await context.store.first<{ source_id: string | null }>(
-        "SELECT source_id FROM ops_requests WHERE operation_id=? AND principal=?",
-        [input.operationId, principal.id],
-      );
+      const own = await ownOperationSource(context.store, input.operationId, principal.id);
       if (
-        !row ||
-        (row.source_id === null
+        !own ||
+        (own.sourceId === null
           ? principal.scopes.sources !== "*" || principal.scopes.accounts !== "*"
-          : !sourceAllowed(principal, row.source_id))
+          : !sourceAllowed(principal, own.sourceId))
       )
         throw new HttpError(400, "target_missing");
       return await opsServices.operation(context, input.operationId);

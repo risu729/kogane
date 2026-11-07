@@ -28,6 +28,8 @@ import {
   knownAssetMetricIds,
   KNOWN_ASSETS_POLICY,
   type ObservationReader,
+  type ServableSnapshot,
+  type SnapshotRefusal,
 } from "../../../read-model/src/index";
 import { addDecimals, integerDecimal } from "../../../domain/src/values.ts";
 import { financialError } from "../errors.ts";
@@ -101,7 +103,7 @@ export interface ActivityRow {
  * no net worth: different units are not added (INV03), and an asset subtotal
  * with unknown liability coverage is not a net worth (addendum 05 section 5).
  */
-export interface HoldingUnit {
+interface HoldingUnit {
   unitRef: string;
   coefficient: string;
   scale: number;
@@ -126,12 +128,25 @@ export interface QueryExecution {
   reader: QueryReader;
   /**
    * A07's adopted balance projection. `holdings` reads it and nothing else;
-   * without it, or before a snapshot is sealed, the intent answers
-   * `unavailable` rather than summing raw observation rows behind it.
+   * without it, before a snapshot is sealed, or while the published snapshot
+   * is refused, the intent answers `unavailable` rather than summing raw
+   * observation rows behind it or rows that no longer describe the context.
    */
-  projection?: BalanceProjectionReader | undefined;
+  projection?: HoldingsProjection | undefined;
   /** The overview the context was opened from; reused so a query reads it once. */
   overview: Overview;
+}
+
+/**
+ * What `holdings` may read of the projection. The snapshot comes only from
+ * `servable()`, which the deployment checks against CORE's epoch, its
+ * visibility revision and the READ contract the way the v2 balance routes do
+ * (05 §7): this file never picks a snapshot itself, so it cannot sum one a
+ * restriction or a restore has voided.
+ */
+export interface HoldingsProjection {
+  reader: Pick<BalanceProjectionReader, "summableQuantities" | "coverage">;
+  servable(): Promise<ServableSnapshot>;
 }
 
 export type QueryOutcome =
@@ -313,7 +328,11 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
     [opened.context.identityDecisionManifestRef],
   );
   const reconciliation = dimension("not-applicable", ["reconciliation_not_implemented"]);
-  const unavailableHoldings = (): QueryOutcome => ({
+  // No sealed snapshot is `projection_not_built`; a refused one carries the
+  // v2 balance routes' own closed code. Either way nothing is summed.
+  const unavailableHoldings = (
+    reason: "projection_not_built" | SnapshotRefusal = "projection_not_built",
+  ): QueryOutcome => ({
     ok: true,
     result: {
       schemaVersion: "financial-result-v1",
@@ -326,28 +345,34 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         policyRelease: KNOWN_ASSETS_POLICY,
         liabilitiesCoverage: "unknown",
       },
-      coverage: coverageOf(scopeRef, coveredRef, [
-        { reasonCode: "projection_not_built", scopeRef },
-      ]),
+      coverage: coverageOf(scopeRef, coveredRef, [{ reasonCode: reason, scopeRef }]),
       quality: {
         identity,
-        freshness: dimension("not-applicable", ["projection_not_built"]),
-        numeric: dimension("not-applicable", ["projection_not_built"]),
+        freshness: dimension("not-applicable", [reason]),
+        numeric: dimension("not-applicable", [reason]),
         reconciliation,
-        valuation: dimension("unresolved", ["projection_not_built"]),
+        valuation: dimension("unresolved", [reason]),
       },
       nextCursor: null,
       explanationRefs: [],
-      warnings: [{ code: "projection_not_built", severity: "blocking" }],
+      warnings: [{ code: reason, severity: "blocking" }],
     },
   });
 
   if (request.intent === "holdings") {
     // A07's adopted balance projection is what `holdings` reads. Without a
     // sealed snapshot the answer is `unavailable` with a reason, never a total
-    // this service computed from the raw observation rows behind it.
-    const snapshot = input.projection ? await input.projection.currentSnapshot() : null;
-    if (!input.projection || !snapshot) return unavailableHoldings();
+    // this service computed from the raw observation rows behind it. A
+    // published snapshot the deployment refuses — another CORE epoch, a
+    // changed use restriction, another READ contract — is `unavailable` with
+    // that refusal's code: filtering rows out of it would leave every figure
+    // at its old value (05 §7).
+    if (!input.projection) return unavailableHoldings();
+    const servable = await input.projection.servable();
+    if (servable === null) return unavailableHoldings();
+    if ("refusal" in servable) return unavailableHoldings(servable.refusal);
+    const { snapshot } = servable;
+    const projection = input.projection.reader;
     const holdingPairs = scopePairs(sourceScope.sources, accountScope.accounts);
     if (holdingPairs.length > MAX_SCOPE_PAIRS)
       return fail("budget_exceeded", [`budget:scopePairs=${String(MAX_SCOPE_PAIRS)}`]);
@@ -359,6 +384,7 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
     const gaps: { reasonCode: string; scopeRef: string | null }[] = [];
     let stale = false;
     let unresolved = false;
+    if (servable.behind) gaps.push({ reasonCode: "snapshot:behind_published_evidence", scopeRef });
     for (const pair of holdingPairs) {
       const scope = {
         ...(pair.source === undefined ? {} : { source: pair.source }),
@@ -367,11 +393,7 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
           ? {}
           : { instrument: request.filters.instrument }),
       };
-      const rows = await input.projection.summableQuantities(
-        snapshot.snapshot_id,
-        scope,
-        metricIds,
-      );
+      const rows = await projection.summableQuantities(snapshot.snapshot_id, scope, metricIds);
       if (rows === null) return fail("budget_exceeded", ["budget:subtotalRows"]);
       for (const row of rows) {
         // The projection is read inside the grant, and every row is checked
@@ -387,7 +409,7 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         );
         totals.set(row.unit_ref, { ...sum, adoptedCount: current.adoptedCount + 1 });
       }
-      for (const row of await input.projection.coverage(snapshot.snapshot_id, scope)) {
+      for (const row of await projection.coverage(snapshot.snapshot_id, scope)) {
         if (row.state === "adopted" && row.freshness === "current") continue;
         if (row.state === "stale" || row.freshness === "stale") stale = true;
         if (row.state === "unresolved" || row.state === "conflict") unresolved = true;
@@ -406,7 +428,9 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         schemaVersion: "financial-result-v1",
         contextId: opened.context.contextId,
         resolvedQuery: opened.resolvedQuery,
-        completeness: (unresolved || stale ? "partial" : "complete") satisfies CompletenessState,
+        completeness: (unresolved || stale || servable.behind
+          ? "partial"
+          : "complete") satisfies CompletenessState,
         data: {
           intent: "holdings",
           units,
@@ -419,8 +443,12 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         quality: {
           identity,
           freshness: dimension(
-            stale ? "partial" : "verified",
-            stale ? ["scope_not_re_observed"] : ["snapshot_current"],
+            stale || servable.behind ? "partial" : "verified",
+            [
+              ...(servable.behind ? ["snapshot:behind_published_evidence"] : []),
+              ...(stale ? ["scope_not_re_observed"] : []),
+              ...(!stale && !servable.behind ? ["snapshot_current"] : []),
+            ],
             [snapshot.snapshot_id],
           ),
           // Only adopted, exactly normalised values are summed; a missing,

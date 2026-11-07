@@ -51,6 +51,7 @@ test("unknown ownership exposes current accounts and exact evidence without a de
     claims: [],
     blockers: [],
     selfDeclarationBlockers: [],
+    ownerDefaultBlockers: [],
     evidenceRefs: [
       "card-settlement:one",
       "balance:11",
@@ -84,6 +85,23 @@ test("all alias and rejected history counts pin freshness while only latest part
   expect(side.claims[0]?.validFrom).toBe("2026-01-01");
   expect(side.blockers).toEqual([]);
   expect(side.selfDeclarationBlockers).toEqual(["ownership_claims_require_review"]);
+});
+test("a proposal recorded after a decision leaves the decision displayed (ADR 0017's amendment of 2026-11-06)", async () => {
+  const { db, sql } = fixture();
+  db.exec(`INSERT INTO decision_revisions VALUES('d1',NULL),('d2',NULL),('d3',NULL),('d4',NULL);
+ INSERT INTO entity_relations VALUES('r1','liable_party','acct-card','party:本人A','accepted',NULL,NULL,'[]','d1');
+ INSERT INTO entity_relations VALUES('r2','liable_party','account:acct-card','party:本人A','proposed',NULL,NULL,'[]','d2');
+ INSERT INTO entity_relations VALUES('r3','liable_party','account:acct-card','party:本人B','proposed',NULL,NULL,'[]','d3');
+ INSERT INTO entity_relations VALUES('r4','liable_party','account:acct-card','party:本人B','proposed',NULL,NULL,'[]','d4');`);
+  const side = (await queryCardOwnership(sql, "one"))!.sides[0]!;
+  // Every row still moves the pin.
+  expect(side.ownershipRevision).toBe(4);
+  // The accepted owner the readers adopt stays shown, so it can be rejected;
+  // an owner with only proposals shows its newest one.
+  expect(side.claims.map((c) => [c.id, c.status])).toEqual([
+    ["r4", "proposed"],
+    ["r1", "accepted"],
+  ]);
 });
 test("a recorded contradiction prevents only the self-declared fallback", async () => {
   const { db, sql } = fixture();

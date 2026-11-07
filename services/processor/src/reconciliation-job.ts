@@ -421,7 +421,7 @@ function groupKey(sourceAccount: string, period: string | null): string {
 }
 
 /** Facts are paired inside one source account and statement period, and each group is bounded. */
-export function groupFacts(facts: readonly MatchFact[]): Map<string, MatchFact[]> {
+function groupFacts(facts: readonly MatchFact[]): Map<string, MatchFact[]> {
   const groups = new Map<string, MatchFact[]>();
   for (const fact of facts) {
     const key = groupKey(fact.sourceAccount, fact.statementPeriod);

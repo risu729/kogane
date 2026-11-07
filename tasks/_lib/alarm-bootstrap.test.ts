@@ -3,7 +3,12 @@ import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { BOOTSTRAP_POLICY, bootstrapReleaseSchedules } from "./ci/alarm-bootstrap.mjs";
+import {
+  BOOTSTRAP_POLICY,
+  bootstrapFailureCode,
+  bootstrapReleaseSchedules,
+} from "./ci/alarm-bootstrap.mjs";
+import { verifyAlarmCronRemoval } from "./ci/alarm-cron-readback.mjs";
 import { REPO_ROOT } from "./repo-root.ts";
 
 const sha = "a".repeat(40),
@@ -339,5 +344,29 @@ describe("bootstrap retries only proved prewrite release mismatch", () => {
     expect(result.code).toBe(0);
     expect(result.stderr).toBe("");
     expect(result.stdout.trim()).toBe("native_node_bootstrap_checks_passed");
+  });
+  test("the command line keeps every closed readback code, status numbers included", async () => {
+    const refused = (status: number) =>
+      verifyAlarmCronRemoval({
+        jobs: [{ enabled: true, worker: "synthetic-worker" }],
+        accountId: "a".repeat(32),
+        token: "synthetic",
+        fetchImpl: async () => new Response("synthetic provider text", { status }),
+      }).catch((error: unknown) => error);
+    for (const status of [401, 403, 503]) {
+      const error = await refused(status);
+      expect(bootstrapFailureCode(error)).toBe(`schedule_cron_readback_http_${status}`);
+    }
+    expect(bootstrapFailureCode(new Error("schedule_bootstrap_uncertain"))).toBe(
+      "schedule_bootstrap_uncertain",
+    );
+    // Anything that is not one of the closed codes is never echoed.
+    for (const error of [
+      new Error("synthetic provider text"),
+      new Error("schedule_bootstrap_x Provider Text"),
+      "schedule_bootstrap_uncertain",
+      null,
+    ])
+      expect(bootstrapFailureCode(error)).toBe("schedule_bootstrap_internal_error");
   });
 });

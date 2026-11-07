@@ -701,7 +701,11 @@ guarded, and is covered by a test with a synthetic source that does report one.
 a caller-chosen `operationId` makes a resend idempotent, the actor is the
 principal the server verified, and `expectedStatus` is the state the caller saw.
 All writes of one command are one D1 batch guarded on the ledger row, so a
-failed guard writes nothing. An acceptance appends two decision revisions (one
+failed guard writes nothing. Every statement after the ledger insert needs the
+ledger row of that same command (key, payload digest and actor), so a
+conflicting command that took the key first carries none of its decisions,
+relation or resolution, and the command answers `idempotency_conflict`. An
+acceptance appends two decision revisions (one
 for the proposal, one for the relation it creates), inserts the
 `entity_relations` row, and resolves the proposal. The relation's ends are the
 targets' own `SourceFactRef` ids, `transaction:<id>`, which already carry
@@ -1005,7 +1009,7 @@ every earlier revision stays readable.
 
 A withdrawn link is closed for good, a known limit: 0032 resolves a proposal
 once, so the proposal row stays `accepted` (the withdrawal supersedes the
-decision that accepted it), the triple's latest relation is `rejected`, and
+decision that accepted it), the triple's newest decision is `rejected`, and
 the candidate offers no action again. The same two rows can only be linked
 again through a new proposal, which the candidate pass writes when either
 row's event is re-anchored or revised onto a new observation.
@@ -1239,12 +1243,20 @@ event already retired keeps the period it had.
 - `activity({ basis, offset })` — current event revisions with at least one leg
   on the requested basis, their legs, their live allocations, one total per
   (basis, unit), and `explanationRefs` running event → legs → allocations →
-  source facts → raw locators.
+  source facts → raw locators. A (basis, unit) with a leg that is not exact
+  keeps its total, unknown with that leg's status and reason (the first such
+  leg by index), so an accepted card settlement lists its exact
+  `cash-movement` total beside an `obligation-change` total that is `missing`
+  with `statement_principal_and_fees_unknown`; it is never zero and never
+  left out (INV05).
 - `obligations({ offset })` — principal, live settlements, `settled`,
   `outstanding` (`principal − settled`, exact arithmetic), confirmed and
   projected fee totals kept apart, and the unresolved differences the
   settlements declared. When either side is not exact, `outstanding` is `null`
-  with an `outstandingReasonCode`; it is never zero-filled (INV05).
+  with an `outstandingReasonCode`; it is never zero-filled (INV05). A fee
+  total is `null` only when there is no such fee: a fee that is not exact, or
+  in another unit than the principal, leaves it unknown with a reason (the
+  fee's own status and reason, or a `conflict` with `unit_mismatch`).
 - `reconciliationSignals({ subjectRefs })` — the latest published
   provider-reported balance beside the amount the adopted events'
   `cash-movement` legs imply, and their `difference` with reason codes (`snapshot_boundary_unknown`,
@@ -1339,10 +1351,31 @@ answer for a set too large to return complete ([read model](read-model.md)),
 rather than partly summed; a statement period narrows it. The provider
 statement totals are listed beside the figures and are never subtracted from
 or compared with them, and `settlementAddsPurchaseExpense` is `false`.
-`coverage` says the list is not a complete transaction history, names the
-excluded shapes, and counts the current provider rows no live event holds,
-across every statement month whatever the filter. All figures are exact
-decimals added in `@kogane/domain`.
+`coverage` says the list is not a complete transaction history, says no
+refund is allocated to a purchase (`refundsAllocated: false`: nothing plans or
+writes `card-refund.allocate`, [above](#review-commands-for-purchases-migration-0051),
+so a refund is summed apart and never subtracted from a purchase, as the page
+says beside each refund), names the excluded shapes, and counts the current
+provider rows no live event holds, across every statement month whatever the
+filter. `unrecognizedReasons` splits
+that count per source and closed reason: each such row is classified when the
+page is read by `classifyCardUsage`, the writer's own rule, through the same
+row-to-fact mapping (`packages/application/src/card-usage-fact.ts`), so the
+page reports the reason the writer skips it. A reason is one of
+`CARD_USAGE_EXCLUSIONS`, or `recognition_pending` for a row the rule accepts
+that no live revision holds yet (the writer has not reached it in its cursor
+cycle, or its write conflicted). Only reasons some row has are listed, Vpass
+before MyJCB, each in the closed order of `CARD_USAGE_UNRECOGNIZED_REASONS`
+(`packages/domain/src/card-purchase.ts`). No reason is stored: there is no
+per-row skip table and no migration, and a reason is always the current rule's.
+At most 1,000 rows (`CARD_PURCHASE_UNRECOGNIZED_LIMIT`, lowest observation id
+first) are classified per request; beyond that the total stays exact,
+`complete` is `false` and the counts add up to less than it (INV05: a partial
+count says so, never scaled or zero). The response carries counts and codes
+only. Installments, revolving and bonus payments stay
+`payment_type_unsupported` ([ADR 0004](adr/0004-payment-type-shapes-from-evidence.md));
+the breakdown changes no recognition ([#547](https://github.com/risu729/kogane/issues/547),
+2026-11-07). All figures are exact decimals added in `@kogane/domain`.
 
 Cost per request: one selection of the filter's live events that carries only
 what the figures, the order and the statement links read (a few hundred bytes
@@ -1350,11 +1383,25 @@ per event; evidence, facts and history are read for the page's 50 events
 only), one statement query and one settlement query over the (account,
 source, period) keys of those events, and one pass of the shared current card
 usage query (`packages/read-model/src/card-usage.ts`) for the `current` flags
-and the unrecognised count. That pass reads every current Vpass/MyJCB capture
-and dominates the cost: on a synthetic store of about 34,000 usage
+and the unrecognised rows, which come back whole (up to the bound) for their
+reasons. That pass reads every current Vpass/MyJCB capture and dominates the
+cost. Returning the unrecognised rows whole instead of only counting them
+added about 45 ms on the full-scale store of [read model: cost](read-model.md#cost)
+(10,869 current rows, 4,268 unrecognised: 344 → 389 ms median for the pass
+on `bun:sqlite`); production had 298 current rows, 6 of them unrecognised
+(read-only count, 2026-11-07 04:10 UTC). Earlier measurement: on a
+synthetic store of about 34,000 usage
 observations (180 days of daily captures) and 8,200 live events, the
 unfiltered first page took about 0.4 s in `bun:sqlite`, of which the usage
-pass was about 0.3 s and the selection about 0.04 s. The candidates add two
+pass was about 0.3 s and the selection about 0.04 s. The pass is proven
+equal to the one shipped before #1020 (frozen in
+`packages/application/test/card-purchase-current-legacy-sql.ts`) for the
+page's current keys and the unrecognised count: on the random stores of
+`packages/read-model/test/card-usage-random-store.ts`
+(`card-purchase-current.test.ts`, which also checks the returned unrecognised
+rows are exactly the first ones by observation id up to each bound) and on the
+scaled store without table statistics (`card-purchase-scale.test.ts`, with
+the plan check). The candidates add two
 queries: one pass over the stage-B `pending_to_posted` proposals, re-deriving
 each target's recognition key by primary-key lookups
 (`packages/application/src/query/card-purchase-candidates.ts`), and one lookup
@@ -1374,9 +1421,9 @@ while `cardPurchaseRecognition` is, calls the same `queryCardPurchases`, and
 returns its page as `data`, figures, coverage, chain and `explanationRefs`
 unchanged, with each candidate's `actions` and `relation` removed: an agent
 sees which links are proposed and why, and every review stays with the
-operator. It needs an `AGENT_API_GRANTS` grant with `records.read` over
-`"*"` sources and accounts (the page cannot yet be recomputed inside a
-narrower scope, so a listed grant is refused rather than answered), the
+operator. It needs `records.read` over `"*"` sources and accounts, which
+every proved caller holds since ADR 0084 (the page cannot yet be recomputed
+inside a narrower scope, so a narrower grant would be refused), the
 10,000-event bound is `413 budget_exceeded` there, and it writes nothing
 either.
 

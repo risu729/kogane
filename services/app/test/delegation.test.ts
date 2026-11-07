@@ -4,7 +4,12 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { createPlan, d1CommandStore } from "../../../packages/application/src/index";
+import {
+  MCP_AUTHORITY,
+  QUERY_GRANT_CAPABILITIES,
+  createPlan,
+  d1CommandStore,
+} from "../../../packages/application/src/index";
 import { changeCommandRoute } from "../../processor/src/change-commands";
 import { mcpDelegationCapabilities } from "../src/delegation";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
@@ -17,28 +22,37 @@ const APP_AUD = "fixture-browser-audience";
 const MCP_AUD = "fixture-mcp-audience";
 const ISSUER = "https://delegation-test.cloudflareaccess.com";
 const NOW = "2026-10-09T00:00:00Z";
-const GRANT = {
-  scopes: { sources: "*", accounts: "*" },
-  capabilities: ["summary.read", "interpretation.propose"],
-  budget: { maxRows: 200, maxProposalTargets: 5, maxExplainDepth: 2 },
-};
-const DECLARATION = {
-  delegatedBy: OWNER,
-  role: "maintainer",
-  scopes: { sources: ["synthetic-private-source"], accounts: "*", scheduleSources: [] },
-  issuedAt: "2026-10-01T00:00:00Z",
-  notAfter: "2026-11-01T00:00:00Z",
-  budget: { writesPerDay: 30 },
-};
-const vars = (configured = JSON.stringify({ [PRINCIPAL]: DECLARATION })) => ({
-  MCP_DELEGATIONS: configured,
-  OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
-  AGENT_API_GRANTS: JSON.stringify({
-    [PRINCIPAL]: GRANT,
-    [OWNER]: GRANT,
-    [`mcp-client:${OTHER}`]: GRANT,
-  }),
-});
+// ADR 0084: nothing is declared. Any MCP client Access verified acts as
+// itself; the operator lists only grade the UI's own routes.
+// The two tests that spend the whole rolling-day budget use their own
+// subjects, so the budget they exhaust is not the one later tests write under.
+const IMPORT_OWNER = "import-budget-synthetic";
+const PROVIDER_OWNER = "provider-budget-synthetic";
+const vars = (operators = JSON.stringify([OWNER])) => ({ OPERATOR_SUBJECTS: operators });
+/** Fills the fixed rolling-day write budget with synthetic applied records. */
+async function spendBudget(principal = PRINCIPAL, subject = OWNER) {
+  const spent = await env.DB.prepare(
+    "SELECT count(*) n FROM audit_records WHERE principal=? AND principal_kind='delegated' AND result IN ('applied','accepted') AND recorded_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')",
+  )
+    .bind(principal)
+    .first<number>("n");
+  const missing = MCP_AUTHORITY.writesPerDay - spent!;
+  await env.DB.batch(
+    Array.from({ length: missing }, () =>
+      env.DB.prepare(
+        `INSERT INTO audit_records (audit_id,recorded_at,path,subject,principal,principal_kind,delegation_ref,operation,risk_class,step,result,correlation_id,idempotency_key,diff_json)
+         VALUES (?,strftime('%Y-%m-%dT%H:%M:%fZ','now'),'mcp',?,?,'delegated',?,'ops.import.request','R1','call','applied',?,?,'{"kind":"none"}')`,
+      ).bind(
+        `aud_${crypto.randomUUID()}`,
+        subject,
+        principal,
+        `dlg_${"0".repeat(64)}`,
+        crypto.randomUUID(),
+        `budget-filler-${crypto.randomUUID()}`,
+      ),
+    ),
+  );
+}
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let jwks: { keys: unknown[] };
 let id = 0;
@@ -139,65 +153,27 @@ async function capabilityReport(configuration: Record<string, unknown>, subject 
   expect(message.result.isError).not.toBe(true);
   return message.result.structuredContent;
 }
-describe("MCP S3 declarations activate only installed delegated operations", () => {
-  it("distinguishes inactive states from valid-but-unconnected without exposing owner configuration", async () => {
-    for (const [configured, subject, reason] of [
-      ["", OWNER, "delegation_not_configured"],
-      ["{", OWNER, "delegation_misconfigured"],
-      [JSON.stringify({ [PRINCIPAL]: DECLARATION }), OTHER, "delegation_not_configured"],
-      [
-        JSON.stringify({ [PRINCIPAL]: { ...DECLARATION, notAfter: NOW } }),
-        OWNER,
-        "delegation_expired",
-      ],
-      [
-        JSON.stringify({ [PRINCIPAL]: { ...DECLARATION, issuedAt: "2026-10-10T00:00:00Z" } }),
-        OWNER,
-        "delegation_not_yet_valid",
-      ],
-      [JSON.stringify({ [PRINCIPAL]: DECLARATION }), OWNER, "delegation_execution_unavailable"],
-    ]) {
-      const report = await capabilityReport(vars(configured), subject);
-      expect(report["capabilities"]).toEqual(GRANT.capabilities);
-      expect(report["delegation"]).toMatchObject({ available: false, reason });
+describe("ADR 0084: every MCP client activates only installed operations", () => {
+  it("distinguishes inactive states from held-but-unconnected without exposing configuration", async () => {
+    // Whatever the operator lists say, and whoever signed in.
+    for (const [operators, subject] of [
+      ["", OWNER],
+      ["{", OWNER],
+      [JSON.stringify([OWNER]), OTHER],
+      [JSON.stringify([OWNER]), OWNER],
+    ] as const) {
+      const report = await capabilityReport(vars(operators), subject);
+      expect(report["capabilities"]).toEqual([...QUERY_GRANT_CAPABILITIES]);
+      expect(report["delegation"]).toMatchObject({
+        available: false,
+        reason: "delegation_execution_unavailable",
+      });
       const text = JSON.stringify(report["delegation"]);
-      for (const forbidden of [
-        OWNER,
-        PRINCIPAL,
-        "synthetic-private-source",
-        "dlg_",
-        "writesPerDay",
-        "notAfter",
-        "scopes",
-      ])
+      for (const forbidden of [OWNER, PRINCIPAL, "dlg_", "writesPerDay", "notAfter", "scopes"])
         expect(text).not.toContain(forbidden);
     }
   });
-  it("uses the real subsecond clock for same-second delegation bounds, not the query clock", async () => {
-    vi.setSystemTime(new Date("2026-10-09T00:00:00.500Z"));
-    const cases = [
-      // Issued earlier within this second must already be active.
-      [{ issuedAt: "2026-10-09T00:00:00.250000001Z" }, "delegation_execution_unavailable"],
-      [{ issuedAt: "2026-10-09T00:00:00.500000000Z" }, "delegation_execution_unavailable"],
-      [{ issuedAt: "2026-10-09T00:00:00.500000001Z" }, "delegation_not_yet_valid"],
-      [{ issuedAt: "2026-10-09T00:00:00.750Z" }, "delegation_not_yet_valid"],
-      // Expired earlier within this second must no longer advertise the role.
-      [{ notAfter: "2026-10-09T00:00:00.250000001Z" }, "delegation_expired"],
-      [{ notAfter: "2026-10-09T00:00:00.500000000Z" }, "delegation_expired"],
-      [{ notAfter: "2026-10-09T00:00:00.500000001Z" }, "delegation_execution_unavailable"],
-      [{ notAfter: "2026-10-09T00:00:00.750Z" }, "delegation_execution_unavailable"],
-    ] as const;
-    for (const [bounds, reason] of cases) {
-      const configuration = vars(JSON.stringify({ [PRINCIPAL]: { ...DECLARATION, ...bounds } }));
-      const report = await capabilityReport(configuration);
-      const delegation = report["delegation"] as { capabilities: unknown[] };
-      expect(report["delegation"]).toMatchObject({ available: false, reason });
-      expect(delegation.capabilities.length > 0).toBe(
-        reason === "delegation_execution_unavailable",
-      );
-      expect(report["capabilities"]).toEqual(GRANT.capabilities);
-    }
-    // The new authority clock must not alter pinned financial query contexts.
+  it("the authority clock does not alter pinned financial query contexts", async () => {
     const http = await send("/api/agent/v1/context.open", {}, vars(), OWNER, APP_AUD);
     expect(http.status).toBe(200);
     const opened = (await http.json()) as { context: { evaluationClock: string } };
@@ -215,14 +191,23 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
     expect(message.result.structuredContent.context.evaluationClock).toBe(NOW);
   });
 
-  it("bad delegation never disables legal read/proposal or changes browser/UI authority", async () => {
-    for (const configured of ["", "{", JSON.stringify({ [PRINCIPAL]: DECLARATION })]) {
+  it("a bad or empty operator list never disables legal read/proposal for the MCP principal", async () => {
+    for (const configured of ["", "{", JSON.stringify([OWNER])]) {
       const configuration = vars(configured);
       const report = await capabilityReport(configuration);
       const http = await send("/api/agent/v1/capabilities", {}, configuration, OWNER, APP_AUD);
       expect(http.status).toBe(200);
       const { delegation: _status, ...reads } = report;
-      expect(await http.json()).toEqual({ ...reads, principal: OWNER });
+      // The browser session holds what the UI gives its subject: the whole
+      // store as the operator, the reader grant when the list is unusable.
+      if (configured === JSON.stringify([OWNER]))
+        expect(await http.json()).toEqual({ ...reads, principal: OWNER });
+      else
+        expect(((await http.json()) as { capabilities: string[] }).capabilities).toEqual([
+          "summary.read",
+          "records.read",
+          "evidence.read",
+        ]);
       const query = await send(
         "/mcp",
         rpcBody("tools/call", {
@@ -262,7 +247,7 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
       expect(JSON.stringify(await ui.json())).not.toContain("delegation");
     }
   });
-  it("valid declarations publish only implemented delegated tools and cannot reach browser operator routes", async () => {
+  it("an MCP client is published only installed tools and cannot reach browser operator routes", async () => {
     const configuration = { ...vars(), OPS_API_ENABLED: "true", COMMANDS_ENABLED: "true" };
     const response = await send("/mcp", rpcBody("tools/list", {}), configuration);
     const message = (await response.json()) as { result: { tools: { name: string }[] } };
@@ -271,15 +256,15 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
         .filter((tool) => /kogane\.(ops|command|schedules)\./u.test(tool.name))
         .map((tool) => tool.name),
     ).toEqual([
+      "kogane.ops.collection.request",
       "kogane.ops.import.request",
       "kogane.ops.replay.request",
+      "kogane.ops.projection.request",
+      "kogane.ops.session.refresh",
       "kogane.ops.operation.get",
     ]);
-    for (const name of [
-      "kogane.ops.collection.request",
-      "kogane.command.approve",
-      "kogane.Access.update",
-    ]) {
+    // Without the private Processor binding no command tool is installed.
+    for (const name of ["kogane.command.approve", "kogane.Access.update"]) {
       const call = await send(
         "/mcp",
         rpcBody("tools/call", { name, arguments: {} }),
@@ -288,7 +273,7 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
       const text = JSON.stringify(await call.json());
       expect(text).not.toContain('"accepted"');
       expect(text).not.toContain('"applied"');
-      expect(text).toMatch(/capability_not_delegated|operation_not_delegable|unknown_tool/u);
+      expect(text).toMatch(/command_executor_unavailable|unknown_tool/u);
     }
     const browserRoute = await send("/api/command/v1/approve", {}, configuration);
     expect(browserRoute.status).toBe(401);
@@ -301,38 +286,29 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
       false,
     );
     expect(unauthenticated.status).toBe(401);
-    expect(JSON.stringify(await unauthenticated.json())).not.toContain("synthetic-private-source");
+    expect(JSON.stringify(await unauthenticated.json())).not.toContain(OWNER);
   });
-  it("the adapter ignores AGENT_GRANTS and never promotes a browser caller", async () => {
-    const configuration = { ...vars(), AGENT_GRANTS: JSON.stringify([OWNER, PRINCIPAL]) };
+  it("the adapter reads no operator list and never promotes a browser caller", async () => {
+    for (const configuration of [
+      vars(),
+      { ...vars(), AGENT_GRANTS: JSON.stringify([PRINCIPAL]) },
+      { ...vars(), AGENT_GRANTS: JSON.stringify([OWNER]) },
+      vars("{"),
+    ])
+      expect(
+        await mcpDelegationCapabilities(
+          configuration,
+          { kind: "mcp-client", principal: PRINCIPAL },
+          NOW,
+        ),
+      ).toMatchObject({ configuration: "valid", available: false });
     expect(
-      await mcpDelegationCapabilities(
-        configuration,
-        { kind: "mcp-client", principal: PRINCIPAL },
-        NOW,
-      ),
-    ).toMatchObject({ configuration: "valid", available: false });
-    expect(
-      await mcpDelegationCapabilities(
-        configuration,
-        { kind: "browser", principal: PRINCIPAL },
-        NOW,
-      ),
+      await mcpDelegationCapabilities(vars(), { kind: "browser", principal: PRINCIPAL }, NOW),
     ).toMatchObject({ reason: "delegation_not_mcp_client", capabilities: [], available: false });
   });
   it("uses real MCP transport for atomic delegated import, replay and bounded authority", async () => {
     vi.useRealTimers();
-    const declaration = {
-      ...DECLARATION,
-      issuedAt: new Date(Date.now() - 60_000).toISOString(),
-      notAfter: new Date(Date.now() + 3_600_000).toISOString(),
-      scopes: { sources: ["sony-bank"], accounts: "*", scheduleSources: [] },
-      budget: { writesPerDay: 1 },
-    };
-    const configuration = {
-      ...vars(JSON.stringify({ [PRINCIPAL]: declaration })),
-      OPS_API_ENABLED: "true",
-    };
+    const configuration = { ...vars(), OPS_API_ENABLED: "true" };
     const invoke = async (
       name: string,
       arguments_: unknown,
@@ -342,6 +318,7 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
         "/mcp",
         rpcBody("tools/call", { name, arguments: arguments_ }),
         configuration_,
+        IMPORT_OWNER,
       );
       expect(response.status).toBe(200);
       return (await response.json()) as {
@@ -353,6 +330,24 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
       runId: "synthetic-delegated-import",
       idempotencyKey: "delegated-real-1",
     };
+    // A run id no terminal key can carry is refused before the write is
+    // bound: no request row, and the one write of the day is unspent.
+    const unaddressable = await invoke("kogane.ops.import.request", {
+      ...arguments_,
+      runId: "synthetic:delegated-import",
+    });
+    expect(unaddressable.result.structuredContent).toMatchObject({
+      error: "invalid_request",
+      refs: ["runId"],
+    });
+    expect(JSON.stringify(unaddressable)).not.toContain("synthetic:delegated-import");
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM ops_requests WHERE principal=? AND idempotency_key=?",
+      )
+        .bind(`mcp-client:${IMPORT_OWNER}`, arguments_.idempotencyKey)
+        .first<number>("n"),
+    ).toBe(0);
     const accepted = await invoke("kogane.ops.import.request", arguments_);
     expect(accepted.result.structuredContent).not.toHaveProperty("error");
     expect(accepted.result.isError).not.toBe(true);
@@ -361,13 +356,13 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
     const rows = await env.DB.prepare(
       "SELECT * FROM audit_records WHERE principal=? AND idempotency_key=? AND result='accepted'",
     )
-      .bind(PRINCIPAL, arguments_.idempotencyKey)
+      .bind(`mcp-client:${IMPORT_OWNER}`, arguments_.idempotencyKey)
       .all<Record<string, unknown>>();
     expect(rows.results).toHaveLength(1);
     expect(rows.results[0]).toMatchObject({
       principal_kind: "delegated",
       path: "mcp",
-      subject: OWNER,
+      subject: IMPORT_OWNER,
       operation: "ops.import.request",
     });
     expect(rows.results[0]!["delegation_ref"]).toMatch(/^dlg_[0-9a-f]{64}$/u);
@@ -379,11 +374,12 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
       await env.DB.prepare(
         "SELECT count(*) AS n FROM ops_requests WHERE principal=? AND idempotency_key=?",
       )
-        .bind(PRINCIPAL, arguments_.idempotencyKey)
+        .bind(`mcp-client:${IMPORT_OWNER}`, arguments_.idempotencyKey)
         .first<number>("n"),
     ).toBe(1);
     const conflict = await invoke("kogane.ops.import.request", { ...arguments_, runId: "changed" });
     expect(conflict.result.structuredContent).toEqual({ error: "idempotency_conflict" });
+    await spendBudget(`mcp-client:${IMPORT_OWNER}`, IMPORT_OWNER);
     const spent = await invoke("kogane.ops.import.request", {
       ...arguments_,
       idempotencyKey: "delegated-real-2",
@@ -393,43 +389,17 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
       await env.DB.prepare(
         "SELECT count(*) AS n FROM ops_requests WHERE principal=? AND idempotency_key=?",
       )
-        .bind(PRINCIPAL, "delegated-real-2")
+        .bind(`mcp-client:${IMPORT_OWNER}`, "delegated-real-2")
         .first<number>("n"),
     ).toBe(0);
     const receipt = await invoke("kogane.ops.operation.get", { operationId });
     expect(receipt.result.isError).not.toBe(true);
-    const narrowed = {
-      ...configuration,
-      MCP_DELEGATIONS: JSON.stringify({
-        [PRINCIPAL]: { ...declaration, scopes: { ...declaration.scopes, sources: [] } },
-      }),
-    };
-    const denied = await invoke("kogane.ops.operation.get", { operationId }, narrowed);
-    const missing = await invoke(
-      "kogane.ops.operation.get",
-      { operationId: `op_${"0".repeat(64)}` },
-      narrowed,
-    );
-    expect(denied.result.structuredContent).toEqual(missing.result.structuredContent);
-    const revoked = await invoke("kogane.ops.import.request", arguments_, {
-      ...configuration,
-      MCP_DELEGATIONS: "",
-    });
-    expect(revoked.result.structuredContent).toEqual({ error: "delegation_not_configured" });
     const browser = await send("/api/command/v1/plan", {}, configuration);
     expect(browser.status).toBe(401);
   });
 
   it("returns identical history and scoped audit data through HTTP and MCP using shared readers", async () => {
-    const grant = {
-      ...GRANT,
-      capabilities: ["records.read", "audit.read"],
-      scopes: { sources: "*", accounts: "*", scheduleSources: "*" },
-    };
-    const configuration = {
-      ...vars(""),
-      AGENT_API_GRANTS: JSON.stringify({ [OWNER]: grant, [PRINCIPAL]: grant }),
-    };
+    const configuration = vars();
     const invoke = async (
       name: string,
       arguments_: unknown,
@@ -507,32 +477,10 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
     const detailHttp = await send("/api/agent/v1/audit.get", detail, configuration, OWNER, APP_AUD);
     const detailMcp = await invoke("kogane.audit.get", detail);
     expect(await detailHttp.json()).toEqual(detailMcp.structuredContent);
-    const narrowedGrant = {
-      ...grant,
-      scopes: { ...grant.scopes, sources: ["sony-bank"], scheduleSources: [] },
-    };
-    const narrowed = {
-      ...configuration,
-      AGENT_API_GRANTS: JSON.stringify({ [OWNER]: narrowedGrant, [PRINCIPAL]: narrowedGrant }),
-    };
-    const refusedHttp = await send(
-      "/api/agent/v1/instruments.history",
-      args,
-      narrowed,
-      OWNER,
-      APP_AUD,
-    );
-    const refusedMcp = await invoke("kogane.instruments.history", args, narrowed);
-    expect(refusedHttp.status).toBe(403);
-    expect(refusedMcp.isError).toBe(true);
-    expect(await refusedHttp.json()).toEqual(refusedMcp.structuredContent);
-    const missing = await invoke(
-      "kogane.audit.get",
-      { auditId: "aud_00000000-0000-4000-8000-000000000000" },
-      narrowed,
-    );
-    const denied = await invoke("kogane.audit.get", detail, narrowed);
-    expect(denied.structuredContent).toEqual(missing.structuredContent);
+    const missing = await invoke("kogane.audit.get", {
+      auditId: "aud_00000000-0000-4000-8000-000000000000",
+    });
+    expect(missing.isError).toBe(true);
     expect(
       await env.DB.prepare(
         "SELECT count(*) AS n FROM instrument_mappings WHERE identifier_id='delegated-history-identifier'",
@@ -580,17 +528,7 @@ it("real MCP R2 owner decision prepares, confirms through the existing writer, a
     }),
   };
   const configuration = {
-    ...vars(
-      JSON.stringify({
-        [PRINCIPAL]: {
-          ...DECLARATION,
-          issuedAt: new Date(Date.now() - 60_000).toISOString(),
-          notAfter: new Date(Date.now() + 3_600_000).toISOString(),
-          role: "operator-delegate",
-          scopes: { sources: "*", accounts: "*", scheduleSources: [] },
-        },
-      }),
-    ),
+    ...vars(),
     COMMANDS_ENABLED: "true",
     PIPELINE: pipeline,
   };
@@ -761,36 +699,18 @@ it("real MCP R2 owner decision prepares, confirms through the existing writer, a
 
 it("provider-contact requests use R2, pin human session policy, refuse expired preparation and roll back spent budget", async () => {
   vi.useRealTimers();
-  const alreadySpent = await env.DB.prepare(
-    "SELECT count(*) n FROM audit_records WHERE principal=? AND principal_kind='delegated' AND result IN ('applied','accepted') AND recorded_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')",
-  )
-    .bind(PRINCIPAL)
-    .first<{ n: number }>();
-  const declaration = {
-    ...DECLARATION,
-    issuedAt: new Date(Date.now() - 60_000).toISOString(),
-    notAfter: new Date(Date.now() + 3_600_000).toISOString(),
-    role: "operator-delegate",
-    scopes: { sources: ["sony-bank"], accounts: "*", scheduleSources: [] },
-    capabilities: undefined,
-    budget: { writesPerDay: alreadySpent!.n + 1 },
-  };
-  // Restrict additive operator capabilities through a maintainer declaration plus these two explicit capabilities.
-  const configured = {
-    ...declaration,
-    role: "maintainer",
-    capabilities: ["operations.collection.request", "operations.session.refresh"],
-  };
   const configuration = {
-    ...vars(JSON.stringify({ [PRINCIPAL]: configured })),
+    ...vars(),
     OPS_API_ENABLED: "true",
     SESSION_REFRESH_POLICY: "",
   };
   const invoke = async (name: string, args: unknown, extra: Record<string, unknown> = {}) => {
-    const response = await send("/mcp", rpcBody("tools/call", { name, arguments: args }), {
-      ...configuration,
-      ...extra,
-    });
+    const response = await send(
+      "/mcp",
+      rpcBody("tools/call", { name, arguments: args }),
+      { ...configuration, ...extra },
+      PROVIDER_OWNER,
+    );
     return (await response.json()) as { result: { structuredContent: any; isError?: boolean } };
   };
   const request = {
@@ -852,6 +772,7 @@ it("provider-contact requests use R2, pin human session policy, refuse expired p
     { SESSION_REFRESH_POLICY: JSON.stringify({ "sony-bank": "unattended" }) },
   );
   expect(policyChanged.result.structuredContent.error).toBe("confirmation_invalid");
+  await spendBudget(`mcp-client:${PROVIDER_OWNER}`, PROVIDER_OWNER);
   const spent = await invoke("kogane.ops.session.refresh", {
     ...session,
     step: "confirm",
@@ -867,7 +788,7 @@ it("provider-contact requests use R2, pin human session policy, refuse expired p
     "SELECT result,step,confirms_audit_id FROM audit_records WHERE principal=? AND delegation_ref=? AND result='accepted'",
   )
     .bind(
-      PRINCIPAL,
+      `mcp-client:${PROVIDER_OWNER}`,
       (await env.DB.prepare(
         "SELECT delegation_ref FROM audit_records WHERE operation='ops.collection.request' AND idempotency_key=? AND result='accepted'",
       )
@@ -880,7 +801,7 @@ it("provider-contact requests use R2, pin human session policy, refuse expired p
   expect(effects.results[0]!.confirms_audit_id).toBeTruthy();
 });
 
-it("MCP schedule job tools are installed only for a resolved grant and write only through prepared native confirmation", async () => {
+it("MCP schedule job tools are installed for an MCP client and write only through prepared native confirmation", async () => {
   vi.useRealTimers();
   const { delegatedScheduleRoute } = await import("../../processor/src/delegated-schedules");
   const pipeline = {
@@ -905,20 +826,8 @@ it("MCP schedule job tools are installed only for a resolved grant and write onl
       return response;
     }),
   };
-  const grant = { ...GRANT, scopes: { sources: "*", accounts: "*", scheduleSources: ["vpass"] } };
   const configured = {
-    ...vars(
-      JSON.stringify({
-        [PRINCIPAL]: {
-          ...DECLARATION,
-          issuedAt: new Date(Date.now() - 60_000).toISOString(),
-          notAfter: new Date(Date.now() + 3_600_000).toISOString(),
-          capabilities: ["schedules.job.update"],
-          scopes: { sources: "*", accounts: "*", scheduleSources: ["vpass"] },
-        },
-      }),
-    ),
-    AGENT_API_GRANTS: JSON.stringify({ [PRINCIPAL]: grant, [OWNER]: grant }),
+    ...vars(),
     SCHEDULES_ENABLED: "true",
     PIPELINE: pipeline,
   };
@@ -1013,10 +922,11 @@ it("MCP schedule job tools are installed only for a resolved grant and write onl
     APP_AUD,
   );
   expect(http.status).toBe(404);
-  const revoked = await invoke(
+  // The operator lists grade the UI, not an MCP client: emptying them changes nothing here.
+  const unlisted = await invoke(
     "kogane.schedules.job.update",
     { ...body, step: "confirm", confirmationDigest: cfm },
-    { ...configured, MCP_DELEGATIONS: "" },
+    { ...configured, OPERATOR_SUBJECTS: "" },
   );
-  expect(revoked.result.structuredContent).toEqual({ error: "delegation_not_configured" });
+  expect(unlisted.result.structuredContent).toEqual(retried.result.structuredContent);
 });

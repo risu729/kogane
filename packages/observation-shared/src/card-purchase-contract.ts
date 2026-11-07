@@ -7,6 +7,7 @@ import {
   CARD_PURCHASE_ACTIONS,
   CARD_PURCHASE_SOURCES,
   CARD_USAGE_EXCLUSIONS,
+  CARD_USAGE_UNRECOGNIZED_REASONS,
 } from "../../domain/src/card-purchase.ts";
 import {
   CARD_PURCHASE_REVIEW_AFFORDANCES,
@@ -52,8 +53,12 @@ const COVERAGE_KEYS = [
   "completeTransactionHistory",
   "unsupportedShapes",
   "unrecognizedCurrentRows",
+  "unrecognizedReasons",
+  "refundsAllocated",
   "limit",
 ];
+const UNRECOGNIZED_REASONS_KEYS = ["complete", "counts"];
+const UNRECOGNIZED_COUNT_KEYS = ["sourceId", "reasonCode", "rows"];
 const ITEM_KEYS = [
   "eventId",
   "revision",
@@ -116,6 +121,38 @@ const list = (value: unknown, bound: number): value is unknown[] =>
   Array.isArray(value) && value.length <= bound;
 const period = (value: unknown) => text(value) && PERIOD.test(value);
 const nullableQuantity = (value: unknown) => value === null || validQuantity(value);
+
+/**
+ * Per source and reason, each pair once and never empty; the counts add up to
+ * the total when `complete` and to less when not, never to more.
+ */
+function validUnrecognizedReasons(value: unknown, total: number): boolean {
+  if (!record(value) || !exactKeys(value, UNRECOGNIZED_REASONS_KEYS)) return false;
+  const { complete, counts } = value;
+  if (
+    typeof complete !== "boolean" ||
+    !list(counts, CARD_PURCHASE_SOURCES.length * CARD_USAGE_UNRECOGNIZED_REASONS.length)
+  )
+    return false;
+  const seen = new Set<string>();
+  let sum = 0;
+  for (const entry of counts) {
+    if (
+      !record(entry) ||
+      !exactKeys(entry, UNRECOGNIZED_COUNT_KEYS) ||
+      !member(CARD_PURCHASE_SOURCES)(entry.sourceId) ||
+      !member(CARD_USAGE_UNRECOGNIZED_REASONS)(entry.reasonCode) ||
+      !count(entry.rows) ||
+      entry.rows === 0
+    )
+      return false;
+    const pair = `${String(entry.sourceId)}\u0000${String(entry.reasonCode)}`;
+    if (seen.has(pair)) return false;
+    seen.add(pair);
+    sum += entry.rows;
+  }
+  return complete ? sum === total : sum < total;
+}
 
 function validSourceRow(value: unknown): boolean {
   return (
@@ -369,6 +406,8 @@ function validPage(value: unknown, candidate: (value: unknown) => boolean): bool
     list(coverage.unsupportedShapes, CARD_USAGE_EXCLUSIONS.length) &&
     coverage.unsupportedShapes.every(member(CARD_USAGE_EXCLUSIONS)) &&
     count(coverage.unrecognizedCurrentRows) &&
+    validUnrecognizedReasons(coverage.unrecognizedReasons, coverage.unrecognizedCurrentRows) &&
+    coverage.refundsAllocated === false &&
     coverage.limit === CARD_PURCHASE_PAGE_LIMIT &&
     value.items.every((item) => validItem(item, candidate))
   );

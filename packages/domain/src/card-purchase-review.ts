@@ -29,21 +29,24 @@ export const CARD_PURCHASE_EXCLUSION_REASONS = [
 export type CardPurchaseExclusionReason = (typeof CARD_PURCHASE_EXCLUSION_REASONS)[number];
 
 /** Decisions that exclude (and later restore) one event: `card-usage-exclusion:<event id>`. */
-export const CARD_USAGE_EXCLUSION_SUBJECT_PREFIX = "card-usage-exclusion:";
+const CARD_USAGE_EXCLUSION_SUBJECT_PREFIX = "card-usage-exclusion:";
 /** The allocation state of one refund event: `card-refund:<refund event id>`. */
-export const CARD_REFUND_SUBJECT_PREFIX = "card-refund:";
+const CARD_REFUND_SUBJECT_PREFIX = "card-refund:";
 /** The refunds allocated to one purchase event: `card-refund-target:<purchase event id>`. */
-export const CARD_REFUND_TARGET_SUBJECT_PREFIX = "card-refund-target:";
+const CARD_REFUND_TARGET_SUBJECT_PREFIX = "card-refund-target:";
 /** The reviewed portion links of one obligation: `card-installment:<obligation id>`. */
-export const CARD_INSTALLMENT_SUBJECT_PREFIX = "card-installment:";
+const CARD_INSTALLMENT_SUBJECT_PREFIX = "card-installment:";
 
-/** The invalidation each review's plan carries, so a confirmation screen can tell it apart. */
+// The invalidation each review's plan carries, so a confirmation screen can tell it apart.
+/** @public Named for the review kinds (docs/change-lifecycle.md); nothing reads it. */
 export const CARD_PURCHASE_EXCLUSION_INVALIDATION = "review:card-purchase-exclusion";
+/** @public Named for the review kinds (docs/change-lifecycle.md); nothing reads it. */
 export const CARD_REFUND_ALLOCATION_INVALIDATION = "review:card-refund-allocation";
+/** @public Named for the review kinds (docs/change-lifecycle.md); nothing reads it. */
 export const CARD_INSTALLMENT_LINK_INVALIDATION = "review:card-installment-link";
 
 /** A purchase plan has at most 36 portions, so one link or unlink names at most 36. */
-export const CARD_INSTALLMENT_PORTIONS_MAX = 36;
+const CARD_INSTALLMENT_PORTIONS_MAX = 36;
 
 const EVENT_ID = /^(purchase|refund)_[0-9a-f]{64}$/u;
 const ALLOCATION_ID = /^ra_[0-9a-f]{64}$/u;
@@ -106,15 +109,19 @@ export function isPortionList(value: unknown, valid: (entry: unknown) => boolean
   );
 }
 
+/** @public Named for the review kinds (docs/change-lifecycle.md); nothing reads it. */
 export function cardUsageExclusionSubjectRef(eventId: string): string {
   return `${CARD_USAGE_EXCLUSION_SUBJECT_PREFIX}${eventId}`;
 }
+/** @public Named for the review kinds (docs/change-lifecycle.md); nothing reads it. */
 export function cardRefundSubjectRef(refundEventId: string): string {
   return `${CARD_REFUND_SUBJECT_PREFIX}${refundEventId}`;
 }
+/** @public Named for the review kinds (docs/change-lifecycle.md); nothing reads it. */
 export function cardRefundTargetSubjectRef(purchaseEventId: string): string {
   return `${CARD_REFUND_TARGET_SUBJECT_PREFIX}${purchaseEventId}`;
 }
+/** @public Named for the review kinds (docs/change-lifecycle.md); nothing reads it. */
 export function cardInstallmentSubjectRef(obligationId: string): string {
   return `${CARD_INSTALLMENT_SUBJECT_PREFIX}${obligationId}`;
 }

@@ -285,10 +285,11 @@ WHERE r.source_id='vpass' AND u.unit_key GLOB 'vpass-card-v[12]-*'
 GROUP BY r.producer_id, version;
 ```
 
-The collector's statement pages are not parsed today: registration gives them
-no parser dataset, and the change that introduces parser datasets for
-shared-R2 artifacts (ADR 0022) withholds the Vpass one. Releasing it is a
-later change, made once the v1 and v2 entities of each card are decided.
+The collector's statement pages are parsed since
+[ADR 0083](adr/0083-release-vpass-collector-statement-pages.md)
+(`terminal-registration-v3`), from successful card runs only: a run whose
+card unit is `partial` is never parsed, so it never displaces the
+importer-era snapshot of a card-month.
 
 ## MoneyForward collector runs carry the account identity
 

@@ -11,7 +11,7 @@ import {
 import { loadEconomicRowReadiness } from "../../../read-model/src/economic-row-readiness.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 
-export interface SafeEconomicRowReadiness extends EconomicRowEvaluation {
+interface SafeEconomicRowReadiness extends EconomicRowEvaluation {
   ref: EconomicRowRef;
   pinsDigest: string;
   keyDigest: string | null;

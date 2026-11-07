@@ -87,11 +87,6 @@ import {
   type ReconciliationProposal,
 } from "../../../packages/domain/src/reconcile.ts";
 import {
-  quantityFromNormalizedDecimal,
-  type Quantity,
-} from "../../../packages/domain/src/values.ts";
-import type { NormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal.ts";
-import {
   candidateMerge,
   loadLiveCardPurchases,
   type LiveCardPurchase,
@@ -116,6 +111,7 @@ import {
   cardPurchaseRecognitionWrites,
 } from "../../../packages/storage-d1/src/atomic/card-purchase-recognition.ts";
 import type { SqlWrite } from "../../../packages/storage-d1/src/core/operations.ts";
+import { cardUsageFactOf } from "../../../packages/application/src/card-usage-fact.ts";
 
 /** Current usage rows one tick reads after the cursor. */
 export const SCAN_LIMIT = 500;
@@ -199,49 +195,9 @@ function readerOf(db: D1Database): CandidateReader {
   };
 }
 
-/** The decimal-v1 amount of a row; an absent projection is `missing`, never zero. */
-function amountOf(row: CurrentCardUsageRow): Quantity {
-  const normalized: NormalizedDecimal = {
-    policyVersion: "decimal-v1",
-    status: row.value_status ?? "missing",
-    coefficient: row.coefficient,
-    scale: row.scale,
-    basis: row.value_basis ?? "none",
-  };
-  return quantityFromNormalizedDecimal(row.unit_ref ?? "unknown-unit", normalized);
-}
-
-/**
- * The fact the domain classifies. Every returned row is already the newest
- * representation (step 3 of `currentCardUsageSql`). A mapping whose status is
- * `unresolved` names a placeholder account, not a card, so it reads as no
- * account at all (`account_not_resolved`).
- */
-export function cardUsageFactOf(row: CurrentCardUsageRow): CardUsageFact {
-  return {
-    observationId: row.observation_id,
-    parseRunId: row.parse_run_id,
-    sourceId: row.source_id,
-    producerId: row.producer_id,
-    externalIdNamespace: row.external_id_namespace,
-    sourceAccount: row.source_account,
-    externalId: row.external_id,
-    accountId: row.account_status === "unresolved" ? null : row.account_id,
-    identityPolicyFamily: row.policy_family,
-    providerStatus: row.provider_status,
-    amount: amountOf(row),
-    usageDate: row.as_of,
-    paymentType: row.payment_type,
-    statementPeriod: row.statement_period,
-    // The row's own capture: a MyJCB snapshot is one ledger artifact, so this
-    // is the `fetched_at` its relative `detailMonth-N` label is resolved from.
-    capturedAt: row.snapshot_fetched_at,
-    providerSaleCode: row.provider_sale_code,
-    usageAmountText: row.usage_amount_text,
-    paymentAmountText: row.payment_amount_text,
-    newestRepresentation: true,
-  };
-}
+// `cardUsageFactOf` lives beside the purchases page's read, which classifies
+// the same rows (packages/application/src/card-usage-fact.ts).
+export { cardUsageFactOf };
 
 // Bump when the retirement read's selection semantics change. A deployment
 // must not reuse an empty-result proof produced under a different contract.
@@ -789,6 +745,19 @@ WHERE proposal_digest IN (SELECT value FROM json_each(?1))`,
   return linked;
 }
 
+/**
+ * The in-batch state of a pair the reconciliation lane accepted by rule and
+ * nobody merged: ?1 the proposal, ?2 the relation kind, ?3 and ?4 its ends.
+ * The triple's current status is read as the candidates read it
+ * (`CANDIDATE_RELATIONS_SQL`): its newest decision by creation time and then
+ * insertion order, so a proposal recorded after the acceptance does not hold
+ * the merge back (ADR 0017's amendment of 2026-11-06).
+ */
+export const ACCEPTED_APART_GUARD_SQL = `EXISTS(SELECT 1 FROM reconciliation_proposals p JOIN decision_revisions d ON d.id=p.decision_revision_id
+  WHERE p.id=? AND p.status='accepted' AND d.method='rule')
+ AND (SELECT r.status FROM entity_relations r WHERE r.kind=? AND r.from_ref=? AND r.to_ref=?
+  ORDER BY r.status<>'proposed' DESC,r.created_at DESC,r.rowid DESC LIMIT 1)='accepted'`;
+
 /** A decision someone other than a rule recorded about either of two events (`event:<id>`). */
 const REVIEWED_EVENT_SQL = `SELECT d.id FROM decision_revisions d
  WHERE d.subject_kind='relation' AND d.subject_ref IN (?,?) AND d.method<>'rule' LIMIT 1`;
@@ -846,10 +815,7 @@ async function mergeLinked(
           binds: [proposalId],
         }
       : {
-          sql: `EXISTS(SELECT 1 FROM reconciliation_proposals p JOIN decision_revisions d ON d.id=p.decision_revision_id
-  WHERE p.id=? AND p.status='accepted' AND d.method='rule')
- AND (SELECT r.status FROM entity_relations r WHERE r.kind=? AND r.from_ref=? AND r.to_ref=?
-  ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1)='accepted'`,
+          sql: ACCEPTED_APART_GUARD_SQL,
           binds: [proposalId, PENDING_POSTED_RELATION_KIND, relation.fromRef, relation.toRef],
         };
     // Re-checked inside the batch: a review committed since the read above

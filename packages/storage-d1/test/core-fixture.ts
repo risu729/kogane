@@ -23,15 +23,15 @@ export const CLIENT = "pilot-client";
 export const OTHER_CLIENT = "other-client";
 export const REVOKED_CLIENT = "revoked-client";
 export const SOURCE = "pilot-source";
-export const PRODUCER = "pilot-producer";
+const PRODUCER = "pilot-producer";
 export const RUN_ID = 1;
 export const EMPTY_RUN_ID = 2;
 /** Three bytes; the artifact keyed "B.json" carries them. */
 export const OBJECT_SHA256 = "a".repeat(64);
 /** Zero bytes; the artifact keyed "a.json" carries them. */
-export const EMPTY_SHA256 = "b".repeat(64);
-export const DESCRIPTOR_A = "c".repeat(64);
-export const DESCRIPTOR_B = "d".repeat(64);
+const EMPTY_SHA256 = "b".repeat(64);
+const DESCRIPTOR_A = "c".repeat(64);
+const DESCRIPTOR_B = "d".repeat(64);
 /** Larger than 2^53: a JS number cannot hold it without losing digits. */
 export const BIG_COEFFICIENT = "123456789012345678901234567891";
 

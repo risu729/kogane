@@ -37,7 +37,7 @@ import {
 import { HttpError, json } from "./http";
 import { rewardExpiryFromRead, rewardReadContext, rewardSimulationsFromRead } from "./rewards-read";
 
-export const REWARDS_PREFIX = "/api/v2/rewards";
+const REWARDS_PREFIX = "/api/v2/rewards";
 
 interface BucketDto {
   bucketRef: string;
@@ -107,7 +107,7 @@ function holdingDto(view: RewardHoldingView, membership: readonly MembershipStat
   };
 }
 
-function offsetOf(url: URL): number {
+function offsetOf(url: Pick<URL, "searchParams">): number {
   const text = url.searchParams.get("offset") ?? "0";
   const offset = Number(text);
   if (!/^(0|[1-9]\d*)$/u.test(text) || !Number.isSafeInteger(offset) || offset > 1_000_000)
@@ -118,7 +118,7 @@ function offsetOf(url: URL): number {
 const QUANTITY = /^(0|[1-9]\d{0,17})(\.\d{1,6})?$/u;
 const REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,127}$/u;
 
-function reference(url: URL, name: string): string | undefined {
+function reference(url: Pick<URL, "searchParams">, name: string): string | undefined {
   const value = url.searchParams.get(name);
   if (value === null) return undefined;
   if (!REFERENCE.test(value)) throw new HttpError(400, "invalid_query");
@@ -136,9 +136,22 @@ function pageEnvelope<T, U>(source: Page<T>, map: (row: T) => U): Page<U> {
 export async function rewardsApi(request: Request, env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
   if (path !== REWARDS_PREFIX && !path.startsWith(`${REWARDS_PREFIX}/`)) return null;
-  const capabilities = { ...CENTRAL_STORE_CAPABILITIES, rewardsV2: true };
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
+  return json(await readRewardRoute(env, url));
+}
+
+/**
+ * One reward route's answer for this path and query: the reader both
+ * `GET /api/v2/rewards/*` and `kogane.rewards.read` call (ADR 0081), with the
+ * route's refusals as `HttpError`s.
+ */
+export async function readRewardRoute(
+  env: Env,
+  url: { pathname: string; searchParams: URLSearchParams },
+): Promise<unknown> {
+  const path = url.pathname;
+  const capabilities = { ...CENTRAL_STORE_CAPABILITIES, rewardsV2: true };
   if (!isRewardPath(path)) throw new HttpError(404, "not_found");
   const allowed = rewardQueryParameters(path, capabilities);
   for (const key of url.searchParams.keys()) {
@@ -164,14 +177,14 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
       ...(program === undefined ? {} : { programId: program }),
       offset: offsetOf(url),
     });
-    return json({
+    return {
       ...pageEnvelope(holdings, (view) => holdingDto(view, membership)),
       interpretation: {
         release: REWARD_POLICY_RELEASE,
         basis: "provider-observed",
         note: "quantities are reported in each programme's own unit",
       },
-    });
+    };
   }
 
   if (path === `${REWARDS_PREFIX}/expiry` || path === `${REWARDS_PREFIX}/simulations`) {
@@ -205,7 +218,7 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
   // true on an answer computed from offers (ADR 0049, amendment 2026-11-06).
   const offerCoverage = { limit: offers.coverage.limit, truncated: offers.coverage.truncated };
   if (offers.coverage.truncated)
-    return json({
+    return {
       simulation: null,
       searchCoverage: "bounded",
       offerCoverage,
@@ -215,18 +228,18 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
       // the same set, rather than answered from part of it (INV05).
       reasonCodes: ["offer_set_too_large"],
       release: CONVERSION_SEARCH_RELEASE,
-    });
+    };
   const matching =
     version === undefined ? offers.rows : offers.rows.filter((row) => row.version === version);
   if (matching.length === 0)
-    return json({
+    return {
       simulation: null,
       searchCoverage: "bounded",
       offerCoverage,
       // Nothing to simulate is not "impossible": no verified offer is stored.
       reasonCodes: ["no_stored_offer"],
       release: CONVERSION_SEARCH_RELEASE,
-    });
+    };
   if (goal) {
     // The search starts from one unit: the caller's `unit`, or the single
     // source unit of the matching offers. With several, the stored offers do
@@ -235,14 +248,14 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
     // reads as "no path"). Listed in code-unit order, not reader order.
     const sourceUnits = [...new Set(matching.map((row) => row.fromUnitRef))].sort();
     if (unitRef === undefined && sourceUnits.length !== 1)
-      return json({
+      return {
         simulation: null,
         searchCoverage: "bounded",
         offerCoverage,
         sourceUnits,
         reasonCodes: ["source_unit_not_selected"],
         release: CONVERSION_SEARCH_RELEASE,
-      });
+      };
     const quantity = decimalQuantity(unitRef ?? sourceUnits[0]!, quantityText);
     // Every stored version is its own candidate here, named by its offerRef.
     const result = findConversionPaths(
@@ -259,7 +272,7 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
       goal,
       { maxDepth: depth, maxCandidates: 8, maxExpansions: 500, requiredCompletionBy: null },
     );
-    return json({
+    return {
       paths: result.paths,
       // The search is bounded by depth and candidate caps, so no path is
       // described as optimal and an unknown condition stays a candidate.
@@ -274,10 +287,10 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
       budget: result.budget,
       basis: "policy-estimated",
       release: result.release,
-    });
+    };
   }
   if (matching.length > 1)
-    return json({
+    return {
       simulation: null,
       offerCoverage,
       // Versions are append-only reference claims with no adoption pointer, and
@@ -287,13 +300,13 @@ export async function rewardsApi(request: Request, env: Env, url: URL): Promise<
       offerVersions: matching.map((row) => `${row.offerId}@${row.version}`),
       reasonCodes: ["offer_version_not_selected"],
       release: CONVERSION_SEARCH_RELEASE,
-    });
+    };
   const offer = matching[0]!;
-  return json({
+  return {
     simulation: simulationDto(offer, decimalQuantity(unitRef ?? offer.fromUnitRef, quantityText)),
     offerCoverage,
     release: CONVERSION_SEARCH_RELEASE,
-  });
+  };
 }
 
 function simulationDto(offer: ConversionOffer, quantity: Quantity) {

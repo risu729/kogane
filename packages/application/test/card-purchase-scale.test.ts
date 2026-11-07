@@ -16,7 +16,12 @@ import {
   unboundedScans,
 } from "../../read-model/test/card-usage-plan.ts";
 import { CI_SCALE, scaledStore } from "../../read-model/test/card-usage-scale-fixture.ts";
-import { CARD_PURCHASE_PAGE_SIZE, queryCardPurchases } from "../src/query/card-purchases.ts";
+import {
+  CARD_PURCHASE_PAGE_SIZE,
+  CURRENT_SQL,
+  queryCardPurchases,
+} from "../src/query/card-purchases.ts";
+import { LEGACY_CURRENT_SQL } from "./card-purchase-current-legacy-sql.ts";
 
 let db: Database;
 
@@ -48,6 +53,46 @@ function executor(legacy: boolean, seen: string[] = []): SqlExecutor {
 }
 
 describe("card purchases on a scaled store without statistics", () => {
+  test("the pass over current usage keeps the shipped current keys and count", () => {
+    const held = (
+      db.query("SELECT DISTINCT recognition_key FROM current_card_purchase_keys").all() as {
+        recognition_key: string;
+      }[]
+    ).map((row) => row.recognition_key);
+    const unheld = (
+      db.query(`SELECT recognition_key FROM (${CURRENT_CARD_USAGE_SQL})`).all(0, -1) as {
+        recognition_key: string | null;
+      }[]
+    )
+      .map((row) => row.recognition_key)
+      .filter((key): key is string => key !== null && !held.includes(key));
+    expect(unheld.length).toBeGreaterThan(0);
+    // Empty, held only, unheld only (a key both on the list and unrecognised),
+    // and a mix with a key no row has.
+    const lists = [[], held, unheld, [...held.slice(0, 50), ...unheld.slice(0, 5), '["none"]']];
+    for (const keys of lists) {
+      const json = JSON.stringify(keys);
+      const legacy = db.query(LEGACY_CURRENT_SQL).all(0, -1, json) as {
+        current_key: string | null;
+        unrecognized: number | null;
+      }[];
+      const rows = db.query(CURRENT_SQL).all(0, -1, json, 3) as {
+        recognition_key: string | null;
+        on_page: number;
+        unrecognized: number;
+        unrecognized_total: number;
+      }[];
+      const keysOf = (values: (string | null)[]) =>
+        [...new Set(values.filter((key): key is string => key !== null))].sort();
+      expect(
+        keysOf(rows.filter((row) => row.on_page === 1).map((row) => row.recognition_key)),
+      ).toEqual(keysOf(legacy.map((row) => row.current_key)));
+      expect(rows[0]?.unrecognized_total ?? 0).toBe(
+        legacy.find((row) => row.current_key === null)!.unrecognized!,
+      );
+    }
+  });
+
   test("pages equal the ones the shipped current usage query produced", async () => {
     const seen: string[] = [];
     const first = await queryCardPurchases(executor(false, seen));
@@ -55,6 +100,7 @@ describe("card purchases on a scaled store without statistics", () => {
     expect(seen.some((query) => query.includes(CURRENT_CARD_USAGE_SQL))).toBe(true);
     expect(first.items).toHaveLength(CARD_PURCHASE_PAGE_SIZE);
     expect(first.coverage.unrecognizedCurrentRows).toBeGreaterThan(0);
+    expect(first.coverage.unrecognizedReasons.counts.length).toBeGreaterThan(0);
     expect(first).toEqual(await queryCardPurchases(executor(true)));
     // The stored period is already `YYYY-MM` (`statementPeriod` in the domain).
     const inputs = [
@@ -76,9 +122,10 @@ describe("card purchases on a scaled store without statistics", () => {
     await queryCardPurchases(executor(false, seen));
     const usage = seen.filter((query) => query.includes(CURRENT_CARD_USAGE_SQL));
     expect(usage).toHaveLength(1);
-    // The wrapper's own relations: the materialized usage and the page's key list.
-    const steps = explain(db, usage[0]!, [0, -1, "[]"]);
-    expect(unboundedScans(steps, ["usage", "u", "json_each"])).toEqual([]);
+    // The wrapper's own relations: the materialized usage, the page's key list and the
+    // ranked unrecognised rows, each read once.
+    const steps = explain(db, usage[0]!, [0, -1, "[]", 1000]);
+    expect(unboundedScans(steps, ["usage", "u", "json_each", "ranked"])).toEqual([]);
     expect(currentRowsDriver(steps)).toMatch(/^SCAN candidate\b/u);
   });
 });

@@ -34,14 +34,20 @@ import {
 } from "./instrument-candidates-contract.ts";
 import { validCardOwnershipReview } from "./card-ownership-contract.ts";
 import { AUDIT_PAGE_PATH, validAuditPage } from "./audit-contract.ts";
-import { DELEGATION_STATUS_PATH, validDelegationStatus } from "./delegation-status-contract.ts";
 import { validCardPurchasePage } from "./card-purchase-contract.ts";
 import { validReconstructedState } from "./reconstructed-state-contract.ts";
 import { validReportedHoldingsChange } from "./reported-holdings-change-contract.ts";
 import { validReportedState } from "./reported-state-contract.ts";
 import { validReportResponse } from "./report-artifact-contract.ts";
 import { validCollectionQualityResponse } from "./collection-quality-contract.ts";
-import { validCardSettlementReviewPage } from "./card-settlement-contract.ts";
+import {
+  validCardSettlementReviewPage,
+  validCardSettlementStatementPage,
+} from "./card-settlement-contract.ts";
+import {
+  CARD_STATEMENTS_UNMATCHED_PATH,
+  validUnmatchedCardStatementsReview,
+} from "./card-statements-unmatched-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
 import { validFinancialProductClaimWire } from "./financial-products.ts";
 import { validBalanceInterpretation } from "./balance-semantics.ts";
@@ -756,7 +762,7 @@ const endpoints: Record<string, Check<unknown>> = {
  * result itself is checked by the domain contract, so the browser and the
  * agent API validate one definition of `financial-result-v1`.
  */
-export function validSharedQueryResponse(value: unknown): boolean {
+function validSharedQueryResponse(value: unknown): boolean {
   return (
     record(value) &&
     value.schemaVersion === "kogane-query-response-v1" &&
@@ -781,8 +787,11 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path === AUDIT_PAGE_PATH) return validAuditPage(value);
   if (path === "/api/v2/reconciliation/card-settlements/ownership")
     return validCardOwnershipReview(value);
+  if (path === "/api/v2/reconciliation/card-settlements/statements")
+    return validCardSettlementStatementPage(value);
   if (path === "/api/v2/reconciliation/card-settlements")
     return validCardSettlementReviewPage(value);
+  if (path === CARD_STATEMENTS_UNMATCHED_PATH) return validUnmatchedCardStatementsReview(value);
   if (path === "/api/v2/card-purchases") return validCardPurchasePage(value);
   if (path === "/api/v2/reported-state") return validReportedState(value);
   if (path === "/api/v2/reported-holdings-change") return validReportedHoldingsChange(value);
@@ -797,7 +806,6 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path === INSTRUMENT_COVERAGE_PATH) return validInstrumentCoverage(value);
   if (path.startsWith("/api/identity/")) return validIdentityResponse(path, value);
   if (path === "/api/v2/query") return validSharedQueryResponse(value);
-  if (path === DELEGATION_STATUS_PATH) return validDelegationStatus(value);
   if (path === "/api/filter-options") {
     return (
       record(value) &&

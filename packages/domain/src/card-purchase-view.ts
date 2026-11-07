@@ -6,6 +6,7 @@ import type {
   CardPurchaseSourceId,
   CardPurchaseUnitTotals,
   CardUsageExclusion,
+  CardUsageUnrecognizedReason,
 } from "./card-purchase.ts";
 import type { EventState, SourceFactRef, UnknownStateReason } from "./events.ts";
 import type {
@@ -177,9 +178,36 @@ export interface CardPurchasePage {
     scope: "card-purchase-recognition";
     completeTransactionHistory: false;
     unsupportedShapes: CardUsageExclusion[];
+    /** Current provider rows no live event holds, across every card source and month. */
     unrecognizedCurrentRows: number;
+    /** Why those rows are outside the list, per source and closed reason. */
+    unrecognizedReasons: CardPurchaseUnrecognizedReasons;
+    /**
+     * No refund is allocated to the purchase it refunds: the review kind
+     * `card-refund.allocate` exists, but nothing plans or writes an
+     * allocation, so a refund is shown and summed apart from purchases and
+     * never subtracted from one. Stated, not implied, as the page says it.
+     */
+    refundsAllocated: false;
     limit: number;
   };
+}
+
+/**
+ * The unrecognised current rows counted per source and reason: each row is
+ * classified by `classifyCardUsage`, the recognition writer's own rule, when
+ * the page is read. `complete` is false when there were more rows than one
+ * request classifies (`CARD_PURCHASE_UNRECOGNIZED_LIMIT`); the counts then
+ * cover the rows of lowest observation id only and add up to less than
+ * `unrecognizedCurrentRows`. Only reasons some row has are listed.
+ */
+export interface CardPurchaseUnrecognizedReasons {
+  complete: boolean;
+  counts: {
+    sourceId: CardPurchaseSourceId;
+    reasonCode: CardUsageUnrecognizedReason;
+    rows: number;
+  }[];
 }
 
 /**

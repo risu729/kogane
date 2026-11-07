@@ -1,6 +1,8 @@
+import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
 import { HttpError, json } from "./http";
 import { decimalPolicySelection } from "./decimal-policy";
 import {
+  d1Executor,
   interpretationContext,
   NO_RECORDED_IDENTITY_RELEASE,
 } from "../../../packages/read-model/src/index";
@@ -61,10 +63,7 @@ LIMIT ?1 OFFSET ?2`;
  * store cannot answer.
  */
 export async function reportArtifactsAvailable(env: Env): Promise<boolean> {
-  const row = await env.DB.prepare(
-    "SELECT count(*) AS present FROM sqlite_master WHERE type='table' AND name='report_artifacts'",
-  ).first<{ present: number }>();
-  return row?.present === 1;
+  return storeHasFeature(d1Executor(env.DB), "reportArtifacts");
 }
 
 function listOffset(url: URL): number {
@@ -128,7 +127,7 @@ interface RunRow {
   completed_at: string | null;
 }
 
-export function reportsRoute(path: string): { reportId: string; view: string } | null {
+function reportsRoute(path: string): { reportId: string; view: string } | null {
   const match = /^\/api\/v2\/reports\/([^/]+)(?:\/(explanation|export))?$/.exec(path);
   if (!match) return null;
   let reportId: string;

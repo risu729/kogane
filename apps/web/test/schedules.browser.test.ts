@@ -2,11 +2,10 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import jobs from "../../../config/alarm-jobs.json";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema";
 import type { ScheduleSnapshot } from "../../../packages/collection/src/schedule-model";
-import type { DelegationStatus } from "../../../packages/observation-shared/src/delegation-status-contract";
-import { delegationStatusFixture, expectDelegationNotice } from "./delegation-status-fixture";
 const client = join(import.meta.dir, "../dist-production"),
   executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
@@ -20,9 +19,7 @@ describe.if(runnable)("operator schedule administration", () => {
   let snapshotReads = 0,
     snapshotStatus = 200,
     leaseResponse: (() => Promise<Response>) | null = null,
-    readAfterWrite: (() => Promise<void>) | null = null,
-    delegations: DelegationStatus | null = null,
-    delegationFailure = 403;
+    readAfterWrite: (() => Promise<void>) | null = null;
   let writes: {
     path: string;
     body: Record<string, unknown>;
@@ -35,8 +32,6 @@ describe.if(runnable)("operator schedule administration", () => {
     snapshotStatus = 200;
     leaseResponse = null;
     readAfterWrite = null;
-    delegations = delegationStatusFixture("none");
-    delegationFailure = 403;
     snapshot = {
       schedules: jobs.map((job) => ({
         ...job,
@@ -82,12 +77,6 @@ describe.if(runnable)("operator schedule administration", () => {
             source: { kind: "central-store", classification: "financial" },
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
-        if (url.pathname === "/api/v2/delegations")
-          return delegations
-            ? Response.json(delegations)
-            : delegationFailure === 403
-              ? Response.json({ error: "operator_required" }, { status: 403 })
-              : Response.json({ error: "unavailable" }, { status: delegationFailure });
         if (url.pathname === "/api/ops/v1/schedules") {
           snapshotReads++;
           if (writes.length && readAfterWrite) await readAfterWrite();
@@ -130,7 +119,10 @@ describe.if(runnable)("operator schedule administration", () => {
   }
   test("release takes a synchronous guard before confirmation and stays disabled through readback", async () => {
     stoppedLease();
-    let finishWrite!: () => void, finishRead!: () => void, readEntered!: () => void;
+    let finishWrite!: () => void,
+      finishRead!: () => void,
+      readEntered!: () => void,
+      writeEntered!: () => void;
     const writing = new Promise<void>((resolve) => {
       finishWrite = resolve;
     });
@@ -140,7 +132,11 @@ describe.if(runnable)("operator schedule administration", () => {
     const readStarted = new Promise<void>((resolve) => {
       readEntered = resolve;
     });
+    const writeStarted = new Promise<void>((resolve) => {
+      writeEntered = resolve;
+    });
     leaseResponse = async () => {
+      writeEntered();
       await writing;
       snapshot.leases = [];
       return Response.json({ released: true });
@@ -171,6 +167,9 @@ describe.if(runnable)("operator schedule administration", () => {
       await pending.waitFor();
       expect(await pending.isDisabled()).toBe(true);
       expect(await page.locator("html").getAttribute("data-lease-confirmations")).toBe("1");
+      // The pending label renders when the request starts, not when the server
+      // has it. Wait on the server's write boundary; the response is still held.
+      await writeStarted;
       expect(writes).toHaveLength(1);
       expect(writes[0]).toMatchObject({
         path: "/api/ops/v1/schedules/leases/vpass",
@@ -325,7 +324,16 @@ describe.if(runnable)("operator schedule administration", () => {
     const writing = new Promise<void>((resolve) => {
       finish = resolve;
     });
+    // Each held write resolves the next arrival, in the order the server saw them.
+    const entered: (() => void)[] = [];
+    const firstWrite = new Promise<void>((resolve) => {
+      entered.push(resolve);
+    });
+    const secondWrite = new Promise<void>((resolve) => {
+      entered.push(resolve);
+    });
     leaseResponse = async () => {
+      entered.shift()?.();
       await writing;
       snapshot.leases = [];
       return Response.json({ released: true });
@@ -336,6 +344,9 @@ describe.if(runnable)("operator schedule administration", () => {
       await page.goto(`${origin}/schedules`);
       await page.getByRole("button", { name: "停止した実行を解除", exact: true }).first().click();
       await page.getByRole("button", { name: "解除中…", exact: true }).waitFor();
+      // The pending label renders when the request starts; wait until the
+      // server holds the first write before starting the second.
+      await firstWrite;
       const second = page.getByRole("button", { name: "停止した実行を解除", exact: true });
       expect(await second.isEnabled()).toBe(true);
       await second.click();
@@ -345,6 +356,7 @@ describe.if(runnable)("operator schedule administration", () => {
             (button) => button.textContent === "解除中…",
           ).length === 2,
       );
+      await secondWrite;
       expect(writes.map((write) => write.path)).toEqual([
         "/api/ops/v1/schedules/leases/vpass",
         "/api/ops/v1/schedules/leases/myjcb",
@@ -377,87 +389,62 @@ describe.if(runnable)("operator schedule administration", () => {
   for (const width of [1280, 390])
     test(`daily time edits persist and exact evidence links remain visible at ${width}px`, async () => {
       const page = await browser.newPage({ viewport: { width, height: 960 } });
-      await page.goto(`${origin}/schedules`);
-      await page.getByRole("heading", { name: "収集スケジュール", exact: true }).waitFor();
-      const card = page
-        .locator(".schedule-card")
-        .filter({ has: page.getByRole("heading", { name: "ソニー銀行", exact: true }) });
-      await card.getByRole("link", { name: "取得記録を見る", exact: true }).waitFor();
-      expect(
-        await card.getByRole("link", { name: "取得記録を見る", exact: true }).getAttribute("href"),
-      ).toBe("/runs/r_123");
-      expect(await page.getByText("管理者による設定変更", { exact: true }).count()).toBe(1);
-      await card.getByLabel("ソニー銀行の実行時刻").fill("06:40");
-      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
-      await page.waitForFunction(
-        () =>
-          document.querySelector<HTMLInputElement>('[aria-label="ソニー銀行の実行時刻"]')?.value ===
-          "06:40",
-      );
-      expect(writes).toHaveLength(1);
-      expect(writes[0]).toMatchObject({
-        path: "/api/ops/v1/schedules/sony-bank",
-        origin,
-        marker: "1",
-        body: {
-          revision: 1,
-          enabled: true,
-          timezone: "Asia/Tokyo",
-          pattern: { kind: "daily", time: "06:40", weekdays: [0, 1, 2, 3, 4, 5, 6] },
-        },
-      });
-      await page.reload();
-      await page.getByLabel("ソニー銀行の実行時刻").waitFor();
-      expect(await page.getByLabel("ソニー銀行の実行時刻").inputValue()).toBe("06:40");
-      const manual = page
-        .locator(".schedule-card")
-        .filter({ has: page.getByRole("heading", { name: "SMBCダイレクト", exact: true }) });
-      expect(await manual.getByRole("button", { name: "設定を保存" }).count()).toBe(0);
-      expect(
-        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
-      ).toBe(true);
-      if (process.env["ALARM_SCREENSHOT_DIRECTORY"])
-        await page.screenshot({
-          path: `${process.env["ALARM_SCREENSHOT_DIRECTORY"]}/alarms-admin-${width}.png`,
+      // Closed even on failure: a page left open can deliver its write after
+      // the next test's beforeEach has reset `writes`.
+      try {
+        await page.goto(`${origin}/schedules`);
+        await page.getByRole("heading", { name: "収集スケジュール", exact: true }).waitFor();
+        const card = page
+          .locator(".schedule-card")
+          .filter({ has: page.getByRole("heading", { name: "ソニー銀行", exact: true }) });
+        await card.getByRole("link", { name: "取得記録を見る", exact: true }).waitFor();
+        expect(
+          await card
+            .getByRole("link", { name: "取得記録を見る", exact: true })
+            .getAttribute("href"),
+        ).toBe("/runs/r_123");
+        expect(await page.getByText("管理者による設定変更", { exact: true }).count()).toBe(1);
+        await card.getByLabel("ソニー銀行の実行時刻").fill("06:40");
+        // `fill` has already set the input, so its value says nothing about the
+        // save. Wait for the save request itself to settle before counting the
+        // writes the server received.
+        const saved = page.waitForResponse(
+          (response) =>
+            new URL(response.url()).pathname === "/api/ops/v1/schedules/sony-bank" &&
+            response.request().method() === "POST",
+        );
+        await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+        await saved;
+        expect(writes).toHaveLength(1);
+        expect(writes[0]).toMatchObject({
+          path: "/api/ops/v1/schedules/sony-bank",
+          origin,
+          marker: "1",
+          body: {
+            revision: 1,
+            enabled: true,
+            timezone: "Asia/Tokyo",
+            pattern: { kind: "daily", time: "06:40", weekdays: [0, 1, 2, 3, 4, 5, 6] },
+          },
         });
-      await page.close();
+        await page.reload();
+        await page.getByLabel("ソニー銀行の実行時刻").waitFor();
+        expect(await page.getByLabel("ソニー銀行の実行時刻").inputValue()).toBe("06:40");
+        const manual = page
+          .locator(".schedule-card")
+          .filter({ has: page.getByRole("heading", { name: "SMBCダイレクト", exact: true }) });
+        expect(await manual.getByRole("button", { name: "設定を保存" }).count()).toBe(0);
+        expect(
+          await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        ).toBe(true);
+        if (process.env["ALARM_SCREENSHOT_DIRECTORY"])
+          await page.screenshot({
+            path: `${process.env["ALARM_SCREENSHOT_DIRECTORY"]}/alarms-admin-${width}.png`,
+          });
+      } finally {
+        await page.close();
+      }
     }, 30000);
-  for (const width of [1280, 390])
-    for (const configuration of ["valid", "none", "misconfigured", "unavailable"] as const)
-      test(`the delegation in force is a read-only notice (${configuration}, ${width}px)`, async () => {
-        delegations =
-          configuration === "unavailable" ? null : delegationStatusFixture(configuration);
-        const page = await browser.newPage({ viewport: { width, height: 960 } });
-        try {
-          await page.goto(`${origin}/schedules`);
-          await page.getByRole("heading", { name: "収集スケジュール", exact: true }).waitFor();
-          await expectDelegationNotice(page, configuration);
-          // The schedule settings stay usable whatever the delegation table says.
-          await page.getByLabel("ソニー銀行の実行時刻").waitFor();
-          expect(writes).toHaveLength(0);
-        } finally {
-          await page.close();
-        }
-      }, 30000);
-  test("a failed re-read never keeps showing the earlier delegation state as current", async () => {
-    delegations = delegationStatusFixture("valid");
-    const page = await browser.newPage({ viewport: { width: 390, height: 960 } });
-    try {
-      await page.goto(`${origin}/schedules`);
-      await expectDelegationNotice(page, "valid");
-      delegations = null;
-      delegationFailure = 503;
-      // A focus refetch (staleTime 0) that fails replaces the earlier answer.
-      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
-      const notice = page.getByRole("region", { name: "AIへの委任" });
-      await notice
-        .getByText("委任の状態を確認できません。時間をおいて再読み込みしてください。")
-        .waitFor();
-      expect(await notice.locator(".delegation-entry").count()).toBe(0);
-    } finally {
-      await page.close();
-    }
-  }, 30000);
   test("a dated maintenance change uses Japan time and retains provenance", async () => {
     const page = await browser.newPage();
     await page.goto(`${origin}/schedules`);
@@ -587,16 +574,38 @@ describe.if(runnable)("operator schedule administration", () => {
     expect(await outdated.getByRole("button", { name: "採用", exact: true }).isDisabled()).toBe(
       true,
     );
+    // The server records each write as it arrives; wait for each decision's
+    // request to settle rather than polling the record for a bounded time.
+    const decided = (id: number) =>
+      page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname === `/api/ops/v1/schedules/proposals/${id}` &&
+          response.request().method() === "POST",
+      );
+    const rejected = decided(2);
     await outdated.getByRole("button", { name: "却下", exact: true }).click();
-    for (let i = 0; i < 100 && writes.length < 1; i++) await page.waitForTimeout(50);
+    await rejected;
     const current = section.locator("li").filter({ hasText: "停止時間の変更" });
+    const accepted = decided(1);
     await current.getByRole("button", { name: "採用", exact: true }).click();
-    // The server records each write as it arrives; wait for both decisions.
-    for (let i = 0; i < 100 && writes.length < 2; i++) await page.waitForTimeout(50);
+    await accepted;
     expect(writes.map((w) => [w.path, w.body, w.marker])).toEqual([
       ["/api/ops/v1/schedules/proposals/2", { decision: "reject" }, "1"],
       ["/api/ops/v1/schedules/proposals/1", { decision: "accept" }, "1"],
     ]);
     await page.close();
   }, 30000);
+
+  test("the schedules and the maintenance editor pass the accessibility audit", async () => {
+    snapshot.leases = [];
+    const page = await browser.newPage({ viewport: { width: 1280, height: 960 } });
+    await page.goto(`${origin}/schedules`);
+    await page.getByRole("heading", { name: "収集スケジュール", exact: true }).waitFor();
+    await page.locator(".schedule-card").first().waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page.getByRole("button", { name: "停止時間を追加", exact: true }).click();
+    await page.locator(".maintenance-editor").waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 });

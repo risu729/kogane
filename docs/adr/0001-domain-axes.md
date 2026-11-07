@@ -2,7 +2,7 @@
 
 - Status: accepted (implementation step A01); the
   [2026-11-06 amendment](#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
-  is proposed until the PR that carries it merges, then accepted
+  is accepted (owner approved 2026-11-07 13:39 UTC)
 - Date: 2026-09-09; amended 2026-11-06
 - Review basis: whole-architecture addendum 00, 04 (AR01–AR18), 05, 06, 13 §1–§3
   of the design review of commit `130912af`
@@ -215,7 +215,7 @@ or `rejected` rows; accepting a reconciliation proposal
 `statement_covers`) and the card purchase provider link
 (`services/processor/src/card-purchase-job.ts`, `pending_to_posted`) write
 `accepted` rows; and an agent's `reconcile.propose`
-(`services/app/src/proposals.ts`) writes a `proposed` row for any relation
+(`packages/application/src/propose-store.ts`) writes a `proposed` row for any relation
 kind. No relation write sets `superseded_by` on an earlier relation decision,
 and the 0029 trigger could not let it: a decision is superseded only by a
 later decision on the same `subject_ref`, and each row is its own subject. So
@@ -276,31 +276,25 @@ view that names a triple's current row.
   [ADR 0015](0015-source-authority-v2.md).
 - Readers of `entity_relations`, and the rule each applies today:
 
-  | Reader                                                                                                               | Kinds                               | What it reads                                                                                                                                           |
-  | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | Balance projection (`projectionRelationsSql`)                                                                        | the four scope kinds                | this rule                                                                                                                                               |
-  | Change lifecycle plan (`RELATION_SQL`, `targets.ts`)                                                                 | any                                 | row count (the plan pin) and the newest row of any status by `created_at`, `id`, shown as the target's current status                                   |
-  | Instrument candidates (`LISTED_AS_SQL`, `instrument-resolution.ts`)                                                  | `listed_as`                         | newest row of any status by `created_at`, `id`                                                                                                          |
-  | Pending-to-posted candidates and merge guard (`card-purchase-candidates.ts`, `card-purchase-job.ts`)                 | `pending_to_posted`                 | row count and newest row of any status by `created_at`, then insertion order (`rowid`)                                                                  |
-  | Card settlement ownership (`card-settlement-ownership.ts`, the 0044 view), card ownership read (`card-ownership.ts`) | `liable_party`, `beneficial_owner`  | newest row per owner reference by insertion order (`rowid`), adopted only when `accepted` with an unsuperseded decision                                 |
-  | Ownership declaration context, ownership review pin, operation revision pins, instrument history count               | ownership kinds, `contradicts`, any | row counts: any recorded claim blocks a self-declaration, and a pin moves on every new row                                                              |
-  | Instrument history, instrument temporal legacy blockers, economic row readiness pins                                 | `listed_as`, `beneficial_owner`     | every row, deliberately: a history, a list of unlogged legacy rows, and an evidence pin (the readiness outcome is always `ownership_unresolved`)        |
-  | Projection input manifest (`PROJECTION_INPUTS_SQL`)                                                                  | any                                 | count of `accepted` rows: a change detector next to the decision count, not a status; a rejection moves the decision count and the CORE source revision |
-  | Delegated reversal (`delegation/reversal.ts`)                                                                        | any                                 | the one row a receipt names, by id                                                                                                                      |
+  | Reader                                                                                                 | Kinds                               | What it reads                                                                                                                                                                                                                                                                        |
+  | ------------------------------------------------------------------------------------------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | Balance projection (`projectionRelationsSql`)                                                          | the four scope kinds                | this rule                                                                                                                                                                                                                                                                            |
+  | Change lifecycle plan (`RELATION_SQL`, `targets.ts`)                                                   | any                                 | row count (the plan pin) and this rule, shown as the target's current status ([ADR 0017's amendment](0017-card-purchase-review-commands.md#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision))                                                                |
+  | Instrument candidates (`LISTED_AS_SQL`, `instrument-resolution.ts`)                                    | `listed_as`                         | this rule (ADR 0017's amendment)                                                                                                                                                                                                                                                     |
+  | Pending-to-posted candidates and merge guard (`card-purchase-candidates.ts`, `card-purchase-job.ts`)   | `pending_to_posted`                 | row count and this rule, by `created_at` and then insertion order (`rowid`) (ADR 0017's amendment)                                                                                                                                                                                   |
+  | Card settlement ownership (`card-settlement-ownership.ts`), card ownership read (`card-ownership.ts`)  | `liable_party`, `beneficial_owner`  | this rule per owner reference by insertion order (`rowid`) over both account aliases, adopted only when `accepted` with an unsuperseded decision (ADR 0017's amendment); the 0044 view `card_settlement_fact_ownership`, which no reader queries, keeps the newest row of any status |
+  | Ownership declaration context, ownership review pin, operation revision pins, instrument history count | ownership kinds, `contradicts`, any | row counts: any recorded claim blocks a self-declaration, and a pin moves on every new row                                                                                                                                                                                           |
+  | Instrument history, instrument temporal legacy blockers, economic row readiness pins                   | `listed_as`, `beneficial_owner`     | every row, deliberately: a history, a list of unlogged legacy rows, and an evidence pin (the readiness outcome is always `ownership_unresolved`)                                                                                                                                     |
+  | Projection input manifest (`PROJECTION_INPUTS_SQL`)                                                    | any                                 | count of `accepted` rows: a change detector next to the decision count, not a status; a rejection moves the decision count and the CORE source revision                                                                                                                              |
+  | Delegated reversal (`delegation/reversal.ts`)                                                          | any                                 | the one row a receipt names, by id                                                                                                                                                                                                                                                   |
 
   The order differs only where two rows of one triple share a `created_at`
   (an `id` tie-break against insertion order) or where `created_at` order and
-  insertion order disagree. The readers that take the newest row of any
-  status would let a later proposal hide a decision; for the ownership
-  readers that makes an owner unresolved rather than wrong. Today the only
-  writer of `proposed` rows is `reconcile.propose`, whose two ends are both
-  `source_account:` references, so no proposal can land on an ownership
-  (`account:` or bare account id), `listed_as` (`instrument:` to
-  `identifier:`) or `pending_to_posted` (transaction id) triple; the one
-  visible effect is the plan's current status of a triple between two source
-  accounts, which shows `proposed` once one follows an acceptance. Moving
-  these readers onto this rule is follow-up work, each with its own equality
-  proof.
+  insertion order disagree. When this amendment merged, the plan, instrument
+  candidate, pending-to-posted and ownership readers still took the newest
+  row of any status, so a later proposal could hide a decision;
+  [ADR 0017's amendment of 2026-11-06](0017-card-purchase-review-commands.md#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision)
+  moved each onto this rule in its own order, with its own equality proof.
 
 ### Consequences
 

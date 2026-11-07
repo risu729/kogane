@@ -4,6 +4,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import {
   reportedStateBody,
   reportedStateWorld,
@@ -168,4 +169,11 @@ describe.if(runnable)("reported state on a date", () => {
     }
     await page.close();
   }, 30_000);
+
+  test("the answered page passes the accessibility audit", async () => {
+    const page = await open();
+    await choose(page, "2026-09-10");
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 });

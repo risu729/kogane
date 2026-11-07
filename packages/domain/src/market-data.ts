@@ -1243,10 +1243,10 @@ export async function selectionManifest(input: {
     if (selection.status === "selected") {
       selected.push(selection.candidate.price.id);
       const recorded = selection.candidate.recordedAt;
-      if (
-        validInstantText(recorded) &&
-        (boundary === null || instantOrder(recorded, boundary)! > 0)
-      )
+      // One instant may be spelled two ways; the larger text breaks the tie,
+      // so the order the selections arrive in never picks the spelling.
+      const order = boundary === null ? 1 : instantOrder(recorded, boundary);
+      if (validInstantText(recorded) && (order! > 0 || (order === 0 && recorded > boundary!)))
         boundary = recorded;
     } else
       refused.push({

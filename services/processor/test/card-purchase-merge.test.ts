@@ -739,6 +739,70 @@ test("a provider-linked pair the reconciliation lane accepted is merged once, wi
   expect(counts(await w.sweep())).toEqual(NOTHING);
 }, 120_000);
 
+/**
+ * A later proposal of a pair's `pending_to_posted` relation, as any proposal
+ * writer appends one (ADR 0017's amendment of 2026-11-06): a `propose`
+ * decision and a `proposed` row, recorded after every decision of the triple.
+ */
+async function proposeLinkAgain(w: World): Promise<void> {
+  const [link] = await w.all<{ from_ref: string; to_ref: string }>(
+    "SELECT from_ref,to_ref FROM entity_relations WHERE kind='pending_to_posted' LIMIT 1",
+  );
+  if (!link) throw new Error("no link");
+  const at = "2099-01-01T00:00:00.000Z";
+  await w.db.batch([
+    w.db
+      .prepare(
+        `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+         VALUES('dr_synthetic_later_proposal','relation','rel_synthetic_later_proposal',1,'propose','ai','synthetic-agent',NULL,'Synthetic proposal.','[]',NULL,NULL,?)`,
+      )
+      .bind(at),
+    w.db
+      .prepare(
+        `INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
+         VALUES('rel_synthetic_later_proposal','pending_to_posted',?,?,NULL,NULL,'proposed','dr_synthetic_later_proposal','[]',?)`,
+      )
+      .bind(link.from_ref, link.to_ref, at),
+  ]);
+}
+
+test("a proposal recorded after the reconciliation lane's acceptance does not hold its merge back", async () => {
+  const w = await world();
+  await pendingThenPosted(w, [POSTED], linked("provider-auth-6"));
+  expect(await reconciliationSweep(w.db, { slices: STAGE_B, now: NOW })).toMatchObject({
+    written: 1,
+    autoAccepted: 1,
+  });
+  await proposeLinkAgain(w);
+  expect(counts(await w.sweep())).toEqual({ ...NOTHING, retired: 1, recognized: 1, merged: 1 });
+  expect((await events(w)).map((event) => [event.state, event.roles])).toEqual([
+    ["captured", "posted,pending"],
+  ]);
+  expect(counts(await w.sweep())).toEqual(NOTHING);
+}, 120_000);
+
+test("a proposal recorded after a merged link's acceptance leaves the link withdrawable", async () => {
+  const w = await world();
+  await pendingThenPosted(w, [POSTED], linked("provider-auth-7"));
+  expect(await w.sweep()).toMatchObject({ merged: 1 });
+  await proposeLinkAgain(w);
+  const [merged] = await events(w);
+  const candidate = await candidateOf(w, merged!.event_id);
+  expect(candidate).toMatchObject({
+    proposalStatus: "accepted",
+    relationStatus: "accepted",
+    relationRevision: 2,
+    actions: ["withdraw"],
+  });
+  expect((await review(w, "relation.reject", candidate)).result).toMatchObject({
+    review: "withdraw",
+  });
+  expect((await events(w)).map((event) => [event.state, event.roles]).sort()).toEqual([
+    ["captured", "posted"],
+    ["unknown", "pending"],
+  ]);
+}, 120_000);
+
 test("the rule never merges again a provider-linked pair a reviewer split, even after a re-anchor", async () => {
   const w = await world();
   const { capture } = await pendingThenPosted(w, [POSTED], linked("provider-auth-5"));

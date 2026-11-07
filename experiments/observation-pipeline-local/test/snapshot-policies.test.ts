@@ -143,8 +143,8 @@ describe("dataset_snapshot_policies seed", () => {
     }
   });
 
-  // On-disk SQLite: a full schema per store, then every snapshot parser over
-  // it. ~0.1s locally but an order of magnitude more on a loaded CI runner,
+  // On-disk SQLite (a disposable store, test-store.ts): a full schema per
+  // store, then every snapshot parser over it. Slower on a loaded CI runner,
   // where bun's 5s default reads the wait as a failure (#162 did the same for
   // the two heaviest store tests). An explicit budget, no changed assertion.
   test("the SQL scope key equals the claim scope key written by parsers", () => {

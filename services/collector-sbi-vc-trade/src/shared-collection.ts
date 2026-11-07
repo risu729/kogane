@@ -38,13 +38,13 @@ const JSON_MEDIA_TYPE = "application/json";
 const UNIT_KEY = "account";
 const UNIT_KIND = "collection";
 
-export const COLLECTOR_DERIVED_ROLE = "collector_derived";
-export const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
+const COLLECTOR_DERIVED_ROLE = "collector_derived";
+const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
 
 /** The run could not start because the session needs a person, not a retry. */
-export const HUMAN_REQUIRED_CODE = "human_required_reauth";
+const HUMAN_REQUIRED_CODE = "human_required_reauth";
 /** The session is unhealthy for a reason re-authentication may still fix. */
-export const SESSION_UNHEALTHY_CODE = "session_unhealthy";
+const SESSION_UNHEALTHY_CODE = "session_unhealthy";
 
 const encoder = new TextEncoder();
 
@@ -58,7 +58,7 @@ export interface SharedCapture {
 }
 
 /** Where the ops API's operation and this attempt enter the terminal (03 §3). */
-export interface SharedRunIdentity {
+interface SharedRunIdentity {
   readonly operationId?: string;
   readonly attemptId: string;
   /**
@@ -110,9 +110,10 @@ async function artifactOf(options: {
 
 /**
  * A revoked or expired session that re-authentication did not restore needs a
- * person: the passkey must be re-registered or the account unblocked. The
- * collector never retries a login past its single cooled-down attempt, so this
- * is reported rather than worked around (12 §3, G3-10, G3-11).
+ * person: the passkey must be re-registered, the account unblocked or the
+ * provider's terms agreed. Logins are only retried on a cooldown (hourly while
+ * an agreement is pending), so this is reported rather than worked around
+ * (12 §3, G3-10, G3-11).
  */
 export function waitingForHuman(health: HealthState): boolean {
   if (health.lastReauthErrorCode !== null) return true;

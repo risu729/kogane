@@ -1301,7 +1301,78 @@ class EconomicClaims {
 }
 
 /** One random store; `drawn` collects the states the seed drew. */
-export function randomSettlementStore(seed: number, drawn: Set<string>): RandomSettlementStore {
+/**
+ * Ownership proposals recorded after everything else (ADR 0017's amendment of
+ * 2026-11-06), with their own generator so every draw before them is
+ * unchanged: per ownership triple already in the store (an owner of an
+ * account, through either alias), and per account for an owner nobody
+ * decided, a `proposed` row with a `propose` decision, sometimes through the
+ * other alias of the account. A proposal changes nothing, so a store with
+ * them must read as the same seed's store without them.
+ */
+function laterProposals(db: Database, next: () => number, drawn: Set<string>): void {
+  const triples = db
+    .query(
+      `SELECT t.kind,t.from_ref,t.to_ref,n.status,t.dated FROM (
+        SELECT kind,from_ref,to_ref,min(rowid) AS first,max(rowid) AS last,
+         max(valid_from IS NOT NULL) AS dated
+        FROM entity_relations WHERE kind IN ('liable_party','beneficial_owner')
+        GROUP BY kind,from_ref,to_ref) t
+       JOIN entity_relations n ON n.rowid=t.last ORDER BY t.first`,
+    )
+    .all() as { kind: string; from_ref: string; to_ref: string; status: string; dated: number }[];
+  const undecided = RANDOM_ACCOUNTS.flatMap((account) =>
+    (["liable_party", "beneficial_owner"] as const).map((kind) => ({
+      kind,
+      from_ref: account,
+      to_ref: "party:p3",
+      status: "none",
+      dated: 0,
+    })),
+  );
+  let sequence = 0;
+  for (const triple of [...triples, ...undecided]) {
+    if (next() >= 0.6) continue;
+    const account = triple.from_ref.replace(/^account:/u, "");
+    const from =
+      next() < 0.5 ? triple.from_ref : triple.from_ref === account ? `account:${account}` : account;
+    if (from !== triple.from_ref) drawn.add("later proposal: through the other alias");
+    drawn.add(
+      triple.status === "none"
+        ? "later proposal: undecided owner"
+        : triple.dated === 1
+          ? "later proposal: after a dated claim"
+          : triple.status === "accepted"
+            ? "later proposal: after an accepted claim"
+            : "later proposal: after a rejected claim",
+    );
+    sequence += 1;
+    const id = `rel-later-${sequence}`;
+    db.query(
+      `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+       VALUES(?,'relation',?,1,'propose','ai','synthetic-agent',NULL,'synthetic','[]',NULL,NULL,'2026-12-01')`,
+    ).run(`dr-later-${sequence}`, id);
+    db.query(
+      `INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
+       VALUES(?,?,?,?,NULL,NULL,'proposed',?,'[]','2026-12-01')`,
+    ).run(id, triple.kind, from, triple.to_ref, `dr-later-${sequence}`);
+  }
+}
+
+/** The proposal states `laterProposals` stores must draw together. */
+export const LATER_PROPOSAL_STATES = [
+  "later proposal: after an accepted claim",
+  "later proposal: after a rejected claim",
+  "later proposal: after a dated claim",
+  "later proposal: undecided owner",
+  "later proposal: through the other alias",
+] as const;
+
+export function randomSettlementStore(
+  seed: number,
+  drawn: Set<string>,
+  options: { laterProposals?: boolean } = {},
+): RandomSettlementStore {
   const builder = new Builder(random(seed), drawn);
   builder.registry();
   builder.ownership();
@@ -1325,6 +1396,7 @@ export function randomSettlementStore(seed: number, drawn: Set<string>): RandomS
   builder.candidates();
   new Reviews(builder).write();
   new EconomicClaims(builder, random(seed + 7_919)).write();
+  if (options.laterProposals === true) laterProposals(builder.db, random(seed + 104_729), drawn);
   const triples: [string, string, string][] = [];
   for (const account of RANDOM_ACCOUNTS)
     for (const source of ["vpass", "myjcb"])

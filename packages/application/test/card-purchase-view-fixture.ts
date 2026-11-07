@@ -300,6 +300,14 @@ export function purchasePage(
       completeTransactionHistory: false,
       unsupportedShapes: [...CARD_USAGE_EXCLUSIONS],
       unrecognizedCurrentRows: 3,
+      unrecognizedReasons: {
+        complete: true,
+        counts: [
+          { sourceId: "vpass", reasonCode: "payment_type_unsupported", rows: 2 },
+          { sourceId: "myjcb", reasonCode: "recognition_pending", rows: 1 },
+        ],
+      },
+      refundsAllocated: false,
       limit: 50,
     },
   };

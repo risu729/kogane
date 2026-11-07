@@ -129,8 +129,9 @@ The identity is the tuple of plan 03 §4:
 (source, runId, terminalDigest, registrationContractVersion)
 ```
 
-`registrationContractVersion` is `terminal-registration-v2` (since ADR 0022;
-`v1` before it), the version of the `terminal-v1` → ingest-contract
+`registrationContractVersion` is `terminal-registration-v3` (since
+[ADR 0083](adr/0083-release-vpass-collector-statement-pages.md); `v2` from
+ADR 0022, `v1` before it), the version of the `terminal-v1` → ingest-contract
 derivation in `packages/application/src/collection/descriptors.ts`. When that
 derivation changes what a terminal _means_ in CORE, the same run registers
 again as a new revision and the old registration is kept. A terminal an
@@ -391,29 +392,36 @@ full list):
   SBI VC Trade datasets; SMBC's normalized balance and transactions; Sony
   Bank's balance, history pages, history CSVs and wallet pages; St George's
   account snapshot; V Point's balance, SMFG point and history pages; the V
-  Point Pay notification event; PRESTIA Bank's sanitized `balance.html`.
+  Point Pay notification event; PRESTIA Bank's sanitized `balance.html`;
+  since `terminal-registration-v3`, the Vpass collector's statement pages
+  (`months/<yyyymm>/<top|answer>-NNN.json`, `sanitized_provider_capture`) →
+  `statement-page`.
 - Not mapped: evidence no parser reads (manifests, summaries, raw pages beside
   their normalized form); Mizuho, whose parsers read artifacts without a
   dataset; MyJCB `credit-menu.html`, whose parser requires a media type
   parameter a terminal cannot carry.
-- **Withheld: Vpass.** The statement-page rule is kept in
-  `WITHHELD_ARTIFACT_DATASETS` and not applied, so collector-vpass captures
-  are registered but never parsed. A parsed collector capture would become
-  the current statement snapshot of its card-month and retire the importer-era
-  purchases with nothing to replace them. The collector derives the trusted
-  card binding only once the owner sets its binding key
-  ([ADR 0023](adr/0023-vpass-collector-card-binding.md) and its amendment);
-  the rule's `until` condition in `descriptors.ts` is that key being set and
-  the collector's tokens matching the importer's.
+- **Vpass, released by [ADR 0083](adr/0083-release-vpass-collector-statement-pages.md).**
+  ADR 0022 withheld the statement-page rule (`WITHHELD_ARTIFACT_DATASETS`,
+  now empty) until the collector's card binding matched the importer's
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). Only a successful
+  card run's pages are parsed: `statement-page` has run-scope eligibility, and
+  a card run whose card unit is `partial` (a month short of its stated total)
+  is a `partial` run, so its pages get no parse job and are never a current
+  snapshot.
 
 `scripts/artifact-datasets.test.ts` checks the table against both sides:
 every mapped or withheld dataset is accepted by a registered parser, every
 dataset a parser requires from a shared-R2 source is mapped, withheld or named
-unreachable, and the withheld list is pinned.
+unreachable, and the withheld list (empty since ADR 0083) is pinned.
 
-**Contract version and carry-over.** The table is `terminal-registration-v2`;
-`v1`'s derivation (St George's dataset only) is kept beside it
-(`DATASETS_BY_VERSION`). The version is part of the `collection_runs` key and
+**Contract version and carry-over.** The table is `terminal-registration-v3`;
+`v1`'s derivation (St George's dataset only) and `v2`'s (the table without
+Vpass) are kept beside it (`DATASETS_BY_VERSION`). The v2 → v3 bump works as
+the v1 → v2 bump below: v3 changes a descriptor only for collector-vpass
+statement pages, so those card runs register again as second fetch runs and
+every other registered terminal is carried over
+([ADR 0083](adr/0083-release-vpass-collector-statement-pages.md)). The v1 → v2
+bump (ADR 0022): The version is part of the `collection_runs` key and
 of the fetch run's `sourceRunKey`, so the scan gives every persisted terminal
 a v2 row. Then, for a terminal v1 already registered:
 
@@ -628,7 +636,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
 | `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
 | `maintenance_survey`       | `targets`, `due`, `extracted`, `failed`, `windows`, `unchanged`, `proposed`, `reviewPending`, `known`, `failures` (closed failure codes, ADR 0050)                                                                                  |
-| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`, `started`, `declined`, `tracked`, `published`, `unpublished`, `abandoned`                                                                                                 |
+| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed` (including imports whose registration threw, §7), `awaiting`, `started`, `declined`, `tracked`, `published`, `unpublished`, `abandoned`                                                |
 | `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
 | `audit_overflow`           | `counters`, `written`                                                                                                                                                                                                               |
 
@@ -678,21 +686,26 @@ principal `lane:<lane>` (hyphens for underscores), operation `lane.tick`,
 `applied`, or `failed` when the stage threw after writing. Before such a lane
 runs, `runScheduled` reads one high-water mark of the tables it may write;
 after it, the lane's own rows above the mark, by its decision actor, commit
-principal or proposal method. The record's references are inclusive ranges of
-those rows (`decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`,
-`proposals:<kind>:<a>-<b>`) and its diff the number of the lane's own rows in
-each; it copies none of the tick row's counts. An idle tick, a lane whose flag
-is off and every other lane write no record. The mark and the record are read
-and written outside the lane's metered scope, and a failure to read or write
-them is logged as `{"event":"lane_audit_record_failed","lane":…,"code":…}` and
-changes nothing the lane did.
+principal or proposal method, each read a range on the table's key without
+table statistics ([audit log: cost](audit-log.md#cost)). The record's
+references are inclusive ranges of those rows (`decision-revisions:<a>-<b>`,
+`commit-seq:<epoch>:<a>-<b>`, `proposals:<kind>:<a>-<b>`) and its diff the
+number of the lane's own rows in each; it copies none of the tick row's
+counts. An idle tick, a lane whose flag is off and every other lane write no
+record. The mark and the record are read and written outside the lane's
+metered scope, and a failure to read or write them is logged as
+`{"event":"lane_audit_record_failed","lane":…,"code":…}` and changes nothing
+the lane did.
 
 ## 7. Operations dispatch
 
 The App accepts an operations-API request, stores it and answers 202;
 notifying the executor is a separate step that may be lost, so the request
 stays `dispatch_pending` until someone takes it (02 §5,
-[ops-api.md](ops-api.md)). `operation_dispatch` is that someone.
+[ops-api.md](ops-api.md)). `operation_dispatch` is that someone. An import's
+run id is checked at acceptance against the bucket key's run grammar, so the
+App stores no import whose terminal key cannot be formed
+([ops-api.md](ops-api.md#routes)).
 
 | Kind                                       | What the Processor does                                                                                               | What it completes                                                                         |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
@@ -722,6 +735,32 @@ tick, as the alarm awaits its own.
 
 A failed dispatch never deletes the request. An import whose terminal is not
 in the bucket is retried, not failed: the collector may still be running.
+
+An import whose registration **throws** — R2 or CORE unavailable, or a
+refusal CORE made that the derivation did not foresee — is treated as the
+collection scan treats one (§2): it is not a verdict about the terminal, so no
+stage row is written for it. It is counted in the tick's `failed` and logged
+as `{"event":"operation_dispatch_registration_failed","code":…}` with the
+error's class only, never its message. Collection and dispatch diagnostic callbacks
+share `safeFailureCode`, which uses built-in type checks and never reads the
+exception's writable name, constructor or message. Its finite labels are
+`AggregateError`, `EvalError`, `RangeError`, `ReferenceError`, `SyntaxError`,
+`TypeError`, `URIError` and `Error`; a custom Error is generic `Error`, and
+unclassifiable or non-error throws become `unknown`. The request stays `dispatch_pending`
+and `accepted`: its `dispatch_attempts` goes up by one, its `failure_code` is
+`registration_failed` and its `available_at_ms` moves five minutes ahead.
+The queue is ordered by `available_at_ms`, so the request moves behind every
+request already due; the requests after it in the same tick are still
+dispatched, the collector executions are still tracked, and the lane tick is
+`ran`. It is registered on a later look once the cause is gone; the
+`registration_failed` code stays on the request after that, as every retry
+code does, because a dispatch that names no code keeps the last one. **Open
+limit:** there is no cap. A throw that never goes away (a refusal no code
+classifies) is retried every five minutes for as long as the lane runs, one
+more `dispatch_attempts` and one more `failed` each time, and nothing closes
+the request. If recording the attempt also fails
+(CORE itself unavailable), that error fails the lane tick as any other D1
+error in the lane does.
 
 ## 8. Retired legacy import
 
@@ -811,7 +850,10 @@ runs, failed and mapped-source terminals, per-unit runs sharing one
 acquisition session, the lane order with flags off and on, the metered
 bindings against Miniflare and (in `services/collector-st-george`'s
 worker test) real workerd D1 and R2, the append-only triggers, the
-bootstrap SQL applied twice to a fresh CORE, and `wrangler deploy --dry-run`.
+bootstrap SQL applied twice to a fresh CORE, an import dispatch whose
+registration throws (R2 failing on its first read: the lane completes, the
+request behind it is dispatched in the same tick, and the one that threw is
+registered on a later look), and `wrangler deploy --dry-run`.
 
 Production deployment, resource identity and migration verification are recorded
 in [legacy-retirement.md](legacy-retirement.md). These checks do not establish
