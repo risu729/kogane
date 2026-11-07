@@ -34,6 +34,7 @@ import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
 import { readObservationList } from "./observation-api";
+import { catalogue } from "./read";
 import { V2_HISTORY_PATH, V2_LATEST_PATH } from "./balances-v2";
 import {
   readReportedState,
@@ -339,19 +340,21 @@ export async function callReadTool(
         const refusal = wholeStoreRefusal(grant, "balances.read");
         if (refusal) return refusal;
         const input = parseRequest(schemas[name], body ?? {});
-        const page = await readObservationList(
-          env,
-          input.list === "latest" ? V2_LATEST_PATH : V2_HISTORY_PATH,
-          routeParameters(input, [
-            "source",
-            "account",
-            "instrument",
-            "metric",
-            "view",
-            "identityRead",
-            "cursor",
-            "limit",
-          ]),
+        const page = await catalogue(() =>
+          readObservationList(
+            env,
+            input.list === "latest" ? V2_LATEST_PATH : V2_HISTORY_PATH,
+            routeParameters(input, [
+              "source",
+              "account",
+              "instrument",
+              "metric",
+              "view",
+              "identityRead",
+              "cursor",
+              "limit",
+            ]),
+          ),
         );
         return {
           status: 200,
@@ -362,10 +365,12 @@ export async function callReadTool(
         const refusal = wholeStoreRefusal(grant, "positions.read");
         if (refusal) return refusal;
         const input = parseRequest(schemas[name], body ?? {});
-        const page = await readObservationList(
-          env,
-          "/api/positions",
-          routeParameters(input, ["source", "account", "identityRead", "offset"]),
+        const page = await catalogue(() =>
+          readObservationList(
+            env,
+            "/api/positions",
+            routeParameters(input, ["source", "account", "identityRead", "offset"]),
+          ),
         );
         return { status: 200, body: { schemaVersion: "kogane-positions-v1", data: page } };
       }
