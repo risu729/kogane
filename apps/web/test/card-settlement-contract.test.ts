@@ -88,6 +88,38 @@ describe("card settlement HTTP contract", () => {
       withEvidence({ ...notProposed, outcome: "absent", reason: "evidence_not_recorded" }),
     ).toBe(false);
   });
+  test("the grouped list needs a judged candidate per statement and a count that covers it", () => {
+    const grouped = "/api/v2/reconciliation/card-settlements/statements";
+    const statements = () => ({
+      statements: [
+        {
+          statementKey: "statement-synthetic",
+          candidateCount: 3,
+          candidates: [settlementReview()],
+        },
+      ],
+      nextOffset: null,
+      coverage: { ...page().coverage, limit: 10, candidatesPerStatement: 5 },
+    });
+    expect(validApiResponse(grouped, statements())).toBe(true);
+    for (const change of [
+      (value: ReturnType<typeof statements>) => (value.statements[0]!.candidates = []),
+      (value: ReturnType<typeof statements>) => (value.statements[0]!.candidateCount = 0),
+      (value: ReturnType<typeof statements>) => (value.statements[0]!.statementKey = ""),
+      (value: ReturnType<typeof statements>) =>
+        Object.assign(value.statements[0]!.candidates[0]!.impact, {
+          netWorthDelta: 0,
+        }),
+      (value: ReturnType<typeof statements>) => (value.coverage.limit = 50),
+    ]) {
+      const invalid = statements();
+      change(invalid);
+      expect(validApiResponse(grouped, invalid)).toBe(false);
+    }
+    // The flat list's shape is not a grouped page, and the other way round.
+    expect(validApiResponse(grouped, page())).toBe(false);
+    expect(validApiResponse(path, statements())).toBe(false);
+  });
   test("old metadata does not imply the feature and a nonboolean capability is rejected", () => {
     expect(clientFeatures(CENTRAL_STORE_CAPABILITIES).cardSettlementReconciliation).toBe(false);
     expect(

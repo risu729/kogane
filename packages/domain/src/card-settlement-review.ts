@@ -80,3 +80,29 @@ export interface CardSettlementReviewPage {
     limit: number;
   };
 }
+
+/**
+ * One statement's candidates (`statement_key`): the lead first (its accepted
+ * candidate, else the newest one ready to accept, else the newest), then the
+ * other judged ones newest first. `candidateCount` counts every candidate of
+ * the statement, so `candidateCount > candidates.length` says older ones exist.
+ */
+export interface CardSettlementStatementGroup {
+  statementKey: string;
+  candidateCount: number;
+  candidates: CardSettlementReview[];
+}
+
+export interface CardSettlementStatementPage {
+  statements: CardSettlementStatementGroup[];
+  nextOffset: number | null;
+  coverage: {
+    scope: "card-statement-bank-debit-candidates";
+    completeTransactionHistory: false;
+    netAssets: "unknown";
+    /** Statements per page. */
+    limit: number;
+    /** The newest candidates judged per statement, besides an accepted one. */
+    candidatesPerStatement: number;
+  };
+}

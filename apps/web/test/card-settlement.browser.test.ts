@@ -22,6 +22,7 @@ describe.if(runnable)("card settlement review", () => {
   let detailRevision = 0;
   let planRevision = 0;
   let action = "accept";
+  let older: ReturnType<typeof settlementReview>[] = [];
   const posted: { operation: string; body: Record<string, unknown> }[] = [];
   beforeEach(() => {
     review = settlementReview();
@@ -29,6 +30,7 @@ describe.if(runnable)("card settlement review", () => {
     detailRevision = 0;
     planRevision = 0;
     action = "accept";
+    older = [];
     posted.length = 0;
   });
   beforeAll(async () => {
@@ -45,6 +47,38 @@ describe.if(runnable)("card settlement review", () => {
               ...CENTRAL_STORE_CAPABILITIES,
               commands: true,
               cardSettlementReconciliation: advertised,
+            },
+          });
+        if (url.pathname === "/api/v2/reconciliation/card-settlements/statements")
+          return Response.json({
+            statements: [
+              {
+                statementKey: "statement-synthetic",
+                candidateCount: older.length + 1,
+                candidates: [review, ...older.slice(0, 1)],
+              },
+            ],
+            nextOffset: null,
+            coverage: {
+              scope: "card-statement-bank-debit-candidates",
+              completeTransactionHistory: false,
+              netAssets: "unknown",
+              limit: 10,
+              candidatesPerStatement: 5,
+            },
+          });
+        if (
+          url.pathname === "/api/v2/reconciliation/card-settlements" &&
+          url.searchParams.has("statementKey")
+        )
+          return Response.json({
+            items: [review, ...older],
+            nextOffset: null,
+            coverage: {
+              scope: "card-statement-bank-debit-candidates",
+              completeTransactionHistory: false,
+              netAssets: "unknown",
+              limit: 50,
             },
           });
         if (url.pathname === "/api/v2/reconciliation/card-settlements")
@@ -412,6 +446,35 @@ describe.if(runnable)("card settlement review", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.getByLabel("判断の理由", { exact: true }).count()).toBe(0);
     expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+    ).toBe(true);
+    await page.close();
+  });
+  test("one statement's earlier candidates are collapsed under the one to review and stay reachable", async () => {
+    const stale = (n: number) => ({
+      ...settlementReview(),
+      proposalId: `card-settlement-stale-${n}`,
+      createdAt: `2026-09-0${n}T00:00:00Z`,
+      acceptanceBlockers: ["statement_changed"],
+    });
+    older = [stale(2), stale(1)];
+    const page = await open();
+    // One statement, so one candidate is open for a decision.
+    expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(1);
+    const summary = page.getByText("この請求のほかの候補（2 件）", {
+      exact: true,
+    });
+    await summary.waitFor();
+    expect(await page.locator(".settlement-older > section").first().isVisible()).toBe(false);
+    await summary.click();
+    expect(await page.locator(".settlement-older > section").count()).toBe(1);
+    await page.getByRole("button", { name: "この請求の候補をすべて表示（3 件）" }).click();
+    await page.getByText("1–3 件目 / 3 件", { exact: true }).waitFor();
+    // The full list adds the one the group did not carry, and repeats none.
+    expect(await page.locator(".settlement-older section.panel").count()).toBe(2);
+    expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(3);
+    await page.setViewportSize({ width: 390, height: 844 });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
     ).toBe(true);

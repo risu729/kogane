@@ -198,12 +198,14 @@ decisions (INV07). The sweep's log line adds `debitAccountEvidence`, the
 number of evidence rows appended.
 
 **On the review page.** Each review in the `カード照合` list and its API
-(`/api/v2/reconciliation/card-settlements`) carries `debitAccount`, read by
-`queryCardSettlements` (`packages/application/src/query/card-settlements.ts`,
+(`/api/v2/reconciliation/card-settlements`, its `statementKey` list and the
+grouped `/statements` list) carries `debitAccount`, read with the decision
+history for every review a read returns
+(`packages/application/src/query/card-settlements.ts`,
 `CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL`): the candidate's latest
 `card_settlement_debit_account_evidence` row under the current policy, found
 through `card_settlement_debit_account_evidence_candidate` for the page's
-candidates only. For example:
+candidates only (the grouped list's judged candidates, in one read). For example:
 
 ```json
 {
@@ -319,6 +321,40 @@ The `カード照合` page shows the source facts, evidence links, candidate rat
 current readiness blockers and decision history. An authenticated human operator
 can plan an acceptance or rejection; the confirmation page then simulates,
 approves and commits the pinned plan. Agents do not acquire acceptance rights.
+
+The page lists statements, not candidates
+(`GET /api/v2/reconciliation/card-settlements/statements`,
+`queryCardSettlementStatements`). The sweep proposes a new candidate whenever a
+fact in its digest changes (a recapture of the statement or the debit, a
+re-parse, an ownership record), so one statement accrues many candidates and
+only the ones citing its newest facts can be accepted. A statement is a
+candidate's stored `statement_key` (source, producer, acquisition namespace,
+card account and period, as `card_statement_facts` keys it), so the
+importer-era and collector-era captures of one month are separate statements.
+Statements are ordered by their newest candidate, ten to a page. Each judges
+its five newest candidates and any accepted one, however old, and leads with
+one of them:
+
+1. its accepted candidate, if any (an acceptance reserves the statement);
+2. otherwise the newest proposed candidate with no acceptance blocker;
+3. otherwise the newest candidate.
+
+The other judged candidates follow, newest first, collapsed under the lead
+(`この請求のほかの候補（N 件）`, N the statement's other candidates). `candidateCount` counts every candidate of the
+statement; when it exceeds the judged ones, `この請求の候補をすべて表示` reads
+the statement's whole list, 50 a page, newest first
+(`GET /api/v2/reconciliation/card-settlements?statementKey=…`). Nothing is
+deleted or hidden for good: candidates and decisions stay append-only and every
+candidate keeps its own history and actions. The flat list
+(`?offset=`) and one review (`?proposalId=`) are unchanged.
+
+A limit: a ready candidate older than the five newest of its statement is never
+the lead. When none of those five is a proposed candidate without blockers, the
+newest leads, with its blockers, and the older ready one is only in the
+statement's full list. The sweep proposes after each capture, so the newest
+candidates cite the newest facts; this happens only when the five newer ones
+are all blocked or decided (for example they cite another debit of the same
+amount that is no longer current, or the operator rejected them).
 
 Acceptance also requires explicit ownership evidence: the card account's
 `liable_party` and bank account's `beneficial_owner` must identify the same
@@ -669,6 +705,8 @@ container was shared with other jobs, so treat these as orders of magnitude):
 | ------------------------------------------ | --------- | ------ |
 | `カード照合` list, first page (50 reviews) | 37,072 ms | 143 ms |
 | one review (`proposalId`)                  | 6,581 ms  | 63 ms  |
+| grouped list, first page (10 statements)   | —         | 130 ms |
+| one statement's list, first page           | —         | 44 ms  |
 | settlement plan read                       | 6,257 ms  | 38 ms  |
 | settlement acceptance commit guard         | 120 ms    | 31 ms  |
 | ownership review guard, candidate term     | 113 ms    | 33 ms  |
@@ -698,7 +736,13 @@ statement totals of its periods after reading every balance observation once
 (the `b` scan the plan checks allow in `ready_statements`, as in
 `card_statement_facts`). The allocation check walks the debit account's bank
 rows through `idx_txn_obs_account` for each candidate. The list orders every
-candidate to choose its page (4 ms for 3,763 candidates here; no index).
+candidate to choose its page (4 ms for 3,763 candidates here; no index). The
+grouped list likewise groups every candidate by `statement_key` to choose its
+ten statements (`statement_page`), then reaches each statement's candidates
+through `card_settlement_candidates_statement` and judges at most its five
+newest and its accepted ones (the two grouped rows of the table above,
+measured 2026-11-07 before the debit-account evidence read was added to every
+list; the flat list's first page measured 104 ms in the same run).
 Not changed here, and not measured: the ownership review's account mapping
 reads (`queryCardOwnership`'s mappings, `prepareOwnershipReview`'s mapping read
 and the two mapping terms of its commit guard) still read
