@@ -13,6 +13,7 @@ import {
   UNMATCHED_HELD_ALIASES_SQL,
   UNMATCHED_HELD_KEYS_SQL,
   UNMATCHED_RESERVED_STATEMENTS_SQL,
+  UNMATCHED_STATEMENTS_SQL,
   type UnmatchedAllocation,
   type UnmatchedCardStatement,
 } from "../../../packages/application/src/query/card-statements-unmatched.ts";
@@ -316,4 +317,22 @@ test("the read's own lookups are keyed, without table statistics", async () => {
     );
     expect({ name, scans }).toEqual({ name, scans: [] });
   }
+});
+
+test("the page's candidate check is keyed on the candidates' statement index, without table statistics", async () => {
+  // docs/card-settlements.md, Cost: the page ranks `card_statement_facts` as
+  // the sweep's page does; whether a candidate cites a statement is one keyed
+  // probe per statement, never a walk of every candidate.
+  const plan = (
+    await db
+      .prepare("EXPLAIN QUERY PLAN " + UNMATCHED_STATEMENTS_SQL)
+      .bind(51, 0)
+      .all<{ detail: string }>()
+  ).results.map((row) => row.detail);
+  expect(plan).toContain(
+    "SEARCH c USING INDEX card_settlement_candidates_statement (statement_key=?)",
+  );
+  expect(plan.filter((detail) => /^SCAN (c|card_settlement_candidates)\b/u.test(detail))).toEqual(
+    [],
+  );
 });
