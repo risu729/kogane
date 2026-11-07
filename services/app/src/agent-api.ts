@@ -98,6 +98,7 @@ import {
 
 import { EVENTS_TOOL_NAME, readMcpTools } from "./read-tools";
 import { eventsV2Available } from "./events-api";
+import { catalogue } from "./read";
 import {
   callDelegatedDecisionTool,
   delegatedDecisionTools,
@@ -252,7 +253,8 @@ export async function agentApi(
       (reconstructedServed ??= reconstructedStateAvailable(env));
     // The events read exists exactly while `GET /api/v2/activity` does (`eventsV2`).
     let eventsServed: Promise<boolean> | undefined;
-    const events = (): Promise<boolean> => (eventsServed ??= eventsV2Available(env));
+    const events = (): Promise<boolean> =>
+      (eventsServed ??= catalogue(() => eventsV2Available(env)));
     const message = await handleMcp(
       request,
       async (name, body) => {
@@ -356,7 +358,7 @@ export async function agentApi(
     throw new HttpError(404, "not_found");
   if (tool === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructedStateAvailable(env)))
     throw new HttpError(404, "not_found");
-  if (tool === EVENTS_TOOL_NAME && !(await eventsV2Available(env)))
+  if (tool === EVENTS_TOOL_NAME && !(await catalogue(() => eventsV2Available(env))))
     throw new HttpError(404, "not_found");
   const body = await boundedJson(request);
   const outcome = (await toolCall(request, env, caller, tool, (audit) =>

@@ -98,6 +98,7 @@ export const AUDIT_OPERATION_LABELS: Readonly<Record<string, string>> = {
   "purchases.explain": "カード利用の説明",
   "schedules.maintenance.read": "定例停止時間の照会",
   "instruments.history": "銘柄の対応付けの履歴の照会",
+  "events.read": "経済イベントと債務の照会",
   "audit.search": "監査ログの検索",
   "audit.get": "監査記録の取得",
   "reconcile.propose": "照合の提案",

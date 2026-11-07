@@ -1154,25 +1154,39 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
       },
     });
 
-  it("answers a tool's or the tool list's exception as the Worker does on every route", async () => {
+  it("keeps unexpected tool failures and catalogue list failures behind closed codes", async () => {
     const environment = {
       ...grants({ [AGENT]: grant(READS), [OTHER]: grant(READS) }),
       EVENTS_V2_ENABLED: "true",
       DB: failing(),
     };
     const log = vi.spyOn(console, "log");
-    const answers: [string, Response][] = [
+    const answers: [string, Response, number, string][] = [
       [
         "2025-11-25 tools/call",
         await rpc("tools/call", { name: "kogane.context.open", arguments: {} }, { environment }),
+        500,
+        "internal_error",
       ],
       [
         "2026-07-28 tools/call",
         await modern("tools/call", { name: "kogane.context.open", arguments: {} }, { environment }),
+        500,
+        "internal_error",
       ],
-      // The tool list asks the store whether purchases are served.
-      ["2025-11-25 tools/list", await rpc("tools/list", {}, { environment })],
-      ["2026-07-28 tools/list", await modern("tools/list", {}, { environment })],
+      // The tool list first checks event availability through the UI's catalogue boundary.
+      [
+        "2025-11-25 tools/list",
+        await rpc("tools/list", {}, { environment }),
+        503,
+        "catalogue_read_failed",
+      ],
+      [
+        "2026-07-28 tools/list",
+        await modern("tools/list", {}, { environment }),
+        503,
+        "catalogue_read_failed",
+      ],
       [
         "HTTP agent route",
         await send(
@@ -1183,14 +1197,16 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
             identity: { via: "app", subject: OTHER },
           },
         ),
+        500,
+        "internal_error",
       ],
     ];
-    for (const [label, response] of answers) {
-      expect(response.status, label).toBe(500);
+    for (const [label, response, status, code] of answers) {
+      expect(response.status, label).toBe(status);
       const text = await response.text();
       expect(text, label).not.toContain(DETAIL);
       expect(JSON.parse(text), label).toEqual({
-        error: "internal_error",
+        error: code,
         requestId: expect.any(String),
       });
     }
@@ -1198,8 +1214,8 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
     expect(lines.map((line) => [line["route"], line["status"], line["errorCode"]])).toEqual([
       ["mcp", 500, "internal_error"],
       ["mcp", 500, "internal_error"],
-      ["mcp", 500, "internal_error"],
-      ["mcp", 500, "internal_error"],
+      ["mcp", 503, "catalogue_read_failed"],
+      ["mcp", 503, "catalogue_read_failed"],
       ["agent_context_open", 500, "internal_error"],
     ]);
     expect(JSON.stringify(log.mock.calls)).not.toContain(DETAIL);
