@@ -961,6 +961,52 @@ Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.
 
+### Production run of 2026-11-07 (Phase 2 unit 2g-4)
+
+The first live decisions, made by an MCP client through the Cloudflare MCP
+Portal (`https://mcp.takuk.me/mcp`) with the `kogane.command.*` tools, under the
+owner's approval of 2026-11-07, 16:47 UTC. Counts and identifiers only; no
+amount or account value is recorded here. Every decision below is in the audit
+log under principal `mcp-client:169b1b83…`.
+
+1. **Before.** 426 candidates, all `proposed`, every one blocked by
+   `owner_not_established`. Ten resolved accounts had no ownership claim and
+   empty `ownerDefaultBlockers`: seven card accounts (the MyJCB connection root
+   under two identities, Vpass `card-002` to `card-006`) and three debit
+   accounts (SMBC ordinary yen under two identities, one SBI Shinsei account).
+2. **Owner default.** Ten `relation.accept` decisions (16:48 to 16:53 UTC) with
+   marker `ownership-declaration:owner-default-v1:<role>:2026-11-07` and party
+   `party:owner`: `liable_party` on the seven card accounts,
+   `beneficial_owner` on the three debit accounts. Each plan cited one
+   blocker-free candidate as its review marker.
+3. **Sweep.** The 16:57 UTC sweep proposed 55 candidates citing the new
+   ownership evidence: `ownership: established-same` and no acceptance
+   blocker (14 MyJCB, 41 Vpass). Candidates proposed before it keep
+   `owner_not_established`; the sweep appends, it does not rewrite them.
+4. **Decisions.** Accepted one MyJCB candidate (`cs_be06321d`, 2026-09,
+   `collector-myjcb` statement, SMBC debit, debit-account statement
+   `supports`) and one Vpass candidate (`cs_93bffe03`, card-005 2026-08,
+   importer-era statement, SMBC debit) at 17:04 UTC. Withdrew `cs_93bffe03` at
+   17:05 UTC, then accepted a fresh Vpass candidate (`cs_6c1a79c8`, card-005
+   2026-09, SMBC debit) at 17:07 UTC. A withdrawn candidate keeps its history
+   (`accepted` then `withdrawn`); the 2026-08 statement's lead became the next
+   proposed candidate.
+5. **Purchases.** `kogane.purchases.explain` for 2026-08 and 2026-09 returned
+   the same captured, authorized and refund totals, event counts and zero
+   unresolved before, after acceptance and after withdrawal;
+   `settlementAddsPurchaseExpense` stayed `false` and each accepted candidate's
+   `impact.addedPurchaseExpense` and `addedCashMovement` are zero. Of the 80
+   events of 2026-09, the 11 MyJCB and 68 Vpass card-005 ones name their
+   accepted settlement and its bank debit (利用 → 請求 → 引落); the 22 events
+   of the withdrawn 2026-08 statement name the next proposed candidate and no
+   bank debit.
+6. **Cash movement.** `kogane.economic-readiness.read` (`bank-movement`) shows
+   `economic_claim_held` on both accepted debits and not on the withdrawn one,
+   so the withdrawal released its claim and each accepted debit has one claim.
+   `/api/v2/activity?basis=cash-movement` itself has no MCP read (it is not a
+   screen route, so the [parity guard](agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07)
+   does not list it); it was not read in this run.
+
 ## Automation prerequisites (ADR 0034)
 
 The pure assessSettlementAutomation function is a separately tested rule

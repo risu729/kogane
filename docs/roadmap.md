@@ -126,10 +126,14 @@ ownership was the only blocker. On 2026-11-07 the owner decided that an account 
 recorded owner is assumed to be the owner's, and that settlement decisions are delegated
 to agents through MCP over the same API as the screens
 ([plan, section 4](plans/2026-11-phase2-card-flow.md#4-owner-decisions-2026-11-07)).
-Neither is implemented yet: no ownership default exists and the operation catalogue has no
-settlement operation. Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
 (2026-11-07) no delegation entry or grant is needed: an MCP client the MCP Access
-application admits acts with the UI's authority, as itself.
+application admits acts with the UI's authority, as itself. Both are in production since
+2026-11-07, 17:07 UTC: an MCP client recorded the owner default on the ten accounts the
+candidates name and accepted one MyJCB and one Vpass settlement (both SMBC debits), withdrawing
+one Vpass acceptance on the way; purchase totals did not change and each accepted debit holds
+one cash-movement claim ([verification](card-settlements.md#production-run-of-2026-11-07-phase-2-unit-2g-4)).
+`/api/v2/activity?basis=cash-movement` has no MCP read yet, so that view was not read.
 
 ### Phase 3 — Coverage, collection requests and cross-source identity
 
