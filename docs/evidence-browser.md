@@ -160,9 +160,10 @@ running server advertises. Verified locally with synthetic fixtures only.
 
 ### Overview — `/`
 
-Row counts for nine of the twelve tables the schema defines (`COUNTED_TABLES`
+Row counts for nine of the twelve tables `schema.sql` defines (`COUNTED_TABLES`
 in `src/queries.ts`: sources, fetch runs, raw objects, artifacts, parse runs
-and the four observation tables), the source registry
+and the four observation tables; the store also applies four tables from
+shared CORE migrations, which are not counted), the source registry
 with artifact counts, every fetch run, and every parse run with its parser
 and version, status, warning count, and whether it is current or
 superseded. Answers: what is in here, where did it come from, and which
