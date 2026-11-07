@@ -26,6 +26,7 @@
 // silent hang. Installed once per process by the bunfig preload and by
 // `harness.ts`; installing twice is a no-op.
 import "./miniflare-http-proxy.ts";
+import "./miniflare-d1-lifetime.ts";
 import workerThreads from "node:worker_threads";
 
 /** How long a read waits for a reply before it fails. */

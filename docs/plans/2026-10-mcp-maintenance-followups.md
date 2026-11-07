@@ -1,7 +1,8 @@
 # Plan: publish the integrated MCP execution and maintenance path
 
-- Status: integration merged 2026-10-10 in #660. S6 survey acceptance and
-  real-client write activation remain open. The owner authorized integration,
+- Status: integration merged 2026-10-10 in #660. Real-client write activation
+  remains open; S6 survey acceptance was decided by the owner on 2026-11-07
+  ([ADR 0050, 2026-11-07 amendment](../adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). The owner authorized integration,
   publication, review, required CI, merge and deployment on 2026-10-10; the
   former local-only publication gate is superseded by that approval.
 - Current integration baseline: main `c0c4088a` (#661, #662 and #653 merged).
@@ -68,7 +69,7 @@ earlier successful results are not substituted for that run or production proof.
    checks and signing requirements. Hand the exact merged source to the sole
    deployment owner; do not duplicate workflow dispatches or manual deploys.
 5. Keep S6 survey acceptance unavailable until the owner decides its adoption
-   conditions. No heuristic proposal adopts a rule. No grant/delegation
+   conditions (decided 2026-11-07: [ADR 0050, 2026-11-07 amendment](../adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). No heuristic proposal adopts a rule. No grant/delegation
    expansion, credential/Access/authentication change or financial adoption
    is authorized by this implementation approval.
 

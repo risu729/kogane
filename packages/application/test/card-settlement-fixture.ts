@@ -60,5 +60,15 @@ export function settlementReview(unknownOwner = false): CardSettlementReview {
     impact: cardSettlementImpact(facts, "proposed"),
     history: [],
     historyTruncated: false,
+    debitAccount: {
+      outcome: "absent",
+      reason: "evidence_not_recorded",
+      policy: "card-debit-account-statement-v3",
+      statementRef: null,
+      bankSourceId: null,
+      bankSourceAccount: null,
+      visibleDigitCount: null,
+      recordedAt: null,
+    },
   };
 }

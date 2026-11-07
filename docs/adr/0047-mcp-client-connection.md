@@ -3,6 +3,10 @@
 - Status: accepted (merged 2026-10-09 in #565)
 - Date: 2026-10-08
 - Issue: #559 (part of)
+- Amended 2026-11-07 by [ADR 0084](0084-mcp-operator-authority-without-delegation.md):
+  `AGENT_API_GRANTS` is removed. The MCP principal `mcp-client:<sub>`, its
+  separate Access application and audience, and its refusal on every non-agent
+  route stand; it now reads and operates over the whole store with no table.
 
 ## Context
 
@@ -194,7 +198,12 @@ Coverage run counts (fact 5):
      caller with `403 actor_not_supported` before `opsContext` or
      `principalFor` runs, and the operations tools are not published on
      `/mcp`; `principalFor` also refuses the `mcp-client:` name as a string,
-     whatever `OPERATOR_SUBJECTS` and `AGENT_GRANTS` say;
+     whatever `OPERATOR_SUBJECTS` and `AGENT_GRANTS` say (amended
+     2026-11-07: since #660, ADR 0063, `/mcp` sends an `mcp-client` call of
+     an operations tool to `callDelegatedOpsTool`, which publishes and runs
+     only what the caller's `MCP_DELEGATIONS` entry holds and otherwise
+     refuses with `delegation_not_configured`; `callOpsTool`'s own refusal
+     of the caller object is now `delegation_not_configured` too);
    - it reaches no route but `/mcp`;
    - the agent-API capability vocabulary has no acceptance, so at most it
      records an inert proposal whose actor is `mcp-client:<sub>`.

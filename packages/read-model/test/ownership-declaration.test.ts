@@ -4,6 +4,7 @@ import {
   OWNERSHIP_DECLARATION_CONTEXT_SQL,
   ownershipDeclarationContextBinds,
   ownershipDeclarationBlockers,
+  declarationAccountScope,
   type OwnershipDeclarationContext,
 } from "../src/ownership-declaration.ts";
 
@@ -45,4 +46,44 @@ test("self-declaration refuses all recorded ownership history and direct contrar
     "ownership_claims_require_review",
     "contrary_evidence_recorded",
   ]);
+});
+
+test("the owner default (ADR 0082) admits a card root, a sole-personal declaration does not, and neither admits a placeholder", () => {
+  using db = new Database(":memory:");
+  db.exec("CREATE TABLE entity_relations(kind TEXT,from_ref TEXT,to_ref TEXT,status TEXT)");
+  db.exec(`CREATE TABLE accounts(id TEXT,role TEXT,status TEXT);
+  CREATE TABLE current_account_mappings(account_id TEXT,source_account_id TEXT,status TEXT);
+  INSERT INTO accounts VALUES('root','card-statement-aggregate','aggregate');
+  INSERT INTO current_account_mappings VALUES('root','sa','aggregate');`);
+  const refs = ["card-settlement:one", "balance:11", "parse_run:1", "account_mapping:map"];
+  const blockers = (
+    scope: "sole-personal" | "owner-default",
+    role: "liable_party" | "beneficial_owner" = "liable_party",
+  ) =>
+    ownershipDeclarationBlockers(
+      db
+        .query(OWNERSHIP_DECLARATION_CONTEXT_SQL)
+        .get(
+          ...ownershipDeclarationContextBinds("root", "sa", refs, role, scope),
+        ) as OwnershipDeclarationContext,
+    );
+  expect(blockers("sole-personal")).toEqual(["single_account_scope_unconfirmed"]);
+  expect(blockers("owner-default")).toEqual([]);
+  // A card root is a liable party's account, never a deposit.
+  expect(blockers("owner-default", "beneficial_owner")).toEqual([
+    "single_account_scope_unconfirmed",
+  ]);
+  for (const status of ["unresolved", "candidate"]) {
+    db.exec(`UPDATE accounts SET status='${status}'`);
+    expect(blockers("owner-default")).toEqual(["single_account_scope_unconfirmed"]);
+  }
+  db.exec("UPDATE accounts SET status='aggregate'");
+  db.query(
+    "INSERT INTO entity_relations VALUES('liable_party','root','party:other','rejected')",
+  ).run();
+  expect(blockers("owner-default")).toEqual(["ownership_claims_require_review"]);
+  expect(declarationAccountScope("beneficial_owner", "owner-default")).toEqual({
+    roles: ["deposit"],
+    statuses: ["identified", "provider-local"],
+  });
 });
