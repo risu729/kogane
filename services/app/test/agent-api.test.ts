@@ -644,6 +644,13 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
+        name: "kogane.evidence.read",
+        required: ["page"],
+        closed: false,
+        properties: ["artifactId", "cursor", "page", "runId", "source"],
+        annotations: readOnly,
+      },
+      {
         name: "kogane.purchases.explain",
         required: [],
         closed: false,
@@ -711,6 +718,7 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.events.read",
       "kogane.reports.read",
       "kogane.collection-quality.read",
+      "kogane.evidence.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -803,6 +811,7 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.events.read",
       "kogane.reports.read",
       "kogane.collection-quality.read",
+      "kogane.evidence.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);

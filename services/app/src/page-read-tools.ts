@@ -39,6 +39,7 @@ import { readReportRoute, reportArtifactsAvailable } from "./reports-api";
 import { collectionQualityAvailable, readCollectionQuality } from "./collection-quality-api";
 import { catalogue } from "./read";
 import { mcpInputSchema } from "./mcp-input-schema";
+import { EVIDENCE_PREFIX, readEvidenceRoute } from "./evidence-browser-api";
 
 /** The result envelope of every page read: the route's answer, under `data`. */
 const PAGE_READ_SCHEMA_VERSION = "kogane-page-read-v1";
@@ -281,6 +282,66 @@ const TOOLS = {
           source === undefined ? "/api/collection-quality" : `/api/collection-quality/${source}`,
         searchParams: query(params),
       }),
+  }),
+  "kogane.evidence.read": tool({
+    title: "Evidence browser: sealed runs and their artifacts",
+    description:
+      "The evidence browser's catalogue of the configured source's sealed collection runs: `meta` (the store and its source), `runs` (one page of a source's sealed runs, newest first; needs `source`), `artifacts` (one page of a run's artifacts; needs `runId`) or `artifact` (one artifact's detail: its key, role, dataset, digests, size, container and declared media type; needs `runId` and `artifactId`). `cursor` (`c_<n>`, from the previous page's `nextCursor`) pages runs and artifacts. The same answer as GET /api/evidence/v1/meta, /sources/{source}/runs, /runs/{run}/artifacts and /runs/{run}/artifacts/{artifact}, under evidence.read and a whole-store read grant. Never the raw bytes. Read-only.",
+    schema: z.strictObject({
+      page: z.enum(["meta", "runs", "artifacts", "artifact"]),
+      source: z
+        .string()
+        .regex(/^[a-z0-9][a-z0-9-]{0,99}$/u)
+        .optional(),
+      runId: z
+        .string()
+        .regex(/^r_[1-9][0-9]{0,15}$/u)
+        .optional(),
+      artifactId: z
+        .string()
+        .regex(/^a_[1-9][0-9]{0,15}$/u)
+        .optional(),
+      cursor: z
+        .string()
+        .regex(/^c_[1-9][0-9]{0,15}$/u)
+        .optional(),
+    }),
+    capability: "evidence.read",
+    routes: [
+      "/api/evidence/v1/meta",
+      "/api/evidence/v1/sources/:source/runs",
+      "/api/evidence/v1/runs/:run/artifacts",
+      "/api/evidence/v1/runs/:run/artifacts/:artifact",
+    ],
+    read: async (env, { page, source, runId, artifactId, ...params }) => {
+      // Each page names exactly the path segments its route has.
+      const segments = { source, runId, artifactId };
+      const takes = {
+        meta: [],
+        runs: ["source"],
+        artifacts: ["runId"],
+        artifact: ["runId", "artifactId"],
+      }[page] as readonly (keyof typeof segments)[];
+      const wrong = (Object.keys(segments) as (keyof typeof segments)[]).filter(
+        (key) => takes.includes(key) !== (segments[key] !== undefined),
+      );
+      if (wrong.length > 0) throw new HttpError(400, "invalid_request", wrong);
+      const pathname =
+        page === "meta"
+          ? `${EVIDENCE_PREFIX}/meta`
+          : page === "runs"
+            ? `${EVIDENCE_PREFIX}/sources/${source}/runs`
+            : `${EVIDENCE_PREFIX}/runs/${runId}/artifacts${page === "artifact" ? `/${artifactId}` : ""}`;
+      const searchParams = query(params);
+      const answer = await readEvidenceRoute(env, {
+        pathname,
+        searchParams,
+        search: searchParams.size > 0 ? `?${searchParams}` : "",
+      });
+      // Every path built above is an evidence route, and none is `/raw`.
+      if (answer === null || "raw" in answer) throw new HttpError(404, "not_found");
+      return answer.body;
+    },
   }),
 } as const;
 

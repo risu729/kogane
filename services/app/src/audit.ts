@@ -243,7 +243,8 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     };
   // One UI page read (`{ schemaVersion, data }`, src/page-read-tools.ts): the
   // page's `items` or `rows`, else its first list (connections, transactions, …), truncated
-  // when the page says more follow; one detail is one row.
+  // when the page says more follow (`coverage.truncated`, `page.hasMore`, a
+  // `nextCursor`); one detail is one row.
   if (operation === "observations.get") return { rows: value["data"] ? 1 : 0, truncated: false };
   // The report list's items, truncated while a cursor follows (the list has no
   // `coverage` or `page`); one report or one explanation is one row, never its
@@ -262,7 +263,8 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     operation === "rewards.read" ||
     operation === "reported-holdings-change.read" ||
     operation === "events.read" ||
-    operation === "collection-quality.read"
+    operation === "collection-quality.read" ||
+    operation === "evidence.read"
   ) {
     const data = (value["data"] ?? {}) as Record<string, unknown>;
     const coverage = (data["coverage"] ?? {}) as Record<string, unknown>;
@@ -281,7 +283,8 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       truncated:
         coverage["truncated"] === true ||
         dataCoverage["truncated"] === true ||
-        page["hasMore"] === true,
+        page["hasMore"] === true ||
+        typeof data["nextCursor"] === "string",
     };
   }
   // A page of statements; a named next page means more remain.

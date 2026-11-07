@@ -152,10 +152,15 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
    * both agent transports: a served page is the route's body under `data`;
    * a refusal is the route's status and closed code.
    */
-  async function expectSameAnswer(pathAndQuery: string, tool: string, args: unknown) {
+  async function expectSameAnswer(
+    pathAndQuery: string,
+    tool: string,
+    args: unknown,
+    grant: unknown = RECORDS_GRANT,
+  ) {
     const page = await route(pathAndQuery);
-    const overHttp = await http(tool, args);
-    const overMcp = await mcp(tool, args);
+    const overHttp = await http(tool, args, grant);
+    const overMcp = await mcp(tool, args, grant);
     const label = `${pathAndQuery} ${JSON.stringify(args)}`;
     expect(overHttp.status, label).toBe(page.status);
     expect(overMcp.isError, label).toBe(page.status >= 400);
