@@ -121,13 +121,15 @@ route and the agent read did not.
   leaves the classification.
 - Each row's reason is the writer's: the read maps the row with the lane's
   own `cardUsageFactOf` (moved to `packages/application/src/card-usage-fact.ts`
-  so both import it) and classifies it with `classifyCardUsage`. An
-  installment, revolving or bonus row therefore stays
-  `payment_type_unsupported`, or, for a MyJCB amount pair, is
-  `installment_amount_differs` (usage and payment amounts differ) or
-  `payment_split_unknown` (one of them unreadable), until a shape is observed
-  and confirmed as this record requires. No reason is stored and nothing is
-  written (INV07).
+  so both import it) and classifies it with `classifyCardUsage`, whose checks
+  run in a fixed order. A row whose payment type is not the accepted
+  single-payment shape, installment, revolving and bonus wording among them,
+  therefore stays `payment_type_unsupported` until a shape is observed and
+  confirmed as this record requires. A MyJCB row that passes that check but
+  whose usage and payment amounts differ is `installment_amount_differs`, or
+  `payment_split_unknown` when one of them is unreadable; the read does not
+  say what the difference means. No reason is stored and nothing is written
+  (INV07).
 - The read's one pass over current usage (`CURRENT_SQL`) returns the page's
   current keys and the unrecognised rows whole, at most
   `CARD_PURCHASE_UNRECOGNIZED_LIMIT` (1,000) of them, lowest observation id
