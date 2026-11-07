@@ -861,10 +861,17 @@ unchanged).
 later row citing an earlier reader's reading neither shown nor hiding an
 earlier current one, a page refused under the current reader shown as
 `absent` with its code while a refusal under another reader, of another page
-or of another card is not, and a malformed row or unknown refusal code
-failing the read. `card-settlement-review-scale.test.ts` checks that its plan
-reaches the evidence, the cited reading and the page's reading by key on the
-scaled store without statistics.
+or of another card is not, a current row winning over a refusal, and a
+malformed row or unknown refusal code failing the read.
+`card-settlement-review-scale.test.ts` checks that its plan reaches the
+evidence, the cited reading and the page's reading by key on the scaled store
+without statistics. Wherever every cited reading is current the read returns
+the rows #1019's text did
+(`packages/application/test/card-settlement-debit-account-legacy-sql.ts`):
+`services/processor/test/card-settlement-scale.test.ts` compares the two
+after the sweep, on random stores and the scaled store, and
+`card-debit-account.test.ts` pins the accepted refusal codes to migration
+0060's CHECK.
 `services/processor/test/card-settlement-unmatched.test.ts` runs the sweep on
 synthetic rows for each [unmatched code](#unmatched-statements): two debits
 summing to the total and a partial debit, an equal debit four days late and no

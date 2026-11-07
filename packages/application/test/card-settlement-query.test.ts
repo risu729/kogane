@@ -279,6 +279,22 @@ describe("provider-stated debit-account evidence", () => {
     // Evidence only: the refusal adds no blocker.
     expect(page.items.every((item) => item.acceptanceBlockers.length === 0)).toBe(true);
   });
+  test("a current row wins over a refusal of the candidate's own page", async () => {
+    // The sweep cites only the candidate's own page, so this pair does not
+    // arise from it; the trigger still admits a row citing another page's
+    // reading of the same card, and the row is the answer.
+    const { db, sql } = store();
+    insert(db, "both");
+    reading(db, 3, { page: 2 });
+    reading(db, 4, { refusal: "card_information_absent" });
+    db.exec(`INSERT INTO card_settlement_debit_account_evidence VALUES
+       (1,'both',3,'card-debit-account-statement-v3','supports',NULL,'${proposal}','2026-09-10');`);
+    const [item] = (await queryCardSettlements(sql, { proposalId: "both" })).items;
+    expect(item?.debitAccount).toMatchObject({
+      outcome: "supports",
+      statementRef: { id: "card_debit_account_statement:3" },
+    });
+  });
   test("an unknown refusal code fails the read instead of passing as a reason", async () => {
     const { db, sql } = store();
     insert(db, "refused");

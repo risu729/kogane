@@ -57,7 +57,7 @@ export const CARD_INFORMATION_REFUSALS = [
   /** The account value is not 「普通|当座 ####*…」. */
   "card_information_account_invalid",
 ] as const;
-type CardInformationRefusal =(typeof CARD_INFORMATION_REFUSALS)[number];
+type CardInformationRefusal = (typeof CARD_INFORMATION_REFUSALS)[number];
 
 /**
  * The version of `readMyJcbCardInformation` a `card_debit_account_statement`

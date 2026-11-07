@@ -452,5 +452,16 @@ changes (INV07). Two gaps remained in that read:
   `card-settlement.browser.test.ts`: the contract accepts the refusal codes
   as `absent` reasons and refuses them as rule reasons or invented codes; the
   page shows a refusal's text.
-- This changes what the read returns on purpose, so it is not a rewrite
-  proven equal to the shipped text; the plan check above is kept.
+- This changes what the read returns on purpose, but only for rows citing an
+  earlier reader's reading and for candidates without a row. Wherever every
+  cited reading is current it must return #1019's rows:
+  `services/processor/test/card-settlement-scale.test.ts` runs the sweep and
+  appends rows of both policies over random stores (one card's pages refused
+  on some seeds) and the scaled store, and compares the read with #1019's
+  text, frozen in
+  `packages/application/test/card-settlement-debit-account-legacy-sql.ts`,
+  for every candidate.
+- `services/processor/test/card-debit-account.test.ts`: the refusal codes the
+  review accepts are exactly the set migration 0060's `refusal_code` CHECK
+  admits. `card-settlement-query.test.ts` also shows a current row winning
+  over a refusal of the candidate's own page.

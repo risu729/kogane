@@ -4,6 +4,7 @@ import { CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL } from "../src/card-settlement-sh
 // 2026-09-27 amendment). Every page is synthetic: the table's shape mirrors
 // the observed one (vertical th/td rows after an h3.hdg-H3 heading), and every
 // bank, branch, digit and name string is made up.
+import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, expect, test } from "bun:test";
 import type { Miniflare } from "miniflare";
 import { publishParse, seedArtifact, startPipeline } from "./harness.ts";
@@ -18,6 +19,7 @@ import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
 import { smbcDirectTransactions } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
 import { cardSettlementEligible } from "../../../packages/domain/src/card-settlement.ts";
 import { bankSourceIdForDisplayedName } from "../../../packages/domain/src/card-debit-account.ts";
+import { CARD_DEBIT_ACCOUNT_STATEMENT_REFUSALS } from "../../../packages/domain/src/card-settlement-review.ts";
 
 let mf: Miniflare, env: Env, db: D1Database;
 beforeAll(async () => {
@@ -575,3 +577,22 @@ test("automation prerequisite diagnostics return only counts and do not adopt de
     await db.prepare("SELECT count(*) n FROM card_settlement_decisions").first<number>("n"),
   ).toBe(before);
 }, 60000);
+
+test("the review's refusal codes are exactly the lane's stored ones", () => {
+  // The settlement review shows a refused page's code as a closed `absent`
+  // reason (ADR 0032, 2026-11-07 amendment), so the domain list must be the
+  // set migration 0060's `refusal_code` CHECK admits, no more and no fewer.
+  const migration = readFileSync(
+    new URL(
+      "../../../packages/storage-d1/migrations/core/0060_card_debit_account_statements.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const check = /refusal_code IS NULL OR refusal_code IN \(([^)]*)\)/u.exec(migration)?.[1];
+  const stored = [...(check ?? "").matchAll(/'([a-z0-9_]+)'/gu)].map(([, code]) => code);
+  expect(stored.length).toBeGreaterThan(0);
+  expect([...CARD_DEBIT_ACCOUNT_STATEMENT_REFUSALS].sort() as string[]).toEqual(
+    stored.map(String).sort(),
+  );
+});

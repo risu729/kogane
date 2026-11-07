@@ -33,6 +33,9 @@ import {
   LEGACY_CARD_SETTLEMENT_STATEMENTS_SQL,
   legacyCardSettlementCommitGuardSql,
 } from "./card-settlement-legacy-sql.ts";
+import { CARD_DEBIT_ACCOUNT_POLICY } from "../../../packages/domain/src/card-debit-account.ts";
+import { CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL } from "../../../packages/application/src/query/card-settlements.ts";
+import { LEGACY_CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL } from "../../../packages/application/test/card-settlement-debit-account-legacy-sql.ts";
 
 const FULL = process.env["KOGANE_CARD_STATEMENT_SCALE"] === "full";
 const TIMEOUT = FULL ? 1_800_000 : 60_000;
@@ -511,3 +514,150 @@ test(
   },
   TIMEOUT,
 );
+
+/**
+ * Gives every MyJCB statement page a reading under the current reader version
+ * (`refused` where `refuse` holds for its statement row, `read` otherwise), runs
+ * the sweep so it records the evidence, appends rows the trigger accepts (each
+ * candidate against every `read` reading of its card, then a changed outcome
+ * under the current policy after every other row, then a row of another policy
+ * after every row), and compares the review's debit-account read with #1019's
+ * text for every candidate, 50 at a time as a page asks. Every cited reading is
+ * current, so each chosen row must be the one the shipped text chose; a
+ * candidate without a row has none under either text and at most gains its
+ * page's refusal code. Returns how many rows were compared and refusals seen.
+ */
+async function sameDebitAccountRows(
+  store: Database,
+  refuse: string,
+): Promise<{ compared: number; refused: number }> {
+  store
+    .query(
+      `INSERT OR IGNORE INTO card_debit_account_statement
+      (source_id,card_source_account,fetch_artifact_id,statement_parse_run_id,
+       raw_sha256,source_object_key,observed_at,reader_version,outcome,refusal_code,
+       bank_name,branch_name,account_type,leading_digits,masked_digit_count,created_at)
+      SELECT s.source_id,s.source_account,a.id,p.id,a.sha256,'synthetic-account-context','2099-01-01',?1,
+       CASE WHEN ${refuse} THEN 'refused' ELSE 'read' END,
+       CASE WHEN ${refuse} THEN 'card_information_table_invalid' END,
+       CASE WHEN NOT (${refuse}) THEN '三井住友銀行' END,
+       CASE WHEN NOT (${refuse}) THEN '架空支店' END,
+       CASE WHEN NOT (${refuse}) THEN '普通' END,
+       CASE WHEN NOT (${refuse}) THEN '1234' END,
+       CASE WHEN NOT (${refuse}) THEN 3 END,'2099-01-01'
+      FROM card_statement_facts s
+      JOIN parse_runs p ON p.id=s.parse_run_id
+      JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+      WHERE s.source_id='myjcb' ORDER BY s.id`,
+    )
+    .run(CARD_INFORMATION_READER_VERSION);
+  // Ticks until the cursor has passed every statement.
+  store.exec("UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1");
+  const cursor = () =>
+    (
+      store.query("SELECT last_statement_id AS id FROM card_settlement_scan_cursor").get() as {
+        id: number;
+      }
+    ).id;
+  const last = (
+    store.query("SELECT coalesce(max(id),0) AS id FROM card_statement_facts").get() as {
+      id: number;
+    }
+  ).id;
+  for (let tick = 0; tick < 1000; tick += 1) {
+    await cardSettlementSweep(d1(store));
+    if (cursor() === last) break;
+  }
+  expect(cursor()).toBe(last);
+  // Rows the sweep would not write but the evidence trigger accepts: each
+  // candidate against every `read` reading of its card, whatever the page, so
+  // a candidate whose own page was refused can still have a row.
+  store.exec(`INSERT INTO card_settlement_debit_account_evidence
+    (candidate_id,statement_id,policy,outcome,reason,proposal_json,evidence_digest,created_at)
+    SELECT c.id,r.id,'${CARD_DEBIT_ACCOUNT_POLICY}',
+     CASE (unicode(substr(c.id,-1))+r.id)%3 WHEN 0 THEN 'supports' WHEN 1 THEN 'names_other_account' ELSE 'not_proposed' END,
+     CASE (unicode(substr(c.id,-1))+r.id)%3 WHEN 2 THEN 'no_matching_account' END,
+     CASE WHEN (unicode(substr(c.id,-1))+r.id)%3<2 THEN '{"synthetic":true}' END,
+     '${"b".repeat(64)}','2099-01-01'
+    FROM card_settlement_candidates c
+    JOIN card_debit_account_statement r ON r.outcome='read'
+     AND r.card_source_account=json_extract(c.facts_json,'$.statement.sourceAccount')
+    ORDER BY c.id,r.id`);
+  store.exec(`INSERT INTO card_settlement_debit_account_evidence
+    (candidate_id,statement_id,policy,outcome,reason,proposal_json,evidence_digest,created_at)
+    SELECT candidate_id,statement_id,policy,'not_proposed','ambiguous_accounts',NULL,evidence_digest,'2099-01-02'
+    FROM card_settlement_debit_account_evidence WHERE id%2=0 ORDER BY id`);
+  store.exec(`INSERT INTO card_settlement_debit_account_evidence
+    (candidate_id,statement_id,policy,outcome,reason,proposal_json,evidence_digest,created_at)
+    SELECT candidate_id,statement_id,'card-debit-account-statement-v2',outcome,reason,proposal_json,evidence_digest,'2099-01-03'
+    FROM card_settlement_debit_account_evidence ORDER BY id`);
+  const candidates = (
+    store.query("SELECT id FROM card_settlement_candidates ORDER BY id").values() as string[][]
+  ).map(([id]) => id!);
+  const byCandidate = <T extends { candidate_id: string }>(found: T[]): T[] =>
+    found.sort((left, right) => left.candidate_id.localeCompare(right.candidate_id));
+  let compared = 0;
+  let refused = 0;
+  for (let start = 0; start < candidates.length; start += 50) {
+    const ids = JSON.stringify(candidates.slice(start, start + 50));
+    const shipped = byCandidate(
+      rows(store, LEGACY_CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL, [ids, CARD_DEBIT_ACCOUNT_POLICY]) as {
+        candidate_id: string;
+      }[],
+    );
+    const current = rows(store, CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL, [
+      ids,
+      CARD_DEBIT_ACCOUNT_POLICY,
+      CARD_INFORMATION_READER_VERSION,
+    ]) as { candidate_id: string; outcome: string | null; refusal_code: string | null }[];
+    refused += current.filter((row) => row.refusal_code !== null).length;
+    const chosen: { candidate_id: string }[] = current
+      .filter((row) => row.outcome !== null)
+      .map(({ refusal_code: _, ...row }) => row);
+    expect(byCandidate(chosen)).toEqual(shipped);
+    compared += shipped.length;
+  }
+  return { compared, refused };
+}
+
+describe("the review's debit-account read where every cited reading is current", () => {
+  test(
+    "returns #1019's rows on random stores",
+    async () => {
+      const seen = { compared: 0, refused: 0 };
+      for (const seed of [1, 2, 3, 4]) {
+        const store = randomSettlementStore(seed, new Set()).db;
+        try {
+          // Every page of one card refused on even seeds. Every random page
+          // has the same bytes, so a card has one reading.
+          const found = await sameDebitAccountRows(
+            store,
+            seed % 2 === 0 ? "s.source_account='myjcb:conn-b:root'" : "0",
+          );
+          seen.compared += found.compared;
+          seen.refused += found.refused;
+        } finally {
+          store.close();
+        }
+      }
+      expect(seen.compared).toBeGreaterThan(0);
+      expect(seen.refused).toBeGreaterThan(0);
+    },
+    TIMEOUT,
+  );
+
+  test(
+    "returns #1019's rows on the scaled store",
+    async () => {
+      db.exec("BEGIN");
+      try {
+        // The store's MyJCB pages are one card's; the random stores refuse.
+        const found = await sameDebitAccountRows(db, "0");
+        expect(found.compared).toBeGreaterThan(50);
+      } finally {
+        db.exec("ROLLBACK");
+      }
+    },
+    TIMEOUT,
+  );
+});
