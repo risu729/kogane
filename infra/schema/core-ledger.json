@@ -6133,13 +6133,11 @@
         "decision_revisions_no_update",
         "decision_revisions_subject"
       ],
-      "noUpdateTriggers": [
-        "decision_revisions_no_update"
-      ],
+      "noUpdateTriggers": [],
       "noDeleteTriggers": [
         "decision_revisions_no_delete"
       ],
-      "appendOnly": true,
+      "appendOnly": false,
       "sqlSha256": "7903382c97aac659"
     },
     {
@@ -21925,6 +21923,7 @@
       "core_source_revision",
       "dataset_snapshot_policies",
       "decision_outbox",
+      "decision_revisions",
       "economic_event_revisions",
       "http_scope_rules",
       "ingest_client_producers",
