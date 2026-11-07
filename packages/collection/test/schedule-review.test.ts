@@ -88,6 +88,33 @@ test("nested VPoint manifests retain failed status and exact safe run reference"
     }).runIds,
   ).toEqual(["session-card-001", "session-card-002"]);
 });
+test("a run whose terminal was not written is never reported as a persisted run", () => {
+  // Synthetic shapes of the collectors that report one run: a `persistence`
+  // outcome (Sony Bank, Money Forward, MyJCB, Mizuho) or a `terminal` summary
+  // (Mobile Suica, V Point). No terminal exists for either run.
+  for (const persistence of ["incomplete", "conflict", "failed"]) {
+    expect(
+      scheduledResult({ runId: "synthetic-unwritten", status: "success", persistence }),
+    ).toEqual({ status: "failed", runIds: [], failureCode: "collection_failed" });
+  }
+  expect(
+    scheduledResult({
+      manifest: { status: "partial", runId: "synthetic-unwritten" },
+      terminal: { persisted: false },
+    }),
+  ).toEqual({ status: "failed", runIds: [], failureCode: "collection_failed" });
+  // A failed run that did write its terminal is still referenced.
+  expect(
+    scheduledResult({ runId: "synthetic-failed", status: "failed", persistence: "persisted" }),
+  ).toEqual({ status: "failed", runIds: ["synthetic-failed"], failureCode: "collection_failed" });
+  expect(
+    scheduledResult({
+      runId: "synthetic-resend",
+      status: "success",
+      persistence: "already_persisted",
+    }).runIds,
+  ).toEqual(["synthetic-resend"]);
+});
 test("a persistent active lease blocks provider entry; no time expiry is consulted", async () => {
   let ref: string | null = "interrupted",
     calls = 0;

@@ -5,6 +5,7 @@ import {
   type SchedulePattern,
 } from "../../../packages/collection/src/schedule-model";
 import { alarmClaimWrite } from "../../../packages/application/src/index.ts";
+import { isLeaseAbortCode } from "../../../packages/collection/src/schedule-result";
 import { collectorBindingName } from "./collector-binding";
 import { jobFor, readSchedule, maintenanceForSchedule, bootstrapSchedules } from "./schedule-store";
 interface DispatchResult {
@@ -163,7 +164,11 @@ export class ScheduleAlarm extends DurableObject<Env> {
       "UPDATE collection_schedule_occurrences SET status=?,run_ids_json=?,failure_code=?,finished_at=? WHERE id=? AND status='started'",
     )
       .bind(
-        result.failureCode === "dispatch_uncertain" ? "uncertain" : result.status,
+        // A lost dispatch answer, or a holder that stopped itself after it may
+        // have contacted the provider (ADR 0085): uncertain, never replayed.
+        result.failureCode === "dispatch_uncertain" || isLeaseAbortCode(result.failureCode)
+          ? "uncertain"
+          : result.status,
         JSON.stringify(result.runIds),
         result.failureCode,
         new Date().toISOString(),

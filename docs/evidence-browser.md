@@ -697,8 +697,8 @@ reaches the Worker first; its assets directory is
 The Worker also serves a small, default-off agent API and one shared query
 route, both of which run the application service in `packages/application`
 rather than a second implementation. See [Agent API](agent-api.md) for the
-grants, tools, result contract, error codes, prompt-injection rules and the
-`AGENT_API_GRANTS` configuration; the deployment facts are:
+grants, tools, result contract, error codes and prompt-injection rules; the
+deployment facts are:
 
 - `POST /api/agent/v1/{capabilities,context.open,financial.query,explain,reconcile.propose}`,
   `POST /api/agent/v1/purchases.explain` while card purchase recognition is
@@ -709,12 +709,12 @@ grants, tools, result contract, error codes, prompt-injection rules and the
   same closed 401/403 answers. Everything outside them is refused with 405.
 - The principal on both is the subject `authenticate` returned; no route reads
   an actor from a request body or a header.
-- With `AGENT_API_GRANTS` absent or empty — the deployed default — every one
-  of the agent routes answers 403 for every authenticated principal, and the
-  local synthetic snapshot adapter never serves them at all. It is a different variable
-  from the change lifecycle's `AGENT_GRANTS` and `OPERATOR_SUBJECTS`; see
-  [Agent API](agent-api.md) for why they must not be merged. All three are
-  allow-lists, so none of them grants anything by being absent.
+- Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+  there is no agent grant table: every caller the Access gate proved reads
+  the whole store on the agent routes, and the local synthetic snapshot
+  adapter never serves them at all. The change lifecycle's `AGENT_GRANTS` and
+  `OPERATOR_SUBJECTS` grade only the UI's command and operations routes; both
+  are allow-lists, so neither grants anything by being absent.
 - The agent API's only write is a relation _proposal_: one
   `decision_revisions` row of kind `propose` and one `entity_relations` row
   with status `proposed` (migration 0029). No reader adopts a proposed

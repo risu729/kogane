@@ -53,6 +53,38 @@ export interface SubtotalRow {
   quantity_scale: number;
 }
 
+/**
+ * Why a published snapshot may not be served (05 §7): the closed codes the v2
+ * balance routes answer 503 with, and the reason every other reader of the
+ * snapshot names instead of a figure.
+ *
+ *   * `read_model_unavailable` — the READ database has the shape of another
+ *     contract, so nothing in it is readable under this one (06 §2);
+ *   * `read_model_context_changed` — CORE was restored under a new epoch, so
+ *     the snapshot describes another context (G3-02);
+ *   * `read_model_restriction_changed` — a use restriction changed after the
+ *     snapshot was last verified, so its subtotals are void until a build
+ *     re-verifies it (G3-04).
+ */
+export const SNAPSHOT_REFUSALS = [
+  "read_model_unavailable",
+  "read_model_context_changed",
+  "read_model_restriction_changed",
+] as const;
+export type SnapshotRefusal = (typeof SNAPSHOT_REFUSALS)[number];
+
+/**
+ * The snapshot a reader may serve now, or why it may not. `null` means none
+ * is published yet. Only a deployment that can check the snapshot against
+ * CORE's epoch, its visibility revision and its contract builds one; a reader
+ * of a published figure takes this instead of calling `currentSnapshot()`.
+ * `behind` says whether the fixed context trails CORE; it is still servable.
+ */
+export type ServableSnapshot =
+  | { snapshot: BalanceSnapshotRow; behind: boolean }
+  | { refusal: SnapshotRefusal }
+  | null;
+
 export interface BalanceProjectionReader {
   /** Operational summary of the store; never the snapshot identity (0038). */
   projectionInputs(): Promise<ProjectionInputsRow>;

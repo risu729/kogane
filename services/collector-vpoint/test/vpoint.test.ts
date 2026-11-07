@@ -145,6 +145,67 @@ describe("V Point collection", () => {
       result.artifacts.some((artifact) => artifact.filename === "vmoney-history-page-0001.json"),
     ).toBe(true);
   });
+
+  // Observed: the walk reaches `results.total` on a page with rows and never
+  // asks for the empty page after it. An empty page before the total is not
+  // an observed end of history, so it must stop the collection rather than
+  // be stored as a complete walk.
+  test("an empty history page before the declared total is not a complete walk", async () => {
+    const seenPointPages: string[] = [];
+    const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path !== "/api/tpoint_history" && path !== "/api/tmoney_history") {
+        return jsonResponse({ status: { code: "0000" }, results: {} });
+      }
+      const form = init?.body;
+      if (!(form instanceof FormData)) throw new Error("expected FormData");
+      const page = String(form.get("page"));
+      if (path === "/api/tmoney_history") {
+        return jsonResponse({ status: { code: "0000" }, results: {} });
+      }
+      seenPointPages.push(page);
+      const count = page === "1" ? 30 : 0;
+      return jsonResponse({
+        status: { code: "0000" },
+        results: {
+          total: 61,
+          history: Array.from({ length: count }, () => ({ point: 1 })),
+          graph: {},
+        },
+      });
+    };
+    await expect(collectVPoint({ sessionCookie: "session=value", fetcher })).rejects.toThrow(
+      "invalid",
+    );
+    expect(seenPointPages).toEqual(["1", "2"]);
+  });
+
+  test("an empty V Money page after a page with rows is not an empty history", async () => {
+    const fetcher = async (input: string | URL | Request, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/tpoint_history") {
+        return jsonResponse({
+          status: { code: "0000" },
+          results: { total: 0, history: [], graph: {} },
+        });
+      }
+      if (path !== "/api/tmoney_history") {
+        return jsonResponse({ status: { code: "0000" }, results: {} });
+      }
+      const form = init?.body;
+      if (!(form instanceof FormData)) throw new Error("expected FormData");
+      if (String(form.get("page")) !== "1") {
+        return jsonResponse({ status: { code: "0000" }, results: {} });
+      }
+      return jsonResponse({
+        status: { code: "0000" },
+        results: { total: 31, history: Array.from({ length: 30 }, () => ({ money: 1 })) },
+      });
+    };
+    await expect(collectVPoint({ sessionCookie: "session=value", fetcher })).rejects.toThrow(
+      "invalid",
+    );
+  });
 });
 
 function jsonResponse(value: unknown): Response {

@@ -19,7 +19,7 @@ the announcement, and the affected scope. `collection` defers daily collection; 
 `feature-only` records provenance but
 does not postpone collection. Sources marked `not-found` have no known window;
 that is not a claim that maintenance never happens. A rule changes only through
-an operator's edit or an operator's acceptance of a re-survey proposal
+an operator's edit or an operator's or delegated acceptance of a re-survey proposal
 ([below](#official-site-re-survey)). The page flags provenance older than
 thirty days.
 
@@ -38,13 +38,37 @@ latest unrelated run. `uncertain` means the provider attempt may have occurred a
 is not replayed automatically. The actual collection's partial outcome remains
 visible in its evidence record.
 
-If a process dies during collection, the source remains locked against another
-manual or scheduled attempt. Inspect its execution state and saved history first.
-Only after confirming the previous execution stopped, use **停止した実行を解除**.
+A running execution proves it is alive
+([ADR 0085](adr/0085-collection-lease-heartbeat.md)): it writes the lease's
+`heartbeat_at` on D1's clock with its claim and every minute while it runs. If
+a process dies during collection, its heartbeat stops, and the Processor's
+5-minute tick frees the lease once the heartbeat is 10 minutes old (a lease
+claimed by a build without heartbeats, which has none or only one older than
+its claim: once it is 60 minutes old). Each such
+release is recorded (`alarm.lease.expire`, principal `alarm:processor-tick`).
+Freeing a lease starts and replays nothing: the next nominal occurrence, or a
+new operations request, simply finds the source free.
+
+A live execution stops itself well before that. Thirteen minutes after its
+claim, or when its heartbeat finds the lease gone or has failed to write for
+three minutes, its provider work is aborted. If it has not stopped 30 s later,
+the call fails anyway; the SBI VC session object also resets itself. Its
+heartbeat continues until its work really ends, so a lease is not freed under
+a live execution that can still write it. (One that ignores its stop and cannot
+write for 10 minutes while the Processor can is the open limit in the ADR.)
+Such a run is recorded `uncertain` (`collection_deadline_exceeded` or
+`collection_lease_lost`), since the provider may have been contacted, and is
+never replayed. St George instead records a failed run with the stop as its
+reason and blocks until the operator resumes it, as after any failed St George
+run.
+
+**停止した実行を解除** remains for the operator, for a source that should not
+wait for the tick. Only after confirming the previous execution stopped, use it.
 The release compares the exact lease reference, clears no newer lease, and starts
 no collection. Repeating the confirmed request succeeds while that source's lease
 is already empty; if another execution acquired a different reference, the retry
-conflicts and leaves it intact. A source with no lease row still conflicts.
+conflicts and leaves it intact. A source with no lease row still conflicts. A
+live execution whose lease was released this way aborts within a minute.
 The button blocks repeated confirmation and submission for the same source until
 the release and its state readback finish. The page refreshes after success or
 failure, and keeps the result visible after the released lease disappears. Normal
@@ -58,16 +82,16 @@ refused as busy. A failed release on completion keeps the collection's own
 result. Either clearing statement is tried up to three times, with no wait
 between attempts. When every attempt fails, the lease stays held and the
 collector logs `collection_lease_release_failed` with only the source id and
-the attempt count; later runs are refused as busy until the release above. Both statements clear only the
-execution's own reference, never a lease another execution acquired. A process
-that dies mid-collection still needs the release above.
+the attempt count; later runs are refused as busy until the tick frees it
+(above). Both statements clear only the execution's own reference, never a
+lease another execution acquired.
 
 On 2026-11-07 two leases had been held for weeks: `vpass` since
 2026-10-12 21:00 UTC and `sbi-vc-trade` since 2026-10-23 18:15 UTC. Every later
 occurrence of those sources failed `collection_busy`. The vpass occurrence had
 ended `uncertain` with no `finished_at`, so the Processor alarm waiting on the
-collector had itself stopped; that is the stopped-execution case, which only
-the release above clears. The sbi-vc-trade keepalive had finished
+collector had itself stopped; that is the stopped-execution case, which then
+only the operator's release cleared, and which the heartbeat above now covers. The sbi-vc-trade keepalive had finished
 `collection_failed` 0.25 s after its claim. That is consistent with either
 failed-statement case above, and also with the session object stopping between
 claim and release; the records do not say which. With the owner's go-ahead
@@ -152,16 +176,26 @@ changed into proposals. It never changes a rule, a schedule or an alarm.
   time and the proposal as its decision reference; it is refused if the rule
   changed after the proposal was read, and that proposal can then only be
   rejected. **却下** records the judgement and changes nothing.
+- **Over MCP** ([ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)).
+  `kogane.schedules.survey.read` (`schedules.read`, optionally one `source`)
+  returns this section, with `truncated` when more than 200 of those proposals
+  are undecided. `kogane.schedules.survey.decide`, which any MCP client applies
+  as itself ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), rejects in one call (R1, idempotency key) and
+  accepts by prepare and confirm against the proposal's `baseRevision` (R2),
+  through the same `decideSurveyProposal` and maintenance writer, under the
+  delegated 31-day ceiling and daily counts. The accepted revision's actor kind
+  is `delegated` and its decision reference is the prepare record
+  (`delegated-audit:aud_<uuid>`). A proposal carrying `rule_absent_from_page`,
+  `rule_disabled_by_operator`, `ambiguous_rule_match`, `cancellation_stated` or
+  `contradictory_windows` is accepted only here, by the operator: over MCP its
+  acceptance is `403 operation_not_delegable` (R3), and its rejection is allowed.
+  The same holds for an acceptance that, against the source's rules at prepare
+  or confirm, would disable a rule, re-enable a disabled one, or equal or
+  overlap another enabled rule. Another source's proposal is `404 proposal_not_found`, as a missing one is.
 
 Not verified: no official page has been fetched; which pages to allow and at
 which cadence are the owner's to confirm, and pages that are PDFs, need a
 login or render with JavaScript cannot be read this way.
-
-The page also shows **AIへの委任**, the AI delegations the App reads from
-`MCP_DELEGATIONS` (none, a void configuration, or each entry's state, role,
-window, capabilities and scope), as a read-only notice; delegations are
-changed only in the deployment configuration
-([agent API](agent-api.md#the-operators-delegation-status-s8-2026-11-06)).
 
 ## Settings API
 
@@ -173,8 +207,6 @@ changed only in the deployment configuration
   execution lease after confirmation, without starting collection.
 - `POST /api/ops/v1/schedules/proposals/:id`: accept or reject one undecided
   re-survey proposal (`{"decision":"accept"}` or `"reject"`).
-- `GET /api/v2/delegations` (outside this prefix, operator only): the
-  delegation notice's read.
 
 Every write is recorded in the common audit log ([audit log](audit-log.md),
 ADR 0064) on the `ui` path: the Processor's writer ends its own batch with the
@@ -199,8 +231,9 @@ and answer `413 request_too_large`, with or without a content-length
 
 Maintenance changes are made from the management screen using this HTTP API.
 An agent can read maintenance windows through the tool below; revising one
-through MCP is an operation the owner may delegate, executed only under a
-delegation; the committed `MCP_DELEGATIONS` is empty, so none is configured.
+through MCP is an operation any MCP client the MCP Access application admits
+applies as itself, over every schedule
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 Automatic online research exists only as the proposal-only
 re-survey above, which fetches nothing until pages are confirmed. See
 [agent access](agent-api.md) and [current status](current-status.md).
@@ -232,10 +265,9 @@ and the routes above refuse every agent and every MCP-audience caller. The tools
   the operator header or a delegation reference; no write is reachable under
   `/internal/schedules/agent/`.
 - `kogane.schedules.maintenance.update` is a delegated operation: no agent-API
-  grant can name it, and it is published only to a principal whose resolved
-  delegation holds `schedules.maintenance.update`. Without one (the committed
-  `MCP_DELEGATIONS` is empty) every call on `/mcp` is refused before anything
-  reaches the Processor; with one, it applies or prepares and confirms
+  grant can name it, and it is published to every MCP client the MCP Access
+  application admits (ADR 0084). A browser caller is refused on `/mcp` before
+  anything reaches the Processor; otherwise it applies or prepares and confirms
   through the private delegated route
   ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)). Its arguments are one revision: omit `ruleId` with
   `revision: 0` to create a rule under an id the server chooses, or name a rule
@@ -255,12 +287,13 @@ kind. Its reason is a closed code (`MAINTENANCE_CHANGE_REASONS` in
 `packages/collection/src/schedule-model.ts`), and its decision reference is
 closed per actor:
 
-| Actor     | Reason                                                                                                                                 | Decision reference                                                     | Otherwise                                                                                                                   |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| operator  | `operator-edit` (the page's edit) or any other code except the survey's                                                                | none                                                                   | any other shape (a `delegated-audit:` one included) is `invalid_request`; a survey proposal's reference is `invalid_reason` |
-| operator  | `maintenance-survey-proposal-accepted`                                                                                                 | exactly `maintenance-survey:proposal:<id>`                             | none is `invalid_reason`; any other shape is `invalid_request`                                                              |
-| delegated | `official-notice-added`, `official-notice-changed`, `official-notice-withdrawn`, `outage-observed`, `owner-instructed` or `correction` | exactly `delegated-audit:aud_<uuid>` (ADR 0064's `audit_id`), required | none, a survey reference or any other shape is `invalid_request`                                                            |
-| delegated | `operator-edit` or `maintenance-survey-proposal-accepted`                                                                              | —                                                                      | `invalid_reason`, whatever the reference                                                                                    |
+| Actor     | Reason                                                                                                                                            | Decision reference                                                         | Otherwise                                                                                                                   |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| operator  | `operator-edit` (the page's edit) or any other code except the survey's                                                                           | none                                                                       | any other shape (a `delegated-audit:` one included) is `invalid_request`; a survey proposal's reference is `invalid_reason` |
+| operator  | `maintenance-survey-proposal-accepted`                                                                                                            | exactly `maintenance-survey:proposal:<id>`                                 | none is `invalid_reason`; any other shape is `invalid_request`                                                              |
+| delegated | `official-notice-added`, `official-notice-changed`, `official-notice-withdrawn`, `outage-observed`, `owner-instructed` or `correction`            | exactly `delegated-audit:aud_<uuid>` (ADR 0064's `audit_id`), required     | none, a survey reference or any other shape is `invalid_request`                                                            |
+| delegated | `maintenance-survey-proposal-accepted`, only under the private survey route's trusted `surveyProposal` option ([below](#official-site-re-survey)) | exactly `delegated-audit:aud_<uuid>`, the prepare record of the acceptance | without the option `invalid_reason`; with it, every other delegated reason is `invalid_reason`                              |
+| delegated | `operator-edit`                                                                                                                                   | —                                                                          | `invalid_reason`, whatever the reference                                                                                    |
 
 The reference is stored whole in `decision_ref`, so no delegated revision is
 ever written without the audit record behind it. The writer answers a closed
@@ -382,5 +415,6 @@ prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
 state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
 the committed MCP financial-reader grant receives no schedule authority.
-S6 survey acceptance remains unavailable pending the separate owner decision;
+S6 survey acceptance remained unavailable pending the separate owner decision
+(delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.
