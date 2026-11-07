@@ -128,15 +128,19 @@ export async function runSharedCollection(
   });
 }
 /**
- * The current JST month up to today's JST date. The bank's dates are Japanese
- * calendar dates, so the UTC date would end the window a day early before
- * 09:00 JST and, on the first of a month, request the whole previous month.
+ * Yesterday's JST date and the JST month it falls in, from that month's first
+ * day. The bank's dates are Japanese calendar dates, so the window is computed
+ * in JST whatever the Worker's UTC clock says, and it ends on the last finished
+ * JST day: a window ending today would mark a day still in progress `complete`,
+ * and a month's last day would never be requested again once the next run's
+ * window starts on the new month. On the first of a month the run therefore
+ * requests the whole previous month; the new month's first day comes the next day.
  */
 export function defaultWindow(now: Date): {
   from: string;
   to: string;
 } {
-  const to = new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const to = new Date(now.getTime() + (9 - 24) * 60 * 60 * 1000).toISOString().slice(0, 10);
   return { from: `${to.slice(0, 8)}01`, to };
 }
 function requiredSecret(value: string | undefined, name: string): string {
