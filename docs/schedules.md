@@ -166,10 +166,9 @@ and answer `413 request_too_large`, with or without a content-length
 
 Maintenance changes are made from the management screen using this HTTP API.
 An agent can read maintenance windows through the tool below; revising one
-through MCP is an operation of the operator's own MCP principal inside its
-read grant's `scheduleSources`
-([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)); the
-committed grant names none, so it revises nothing yet.
+through MCP is an operation any MCP client the MCP Access application admits
+applies as itself, over every schedule
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 Automatic online research exists only as the proposal-only
 re-survey above, which fetches nothing until pages are confirmed. See
 [agent access](agent-api.md) and [current status](current-status.md).
@@ -198,10 +197,9 @@ and the routes above refuse every agent and every MCP-audience caller. The tools
   the operator header or a delegation reference; no write is reachable under
   `/internal/schedules/agent/`.
 - `kogane.schedules.maintenance.update` is a delegated operation: no agent-API
-  grant can name it, and it is published only to the operator's own MCP
-  principal (ADR 0084). Any other caller is refused on `/mcp` before anything
-  reaches the Processor, and so is a source outside that principal's read
-  grant's `scheduleSources`; otherwise it applies or prepares and confirms
+  grant can name it, and it is published to every MCP client the MCP Access
+  application admits (ADR 0084). A browser caller is refused on `/mcp` before
+  anything reaches the Processor; otherwise it applies or prepares and confirms
   through the private delegated route
   ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)). Its arguments are one revision: omit `ruleId` with
   `revision: 0` to create a rule under an id the server chooses, or name a rule

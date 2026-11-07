@@ -370,8 +370,9 @@ target index, one more for each claimed occurrence of that job.
   existing `409 idempotency_conflict`, which it answers for every failed
   append). The command, operations and schedule writers act only for a
   principal whose subject the actor shape admitted (`principalFor`); the
-  proposal tool acts for any subject `AGENT_API_GRANTS` names, so a granted
-  subject outside the actor shape can read but cannot propose.
+  proposal tool acts for any proved caller (ADR 0084: every one holds the
+  whole-store grant), so a subject outside the actor shape can read but
+  cannot propose.
 - `replayed` and `failed` records are not capped (ADR 0064 caps `prepared`,
   `read` and `refused` only).
 - With one principal on several paths (the owner's subject on `ui` and on the

@@ -448,7 +448,7 @@ agent-only caller before they get that far
 ([ADR 0047](adr/0047-mcp-client-connection.md)); the delegated command,
 decision and operations tools (`services/app/src/delegated-command-tools.ts`,
 `delegated-decision-tools.ts`, `ops-tools.ts`) are graded instead by the
-authority ADR 0084 derives for the operator's own MCP principal
+authority ADR 0084 gives every MCP client the MCP Access application admits
 ([ADR 0063](adr/0063-delegated-ai-operation-path.md),
 [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 

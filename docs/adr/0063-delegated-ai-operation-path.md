@@ -12,9 +12,10 @@
   [ADR 0084](0084-mcp-operator-authority-without-delegation.md): items 2 and 4
   (the `MCP_DELEGATIONS` declaration, its roles, declared capabilities, scopes,
   lifetimes and budgets), the delegation part of item 11 and the 2026-11-06
-  delegation-status amendment. The operator's MCP principal now resolves from
-  `OPERATOR_SUBJECTS` and its read grant; the other items stand. Text below
-  that says `MCP_DELEGATIONS` is empty describes the state before ADR 0084.
+  delegation-status amendment. Any MCP client Access verifies now resolves,
+  over the whole store, and `AGENT_API_GRANTS` is removed too; the other items
+  stand. Text below that says `MCP_DELEGATIONS` is empty or names
+  `AGENT_API_GRANTS` describes the state before ADR 0084.
 - Date: 2026-10-09
 - Amends: [ADR 0013](0013-agent-card-purchase-read.md) (the read-only
   premise), [ADR 0039](0039-alarm-schedule-management.md) ("agents and service

@@ -114,8 +114,8 @@ change (owner, 2026-11-06 13:25 UTC). Examples:
 - adds or changes a migration (`packages/storage-d1/migrations/`) or a resource in
   `infra/resources.json`; rollback restores no database
   ([CI/CD: rollback](docs/ci-cd.md#rollback-plan-11-7));
-- changes a feature flag, grant, `OPERATOR_SUBJECTS`, Access audience, secret
-  name or binding in a `wrangler.jsonc`;
+- changes a feature flag, grant, `OPERATOR_SUBJECTS`, Access audience or
+  policy, secret name or binding in a `wrangler.jsonc`;
 - adds an agent or MCP operation or capability in
   `packages/application/src/operation-path/catalogue.ts`;
 - changes `.github/workflows/`, the release ledger or the rollback floor;
@@ -151,14 +151,15 @@ UTC.
   accepts it (INV07, [ADR 0001](docs/adr/0001-domain-axes.md);
   [economic events](docs/economic-events.md#what-is-automatic-and-what-is-proposal-only)).
 - Heuristics, rule proposal passes and AI proposals only propose (INV07
-  above). Besides the human operator in the browser, only the operator's own
-  MCP principal applies an operation: `mcp-client:<sub>`, verified by
-  Cloudflare Access on the dedicated MCP application, whose `<sub>` the UI
-  grades as the operator (`OPERATOR_SUBJECTS`). It acts as itself, never as
-  the operator, inside its own `AGENT_API_GRANTS` read scope, under the
-  operation's confirmation class (R1 direct, R2 prepare/confirm; R3 refused),
-  through the common command layer, and with an audit record. Every other
-  agent only reads and proposes
+  above). Besides the human operator in the browser, an operation is applied
+  only by an MCP client: `mcp-client:<sub>`, verified by Cloudflare Access on
+  the dedicated MCP application. No server-side table grants or narrows it
+  (owner, 2026-11-07): it reads the whole store and acts as itself, never as
+  the operator, under the operation's confirmation class (R1 direct, R2
+  prepare/confirm; R3 refused), through the common command layer, and with an
+  audit record. The MCP Access policy decides who that can be, and the owner
+  limits tools in the MCP client. A rule, heuristic or the HTTP agent route
+  only reads and proposes
   ([change lifecycle](docs/change-lifecycle.md#grants),
   [agent API](docs/agent-api.md#card-purchase-explanation)). Grants, Access,
   the operator list, secrets and deployment (R4) are never operations

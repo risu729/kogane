@@ -128,8 +128,8 @@ to agents through MCP over the same API as the screens
 ([plan, section 4](plans/2026-11-phase2-card-flow.md#4-owner-decisions-2026-11-07)).
 Neither is implemented yet: no ownership default exists and the operation catalogue has no
 settlement operation. Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
-(2026-11-07) no delegation entry is needed: the owner's MCP principal acts with the
-owner's UI authority.
+(2026-11-07) no delegation entry or grant is needed: an MCP client the MCP Access
+application admits acts with the UI's authority, as itself.
 
 ### Phase 3 — Coverage, collection requests and cross-source identity
 
@@ -191,9 +191,9 @@ Issues: [#559](https://github.com/risu729/kogane/issues/559),
 [#560](https://github.com/risu729/kogane/issues/560),
 [#561](https://github.com/risu729/kogane/issues/561). Each phase's feature is
 done only when it also works from the UI and MCP (layer 16 criteria).
-Grants (`AGENT_API_GRANTS`, `AGENT_GRANTS`, `OPERATOR_SUBJECTS`) are owner decisions
-and never part of an agent PR; there is no separate delegation since
-[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md).
+Grants (`AGENT_GRANTS`, `OPERATOR_SUBJECTS`), Access policies and secrets are owner
+decisions and never part of an agent PR; there is no delegation table and no agent read
+grant table since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md).
 Every screen operation also exists as an MCP operation over the same
 application service ([ADR 0081](adr/0081-ui-parity-through-mcp.md)); the first
 unit of this track inventories screen operations against MCP tools and adds
@@ -216,7 +216,7 @@ New collectors (#455–#510) start only when the owner asks, or after Phase 3.
 | 11: derived balances and positions      | Difference contracts and reconciliation readers; a pure fold from a start snapshot and adopted events, a commit-log knowledge selector, a one-account query, its route, agent tool, page ([ADR 0052](adr/0052-reconstructed-state-fold.md), [ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md))                                                                                                             | Applying adopted events to a starting snapshot to reconstruct balances and quantities                                                |
 | 12 + 14: cost basis and P&L             | Input gates, some P&L decomposition functions, a pure lot/disposal-allocation engine over provisional inputs, and an adapter from selected revisions that answers unsupported until a securities writer exists ([ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md))                                                                                                                                                   | A securities writer, transfers with carried cost, fee and FX evidence, persisted results, realized and unrealized P&L                |
 | 15: tax                                 | Refusal when required policy or inputs are missing                                                                                                                                                                                                                                                                                                                                                                             | Verified rules and tested outputs for a named jurisdiction, period and asset/account class                                           |
-| 16: AI / MCP                            | Shared query/explanation/proposal service and transports; scoped audit, instrument-history, instrument-coverage, account-candidate, economic-readiness and dated reported-state reads; MCP operations applied by the operator's own MCP principal ([ADR 0063](adr/0063-delegated-ai-operation-path.md), [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md))                                                     | Complete analysis and correction flows using the same services as the UI; survey acceptance over MCP                                 |
+| 16: AI / MCP                            | Shared query/explanation/proposal service and transports; scoped audit, instrument-history, instrument-coverage, account-candidate, economic-readiness and dated reported-state reads; MCP operations applied by any MCP client Access admits, as itself ([ADR 0063](adr/0063-delegated-ai-operation-path.md), [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md))                                              | Complete analysis and correction flows using the same services as the UI; survey acceptance over MCP                                 |
 
 Current implementation and limits are maintained in [current status](current-status.md).
 The detailed source-by-source fixes and dated rollout observations previously
