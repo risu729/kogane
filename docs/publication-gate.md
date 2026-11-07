@@ -98,9 +98,10 @@ SELECT count(*) FROM parse_runs WHERE status='ok' AND superseded_by_parse_run_id
 
 ## Writer
 
-`services/processor/src/publication-gate.ts` supplies two
-statements that `publishBatch` in `worker.ts` appends to the existing publish
-transaction, after the run is marked `ok` and older runs are superseded:
+`publicationStatements` in `packages/storage-d1/src/atomic/publication.ts`
+(re-exported by `services/processor/src/publication-gate.ts`, the historical
+import path) supplies two statements that `publishBatch` in the same module
+appends to the publish transaction the Worker sends, after the run is marked `ok` and older runs are superseded:
 append the event (naming the run it replaces), then upsert the pointer. Each
 carries three guards — the run was left `ok` and unsuperseded by this batch,
 the lease is still live (the same predicate as the batch's first statement),
@@ -141,8 +142,8 @@ Every normal read path now decides "current" by membership in
 | `packages/read-model/src/sql.ts` `PARSING_HEALTH_SQL`                              | newer `ok` unsuperseded parse repairs a failed job         | newer published parse repairs it                                                                         |
 | `packages/parsers/src/snapshot-query.ts` `complete_parse`                          | `status = 'ok' AND superseded_by_parse_run_id IS NULL`     | `EXISTS (... published_parse_runs ...)`; relation named by `SnapshotRelations.publishedParseRuns`        |
 | `experiments/observation-pipeline-local/src/queries.ts` `CURRENT`                  | legacy predicate                                           | projection membership                                                                                    |
-| `services/app/src/identity-api.ts` `eligible`                                      | legacy predicate                                           | join `published_parse_runs`                                                                              |
-| `services/app/src/observation-organization.ts` `historical`                        | `superseded_by_parse_run_id IS NOT NULL`                   | `pub.parse_run_id IS NULL` (LEFT JOIN projection); unadopted, unsuperseded runs are decorated for no one |
+| `packages/application/src/query/identity-pages.ts` `eligible`                      | legacy predicate                                           | join `published_parse_runs`                                                                              |
+| `packages/application/src/query/observation-organization.ts` `historical`          | `superseded_by_parse_run_id IS NOT NULL`                   | `pub.parse_run_id IS NULL` (LEFT JOIN projection); unadopted, unsuperseded runs are decorated for no one |
 | `packages/storage-d1/migrations/core/0026` `current_identity_observations`         | legacy predicate (0022)                                    | projection-driven, same plan shape                                                                       |
 | `services/processor/src/identity-store.ts` `identitySweep` ordering                | current-first by `superseded IS NOT NULL`                  | published-first by projection membership (historical runs are still interpreted, as before)              |
 | `services/processor/src/identity-audit.ts` `eligible`, lineage                     | legacy predicate; lineage by supersession                  | projection join; lineage by projection                                                                   |
@@ -175,9 +176,12 @@ the replay-plan estimate and `/status` freshness kept reading
   legacy rule, named as such), or on the line directly below one. `//`, SQL
   `--` and JSDoc `*` all count as comment markers;
 - each allowed file states it exactly as many times as the table in the test
-  records: the read model's legacy concept (1), `publication-gate.ts` (5),
-  `worker.ts` supersession batch (3), the PoC `store.ts` (4). One more
-  occurrence fails until the number is changed in review;
+  records: the read model's legacy concept (1),
+  `packages/storage-d1/src/atomic/publication.ts` (6: the projection writer,
+  its note and the supersession batch that moved there from `worker.ts`), the
+  candidate writer in `services/processor/src/release-adoption.ts` (1), the
+  PoC `store.ts` (4). One more occurrence fails until the number is changed in
+  review;
 - `packages/storage-d1/migrations/core/*.sql` may state it only up to 0026, the
   migration that introduced the projection and backfilled it from that rule;
 - `status = 'ok'` outside tests appears only in the reviewed writers and the
@@ -246,7 +250,8 @@ production Worker rollback.
 
 ## Rollback
 
-- Today (candidates not enabled): the previous evidence-browser and
+- Before candidates were enabled (`services/processor/wrangler.jsonc` now
+  declares `RELEASE_CANDIDATES_ENABLED: "true"`, so this case is historical): the previous evidence-browser and
   observation-pipeline builds still read and write the legacy rule, and the
   projection is kept consistent by the writer or by repair, so rolling either
   Worker back is safe. Rolling back the migration is not needed and not

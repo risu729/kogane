@@ -47,6 +47,7 @@ import {
   type ReaderOptions,
   ResultLimitExceededError,
   type SourceFetchRunCount,
+  type SourceParseRun,
   type SqlExecutor,
 } from "./reader";
 import { CANDIDATE_LIMIT, GLOBAL_PASS_NOTICE_LIMIT, RESULT_BOUND } from "./scope";
@@ -75,6 +76,7 @@ import {
   PROVENANCE_SQL,
   RAW_DOWNLOAD_SQL,
   SOURCE_FETCH_RUN_COUNTS_SQL,
+  SOURCE_PARSE_RUNS_SQL,
   transactionsSql,
   VISIBLE_EVIDENCE_PROBE_SQL,
 } from "./sql";
@@ -154,6 +156,12 @@ export function createObservationReader(
         JSON.stringify(listed),
       ]);
       return rows.map((row) => ({ source_id: row.source_id, run_count: Number(row.run_count) }));
+    },
+
+    async sourceParseRuns(sources): Promise<SourceParseRun[]> {
+      const listed = [...new Set(sources)].sort();
+      if (listed.length === 0) return [];
+      return list<SourceParseRun>(SOURCE_PARSE_RUNS_SQL, [JSON.stringify(listed)]);
     },
 
     unitUpdates: readUnitUpdates,

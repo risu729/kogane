@@ -198,3 +198,164 @@ test("a normalized write fault preserves raw evidence and the next alarm repairs
   expect(writes.has(`${prefix}/transactions/20260801-20260831.normalized.json`)).toBeTrue();
   expect(writes.has(`${prefix}/manifest.json`)).toBeTrue();
 });
+
+test("a retried completion does not log out again and keeps a whole backfill whole", async () => {
+  const key = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
+  const runId = "00000000-0000-4000-8000-000000000003";
+  const values = new Map<string, unknown>([
+    [
+      "progress",
+      {
+        phase: "running",
+        from: "2026-08-01",
+        to: "2026-08-31",
+        startedAt: "2026-09-01T00:00:00.000Z",
+        runId,
+        completedChunks: 1,
+        totalChunks: 1,
+        transactionCount: 0,
+        artifactCount: 0,
+        retryCount: 0,
+        lastErrorCode: null,
+        logoutSucceeded: null,
+      },
+    ],
+    ["artifacts", []],
+    ["failureCodes", []],
+    ["session", await encryptJson({}, key)],
+  ]);
+  const alarms: number[] = [];
+  const state = {
+    storage: {
+      get: async (name: string) => values.get(name),
+      put: async (name: string | Record<string, unknown>, value?: unknown) => {
+        if (typeof name === "string") values.set(name, value);
+        else for (const [field, item] of Object.entries(name)) values.set(field, item);
+      },
+      delete: async (name: string) => {
+        values.delete(name);
+      },
+      setAlarm: async (time: number) => {
+        alarms.push(time);
+      },
+      deleteAlarm: async () => undefined,
+    },
+  } as unknown as DurableObjectState;
+  // Every month is stored; the staging manifest write after the logout fails
+  // once, so the completion runs again on the next alarm.
+  let manifestFaultsRemaining = 1;
+  const bucket = {
+    put: async (objectKey: string) => {
+      if (objectKey.endsWith("/manifest.json") && manifestFaultsRemaining > 0) {
+        manifestFaultsRemaining -= 1;
+        throw new Error("manifest_write_failed");
+      }
+      return {};
+    },
+  } as unknown as R2Bucket;
+  let logouts = 0;
+  const profile = spyOn(DirectProfile, "import").mockReturnValue({
+    export: () => ({}),
+    // A session that already logged out cannot log out again.
+    logout: async () => {
+      logouts += 1;
+      if (logouts > 1) throw new Error("session_already_ended");
+    },
+  } as unknown as DirectProfile);
+  restores.push(() => profile.mockRestore());
+  const session = new SmbcBackfillSession(state, {
+    SESSION_ENCRYPTION_KEY: key,
+    SMBC_CREDENTIAL_JSON: JSON.stringify({ user: "1234567-12345", password: "synthetic-only" }),
+    COLLECTOR_SCHEMA_VERSION: "smbc-direct-backfill-worker-poc-v1",
+    DATA: bucket,
+  } as unknown as Env);
+
+  await session.alarm();
+  expect(values.get("progress")).toMatchObject({ phase: "running", retryCount: 1 });
+  expect(alarms).toHaveLength(1);
+
+  await session.alarm();
+  expect(logouts).toBe(1);
+  expect(values.get("progress")).toMatchObject({
+    phase: "success",
+    completedChunks: 1,
+    logoutSucceeded: true,
+  });
+  expect(values.get("failureCodes")).toEqual([]);
+});
+
+test("a completion that exhausts its retries after logging out keeps that logout", async () => {
+  const key = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
+  const runId = "00000000-0000-4000-8000-000000000004";
+  const values = new Map<string, unknown>([
+    [
+      "progress",
+      {
+        phase: "running",
+        from: "2026-08-01",
+        to: "2026-08-31",
+        startedAt: "2026-09-01T00:00:00.000Z",
+        runId,
+        completedChunks: 1,
+        totalChunks: 1,
+        transactionCount: 0,
+        artifactCount: 0,
+        retryCount: 0,
+        lastErrorCode: null,
+        logoutSucceeded: null,
+      },
+    ],
+    ["artifacts", []],
+    ["failureCodes", []],
+    ["session", await encryptJson({}, key)],
+  ]);
+  const state = {
+    storage: {
+      get: async (name: string) => values.get(name),
+      put: async (name: string | Record<string, unknown>, value?: unknown) => {
+        if (typeof name === "string") values.set(name, value);
+        else for (const [field, item] of Object.entries(name)) values.set(field, item);
+      },
+      delete: async (name: string) => {
+        values.delete(name);
+      },
+      setAlarm: async () => undefined,
+      deleteAlarm: async () => undefined,
+    },
+  } as unknown as DurableObjectState;
+  // The completion's manifest write fails on the first alarm and on every
+  // retry; the failure path's own manifest write then succeeds.
+  let manifestFaultsRemaining = 4;
+  const bucket = {
+    put: async (objectKey: string) => {
+      if (objectKey.endsWith("/manifest.json") && manifestFaultsRemaining > 0) {
+        manifestFaultsRemaining -= 1;
+        throw new Error("manifest_write_failed");
+      }
+      return {};
+    },
+  } as unknown as R2Bucket;
+  let logouts = 0;
+  const profile = spyOn(DirectProfile, "import").mockReturnValue({
+    export: () => ({}),
+    // A session that already logged out cannot log out again.
+    logout: async () => {
+      logouts += 1;
+      if (logouts > 1) throw new Error("session_already_ended");
+    },
+  } as unknown as DirectProfile);
+  restores.push(() => profile.mockRestore());
+  const silenced = spyOn(console, "error").mockImplementation(() => {});
+  restores.push(() => silenced.mockRestore());
+  const session = new SmbcBackfillSession(state, {
+    SESSION_ENCRYPTION_KEY: key,
+    SMBC_CREDENTIAL_JSON: JSON.stringify({ user: "1234567-12345", password: "synthetic-only" }),
+    COLLECTOR_SCHEMA_VERSION: "smbc-direct-backfill-worker-poc-v1",
+    DATA: bucket,
+  } as unknown as Env);
+
+  for (let alarm = 0; alarm < 4; alarm += 1) await session.alarm();
+  expect(logouts).toBe(1);
+  expect(values.get("progress")).toMatchObject({ phase: "failed", logoutSucceeded: true });
+  expect(values.get("failureCodes")).not.toContain("logout_failed");
+});

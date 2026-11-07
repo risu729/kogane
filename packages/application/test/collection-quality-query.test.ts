@@ -138,6 +138,11 @@ describe("the summary", () => {
       status: "uncertain",
       failureCode: "dispatch_uncertain",
     });
+    store.occurrence("sbi-vc-keepalive", {
+      nominalAt: "2099-01-02T21:15:00.000Z",
+      status: "failed",
+      failureCode: "manual_agreement_required",
+    });
   });
 
   test("names every job and source, and is the wire contract", async () => {
@@ -153,7 +158,7 @@ describe("the summary", () => {
     expect(summary.sources.map((source) => source.sourceId)).toEqual(visible.map((row) => row.id));
   });
 
-  test("a failed receipt, its runs where CORE has them, the lease and the withheld dataset", async () => {
+  test("a failed receipt, its runs where CORE has them and the lease; no dataset is withheld since ADR 0083", async () => {
     const summary = await queryCollectionQualitySummary(executor(store));
     const vpass = summary.sources.find((source) => source.sourceId === "vpass")!;
     expect(vpass.collectors).toEqual(["vpass"]);
@@ -209,7 +214,6 @@ describe("the summary", () => {
       "acquisition_partial",
       "coverage_partial",
       "unregistered_terminals",
-      "dataset_withheld",
     ]);
   });
 
@@ -242,6 +246,10 @@ describe("the summary", () => {
     expect(reasons("prestia")).toEqual(["schedule_disabled", "no_registered_run"]);
     expect(reasons("sony-bank")).toEqual(["schedule_never_ran", "no_registered_run"]);
     expect(reasons("myjcb")).toEqual(["occurrence_uncertain", "no_registered_run"]);
+    // A pending provider terms agreement waits for the owner, not for a retry.
+    expect(reasons("sbi-vc-trade")).toEqual(
+      expect.arrayContaining(["occurrence_failed", "user_action_required"]),
+    );
     expect(reasons("paypay")).toEqual(["no_collector", "no_registered_run"]);
     // The V Point Pay app job is unsupported; its e-mail path has no job.
     const pay = summary.sources.find((source) => source.sourceId === "v-point-pay")!;
@@ -323,14 +331,29 @@ describe("the cells of a source", () => {
         entry.current?.capturedAt ?? null,
       ]),
     ).toEqual([
-      ["2099-01", "current", ["coverage_not_recorded"], "2099-02-02T00:00:00.000Z"],
+      [
+        "2099-01",
+        "current",
+        [
+          "identity_not_recorded",
+          "published_without_observations",
+          "retention_not_assessed",
+          "coverage_not_recorded",
+        ],
+        "2099-02-02T00:00:00.000Z",
+      ],
       [
         "2098-12",
         "older-current",
-        ["parse_pending", "newer_capture_not_current"],
+        ["retention_not_assessed", "parse_pending", "newer_capture_not_current"],
         "2099-02-01T00:00:00.000Z",
       ],
-      ["2098-11", "no-current", ["parser_rejected", "no_current_capture"], null],
+      [
+        "2098-11",
+        "no-current",
+        ["retention_not_assessed", "parser_rejected", "no_current_capture"],
+        null,
+      ],
     ]);
     expect(page!.cells[0]).toMatchObject({
       dataset: "globalpass-activity",
@@ -374,7 +397,7 @@ describe("the cells of a source", () => {
       parser: null,
       state: "no-current",
       newest: { parses: { notQueued: 1, notEligible: 0, published: 0 } },
-      reasons: ["parse_not_queued", "no_current_capture"],
+      reasons: ["retention_not_assessed", "parse_not_queued", "no_current_capture"],
     });
     expect(validApiResponse("/api/collection-quality/sony-bank", first)).toBe(true);
     const rest = await queryCollectionQualityCells(executor(s), {
@@ -401,6 +424,10 @@ function row(overrides: Partial<CellQualityRow> = {}): CellQualityRow {
     newest_run_succeeded: 1,
     latest_producer_run_id: 7,
     artifacts: 2,
+    observations: 2,
+    unresolved_identities: 0,
+    identity_missing: 0,
+    unit_outcome_unknown: 0,
     raw_stored: 2,
     not_queued: 0,
     not_eligible: 0,
@@ -423,16 +450,16 @@ function row(overrides: Partial<CellQualityRow> = {}): CellQualityRow {
 describe("one reason per stored state", () => {
   const valid = (entry: ReturnType<typeof cell>) =>
     validCollectionQualityCells({
-      apiVersion: 1,
+      apiVersion: 2,
       sourceId: "vpass",
       latestFetchRun: null,
       cells: [entry],
       coverage: { limit: 500, truncated: false, nextOffset: null },
     });
 
-  test("a cell with every stage done has no reason", () => {
+  test("stored stages never assert provider retention completeness", () => {
     const entry = cell(row());
-    expect(entry).toMatchObject({ state: "current", reasons: [] });
+    expect(entry).toMatchObject({ state: "current", reasons: ["retention_not_assessed"] });
     expect(valid(entry)).toBe(true);
   });
 
@@ -440,6 +467,10 @@ describe("one reason per stored state", () => {
     [{ newest_run_succeeded: 0 }, ["run_not_successful"]],
     [
       { unit_failed: 1, unit_failure_code: "human_required_reauth" },
+      ["unit_failed", "user_action_required"],
+    ],
+    [
+      { unit_failed: 1, unit_failure_code: "manual_agreement_required" },
       ["unit_failed", "user_action_required"],
     ],
     [{ unit_failed: 1, unit_failure_code: "fetch_failed" }, ["unit_failed"]],
@@ -483,7 +514,9 @@ describe("one reason per stored state", () => {
     ],
   ] as const)("%o gives %o", (overrides, reasons) => {
     const entry = cell(row(overrides as Partial<CellQualityRow>));
-    expect(entry.reasons).toEqual([...reasons]);
+    expect(entry.reasons.filter((reason) => reason !== "retention_not_assessed")).toEqual([
+      ...reasons,
+    ]);
     expect(valid(entry)).toBe(true);
   });
 

@@ -10,18 +10,19 @@ import {
 import {
   preferredInstrumentNames,
   PREFERRED_INSTRUMENT_NAMES_SQL,
-} from "../src/preferred-instrument-names";
+} from "../../../packages/application/src/query/preferred-instrument-names";
 import { env } from "cloudflare:test";
-import { beforeAll, expect, it, vi } from "vitest";
+import { d1Executor } from "../../../packages/read-model/src/d1";
+import { beforeAll, expect, it } from "vitest";
 import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import {
   observationOrganizations,
   organizeRows,
   ORGANIZATION_QUERY,
-} from "../src/observation-organization";
+} from "../../../packages/application/src/query/observation-organization.ts";
 import { observationApi } from "../src/observation-api";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
-import { organizedFilterOptions } from "../src/organized-filter-options";
+import { organizedFilterOptions } from "../../../packages/application/src/query/organized-filter-options.ts";
 
 beforeAll(seedRegistry);
 const kinds = ["transaction", "balance", "position", "valuation"] as const;
@@ -153,7 +154,7 @@ async function seed(
 
 it("organizes all four kinds without replacing stored fields and preserves missing interpretation", async () => {
   const { refs } = await seed();
-  const result = await observationOrganizations(env.DB, refs);
+  const result = await observationOrganizations(d1Executor(env.DB), refs);
   expect(result.size).toBe(4);
   for (const ref of refs)
     expect(result.get(`${ref.kind}:${ref.id}`)).toMatchObject({
@@ -168,11 +169,11 @@ it("organizes all four kinds without replacing stored fields and preserves missi
     source_account: "original-account",
     quantity_text: "2",
   };
-  const rows = await organizeRows(env.DB, "position", [source]);
+  const rows = await organizeRows(d1Executor(env.DB), "position", [source]);
   expect(rows[0]).toMatchObject(source);
   expect(source).not.toHaveProperty("organization");
   expect(
-    (await observationOrganizations(env.DB, [{ kind: "position", id: 999999 }])).get(
+    (await observationOrganizations(d1Executor(env.DB), [{ kind: "position", id: 999999 }])).get(
       "position:999999",
     ),
   ).toEqual({ state: "unavailable", lineage: null, account: null, instruments: [] });
@@ -186,7 +187,7 @@ it("binds official products only to their own snapshot evidence, including nativ
   await prepare(
     `INSERT INTO account_mappings VALUES ('am2','ref',2,'account','manual','nickname',1,'2100','旅行用','identified')`,
   ).run();
-  const result = await observationOrganizations(env.DB, refs);
+  const result = await observationOrganizations(d1Executor(env.DB), refs);
   for (const kind of ["balance", "valuation"] as const) {
     const ref = refs.find((r) => r.kind === kind)!;
     const organization = result.get(`${kind}:${ref.id}`)!;
@@ -220,7 +221,7 @@ it("binds official products only to their own snapshot evidence, including nativ
     .bind(acquisition.id)
     .run();
   expect(
-    [...(await observationOrganizations(env.DB, refs)).values()].every(
+    [...(await observationOrganizations(d1Executor(env.DB), refs)).values()].every(
       (r) => r.product === undefined,
     ),
   ).toBe(true);
@@ -232,7 +233,7 @@ it("bounds product metadata before it leaves D1 and preserves oversized source e
     currency: "JPY",
     padding: "x".repeat(9000),
   });
-  const result = await observationOrganizations(env.DB, refs);
+  const result = await observationOrganizations(d1Executor(env.DB), refs);
   for (const ref of refs.filter((row) => row.kind === "balance" || row.kind === "valuation")) {
     expect(result.get(`${ref.kind}:${ref.id}`)!.product).toMatchObject({
       status: "unresolved",
@@ -249,14 +250,14 @@ it("bounds product metadata before it leaves D1 and preserves oversized source e
     currency: "JPY",
     padding: "x".repeat(9000),
   });
-  const projected = await observationOrganizations(env.DB, harmless.refs);
+  const projected = await observationOrganizations(d1Executor(env.DB), harmless.refs);
   expect(projected.get(`balance:${harmless.refs[1]!.id}`)!.product!.status).toBe("identified");
   const sony = await seed("sony-bank:deposit:JPY", {
     code: "x".repeat(9000),
     currency: "JPY",
     sony: true,
   });
-  const sonyResult = await observationOrganizations(env.DB, sony.refs);
+  const sonyResult = await observationOrganizations(d1Executor(env.DB), sony.refs);
   expect(sonyResult.get(`balance:${sony.refs[1]!.id}`)!.product).toMatchObject({
     status: "unresolved",
     productId: null,
@@ -278,7 +279,9 @@ it("uses current manual claims but does not publish an unsealed newer identity r
       `INSERT INTO identity_observations VALUES ('new','unsealed','transaction',?,'ref','am2','[]')`,
     ).bind(refs[0]!.id),
   ]);
-  const result = (await observationOrganizations(env.DB, refs)).get(`transaction:${refs[0]!.id}`)!;
+  const result = (await observationOrganizations(d1Executor(env.DB), refs)).get(
+    `transaction:${refs[0]!.id}`,
+  )!;
   expect(result.account).toMatchObject({ label: "手動口座", method: "manual", revision: 2 });
   expect(result.instruments[0]).toMatchObject({ label: "手動銘柄", method: "manual", revision: 2 });
 });
@@ -290,7 +293,7 @@ it("excludes acquisition evidence revoked from financial visibility", async () =
   )
     .bind(acquisition.id)
     .run();
-  const result = await observationOrganizations(env.DB, refs);
+  const result = await observationOrganizations(d1Executor(env.DB), refs);
   expect([...result.values()].every((r) => r.state === "unavailable")).toBe(true);
 });
 
@@ -302,7 +305,7 @@ it("retains historical names without presenting superseded observations as curre
     .bind(acquisition.artifacts[0]!.id)
     .first<{ id: number }>();
   await supersedeParse(parseId, replacement!.id);
-  const result = await observationOrganizations(env.DB, refs);
+  const result = await observationOrganizations(d1Executor(env.DB), refs);
   expect(
     [...result.values()].every((r) => r.state === "organized" && r.lineage === "historical"),
   ).toBe(true);
@@ -313,11 +316,11 @@ it("accepts the full existing position/valuation fanout and bounds each query to
     kind: "valuation" as const,
     id: 900000 + id,
   }));
-  const result = await observationOrganizations(env.DB, refs);
+  const result = await observationOrganizations(d1Executor(env.DB), refs);
   expect(result.size).toBe(5501);
   expect([...result.values()].every((r) => r.state === "unavailable")).toBe(true);
   await expect(
-    observationOrganizations(env.DB, [...refs, { kind: "valuation", id: 1000000 }]),
+    observationOrganizations(d1Executor(env.DB), [...refs, { kind: "valuation", id: 1000000 }]),
   ).rejects.toThrow("organization_reference_limit");
 });
 
@@ -356,7 +359,7 @@ it("adds current filter labels without changing source filter values or inventin
     ],
   };
   for (const kind of ["transactions", "balances", "positions"]) {
-    const result = await organizedFilterOptions(env.DB, kind, options);
+    const result = await organizedFilterOptions(d1Executor(env.DB), kind, options);
     expect(result.accounts[0]).toEqual({
       ...options.accounts[0],
       display_name: "整理された口座",
@@ -376,10 +379,10 @@ it("adds current filter labels without changing source filter values or inventin
       `INSERT INTO account_mappings VALUES ('am2','ref',2,'account','manual','correction',1,'2100','手動の絞り込み名','identified')`,
     ),
   ]);
-  const updated = await organizedFilterOptions(env.DB, "transactions", options);
+  const updated = await organizedFilterOptions(d1Executor(env.DB), "transactions", options);
   expect(updated.accounts[0]!.display_name).toBe("手動の絞り込み名");
-  expect(await organizedFilterOptions(env.DB, "artifacts", options)).toBe(options);
-  expect(await organizedFilterOptions(env.DB, "constructor", options)).toBe(options);
+  expect(await organizedFilterOptions(d1Executor(env.DB), "artifacts", options)).toBe(options);
+  expect(await organizedFilterOptions(d1Executor(env.DB), "constructor", options)).toBe(options);
 });
 
 it("does not choose one account when a raw filter scope has multiple organized targets", async () => {
@@ -392,7 +395,7 @@ it("does not choose one account when a raw filter scope has multiple organized t
     metrics: [],
     accounts: [{ source_id: "other-test", source_account: raw }],
   };
-  const result = await organizedFilterOptions(env.DB, "transactions", options);
+  const result = await organizedFilterOptions(d1Executor(env.DB), "transactions", options);
   expect(result.accounts[0]).toEqual({
     ...options.accounts[0],
     display_name: null,
@@ -404,7 +407,9 @@ it("does not choose one account when a raw filter scope has multiple organized t
   )
     .bind(second.acquisition.id)
     .run();
-  expect((await organizedFilterOptions(env.DB, "transactions", options)).accounts[0]).toEqual({
+  expect(
+    (await organizedFilterOptions(d1Executor(env.DB), "transactions", options)).accounts[0],
+  ).toEqual({
     ...options.accounts[0],
     display_name: "整理された口座",
     organization_ambiguous: false,
@@ -415,13 +420,12 @@ it("does not choose one account when a raw filter scope has multiple organized t
     .bind(first.acquisition.id)
     .run();
   expect(
-    (await organizedFilterOptions(env.DB, "transactions", options)).accounts[0]!.display_name,
+    (await organizedFilterOptions(d1Executor(env.DB), "transactions", options)).accounts[0]!
+      .display_name,
   ).toBeNull();
 });
 
 it("rejects an oversized distinct-reference result even for one raw filter group", async () => {
-  const statement = env.DB.prepare("SELECT 1");
-  const empty = await statement.all();
   const output = Array.from({ length: 5001 }, (_, i) => ({
     source_id: "other-test",
     producer_id: "evidence-test",
@@ -431,20 +435,19 @@ it("rejects an oversized distinct-reference result even for one raw filter group
     target_id: "same-target",
     method: "rule",
   }));
-  vi.spyOn(statement, "all").mockResolvedValue({ ...empty, results: output });
-  vi.spyOn(env.DB, "prepare").mockReturnValue(statement);
-  try {
-    await expect(
-      organizedFilterOptions(env.DB, "transactions", {
-        sources: [],
-        instruments: [],
-        metrics: [],
-        accounts: [{ source_id: "other-test", source_account: "shared-scope" }],
-      }),
-    ).rejects.toThrow("filter_organization_budget");
-  } finally {
-    vi.restoreAllMocks();
-  }
+  // A reader that returns more distinct references than the budget allows.
+  const reads = {
+    all: async <T>() => output as T[],
+    first: async () => null,
+  };
+  await expect(
+    organizedFilterOptions(reads, "transactions", {
+      sources: [],
+      instruments: [],
+      metrics: [],
+      accounts: [{ source_id: "other-test", source_account: "shared-scope" }],
+    }),
+  ).rejects.toThrow("filter_organization_budget");
 });
 
 it("classifies the exact mapping assignment, preserves read modes and equals frozen SQL on scaled stores", async () => {
@@ -506,7 +509,7 @@ it("classifies the exact mapping assignment, preserves read modes and equals fro
           old,
       ),
     ).toEqual(legacy);
-    const rows = await observationOrganizations(env.DB, refs, mode);
+    const rows = await observationOrganizations(d1Executor(env.DB), refs, mode);
     for (const [n, ref] of refs.entries()) {
       const expected = mode === "as-recorded" ? "automatic" : expectedOrigins[Math.floor(n / 4)];
       const value = rows.get(ref.kind + ":" + ref.id)!;
@@ -547,7 +550,7 @@ it("a current delegated name overlay never inherits the actor of the as-recorded
     "current-name-overlay",
   );
   await env.DB.batch(fixture.writes.map((write) => env.DB.prepare(write.sql).bind(...write.args)));
-  const recorded = await observationOrganizations(env.DB, refs, "as-recorded");
+  const recorded = await observationOrganizations(d1Executor(env.DB), refs, "as-recorded");
   for (const value of recorded.values()) {
     expect(value.instruments[0]).toMatchObject({
       revision: 1,
@@ -571,6 +574,6 @@ it("a current delegated name overlay never inherits the actor of the as-recorded
       .all<{ detail: string }>()
   ).results;
   expect(plan.some((row) => /SCAN (origin_d|origin_op)\b/u.test(row.detail))).toBe(false);
-  const names = await preferredInstrumentNames(env.DB, [identifier!.id]);
+  const names = await preferredInstrumentNames(d1Executor(env.DB), [identifier!.id]);
   expect(names.get(identifier!.id)!.decisionOrigin).toBe("delegated");
 });

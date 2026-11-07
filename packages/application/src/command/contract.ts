@@ -7,6 +7,7 @@
 import { isOneOf, isRecord, isText } from "../../../domain/src/guards.ts";
 import type { OwnershipSelfDeclaration } from "../../../domain/src/ownership-declaration.ts";
 import { RELATION_KINDS, type RelationKind } from "../../../domain/src/decisions.ts";
+import { validLocalDateText } from "../../../domain/src/time.ts";
 import {
   CARD_PURCHASE_EXCLUSION_REASONS,
   type CardPurchaseExclusionReason,
@@ -227,6 +228,7 @@ export function validPayload(kind: ChangeKind, value: unknown): value is ChangeP
     value.fromRef !== value.toRef &&
     optionalDate(value.validFrom) &&
     optionalDate(value.validTo) &&
+    (value.validFrom === null || value.validTo === null || value.validFrom <= value.validTo) &&
     Array.isArray(value.evidenceRefs) &&
     value.evidenceRefs.length <= 100 &&
     value.evidenceRefs.every((ref) => isText(ref, 512)) &&
@@ -276,8 +278,9 @@ function exactKeys(value: Record<string, unknown>, keys: readonly string[]): boo
   return own.length === keys.length && keys.every((key) => own.includes(key));
 }
 
+/** Null, or a calendar day `YYYY-MM-DD` (`2026-02-30` and `2026-13-01` are not days). */
 function optionalDate(value: unknown): value is string | null {
-  return value === null || (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/u.test(value));
+  return value === null || validLocalDateText(value);
 }
 
 export function isChangeKind(value: unknown): value is ChangeKind {

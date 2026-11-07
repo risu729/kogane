@@ -27,7 +27,7 @@ import type {
 } from "../../../packages/application/src/index";
 import { type Answer, auditContext, auditedRoute, UpstreamLost, upstreamOutcome } from "./audit";
 import { principalFor } from "./grants";
-import { HttpError, json } from "./http";
+import { boundedText, HttpError, json } from "./http";
 
 const PREFIX = "/api/command/v1/";
 export const COMMAND_OPERATIONS = ["plan", "simulate", "approve", "commit", "operation"] as const;
@@ -136,11 +136,7 @@ async function commandRoute(
       response: json({ error: "approval_required" }, 403),
       outcome: { result: "refused", code: "approval_required" },
     };
-  const length = Number(request.headers.get("content-length") ?? "0");
-  if (!Number.isSafeInteger(length) || length > BODY_LIMIT)
-    throw new HttpError(413, "request_too_large");
-  const body = await request.text();
-  if (body.length > BODY_LIMIT) throw new HttpError(413, "request_too_large");
+  const body = await boundedText(request, BODY_LIMIT);
   try {
     const parsed: unknown = JSON.parse(body === "" ? "{}" : body);
     if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed))

@@ -833,6 +833,72 @@ test("moneyforward-me: the account unit is the v2 identity, with no secret, and 
   expect(registered.runStatus).toBe("success");
 });
 
+test("moneyforward-me: sparse captured months register as separate sealed CORE ranges (#452)", async () => {
+  const page = (dataset: string, filename: string, body: string) => ({
+    dataset,
+    filename,
+    mediaType: "text/html; charset=utf-8",
+    body,
+  });
+  const plan = await moneyForwardRunPlan({
+    schemaVersion: "moneyforward-worker-poc-v1",
+    runId: RUN_ID,
+    startedAt: STARTED_AT,
+    completedAt: COMPLETED_AT,
+    status: "partial",
+    accountDetailCount: 1,
+    monthlyFragmentCount: 2,
+    artifacts: [
+      page("accounts-index", "accounts.html", `<a href="/accounts/show/synthetic-a">x</a>`),
+      page(
+        "account-detail",
+        "account-detail-01.html",
+        `<input name="account[id_hash]" value="synthetic-a"><input name="service[id]" value="synthetic-s">`,
+      ),
+      page("monthly-transactions", "account-01-month-2099-01.html", "<div>synthetic January</div>"),
+      page("monthly-transactions", "account-01-month-2099-03.html", "<div>synthetic March</div>"),
+    ],
+    failures: [{ operation: "collect", errorType: "Synthetic", message: "collector_partial" }],
+  });
+  const h = harness();
+  try {
+    expect((await persistRun(h.bucket, plan)).outcome).toBe("persisted");
+    const result = await registerCollectionRun(h.env, { source: "moneyforward-me", runId: RUN_ID });
+    expect(result).toMatchObject({ outcome: "registered", artifacts: 5 });
+    if (result.outcome !== "registered") throw new Error("unreachable");
+    expect(
+      h.db
+        .query(
+          `SELECT range_kind, precision, basis, start_value, end_value
+             FROM fetch_run_ranges WHERE fetch_run_id=? ORDER BY range_key`,
+        )
+        .all(result.fetchRunId),
+    ).toEqual([
+      {
+        range_kind: "declared_coverage",
+        precision: "month",
+        basis: "manifest",
+        start_value: "2099-01",
+        end_value: "2099-01",
+      },
+      {
+        range_kind: "declared_coverage",
+        precision: "month",
+        basis: "manifest",
+        start_value: "2099-03",
+        end_value: "2099-03",
+      },
+    ]);
+    expect(
+      h.db
+        .query("SELECT count(*) AS n FROM fetch_run_seals WHERE fetch_run_id=?")
+        .get(result.fetchRunId),
+    ).toEqual({ n: 1 });
+  } finally {
+    h.db.close();
+  }
+});
+
 test("sony-bank: responses, exports, redacted statements and the summary register and seal", async () => {
   const plan = await sonyBankRunPlan({
     schemaVersion: "sony-bank-worker-poc-v2",
@@ -933,10 +999,9 @@ test("vpass: one card's sanitized envelopes and the run manifest register and se
     "sanitized_provider_capture/transformed/source_not_retained_for_security",
   ]);
   expect(registered.units).toEqual([{ unit_key: "card-001", artifacts: 4, declared: 4 }]);
-  // ADR 0022/0023 withhold Vpass from a parser dataset until the collector's
-  // binding key is set and its tokens match the importer's. The pages' role
-  // must not lift that hold.
-  expect(registered.datasets).toEqual([null]);
+  // Since ADR 0083 (`terminal-registration-v3`) the statement page carries
+  // `statement-page`; the card list, selection, discovery and manifest none.
+  expect(registered.datasets).toEqual([null, "statement-page"]);
 });
 
 test("ADR 0026: a successful plan's units state what the parse gate reads", () => {

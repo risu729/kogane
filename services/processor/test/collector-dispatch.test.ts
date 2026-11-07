@@ -14,6 +14,7 @@ import {
   d1CommandStore,
   readOperation,
   requestCollection,
+  requestImport,
   requestSessionRefresh,
   type CommandStore,
   type OperationReceipt,
@@ -302,6 +303,42 @@ test("success: accepted, started, collected and published are distinct, timestam
   expect(w.calls).toHaveLength(1);
 });
 
+test("a throwing import leaves collected publication tracking able to finish", async () => {
+  const w = world();
+  const operationId = await collect(w);
+  await w.tick(T0 + MINUTE);
+  expect(await registerCollectionRun(w.env, { source: SOURCE, runId: "op-run-001" })).toMatchObject(
+    { outcome: "registered" },
+  );
+  publishArtifact(w, "balance.json");
+  workItemProcessed(w);
+
+  const imported = await requestImport({
+    store: w.store,
+    principal: PRINCIPAL,
+    now: ACCEPTED_AT,
+    request: { source: SOURCE, runId: "run-broken" },
+  });
+  if (!imported.ok) throw new Error("acceptance failed");
+  const get = w.bucket.get.bind(w.bucket);
+  w.bucket.get = async (key) => {
+    if (key === `runs/${SOURCE}/run-broken/terminal.json`) throw new Error("synthetic R2 outage");
+    return get(key);
+  };
+
+  expect(await w.tick(T0 + 10 * MINUTE)).toMatchObject({
+    claimed: 1,
+    retried: 0,
+    failed: 1,
+    tracked: 1,
+    published: 1,
+    started: 0,
+  });
+  expect((await read(w, operationId)).execution?.state).toBe("published");
+  expect((await read(w, imported.receipt.operationId)).dispatch.state).toBe("dispatch_pending");
+  expect(w.calls).toHaveLength(1);
+});
+
 test("resend with the same key is the same operation and never a second run", async () => {
   const w = world();
   const operationId = await collect(w, "same-key");
@@ -464,6 +501,19 @@ test("lease conflict found by the collector itself declines with collection_busy
   expect(receipt.execution).toMatchObject({ state: "failed", reasonCode: "collection_busy" });
   expect(receipt.failureCode).toBe("collection_busy");
   expect(rows(w.db, "SELECT count(*) AS n FROM collection_execution_leases")).toEqual([{ n: 0 }]);
+});
+
+test("a collector that stopped itself after it may have reached the provider ends uncertain", async () => {
+  // ADR 0085: the holder hit its deadline (or lost its lease) mid-collection,
+  // so the provider attempt may have happened; it is never replayed.
+  for (const code of ["collection_deadline_exceeded", "collection_lease_lost"]) {
+    const w = world();
+    w.answer = async () => ({ status: "failed", runIds: [], failureCode: code });
+    const operationId = await collect(w);
+    await w.tick(T0 + MINUTE);
+    const receipt = await read(w, operationId);
+    expect(receipt.execution).toMatchObject({ state: "uncertain", reasonCode: code });
+  }
 });
 
 test("unsupported session refresh ends with a closed terminal code and contacts nobody", async () => {

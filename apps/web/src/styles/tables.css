@@ -351,6 +351,24 @@ th[aria-sort]:not([aria-sort="none"]) .sort-arrow {
   min-width: 44rem;
 }
 
+/* 監査ログ: one record per row; secondary codes sit under their cell's lead. */
+.audit-table {
+  min-width: 64rem;
+}
+.audit-table td {
+  vertical-align: top;
+}
+.audit-table code {
+  font-size: var(--text-xs);
+}
+.audit-meta,
+.audit-diff-fields {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+
 /* The run disclosure keeps its summary on one line; the tool name and the
  * external run id it opens on may be long tokens, and those wrap. */
 .fetch-run-table .col-run {

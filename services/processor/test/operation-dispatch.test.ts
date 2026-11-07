@@ -204,6 +204,87 @@ test("an import of a blocked terminal records the block and does not complete", 
   });
 });
 
+test("a throwing CORE registration backs off while the next import progresses", async () => {
+  const harness = withDispatch();
+  for (const runId of ["run-001", "run-002"]) {
+    await persistSyntheticRun(harness, { run: { runId } });
+  }
+  const operations: string[] = [];
+  for (const runId of ["run-001", "run-002"]) {
+    const accepted = await requestImport({
+      store: harness.store,
+      principal: PRINCIPAL,
+      now: NOW,
+      request: { source: SOURCE, runId },
+    });
+    if (!accepted.ok) throw new Error("acceptance failed");
+    operations.push(accepted.receipt.operationId);
+  }
+  // Take the failing import first, so the later request proves the lane continues.
+  harness.db.run("UPDATE ops_requests SET available_at_ms=1 WHERE operation_id=?", [
+    operations[0]!,
+  ]);
+  harness.db.run("UPDATE ops_requests SET available_at_ms=2 WHERE operation_id=?", [
+    operations[1]!,
+  ]);
+  expect(
+    harness.db
+      .query<{ operation_id: string }, []>(
+        "SELECT operation_id FROM ops_requests ORDER BY available_at_ms,operation_id LIMIT 1",
+      )
+      .get()!.operation_id,
+  ).toBe(operations[0]!);
+  harness.db.exec(`CREATE TRIGGER synthetic_import_failure BEFORE INSERT ON fetch_run_seals
+    WHEN (SELECT source_run_key FROM fetch_runs WHERE id=NEW.fetch_run_id) GLOB 'run-001:*'
+    BEGIN SELECT RAISE(ABORT, 'synthetic_unlisted_refusal'); END`);
+  const at = (minutes: number) => () => new Date(Date.parse(NOW) + minutes * 60_000);
+  expect(await dispatchOperations(harness.env, { now: at(1) })).toMatchObject({
+    claimed: 2,
+    retried: 0,
+    dispatched: 1,
+    failed: 1,
+  });
+  const waiting = await receipt(harness, operations[0]!);
+  if (!waiting.ok) throw new Error("receipt missing");
+  expect(waiting.receipt).toMatchObject({
+    status: "accepted",
+    failureCode: "registration_failed",
+    dispatch: { state: "dispatch_pending", attempts: 1 },
+  });
+  // A throw is not a terminal verdict and writes no operation stage.
+  expect(stageStates(waiting.receipt.stages)).toEqual([
+    "registered:pending",
+    "parsed:pending",
+    "adopted:pending",
+    "projected:pending",
+  ]);
+  expect(
+    harness.db
+      .query("SELECT count(*) AS n FROM ops_request_stages WHERE operation_id=?")
+      .get(operations[0]!),
+  ).toEqual({ n: 0 });
+  const healthy = await receipt(harness, operations[1]!);
+  if (!healthy.ok) throw new Error("receipt missing");
+  expect(healthy.receipt.dispatch.state).toBe("dispatched");
+  expect(await dispatchOperations(harness.env, { now: at(5) })).toMatchObject({ claimed: 0 });
+
+  harness.db.exec("DROP TRIGGER synthetic_import_failure");
+  expect(await dispatchOperations(harness.env, { now: at(6) })).toMatchObject({
+    claimed: 1,
+    dispatched: 1,
+    retried: 0,
+    failed: 0,
+  });
+  const recovered = await receipt(harness, operations[0]!);
+  if (!recovered.ok) throw new Error("receipt missing");
+  expect(recovered.receipt.dispatch).toMatchObject({ state: "dispatched", attempts: 2 });
+  expect(recovered.receipt.failureCode).toBe("registration_failed");
+  expect(stageOf(recovered.receipt.stages, "registered")).toMatchObject({
+    state: "completed",
+    attempts: 1,
+  });
+});
+
 test("a projection rebuild is handed over, never completed on the handover", async () => {
   const harness = withDispatch();
   const accepted = await requestProjectionRebuild({
@@ -265,4 +346,93 @@ test("a collection request whose connection is not enabled waits instead of comp
   expect(await dispatchOperations(harness.env, { now: at, connections })).toMatchObject({
     claimed: 0,
   });
+});
+
+test("an import whose registration throws moves behind the queue and never fails the lane", async () => {
+  // A throw is not a verdict about the terminal (R2 or CORE unavailable, or a
+  // refusal the derivation did not foresee). Before this was caught it failed
+  // the whole lane tick, wrote nothing to the request and left it at the head
+  // of the queue, so every later request and the collector tracking waited
+  // for as long as the cause lasted.
+  const harness = withDispatch();
+  for (const runId of ["run-001", "run-002"]) {
+    await persistSyntheticRun(harness, { run: { runId } });
+  }
+  const operations: string[] = [];
+  for (const runId of ["run-001", "run-002"]) {
+    const accepted = await requestImport({
+      store: harness.store,
+      principal: PRINCIPAL,
+      now: NOW,
+      request: { source: SOURCE, runId },
+    });
+    if (!accepted.ok) throw new Error("acceptance failed");
+    operations.push(accepted.receipt.operationId);
+  }
+  // The two runs share content-addressed objects, so R2 failing on its first
+  // read fails exactly the registration the lane takes first, whichever
+  // request the queue order puts at its head.
+  const head = harness.bucket.head.bind(harness.bucket);
+  let reads = 0;
+  harness.bucket.head = async (key: string) => {
+    reads += 1;
+    if (reads === 1) throw new Error("synthetic r2 outage: " + key);
+    return head(key);
+  };
+  const queueHead = harness.db
+    .query<{ operation_id: string }, []>(
+      "SELECT operation_id FROM ops_requests ORDER BY available_at_ms,operation_id LIMIT 1",
+    )
+    .get()!.operation_id;
+  const behind = operations.find((id) => id !== queueHead)!;
+  const at = new Date("2026-09-11T00:01:00Z");
+  const codes: string[] = [];
+
+  // The lane completes, and the request behind is dispatched in the same tick.
+  expect(
+    await dispatchOperations(harness.env, { now: () => at, onFailure: (code) => codes.push(code) }),
+  ).toMatchObject({ claimed: 2, dispatched: 1, failed: 1, retried: 0 });
+  // The error's class only, never its message (which here quotes a key).
+  expect(codes).toEqual(["Error"]);
+  const dispatched = await receipt(harness, behind);
+  if (!dispatched.ok) throw new Error("receipt missing");
+  expect(dispatched.receipt.dispatch.state).toBe("dispatched");
+  expect(stageOf(dispatched.receipt.stages, "registered")).toMatchObject({ state: "completed" });
+
+  // The one that threw is kept, counted as attempted, says why, and has no
+  // stage row: nothing about its terminal was judged.
+  const thrown = await receipt(harness, queueHead);
+  if (!thrown.ok) throw new Error("receipt missing");
+  expect(thrown.receipt.status).toBe("accepted");
+  expect(thrown.receipt.dispatch).toMatchObject({ state: "dispatch_pending", attempts: 1 });
+  expect(thrown.receipt.failureCode).toBe("registration_failed");
+  expect(
+    harness.db
+      .query<{ n: number }, [string]>(
+        "SELECT count(*) AS n FROM ops_request_stages WHERE operation_id=?1",
+      )
+      .get(queueHead),
+  ).toEqual({ n: 0 });
+  // It moved behind the queue: not taken again until its retry time.
+  const availableAt = harness.db
+    .query<{ available_at_ms: number }, [string]>(
+      "SELECT available_at_ms FROM ops_requests WHERE operation_id=?1",
+    )
+    .get(queueHead)!.available_at_ms;
+  expect(availableAt).toBeGreaterThan(at.valueOf());
+  expect(await dispatchOperations(harness.env, { now: () => at })).toMatchObject({ claimed: 0 });
+
+  // A later look registers it once the cause is gone.
+  const later = new Date(availableAt);
+  expect(await dispatchOperations(harness.env, { now: () => later })).toMatchObject({
+    claimed: 1,
+    dispatched: 1,
+    failed: 0,
+  });
+  const recovered = await receipt(harness, queueHead);
+  if (!recovered.ok) throw new Error("receipt missing");
+  expect(recovered.receipt.dispatch).toMatchObject({ state: "dispatched", attempts: 2 });
+  // A dispatch that names no code keeps the last one (docs/processor.md §7).
+  expect(recovered.receipt.failureCode).toBe("registration_failed");
+  expect(stageOf(recovered.receipt.stages, "registered")).toMatchObject({ state: "completed" });
 });

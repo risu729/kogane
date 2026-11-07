@@ -1,7 +1,9 @@
 # ADR 0001: Keep A/B/C/D as provenance, add independent domain axes
 
-- Status: accepted (implementation step A01)
-- Date: 2026-09-09
+- Status: accepted (implementation step A01); the
+  [2026-11-06 amendment](#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
+  is proposed until the PR that carries it merges, then accepted
+- Date: 2026-09-09; amended 2026-11-06
 - Review basis: whole-architecture addendum 00, 04 (AR01–AR18), 05, 06, 13 §1–§3
   of the design review of commit `130912af`
 
@@ -188,3 +190,168 @@ Locally with synthetic data only: `mise run //packages/domain:typecheck` and `bu
 `packages/domain` (SYN01–SYN24 and per-module unit tests),
 `mise run //packages/domain:ci`, `mise run ci:root`, and
 repository lint via `hk`. No production data, D1 or Workers were involved.
+
+## Amendment 2026-11-06: a relation triple's status is its newest decision
+
+- Status: accepted (merged 2026-11-06 in #957)
+- Date: 2026-11-06
+- Carried by: `projectionRelationsSql` in
+  `packages/read-model/src/balance-projection-sql.ts`, `RELATION_SQL` in
+  `services/processor/src/balance-projection-job.ts`,
+  `SCOPE_RELATION_RELEASE` (`scope-relations-v2`) in
+  `packages/read-model/src/balance-projection.ts`,
+  [balance read model](../balance-read-model.md#how-a-row-gets-its-state),
+  [decision log](../decision-log.md), [projection input](../projection-input.md)
+
+### Context
+
+`TypedRelation.status` (INV07 above) is stored as `entity_relations.status`,
+and the table is append-only (migration 0029). Every judgement appends a row
+with its own decision, whose `subject_ref` is that row's id:
+`relation.accept` and `relation.reject`
+(`packages/application/src/operations/relation-writes.ts`) write `accepted`
+or `rejected` rows; accepting a reconciliation proposal
+(`services/processor/src/reconciliation-commands.ts`, whose kinds include
+`statement_covers`) and the card purchase provider link
+(`services/processor/src/card-purchase-job.ts`, `pending_to_posted`) write
+`accepted` rows; and an agent's `reconcile.propose`
+(`packages/application/src/propose-store.ts`) writes a `proposed` row for any relation
+kind. No relation write sets `superseded_by` on an earlier relation decision,
+and the 0029 trigger could not let it: a decision is superseded only by a
+later decision on the same `subject_ref`, and each row is its own subject. So
+the history of one relation is every row of its triple (kind, `from_ref`,
+`to_ref`), and which row is in force is a reader's rule.
+
+The balance projection read every row of `same_account`,
+`connection_contains`, `account_has_pocket` and `statement_covers` and turned
+each `accepted` one into a scope relation. A `relation.reject` after a
+`relation.accept` of the same triple therefore left the acceptance in force:
+two scopes the reviewer had separated stayed one measurement (`same`), or a
+containment stayed a `subset`, until the end of time. The CORE schema has no
+view that names a triple's current row.
+
+### Options considered
+
+1. **Keep reading every row.** Rejected: a rejection could never withdraw an
+   acceptance, which is the defect.
+2. **The newest row of any status**, as the change lifecycle's plan reads a
+   triple's `current_status` (`created_at DESC, id DESC` in
+   `packages/application/src/operations/targets.ts`) and as
+   `LISTED_AS_SQL` reads `listed_as`. Rejected for adoption: an agent's
+   proposal appended after an acceptance would then withdraw it, so a
+   proposal would change an adopted set, against INV07 and the agent API's
+   guarantee that a proposal changes no balance
+   ([agent API](../agent-api.md#proposals-are-not-adoptions)).
+3. **The newest decision; a proposal never supersedes a decision.** Chosen.
+4. **A CORE view of current relations that every reader joins.** Not now:
+   it is a migration, the readers below order a triple's rows in three
+   slightly different ways, and moving each onto one view needs its own
+   equality proof. This amendment states the rule a view would implement.
+
+### Decision
+
+- A relation triple's current row is its newest **decision** (`accepted`,
+  `rejected` or `released`), ordered by `created_at` and then `id`, newest
+  first, the change lifecycle's order. A triple with no decision reads its
+  newest proposal, which adopts nothing. A later `proposed` row never
+  replaces a decision. The validity window (`valid_from`, `valid_to`) is not
+  part of the triple and does not order it. `released` is the stored form of
+  the domain's `superseded` (`RELATION_STATUS_STORAGE`,
+  `packages/domain/src/decisions.ts`): a judgement that the relation no
+  longer holds, so it withdraws an earlier acceptance as a rejection does. No
+  command writes it today. Relation ids are digests, not a sequence, so the
+  `id` tie-break only makes the order total: each decision's plan pins the
+  triple's row count, so of two commits planned against the same count the
+  second writes nothing, and a tie needs a later plan committed within the
+  same millisecond as the first.
+- The balance projection reads exactly that row per triple
+  (`projectionRelationsSql`) and, as before, adopts only `accepted` rows. Rows
+  stay in `id` order, so a store with one row per triple captures the same
+  input it captured before. The declared-relation budget (5,000) now counts
+  current triples, still with one row read past it so a larger set is
+  refused, never cut.
+- The rule changes what the projection makes of an input, so the scope
+  relation release moves to `scope-relations-v2`. The release is part of the
+  build digest and of the stored input manifest, as for
+  [ADR 0015](0015-source-authority-v2.md).
+- Readers of `entity_relations`, and the rule each applies today:
+
+  | Reader                                                                                                               | Kinds                               | What it reads                                                                                                                                           |
+  | -------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | Balance projection (`projectionRelationsSql`)                                                                        | the four scope kinds                | this rule                                                                                                                                               |
+  | Change lifecycle plan (`RELATION_SQL`, `targets.ts`)                                                                 | any                                 | row count (the plan pin) and the newest row of any status by `created_at`, `id`, shown as the target's current status                                   |
+  | Instrument candidates (`LISTED_AS_SQL`, `instrument-resolution.ts`)                                                  | `listed_as`                         | newest row of any status by `created_at`, `id`                                                                                                          |
+  | Pending-to-posted candidates and merge guard (`card-purchase-candidates.ts`, `card-purchase-job.ts`)                 | `pending_to_posted`                 | row count and newest row of any status by `created_at`, then insertion order (`rowid`)                                                                  |
+  | Card settlement ownership (`card-settlement-ownership.ts`, the 0044 view), card ownership read (`card-ownership.ts`) | `liable_party`, `beneficial_owner`  | newest row per owner reference by insertion order (`rowid`), adopted only when `accepted` with an unsuperseded decision                                 |
+  | Ownership declaration context, ownership review pin, operation revision pins, instrument history count               | ownership kinds, `contradicts`, any | row counts: any recorded claim blocks a self-declaration, and a pin moves on every new row                                                              |
+  | Instrument history, instrument temporal legacy blockers, economic row readiness pins                                 | `listed_as`, `beneficial_owner`     | every row, deliberately: a history, a list of unlogged legacy rows, and an evidence pin (the readiness outcome is always `ownership_unresolved`)        |
+  | Projection input manifest (`PROJECTION_INPUTS_SQL`)                                                                  | any                                 | count of `accepted` rows: a change detector next to the decision count, not a status; a rejection moves the decision count and the CORE source revision |
+  | Delegated reversal (`delegation/reversal.ts`)                                                                        | any                                 | the one row a receipt names, by id                                                                                                                      |
+
+  The order differs only where two rows of one triple share a `created_at`
+  (an `id` tie-break against insertion order) or where `created_at` order and
+  insertion order disagree. The readers that take the newest row of any
+  status would let a later proposal hide a decision; for the ownership
+  readers that makes an owner unresolved rather than wrong. Today the only
+  writer of `proposed` rows is `reconcile.propose`, whose two ends are both
+  `source_account:` references, so no proposal can land on an ownership
+  (`account:` or bare account id), `listed_as` (`instrument:` to
+  `identifier:`) or `pending_to_posted` (transaction id) triple; the one
+  visible effect is the plan's current status of a triple between two source
+  accounts, which shows `proposed` once one follows an acceptance. Moving
+  these readers onto this rule is follow-up work, each with its own equality
+  proof.
+
+### Consequences
+
+- No migration and no operator step. After deploy the build digest differs,
+  so the first projection tick (flag on) finds no complete snapshot under it,
+  captures afresh and builds and publishes a new snapshot, as for ADR 0015.
+  A build already in progress at deploy finishes from the input it fixed
+  (which holds every row, [projection input](../projection-input.md)) and may
+  still carry a withdrawn acceptance; the next tick replaces it. An operator
+  can confirm the change with an aggregate read of the READ database: the
+  active snapshot's `input_manifest_json` names `scope-relations-v2`.
+- A triple whose acceptance a later rejection or release withdrew stops
+  contributing `same` or `subset`; its scopes go back to whatever the
+  disjointness policy and authority say, usually an unknown overlap. Nothing
+  else changes: a triple with one row, or whose newest decision is the
+  acceptance, reads as before.
+- A store whose relation rows exceed 5,000 but whose current triples do not
+  is now built instead of refused. The read still visits each row of the four
+  kinds once, by the same keyed range of `entity_relations_to` or `_from` on
+  the kind that the shipped text used, and ranks them with one sort
+  (`row_number()` over the triple, as `LISTED_AS_SQL` ranks `listed_as`), so
+  its cost grows with the stored rows as before. A correlated newer-row check
+  was rejected for cost: no index covers the whole triple, so each check reads
+  every row sharing (kind, one reference), which is quadratic in a long
+  history of one triple (an agent re-proposing it, say) or in many triples
+  onto one reference.
+- The rule is per exact triple. Two references to one thing are two triples:
+  a `connection_contains` that migration 0029 recorded under a connection key
+  the one-time identity-value rewrite (migration 0063) later replaced is not
+  withdrawn by a rejection recorded under the current key. No balance
+  candidate has a `connection:` scope today (a candidate's scope is
+  `source_account:` or `source-local:`), so no balance row depends on it.
+
+### Verification
+
+Synthetic data only. `services/processor/test/balance-projection.test.ts`
+captures a fixed input after accept-then-reject, reject-then-accept, a
+same-instant pair, a proposal after an acceptance and a reversed triple; it
+fails on the shipped read (the withdrawn acceptances stay `same` and
+`subset`). `packages/read-model/test/balance-projection-relations.test.ts`
+compares against the shipped text, frozen with its digest in
+`balance-projection-relations-legacy-sql.ts`: identical rows on a scaled
+store of 4,800 single-row triples and 1,200 rows of other kinds; on 300
+random stores (one to four rows per triple, ties, ids against time) the
+shipped rows minus exactly those a later row of their triple supersedes,
+equal to a model written without SQL, and scope relations that differ only
+by acceptances a later decision withdrew; the bound counted in triples;
+without table statistics, one keyed search of `entity_relations_to` or `_from`
+as the only step that touches the table (no correlated lookup, no table
+scan); and a store of 6,000 proposals on one accepted triple plus 4,000
+decided triples onto one reference, read in linear time and equal to the
+model. The suite fails when the ranking drops the decision precedence, the
+`id` tie-break, the `to_ref` or `kind` partition, the `id` order or the bound
+(mutations run by hand in review).
