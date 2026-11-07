@@ -119,7 +119,13 @@ describe.if(runnable)("collection quality browser", () => {
       const reads = requests.filter((request) =>
         request.path.startsWith("/api/collection-quality"),
       ).length;
+      // The spinner appears only once the query cache reports the refetch, so
+      // its absence right after the click proves nothing: wait for the read.
+      const refetched = page.waitForResponse((response) =>
+        new URL(response.url()).pathname.startsWith("/api/collection-quality"),
+      );
       await page.getByRole("button", { name: "表示を更新", exact: false }).click();
+      await refetched;
       await page.waitForFunction(() => !document.querySelector(".refresh-symbol.is-refreshing"));
       expect(
         requests.filter((request) => request.path.startsWith("/api/collection-quality")).length,
