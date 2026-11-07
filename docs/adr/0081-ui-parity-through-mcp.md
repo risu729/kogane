@@ -114,15 +114,20 @@ What the code does today (main `02a915a`):
 
 ## Verification
 
-- Today: most MCP tools call shared services. The three that ran their own SQL
-  (above) call `delegatedWritesRemaining` and `ownOperationSource` in
-  `packages/application` instead, and `tests/mcp-tools-no-sql.test.ts` fails
-  when `services/app/src/mcp.ts` or a `*-tools.ts` adapter calls a store
-  directly or holds a SQL statement. SQL still runs on the MCP path in helpers
-  of `services/app/src` that the screens share, outside that guard:
-  `scopedParseRuns` in `agent-service.ts`, the proposal store in
-  `proposals.ts`, and the schema probe in `reported-state-api.ts`. They move
-  into `packages/application` next, and join the guard when they do.
+- Today: no module on the MCP path runs SQL of its own. The three tools that
+  did (above) call `delegatedWritesRemaining` and `ownOperationSource` in
+  `packages/application`. The helpers they shared with the screens moved too:
+  the agent service's scoped parse-run window is the read model's
+  `sourceParseRuns`, the proposal store is `commandProposalStore` in
+  `packages/application/src/propose-store.ts`, and the `sqlite_master` checks
+  behind `kogane.capabilities` and the optional routes are `storeHasFeature`
+  in `packages/application/src/query/store-schema.ts`.
+  `tests/mcp-tools-no-sql.test.ts` follows the relative imports from
+  `services/app/src/mcp.ts` and fails when a module it reaches calls a store
+  or the D1 binding directly or holds a SQL statement. It exempts, by name and
+  with the reason, the modules whose remaining SQL only screen routes call
+  (the balance page helpers and the report routes); an exemption fails once
+  its module holds no SQL. No catalogue or read-route guard test exists yet.
 - The six `ops.*` tools: `services/app/test/delegated-ops-parity.test.ts`
   checks that a delegation holding every `operations.*` capability is shown
   all six and a narrower one only those it holds, and that each request gives

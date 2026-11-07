@@ -93,6 +93,13 @@ export interface ParsingHealth {
 }
 
 /** One source's visible fetch runs, counted over its whole history. */
+/** One row of `sourceParseRuns`: the run and the parser build it ran. */
+export interface SourceParseRun {
+  id: number;
+  parser_name: string;
+  parser_version: string;
+}
+
 export interface SourceFetchRunCount {
   source_id: string;
   run_count: number;
@@ -107,6 +114,13 @@ export interface ObservationReader {
    * nothing. Ordered by source id.
    */
   fetchRunCounts(sources: readonly string[]): Promise<SourceFetchRunCount[]>;
+  /**
+   * The newest visible parse runs of the listed sources, newest first: the
+   * overview's parse-run window (`PAGE_LIMIT` rows), restricted to those
+   * sources before it is bounded, so a run of an unlisted source never takes a
+   * place in it. An empty list reads nothing.
+   */
+  sourceParseRuns(sources: readonly string[]): Promise<SourceParseRun[]>;
   /**
    * D13 partial-update signal: partial fetch runs that refreshed some units of
    * a dataset on the `unit` eligibility scope. Empty for every dataset on the

@@ -1,18 +1,49 @@
 // ADR 0081 point 2: an MCP tool never issues SQL. It passes the store it was
 // given to a shared service in packages/application, so the screen and the
-// tool answer from one query. This guard reads the App's MCP adapters and
-// fails on a store call or a SQL statement written in one of them.
+// tool answer from one query. This guard follows the App's relative imports
+// from the MCP entry (`mcp.ts`, which reaches every `*-tools.ts` adapter and
+// the agent service) and fails on a store call or a SQL statement in any
+// module it reaches, unless the module is listed below with the reason MCP
+// never runs its SQL.
 import { describe, expect, test } from "bun:test";
-import { readdirSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 
 const source = resolve(import.meta.dir, "../services/app/src");
-const adapters = [
-  "mcp.ts",
-  ...readdirSync(source)
-    .filter((name) => name.endsWith("-tools.ts"))
-    .sort(),
-];
+const IMPORT = /(?:import|export)\s[^;]*?\sfrom\s*["'](\.{1,2}\/[^"']+)["']/gsu;
+
+/** Every module of services/app/src reachable from `entry` by relative imports. */
+function reachable(entry: string): string[] {
+  const seen = new Set<string>();
+  const queue = [resolve(source, entry)];
+  while (queue.length > 0) {
+    const file = queue.pop()!;
+    if (seen.has(file)) continue;
+    seen.add(file);
+    for (const match of readFileSync(file, "utf8").matchAll(IMPORT)) {
+      const target = resolve(dirname(file), match[1]!.replace(/\.ts$/u, "") + ".ts");
+      if (target.startsWith(`${source}/`) && existsSync(target)) queue.push(target);
+    }
+  }
+  return [...seen].map((file) => relative(source, file)).sort();
+}
+
+/**
+ * Modules on the import graph whose SQL only the screens run. Each is
+ * imported for a function that issues none; the SQL that remains is in
+ * functions the MCP path never calls. A module drops off this list when its
+ * SQL moves into packages/application.
+ */
+const SCREEN_ONLY_SQL: Record<string, string> = {
+  "account-connections.ts": "observation-organization's organizeRows, below",
+  "normalized-decimals.ts": "balances-v2's page functions, which no MCP tool calls",
+  "observation-organization.ts": "balances-v2's page functions, which no MCP tool calls",
+  "preferred-instrument-names.ts": "observation-organization's organizeRows, above",
+  "reports-api.ts": "the report routes; capabilities imports only reportArtifactsAvailable",
+};
+
+const modules = reachable("mcp.ts");
+const adapters = modules.filter((name) => !(name in SCREEN_ONLY_SQL));
 // A CommandStore, SqlExecutor or D1 call: `store.first<…>(`, `db\n  .prepare(`, …
 // `Promise.all(` is not a store call.
 const STORE_CALL = /(?<!Promise\s*)\??\.\s*(?:first|all|batch|prepare|run|raw)\s*[<(]/gu;
@@ -35,10 +66,17 @@ function offending(text: string) {
 }
 
 describe("MCP tools issue no SQL of their own (ADR 0081)", () => {
-  test("the adapter list is not empty", () => {
-    expect(adapters).toContain("ops-tools.ts");
-    expect(adapters).toContain("delegated-schedule-tools.ts");
-    expect(adapters).toContain("delegated-maintenance-tools.ts");
+  test("the import graph reaches every tool adapter and the agent service", () => {
+    for (const name of readdirSync(source).filter((file) => file.endsWith("-tools.ts")))
+      expect(modules).toContain(name);
+    for (const name of ["agent-api.ts", "agent-service.ts", "capabilities.ts"])
+      expect(modules).toContain(name);
+  });
+  test("every screen-only exemption is on the graph and still holds SQL", () => {
+    for (const name of Object.keys(SCREEN_ONLY_SQL)) {
+      expect(modules).toContain(name);
+      expect(offending(readFileSync(resolve(source, name), "utf8")).length).toBeGreaterThan(0);
+    }
   });
   for (const name of adapters)
     test(name, () => {
