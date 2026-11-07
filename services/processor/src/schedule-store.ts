@@ -31,6 +31,7 @@ import {
   changedFields,
   type OperationCall,
   type OperationName,
+  leaseExpiryWrite,
   parseAuditEnvelope,
   processorCall,
 } from "../../../packages/application/src/index.ts";
@@ -143,10 +144,69 @@ export async function markAbandonedOccurrences(db: D1Database, before: string): 
     .bind(before)
     .run();
 }
+/**
+ * How long a held lease may go without a heartbeat before its execution is
+ * taken to have stopped (ADR 0085). A live holder stops itself after three
+ * minutes without one and at thirteen minutes after its claim
+ * (`LEASE_TIMING` in packages/collection/src/schedule-lease.ts).
+ */
+export const LEASE_STALE_MINUTES = 10;
+/**
+ * A lease claimed by a build that writes no heartbeat is judged by its age
+ * instead. Such a claim has no heartbeat, or one older than the claim: a
+ * release written by an older build leaves the previous holder's heartbeat
+ * behind, and an older claim does not overwrite it. `started_at` is the
+ * claiming isolate's clock and `heartbeat_at` D1's. For a claim that writes
+ * heartbeats, a skew between them can only move its lease to this longer
+ * rule; an older build's claim under a leftover heartbeat falls to the
+ * shorter rule only when its isolate lags D1 by more than the time between
+ * that heartbeat and the claim (ADR 0085).
+ */
+export const LEGACY_LEASE_STALE_MINUTES = 60;
+const OWN_HEARTBEAT =
+  "heartbeat_at IS NOT NULL AND (started_at IS NULL OR heartbeat_at >= started_at)";
+const STALE_LEASE = `lease_ref IS NOT NULL AND (
+  (${OWN_HEARTBEAT} AND heartbeat_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-${LEASE_STALE_MINUTES} minutes'))
+  OR (NOT (${OWN_HEARTBEAT}) AND started_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-${LEGACY_LEASE_STALE_MINUTES} minutes')))`;
+
+/**
+ * Frees every lease whose execution went silent (ADR 0085) and records each
+ * release. Times are compared on D1's clock, the clock the holders write. The
+ * release names the exact reference it read and re-checks staleness in the
+ * same statement, so a heartbeat or an operator release that lands in between
+ * wins and nothing is recorded. It starts no collection and replays nothing:
+ * the next nominal occurrence, or a new operations request, simply finds the
+ * source free.
+ */
+export async function expireStaleLeases(db: D1Database): Promise<number> {
+  const stale = await db
+    .prepare(
+      `SELECT source,lease_ref FROM collection_execution_leases WHERE ${STALE_LEASE} ORDER BY source`,
+    )
+    .all<{ source: string; lease_ref: string }>();
+  let freed = 0;
+  for (const row of stale.results) {
+    const record = leaseExpiryWrite(row.source, new Date().toISOString(), crypto.randomUUID());
+    const [released] = await db.batch([
+      db
+        .prepare(
+          `UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL,heartbeat_at=NULL WHERE source=? AND lease_ref=? AND ${STALE_LEASE}`,
+        )
+        .bind(row.source, row.lease_ref),
+      statement(db, record),
+    ]);
+    if (released?.meta.changes === 1) {
+      freed += 1;
+      console.log(JSON.stringify({ event: "collection_lease_expired", source: row.source }));
+    }
+  }
+  return freed;
+}
 export async function bootstrapSchedules(env: Env) {
   // A generous grace exceeds the platform alarm's 15-minute execution limit.
   // The exact finish time is unknown, so finished_at deliberately remains null.
   await markAbandonedOccurrences(env.DB, new Date(Date.now() - 60 * 60_000).toISOString());
+  await expireStaleLeases(env.DB);
   const reservations = [];
   for (const job of jobs) {
     const row = await initializeSchedule(env, job.id);
@@ -1293,7 +1353,7 @@ export async function releaseCollectionLease(
       // A repeated release is already satisfied while the source is unlocked.
       // Check this in the same statement as the write: a newly acquired lease
       // must never be cleared by a delayed retry of the previous reference.
-      "UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL WHERE source=? AND (lease_ref=? OR lease_ref IS NULL)",
+      "UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL,heartbeat_at=NULL WHERE source=? AND (lease_ref=? OR lease_ref IS NULL)",
     ).bind(source, v.leaseRef),
     statement(env.DB, record),
   ]);

@@ -49,7 +49,7 @@ for current behavior.
 - [ADR 0036: Observe covered D1 costs and failures per Processor lane](0036-lane-cost-observability.md)
 - [ADR 0037: Admit reconciliation pages by evidence and reuse clean purchase retirement checks](0037-reconciliation-purchase-cost.md)
 - [ADR 0038: Isolate complete hosted verification while sharing preparation](0038-shared-verification-preparation.md)
-- [ADR 0039: Alarm scheduling and public maintenance rules](0039-alarm-schedule-management.md) — accepted; amended by ADR 0063
+- [ADR 0039: Alarm scheduling and public maintenance rules](0039-alarm-schedule-management.md) — accepted; amended by ADR 0063 and ADR 0085
 - [ADR 0040: Deploy compatible Workers through prebuilt cf versions](0040-compatible-cf-version-deployment.md)
 - [ADR 0041: Separate maintained documentation from historical records](0041-documentation-scope.md)
 - [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — accepted; production verification pending
@@ -88,3 +88,4 @@ for current behavior.
 - [ADR 0081: Every operation the web UI offers is also an MCP operation, served by the same application service](0081-ui-parity-through-mcp.md) — accepted; two screen-only `ui` entries and some read pages still lack MCP tools (the six `ops.*` tools are served to every MCP client since ADR 0084), MCP adapters no longer issue SQL (guard test), but shared helpers on the MCP path still do; no catalogue or read-route guard test yet; point 3 amended by ADR 0084
 - [ADR 0083: Release the Vpass collector's statement pages under `terminal-registration-v3`; only a successful card run is parsed](0083-release-vpass-collector-statement-pages.md) — accepted; ends ADR 0022's Vpass withholding
 - [ADR 0084: Every MCP client Access verifies acts with the UI's authority; MCP_DELEGATIONS and AGENT_API_GRANTS are removed](0084-mcp-operator-authority-without-delegation.md) — proposed; supersedes ADR 0063's declaration, roles and delegation-status page, and ADR 0047's grant table
+- [ADR 0085: A collection execution lease proves its holder alive; the Processor frees a lease whose holder went silent](0085-collection-lease-heartbeat.md) — proposed; heartbeat (CORE 0082), 13-minute self-stop, `alarm.lease.expire` on every `processor-tick`

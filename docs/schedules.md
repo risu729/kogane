@@ -38,13 +38,37 @@ latest unrelated run. `uncertain` means the provider attempt may have occurred a
 is not replayed automatically. The actual collection's partial outcome remains
 visible in its evidence record.
 
-If a process dies during collection, the source remains locked against another
-manual or scheduled attempt. Inspect its execution state and saved history first.
-Only after confirming the previous execution stopped, use **停止した実行を解除**.
+A running execution proves it is alive
+([ADR 0085](adr/0085-collection-lease-heartbeat.md)): it writes the lease's
+`heartbeat_at` on D1's clock with its claim and every minute while it runs. If
+a process dies during collection, its heartbeat stops, and the Processor's
+5-minute tick frees the lease once the heartbeat is 10 minutes old (a lease
+claimed by a build without heartbeats, which has none or only one older than
+its claim: once it is 60 minutes old). Each such
+release is recorded (`alarm.lease.expire`, principal `alarm:processor-tick`).
+Freeing a lease starts and replays nothing: the next nominal occurrence, or a
+new operations request, simply finds the source free.
+
+A live execution stops itself well before that. Thirteen minutes after its
+claim, or when its heartbeat finds the lease gone or has failed to write for
+three minutes, its provider work is aborted. If it has not stopped 30 s later,
+the call fails anyway; the SBI VC session object also resets itself. Its
+heartbeat continues until its work really ends, so a lease is not freed under
+a live execution that can still write it. (One that ignores its stop and cannot
+write for 10 minutes while the Processor can is the open limit in the ADR.)
+Such a run is recorded `uncertain` (`collection_deadline_exceeded` or
+`collection_lease_lost`), since the provider may have been contacted, and is
+never replayed. St George instead records a failed run with the stop as its
+reason and blocks until the operator resumes it, as after any failed St George
+run.
+
+**停止した実行を解除** remains for the operator, for a source that should not
+wait for the tick. Only after confirming the previous execution stopped, use it.
 The release compares the exact lease reference, clears no newer lease, and starts
 no collection. Repeating the confirmed request succeeds while that source's lease
 is already empty; if another execution acquired a different reference, the retry
-conflicts and leaves it intact. A source with no lease row still conflicts.
+conflicts and leaves it intact. A source with no lease row still conflicts. A
+live execution whose lease was released this way aborts within a minute.
 The button blocks repeated confirmation and submission for the same source until
 the release and its state readback finish. The page refreshes after success or
 failure, and keeps the result visible after the released lease disappears. Normal
@@ -58,16 +82,16 @@ refused as busy. A failed release on completion keeps the collection's own
 result. Either clearing statement is tried up to three times, with no wait
 between attempts. When every attempt fails, the lease stays held and the
 collector logs `collection_lease_release_failed` with only the source id and
-the attempt count; later runs are refused as busy until the release above. Both statements clear only the
-execution's own reference, never a lease another execution acquired. A process
-that dies mid-collection still needs the release above.
+the attempt count; later runs are refused as busy until the tick frees it
+(above). Both statements clear only the execution's own reference, never a
+lease another execution acquired.
 
 On 2026-11-07 two leases had been held for weeks: `vpass` since
 2026-10-12 21:00 UTC and `sbi-vc-trade` since 2026-10-23 18:15 UTC. Every later
 occurrence of those sources failed `collection_busy`. The vpass occurrence had
 ended `uncertain` with no `finished_at`, so the Processor alarm waiting on the
-collector had itself stopped; that is the stopped-execution case, which only
-the release above clears. The sbi-vc-trade keepalive had finished
+collector had itself stopped; that is the stopped-execution case, which then
+only the operator's release cleared, and which the heartbeat above now covers. The sbi-vc-trade keepalive had finished
 `collection_failed` 0.25 s after its claim. That is consistent with either
 failed-statement case above, and also with the session object stopping between
 claim and release; the records do not say which. With the owner's go-ahead

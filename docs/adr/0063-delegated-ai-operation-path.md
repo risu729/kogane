@@ -334,7 +334,10 @@ an audit record; R4 is never delegated. A delegated decision is recorded with
   add a line pointing to this ADR when they next change. ADR 0046 (#564) does,
   in its amendment of 2026-10-09 (slice S4).
 - Stopped-execution lease release stays the operator's until the server can
-  verify that an execution stopped.
+  verify that an execution stopped. Since ADR 0085 (2026-11-07) the server does
+  verify it, from ten minutes of heartbeat silence, and frees such a lease
+  itself on the `alarm` path; the operator's release stays R3, refused over
+  MCP (ADR 0084).
 
 ## Verification
 

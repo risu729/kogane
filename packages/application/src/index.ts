@@ -409,6 +409,8 @@ export {
   laneTickRecord,
   laneWroteAny,
   type LaneWrites,
+  LEASE_EXPIRY_JOB,
+  leaseExpiryWrite,
   occurrenceRef,
 } from "./audit/automatic.ts";
 export {

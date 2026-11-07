@@ -112,6 +112,7 @@ export const AUDIT_OPERATION_LABELS: Readonly<Record<string, string>> = {
   "mcp.request": "MCPのリクエスト（操作の特定前）",
   "audit.overflow": "上限を超えた記録の日次集計",
   "alarm.occurrence.claim": "定期収集の実行の受付",
+  "alarm.lease.expire": "停止した実行の自動解除",
   "lane.tick": "処理レーンの1回の実行",
 };
 
