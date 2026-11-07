@@ -185,7 +185,10 @@ re-survey above, which fetches nothing until pages are confirmed. See
 [ADR 0046](adr/0046-agent-maintenance-windows.md), as amended by
 [ADR 0063](adr/0063-delegated-ai-operation-path.md) item 8 (slice S4 of the
 [AI operation path plan](plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)).
-Lease release and bootstrap stay operator or deployment only; job times and
+Lease release and bootstrap stay operator or deployment only (the MCP tool
+`kogane.schedules.lease.release` exists and refuses every call with
+`operation_not_delegable`, [ADR 0081](adr/0081-ui-parity-through-mcp.md)
+point 3; [agent access](agent-api.md#maintenance-windows)); job times and
 enable/disable are otherwise reachable only through the delegated
 `kogane.schedules.job.update` tool ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)),
 and the routes above refuse every agent and every MCP-audience caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows).

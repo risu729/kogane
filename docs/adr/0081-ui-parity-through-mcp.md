@@ -114,3 +114,9 @@ What the code does today (main `02a915a`):
   published `mcp` tool, and the read-route test fails when a UI read route has
   no MCP read. A test per new tool compares its result with the HTTP route's result
   for the same synthetic input.
+- 2026-11-07: `kogane.schedules.lease.release` is listed on `/mcp` while
+  `SCHEDULES_ENABLED` is on and refuses every call with
+  `403 operation_not_delegable`, recorded at R3 under `schedules.lease.release`
+  on `mcp`, whose catalogue paths are now `ui` and `mcp`
+  (`services/app/test/schedule-tools.test.ts`;
+  [agent access](../agent-api.md#maintenance-windows)).

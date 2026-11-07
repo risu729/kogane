@@ -37,7 +37,8 @@ Maintenance windows can be read under their own capability (`schedules.read`);
 revising one, like a job setting, is an operation the owner may delegate
 (ADR 0063), executed only under a delegation, and none is configured
 ([below](#maintenance-windows)). Lease release stays operator-only
-([schedules](schedules.md#settings-api)).
+([schedules](schedules.md#settings-api)): its MCP tool exists and refuses
+every call ([below](#maintenance-windows)).
 
 ## Why the application service exists
 
@@ -192,30 +193,32 @@ would answer ([below](#instrument-coverage),
 maintenance tools (`src/schedule-tools.ts`) exist while `SCHEDULES_ENABLED` is
 on: the read is reachable both ways, the revision on `/mcp` only and listed
 only to a principal whose resolved delegation holds it, and none is configured
-([below](#maintenance-windows)). The instrument-history and audit reads
+([below](#maintenance-windows)). The lease release tool exists on `/mcp` on the
+same condition and refuses every call ([below](#maintenance-windows)). The instrument-history and audit reads
 (`src/read-tools.ts`) are reachable both ways
 ([below](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10));
 the other delegated MCP tools are described there too.
 
-| Tool                                  | HTTP                                            | MCP `tools/call`                      | Requires                                                                                                                                               |
-| ------------------------------------- | ----------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `kogane.capabilities`                 | `POST /api/agent/v1/capabilities`               | `kogane.capabilities`                 | any grant                                                                                                                                              |
-| `kogane.context.open`                 | `POST /api/agent/v1/context.open`               | `kogane.context.open`                 | any grant                                                                                                                                              |
-| `kogane.financial.query`              | `POST /api/agent/v1/financial.query`            | `kogane.financial.query`              | per intent (table below)                                                                                                                               |
-| `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                                         |
-| `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                               |
-| `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                         |
-| `kogane.instruments.coverage`         | `POST /api/agent/v1/instruments.coverage`       | `kogane.instruments.coverage`         | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                              |
-| `kogane.accounts.candidates`          | `POST /api/agent/v1/accounts.candidates`        | `kogane.accounts.candidates`          | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                                               |
-| `kogane.economic-readiness.read`      | `POST /api/agent/v1/economic-readiness.read`    | `kogane.economic-readiness.read`      | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))                             |
-| `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                          |
-| `kogane.reported-state.read`          | `POST /api/agent/v1/reported-state.read`        | `kogane.reported-state.read`          | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#reported-state-on-a-date))                               |
-| `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                               |
-| `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                      |
-| `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | a delegation (`MCP_DELEGATIONS`) holding `schedules.maintenance.update`; none is configured, so it is listed to nobody ([below](#maintenance-windows)) |
-| `kogane.instruments.history`          | `POST /api/agent/v1/instruments.history`        | `kogane.instruments.history`          | `records.read` on `"*"` sources and accounts                                                                                                           |
-| `kogane.audit.search`                 | `POST /api/agent/v1/audit.search`               | `kogane.audit.search`                 | `audit.read` with `"*"` accounts                                                                                                                       |
-| `kogane.audit.get`                    | `POST /api/agent/v1/audit.get`                  | `kogane.audit.get`                    | `audit.read` with `"*"` accounts                                                                                                                       |
+| Tool                                  | HTTP                                            | MCP `tools/call`                      | Requires                                                                                                                                                       |
+| ------------------------------------- | ----------------------------------------------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.capabilities`                 | `POST /api/agent/v1/capabilities`               | `kogane.capabilities`                 | any grant                                                                                                                                                      |
+| `kogane.context.open`                 | `POST /api/agent/v1/context.open`               | `kogane.context.open`                 | any grant                                                                                                                                                      |
+| `kogane.financial.query`              | `POST /api/agent/v1/financial.query`            | `kogane.financial.query`              | per intent (table below)                                                                                                                                       |
+| `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                                                 |
+| `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                                       |
+| `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                 |
+| `kogane.instruments.coverage`         | `POST /api/agent/v1/instruments.coverage`       | `kogane.instruments.coverage`         | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                                      |
+| `kogane.accounts.candidates`          | `POST /api/agent/v1/accounts.candidates`        | `kogane.accounts.candidates`          | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                                                       |
+| `kogane.economic-readiness.read`      | `POST /api/agent/v1/economic-readiness.read`    | `kogane.economic-readiness.read`      | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))                                     |
+| `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                                  |
+| `kogane.reported-state.read`          | `POST /api/agent/v1/reported-state.read`        | `kogane.reported-state.read`          | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#reported-state-on-a-date))                                       |
+| `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                                       |
+| `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                              |
+| `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | a delegation (`MCP_DELEGATIONS`) holding `schedules.maintenance.update`; none is configured, so it is listed to nobody ([below](#maintenance-windows))         |
+| `kogane.schedules.lease.release`      | none                                            | `kogane.schedules.lease.release`      | nothing grants it: listed to every MCP client while `SCHEDULES_ENABLED` is on, and every call is `403 operation_not_delegable` ([below](#maintenance-windows)) |
+| `kogane.instruments.history`          | `POST /api/agent/v1/instruments.history`        | `kogane.instruments.history`          | `records.read` on `"*"` sources and accounts                                                                                                                   |
+| `kogane.audit.search`                 | `POST /api/agent/v1/audit.search`               | `kogane.audit.search`                 | `audit.read` with `"*"` accounts                                                                                                                               |
+| `kogane.audit.get`                    | `POST /api/agent/v1/audit.get`                  | `kogane.audit.get`                    | `audit.read` with `"*"` accounts                                                                                                                               |
 
 No tool lists or reads the fixed report artifacts (評価レポート): they are
 served to the operator by `GET /api/v2/reports` and
@@ -705,6 +708,21 @@ alarm reconciliation. A fresh result reports reconciliation `completed` or
 `pending`; a replay reports `null`. Read the maintenance tool for the current
 reservation/alarm instead of assuming that a saved revision is armed.
 See [the writer contract](schedules.md#the-writers-contract-for-delegated-execution-plan-slice-s3).
+
+**Releasing a lease** (`kogane.schedules.lease.release`, operation
+`schedules.lease.release`, R3; [ADR 0081](adr/0081-ui-parity-through-mcp.md)
+point 3). The schedules page's 停止した実行を解除 has this tool so that the
+screen operation exists on MCP, but the release stays the operator's: it
+asserts that the execution holding the lease stopped, which the server cannot
+verify ([ADR 0063](adr/0063-delegated-ai-operation-path.md) item 5), and no
+delegation capability names it. While `SCHEDULES_ENABLED` is on the tool is
+listed to every MCP client, with the arguments the page's route takes
+(`source`, `leaseRef`), and every call answers `403 operation_not_delegable`,
+whatever its arguments, grant or delegation. The call reads no store and is
+not relayed to the Processor; it is recorded once as `refused` on `mcp` at R3.
+It has no `/api/agent/v1` route, and a browser session on `/mcp` is not offered
+it. A lease that will not clear is released by the operator on the schedules
+page ([schedules](schedules.md#settings-api)).
 
 ## Contexts, cursors and hand-off
 
