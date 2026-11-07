@@ -53,6 +53,19 @@ could disagree with it. Any change of kind, payload, expected revision or base
 context produces a different plan id, and an approval bound to the old digest
 can never apply to the new one (SC17, INV09).
 
+### Approval id
+
+```
+approvalId = commandKey("ap", [planId, approver, now, sortedScope, uses])
+```
+
+The approval's lifetime is not part of its id. An `approve` that finds its
+approval row already written (the same approver, plan, instant, scope and use
+count) inserts no second approval and answers with that row: its stored
+`expires_at` and `uses_remaining`, not the lifetime the repeated request asked
+for, so the receipt always equals what `readOwnApproval` and `commit` read.
+The processor route always asks for the default ten-minute lifetime.
+
 ### Expected revisions
 
 Every impact query joins `published_parse_runs`. Since migration 0026 "current"
@@ -184,9 +197,12 @@ characters:
 | `card-installment.unlink` | `{ obligationId, portionKeys, reason }`      | `obl_cp_<sha256>`; 1–36 distinct recognition keys, each the compact JSON text of `[source, producer, namespace or null, account, external id]`, at most 2048 characters as 0047 stores it |
 
 **Limit.** The command API takes a request body of at most 16 KiB
-(`services/app/src/command-api.ts`), so a link or unlink whose 36 entries are
-long keys can exceed it and would need more than one plan; the change that
-adds installment links decides how it splits them.
+(`services/app/src/command-api.ts`); the Processor's private
+`/command/v1/*` routes bound it again at 16 KiB in bytes while reading it,
+stop reading past the limit and answer `400 invalid_command`
+(`services/processor/src/bounded-body.ts`). So a link or unlink whose 36
+entries are long keys can exceed it and would need more than one plan; the
+change that adds installment links decides how it splits them.
 
 The reason codes, the subject prefixes (`card-usage-exclusion:`,
 `card-refund:`, `card-refund-target:`, `card-installment:`) and the
@@ -414,8 +430,9 @@ POST /api/command/v1/operation  { operationId }                     -> { receipt
 
 ### Grants
 
-Two variables, both **JSON arrays of verified Access subjects**, both empty in
-the committed configuration, and both allow-lists:
+Two variables, both **JSON arrays of verified Access subjects** and both
+allow-lists. The committed configuration names the human operator in
+`OPERATOR_SUBJECTS` and leaves `AGENT_GRANTS` empty:
 
 | Variable            | Names              | Capabilities                                      |
 | ------------------- | ------------------ | ------------------------------------------------- |
@@ -428,7 +445,12 @@ One resolver reads them — `resolvePrincipal` in
 surface: the five command routes and the six `/api/ops/v1` routes call it.
 The six operations MCP tools would too, but `/mcp` refuses them from its
 agent-only caller before they get that far
-([ADR 0047](adr/0047-mcp-client-connection.md)).
+([ADR 0047](adr/0047-mcp-client-connection.md)); the delegated command,
+decision and operations tools (`services/app/src/delegated-command-tools.ts`,
+`delegated-decision-tools.ts`, `ops-tools.ts`) are graded instead by the
+authority ADR 0084 gives every MCP client the MCP Access application admits
+([ADR 0063](adr/0063-delegated-ai-operation-path.md),
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 
 - A subject in `OPERATOR_SUBJECTS` is the human operator.
 - A subject in `AGENT_GRANTS` is an agent. Its `approve`/`commit` is
@@ -526,10 +548,7 @@ stale, and Approve / Commit buttons. The buttons act only when the API
 advertises `commands: true`; without it the screen is read-only and says so.
 After a commit the receipt panel distinguishes `受理` (accepted) from
 `反映済み` (published) and offers a re-check rather than claiming completion
-(addendum 11 §5). Above the plan, a read-only **AIへの委任** notice shows the
-AI delegations in force, if any
-([agent API](agent-api.md#the-operators-delegation-status-s8-2026-11-06));
-it does not change what the operator's buttons do.
+(addendum 11 §5).
 
 A plan that reviews something shown elsewhere adds a panel that reads the
 reviewed item back from the server. The panel compares the plan's pins with that

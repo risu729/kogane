@@ -118,6 +118,63 @@ test("source audit separates explicit deposits, gross totals, rewards, limits an
     }),
   ).toMatchObject({ kind: "asset", netAssetEligible: false });
 });
+test("capacities, provider aggregates and averages that overlap deposits are never assets (INV06)", () => {
+  const classify = (sourceId: string, parserName: string, metric: string, sourceAccount = "s") =>
+    classifyBalance({ sourceId, parserName, metric, sourceAccount });
+  for (const [sourceId, parserName, metric] of [
+    ["prestia", "prestia-bank-balances", "available_balance"],
+    ["mizuho-bank", "mizuho-account-list", "available_balance"],
+  ] as const)
+    expect(classify(sourceId, parserName, metric)).toMatchObject({
+      kind: "other",
+      measurementKind: "capacity",
+      assetClass: "unknown",
+      netAssetEligible: false,
+    });
+  for (const metric of ["provider_yen_equivalent", "provider_balance_group_total"])
+    expect(classify("prestia", "prestia-bank-balances", metric)).toMatchObject({
+      kind: "aggregate",
+      measurementKind: "aggregate_balance",
+      assetClass: "mixed",
+      netAssetEligible: false,
+    });
+  for (const metric of [
+    "provider_monthly_average_total_relationship_balance",
+    "provider_monthly_average_foreign_currency_balance",
+    "provider_monthly_average_liquid_deposit_balance",
+  ])
+    expect(classify("prestia", "prestia-bank-balances", metric)).toMatchObject({
+      kind: "other",
+      measurementKind: "unknown",
+      timeBasis: "unknown",
+      netAssetEligible: false,
+    });
+  // The deposits those figures overlap are the assets, each in its own row.
+  for (const [sourceId, parserName, metric] of [
+    ["prestia", "prestia-bank-balances", "term_deposit_principal"],
+    ["mizuho-bank", "mizuho-account-list", "account_balance"],
+  ] as const)
+    expect(classify(sourceId, parserName, metric)).toMatchObject({
+      kind: "asset",
+      assetClass: "cash",
+      netAssetEligible: false,
+    });
+  // A same-named metric of another parser is not given the deposit meaning.
+  expect(classify("mizuho-bank", "mizuho-other", "account_balance").kind).toBe("other");
+  expect(classify("sbi-vc-trade", "sbi-vc-account-margin", "margin_balance")).toMatchObject({
+    kind: "other",
+    measurementKind: "unknown",
+  });
+  expect(
+    classify("v-point", "v-point-balance-info", "available_point_bucket", "v-point:store-limited:1")
+      .label,
+  ).toBe("店舗限定ポイント残高");
+  expect(
+    classify("mobile-suica", "mobile-suica-sf-history", "sf_balance_after_transaction", "other")
+      .kind,
+  ).toBe("other");
+});
+
 test("exact complementary Shinsei rows project once and retain both B observations without mutation", () => {
   const rows = [row(1), row(2)];
   const before = JSON.stringify(rows);

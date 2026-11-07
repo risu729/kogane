@@ -1,6 +1,6 @@
 # ADR 0035: Bound identity view expansion and skip unchanged reward capture
 
-- Status: proposed until this PR merges; accepted upon merge
+- Status: accepted (merged 2026-10-04 in #417)
 - Date: 2026-10-04
 
 ## Context

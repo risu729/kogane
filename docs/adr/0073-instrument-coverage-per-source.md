@@ -1,8 +1,8 @@
 # ADR 0073: Count each source's instrument identifiers by their candidate state, in a read beside the account coverage
 
-- Status: proposed (until this PR merges)
+- Status: accepted (merged 2026-11-06 in #936)
 - Date: 2026-11-06
-- Related: [roadmap, phases 0–5](../roadmap.md#phases-05--coverage-and-cross-source-identity),
+- Related: [roadmap, layers 0–5](../roadmap.md#layers-05--coverage-and-cross-source-identity),
   [ADR 0055](0055-instrument-candidates.md) (the candidate read and its
   identifier states), [identity](../identity.md),
   [identity operations](../identity-operations.md)
@@ -70,8 +70,10 @@ observation, which ADR 0055's amendment measured (about 0.8 to 0.95 s per
    no identifier record; the perimeter is the candidate review's: the whole
    store, refused before anything is read otherwise (`unauthorized` /
    `evidence_restricted`), because the counts depend on sources a listed
-   grant could not see. No agent tool serves it, so today only the browser's
-   `readerGrant` (which holds both capabilities) reaches it. The observation count is
+   grant could not see. As first decided no agent tool served it, so only the
+   browser's `readerGrant` (which holds both capabilities) reached it; the
+   [2026-11-06 amendment](#amendment-2026-11-06-the-agent-read-on-both-agent-paths)
+   adds the agent read under the same rule. The observation count is
    checked first and the read's own bounds refuse the whole answer
    (`budget_exceeded` with `budget:identityObservations=500000` or
    `budget:instrumentResolution`), never a part or zeros.
@@ -104,7 +106,8 @@ observation, which ADR 0055's amendment measured (about 0.8 to 0.95 s per
    coverage's `整理状況を読み込めませんでした`.
 
 No migration, index, SQL text or agent tool is added; the existing coverage
-response and its contract are unchanged.
+response and its contract are unchanged. (The agent tool is added by the
+[2026-11-06 amendment](#amendment-2026-11-06-the-agent-read-on-both-agent-paths).)
 
 ## Consequences
 
@@ -163,3 +166,92 @@ Synthetic data only, no production access:
 - `mise run //packages/application:ci`, `//packages/observation-shared:ci`,
   `//services/app:ci`, `//apps/web:ci`,
   `//experiments/observation-pipeline-local:ci`, `mise run ci:root`.
+
+## Amendment 2026-11-06: the agent read on both agent paths
+
+- Status: accepted (merged 2026-11-06 in #946)
+- Date: 2026-11-06
+- Carried by: the `kogane.instruments.coverage` case and schema of
+  `services/app/src/read-tools.ts`, its `toolRows` case in
+  `services/app/src/audit.ts`, and the `instruments.coverage` entry of
+  `packages/application/src/operation-path/catalogue.ts`
+
+### Context
+
+The service above was reachable from the browser only. An agent asking how
+much of a source's instrument history a person has resolved had no read of
+it: `kogane.instruments.candidates` pages the candidates themselves under
+`records.read`, and counting its pages would restate the counts this service
+already computes.
+
+### Options considered
+
+1. **No agent read**, leaving the counts to the page. Rejected: the counts
+   are the per-source answer of the roadmap's phases 0–5, and an agent would
+   have to rebuild them from candidate pages, a second computation of one
+   answer.
+2. **A coverage intent of `kogane.financial.query`.** Rejected: that query
+   honours listed source scopes and its own read model, while this service is
+   whole-store or nothing; one tool would carry two perimeter rules.
+3. **A read tool beside `kogane.instruments.history`** that calls
+   `readInstrumentCoverage` unchanged under the caller's grant. Chosen.
+
+### Decision
+
+1. **Tool and path.** `kogane.instruments.coverage`, served on `/mcp`
+   (`tools/call`) and on `POST /api/agent/v1/instruments.coverage`, by one
+   implementation (`callReadTool`), the agent path being the tool name
+   without `kogane.` as for every agent tool. Its input is a closed object
+   with one optional key, `source` (1 to 128 characters, no control
+   character: the route's limits). An unknown key or a malformed value is
+   `400 invalid_request` before the service runs, on both transports.
+2. **Grant.** The service's own rule, applied to the caller's grant (not the
+   reader grant): `summary.read`, else `403 unauthorized`
+   (`capability:summary.read`); sources and accounts both `"*"`, else
+   `403 evidence_restricted` (`scope:source`, `scope:account`); both decided
+   before the store is read. Over MCP the refusal is the same body with
+   `isError: true`. This is the whole-store-only rule ADR 0063 (decision 10)
+   sets for every new read tool, which calls the route's own reader.
+3. **Listing.** `tools/list` lists it only to a grant that holds
+   `summary.read` over the whole store (`readMcpTools`), as the history tool
+   is listed only to `records.read` over the whole store. A grant it is not
+   listed to that calls it anyway is refused as in 2, not told the tool is
+   unknown.
+4. **Answer.** The service's `kogane-instrument-coverage-v1` unchanged, equal
+   to the browser route's answer for the same `source`; the bounds and their
+   `budget_exceeded` refusals are the service's.
+5. **Audit.** One record per call (ADR 0064) under the operation
+   `instruments.coverage`: risk R0, result `read`, with the number of source
+   rows the answer carried (`toolRows`) and `truncated: false`, never a
+   source, a count or an identifier; a refusal records its closed code.
+
+### Consequences
+
+- The committed `AGENT_API_GRANTS` names one MCP reader with `summary.read`
+  and `records.read` over `"*"` sources and accounts, so by configuration
+  `tools/list` lists this tool to that client. That is a configuration fact,
+  not evidence that a client listed or called it.
+- Each call runs the candidate walk once, as a page load does; the cost and
+  bounds are ADR 0055's. Routine polling would need a written bound first, as
+  for `kogane.instruments.candidates`.
+- It reads and never writes; the audit record is its only write.
+
+### Verification
+
+Synthetic data only, no production access:
+
+- `services/app/test/instrument-coverage-api.test.ts`, over the real Worker,
+  CORE migrations and the production identity writer: listed to whole-store
+  `summary.read` (alone and with `records.read`) and to no grant without it
+  or with a listed source or account axis; the published schema closed with
+  the one optional key; HTTP, MCP and the browser route answer equal bodies
+  for no filter, a source filter and an unknown source; the capability,
+  source-scope and account-scope refusals and the input refusals equal over
+  both transports; no provider text in an answer; one R0 `read` record per
+  served call with its row count, a refusal under its code, and no source or
+  provider text in a record; nothing but audit records written.
+- `services/app/test/agent-api.test.ts` and `mcp-client.test.ts`: the pinned
+  tool lists and schema snapshot under each grant shape include the tool
+  exactly where the grant holds whole-store `summary.read`.
+- `mise run //packages/application:ci`, `//services/app:ci`,
+  `mise run ci:root`.

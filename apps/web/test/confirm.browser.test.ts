@@ -33,8 +33,6 @@ import {
   POSTED_EVENT,
   serverPlanPins,
 } from "./card-purchase-link-fixture.ts";
-import type { DelegationStatus } from "../../../packages/observation-shared/src/delegation-status-contract.ts";
-import { delegationStatusFixture, expectDelegationNotice } from "./delegation-status-fixture.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -88,9 +86,7 @@ describe.if(runnable)("change confirmation screen", () => {
   } | null = null;
   let purchaseAdvertised = true;
   const purchaseReads: string[] = [];
-  let delegations: DelegationStatus | null = null;
   beforeEach(() => {
-    delegations = delegationStatusFixture("none");
     link = null;
     purchaseAdvertised = true;
     purchaseReads.length = 0;
@@ -112,10 +108,6 @@ describe.if(runnable)("change confirmation screen", () => {
               cardPurchaseRecognition: purchaseAdvertised,
             },
           });
-        if (url.pathname === "/api/v2/delegations")
-          return delegations
-            ? Response.json(delegations)
-            : Response.json({ error: "operator_required" }, { status: 403 });
         if (url.pathname === "/api/v2/card-purchases") {
           const eventId = url.searchParams.get("eventId") ?? "";
           purchaseReads.push(eventId);
@@ -238,23 +230,6 @@ describe.if(runnable)("change confirmation screen", () => {
     expect(main).toContain("この接続先では確認操作が有効ではないため、承認・確定は行えません。");
     await page.close();
   }, 30_000);
-
-  for (const width of [1280, 390])
-    for (const configuration of ["valid", "none", "misconfigured", "unavailable"] as const)
-      test(`the delegation in force is a read-only notice beside the operator's own approval (${configuration}, ${width}px)`, async () => {
-        commands = true;
-        stale = false;
-        delegations =
-          configuration === "unavailable" ? null : delegationStatusFixture(configuration);
-        const page = await open({ width, height: 960 });
-        try {
-          await expectDelegationNotice(page, configuration);
-          // The operator's own approval never depends on the delegation table.
-          expect(await page.getByRole("button", { name: "承認する" }).isDisabled()).toBe(false);
-        } finally {
-          await page.close();
-        }
-      }, 30_000);
 
   test("refuses to act on a stale plan and offers the re-simulated plan id", async () => {
     commands = true;

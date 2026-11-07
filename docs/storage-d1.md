@@ -28,7 +28,7 @@ end. Rollback is reverting the commits.
 ```
 packages/storage-d1/
   migrations/core/      0001…0037 moved byte-for-byte from services/raw-evidence; 0039 (U08), 0040 (U06) and later land here
-  migrations/read/      empty; U11 adds 0001_read_baseline.sql
+  migrations/read/      READ's own history: 0001_read_baseline.sql (U11) to 0005
   src/d1.ts             D1Like, D1StatementLike, first/all/run/statement/runBatch
   src/migrations.ts     where the two directories are, named once
   src/core/             one module per group of CORE tables
@@ -145,9 +145,9 @@ as positional arrays. A real `D1PreparedStatement` has always had it; the ORM's
 row mapper reads every projected select and every `RETURNING` that way, and
 `test/sqlite.ts` implements it over `bun:sqlite`. Nothing in `src/core/` or
 `src/atomic/` uses it. Every `D1Like` a test hands to the pilot is either that
-adapter or a real D1 (the `services/raw-evidence` suite runs the switched reads
-on the Workers runtime through `@cloudflare/vitest-plugin`), so `raw()` is
-exercised on both. The mapper coerces nothing: a NULL stays `null` before any
+adapter or a real D1 (the `services/raw-evidence` suite ran the switched reads
+on the Workers runtime through `@cloudflare/vitest-plugin` until that Worker
+was retired on 2026-09-13), so `raw()` was exercised on both. The mapper coerces nothing: a NULL stays `null` before any
 column type sees it, `integer()` and `text()` columns return the driver value
 untouched, and the codec-backed columns below raise on anything they cannot
 read. The `id` columns the six reads return are rowids; no column that could
@@ -191,7 +191,8 @@ module rather than listed, so a declaration that is added and forgotten is
 still compared; a separate assertion pins the list itself, so deleting one is a
 failure rather than a silent narrowing.
 
-**Only declared tables are compared.** CORE creates 102 tables and the mirror
+**Only declared tables are compared.** CORE creates 141 tables
+([`infra/schema/core-ledger.md`](../infra/schema/core-ledger.md)) and the mirror
 declares the fifteen the pilot reads, writes or asserts immutability on. A table
 that exists in SQL without a declaration is scope, not drift, and is not a
 failure; a table that _must_ be mirrored is one the pinned list names. Widening
@@ -368,9 +369,10 @@ git-history check knows there is nothing to compare rather than reporting them
 missing. `0039_collection_runs.sql` (U08, shared-R2 terminal registration —
 see `docs/processor.md`) is the first of them.
 
-`migrations/read/` is empty on purpose. READ is a separate database with a
-separate history starting again at `0001`; keeping the two directories apart
-is what stops a job applying or resetting the wrong one.
+`migrations/read/` holds READ's own migrations (`0001_read_baseline.sql` to
+`0005_reward_provider_expiry_sections.sql` today). READ is a separate database
+with a separate history starting again at `0001`; keeping the two directories
+apart is what stops a job applying or resetting the wrong one.
 
 Consumers repointed by this change:
 
@@ -401,10 +403,13 @@ object, catalogue an artifact, stage and seal an inventory, record an attempt.
 They take a parsed request body rather than a `Request`, because a Processor
 registering a terminal run has no request to hand them.
 
-`RunRegistrationPort` (`src/ingest/port.ts`) is the operation set both callers
-implement: `CentralClient` over the legacy HTTP protocol, and
-`directRegistrationPort` in-process. `services/raw-evidence` is now only the
-adapter decision D2 keeps deployed — routing, authentication and status codes.
+`RunRegistrationPort` (`src/ingest/port.ts`) is the operation set registration
+calls. When this change landed it had two implementations: `CentralClient` over
+the legacy HTTP protocol, and `directRegistrationPort` in-process, with
+`services/raw-evidence` reduced to routing, authentication and status codes.
+Since the 2026-09-13 retirement
+([legacy-retirement.md](legacy-retirement.md)) only `directRegistrationPort`
+remains; the Processor registers terminals through it.
 
 ## What is verified, and how
 
@@ -430,6 +435,10 @@ production.
 | G2-16: an `update` or `delete` through the ORM is refused by the same trigger, and leaves the row untouched                                                                               | `packages/storage-d1/test/drizzle-immutability.test.ts`                                                        |
 | G4-11, G4-12: a coefficient beyond 2^53, a NULL amount and a date-only window keep their meaning through the ORM's columns                                                                | `packages/storage-d1/test/drizzle-codecs.test.ts`                                                              |
 | G4-14: a dependency change that moves a parser digest is a new release, and this change moves none                                                                                        | `packages/parsers/test/parser-digests.test.ts`, `docs/libraries.md`                                            |
+
+The `services/raw-evidence` suites named in two rows above were removed with
+that Worker on 2026-09-13 ([legacy-retirement.md](legacy-retirement.md)); the
+in-process path they compared against is the one that remains.
 
 ## Flags, deploy order, rollback
 

@@ -1,5 +1,6 @@
 import { delegatedMaintenanceRoute } from "./delegated-maintenance";
 import { delegatedScheduleRoute } from "./delegated-schedules";
+import { delegatedSurveyRoute } from "./delegated-survey";
 import { retireReplacedJobsSql } from "./job-retirement-sql.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { PersistedObservation } from "../../../packages/parsers/src/scheduled-payment.ts";
@@ -21,6 +22,7 @@ import {
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
+import { boundedText } from "./bounded-body.ts";
 import { auditOverflowStage } from "./audit-overflow.ts";
 import { scheduleRoute } from "./schedule-store";
 import { collectionQualityAlarmRoute } from "./collection-quality-alarms";
@@ -1158,36 +1160,12 @@ export async function sweep(env: Env, options: SweepOptions = {}) {
   return { ...totals, lanes };
 }
 
-async function bounded(request: Request, limit: number): Promise<string | null> {
-  if (!request.body) return null;
-  const reader = request.body.getReader();
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  let size = 0,
-    text = "";
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > limit) {
-        await reader.cancel();
-        return null;
-      }
-      text += decoder.decode(value, { stream: true });
-    }
-    return text + decoder.decode();
-  } catch {
-    return null;
-  } finally {
-    reader.releaseLock();
-  }
-}
-
 async function command(request: Request): Promise<Record<string, unknown> | null> {
-  const body = await bounded(request, 4096);
-  if (body === null) return null;
   let value: unknown;
   try {
+    // Malformed UTF-8 and a failing stream refuse the command like bad JSON.
+    const body = await boundedText(request, 4096, { fatal: true });
+    if (body === null) return null;
     value = JSON.parse(body);
   } catch {
     return null;
@@ -2082,7 +2060,8 @@ export default {
     // that did not arrive that way is refused, not answered. Read-only.
     const delegatedScheduling =
       (await delegatedMaintenanceRoute(request, env, url)) ??
-      (await delegatedScheduleRoute(request, env, url));
+      (await delegatedScheduleRoute(request, env, url)) ??
+      (await delegatedSurveyRoute(request, env, url));
     if (delegatedScheduling) return delegatedScheduling;
     const scheduling = await scheduleRoute(request, env, url);
     const qualityAlarms = await collectionQualityAlarmRoute(request, env, url);

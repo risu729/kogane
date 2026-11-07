@@ -437,7 +437,8 @@ export const REWARD_REQUEST_SCHEMA = {
   // (U16, G2-20). Served only where `rewardsV2ReadModel` is `read-d1`; without
   // a snapshot it is `503`, never an empty success.
   "/api/v2/rewards/simulations": ["cursor", "limit"],
-  "/api/v2/rewards/offers/simulate": ["offer", "quantity", "unit", "goal", "depth"],
+  // `version` names one stored version of `offer`; it is refused without one.
+  "/api/v2/rewards/offers/simulate": ["offer", "version", "quantity", "unit", "goal", "depth"],
 } as const satisfies Record<string, readonly string[]>;
 export type RewardPath = keyof typeof REWARD_REQUEST_SCHEMA;
 

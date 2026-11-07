@@ -64,7 +64,9 @@ refresh failures retain previously authorized records with an explicit warning.
 | `tables.css`     | Scroll region, cell defaults, sortable headers, the transaction/balance/identity column contracts                                                         |
 | `pages.css`      | Page-specific layouts: overview, source cards, positions, observation lists, rewards, settlement, card ownership, card purchases, reported state, reports |
 
-`balance-display.css` stays beside its component. Responsive rules sit next to
+`styles/schedules.css` is not in the index: `pages/Schedules.tsx` imports it
+directly, and it still carries raw pixel sizes and fallback colours beside its
+token references. `balance-display.css` stays beside its component. Responsive rules sit next to
 the rule they modify, not in one media block, so page work touches one file.
 
 The scales in `tokens.css`:
@@ -129,7 +131,7 @@ parameters each capability unlocks, and the client argument builder are one
 definition in `packages/observation-shared/src/api-schema.ts`. The response
 validator (`validApiResponse`) checks the object against that schema, both
 servers derive their accepted parameters from it, and the same
-conformance checks (`test/api-conformance.ts`) run against the local store,
+conformance checks (`packages/observation-shared/test-support/api-conformance.ts`) run against the local store,
 the local synthetic snapshot adapter, and the production Worker. Capabilities are never
 an authorization switch: Access JWT verification, closed responses on auth
 failure, and `no-store` apply before any capability is read.
@@ -213,6 +215,19 @@ reports synthetic data through `/api/meta`. It does not read or modify the
 regular `state/` database. A normal shutdown removes its temporary store.
 An abrupt process termination can leave a temporary `kogane-preview-*`
 directory; it contains only synthetic data.
+
+Because `/api/meta` reports `source.classification: synthetic`, the client
+mounts no financial or evidence view, and no command view other than the
+schedules page below. Every such route (取引, 残高, 保有資産, 原本・証跡 and the
+others) shows only 表示対象の記録がありません and 接続先を確認してください。,
+even though the preview API still serves the fixtures
+([synthetic display test](../apps/web/test/synthetic-display.browser.test.ts)).
+The preview is therefore a check of the shell and that guard, not of the
+financial pages. 収集スケジュール (`/schedules`) and 監査ログ (`/audit`) are
+drawn outside that guard, but the preview serves neither
+`/api/ops/v1/schedules` nor `/api/v2/audit`: the
+schedules page shows its load-error messages, and the audit page says that
+this source provides no audit log.
 
 `mise run //experiments/observation-pipeline-local:serve` continues to read the regular local store. Its metadata
 reports the data classification as unknown: an operator may have ingested
