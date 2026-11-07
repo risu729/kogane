@@ -21,7 +21,6 @@ import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { maskRandomTokens } from "../../../packages/application/test/random-tokens";
 
 const OWNER = "maintenance-owner-synthetic";
-const OWNER_MCP = `mcp-client:${OWNER}`;
 const READER = "maintenance-reader-synthetic";
 const FINANCIAL = "financial-agent-synthetic";
 const REVIEWER = "reviewer-owner-synthetic";
@@ -32,42 +31,6 @@ const REFERENCE = "https://maintenance.synthetic.test/notices";
 const TOKEN = "eyJhbGciOiJIUzI1NiJ9.c3ludGhldGlj.dG9rZW4";
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
-const BUDGET = { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 1 };
-const scheduleGrant = (scheduleSources: string[] | "*") => ({
-  scopes: { sources: [], accounts: [], scheduleSources },
-  capabilities: ["schedules.read"],
-  budget: BUDGET,
-});
-const financialGrant = {
-  scopes: { sources: "*", accounts: "*" },
-  capabilities: ["summary.read", "records.read", "evidence.read", "interpretation.propose"],
-  budget: BUDGET,
-};
-/** Each subject has the same grant on the browser route and as its MCP client. */
-const GRANTS = {
-  [OWNER]: scheduleGrant(["vpass", "sony-bank"]),
-  [OWNER_MCP]: scheduleGrant(["vpass", "sony-bank"]),
-  [READER]: scheduleGrant(["vpass"]),
-  [`mcp-client:${READER}`]: scheduleGrant(["vpass"]),
-  [FINANCIAL]: financialGrant,
-  [`mcp-client:${FINANCIAL}`]: financialGrant,
-  [`mcp-client:${REVIEWER}`]: {
-    scopes: { sources: "*", accounts: "*", scheduleSources: "*" },
-    capabilities: ["summary.read"],
-    budget: BUDGET,
-  },
-};
-/** The owner's maintainer delegation to its own MCP identity (ADR 0063), valid now. */
-const MAINTAINER = {
-  delegatedBy: OWNER,
-  role: "maintainer",
-  scopes: { sources: [], accounts: [], scheduleSources: ["vpass"] },
-  issuedAt: iso(Date.now() - DAY),
-  notAfter: iso(Date.now() + 30 * DAY),
-  budget: { writesPerDay: 30 },
-};
-const delegations = (entries: Record<string, unknown>) => JSON.stringify(entries);
-
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let jwks: { keys: unknown[] };
 let issuer: string;
@@ -180,9 +143,7 @@ async function request(
       ACCESS_AUDIENCE: APP_AUD,
       ACCESS_MCP_AUDIENCE: MCP_AUD,
       SCHEDULES_ENABLED: "true",
-      AGENT_API_GRANTS: JSON.stringify(GRANTS),
       OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
-      MCP_DELEGATIONS: "",
       RELEASE_SHA: "a".repeat(40),
       PIPELINE,
       ...options.environment,
@@ -223,6 +184,9 @@ async function http(subject: string, name: string, body: unknown) {
     audience: APP_AUD,
     body,
     headers: { "content-type": "application/json" },
+    // The HTTP agent route gives a browser session what the UI gives it; the
+    // maintenance windows are the operator's in the UI (ADR 0084).
+    environment: { OPERATOR_SUBJECTS: JSON.stringify([...new Set([OWNER, subject])]) },
   });
   return { status: response.status, body: (await response.json()) as any };
 }
@@ -267,25 +231,16 @@ async function records(operation: string): Promise<Record<string, unknown>[]> {
 }
 
 describe("the maintenance read: one function on both agent paths", () => {
-  it("lists reads by grant and revisions only by valid delegation", async () => {
+  it("lists the read and the revision to every MCP client, whatever the command lists say (ADR 0084)", async () => {
     const names = async (subject: string, environment?: Record<string, unknown>) =>
       ((await mcp(subject, "tools/list", {}, environment)).result.tools as { name: string }[]).map(
         (entry) => entry.name,
       );
-    expect(await names(OWNER)).toContain(READ);
-    expect(await names(READER)).toContain(READ);
-    // A financial grant holds no schedule capability, and a schedule scope
-    // without the capability reaches nothing.
-    expect(await names(FINANCIAL)).not.toContain(READ);
-    expect(await names(REVIEWER)).not.toContain(READ);
-    // Only the named owner delegation publishes the installed writer.
-    expect(
-      await names(OWNER, { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) }),
-    ).toContain(UPDATE);
-    for (const subject of [READER, FINANCIAL])
-      expect(
-        await names(subject, { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) }),
-      ).not.toContain(UPDATE);
+    for (const subject of [OWNER, READER, FINANCIAL, REVIEWER]) {
+      expect(await names(subject)).toContain(READ);
+      expect(await names(subject)).toContain(UPDATE);
+    }
+    expect(await names(OWNER, { OPERATOR_SUBJECTS: "[]" })).toContain(UPDATE);
     // Off with the settings routes: neither listed nor callable.
     expect(await names(OWNER, { SCHEDULES_ENABLED: "false" })).not.toContain(READ);
     for (const name of [READ, UPDATE]) {
@@ -308,9 +263,10 @@ describe("the maintenance read: one function on both agent paths", () => {
       expect(viaMcp.isError).toBe(false);
       expect(viaHttp.status).toBe(200);
       expect(viaHttp.body).toEqual(viaMcp.structuredContent);
-      expect(viaHttp.body.sources.map((entry: { source: string }) => entry.source)).toEqual([
-        "vpass",
-      ]);
+      const sources = viaHttp.body.sources.map((entry: { source: string }) => entry.source);
+      // The whole-store grant reaches every schedule; a filter narrows the answer.
+      if ("source" in args) expect(sources).toEqual(["vpass"]);
+      else expect(sources).toEqual(expect.arrayContaining(["vpass", "sony-bank"]));
     }
     // Each relayed as its own principal, never as an operator.
     expect(relayed).toEqual([
@@ -334,11 +290,16 @@ describe("the maintenance read: one function on both agent paths", () => {
       });
   });
 
-  it("refuses alike on both paths: no capability, a source outside the scope or none at all", async () => {
+  it("refuses alike on both paths: a bad argument", async () => {
+    // A source this store does not hold is inside the whole-store scope, so
+    // it answers an empty list, alike on both paths.
+    const unknown = await http(READER, READ, { source: "no-such-source" });
+    expect(unknown).toMatchObject({ status: 200, body: { sources: [] } });
+    expect((await tool(READER, READ, { source: "no-such-source" })).structuredContent).toEqual(
+      unknown.body,
+    );
+    relayed.length = 0;
     for (const [subject, args, status, error] of [
-      [FINANCIAL, { source: "vpass" }, 403, "unauthorized"],
-      [READER, { source: "sony-bank" }, 403, "source_not_granted"],
-      [READER, { source: "no-such-source" }, 403, "source_not_granted"],
       [READER, { source: "vpass", extra: 1 }, 400, "invalid_request"],
     ] as const) {
       const viaMcp = await tool(subject, READ, args);
@@ -381,101 +342,8 @@ describe("the maintenance revision: delegated authority and closed request bound
     return { status: result.structuredContent.error as string, record: written[0]! };
   }
 
-  it("refuses an MCP client without a delegation, the operator's own included", async () => {
-    // The owner is the configured operator, yet on `/mcp` it is only
-    // `mcp-client:<sub>`: no bare-subject fallback to the operator.
-    for (const subject of [OWNER, READER, FINANCIAL]) {
-      const { status, record } = await refusedUpdate(subject, window("vpass"));
-      expect(status).toBe("delegation_not_configured");
-      expect(record).toMatchObject({
-        path: "mcp",
-        subject,
-        principal: `mcp-client:${subject}`,
-        principal_kind: "agent",
-        delegation_ref: null,
-        operation: "schedules.maintenance.update",
-        risk_class: "R1",
-        result: "refused",
-        result_code: "delegation_not_configured",
-        target_ref: null,
-      });
-    }
-    // Another owner's delegation is not this client's.
-    const other = await refusedUpdate(READER, window("vpass"), {
-      MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }),
-    });
-    expect(other.status).toBe("delegation_not_configured");
-  });
-
-  it("refuses under every invalid, early or late delegation table", async () => {
-    const cases: [string, string][] = [
-      ["{", "delegation_misconfigured"],
-      // Keyed by the bare subject: never a delegation, and the table is unreadable.
-      [delegations({ [OWNER]: MAINTAINER }), "delegation_misconfigured"],
-      // A delegator who is not the operator.
-      [
-        delegations({ [`mcp-client:${READER}`]: { ...MAINTAINER, delegatedBy: READER } }),
-        "delegation_misconfigured",
-      ],
-      // A schedule scope wider than the client's read grant.
-      [
-        delegations({
-          [OWNER_MCP]: {
-            ...MAINTAINER,
-            scopes: { ...MAINTAINER.scopes, scheduleSources: ["vpass", "myjcb"] },
-          },
-        }),
-        "delegation_misconfigured",
-      ],
-      [
-        delegations({ [OWNER_MCP]: { ...MAINTAINER, issuedAt: iso(Date.now() + DAY) } }),
-        "delegation_not_yet_valid",
-      ],
-      [
-        delegations({
-          [OWNER_MCP]: {
-            ...MAINTAINER,
-            issuedAt: iso(Date.now() - 2 * DAY),
-            notAfter: iso(Date.now() - DAY),
-          },
-        }),
-        "delegation_expired",
-      ],
-    ];
-    for (const [configured, code] of cases) {
-      const { status, record } = await refusedUpdate(OWNER, window("vpass"), {
-        MCP_DELEGATIONS: configured,
-      });
-      expect([configured, status]).toEqual([configured, code]);
-      expect(record).toMatchObject({
-        result: code === "delegation_misconfigured" ? "failed" : "refused",
-        result_code: code,
-        delegation_ref: null,
-      });
-    }
-  });
-
-  it("refuses a delegation without the capability", async () => {
-    const reviewer = {
-      ...MAINTAINER,
-      delegatedBy: REVIEWER,
-      role: "reviewer",
-      scopes: { sources: "*", accounts: "*", scheduleSources: "*" },
-    };
-    const { status } = await refusedUpdate(REVIEWER, window("vpass"), {
-      OPERATOR_SUBJECTS: JSON.stringify([OWNER, REVIEWER]),
-      MCP_DELEGATIONS: delegations({ [`mcp-client:${REVIEWER}`]: reviewer }),
-    });
-    expect(status).toBe("delegation_capability_denied");
-  });
-
-  it("checks arguments and scope under a valid delegation before relaying", async () => {
-    const environment = { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) };
-    // Out of the delegation's scope, existing or not: one answer.
-    const outside = await refusedUpdate(OWNER, window("sony-bank"), environment);
-    const missing = await refusedUpdate(OWNER, window("no-such-source"), environment);
-    expect(outside.status).toBe("source_not_granted");
-    expect(missing.status).toBe(outside.status);
+  it("checks arguments and scope before relaying", async () => {
+    const environment = {};
     // The reason is a closed code: free text is refused at the edge.
     const freeText = await refusedUpdate(
       OWNER,
@@ -499,32 +367,6 @@ describe("the maintenance revision: delegated authority and closed request bound
       );
   });
 
-  it("an agent grant cannot name the revision: the whole table is refused", async () => {
-    const response = await request("/mcp", {
-      subject: OWNER,
-      audience: MCP_AUD,
-      body: {
-        jsonrpc: "2.0",
-        id: ++rpc,
-        method: "tools/call",
-        params: { name: UPDATE, arguments: window("vpass") },
-      },
-      headers: { ...MCP_CLIENT_HEADERS, "mcp-protocol-version": "2025-11-25" },
-      environment: {
-        AGENT_API_GRANTS: JSON.stringify({
-          ...GRANTS,
-          [OWNER_MCP]: {
-            ...GRANTS[OWNER_MCP],
-            capabilities: ["schedules.read", "schedules.maintenance.update"],
-          },
-        }),
-      },
-    });
-    expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
-    expect(relayed).toEqual([]);
-  });
-
   it("shares the published closed schema with the executable adapter", () => {
     expect(scheduleUpdateSchema.safeParse(window("vpass")).success).toBe(true);
     for (const extra of [{ actor: "x" }, { ruleId: "Has Space" }, { reason: "correction " }])
@@ -538,7 +380,7 @@ describe("the maintenance revision: delegated authority and closed request bound
   });
 
   it("records codes and counts only: refused argument values reach no record or revision", async () => {
-    const environment = { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) };
+    const environment = {};
     await refusedUpdate(
       OWNER,
       window("vpass", {
@@ -629,5 +471,97 @@ describe("the operator's edit is the one revision path that runs today", () => {
       reason_code: "operator-edit",
       risk_class: "R1",
     });
+  });
+});
+
+describe("the lease release: listed on /mcp and refused for every caller (ADR 0081 point 3)", () => {
+  const RELEASE = "kogane.schedules.lease.release";
+  const LEASE_REF = "0b6f1c3e-8d2a-4f5b-9c7e-1a2b3c4d5e6f";
+  const names = async (subject: string, environment?: Record<string, unknown>) =>
+    ((await mcp(subject, "tools/list", {}, environment)).result.tools as { name: string }[]).map(
+      (entry) => entry.name,
+    );
+
+  it("is listed to every MCP client while the settings routes exist, and absent without them", async () => {
+    for (const subject of [OWNER, READER, FINANCIAL])
+      expect(await names(subject)).toContain(RELEASE);
+    // Whatever the operator list says (ADR 0084: no table grades MCP).
+    expect(await names(OWNER, { OPERATOR_SUBJECTS: "[]" })).toContain(RELEASE);
+    // The route's input (`/leases/{source}` with `{leaseRef, confirmedStopped}`), closed.
+    const listed = (
+      (await mcp(OWNER, "tools/list", {})).result.tools as {
+        name: string;
+        inputSchema: Record<string, unknown>;
+      }[]
+    ).find((entry) => entry.name === RELEASE)!;
+    expect(listed.inputSchema).toMatchObject({
+      type: "object",
+      additionalProperties: false,
+      required: ["source", "leaseRef", "confirmedStopped"],
+      properties: { confirmedStopped: { const: true } },
+    });
+    expect(await names(OWNER, { SCHEDULES_ENABLED: "false" })).not.toContain(RELEASE);
+    const off = await mcp(
+      OWNER,
+      "tools/call",
+      { name: RELEASE, arguments: { source: "vpass", leaseRef: LEASE_REF } },
+      { SCHEDULES_ENABLED: "false" },
+    );
+    expect(off.error).toEqual({ code: -32602, message: "unknown_tool" });
+  });
+
+  it("refuses every call before any store or Processor is reached, and records it at R3", async () => {
+    // A held lease that a release would clear.
+    await env.DB.prepare(
+      "INSERT INTO collection_execution_leases(source,lease_ref,started_at) VALUES('vpass',?,?) ON CONFLICT(source) DO UPDATE SET lease_ref=excluded.lease_ref,started_at=excluded.started_at",
+    )
+      .bind(LEASE_REF, iso(Date.now() - DAY))
+      .run();
+    const before = (await records("schedules.lease.release")).length;
+    const calls: [string, unknown, Record<string, unknown>?][] = [
+      // The page's own body, exactly as its route would release with it.
+      [OWNER, { source: "vpass", leaseRef: LEASE_REF, confirmedStopped: true }],
+      // The whole-store authority every MCP client holds does not change it,
+      // whatever the operator list says.
+      [
+        OWNER,
+        { source: "vpass", leaseRef: LEASE_REF, confirmedStopped: true },
+        { OPERATOR_SUBJECTS: "[]" },
+      ],
+      // Neither does a reader without schedule authority, nor a malformed body.
+      [FINANCIAL, { source: "vpass", leaseRef: LEASE_REF, confirmedStopped: true }],
+      [READER, { source: "vpass", leaseRef: LEASE_REF }],
+      [READER, {}],
+    ];
+    for (const [subject, args, environment] of calls)
+      expect(await tool(subject, RELEASE, args, environment)).toMatchObject({
+        isError: true,
+        structuredContent: { error: "operation_not_delegable" },
+      });
+    expect(relayed).toEqual([]);
+    const lease = await env.DB.prepare(
+      "SELECT lease_ref FROM collection_execution_leases WHERE source='vpass'",
+    ).first<string>("lease_ref");
+    expect(lease).toBe(LEASE_REF);
+    const written = (await records("schedules.lease.release")).slice(before);
+    expect(written.map((row) => row["principal"])).toEqual(
+      calls.map(([subject]) => `mcp-client:${subject}`),
+    );
+    for (const row of written)
+      expect(row).toMatchObject({
+        path: "mcp",
+        principal_kind: "agent",
+        delegation_ref: null,
+        risk_class: "R3",
+        result: "refused",
+        result_code: "operation_not_delegable",
+        target_ref: null,
+      });
+  });
+
+  it("has no HTTP agent route", async () => {
+    const refused = await http(OWNER, RELEASE, { source: "vpass", leaseRef: LEASE_REF });
+    expect(refused).toMatchObject({ status: 404, body: { error: "not_found" } });
+    expect(relayed).toEqual([]);
   });
 });

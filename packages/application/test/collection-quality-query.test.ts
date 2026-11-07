@@ -158,7 +158,7 @@ describe("the summary", () => {
     expect(summary.sources.map((source) => source.sourceId)).toEqual(visible.map((row) => row.id));
   });
 
-  test("a failed receipt, its runs where CORE has them, the lease and the withheld dataset", async () => {
+  test("a failed receipt, its runs where CORE has them and the lease; no dataset is withheld since ADR 0083", async () => {
     const summary = await queryCollectionQualitySummary(executor(store));
     const vpass = summary.sources.find((source) => source.sourceId === "vpass")!;
     expect(vpass.collectors).toEqual(["vpass"]);
@@ -214,7 +214,6 @@ describe("the summary", () => {
       "acquisition_partial",
       "coverage_partial",
       "unregistered_terminals",
-      "dataset_withheld",
     ]);
   });
 

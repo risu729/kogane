@@ -9,7 +9,12 @@
   S6. Slice S7 (the `alarm` and `lane` audit writers, #925) and slice S8 (the
   `監査ログ` page, #923, and the delegation status on the schedules and
   confirm pages, #926) are implemented on main. Survey acceptance (S6) and
-  real-client activation remain open. See the
+  real-client activation remain open. On 2026-11-07
+  [ADR 0084](../adr/0084-mcp-operator-authority-without-delegation.md) removed
+  the `MCP_DELEGATIONS` declaration, its roles and the delegation status
+  (S3's declaration core and S8's status part): the operator's MCP principal
+  now resolves from `OPERATOR_SUBJECTS` and its read grant, and the sections
+  below that describe declarations record the earlier design. See the
   [current resume plan](2026-10-mcp-maintenance-followups.md).
   The decisions it rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and
@@ -1100,7 +1105,8 @@ acceptance and concrete client delegation remain separate owner decisions.
   `delegationRef`; the schedules and confirm pages show it as a read-only
   notice. The route and shape are recorded in
   [ADR 0063's amendment](../adr/0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06-proposed);
-  [agent API](../agent-api.md#the-operators-delegation-status-s8-2026-11-06).
+  [agent API](../agent-api.md#the-operators-mcp-principal-adr-0084-2026-11-07)
+  (removed by ADR 0084).
   Service, contract and desktop/mobile browser tests cover it. The audit page
   is a separate pull request.
 

@@ -18,11 +18,6 @@ const PATH = "/api/identity/account-candidates";
 const AGENT_PATH = "/api/agent/v1/accounts.candidates";
 const REVIEWED = `moneyforward-account-v2-${"a".repeat(64)}`;
 const UNREVIEWED = `moneyforward-account-v2-${"b".repeat(64)}`;
-const FULL_GRANT = {
-  scopes: { sources: "*", accounts: "*" },
-  capabilities: ["summary.read", "records.read"],
-  budget: { maxRows: 500, maxProposalTargets: 5, maxExplainDepth: 3 },
-};
 const MCP_AUDIENCE = "fixture-mcp-audience";
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;
@@ -80,7 +75,6 @@ interface CallOptions {
   method?: string;
   body?: unknown;
   subject?: string | null;
-  grants?: Record<string, unknown>;
 }
 
 async function call(path: string, options: CallOptions = {}) {
@@ -111,12 +105,6 @@ async function call(path: string, options: CallOptions = {}) {
     ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
     OPERATOR_SUBJECTS: '["synthetic-operator"]',
     AGENT_GRANTS: '["synthetic-agent"]',
-    AGENT_API_GRANTS: JSON.stringify(
-      options.grants ?? {
-        "synthetic-agent": FULL_GRANT,
-        "mcp-client:synthetic-agent": FULL_GRANT,
-      },
-    ),
   } as Env);
 }
 
@@ -229,18 +217,9 @@ describe("GET /api/identity/account-candidates", () => {
 });
 
 describe("kogane.accounts.candidates", () => {
-  it("answers the same page over HTTP and MCP, and is listed to a whole-store records.read grant only", async () => {
+  it("answers the same page over HTTP and MCP, and is listed to every MCP client", async () => {
     const listed = await mcp({ method: "tools/list" });
     expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).toContain(
-      "kogane.accounts.candidates",
-    );
-    const summaryOnly = await mcp(
-      { method: "tools/list" },
-      {
-        grants: { "mcp-client:synthetic-agent": { ...FULL_GRANT, capabilities: ["summary.read"] } },
-      },
-    );
-    expect(summaryOnly["result"].tools.map((tool: { name: string }) => tool.name)).not.toContain(
       "kogane.accounts.candidates",
     );
     const overRoute = await (await call(`${PATH}?view=connections`)).json();
@@ -258,33 +237,8 @@ describe("kogane.accounts.candidates", () => {
     expect(overMcp["result"].structuredContent).toEqual(overRoute);
   });
 
-  it("is graded by the agent's grant and its strict input, and writes nothing", async () => {
+  it("is graded by its strict input, and writes nothing", async () => {
     const before = await tables();
-    const summary = await call(AGENT_PATH, {
-      subject: "synthetic-agent",
-      body: {},
-      grants: { "synthetic-agent": { ...FULL_GRANT, capabilities: ["summary.read"] } },
-    });
-    expect(summary.status).toBe(403);
-    expect(await summary.json()).toMatchObject({
-      code: "unauthorized",
-      refs: ["capability:records.read"],
-    });
-    const narrowed = await call(AGENT_PATH, {
-      subject: "synthetic-agent",
-      body: {},
-      grants: {
-        "synthetic-agent": {
-          ...FULL_GRANT,
-          scopes: { sources: ["moneyforward-me"], accounts: "*" },
-        },
-      },
-    });
-    expect(narrowed.status).toBe(403);
-    expect(await narrowed.json()).toMatchObject({
-      code: "evidence_restricted",
-      refs: ["scope:source"],
-    });
     const unknownKey = await call(AGENT_PATH, {
       subject: "synthetic-agent",
       body: { source: "x" },
