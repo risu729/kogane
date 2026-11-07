@@ -12,6 +12,10 @@ const TOOL = "kogane.evidence.read";
 const EVIDENCE_GRANT = { ...RECORDS_GRANT, capabilities: ["evidence.read"] };
 const PREFIX = "/api/evidence/v1";
 const page = pageReadHarness("evidence-read");
+// The browser with no configured source, as `EVIDENCE_SOURCE_ID` unset or another value.
+const unconfigured = pageReadHarness("evidence-read-unconfigured", {
+  EVIDENCE_SOURCE_ID: "other-test",
+});
 
 let run: Awaited<ReturnType<typeof seedRun>>;
 let hidden: Awaited<ReturnType<typeof seedRun>>;
@@ -102,6 +106,22 @@ describe("kogane.evidence.read", () => {
     ] as [string, Record<string, unknown>, number][]) {
       const refused = await page.expectSameAnswer(query, TOOL, args);
       expect(refused.status, query).toBe(status);
+    }
+  });
+
+  it("answers 503 source_not_configured on every page while no source is configured", async () => {
+    for (const [query, args] of [
+      [`${PREFIX}/meta`, { page: "meta" }],
+      [`${PREFIX}/sources/sony-bank/runs`, { page: "runs", source: "sony-bank" }],
+      [`${PREFIX}/runs/r_${run.id}/artifacts`, { page: "artifacts", runId: `r_${run.id}` }],
+      [
+        `${PREFIX}/runs/r_${run.id}/artifacts/${artifact}`,
+        { page: "artifact", runId: `r_${run.id}`, artifactId: artifact },
+      ],
+    ] as const) {
+      const refused = await unconfigured.expectSameAnswer(query, TOOL, args, EVIDENCE_GRANT);
+      expect(refused.status, query).toBe(503);
+      expect(refused.body, query).toMatchObject({ error: "source_not_configured" });
     }
   });
 

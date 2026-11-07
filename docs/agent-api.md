@@ -642,7 +642,8 @@ function, so they cannot disagree on a row, a page bound or a refusal code.
 
 Input is a closed object. Its keys are the route's query parameters with
 their bounds, plus the field that picks the route (`collection`, `page` or `kind`, or the
-`kind` and `id` of a detail route). The tool sets only the parameters the caller gives,
+`kind` and `id` of a detail route) and the route's other path segments
+(`reportId`, `source`, `runId`, `artifactId`). The tool sets only the parameters the caller gives,
 so the reader applies the route's own defaults and refusals. Output is
 `{ "schemaVersion": "kogane-page-read-v1", "data": <the route's body> }`.
 The route's answer carries provider labels, so all of it travels under
@@ -706,13 +707,13 @@ gone from the list once withdrawn (its current revision has no leg).
 `kogane.evidence.read` takes `{ page, source?, runId?, artifactId?, cursor? }`.
 `page` picks the route: `meta`; `runs`, which needs `source`; `artifacts`,
 which needs `runId`; `artifact`, which needs `runId` and `artifactId`. A
-segment the page lacks, or one it does not have, is `400 invalid_request` with
-that key as the ref. The ids are the route's own (`r_<n>`, `a_<n>`, `c_<n>`),
+segment the page needs and is not given, or one it does not take, is
+`400 invalid_request` with that key as the ref. The ids are the route's own (`r_<n>`, `a_<n>`, `c_<n>`),
 so no argument can name another path, `/raw` included; `cursor` goes to the
 route as its query, which refuses it on `meta` and on a detail as the route
 does (`400 invalid_query`). Like the browser, it shows only the configured
-source's sealed runs; while no source is configured every page is
-`503 source_not_configured`. It needs `evidence.read`, as the artifact
+source's sealed runs; while no source is configured every call that passes
+these argument checks is `503 source_not_configured`. It needs `evidence.read`, as the artifact
 detail names the provider's file, its media type and digest.
 
 Every MCP client holds the whole-store grant
