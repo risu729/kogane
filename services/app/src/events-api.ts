@@ -6,6 +6,7 @@
 // Every figure carries its basis and its explanation refs. The activity list
 // never mixes cash-out with cost recognised at purchase: the basis is a
 // required part of the request (addendum 07 section 6).
+import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
 import {
   createEventsReader,
   d1Executor,
@@ -25,10 +26,7 @@ export const EVENTS_PAGE_SIZE = 200;
  * of migration 0032 advertises `eventsV2: false` and serves nothing.
  */
 export async function eventsV2Available(env: Env): Promise<boolean> {
-  const row = await env.DB.prepare(
-    "SELECT count(*) AS present FROM sqlite_master WHERE type='table' AND name='economic_event_revisions'",
-  ).first<{ present: number }>();
-  return row?.present === 1;
+  return storeHasFeature(d1Executor(env.DB), "economicEvents");
 }
 
 function offsetOf(url: URL): number {

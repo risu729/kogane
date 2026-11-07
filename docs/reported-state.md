@@ -17,10 +17,12 @@ is [reconstructed state](reconstructed-state.md) (served by `GET /api/v2/reconst
 | Policies            | `packages/domain/src/reported-state.ts` (cutoff, freshness, payable status, perimeter)                                      |
 | Query               | `queryDatedState` in `packages/application/src/query/dated-state.ts`                                                        |
 | HTTP                | `GET /api/v2/reported-state?date=YYYY-MM-DD` (`services/app/src/reported-state-api.ts`)                                     |
+| Agent tool          | `kogane.reported-state.read` (`services/app/src/read-tools.ts`), the route's `readReportedState`                            |
 | Contract            | `validReportedState` in `packages/observation-shared/src/reported-state-contract.ts`                                        |
 | Page                | 基準日の保有状況 at `/state` (`apps/web/src/pages/ReportedState.tsx`), capability `reportedStateOnDate`                     |
 | Two dates           | `queryHoldingsChange` in `packages/application/src/query/holdings-change.ts` ([below](#holdings-changes-between-two-dates)) |
 | Two dates, HTTP     | `GET /api/v2/reported-holdings-change` (`services/app/src/reported-holdings-change-api.ts`)                                 |
+| Two dates, agent    | `kogane.reported-holdings-change.read` (`services/app/src/page-read-tools.ts`), the route's `readHoldingsChange`            |
 | Two dates, contract | `validReportedHoldingsChange` in `packages/observation-shared/src/reported-holdings-change-contract.ts`                     |
 | Two dates, page     | panel 保有数量の変化 on `/state` (`apps/web/src/pages/ReportedHoldingsChange.tsx`)                                          |
 
@@ -145,7 +147,8 @@ holdings of two dates side by side
 ([ADR 0075](adr/0075-reported-holdings-change-between-dates.md)); the rules
 are `compareReportedHoldings` in `packages/domain/src/holdings-change.ts`
 (`holdings-change-v1`). A route, a wire contract and a panel of the `/state`
-page serve it ([below](#http-contract-and-page)); no agent tool does.
+page serve it ([below](#http-contract-and-page)), and so does the page read
+`kogane.reported-holdings-change.read` ([agent API](agent-api.md#ui-read-pages)).
 
 It reads the reported state on both dates (narrowed by `source` only, so a
 capture whose identity is not recorded yet still lists its holdings), each
@@ -288,8 +291,7 @@ answer under two seconds.
   total across sources.
 - Nothing is stored: a reported state has no fixed report or
   `calculation_runs` row yet.
-- Holdings changes between two dates have no agent tool (the reported state
-  on a date has none), and the page compares only up to its own 基準日
+- The holdings-change page compares only up to its own 基準日
   without the route's `source` and `account` filters. A change is what two captures report, not attributed to any trade or
   transfer (no event moves a security quantity); a parser renamed between the
   dates would make one holding two keys; balances are not compared there.

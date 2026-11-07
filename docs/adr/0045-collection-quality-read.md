@@ -186,7 +186,7 @@ and is not claimed here.
 
 ## Amendment 2026-10-09: compose the remaining shipped capture selections
 
-- Status: proposed (until its PR merges)
+- Status: accepted (merged 2026-10-09 in #630)
 - Issue: part of #542
 
 ### Context and options

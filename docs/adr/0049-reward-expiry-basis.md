@@ -270,7 +270,7 @@ this decision, not a defect: the inputs that would allow one are not confirmed.
 
 ## Amendment: current V Point snapshot and unclassified buckets
 
-- Status: proposed; accepted upon merge of #632
+- Status: accepted (merged 2026-10-10 in #632)
 - Date: 2026-10-09
 - Issue: #554; current capture selection consumes #542's shared contract
 
@@ -376,7 +376,7 @@ enforce append-only/current-publication guards and bump the source revision.
 
 ## Amendment: bounded offer set for offer simulation
 
-- Status: proposed; accepted upon merge
+- Status: accepted (merged 2026-11-06 in #937)
 - Date: 2026-11-06
 
 No ADR recorded the offer read of `GET /api/v2/rewards/offers/simulate`.

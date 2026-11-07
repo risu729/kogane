@@ -179,7 +179,7 @@ collectorの非公開HTML routeとfragment構造は将来変更され得る。va
 ## 実装・関連記録
 
 - `services/collector-moneyforward/README.md`: authentication、read-only collection、source limitations
-- `services/collector-r2-importer/README.md`: strict validator、chunking、cursor、rollout order
+- `services/collector-r2-importer/README.md` (removed with the importer on 2026-09-13): strict validator、chunking、cursor、rollout order
 - `docs/sources/smbc-bank.md`: MoneyForward経由で弱化・欠落するSMBC/Vpass固有情報
 - `packages/storage-d1/migrations/core/0014_moneyforward_collector_r2.sql`: central route/policy
 

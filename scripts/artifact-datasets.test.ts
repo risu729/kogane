@@ -11,8 +11,8 @@
 //    nor withheld (`WITHHELD_ARTIFACT_DATASETS`), nor named below as
 //    unreachable with the reason;
 //  * a rule is exercised by no artifact a collector writes;
-//  * the withheld list changes (Vpass stays unparsed until ADR 0023's
-//    binding exists; lifting it is a decision, not an edit);
+//  * the withheld list changes (it is empty since ADR 0083 released Vpass
+//    under `terminal-registration-v3`; withholding again is a decision);
 //  * an artifact a parser reads with a NULL dataset exists outside Mizuho,
 //    which would mean a registration before the table was already parsed.
 //
@@ -27,7 +27,6 @@ import {
   artifactRequest,
   COLLECTOR_SOURCE_IDS,
   coreSourceId,
-  datasetByRules,
   REGISTRATION_CONTRACT_VERSION,
   REGISTRATION_CONTRACT_VERSIONS,
   VPASS_CARD_BINDING_DESCRIPTOR,
@@ -489,8 +488,7 @@ const SAMPLES: readonly Sample[] = [
     artifactKey: "months/202601/top-001.json",
     role: "sanitized_provider_capture",
     mediaType: json,
-    dataset: null,
-    withheld: "statement-page",
+    dataset: "statement-page",
     unitKey: "card-001",
   },
   {
@@ -498,8 +496,7 @@ const SAMPLES: readonly Sample[] = [
     artifactKey: "months/202601/answer-002.json",
     role: "sanitized_provider_capture",
     mediaType: json,
-    dataset: null,
-    withheld: "statement-page",
+    dataset: "statement-page",
     unitKey: "card-001",
   },
   {
@@ -709,28 +706,50 @@ describe("the registration dataset table (ADR 0022)", () => {
     }
   });
 
-  test("Vpass is withheld: every artifact a collector-vpass run writes stays without a dataset", async () => {
-    // Lifting this is a decision (ADR 0022, ADR 0023): the collector derives
-    // the binding now, but the pages stay withheld until its key is set and
-    // its tokens are shown to be the importer's (ADR 0023's amendment).
-    expect(Object.keys(WITHHELD_ARTIFACT_DATASETS)).toEqual(["vpass"]);
-    expect(Object.hasOwn(ARTIFACT_DATASETS, "vpass")).toBe(false);
+  test("nothing is withheld, and Vpass's statement pages are mapped only from v3 (ADR 0083)", async () => {
+    // ADR 0022 and ADR 0023 withheld the rule; ADR 0083 moved it into the
+    // table unchanged under `terminal-registration-v3`. v1 and v2 stay as
+    // they were: a collector-vpass artifact has no dataset under either.
+    expect(Object.keys(WITHHELD_ARTIFACT_DATASETS)).toEqual([]);
+    expect(REGISTRATION_CONTRACT_VERSIONS).toEqual([
+      "terminal-registration-v1",
+      "terminal-registration-v2",
+      "terminal-registration-v3",
+    ]);
+    expect(REGISTRATION_CONTRACT_VERSION).toBe("terminal-registration-v3");
     const vpass = (await allSamples()).filter((sample) => sample.source === "vpass");
-    expect(vpass.length).toBeGreaterThan(0);
+    expect(vpass.filter((sample) => sample.dataset === "statement-page").length).toBe(2);
     for (const sample of vpass) {
-      expect(artifactDataset("vpass", sample)).toBeNull();
-      expect(accepting(meta(sample, null))).toEqual([]);
-      // What the withheld rule would give, so lifting it is a move, not a new mapping.
-      expect(datasetByRules(WITHHELD_ARTIFACT_DATASETS.vpass!.rules, sample)).toBe(
-        sample.withheld ?? null,
-      );
+      expect(artifactDataset("vpass", sample, "terminal-registration-v1")).toBeNull();
+      expect(artifactDataset("vpass", sample, "terminal-registration-v2")).toBeNull();
+      expect(artifactDataset("vpass", sample)).toBe(sample.dataset);
+    }
+    // The importer's role for the same key is not the collector's, and stays unmapped.
+    const page = vpass.find((sample) => sample.dataset === "statement-page")!;
+    expect(artifactDataset("vpass", { ...page, role: "provider_response" })).toBeNull();
+  });
+
+  test("v3 changes a descriptor only for Vpass's statement pages, which v2 left unparsed", async () => {
+    // The INV06 half of the v3 bump: the terminals v3 registers again are
+    // collector-vpass card runs, whose v2 pages no parser read; every other
+    // terminal keeps its v2 descriptors and is carried over.
+    for (const sample of await allSamples()) {
+      const before = artifactDataset(sample.source, sample, "terminal-registration-v2");
+      const after = artifactDataset(sample.source, sample);
+      if (before === after) continue;
+      expect({ artifact: `${sample.source}/${sample.artifactKey}`, before, after }).toEqual({
+        artifact: `${sample.source}/${sample.artifactKey}`,
+        before: null,
+        after: "statement-page",
+      });
+      expect(sample.source).toBe("vpass");
+      expect(accepting(meta(sample, before))).toEqual([]);
     }
   });
 
   test("the Vpass card binding carries its evidence dataset and format, and no parser reads it (ADR 0023)", async () => {
     // Deliberately outside both tables: the binding is evidence the trusted
-    // binding view reads, not a parser input, and it registers while the
-    // statement pages stay withheld.
+    // binding view reads, not a parser input.
     const binding = SAMPLES.find((sample) => sample.artifactKey === "card-identity-binding.json")!;
     const derive = (artifact: Sample) =>
       artifactRequest(
@@ -788,11 +807,10 @@ describe("the registration dataset table (ADR 0022)", () => {
     // one whose v1 artifacts were never parsed, so its capture is parsed
     // once; every other terminal is carried over, not registered again.
     const v1 = REGISTRATION_CONTRACT_VERSIONS[0];
-    expect(REGISTRATION_CONTRACT_VERSION).not.toBe(v1);
     let changed = 0;
     for (const sample of await allSamples()) {
       const before = artifactDataset(sample.source, sample, v1);
-      const after = artifactDataset(sample.source, sample);
+      const after = artifactDataset(sample.source, sample, "terminal-registration-v2");
       if (before === after) continue;
       changed += 1;
       expect({ artifact: `${sample.source}/${sample.artifactKey}`, before }).toEqual({
