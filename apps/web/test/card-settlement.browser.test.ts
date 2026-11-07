@@ -200,6 +200,75 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  // What the card's own statement says about its debit account (ADR 0032):
+  // one page per outcome, so each test opens one page.
+  const unnamedDebitAccount = {
+    policy: null,
+    bankSourceId: null,
+    bankSourceAccount: null,
+    visibleDigitCount: null,
+    recordedAt: null,
+  };
+  const namedDebitAccount = {
+    reason: null,
+    policy: "card-debit-account-statement-v3",
+    bankSourceId: "smbc-bank",
+    bankSourceAccount: "synthetic-other-bank",
+    visibleDigitCount: 4,
+    recordedAt: "2026-09-12T00:00:00Z",
+  };
+  async function mainText(): Promise<string> {
+    const page = await open();
+    const text = await page.locator("main").innerText();
+    await page.close();
+    return text;
+  }
+
+  test("a MyJCB review the lanes have not reached says so", async () => {
+    expect(await mainText()).toContain("未記録（明細の読み取りまたは照合がまだ行われていません）");
+  });
+
+  test("a statement naming another debit account is a warning, never a blocker", async () => {
+    review.debitAccount = { outcome: "names_other_account", ...namedDebitAccount };
+    const page = await open();
+    const warning = page
+      .getByRole("note")
+      .filter({ hasText: "別の口座（三井住友銀行 · synthetic-other-bank）" });
+    await warning.waitFor();
+    expect(await warning.innerText()).toContain("この対応付けは誤っている可能性があります");
+    // Evidence only: it adds no blocker, and adoption stays the operator's.
+    expect(await page.locator("main").innerText()).not.toContain("現時点では採用できません");
+    await page.close();
+  });
+
+  test("a statement naming the debit's account shows what was compared", async () => {
+    review.debitAccount = { outcome: "supports", ...namedDebitAccount };
+    expect(await mainText()).toContain(
+      "この出金の口座と一致（三井住友銀行 · synthetic-other-bank、口座番号の先頭4桁を照合、支店名は未照合）",
+    );
+  });
+
+  test("a refused page is named by its closed code", async () => {
+    review.debitAccount = {
+      outcome: "statement_refused",
+      reason: "card_information_absent",
+      ...unnamedDebitAccount,
+    };
+    expect(await mainText()).toContain(
+      "明細から読み取れません（明細に「カード情報」がありません）",
+    );
+  });
+
+  test("a Vpass statement states no debit account", async () => {
+    review.facts.statement.sourceId = "vpass";
+    review.debitAccount = {
+      outcome: "not_stated_by_source",
+      reason: "source_states_no_debit_account",
+      ...unnamedDebitAccount,
+    };
+    expect(await mainText()).toContain("Vpassの明細には引落口座の記載がありません");
+  });
+
   test("server impact remains separate from purchase expense and requires approve then commit", async () => {
     const page = await open();
     const text = await page.locator("main").innerText();

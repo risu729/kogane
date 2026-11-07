@@ -3,7 +3,10 @@ import {
   type CardSettlementFacts,
 } from "../../domain/src/card-settlement.ts";
 import { exactQuantity, integerDecimal } from "../../domain/src/values.ts";
-import type { CardSettlementReview } from "../../domain/src/card-settlement-review.ts";
+import {
+  cardSettlementDebitAccount,
+  type CardSettlementReview,
+} from "../../domain/src/card-settlement-review.ts";
 
 export function settlementFacts(unknownOwner = false): CardSettlementFacts {
   const amount = exactQuantity("JPY", integerDecimal(3000));
@@ -58,6 +61,7 @@ export function settlementReview(unknownOwner = false): CardSettlementReview {
     createdAt: "2026-09-11T00:00:00Z",
     acceptanceBlockers: unknownOwner ? ["owner_not_established"] : [],
     impact: cardSettlementImpact(facts, "proposed"),
+    debitAccount: cardSettlementDebitAccount(facts.statement.sourceId, null, null),
     history: [],
     historyTruncated: false,
   };

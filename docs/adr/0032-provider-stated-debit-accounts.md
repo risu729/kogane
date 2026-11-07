@@ -13,7 +13,9 @@
   [ADR 0001](0001-domain-axes.md) (INV07: heuristics only propose)
 - Amended: [2026-09-27](#amendment-2026-09-27-the-observed-shapes), with the
   round-4 observation this decision waited for: MyJCB shows a bank name, a
-  branch name and the leading digits; Vpass shows no debit account.
+  branch name and the leading digits; Vpass shows no debit account; and
+  [2026-11-06](#amendment-2026-11-06-the-review-shows-the-evidence): the
+  `カード照合` review shows the evidence.
 
 ## Context
 
@@ -304,7 +306,8 @@ unobserved.
   `supports` a candidate until an adapter bank's reference carries the
   displayed account number.
 - The evidence is not shown on the review page: that needs a field in the
-  published review contract and the web page, a later change.
+  published review contract and the web page, a later change (made by the
+  [2026-11-06 amendment](#amendment-2026-11-06-the-review-shows-the-evidence)).
 - Branch names are stored and never compared, so two known accounts at one
   bank with the same four leading digits are `ambiguous_accounts`.
 - The stored table adds the bank name, branch name, 科目 and four digits to
@@ -336,3 +339,92 @@ unobserved.
   table mirrors the reported shape); whether Mizuho's branch-name rendering
   equals MyJCB's; the relation between the mask length and a bank's account
   number length.
+
+## Amendment 2026-11-06: the review shows the evidence
+
+- Status: proposed; accepted when the amending PR merges
+- Date: 2026-11-06
+- Carried by:
+  `packages/domain/src/card-settlement-review.ts`
+  (`CardSettlementDebitAccount`, `cardSettlementDebitAccount`),
+  `packages/application/src/query/card-settlements.ts`
+  (`CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL`),
+  `packages/observation-shared/src/card-settlement-contract.ts`,
+  `apps/web/src/reconciliation-display.tsx`,
+  [card settlements: provider-stated debit accounts](../card-settlements.md#provider-stated-debit-accounts)
+
+### Context
+
+Phase 2 of the [roadmap](../roadmap.md#phase-2--card-usage--statement--bank-debit-current-milestone)
+is done when, for one Vpass card and one MyJCB card, an operator can open a
+statement and its bank debit, inspect the original evidence and correct a
+wrong match. The card side differs here, and only here, between the two
+sources: a MyJCB statement page names the bank account the provider debits,
+and the sweep has recorded what that says about every MyJCB candidate since
+2026-09-27, while no Vpass statement API names one. The operator saw
+neither: the review contract had no field for it, so a candidate pairing a
+MyJCB statement with a debit from an account the statement does not name
+looked exactly like one it names, and the `not_proposed` reasons and refused
+pages were visible only in D1.
+
+### Options considered
+
+1. **Leave it in D1.** Rejected: the evidence exists to help an operator
+   judge a pair, and an operator has no way to read it.
+2. **Make `names_other_account` an acceptance blocker.** Rejected: the rule
+   compares only accounts Kogane knows, by four leading digits and without
+   the branch, so its proposal can itself be wrong (above); the statement is
+   evidence, and only a person decides (INV07).
+3. **Serve it beside each review, as evidence, with a closed state for every
+   case where there is none (chosen).**
+
+### Decision
+
+- Every review carries `debitAccount`, with one `outcome` of `supports`,
+  `names_other_account`, `not_proposed`, `statement_refused`,
+  `not_recorded` or `not_stated_by_source`, and only the values that outcome
+  has: the bank source id, source account and compared digit count of the
+  rule's proposal; the rule's or the reader's closed reason; the policy and
+  the time of the row. Only the newest row under the current policy and the
+  reading under the current reader version count; an earlier policy's row
+  says nothing about the current rule.
+- A Vpass review is `not_stated_by_source` with
+  `source_states_no_debit_account`, the observation of 2026-09-27 above, and
+  the contract refuses any other outcome for a Vpass statement and this one
+  for a MyJCB statement. Nothing is read for a Vpass review.
+- The value is served, validated and shown, never used: no plan, guard,
+  blocker or command reads it. The page shows `names_other_account` as a
+  warning that the match may be wrong; correcting it is the existing reject
+  or withdrawal.
+- The review serves no displayed text from the page: no bank name, branch
+  name, digits or holder name (ADR 0029).
+
+### Consequences
+
+- The `カード照合` list and detail make one more keyed read per page when it
+  holds a MyJCB review. A stored row that breaks the evidence contract makes
+  the page unavailable, as a malformed candidate does.
+- The contract gains a required field: a client of this release refuses an
+  answer without it. The web client is released with the App Worker that
+  serves it.
+- The purchase explanation chain and the agent API do not carry it.
+
+### Verification
+
+- `packages/application/test/card-settlement-query.test.ts`: the newest row
+  wins; an earlier policy's row and an earlier reader version's refusal say
+  nothing; a refusal under the current version is `statement_refused`; a
+  recorded row wins over the reading; a Vpass review reads nothing; rows that
+  break the contract are refused.
+- `services/processor/test/card-debit-account.test.ts`: on every CORE
+  migration, after the lanes ran on synthetic pages, each MyJCB review shows
+  its outcome (`not_proposed` with each reason, `supports` for the one debit
+  whose parse records the account, `statement_refused`, `not_recorded`), the
+  page passes the wire contract, no displayed text is served, reading writes
+  nothing, and the read's plan uses the evidence index with no base-table
+  scan, without statistics.
+- `apps/web/test/card-settlement-contract.test.ts` and
+  `apps/web/test/card-settlement.browser.test.ts`: the wire shape of every
+  outcome and what the page shows for each.
+- Not verified: production rows (no production query was run for this
+  change).

@@ -205,7 +205,8 @@ type CardDebitAccountRationale =
   | "branch_not_compared"
   | "leading_digits_agree"
   | "unique_among_known_accounts";
-const CARD_DEBIT_ACCOUNT_REASONS = [
+/** Why the rule made no proposal: a closed set (migration 0060 CHECK). */
+export const CARD_DEBIT_ACCOUNT_REASONS = [
   "statement_invalid",
   "bank_not_resolved",
   "account_type_not_resolved",
@@ -215,7 +216,7 @@ const CARD_DEBIT_ACCOUNT_REASONS = [
   "ambiguous_accounts",
   "uncomparable_account_at_bank",
 ] as const;
-type CardDebitAccountReason = (typeof CARD_DEBIT_ACCOUNT_REASONS)[number];
+export type CardDebitAccountReason = (typeof CARD_DEBIT_ACCOUNT_REASONS)[number];
 export type CardDebitAccountOutcome =
   | { outcome: "proposed"; proposal: CardDebitAccountProposal }
   | { outcome: "not-proposed"; reason: CardDebitAccountReason; comparedAccounts: number };

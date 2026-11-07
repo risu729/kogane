@@ -18,6 +18,13 @@ import { identifyParse, type IdentityResolver } from "../src/identity-store.ts";
 import { smbcDirectTransactions } from "../../../packages/parsers/src/parsers/smbc-direct.ts";
 import { cardSettlementEligible } from "../../../packages/domain/src/card-settlement.ts";
 import { bankSourceIdForDisplayedName } from "../../../packages/domain/src/card-debit-account.ts";
+import {
+  CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL,
+  queryCardSettlements,
+} from "../../../packages/application/src/query/card-settlements.ts";
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
+import { validCardSettlementReviewPage } from "../../../packages/observation-shared/src/card-settlement-contract.ts";
+import { statementPlanProblems } from "../../../packages/read-model/test/card-statement-plan.ts";
 
 let mf: Miniflare, env: Env, db: D1Database;
 beforeAll(async () => {
@@ -559,6 +566,93 @@ test("SMBC supports only the debit whose own published parse records its selecte
   expect(
     await db.prepare("SELECT count(*) n FROM card_settlement_decisions").first<number>("n"),
   ).toBe(0);
+}, 60000);
+
+test("the カード照合 review shows each candidate what its statement says about the debit account", async () => {
+  // A page whose table is refused, and a page the lane has not read yet: each
+  // statement still gets its SMBC candidate, with no evidence row.
+  await seedPage(
+    810,
+    "conn-refused/credit-detail-01.html",
+    page(replace("科目・口座番号", "普通 ***1234")),
+  );
+  await cardDebitAccountSweep(env);
+  await seedCandidate(810, 910, "conn-refused");
+  await seedPage(811, "conn-unread/credit-detail-01.html", page());
+  await seedCandidate(811, 911, "conn-unread");
+  await db.prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=0").run();
+  await cardSettlementSweep(db);
+
+  const before = await db
+    .prepare("SELECT count(*) AS n FROM card_settlement_debit_account_evidence")
+    .first<number>("n");
+  const page1 = await queryCardSettlements(d1Executor(db));
+  // Every SMBC debit of the same amount and day pairs with every statement:
+  // one review per pair, each with its own evidence.
+  const of = (card: string) =>
+    page1.items
+      .filter((item) => item.facts.statement.sourceAccount === `myjcb:${card}:root`)
+      .map((item) => ({ bank: item.facts.bankDebit.ref.revision, ...item.debitAccount }));
+  for (const card of ["conn-a", "conn-b", "conn-number", "conn-refused", "conn-unread"])
+    expect(of(card).length).toBeGreaterThan(0);
+  // The newest row under the current policy: the second Mizuho account made
+  // conn-a's proposal ambiguous after it first named another account.
+  for (const review of of("conn-a"))
+    expect(review).toMatchObject({
+      outcome: "not_proposed",
+      reason: "ambiguous_accounts",
+      policy: "card-debit-account-statement-v3",
+      bankSourceId: null,
+    });
+  // Both pages name SMBC: only the debit whose own parse records the account
+  // supports the pair; every numberless debit is uncomparable.
+  for (const card of ["conn-b", "conn-number"]) {
+    for (const review of of(card))
+      expect(review).toMatchObject(
+        review.bank === "parse_run:909"
+          ? {
+              outcome: "supports",
+              reason: null,
+              bankSourceId: "smbc-bank",
+              bankSourceAccount: "smbc-bank:ordinary-yen",
+              visibleDigitCount: 4,
+            }
+          : { outcome: "not_proposed", reason: "no_comparable_bank_account" },
+      );
+    expect(of(card).filter((review) => review.outcome === "supports")).toHaveLength(1);
+  }
+  for (const review of of("conn-refused"))
+    expect(review).toMatchObject({
+      outcome: "statement_refused",
+      reason: "card_information_account_invalid",
+      policy: null,
+      recordedAt: null,
+    });
+  for (const review of of("conn-unread"))
+    expect(review).toMatchObject({ outcome: "not_recorded", reason: null });
+  // The wire contract accepts what the review serves.
+  expect(validCardSettlementReviewPage(page1)).toBe(true);
+  // Reading writes nothing, and nothing of a page's displayed text reaches
+  // the review: no bank or branch name, no holder or card name.
+  expect(
+    await db
+      .prepare("SELECT count(*) AS n FROM card_settlement_debit_account_evidence")
+      .first<number>("n"),
+  ).toBe(before);
+  const served = JSON.stringify(page1);
+  for (const text of ["みずほ銀行", "三井住友銀行", "架空支店", "カク", CARD_NAME])
+    expect(served).not.toContain(text);
+
+  // Each read is found by key on the shipped schema without statistics.
+  const ids = JSON.stringify(page1.items.map((item) => item.proposalId));
+  const plan = await db
+    .prepare(`EXPLAIN QUERY PLAN ${CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL}`)
+    .bind(ids, "card-debit-account-statement-v3", CARD_INFORMATION_READER_VERSION)
+    .all<{ id: number; parent: number; detail: string }>();
+  expect(statementPlanProblems(plan.results)).toEqual([]);
+  expect(plan.results.map((step) => step.detail).join("\n")).toMatch(
+    /SEARCH e USING (?:COVERING )?INDEX card_settlement_debit_account_evidence_candidate/u,
+  );
 }, 60000);
 
 test("automation prerequisite diagnostics return only counts and do not adopt decisions", async () => {

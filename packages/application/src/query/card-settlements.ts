@@ -5,10 +5,14 @@ import {
   validCardSettlementFacts,
   type CardSettlementStatus,
 } from "../../../domain/src/card-settlement.ts";
-import type {
-  CardSettlementReview,
-  CardSettlementReviewPage,
+import {
+  cardSettlementDebitAccount,
+  type CardSettlementReview,
+  type CardSettlementReviewPage,
+  type DebitAccountEvidenceRow,
 } from "../../../domain/src/card-settlement-review.ts";
+import { CARD_DEBIT_ACCOUNT_POLICY } from "../../../domain/src/card-debit-account.ts";
+import { CARD_INFORMATION_READER_VERSION } from "../../../domain/src/myjcb-card-information.ts";
 import { cardSettlementReadinessCtes } from "../../../read-model/src/card-settlement-readiness.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 
@@ -28,6 +32,15 @@ interface ReviewRow {
   bank_current: number | null;
   ownership_current: number | null;
   allocation_available: number | null;
+}
+interface DebitAccountRow {
+  candidate_id: string;
+  outcome: string | null;
+  reason: string | null;
+  policy: string | null;
+  proposal_json: string | null;
+  created_at: string | null;
+  refusal_code: string | null;
 }
 interface HistoryRow {
   proposal_id: string;
@@ -66,6 +79,8 @@ function review(row: ReviewRow): CardSettlementReview {
     facts,
     acceptanceBlockers: blockers,
     impact: cardSettlementImpact(facts, row.status),
+    // Every source states it the same way until the debit-account read below.
+    debitAccount: cardSettlementDebitAccount(facts.statement.sourceId, null, null),
     decisionRevisionId: row.decision_revision_id,
     eventId: row.event_id,
     obligationId: row.obligation_id,
@@ -101,6 +116,30 @@ export const CARD_SETTLEMENT_PAGE_SQL = reviewsSql(
 export const CARD_SETTLEMENT_REVIEW_SQL = reviewsSql(
   "SELECT id FROM card_settlement_candidates WHERE id=?1 ORDER BY created_at DESC,id DESC LIMIT ?2 OFFSET ?3",
 );
+
+/**
+ * What the card provider's statement says about its debit account, for the
+ * MyJCB candidates `?1` names (a JSON array of ids): the newest
+ * `card_settlement_debit_account_evidence` row of each under policy `?2`, and
+ * the refusal code of the reading of the candidate's own statement page under
+ * reader version `?3` (`card_debit_account_statement`, migration 0060). Each
+ * is found by key: the evidence by its `(candidate_id, …)` index, the page by
+ * the candidate's statement parse run and the reading by its unique
+ * `(raw_sha256, card_source_account, reader_version)` index.
+ */
+export const CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL = `WITH chosen AS MATERIALIZED (
+ SELECT c.id,c.statement_parse_run_id,json_extract(c.facts_json,'$.statement.sourceAccount') AS card_source_account,
+  (SELECT e.id FROM card_settlement_debit_account_evidence e
+   WHERE e.candidate_id=c.id AND e.policy=?2 ORDER BY e.id DESC LIMIT 1) AS evidence_id
+ FROM json_each(?1) selected JOIN card_settlement_candidates c ON c.id=selected.value
+)
+SELECT chosen.id AS candidate_id,e.outcome,e.reason,e.policy,e.proposal_json,e.created_at,
+ (SELECT s.refusal_code FROM parse_runs p JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+  JOIN card_debit_account_statement s ON s.raw_sha256=a.sha256
+   AND s.card_source_account=chosen.card_source_account AND s.reader_version=?3
+  WHERE p.id=chosen.statement_parse_run_id AND s.outcome='refused' LIMIT 1) AS refusal_code
+FROM chosen LEFT JOIN card_settlement_debit_account_evidence e ON e.id=chosen.evidence_id
+ORDER BY chosen.id`;
 
 /** Offset lists and exact-id reads share the same financial and explanation DTO. */
 export async function queryCardSettlements(
@@ -139,6 +178,33 @@ export async function queryCardSettlements(
         createdAt: row.created_at,
       }));
       item.historyTruncated = revisions.length > HISTORY_LIMIT;
+    }
+    const myjcb = items.filter((item) => item.facts.statement.sourceId === "myjcb");
+    if (myjcb.length > 0) {
+      const rows = await sql.all<DebitAccountRow>(CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL, [
+        JSON.stringify(myjcb.map((item) => item.proposalId)),
+        CARD_DEBIT_ACCOUNT_POLICY,
+        CARD_INFORMATION_READER_VERSION,
+      ]);
+      const byCandidate = new Map(rows.map((row) => [row.candidate_id, row]));
+      for (const item of myjcb) {
+        const row = byCandidate.get(item.proposalId);
+        const evidence: DebitAccountEvidenceRow | null =
+          row?.outcome != null && row.policy !== null && row.created_at !== null
+            ? {
+                outcome: row.outcome,
+                reason: row.reason,
+                policy: row.policy,
+                proposal_json: row.proposal_json,
+                created_at: row.created_at,
+              }
+            : null;
+        item.debitAccount = cardSettlementDebitAccount(
+          "myjcb",
+          evidence,
+          row?.refusal_code ?? null,
+        );
+      }
     }
   }
   return {

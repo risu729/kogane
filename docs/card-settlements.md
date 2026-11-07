@@ -197,12 +197,44 @@ owner and no ownership evidence, and ownership and acceptance stay operator
 decisions (INV07). The sweep's log line adds `debitAccountEvidence`, the
 number of evidence rows appended.
 
+**On the review page** ([ADR 0032 amendment 2026-11-06](adr/0032-provider-stated-debit-accounts.md#amendment-2026-11-06-the-review-shows-the-evidence)).
+Every review of the `カード照合` list and of one proposal carries
+`debitAccount` (`CardSettlementDebitAccount` in
+`packages/domain/src/card-settlement-review.ts`, validated by
+`packages/observation-shared/src/card-settlement-contract.ts`), and the page
+shows it as 「明細が示す引落口座」 beside the evidence links:
+
+| `outcome`              | When                                                                                                 | Carries                                                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `supports`             | the newest evidence row of the candidate under the current policy says so                            | the bank source and source account the proposal names, digits compared |
+| `names_other_account`  | the same, naming another account; the page shows it as a warning that the match may be wrong         | the same                                                               |
+| `not_proposed`         | the same, where the rule made no proposal                                                            | the rule's closed reason                                               |
+| `statement_refused`    | no such row, and the reading of the candidate's own page under the current reader version is refused | the reader's closed code                                               |
+| `not_recorded`         | neither (the lanes have not reached the candidate, or the bank has more than 100 known accounts)     | nothing                                                                |
+| `not_stated_by_source` | every Vpass review: no Vpass statement API carries a debit account (observed absent, below)          | `source_states_no_debit_account`                                       |
+
+The first three also carry the policy and the time the row was appended,
+and only the first two name an account; the last three carry no policy,
+account or time. A row of an
+earlier policy or a reading of an earlier reader version is not shown. The
+review reads `CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL`
+(`packages/application/src/query/card-settlements.ts`) once per page, for its
+MyJCB reviews only: the newest row by the evidence table's `candidate_id`
+index, and the reading through the candidate's statement parse run and the
+reading's unique key, with no scan of a base table. No displayed bank name,
+branch name, digit or holder name is served: only source ids, source
+accounts, counts and closed codes. A stored row that breaks the evidence
+contract makes the answer unavailable (`card_settlement_debit_account_invalid`),
+as a malformed candidate does. The value is evidence for the reviewer only:
+it adds no acceptance blocker, changes no candidate and is not read by any
+plan, guard or command, so an acceptance or a correction stays the
+operator's decision (INV07).
+
 Limits:
 
-- **Not on the review page.** The evidence rows are not read by the
-  `カード照合` review or its API: showing them needs a new field in the review
-  contract (`packages/observation-shared/src/card-settlement-contract.ts`) and
-  the web page, which this change does not make.
+- **Not in the purchase explanation or the agent API.** The `カード利用`
+  chain and `kogane.purchases.explain` still name the accepted debit
+  without it; the `カード照合` route is operator-only.
 - **Historical SMBC and SBI Shinsei references remain uncomparable.**
   SMBC's legacy reference carries no account digits. New captures retain the
   successful request's branch, ordinary account type and number in normalized
@@ -273,8 +305,10 @@ Limits:
 - A statement with a candidate is not counted here, even when its window holds
   several equal debits (each is its own candidate).
 
-The `カード照合` page shows the source facts, evidence links, candidate rationale,
-current readiness blockers and decision history. An authenticated human operator
+The `カード照合` page shows the source facts, evidence links, what the card's
+own statement says about its debit account
+([above](#provider-stated-debit-accounts)), candidate rationale, current
+readiness blockers and decision history. An authenticated human operator
 can plan an acceptance or rejection; the confirmation page then simulates,
 approves and commits the pinned plan. Agents do not acquire acceptance rights.
 
@@ -740,7 +774,16 @@ and card names never read), the lane (one row per card and raw object, no
 second row on a re-run or for the same bytes of another run, refusals stored
 without values, append-only guards), and the settlement sweep (evidence
 attached, a changed outcome appended, the candidate's facts and eligibility
-unchanged).
+unchanged), and the review's `debitAccount` for each outcome on the shipped
+schema (the newest row under the current policy, a refused page, an unread
+page, no displayed text served, nothing written, and the read's plan found by
+key without statistics).
+`packages/application/test/card-settlement-query.test.ts` covers the review's
+choice of row (newest row, current policy and reader version only, a Vpass
+review read for nothing) and refuses a stored row that breaks the contract;
+`apps/web/test/card-settlement-contract.test.ts` pins the wire shape of each
+outcome, and `apps/web/test/card-settlement.browser.test.ts` what the page
+shows for each.
 `services/processor/test/card-settlement-unmatched.test.ts` runs the sweep on
 synthetic rows for each [unmatched code](#unmatched-statements): two debits
 summing to the total and a partial debit, an equal debit four days late and no

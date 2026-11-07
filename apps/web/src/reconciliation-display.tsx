@@ -47,6 +47,73 @@ export function settlementReason(code: string): string {
   return Object.hasOwn(REASONS, code) ? REASONS[code]! : code;
 }
 
+/**
+ * Why the card provider's statement names no debit account the review can
+ * show (ADR 0032; docs/card-settlements.md, Provider-stated debit accounts).
+ * A code without a label is shown as stored.
+ */
+const DEBIT_ACCOUNT_REASONS: Record<string, string> = {
+  statement_invalid: "明細の読み取り結果が不正です",
+  bank_not_resolved: "明細の金融機関名が対応する銀行ではありません",
+  account_type_not_resolved: "明細の科目を読み取れません",
+  account_digits_not_shown: "明細に口座番号の先頭桁がありません",
+  no_comparable_bank_account: "その銀行に口座番号を比べられる口座がありません",
+  no_matching_account: "先頭の桁が一致する口座がありません",
+  ambiguous_accounts: "先頭の桁が一致する口座が複数あります（支店名は比べません）",
+  uncomparable_account_at_bank: "その銀行に口座番号を比べられない口座があります",
+  card_information_absent: "明細に「カード情報」がありません",
+  card_information_ambiguous: "明細に「カード情報」が複数あります",
+  card_information_table_missing: "「カード情報」の表がありません",
+  card_information_table_invalid: "「カード情報」の表の形が想定と異なります",
+  card_information_name_invalid: "金融機関名または支店名を読み取れません",
+  card_information_account_invalid: "科目・口座番号を読み取れません",
+  page_not_utf8: "明細の原本を文字として読めません",
+  raw_object_unreadable: "明細の原本を読み出せません",
+  source_states_no_debit_account: "Vpassの明細には引落口座の記載がありません",
+};
+
+function debitAccountReason(code: string): string {
+  return Object.hasOwn(DEBIT_ACCOUNT_REASONS, code) ? DEBIT_ACCOUNT_REASONS[code]! : code;
+}
+
+/**
+ * What the card provider's statement says about the bank account it debits,
+ * as the server recorded it. Evidence for the reviewer only: it decides
+ * neither the match nor the account's owner.
+ */
+function DebitAccountEvidence({ review }: { review: CardSettlementReview }): ReactNode {
+  const value = review.debitAccount;
+  switch (value.outcome) {
+    case "supports":
+      return (
+        <span>
+          この出金の口座と一致（{bankSourceLabel(value.bankSourceId)} · {value.bankSourceAccount}
+          、口座番号の先頭{value.visibleDigitCount}桁を照合、支店名は未照合）
+        </span>
+      );
+    case "names_other_account":
+      return (
+        <Notice tone="warn" inline role="note">
+          <p>
+            <strong>
+              カード会社の明細は別の口座（{bankSourceLabel(value.bankSourceId)} ·{" "}
+              {value.bankSourceAccount}）を引落口座として示しています。
+            </strong>
+          </p>
+          <p>この対応付けは誤っている可能性があります。原本を確認してください。</p>
+        </Notice>
+      );
+    case "not_proposed":
+      return <span>口座を特定できません（{debitAccountReason(value.reason)}）</span>;
+    case "statement_refused":
+      return <span>明細から読み取れません（{debitAccountReason(value.reason)}）</span>;
+    case "not_recorded":
+      return <span>未記録（明細の読み取りまたは照合がまだ行われていません）</span>;
+    case "not_stated_by_source":
+      return <span>{debitAccountReason(value.reason)}</span>;
+  }
+}
+
 export function SettlementQuantity({ value }: { value: Quantity }): ReactNode {
   return value.value.status === "exact" ? (
     <span>
@@ -141,6 +208,9 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
           <FactLink fact={facts.statement.ref} label="請求の記録と原本" />
           {" / "}
           <FactLink fact={facts.bankDebit.ref} label="銀行明細と原本" />
+        </KvRow>
+        <KvRow label="明細が示す引落口座">
+          <DebitAccountEvidence review={review} />
         </KvRow>
       </Kv>
       <h3>照合の根拠</h3>
