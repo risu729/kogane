@@ -57,8 +57,11 @@ function recording(db: Database, issued: Set<string>): SqlExecutor {
 
 /**
  * One proposed review whose card side's owner is unknown, over the stub schema
- * of card-settlement-query.test.ts: the debit account evidence tables carry the
- * columns the read names and migration 0060's candidate index.
+ * of card-settlement-query.test.ts: the candidates the debit account read
+ * joins, the parse run and artifact of each candidate's statement page, and
+ * the debit account statement and evidence tables with the columns the read
+ * names and migration 0060's candidate index. The statements are planned on
+ * the complete schema below, so the stub only has to run them.
  */
 function settlementStore(): Database {
   const db = new Database(":memory:");
@@ -66,7 +69,13 @@ function settlementStore(): Database {
     decision_revision_id TEXT,event_id TEXT,obligation_id TEXT,settlement_id TEXT,created_at TEXT);
     CREATE VIEW card_settlement_readiness AS SELECT id,1 AS statement_current,1 AS bank_current,1 AS ownership_current,1 AS allocation_available FROM card_settlement_reviews;
     CREATE TABLE card_settlement_decisions(proposal_id TEXT,revision INTEGER,status TEXT,decision_revision_id TEXT,created_at TEXT);
-    CREATE TABLE card_debit_account_statement(id INTEGER PRIMARY KEY,reader_version TEXT);
+    CREATE VIEW card_settlement_candidates AS SELECT id,1 AS statement_parse_run_id,facts_json FROM card_settlement_reviews;
+    CREATE TABLE parse_runs(id INTEGER PRIMARY KEY,fetch_artifact_id INTEGER);
+    CREATE TABLE fetch_artifacts(id INTEGER PRIMARY KEY,sha256 TEXT);
+    INSERT INTO parse_runs VALUES(1,1);
+    INSERT INTO fetch_artifacts VALUES(1,'synthetic-sha-1');
+    CREATE TABLE card_debit_account_statement(id INTEGER PRIMARY KEY,raw_sha256 TEXT,card_source_account TEXT,
+      reader_version TEXT,outcome TEXT,refusal_code TEXT);
     CREATE TABLE card_settlement_debit_account_evidence(id INTEGER PRIMARY KEY,candidate_id TEXT,statement_id INTEGER,
       policy TEXT,outcome TEXT,reason TEXT,proposal_json TEXT,created_at TEXT);
     CREATE INDEX card_settlement_debit_account_evidence_candidate
