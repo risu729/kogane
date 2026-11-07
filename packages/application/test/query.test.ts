@@ -47,6 +47,7 @@ async function run(
  */
 function projectionStub(options: {
   snapshot?: boolean;
+  behind?: boolean;
   refusal?: SnapshotRefusal;
   rows?: SubtotalRow[];
   coverage?: ProjectionCoverageRow[];
@@ -69,7 +70,7 @@ function projectionStub(options: {
         ? { refusal: refused }
         : options.snapshot === false
           ? null
-          : { snapshot },
+          : { snapshot, behind: options.behind ?? false },
     reader: {
       coverage: async () => {
         guard();
@@ -491,6 +492,44 @@ describe("holdings over a refused snapshot", () => {
 });
 
 describe("holdings from the adopted projection", () => {
+  for (const behind of [false, true]) {
+    for (const stale of [false, true]) {
+      test(`snapshot behind=${behind}, scope stale=${stale} reports every freshness reason`, async () => {
+        const outcome = await run(
+          grant(),
+          request({ intent: "holdings" }),
+          reader(),
+          projectionStub({
+            behind,
+            rows: [adopted()],
+            coverage: stale
+              ? [{ state: "stale", reason_code: "no_new_observation", freshness: "stale", count: 1 }]
+              : [],
+          }),
+        );
+        expect(outcome.ok).toBe(true);
+        if (!outcome.ok) return;
+        expect(validFinancialResult(outcome.result, anyData)).toBe(true);
+        expect(outcome.result.completeness).toBe(behind || stale ? "partial" : "complete");
+        expect(outcome.result.quality.freshness.state).toBe(behind || stale ? "partial" : "verified");
+        const expected = [
+          ...(behind ? ["snapshot:behind_published_evidence"] : []),
+          ...(stale ? ["scope_not_re_observed"] : []),
+          ...(!behind && !stale ? ["snapshot_current"] : []),
+        ];
+        expect(outcome.result.quality.freshness.reasonCodes).toEqual(expected);
+        expect(outcome.result.coverage.gaps.some(
+          (gap) => gap.reasonCode === "snapshot:behind_published_evidence",
+        )).toBe(behind);
+        if (outcome.result.data.intent !== "holdings") throw new Error("unreachable");
+        expect(outcome.result.data.units).toEqual([
+          { unitRef: "JPY", coefficient: "60000", scale: 0, adoptedCount: 1 },
+        ]);
+        expect(outcome.result.quality.numeric.state).toBe("verified");
+      });
+    }
+  }
+
   test("sums the adopted set per unit, exactly, and never across units", async () => {
     const outcome = await run(
       grant(),
