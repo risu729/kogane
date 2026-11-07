@@ -126,10 +126,16 @@ ownership was the only blocker. On 2026-11-07 the owner decided that an account 
 recorded owner is assumed to be the owner's, and that settlement decisions are delegated
 to agents through MCP over the same API as the screens
 ([plan, section 4](plans/2026-11-phase2-card-flow.md#4-owner-decisions-2026-11-07)).
-Neither is implemented yet: no ownership default exists and the operation catalogue has no
-settlement operation. Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
 (2026-11-07) no delegation entry or grant is needed: an MCP client the MCP Access
-application admits acts with the UI's authority, as itself.
+application admits acts with the UI's authority, as itself. Both decisions were first exercised
+in production on 2026-11-07, 16:48 to 17:07 UTC: an MCP client recorded the owner default on the
+ten accounts the candidates name and accepted one MyJCB and one Vpass settlement (both SMBC
+debits), withdrawing one Vpass acceptance on the way; purchase totals did not change and only
+the accepted debits hold a cash-movement claim
+([verification](card-settlements.md#first-production-decisions-2026-11-07)). The done-when is
+not met yet: `/api/v2/activity?basis=cash-movement` has no MCP read, so the cash-movement view
+was not read.
 
 ### Phase 3 — Coverage, collection requests and cross-source identity
 
@@ -253,7 +259,8 @@ lifecycle. Statements without a settlement candidate are listed on
 a closed reason, refund and zero totals under their own code, and the ADR 0074
 planner's read-only answer for statements whose window holds no equal debit
 ([card settlements](card-settlements.md#statements-without-a-candidate)); a
-multi-debit allocation is shown but cannot be accepted. Source ownership,
+multi-debit allocation is shown but cannot be accepted. Source ownership is
+recorded by the owner default (ADR 0082) for the accounts the candidates name;
 supported bank coverage, partial payments and refund handling still need
 completion.
 Securities executions, settlement, holdings and valuation follow that flow.
