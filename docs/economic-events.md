@@ -1308,6 +1308,10 @@ the Worker reads. Otherwise the paths 404 like any unknown route and
 `ApiCapabilities`; both stored capability constants default it to `false` and
 the server replaces it with what the store has. `EVENTS_V2_ENABLED` is not read.
 
+An agent reads both routes through `kogane.events.read`
+([agent API](agent-api.md#ui-read-pages)), which calls the routes' own
+`readEventsRoute` and exists exactly where they do.
+
 `services/app/src/card-purchases-api.ts` serves one more read, to an operator
 only:
 

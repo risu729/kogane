@@ -113,6 +113,7 @@ export const AUDIT_OPERATION_LABELS: Readonly<Record<string, string>> = {
   "balances.read": "最新残高と残高履歴の照会",
   "rewards.read": "ポイント保有と失効予定の照会",
   "reported-holdings-change.read": "2日間の保有の変化の照会",
+  "events.read": "入出金・購入の経済イベントと債務の照会",
   "audit.search": "監査ログの検索",
   "audit.get": "監査記録の取得",
   "reconcile.propose": "照合の提案",

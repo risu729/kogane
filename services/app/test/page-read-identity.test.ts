@@ -94,7 +94,9 @@ describe("kogane.identity.read", () => {
         for (const accounts of ["*", ["ref"]] as const) {
           const grant = { ...RECORDS_GRANT, capabilities, scopes: { sources, accounts } } as Grant;
           expect(
-            pageReadMcpTools(grant, { reportedState: true }).some((tool) => tool.name === TOOL),
+            pageReadMcpTools(grant, { reportedState: true, economicEvents: true }).some(
+              (tool) => tool.name === TOOL,
+            ),
             JSON.stringify(grant),
           ).toBe(capabilities.includes("records.read") && sources === "*" && accounts === "*");
         }
