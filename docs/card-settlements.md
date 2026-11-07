@@ -380,6 +380,10 @@ Limits:
   how deep a caller pages (`budget_exceeded`).
 - A debit without a resolved account has no alias class, so the planner
   excludes it (`identity_not_admitted`).
+- A window row the sweep never compares (no exact amount, or a debit date
+  that is not a civil date) still goes to the planner, which excludes it under
+  its own code; a dateless one competes, so a statement it could pay is not
+  `proposed` beside it.
 
 The `カード照合` page shows the source facts, evidence links, candidate rationale,
 current readiness blockers and decision history. An authenticated human operator

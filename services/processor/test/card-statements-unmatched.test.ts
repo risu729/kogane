@@ -61,6 +61,7 @@ const STATEMENTS: [string, string, string | null][] = [
   ["2098-06", "3000", "2098-06-10"], // two statements whose windows share one debit pair
   ["2098-07", "3000", "2098-06-14"],
   ["2098-08", "2000", null], // no due date
+  ["2098-09", "3000", "2098-09-28"], // two debits sum to it, beside a third whose date is no civil date
 ];
 /** SMBC debits: [provider id, magnitude, debit date]. */
 const DEBITS: [string, string, string][] = [
@@ -70,6 +71,11 @@ const DEBITS: [string, string, string][] = [
   ["d-5", "7000", "2098-05-10"],
   ["d-6a", "1000", "2098-06-11"],
   ["d-6b", "2000", "2098-06-12"],
+  ["d-9a", "1000", "2098-09-27"],
+  ["d-9b", "2000", "2098-09-29"],
+  // Not a civil date, yet inside the window's text comparison: the sweep never
+  // compares it, and the planner must see it, not lose it.
+  ["d-9c", "1000", "2098-09-31"],
 ];
 
 async function seed() {
@@ -201,6 +207,7 @@ test("each statement without a candidate carries its closed code and, where aske
     "2098-06": "no_equal_amount_debit",
     "2098-07": "no_equal_amount_debit",
     "2098-08": "statement_not_comparable",
+    "2098-09": "no_equal_amount_debit",
   });
   // Two whole debits pay the first statement exactly: listed, never acceptable.
   expect(items.get("2098-01")?.planner).toMatchObject({ status: "proposed", codes: [] });
@@ -223,6 +230,13 @@ test("each statement without a candidate carries its closed code and, where aske
       status: "needs_review",
       codes: ["candidate_not_unique", "debit_in_other_statement_allocation"],
     });
+  // A debit without a civil date is not dropped before the planner: it could
+  // replace a member, so the exact pair is not proposed alone (ADR 0074).
+  expect(items.get("2098-09")?.debitsInWindow).toBe(3);
+  expect(items.get("2098-09")?.planner).toMatchObject({ status: "needs_review" });
+  expect((items.get("2098-09")!.planner as { codes: string[] }).codes).toContain(
+    "excluded_debit_competes",
+  );
   // The planner is asked only about no_equal_amount_debit.
   for (const period of ["2098-03", "2098-04", "2098-05", "2098-08"])
     expect(items.get(period)?.planner).toBeNull();
@@ -254,7 +268,7 @@ test("a statement the sweep pairs leaves the list, and the sweep counts the refu
       statement_total_refund_or_zero: 1,
       statement_not_comparable: 1,
       no_debit_in_window: 1,
-      no_equal_amount_debit: 4,
+      no_equal_amount_debit: 5,
     },
   });
   const page = await review();

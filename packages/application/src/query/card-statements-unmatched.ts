@@ -22,7 +22,10 @@
 //   a planner run is at most 16 statements and 32 debits, and a run past
 //   them is answered `input_bound_exceeded`, never cut. The grant's
 //   `maxRows` bounds how deep a caller pages (`budget_exceeded`).
-import { cardSettlementCandidate } from "../../../domain/src/card-settlement.ts";
+import {
+  cardSettlementCandidate,
+  type CardBankDebitFact,
+} from "../../../domain/src/card-settlement.ts";
 import {
   CARD_STATEMENT_ALLOCATION_DEBITS_MAX,
   CARD_STATEMENT_ALLOCATION_RELEASE,
@@ -46,7 +49,7 @@ import type { SourceFactRef } from "../../../domain/src/events.ts";
 import type { FinancialError } from "../../../domain/src/result.ts";
 import { humanAdoptedRowIdentity } from "../../../domain/src/row-identity.ts";
 import { daysBetween, parseLocalDate, type TemporalValue } from "../../../domain/src/time.ts";
-import type { Quantity } from "../../../domain/src/values.ts";
+import { absentQuantity, type Quantity } from "../../../domain/src/values.ts";
 import {
   bankDebitFactOf,
   CARD_SETTLEMENT_BANK_DEBITS_LIMIT,
@@ -273,6 +276,37 @@ async function heldOf(sql: SqlExecutor, query: string, values: readonly string[]
   return rows.map((row) => row.held);
 }
 
+/**
+ * The debit as the planner reads it. A row the sweep never compares (no exact
+ * amount, or a debit date that is not a civil date, which the window's text
+ * comparison can still return) is given to the planner too, which excludes it
+ * under its own code and lets a dateless one compete (ADR 0074): dropped here,
+ * a statement could be `proposed` beside another possible payer.
+ */
+function plannerDebitFact(bank: BankRow): CardBankDebitFact {
+  const fact = bankDebitFactOf(bank);
+  if (fact !== null) return fact;
+  const date = bank.debit_date ?? null;
+  return {
+    ref: {
+      kind: "transaction",
+      id: "transaction:" + bank.id,
+      revision: "parse_run:" + bank.parse_run_id,
+    },
+    sourceId: bank.source_id,
+    sourceAccount: bank.source_account,
+    accountId: bank.account_id ?? null,
+    ownerRef: bank.owner_ref ?? null,
+    amount:
+      sweepRowAmount(bank, true) ??
+      absentQuantity(bank.unit_ref, "unparsed", "debit_amount_not_exact"),
+    occurred:
+      date !== null && parseLocalDate(date) !== null
+        ? { kind: "local-date", value: date, zone: "Asia/Tokyo", basis: "provider" }
+        : { kind: "unknown", reasonCode: "debit_date_invalid" },
+  };
+}
+
 /** One planner run over a group, answered per statement id. */
 async function planGroup(
   sql: SqlExecutor,
@@ -303,8 +337,7 @@ async function planGroup(
   );
   const debitInputs: AllocationDebitInput[] = [];
   for (const bank of debits.values()) {
-    const fact = bankDebitFactOf(bank);
-    if (fact === null) continue; // not exact or no valid date: the sweep never compares it either
+    const fact = plannerDebitFact(bank);
     const parserName = parsers.get(bank.id);
     // An unresolved account has no alias class: `identity_not_admitted`.
     const identity =

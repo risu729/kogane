@@ -249,6 +249,10 @@ this.
   row and resolved account, as the acceptance plan computes it; a debit
   without a resolved account or an admitted identity is
   `identity_not_admitted`.
+- **Rows the sweep does not compare.** A window row without an exact amount
+  or with a debit date that is not a civil date is passed to the planner as
+  it is (an absent amount, an unknown date), not dropped, so the planner
+  excludes it under its own code and a dateless one competes, as above.
 
 Verification: `services/processor/test/card-statements-unmatched.test.ts`
 on the complete CORE schema (two debits paying one statement exactly, a
