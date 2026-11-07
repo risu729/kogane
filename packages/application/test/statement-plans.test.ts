@@ -4,7 +4,8 @@
 // `queryCardSettlements` and `queryCardOwnership` choose their candidates with
 // keyed CTEs whose plans card-settlement-review-differential.test.ts already
 // checks; after that each issues statements of its own: a review's decision
-// history, the side's account mapping, its ownership claims and relations.
+// history and provider-stated debit account evidence, the side's account
+// mapping, its ownership claims and relations.
 // Those are recorded here as the functions issue them, over the stub stores of
 // card-settlement-query.test.ts and card-ownership-query.test.ts (which stand
 // in for the readiness view), and explained on every CORE migration. None may
@@ -17,6 +18,7 @@ import { planOf, tableScans } from "../../storage-d1/test/plan-check.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
 import { CARD_OWNERSHIP_CANDIDATE_SQL, queryCardOwnership } from "../src/query/card-ownership.ts";
 import {
+  CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL,
   CARD_SETTLEMENT_PAGE_SQL,
   CARD_SETTLEMENT_REVIEW_SQL,
   queryCardSettlements,
@@ -53,13 +55,22 @@ function recording(db: Database, issued: Set<string>): SqlExecutor {
   };
 }
 
-/** One proposed review whose card side's owner is unknown (card-settlement-query.test.ts). */
+/**
+ * One proposed review whose card side's owner is unknown, over the stub schema
+ * of card-settlement-query.test.ts: the debit account evidence tables carry the
+ * columns the read names and migration 0060's candidate index.
+ */
 function settlementStore(): Database {
   const db = new Database(":memory:");
   db.exec(`CREATE TABLE card_settlement_reviews(id TEXT,facts_json TEXT,revision INTEGER,status TEXT,
     decision_revision_id TEXT,event_id TEXT,obligation_id TEXT,settlement_id TEXT,created_at TEXT);
     CREATE VIEW card_settlement_readiness AS SELECT id,1 AS statement_current,1 AS bank_current,1 AS ownership_current,1 AS allocation_available FROM card_settlement_reviews;
-    CREATE TABLE card_settlement_decisions(proposal_id TEXT,revision INTEGER,status TEXT,decision_revision_id TEXT,created_at TEXT);`);
+    CREATE TABLE card_settlement_decisions(proposal_id TEXT,revision INTEGER,status TEXT,decision_revision_id TEXT,created_at TEXT);
+    CREATE TABLE card_debit_account_statement(id INTEGER PRIMARY KEY,reader_version TEXT);
+    CREATE TABLE card_settlement_debit_account_evidence(id INTEGER PRIMARY KEY,candidate_id TEXT,statement_id INTEGER,
+      policy TEXT,outcome TEXT,reason TEXT,proposal_json TEXT,created_at TEXT);
+    CREATE INDEX card_settlement_debit_account_evidence_candidate
+      ON card_settlement_debit_account_evidence(candidate_id,statement_id,policy,id);`);
   db.prepare(
     "INSERT INTO card_settlement_reviews VALUES('one',?,0,'proposed',NULL,NULL,NULL,NULL,?)",
   ).run(JSON.stringify(settlementFacts(true)), "2026-09-11T00:00:00Z");
@@ -109,8 +120,10 @@ test("the review reads' own statements read no growing table whole", async () =>
   const ownership = ownershipStore();
   expect(await queryCardOwnership(recording(ownership, issued), "one")).not.toBeNull();
   ownership.close();
-  // The decision history, the mapping, the claims and the relations.
-  expect(issued.size).toBeGreaterThanOrEqual(4);
+  // The decision history, the debit account evidence, the mapping, the claims
+  // and the relations.
+  expect(issued.size).toBeGreaterThanOrEqual(5);
+  expect([...issued]).toContain(CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL);
 
   const core = fullCoreDatabase();
   const offending: { sql: string; scans: string[] }[] = [];
