@@ -196,7 +196,9 @@ Open limits, written down rather than guessed:
   collector has served `runOperation`.
 - The requested window is not applied by any collector.
 - READ projection of a run is not traced; `projected` stays pending.
-- The operator UI has no operations view; the trail is read over HTTP. The
+- The operator UI reads one operation's trail on its 依頼の経過 page
+  (amendment of 2026-11-07 below); it has no list of operations and sends no
+  operations request. The
   existing `kogane.ops.operation.get` returns the same record on this code, but
   MCP client access (#559/#565) is designed to stop publishing operations tools
   on `/mcp`; operation tracking over MCP is a follow-up read tool graded by an
@@ -237,3 +239,65 @@ Open limits, written down rather than guessed:
 
 Production dispatch, a real collector answering `runOperation`, and a
 production trail to publication are unverified.
+
+## Amendment 2026-11-07 — the operator's 依頼の経過 page (proposed)
+
+Status: proposed (accepted when its pull request merges).
+
+**Context.** Phase 3 of the [roadmap](../roadmap.md#phase-3--coverage-collection-requests-and-cross-source-identity)
+asks that a collection can be requested and followed to published
+observations. The trail existed only as JSON over
+`GET /api/ops/v1/operations/{id}`, and the UI footer states that collection is
+not run from the screen.
+
+**Options considered.** (1) Keep the trail HTTP-only. (2) A page that reads
+one operation and also requests collections from the browser. (3) A read-only
+page for one operation, opened from the audit log, that sends nothing.
+
+**Decision.** Option 3. `/operations/op_<64 hex>` in the observation client
+(`apps/web/src/pages/Operation.tsx`) reads the existing route once per opening
+and again only when the operator presses 最新の状態を読み直す or the shell's
+表示を更新 (no polling, no re-read on focus or reconnect): the record's
+status, dispatch, failure code and times; every stage the kind reports with
+its evidence reference (a fetch run `r_<id>` links to its 取得記録) and
+failure code; and for a collection or session refresh the execution state,
+reason, connection, waits and times, the note that the requested window is
+stored and not applied, and each reported run's state, reason, block code,
+provider outcome, 取得記録 link and artifact counts. Closed codes are shown
+by Japanese name with the code beside them; unknown codes are shown as
+themselves. The 監査ログ page links every `op_` target to this page; there is
+no list route, so the audit log is where an operation id is found. Like the
+audit page, it reads no capability and is drawn outside the metadata
+boundary; the route's operator check is the only gate (`403` reads as
+operator-only, `404` as not found, which also covers another principal's
+operation and a deployment without the API). Option 2 is not taken: requesting
+a provider contact from the browser is a product change the owner has not
+made, and the footer's statement stays true.
+
+The browser validates the record before rendering it
+(`packages/observation-shared/src/operation-contract.ts`, through
+`validApiResponse`): exact keys, the closed vocabularies, the stages of the
+kind in order, an execution exactly for the collector kinds with the scope of
+its action, at most 100 runs, a run's state consistent with its registration
+(CORE 0039: `registeredAt` exactly when there is a fetch run) and its
+artifact counts (`published + pending + notPublished = parseSelected ≤ total`,
+`parseFailed ≤ notPublished`), and references that are identifiers, never a
+URL. A record outside it is an error, never a partial trail.
+
+**Consequences.** No route, migration, flag, MCP tool or capability changes.
+Each opening and each re-read is an audited `ops.operation.get` read, as an
+HTTP read already was. The page does not make `projected` traced, apply a
+requested window, or show operations the operator cannot find in the audit
+log.
+
+**Verification.** `packages/observation-shared/test/operation-contract.test.ts`
+(the validator); `packages/application/test/operation-record-contract.test.ts`
+(the restated vocabularies equal the application's);
+`services/app/test/ops-api.test.ts` (records the real route returns over the
+real migrations pass the validator) and
+`services/processor/test/collector-dispatch.test.ts` (every record read along
+the full trail, from acceptance to publication, failure and expiry, passes it);
+`apps/web/test/operation.browser.test.ts` (the page on desktop and phone
+widths, one read per opening, an explicit re-read, refusals and a malformed
+record) and `apps/web/test/audit.browser.test.ts` (the audit link opens the
+page).

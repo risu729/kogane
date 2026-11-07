@@ -427,7 +427,20 @@ only. A collected execution with no reported run is `unpublished`
 Limits: no deployed collector has served `runOperation` and no connection is
 enabled; `projected` (READ) is not traced, so a published collection stays
 `running`; the requested window is not applied; one collector call is awaited
-per Processor invocation, inside the tick; the web UI has no operations view.
+per Processor invocation, inside the tick. The web UI cannot request an
+operation and has no list of operations.
+
+**The 依頼の経過 page.** `/operations/op_<id>` in the observation client
+shows this record read-only: status, stages with their evidence (a fetch run
+links to its 取得記録), the execution and every reported run with its counts,
+each closed code by Japanese name beside the code. It reads once per opening
+and again only when asked, and the 監査ログ page links each `op_` target to
+it. The browser validates the record first
+(`packages/observation-shared/src/operation-contract.ts`); a record outside
+the contract is an error. A `403` says the trail is the operator's; a `404`
+says the operation is not found, which also covers another principal's
+operation and a deployment with `OPS_API_ENABLED` off
+([ADR 0048, amendment of 2026-11-07](adr/0048-operation-collector-dispatch.md#amendment-2026-11-07--the-operators-依頼の経過-page-proposed)).
 
 ## Storage
 

@@ -242,6 +242,26 @@ describe.if(runnable)("the operator's audit log page", () => {
     }
   }, 60_000);
 
+  test("an operations request's target opens its 依頼の経過 page", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/audit?operation=ops.collection.request`);
+      await rows(page).first().waitFor();
+      const link = page.getByRole("link", { name: "依頼の経過を見る" });
+      expect(await link.count()).toBe(1);
+      const target = `/operations/op_${"e".repeat(64)}`;
+      expect(await link.getAttribute("href")).toBe(target);
+      // Only an `op_` target is a link; plans, schedules and leases stay codes.
+      await link.click();
+      await page.getByRole("heading", { level: 1, name: "依頼の経過" }).waitFor();
+      expect(new URL(page.url()).pathname).toBe(target);
+      // This server serves no operation record: the page says it is not found.
+      await page.getByText("この依頼は見つかりません。", { exact: false }).waitFor();
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
   test("a URL filter outside the closed values is refused before any request", async () => {
     const page = await browser.newPage();
     try {
