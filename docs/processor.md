@@ -678,14 +678,16 @@ principal `lane:<lane>` (hyphens for underscores), operation `lane.tick`,
 `applied`, or `failed` when the stage threw after writing. Before such a lane
 runs, `runScheduled` reads one high-water mark of the tables it may write;
 after it, the lane's own rows above the mark, by its decision actor, commit
-principal or proposal method. The record's references are inclusive ranges of
-those rows (`decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`,
-`proposals:<kind>:<a>-<b>`) and its diff the number of the lane's own rows in
-each; it copies none of the tick row's counts. An idle tick, a lane whose flag
-is off and every other lane write no record. The mark and the record are read
-and written outside the lane's metered scope, and a failure to read or write
-them is logged as `{"event":"lane_audit_record_failed","lane":…,"code":…}` and
-changes nothing the lane did.
+principal or proposal method, each read a range on the table's key without
+table statistics ([audit log: cost](audit-log.md#cost)). The record's
+references are inclusive ranges of those rows (`decision-revisions:<a>-<b>`,
+`commit-seq:<epoch>:<a>-<b>`, `proposals:<kind>:<a>-<b>`) and its diff the
+number of the lane's own rows in each; it copies none of the tick row's
+counts. An idle tick, a lane whose flag is off and every other lane write no
+record. The mark and the record are read and written outside the lane's
+metered scope, and a failure to read or write them is logged as
+`{"event":"lane_audit_record_failed","lane":…,"code":…}` and changes nothing
+the lane did.
 
 ## 7. Operations dispatch
 

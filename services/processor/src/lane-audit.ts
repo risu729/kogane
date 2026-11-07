@@ -38,26 +38,61 @@ import type { LaneTickResult } from "./lane-ticks.ts";
 /** The actor of the reconciliation sweep's automatic acceptances (`reconciliation-job.ts`). */
 export const RECONCILIATION_RULE_ACTOR = "rule:reconciliation-v1";
 
+/**
+ * Every statement this module prepares. Each is a range on its table's key,
+ * also without table statistics (D1 never runs `ANALYZE`), which
+ * `test/lane-audit-plans.test.ts` asserts for every one of them.
+ *
+ * `reconciliation_proposals` has an index on `(kind,stage)`: grouping or
+ * filtering on a bare `kind` lets the planner walk that index for the grouping
+ * order or seek every proposal of one kind, so its reads write `+kind`, which
+ * keeps the value and its collation but is not an index term, and the plan is
+ * the rowid range (docs/audit-log.md, Cost).
+ */
+export const LANE_AUDIT_SQL = {
+  mark: `SELECT e.core_epoch AS epoch,
+  (SELECT coalesce(max(rowid),0) FROM decision_revisions) AS decisions,
+  (SELECT coalesce(max(commit_seq),0) FROM economic_commit_log WHERE core_epoch=e.core_epoch) AS commits,
+  (SELECT coalesce(max(rowid),0) FROM reconciliation_proposals) AS reconciliation,
+  (SELECT coalesce(max(rowid),0) FROM card_settlement_candidates) AS settlement,
+  (SELECT coalesce(max(id),0) FROM maintenance_survey_proposals) AS survey
+  FROM core_source_revision e WHERE e.id=1`,
+  decisions: `SELECT count(*) AS n,min(rowid) AS lo,max(rowid) AS hi FROM decision_revisions
+                WHERE rowid>?1 AND actor_id=?2 AND method='rule'`,
+  commits: `SELECT count(*) AS n,min(commit_seq) AS lo,max(commit_seq) AS hi FROM economic_commit_log
+                WHERE core_epoch=?1 AND commit_seq>?2 AND principal=?3`,
+  reconciliationProposals: `SELECT kind,count(*) AS n,min(rowid) AS lo,max(rowid) AS hi FROM reconciliation_proposals
+      WHERE rowid>?1 AND method='rule' GROUP BY +kind ORDER BY +kind`,
+  settlementCandidates: `SELECT 'candidate' AS kind,count(*) AS n,min(rowid) AS lo,max(rowid) AS hi
+      FROM card_settlement_candidates WHERE rowid>?1 HAVING count(*)>0`,
+  surveyProposals: `SELECT kind,count(*) AS n,min(id) AS lo,max(id) AS hi FROM maintenance_survey_proposals
+      WHERE id>?1 GROUP BY kind`,
+  decisionsRef: `SELECT id FROM decision_revisions WHERE rowid>=?1 AND rowid<=?2 AND actor_id=?3 AND method='rule' ORDER BY rowid`,
+  commitsRef: `SELECT commit_seq FROM economic_commit_log WHERE core_epoch=?1 AND commit_seq>=?2 AND commit_seq<=?3 AND principal=?4 ORDER BY commit_seq`,
+  reconciliationRef: `SELECT id FROM reconciliation_proposals WHERE rowid>=?1 AND rowid<=?2 AND method='rule' AND +kind=?3 ORDER BY rowid`,
+  settlementRef:
+    "SELECT id FROM card_settlement_candidates WHERE rowid>=?1 AND rowid<=?2 ORDER BY rowid",
+  surveyRef:
+    "SELECT id FROM maintenance_survey_proposals WHERE id>=?1 AND id<=?2 AND kind=?3 ORDER BY id",
+} as const;
+
 /** The proposal tables a lane may write, each with the closed kinds it maps to. */
 const PROPOSAL_TABLES = {
   // Stage A pairs of the reconciliation sweep and pending-to-posted
   // candidates of purchase recognition: rule proposals only (an agent's or an
   // operator's proposal has another method).
   reconciliation: {
-    sql: `SELECT kind,count(*) AS n,min(rowid) AS lo,max(rowid) AS hi FROM reconciliation_proposals
-      WHERE rowid>?1 AND method='rule' GROUP BY kind`,
+    sql: LANE_AUDIT_SQL.reconciliationProposals,
     kind: (raw: string) => `reconciliation-${raw.replaceAll("_", "-")}`,
   },
   // Written by the settlement sweep only.
   "card-settlement": {
-    sql: `SELECT 'candidate' AS kind,count(*) AS n,min(rowid) AS lo,max(rowid) AS hi
-      FROM card_settlement_candidates WHERE rowid>?1 HAVING count(*)>0`,
+    sql: LANE_AUDIT_SQL.settlementCandidates,
     kind: () => "card-settlement-candidate",
   },
   // Written by the maintenance re-survey only.
   "maintenance-survey": {
-    sql: `SELECT kind,count(*) AS n,min(id) AS lo,max(id) AS hi FROM maintenance_survey_proposals
-      WHERE id>?1 GROUP BY kind`,
+    sql: LANE_AUDIT_SQL.surveyProposals,
     kind: (raw: string) => `maintenance-survey-${raw}`,
   },
 } as const;
@@ -104,17 +139,9 @@ export interface LaneAuditMark {
   "maintenance-survey": number;
 }
 
-const MARK_SQL = `SELECT e.core_epoch AS epoch,
-  (SELECT coalesce(max(rowid),0) FROM decision_revisions) AS decisions,
-  (SELECT coalesce(max(commit_seq),0) FROM economic_commit_log WHERE core_epoch=e.core_epoch) AS commits,
-  (SELECT coalesce(max(rowid),0) FROM reconciliation_proposals) AS reconciliation,
-  (SELECT coalesce(max(rowid),0) FROM card_settlement_candidates) AS settlement,
-  (SELECT coalesce(max(id),0) FROM maintenance_survey_proposals) AS survey
-  FROM core_source_revision e WHERE e.id=1`;
-
 /** The high-water mark before a lane runs: one statement, each part a seek on its key. */
 async function laneAuditMark(db: D1Database): Promise<LaneAuditMark> {
-  const row = await db.prepare(MARK_SQL).first<{
+  const row = await db.prepare(LANE_AUDIT_SQL.mark).first<{
     epoch: string;
     decisions: number;
     commits: number;
@@ -146,8 +173,8 @@ const range = (row: RangeRow | null | undefined): LaneRange | null =>
 
 /**
  * The lane's own rows above `mark`: its decisions, its commits in the mark's
- * epoch, and its proposals per kind. Every read is a range on the table's
- * key, so a tick reads only what was written since its mark.
+ * epoch, and its proposals per kind, in kind order. Every read is a range
+ * on the table's key, so a tick reads only what was written since its mark.
  */
 async function laneWrites(
   db: D1Database,
@@ -159,10 +186,7 @@ async function laneWrites(
       ? null
       : range(
           await db
-            .prepare(
-              `SELECT count(*) AS n,min(rowid) AS lo,max(rowid) AS hi FROM decision_revisions
-                WHERE rowid>?1 AND actor_id=?2 AND method='rule'`,
-            )
+            .prepare(LANE_AUDIT_SQL.decisions)
             .bind(mark.decisions, spec.decisionActor)
             .first<RangeRow>(),
         );
@@ -171,10 +195,7 @@ async function laneWrites(
       ? null
       : range(
           await db
-            .prepare(
-              `SELECT count(*) AS n,min(commit_seq) AS lo,max(commit_seq) AS hi FROM economic_commit_log
-                WHERE core_epoch=?1 AND commit_seq>?2 AND principal=?3`,
-            )
+            .prepare(LANE_AUDIT_SQL.commits)
             .bind(mark.epoch, mark.commits, spec.commitPrincipal)
             .first<RangeRow>(),
         );
@@ -282,9 +303,7 @@ export async function resolveLaneRef(
   if (match.d !== undefined) {
     if (spec.decisionActor === undefined) return null;
     const rows = await db
-      .prepare(
-        `SELECT id FROM decision_revisions WHERE rowid>=?1 AND rowid<=?2 AND actor_id=?3 AND method='rule' ORDER BY rowid`,
-      )
+      .prepare(LANE_AUDIT_SQL.decisionsRef)
       .bind(Number(match.d), Number(match.dt), spec.decisionActor)
       .all<{ id: string }>();
     return rows.results.map((row) => row.id);
@@ -292,9 +311,7 @@ export async function resolveLaneRef(
   if (match.c !== undefined) {
     if (spec.commitPrincipal === undefined) return null;
     const rows = await db
-      .prepare(
-        `SELECT commit_seq FROM economic_commit_log WHERE core_epoch=?1 AND commit_seq>=?2 AND commit_seq<=?3 AND principal=?4 ORDER BY commit_seq`,
-      )
+      .prepare(LANE_AUDIT_SQL.commitsRef)
       .bind(match.epoch, Number(match.c), Number(match.ct), spec.commitPrincipal)
       .all<{ commit_seq: number }>();
     return rows.results.map((row) => `${match.epoch}:${row.commit_seq}`);
@@ -304,27 +321,21 @@ export async function resolveLaneRef(
     to = Number(match.pt);
   if (kind.startsWith("reconciliation-") && spec.proposals.includes("reconciliation")) {
     const rows = await db
-      .prepare(
-        `SELECT id FROM reconciliation_proposals WHERE rowid>=?1 AND rowid<=?2 AND method='rule' AND kind=?3 ORDER BY rowid`,
-      )
+      .prepare(LANE_AUDIT_SQL.reconciliationRef)
       .bind(from, to, kind.slice("reconciliation-".length).replaceAll("-", "_"))
       .all<{ id: string }>();
     return rows.results.map((row) => row.id);
   }
   if (kind === "card-settlement-candidate" && spec.proposals.includes("card-settlement")) {
     const rows = await db
-      .prepare(
-        "SELECT id FROM card_settlement_candidates WHERE rowid>=?1 AND rowid<=?2 ORDER BY rowid",
-      )
+      .prepare(LANE_AUDIT_SQL.settlementRef)
       .bind(from, to)
       .all<{ id: string }>();
     return rows.results.map((row) => row.id);
   }
   if (kind.startsWith("maintenance-survey-") && spec.proposals.includes("maintenance-survey")) {
     const rows = await db
-      .prepare(
-        "SELECT id FROM maintenance_survey_proposals WHERE id>=?1 AND id<=?2 AND kind=?3 ORDER BY id",
-      )
+      .prepare(LANE_AUDIT_SQL.surveyRef)
       .bind(from, to, kind.slice("maintenance-survey-".length))
       .all<{ id: number }>();
     return rows.results.map((row) => String(row.id));
