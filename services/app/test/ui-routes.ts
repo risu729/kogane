@@ -131,9 +131,14 @@ function pathConstants(source: string, exported: boolean): Map<string, string> {
   return constants;
 }
 
+/** `text` as a literal inside a regular expression: every metacharacter escaped. */
+function escapeRegExp(text: string): string {
+  return text.replace(/[\\^$.*+?()[\]{}|/]/gu, "\\$&");
+}
+
 /** Whether `source` uses `name` other than in its own declaration. */
 function uses(source: string, name: string): boolean {
-  const escaped = name.replace(/[$]/gu, "\\$");
+  const escaped = escapeRegExp(name);
   const all = source.match(new RegExp(`(?<![\\w$.])${escaped}(?![\\w$])`, "gu"))?.length ?? 0;
   const declared = source.match(new RegExp(`\\bconst\\s+${escaped}(?![\\w$])`, "gu"))?.length ?? 0;
   return all > declared;
@@ -210,11 +215,11 @@ function segmentBuilders(source: string): { paths: string[]; resolved: Set<numbe
     const found = [...source.slice(open, end).matchAll(/\breturn\s+(`(?:[^`\\]|\\.)*`)/gu)];
     const returns = found.map((each) => each[1]!.slice(1, -1));
     const segment = (param: string) =>
-      new RegExp(`/\\$\\{\\s*${param.replace(/[$]/gu, "\\$")}\\s*\\}(?=/|\\?|$)`, "u");
+      new RegExp(`/\\$\\{\\s*${escapeRegExp(param)}\\s*\\}(?=/|\\?|$)`, "u");
     if (!returns.some((template) => params.some((param) => segment(param).test(template))))
       continue;
     const calls = [
-      ...source.matchAll(new RegExp(`(?<![\\w$.])${name.replace(/[$]/gu, "\\$")}\\s*\\(`, "gu")),
+      ...source.matchAll(new RegExp(`(?<![\\w$.])${escapeRegExp(name)}\\s*\\(`, "gu")),
     ].filter((call) => call.index !== match.index + match[0].indexOf(name));
     if (calls.length === 0) continue;
     for (const each of found) resolved.add(open + each.index + each[0].length - each[1]!.length);
@@ -226,7 +231,7 @@ function segmentBuilders(source: string): { paths: string[]; resolved: Set<numbe
             const literal = /^"([^"]*)"$|^'([^']*)'$/u.exec(args[index] ?? "");
             if (literal === null) return text;
             return text.replace(
-              new RegExp(`\\$\\{\\s*${param.replace(/[$]/gu, "\\$")}\\s*\\}`, "gu"),
+              new RegExp(`\\$\\{\\s*${escapeRegExp(param)}\\s*\\}`, "gu"),
               () => literal[1] ?? literal[2]!,
             );
           }, template),
