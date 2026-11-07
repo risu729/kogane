@@ -41,7 +41,10 @@ import { validReportedHoldingsChange } from "./reported-holdings-change-contract
 import { validReportedState } from "./reported-state-contract.ts";
 import { validReportResponse } from "./report-artifact-contract.ts";
 import { validCollectionQualityResponse } from "./collection-quality-contract.ts";
-import { validCardSettlementReviewPage } from "./card-settlement-contract.ts";
+import {
+  validCardSettlementReviewPage,
+  validCardSettlementStatementPage,
+} from "./card-settlement-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
 import { validFinancialProductClaimWire } from "./financial-products.ts";
 import { validBalanceInterpretation } from "./balance-semantics.ts";
@@ -781,6 +784,8 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path === AUDIT_PAGE_PATH) return validAuditPage(value);
   if (path === "/api/v2/reconciliation/card-settlements/ownership")
     return validCardOwnershipReview(value);
+  if (path === "/api/v2/reconciliation/card-settlements/statements")
+    return validCardSettlementStatementPage(value);
   if (path === "/api/v2/reconciliation/card-settlements")
     return validCardSettlementReviewPage(value);
   if (path === "/api/v2/card-purchases") return validCardPurchasePage(value);
