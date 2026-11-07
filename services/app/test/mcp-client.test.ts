@@ -84,6 +84,7 @@ const PUBLISHED = [
   "kogane.events.read",
   "kogane.reports.read",
   "kogane.collection-quality.read",
+  "kogane.evidence.read",
   PURCHASES_TOOL_NAME,
   RECONSTRUCTED_STATE_TOOL_NAME,
 ];
