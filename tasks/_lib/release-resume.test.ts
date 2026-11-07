@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   readFileSync,
@@ -477,139 +477,137 @@ describe("serial workflow resumes publication once without bypassing a Container
 });
 
 for (const native of [false, true])
-  for (const phase of [
-    "success",
-    "artifact-tamper",
-    "artifact-fetch",
-    "image-mismatch",
-    "input-changed",
-  ] as const)
-    test(
-      "real Node restores native and legacy prepared bytes with exact artifact/image proof: " +
-        (native ? "native" : "legacy") +
-        " " +
-        phase,
-      () => {
-        const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } = require("node:fs");
-        const { tmpdir } = require("node:os");
-        const { execFileSync, spawnSync } = require("node:child_process");
-        const { containerInputDigest } = require("./ci/cf-container-release.mjs");
-        const dir = mkdtempSync(resolve(tmpdir(), "kogane-resume-cli-"));
-        try {
-          const root = resolve(dir, "checkout"),
-            temp = resolve(dir, "temp"),
-            tools = resolve(dir, "tools");
-          for (const path of [
-            root,
-            temp,
-            tools,
-            resolve(root, target.path, "container"),
-            resolve(root, "dist/test"),
-          ])
-            mkdirSync(path, { recursive: true });
-          const config = resolve(root, target.path, "wrangler.jsonc");
-          writeFileSync(config, '{"synthetic":"original stamped config"}');
-          writeFileSync(resolve(root, "dist/test/entry.js"), "synthetic original bundle");
-          writeFileSync(
-            resolve(root, target.path, "Dockerfile"),
-            "FROM scratch\nCOPY container/source.mjs /source.mjs\n",
-          );
-          writeFileSync(
-            resolve(root, target.path, "container/source.mjs"),
-            "synthetic image input",
-          );
-          const cf = resolve(root, target.path, ".cloudflare/output/v0");
-          mkdirSync(cf, { recursive: true });
-          writeFileSync(resolve(cf, "metadata.json"), "synthetic exact cf output");
-          const manifest = {
-            configs: [{ path: target.path + "/wrangler.jsonc" }],
-            bundles: [{ directory: "dist/test" }],
-            workers: [{ name: target.name, path: target.path }],
-            ...(native ? { cfArtifacts: [{ name: target.name }] } : {}),
-          };
-          writeFileSync(resolve(temp, "release-manifest.json"), JSON.stringify(manifest));
-          writeFileSync(
-            resolve(temp, "release-plan.json"),
-            JSON.stringify({ selected: [target.name] }),
-          );
-          writeFileSync(resolve(temp, "previous-record.json"), "null");
-          writeFileSync(
-            resolve(temp, "container-baseline.json"),
-            JSON.stringify({ registryNamespace: "synthetic", snapshots: [before] }),
-          );
-          const imageId = `sha256:${"f".repeat(64)}`;
-          const localTag = `cloudflare-build/${"d".repeat(12)}/${target.appName}:${"e".repeat(12)}`;
-          writeFileSync(
-            resolve(temp, "container-manifest.json"),
-            JSON.stringify([
-              {
-                name: target.name,
-                imageId,
-                localTag,
-                inputs: containerInputDigest(root, target),
-                daemonId: "original-daemon",
-              },
-            ]),
-          );
-          writeFileSync(
-            resolve(tools, "docker"),
-            '#!/bin/sh\ncase "$1 $2" in "image save") printf "synthetic Docker archive" > "$4";; "image load") test -s "$4";; "image inspect") test "$#" -eq 3 || exit 1; printf "%s\\n" "$MOCK_IMAGE_ID";; "info --format") printf "restored-daemon\\n";; *) exit 1;; esac\n',
-          );
-          chmodSync(resolve(tools, "docker"), 0o755);
-          const guard = resolve(REPO_ROOT, "tasks/_lib/ci/release-resume.mjs");
-          const env = {
-            ...process.env,
-            PATH: `${tools}:${process.env.PATH}`,
-            RUNNER_TEMP: temp,
-            GITHUB_ENV: resolve(temp, "env"),
-            GITHUB_OUTPUT: resolve(temp, "outputs"),
-            GITHUB_TOKEN: "synthetic-token",
-            GITHUB_REPOSITORY: "synthetic/repository",
-            GITHUB_RUN_ID: "123",
-            GITHUB_RUN_ATTEMPT: "2",
-            SHA: sha,
-            TRUSTED_SHA: trustedSha,
-            CLOUDFLARE_ACCOUNT_ID: "b".repeat(32),
-            CLOUDFLARE_API_TOKEN: "synthetic-cf-token",
-            MOCK_IMAGE_ID: JSON.stringify([{ Id: imageId, Os: "linux", Architecture: "amd64" }]),
-          };
-          const packed = spawnSync("node", [guard, "pack"], { cwd: root, env, encoding: "utf8" });
-          expect(packed.error).toBeUndefined();
-          expect(packed.signal).toBeNull();
-          expect(packed.stderr).toBe("");
-          expect(packed.status).toBe(0);
-          const zip = resolve(dir, "prepared.zip");
-          execFileSync("python3", [
-            "-c",
-            "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w'); z.write(sys.argv[2],'prepared.tar'); z.close()",
-            zip,
-            resolve(temp, "prepared.tar"),
-          ]);
-          rmSync(resolve(temp, "prepared"), { recursive: true });
-          rmSync(resolve(temp, "prepared.tar"));
-          const bytes = readFileSync(zip),
-            artifactDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-          const record = {
-            ...deployment().payload,
-            resume: { ...deployment().payload.resume, artifactDigest },
-            containerManifestSha256: createHash("sha256")
-              .update(readFileSync(resolve(temp, "container-manifest.json")))
-              .digest("hex"),
-            containerBaselineSha256: createHash("sha256")
-              .update(readFileSync(resolve(temp, "container-baseline.json")))
-              .digest("hex"),
-          };
-          writeFileSync(resolve(temp, "release-record.json"), JSON.stringify(record));
-          writeFileSync(
-            resolve(temp, "resume-receipt.json"),
-            JSON.stringify({ ...receipt(), targets: [{ ...before, version: 4 }] }),
-          );
-          writeFileSync(config, "changed local config");
-          writeFileSync(resolve(root, "dist/test/entry.js"), "changed local bundle");
-          const bootstrap = resolve(dir, "bootstrap.mjs");
-          writeFileSync(
-            bootstrap,
-            `import {readFileSync} from 'node:fs';
+  describe(`real Node restore of ${native ? "native" : "legacy"} prepared bytes`, () => {
+    // Every phase restores the same prepared archive, so it is packed (one Node
+    // process) and zipped (one Python process) once per flavor. Each phase
+    // restores a private copy of the packed checkout and temp tree, which leaves
+    // it only its own restore processes: the five phases used to repeat the pack
+    // and the zip and timed out under load.
+    const { mkdirSync, chmodSync, cpSync } = require("node:fs");
+    const { execFileSync, spawnSync } = require("node:child_process");
+    const { containerInputDigest } = require("./ci/cf-container-release.mjs");
+    const guard = resolve(REPO_ROOT, "tasks/_lib/ci/release-resume.mjs");
+    let shared = "";
+    let bootstrap = "";
+    let packedEnv: Record<string, string | undefined> = {};
+    beforeAll(() => {
+      shared = mkdtempSync(resolve(tmpdir(), "kogane-resume-cli-"));
+      const root = resolve(shared, "checkout"),
+        temp = resolve(shared, "temp"),
+        tools = resolve(shared, "tools");
+      for (const path of [
+        root,
+        temp,
+        tools,
+        resolve(root, target.path, "container"),
+        resolve(root, "dist/test"),
+      ])
+        mkdirSync(path, { recursive: true });
+      const config = resolve(root, target.path, "wrangler.jsonc");
+      writeFileSync(config, '{"synthetic":"original stamped config"}');
+      writeFileSync(resolve(root, "dist/test/entry.js"), "synthetic original bundle");
+      writeFileSync(
+        resolve(root, target.path, "Dockerfile"),
+        "FROM scratch\nCOPY container/source.mjs /source.mjs\n",
+      );
+      writeFileSync(resolve(root, target.path, "container/source.mjs"), "synthetic image input");
+      const cf = resolve(root, target.path, ".cloudflare/output/v0");
+      mkdirSync(cf, { recursive: true });
+      writeFileSync(resolve(cf, "metadata.json"), "synthetic exact cf output");
+      const manifest = {
+        configs: [{ path: target.path + "/wrangler.jsonc" }],
+        bundles: [{ directory: "dist/test" }],
+        workers: [{ name: target.name, path: target.path }],
+        ...(native ? { cfArtifacts: [{ name: target.name }] } : {}),
+      };
+      writeFileSync(resolve(temp, "release-manifest.json"), JSON.stringify(manifest));
+      writeFileSync(
+        resolve(temp, "release-plan.json"),
+        JSON.stringify({ selected: [target.name] }),
+      );
+      writeFileSync(resolve(temp, "previous-record.json"), "null");
+      writeFileSync(
+        resolve(temp, "container-baseline.json"),
+        JSON.stringify({ registryNamespace: "synthetic", snapshots: [before] }),
+      );
+      const imageId = `sha256:${"f".repeat(64)}`;
+      const localTag = `cloudflare-build/${"d".repeat(12)}/${target.appName}:${"e".repeat(12)}`;
+      writeFileSync(
+        resolve(temp, "container-manifest.json"),
+        JSON.stringify([
+          {
+            name: target.name,
+            imageId,
+            localTag,
+            inputs: containerInputDigest(root, target),
+            daemonId: "original-daemon",
+          },
+        ]),
+      );
+      writeFileSync(
+        resolve(tools, "docker"),
+        '#!/bin/sh\ncase "$1 $2" in "image save") printf "synthetic Docker archive" > "$4";; "image load") test -s "$4";; "image inspect") test "$#" -eq 3 || exit 1; printf "%s\\n" "$MOCK_IMAGE_ID";; "info --format") printf "restored-daemon\\n";; *) exit 1;; esac\n',
+      );
+      chmodSync(resolve(tools, "docker"), 0o755);
+      packedEnv = {
+        ...process.env,
+        PATH: `${tools}:${process.env.PATH}`,
+        GITHUB_TOKEN: "synthetic-token",
+        GITHUB_REPOSITORY: "synthetic/repository",
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "2",
+        SHA: sha,
+        TRUSTED_SHA: trustedSha,
+        CLOUDFLARE_ACCOUNT_ID: "b".repeat(32),
+        CLOUDFLARE_API_TOKEN: "synthetic-cf-token",
+        MOCK_IMAGE_ID: JSON.stringify([{ Id: imageId, Os: "linux", Architecture: "amd64" }]),
+      };
+      const packed = spawnSync("node", [guard, "pack"], {
+        cwd: root,
+        env: {
+          ...packedEnv,
+          RUNNER_TEMP: temp,
+          GITHUB_ENV: resolve(temp, "env"),
+          GITHUB_OUTPUT: resolve(temp, "outputs"),
+        },
+        encoding: "utf8",
+      });
+      expect(packed.error).toBeUndefined();
+      expect(packed.signal).toBeNull();
+      expect(packed.stderr).toBe("");
+      expect(packed.status).toBe(0);
+      const zip = resolve(shared, "prepared.zip");
+      execFileSync("python3", [
+        "-c",
+        "import zipfile,sys; z=zipfile.ZipFile(sys.argv[1],'w'); z.write(sys.argv[2],'prepared.tar'); z.close()",
+        zip,
+        resolve(temp, "prepared.tar"),
+      ]);
+      rmSync(resolve(temp, "prepared"), { recursive: true });
+      rmSync(resolve(temp, "prepared.tar"));
+      const bytes = readFileSync(zip),
+        artifactDigest = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+      const record = {
+        ...deployment().payload,
+        resume: { ...deployment().payload.resume, artifactDigest },
+        containerManifestSha256: createHash("sha256")
+          .update(readFileSync(resolve(temp, "container-manifest.json")))
+          .digest("hex"),
+        containerBaselineSha256: createHash("sha256")
+          .update(readFileSync(resolve(temp, "container-baseline.json")))
+          .digest("hex"),
+      };
+      writeFileSync(resolve(temp, "release-record.json"), JSON.stringify(record));
+      writeFileSync(
+        resolve(temp, "resume-receipt.json"),
+        JSON.stringify({ ...receipt(), targets: [{ ...before, version: 4 }] }),
+      );
+      writeFileSync(config, "changed local config");
+      writeFileSync(resolve(root, "dist/test/entry.js"), "changed local bundle");
+      bootstrap = resolve(shared, "bootstrap.mjs");
+      writeFileSync(
+        bootstrap,
+        `import {readFileSync} from 'node:fs';
       globalThis.fetch=async(url,options={})=>{
         const text=String(url);
         if(text==='https://artifact.invalid/archive'){
@@ -629,66 +627,99 @@ for (const native of [false, true])
         else throw Error('unexpected request');
         return Response.json(value);
       };`,
-          );
-          const run = (patch = {}) => {
-            const result = spawnSync("node", ["--import", bootstrap, guard, "restore"], {
-              cwd: root,
-              env: { ...env, ...patch },
-              encoding: "utf8",
-            });
-            expect(result.error).toBeUndefined();
-            expect(result.signal).toBeNull();
-            return result;
-          };
-          if (phase === "success") {
-            const restored = run();
-            expect(restored.stderr).toBe("");
-            expect(restored.status).toBe(0);
-            expect(
-              readdirSync(temp).filter((entry) => entry.startsWith("release-resume-")),
-            ).toEqual([]);
-            expect(readdirSync(temp)).not.toContain("docker-images.tar");
-            expect(readFileSync(config, "utf8")).toContain("original stamped config");
-            expect(readFileSync(resolve(root, "dist/test/entry.js"), "utf8")).toBe(
-              "synthetic original bundle",
-            );
-            if (native)
-              expect(readFileSync(resolve(cf, "metadata.json"), "utf8")).toBe(
-                "synthetic exact cf output",
+      );
+    });
+    afterAll(() => {
+      if (shared) rmSync(shared, { recursive: true, force: true });
+    });
+    for (const phase of [
+      "success",
+      "artifact-tamper",
+      "artifact-fetch",
+      "image-mismatch",
+      "input-changed",
+    ] as const)
+      test(
+        "real Node restores native and legacy prepared bytes with exact artifact/image proof: " +
+          (native ? "native" : "legacy") +
+          " " +
+          phase,
+        () => {
+          const dir = mkdtempSync(resolve(tmpdir(), "kogane-resume-cli-"));
+          try {
+            // A private copy of the packed state: restore consumes and rewrites it.
+            const root = resolve(dir, "checkout"),
+              temp = resolve(dir, "temp");
+            cpSync(resolve(shared, "checkout"), root, { recursive: true });
+            cpSync(resolve(shared, "temp"), temp, { recursive: true });
+            const config = resolve(root, target.path, "wrangler.jsonc");
+            const cf = resolve(root, target.path, ".cloudflare/output/v0");
+            const env = {
+              ...packedEnv,
+              RUNNER_TEMP: temp,
+              GITHUB_ENV: resolve(temp, "env"),
+              GITHUB_OUTPUT: resolve(temp, "outputs"),
+            };
+            const run = (patch = {}) => {
+              const result = spawnSync("node", ["--import", bootstrap, guard, "restore"], {
+                cwd: root,
+                env: { ...env, ...patch },
+                encoding: "utf8",
+              });
+              expect(result.error).toBeUndefined();
+              expect(result.signal).toBeNull();
+              return result;
+            };
+            if (phase === "success") {
+              const restored = run();
+              expect(restored.stderr).toBe("");
+              expect(restored.status).toBe(0);
+              expect(
+                readdirSync(temp).filter((entry) => entry.startsWith("release-resume-")),
+              ).toEqual([]);
+              expect(readdirSync(temp)).not.toContain("docker-images.tar");
+              expect(readFileSync(config, "utf8")).toContain("original stamped config");
+              expect(readFileSync(resolve(root, "dist/test/entry.js"), "utf8")).toBe(
+                "synthetic original bundle",
               );
-            expect(readFileSync(resolve(temp, "env"), "utf8")).toContain(
-              "CONTAINER_RESTORED_DAEMON=restored-daemon",
-            );
+              if (native)
+                expect(readFileSync(resolve(cf, "metadata.json"), "utf8")).toBe(
+                  "synthetic exact cf output",
+                );
+              expect(readFileSync(resolve(temp, "env"), "utf8")).toContain(
+                "CONTAINER_RESTORED_DAEMON=restored-daemon",
+              );
+            }
+            if (phase === "artifact-tamper") {
+              expect(run({ MOCK_TAMPER: "true" }).stderr.trim()).toBe(
+                "release_resume_artifact_digest",
+              );
+              expect(
+                readdirSync(temp).filter((entry) => entry.startsWith("release-resume-")),
+              ).toEqual([]);
+            }
+            if (phase === "artifact-fetch")
+              expect(run({ MOCK_FETCH_FAIL: "true" }).stderr.trim()).toBe(
+                "release_resume_artifact_fetch",
+              );
+            if (phase === "image-mismatch")
+              expect(
+                run({
+                  MOCK_IMAGE_ID: JSON.stringify([
+                    { Id: `sha256:${"a".repeat(64)}`, Os: "linux", Architecture: "amd64" },
+                  ]),
+                }).stderr.trim(),
+              ).toBe("release_resume_restored_image");
+            if (phase === "input-changed") {
+              writeFileSync(resolve(root, target.path, "container/source.mjs"), "changed input");
+              expect(run().stderr.trim()).toBe("release_resume_restored_image");
+            }
+          } finally {
+            rmSync(dir, { recursive: true, force: true });
           }
-          if (phase === "artifact-tamper") {
-            expect(run({ MOCK_TAMPER: "true" }).stderr.trim()).toBe(
-              "release_resume_artifact_digest",
-            );
-            expect(
-              readdirSync(temp).filter((entry) => entry.startsWith("release-resume-")),
-            ).toEqual([]);
-          }
-          if (phase === "artifact-fetch")
-            expect(run({ MOCK_FETCH_FAIL: "true" }).stderr.trim()).toBe(
-              "release_resume_artifact_fetch",
-            );
-          if (phase === "image-mismatch")
-            expect(
-              run({
-                MOCK_IMAGE_ID: JSON.stringify([
-                  { Id: `sha256:${"a".repeat(64)}`, Os: "linux", Architecture: "amd64" },
-                ]),
-              }).stderr.trim(),
-            ).toBe("release_resume_restored_image");
-          if (phase === "input-changed") {
-            writeFileSync(resolve(root, target.path, "container/source.mjs"), "changed input");
-            expect(run().stderr.trim()).toBe("release_resume_restored_image");
-          }
-        } finally {
-          rmSync(dir, { recursive: true, force: true });
-        }
-      },
-    );
+        },
+      );
+  });
 
 test("streamed artifact stays private until complete checksum and never overwrites promotion", async () => {
   const temp = mkdtempSync(resolve(tmpdir(), "kogane-stream-"));
