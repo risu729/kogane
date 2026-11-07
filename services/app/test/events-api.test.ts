@@ -133,11 +133,33 @@ function withoutEventsTable(db: D1Database): D1Database {
   });
 }
 
+/** The store with one read path failing; audit writes keep working. */
+function failingEventReads(db: D1Database, availability = false): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) => {
+          if (
+            availability
+              ? sql.includes("sqlite_master") && sql.includes("economic_event_revisions")
+              : /FROM (economic_event_revisions|obligation_revisions)\b/u.test(sql)
+          )
+            throw new Error("synthetic event store failure");
+          return target.prepare(sql);
+        };
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 async function call(
   path: string,
   options: {
     retired?: string;
     schema?: boolean;
+    /** A store whose event reads (or only its availability check) fail. */
+    failing?: "reads" | "availability";
     jwt?: string | null;
     method?: string;
     subject?: string;
@@ -159,7 +181,12 @@ async function call(
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
   return worker.fetch(new Request(`https://fixture.test${path}`, init), {
     ...env,
-    DB: options.schema === false ? withoutEventsTable(env.DB) : env.DB,
+    DB:
+      options.schema === false
+        ? withoutEventsTable(env.DB)
+        : options.failing === undefined
+          ? env.DB
+          : failingEventReads(env.DB, options.failing === "availability"),
     ACCESS_ISSUER: issuer,
     ACCESS_AUDIENCE: "fixture-audience",
     ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
@@ -276,13 +303,10 @@ describe("the agent tool", () => {
         })
       ).json()) as { result: { tools: { name: string }[] } }
     ).result.tools.map((tool) => tool.name);
-  const http = (args: unknown, options: { schema?: boolean } = {}) =>
-    call(TOOL_PATH, {
-      subject: "agent-principal",
-      body: args,
-      ...(options.schema === undefined ? {} : { schema: options.schema }),
-    });
-  const mcpCall = async (args: unknown, options: { schema?: boolean } = {}) =>
+  type Store = { schema?: boolean; failing?: "reads" | "availability" };
+  const http = (args: unknown, options: Store = {}) =>
+    call(TOOL_PATH, { subject: "agent-principal", body: args, ...options });
+  const mcpCall = async (args: unknown, options: Store = {}) =>
     (await (
       await call("/mcp", {
         subject: "agent-principal",
@@ -292,7 +316,7 @@ describe("the agent tool", () => {
           method: "tools/call",
           params: { name: EVENTS_TOOL_NAME, arguments: args },
         },
-        ...(options.schema === undefined ? {} : { schema: options.schema }),
+        ...options,
       })
     ).json()) as {
       result?: {
@@ -491,6 +515,46 @@ describe("the agent tool", () => {
     expect((await direct({ list: "activity" }, RECORDS_GRANT)).status).toBe(200);
     // No Access identity.
     expect((await call(TOOL_PATH, { jwt: null, body: { list: "activity" } })).status).toBe(401);
+  });
+
+  it("answers a failed event read with the routes' closed 503 on both agent paths", async () => {
+    for (const list of ["activity", "obligations"]) {
+      const route = await call(`/api/v2/${list}`, { failing: "reads" });
+      expect(route.status, list).toBe(503);
+      expect(await route.json()).toMatchObject({ error: "catalogue_read_failed" });
+      const response = await http({ list }, { failing: "reads" });
+      expect(response.status, list).toBe(503);
+      expect(await response.json()).toEqual({ error: "catalogue_read_failed" });
+      const viaMcp = await mcpCall({ list }, { failing: "reads" });
+      expect(viaMcp.result?.isError, list).toBe(true);
+      expect(viaMcp.result?.structuredContent, list).toEqual({ error: "catalogue_read_failed" });
+    }
+  });
+
+  it("answers a failed availability check with the routes' 503, the tool list included", async () => {
+    const requests = [
+      ["/api/v2/activity", undefined],
+      [TOOL_PATH, { list: "activity" }],
+      ["/mcp", { jsonrpc: "2.0", id: 1, method: "tools/list" }],
+      [
+        "/mcp",
+        {
+          jsonrpc: "2.0",
+          id: 2,
+          method: "tools/call",
+          params: { name: EVENTS_TOOL_NAME, arguments: { list: "activity" } },
+        },
+      ],
+    ] as const;
+    for (const [path, body] of requests) {
+      const response = await call(path, {
+        subject: "agent-principal",
+        ...(body === undefined ? {} : { body }),
+        failing: "availability",
+      });
+      expect(response.status, path).toBe(503);
+      expect(await response.json()).toMatchObject({ error: "catalogue_read_failed" });
+    }
   });
 
   it("is neither a tool nor a path where the routes are absent", async () => {

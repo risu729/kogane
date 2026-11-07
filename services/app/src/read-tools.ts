@@ -43,6 +43,7 @@ import { ACTIVITY_BASES } from "../../../packages/read-model/src/events.ts";
 import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
+import { catalogue } from "./read";
 import {
   readReportedState,
   REPORTED_STATE_ACCOUNT,
@@ -339,7 +340,10 @@ export async function callReadTool(
         const parameters = new URLSearchParams();
         if (input.basis !== undefined) parameters.set("basis", input.basis);
         if (input.offset !== undefined) parameters.set("offset", String(input.offset));
-        const outcome = await readEconomicEvents(d1Executor(env.DB), input.list, parameters);
+        // The routes' failure boundary too: a store failure is their 503.
+        const outcome = await catalogue(() =>
+          readEconomicEvents(d1Executor(env.DB), input.list, parameters),
+        );
         return outcome.ok
           ? { status: 200, body: outcome.body }
           : { status: 400, body: { error: outcome.refusal } };

@@ -715,7 +715,10 @@ a `list` or `basis` outside its values, a non-integer `offset`) is
 `{error}` body on both agent paths: `400 invalid_query` (`basis` with
 `obligations`) and `400 invalid_offset` (below 0 or above 1,000,000). The next
 page is `nextCursor`, the offset to send next; the grant's `budget.maxRows`
-does not bound a page, the route's 200 does. It reads and never writes.
+does not bound a page, the route's 200 does. A store failure, in the read or
+in the availability check (the tool list included), is the routes'
+`503 catalogue_read_failed` on both agent paths, through the same `catalogue`
+boundary. It reads and never writes.
 
 Every quantity keeps its basis and unit, bases are never merged, and an
 outstanding amount that is not exact is `null` with

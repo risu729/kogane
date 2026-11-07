@@ -204,7 +204,10 @@ tool from.
   (`invalid_query`, `invalid_offset`) and calls `createEventsReader` with a
   200-entry page. The route maps a path to its list and a refusal to `400`; the
   tool maps a closed object (`list`, `basis`, `offset`) to the same query
-  parameters, so both answer the same bytes and the same codes.
+  parameters, so both answer the same bytes and the same codes. A store
+  failure, in the read or in the projection check, is the routes'
+  `503 catalogue_read_failed` on both agent paths and in the MCP tool list
+  (the `catalogue` boundary of `services/app/src/read.ts`).
 - The tool needs `records.read` over `"*"` sources and accounts
   (`economicEventsGrantRefusal`, graded before the body is read), as ADR 0063
   decision 10 asks of a new whole-store read. It exists while the routes do
@@ -241,7 +244,9 @@ tool from.
   caller and a hostile description on the event's source row reaches none;
   listing with and without the projection and under narrower grants; route
   refusals with the route's code and the same status on both paths; grant
-  refusals before the body is read; absence without the projection; one R0
+  refusals before the body is read; a failed read or projection check is
+  `503 catalogue_read_failed` on the route, both agent paths and the tool
+  list; absence without the projection; one R0
   audit record per served call with a row count only.
 - `services/app/test/ui-mcp-parity.test.ts` lists the tool without a UI route;
   the pinned tool lists in `services/app/test/agent-api.test.ts` (schema
