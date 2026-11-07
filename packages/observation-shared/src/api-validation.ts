@@ -45,6 +45,10 @@ import {
   validCardSettlementReviewPage,
   validCardSettlementStatementPage,
 } from "./card-settlement-contract.ts";
+import {
+  CARD_STATEMENTS_UNMATCHED_PATH,
+  validUnmatchedCardStatementsReview,
+} from "./card-statements-unmatched-contract.ts";
 import { validAccountConnection } from "./account-connection-contract.ts";
 import { validFinancialProductClaimWire } from "./financial-products.ts";
 import { validBalanceInterpretation } from "./balance-semantics.ts";
@@ -788,6 +792,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
     return validCardSettlementStatementPage(value);
   if (path === "/api/v2/reconciliation/card-settlements")
     return validCardSettlementReviewPage(value);
+  if (path === CARD_STATEMENTS_UNMATCHED_PATH) return validUnmatchedCardStatementsReview(value);
   if (path === "/api/v2/card-purchases") return validCardPurchasePage(value);
   if (path === "/api/v2/reported-state") return validReportedState(value);
   if (path === "/api/v2/reported-holdings-change") return validReportedHoldingsChange(value);

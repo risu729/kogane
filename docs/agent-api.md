@@ -68,13 +68,13 @@ here parses the token a second time and nothing reads an actor from a request
 body or header, which is the same rule the change lifecycle follows. A valid
 token with no grant is still refused.
 
-| Capability               | Allows                                                                                                                                                                                                     | Notes                                                   |
-| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                                                                                         | The first capability an agent should get                |
-| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `economic-readiness.read`, `reported-state.read` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                                                                                                | A separate grant; raw bytes are still a different route |
-| `interpretation.propose` | `reconcile.propose`                                                                                                                                                                                        | Proposals only; never adoption                          |
-| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                                                                                                  | Not a financial read; implied by no other capability    |
+| Capability               | Allows                                                                                                                                                                                                                                   | Notes                                                   |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                                                                                                                       | The first capability an agent should get                |
+| `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `card-settlements.unmatched`, `economic-readiness.read`, `reported-state.read` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`)                                                                                                                                                                              | A separate grant; raw bytes are still a different route |
+| `interpretation.propose` | `reconcile.propose`                                                                                                                                                                                                                      | Proposals only; never adoption                          |
+| `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                                                                                                                                | Not a financial read; implied by no other capability    |
 
 Capabilities that appear in the addendum's table and deliberately **do not**
 exist in this vocabulary: `interpretation.accept`, `calculation.run`,
@@ -186,7 +186,7 @@ recognition and an eighth while it serves the reconstructed state, one
 implementation each (`src/agent-service.ts`), reachable two ways. The read
 tools of `src/read-tools.ts` (`kogane.instruments.history`,
 `kogane.instruments.coverage`, `kogane.accounts.candidates`,
-`kogane.economic-readiness.read`, `kogane.audit.search`, `kogane.audit.get`) are reachable both ways too; the dated reported state's read
+`kogane.card-settlements.unmatched`, `kogane.economic-readiness.read`, `kogane.audit.search`, `kogane.audit.get`) are reachable both ways too; the dated reported state's read
 (`kogane.reported-state.read`) is served on the same condition as the eighth, and each is listed only to a grant its service
 would answer ([below](#instrument-coverage),
 [shared history reads](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)). The two
@@ -209,6 +209,7 @@ the other delegated MCP tools are described there too.
 | `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                                 |
 | `kogane.instruments.coverage`         | `POST /api/agent/v1/instruments.coverage`       | `kogane.instruments.coverage`         | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                                      |
 | `kogane.accounts.candidates`          | `POST /api/agent/v1/accounts.candidates`        | `kogane.accounts.candidates`          | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                                                       |
+| `kogane.card-settlements.unmatched`   | `POST /api/agent/v1/card-settlements.unmatched` | `kogane.card-settlements.unmatched`   | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#card-statements-without-a-candidate))                              |
 | `kogane.economic-readiness.read`      | `POST /api/agent/v1/economic-readiness.read`    | `kogane.economic-readiness.read`      | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))                                     |
 | `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                                  |
 | `kogane.reported-state.read`          | `POST /api/agent/v1/reported-state.read`        | `kogane.reported-state.read`          | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#reported-state-on-a-date))                                       |
@@ -501,6 +502,31 @@ payload, with a reason, through the change lifecycle, where an agent named in
 `AGENT_GRANTS` (empty in the committed configuration) can plan and cannot
 approve or commit, and an MCP client reaches no command route. No candidate provenance is checked on the
 server: read the candidate again right before planning, as the page does.
+
+### Card statements without a candidate
+
+`kogane.card-settlements.unmatched` reads one page of the card statement
+totals no settlement candidate cites, with each statement's closed reason and,
+for `no_equal_amount_debit`, the ADR 0074 planner's read-only answer
+([card settlements](card-settlements.md#statements-without-a-candidate)). It
+is the `カード照合` page's own service (`reviewUnmatchedCardStatements`), so an
+agent and the page read one answer. It is listed on `/mcp` only to a grant
+holding `records.read` over the whole store.
+
+Input, a closed object: `offset` (optional, 0 to 100,000). Output:
+`kogane-card-statements-unmatched-v1` with the manifest (the closed codes,
+the planner release, the display policy, the partition and bounds, and
+`acceptance: "single-debit-candidates-only"`), at most 50 `items` and
+`nextOffset`. Each item has the statement's ref, source, source account,
+resolved account, total (null when not exact), due date (null when absent),
+period, `code`, `debitsInWindow`, `planner` (null unless asked) and
+`acceptable: false`.
+
+Authorization: `records.read`, else `403 unauthorized`; sources and accounts
+both `"*"`, else `403 evidence_restricted`; `offset + 50` within `maxRows`,
+else `413 budget_exceeded`; all decided before the store is read. An unknown
+key or malformed value is `400 invalid_request`. It reads and never writes;
+nothing it lists can be accepted.
 
 ### Reported state on a date
 
