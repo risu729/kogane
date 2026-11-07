@@ -193,6 +193,10 @@ the other delegated MCP tools are described there too.
 | `kogane.audit.search`                 | `POST /api/agent/v1/audit.search`               | `kogane.audit.search`                 | `audit.read` with `"*"` accounts                                                                                                                                                                                                                                    |
 | `kogane.audit.get`                    | `POST /api/agent/v1/audit.get`                  | `kogane.audit.get`                    | `audit.read` with `"*"` accounts                                                                                                                                                                                                                                    |
 | `kogane.identity.read`                | `POST /api/agent/v1/identity.read`              | `kogane.identity.read`                | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                 |
+| `kogane.store.read`                   | `POST /api/agent/v1/store.read`                 | `kogane.store.read`                   | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                 |
+| `kogane.observations.list`            | `POST /api/agent/v1/observations.list`          | `kogane.observations.list`            | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                 |
+| `kogane.observations.get`             | `POST /api/agent/v1/observations.get`           | `kogane.observations.get`             | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                 |
+| `kogane.balances.read`                | `POST /api/agent/v1/balances.read`              | `kogane.balances.read`                | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                 |
 
 No tool lists or reads the fixed report artifacts (評価レポート): they are
 served to the operator by `GET /api/v2/reports` and
@@ -592,13 +596,17 @@ calling the reader those routes call, with the request the route would build
 from the same parameters. The route and the tool are two adapters over one
 function, so they cannot disagree on a row, a page bound or a refusal code.
 
-| Tool                   | UI routes                                                                                                        | Requires                                     |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `kogane.identity.read` | `GET /api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage` | `records.read` on `"*"` sources and accounts |
+| Tool                       | UI routes                                                                                                        | Requires                                     |
+| -------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `kogane.identity.read`     | `GET /api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage` | `records.read` on `"*"` sources and accounts |
+| `kogane.store.read`        | `GET /api/meta`, `/api/overview`, `/api/filter-options`                                                          | `records.read` on `"*"` sources and accounts |
+| `kogane.observations.list` | `GET /api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`                                     | `records.read` on `"*"` sources and accounts |
+| `kogane.observations.get`  | `GET /api/observations/{kind}/{id}`, `/api/artifacts/{id}`                                                       | `records.read` on `"*"` sources and accounts |
+| `kogane.balances.read`     | `GET /api/v2/balances/latest`, `/api/v2/balances/history`                                                        | `records.read` on `"*"` sources and accounts |
 
 Input is a closed object. Its keys are the route's query parameters with
-their bounds, plus the field that picks the route (`collection` for
-`kogane.identity.read`). The tool sets only the parameters the caller gives,
+their bounds, plus the field that picks the route (`collection`, `page` or `kind`, or the
+`kind` and `id` of a detail route). The tool sets only the parameters the caller gives,
 so the reader applies the route's own defaults and refusals. Output is
 `{ "schemaVersion": "kogane-page-read-v1", "data": <the route's body> }`.
 The route's answer carries provider labels, so all of it travels under
@@ -617,11 +625,14 @@ the offending keys as refs, even where the route would answer another code
 for the same value (`identityRead=snapshot` is `unsupported_semantics` there,
 an unsafe `offset` `invalid_offset`). `tools/list` lists each tool only to a grant that
 passes both checks. Each call is recorded as an R0 `read` under the tool name
-without `kogane.` (`identity.read`), with the page's row count
-([audit log](audit-log.md)); the browser route records nothing, as before.
+without `kogane.` (`identity.read`, `store.read`, …), with the page's row
+count ([audit log](audit-log.md)); the browser route records nothing, as
+before. A raw download (`/api/raw/{sha256}`) is not one of these reads:
+`kogane.observations.get` returns an artifact's detail, never its bytes.
 
-The committed owner MCP grant holds `records.read` over `"*"`, so by
-configuration `kogane.identity.read` is listed to that client.
+Every MCP client holds the whole-store grant
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), so each of these
+tools is listed to it.
 
 ### Reconstructed state
 

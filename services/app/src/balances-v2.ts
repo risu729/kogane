@@ -59,7 +59,7 @@ import {
   type PointerRow,
   type ReadProjectionReader,
 } from "../../../packages/storage-d1/src/read/index.ts";
-import { HttpError, json } from "./http";
+import { HttpError } from "./http";
 import { decimalRows } from "./normalized-decimals";
 import { organizationContext, organizeRows } from "./observation-organization";
 
@@ -160,7 +160,7 @@ export interface V2Scope {
   measureView?: "balances" | "summaries";
 }
 
-function scopeOf(url: URL): V2Scope {
+function scopeOf(url: Pick<URL, "searchParams">): V2Scope {
   const view = url.searchParams.get("view");
   return {
     ...(url.searchParams.get("source") ? { source: url.searchParams.get("source")! } : {}),
@@ -173,7 +173,7 @@ function scopeOf(url: URL): V2Scope {
   };
 }
 
-function pageLimit(url: URL): number {
+function pageLimit(url: Pick<URL, "searchParams">): number {
   const text = url.searchParams.get("limit");
   if (text === null) return DEFAULT_PROJECTION_PAGE_LIMIT;
   // One of the offered sizes as written: `Number` alone would also read
@@ -473,7 +473,7 @@ interface Continuation {
  */
 async function continuation(
   target: ReadTarget,
-  url: URL,
+  url: Pick<URL, "searchParams">,
   digest: string,
 ): Promise<Continuation | null> {
   if (target.contractMismatch) throw new HttpError(503, "read_model_unavailable");
@@ -544,9 +544,9 @@ export async function legacyLatestFromProjection(
  */
 export async function latestBalancePage(
   env: Env,
-  url: URL,
+  url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<Response> {
+): Promise<LatestBalancePage> {
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
@@ -621,7 +621,7 @@ export async function latestBalancePage(
       organized.map((row) => row.organization),
     ),
   };
-  return json(body);
+  return body;
 }
 
 /**
@@ -631,9 +631,9 @@ export async function latestBalancePage(
  */
 export async function balanceHistoryPage(
   env: Env,
-  url: URL,
+  url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<Response> {
+): Promise<BalanceHistoryPage> {
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
@@ -728,5 +728,5 @@ export async function balanceHistoryPage(
       organized.map((row) => row.organization),
     ),
   };
-  return json(body);
+  return body;
 }
