@@ -178,6 +178,19 @@ describe("contracts validate", () => {
     expect(validExpiryRule(inactivityRule)).toBe(true);
     expect(validConversionOffer(offer())).toBe(true);
     expect(
+      validConversionOffer(
+        offer({ validTime: { kind: "open-ended", start: "2026-04-01", zone: TOKYO } }),
+      ),
+    ).toBe(true);
+    expect(validConversionOffer(offer({ applicationDeadline: null }))).toBe(true);
+    expect(
+      validConversionOffer(
+        offer({
+          validTime: { kind: "open-ended", start: "2026-04-01", zone: TOKYO, end: null } as never,
+        }),
+      ),
+    ).toBe(false);
+    expect(
       validMembershipState({
         programId: "program:a",
         holdingRef: "holding:member-1",
@@ -614,6 +627,23 @@ describe("SC13 / AT41 / AT49 — eligibility and the application-credit distinct
     expect(eligibility.excluded).toEqual([
       { bucketRef: "bucket:restricted", reasonCode: "bucket_kind_not_eligible" },
     ]);
+  });
+
+  test("a standing offer with no announced end is available on and after its first day", () => {
+    const standing = {
+      ...transitOffer,
+      validTime: { kind: "open-ended", start: "2026-04-01", zone: TOKYO } as const,
+      applicationDeadline: null,
+    };
+    for (const clock of ["2026-04-01", "2026-09-09", "2099-12-31"])
+      expect(availableForOffer(buckets, standing, [], day(clock))).toMatchObject({
+        state: "available",
+        uncertaintyCodes: [],
+      });
+    expect(availableForOffer(buckets, standing, [], day("2026-03-31"))).toMatchObject({
+      state: "not-eligible",
+      uncertaintyCodes: ["offer_not_valid_at_clock"],
+    });
   });
 
   test("an unverified offer is needs-rule-verification, not a refusal and not an approval", () => {

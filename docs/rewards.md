@@ -44,6 +44,36 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
   移動中を0に戻す。
 - `findConversionPaths(offers, start, goal, budget)` — 深さと候補数を明示的に制限した探索。
 
+### Standing offers: no end date and no deadline
+
+Owner decision (2026-11-07 12:51 UTC): an offer whose end date is not announced is
+common, and it is a standing offer, not an offer of unknown period. Kogane stores
+"no end" and "no deadline" as values, so the offer stays usable instead of falling
+into `needs-rule-verification`.
+
+| Field                                               | Standing offer                                                   | Bounded offer (unchanged)             |
+| --------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |
+| `validTime` / `valid_time_json`                     | `{"kind":"open-ended","start":"2026-04-01","zone":"Asia/Tokyo"}` | a `local-date`, `period` or `instant` |
+| `applicationDeadline` / `application_deadline_json` | `null` (the JSON text `null`; the column stays `NOT NULL`)       | a `local-date`, `period` or `instant` |
+
+- `start` is the first day the offer is known to apply. When the provider states no
+  start, it is the date of the evidence that shows the offer. A day before `start` is
+  `offer_not_valid_at_clock`; `start` and every later day are inside. An instant
+  counts by its own calendar date. The zone follows the same compatibility rule as
+  `compareTemporal` (`null` is compatible with any zone; a different zone is not
+  comparable).
+- `open-ended` is accepted only where a field says so (an offer's `validTime`); it is
+  not a `TemporalValue`, so no other time field accepts it.
+- `{"kind":"unknown"}` keeps its meaning: the period was not established (including
+  stored text that does not parse). It is never read as a standing offer, and the
+  reader never turns damaged text into `open-ended` or `null`.
+- An `unknown` validity or deadline is still not checked at a clock, as before:
+  `availableForOffer` adds no code for it, and route search does not reject on it. A
+  standing offer stores `open-ended` and `null` instead of relying on that, so
+  tightening the unknown case later cannot drop standing offers.
+- No migration: both columns already hold JSON text, and nothing writes offer rows
+  today (§3).
+
 ## 2. 期限の状態
 
 `ExpiryEstimate.state` は4つある。
