@@ -590,6 +590,8 @@ self-reported, another program's or out-of-period claims remain
 describe an unestablished condition, not proof that a future application is impossible.
 No provider terms, quota, fee or acceptance policy is inferred.
 
-The exhaustive eligibility test covers all 960 combinations of ten validity
-shapes (including three standing-offer shapes), eight membership scenarios, restricted/unrestricted tiers, three application
-days and direct/two-hop routes. The existing deadline and completion rules are unchanged.
+The exhaustive eligibility test covers all 960 combinations of ten validity shapes
+(including three standing-offer shapes), eight membership scenarios,
+restricted/unrestricted tiers, three application days and direct/two-hop routes. A
+malformed stored validity establishes no day and stays `needs_rule_verification`. The
+existing deadline and completion rules are unchanged.

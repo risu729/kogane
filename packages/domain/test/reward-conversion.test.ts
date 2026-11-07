@@ -333,3 +333,32 @@ test("a standing offer with no deadline is a route at any later day", () => {
     { offerRef: "offer:a-b@v1", reasonCode: "offer_not_valid_at_clock" },
   ]);
 });
+
+test("a malformed stored validity establishes no day, rather than refusing one", () => {
+  const budget = { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  const malformed = [
+    { kind: "open-ended", start: "2026-02-30", zone: "Asia/Tokyo" },
+    { kind: "open-ended", start: "2026-04-01", zone: "Asia/Tokyo", end: "2026-12-31" },
+    { ...day("2026-02-30") },
+    {
+      kind: "period",
+      start: "2026-05-01",
+      end: "2026-04-01",
+      endExclusive: false,
+      zone: "Asia/Tokyo",
+      granularity: "day",
+    },
+  ] as unknown as OfferValidity[];
+  for (const validTime of malformed) {
+    const result = findConversionPaths(
+      [offer({ validTime, applicationDeadline: null })],
+      { quantity: quantity(4), clock: day("2026-04-15") },
+      "points:b",
+      budget,
+    );
+    expect(result.paths).toEqual([]);
+    expect(result.rejected).toEqual([
+      { offerRef: "offer:a-b@v1", reasonCode: "needs_rule_verification" },
+    ]);
+  }
+});
