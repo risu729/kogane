@@ -1,7 +1,7 @@
 # Plan: Phase 2 — card usage → statement → bank debit
 
 - Status: **accepted** by the owner on 2026-11-07 (03:58 UTC): "all units as recommended; the fine order does not matter". Each unit is its own pull request; design changes inside a unit still get an ADR.
-- Written: 2026-11-06 23:40 UTC against main `54e2d7b`, revised after an independent subagent review (23:55 UTC).
+- Written: 2026-11-06 23:40 UTC against main [`54e2d7b`](https://github.com/risu729/kogane/commit/54e2d7b), revised after an independent subagent review (23:55 UTC).
 - Roadmap: [Phase 2](../roadmap.md#phase-2--card-usage--statement--bank-debit-current-milestone). Issues [#543](https://github.com/risu729/kogane/issues/543), [#547](https://github.com/risu729/kogane/issues/547), [#548](https://github.com/risu729/kogane/issues/548); sources [#445 Vpass](https://github.com/risu729/kogane/issues/445), [#444 MyJCB](https://github.com/risu729/kogane/issues/444).
 
 ## 1. Where production was (read-only counts, 2026-11-06 ~23:30 UTC)
@@ -10,13 +10,13 @@ CORE D1 `kogane-raw-evidence`, aggregate queries only.
 
 Current statement totals (`card_statement_facts`):
 
-| source | producer              | statements | accounts | periods            |
-| ------ | --------------------- | ---------- | -------- | ------------------ |
-| myjcb  | collector-myjcb       | 5          | 1        | 2025-11 .. 2026-11 |
-| myjcb  | collector-r2-importer | 3          | 1        | 2025-11 .. 2026-09 |
-| vpass  | collector-r2-importer | 27         | 5        | 2025-06 .. 2026-09 |
+| source | producer              | statements | accounts |
+| ------ | --------------------- | ---------- | -------- |
+| myjcb  | collector-myjcb       | 5          | 1        |
+| myjcb  | collector-r2-importer | 3          | 1        |
+| vpass  | collector-r2-importer | 27         | 5        |
 
-No collector-era Vpass statement is parsed (ADR 0022 withholds the dataset), so Vpass data stops at the importer's last run (2026-09-10).
+The collector's MyJCB statements reach the current billing period; the importer's stop at its last run. No collector-era Vpass statement is parsed (ADR 0022 withholds the dataset), so Vpass data also stops at the importer's last run. (Statement periods and run dates are left out: production dates are not copied into docs.)
 
 Settlement candidates (`card_settlement_candidates` + `card_settlement_readiness`):
 
@@ -48,7 +48,7 @@ Add the latest `card_settlement_debit_account_evidence` outcome (`supports` / `n
 
 ### 2c One current candidate per statement on the review list (code)
 
-267 candidates for 6 MyJCB statements and 133 for 21 Vpass statements. The candidate digest covers the facts, including both parse runs, the account and the owner (services/processor/src/card-settlement-job.ts:224-292), so every new capture, re-parse or ownership record makes a new candidate; recording ownership in 2g will add another for every statement. The review list shows every candidate newest first with no grouping (packages/application/src/query/card-settlements.ts:96-99). Group by statement and show the ready one first, the stale ones collapsed under it. No candidate is deleted (append-only). The query change gets the cost and plan checks of card-settlements.md#cost; no migration expected.
+267 candidates for 6 MyJCB statements and 133 for 21 Vpass statements. The candidate digest covers the facts, including both parse runs, the account and the owner (services/processor/src/card-settlement-job.ts:224-292), so every new capture, re-parse or ownership record makes a new candidate; recording ownership in 2g will add another for every statement. The review list shows every candidate newest first with no grouping (packages/application/src/query/card-settlements.ts:96-99). Group by statement and show the ready one first, the stale ones collapsed under it. No candidate is deleted (append-only). The query change gets the cost and plan checks of [card settlements: cost](../card-settlements.md#cost); no migration expected.
 
 ### 2d Closed reasons for unrecognised card rows on /purchases (code, [#547](https://github.com/risu729/kogane/issues/547))
 
@@ -56,28 +56,29 @@ Replace the single `unrecognizedCurrentRows` count with counts per closed skip c
 
 ### 2e Statements without a candidate, with their reason (code, [#548](https://github.com/risu729/kogane/issues/548), [ADR 0074](../adr/0074-card-statement-allocation-planner.md))
 
-Today unmatched statements are only tick counts. Show each statement that has no candidate on the review page with its closed reason, and, for `no_equal_amount_debit`, the ADR 0074 planner's read-only answer (`multiple-debits` proposal listed but not acceptable, `in_window_debits_below_total`, `debit_above_total`, `candidate_not_unique`). Needs policy values from the owner (see question 3) and a call path: the planner runs at read time over the same bank reads the sweep makes (no lane, no table, no migration), with the cost checks. Refund and zero statement totals get their own closed code (`statement_total_refund_or_zero`) instead of `statement_not_comparable`, so refund allocation is visibly unsupported. Accepting a multi-debit allocation stays out of scope: the acceptance writer claims one debit, and how a provider shows a partial or split payment is unobserved. Refund or zero statement totals are listed as `statement_not_comparable`.
+Today unmatched statements are only tick counts. Show each statement that has no candidate on the review page with its closed reason, and, for `no_equal_amount_debit`, the ADR 0074 planner's read-only answer (`multiple-debits` proposal listed but not acceptable, `in_window_debits_below_total`, `debit_above_total`, `candidate_not_unique`). Needs policy values from the owner (see question 3) and a call path: the planner runs at read time over the same bank reads the sweep makes (no lane, no table, no migration), with the cost checks. Refund and zero statement totals get their own closed code (`statement_total_refund_or_zero`) instead of `statement_not_comparable`, so refund allocation is visibly unsupported (today a refund or zero total is counted under `statement_not_comparable`, which also covers a missing due date or period). Accepting a multi-debit allocation stays out of scope: the acceptance writer claims one debit, and how a provider shows a partial or split payment is unobserved.
 
 ### 2f Release the Vpass collector's statement pages (code + ADR, [#445](https://github.com/risu729/kogane/issues/445); approved 2026-11-07)
 
-The real release condition is in ADR 0023's amendment, updated by ADR 0029: (a) the collector's tokens equal the importer's, which migration 0063 made true for 6 of the 7 cards; and (b) the persist diagnostics show the collector's card units reaching `complete`. (b) is not checked yet; I check it read-only first. The "binding key" wording in descriptors.ts:390-404 is stale and is corrected in this PR.
+The real release condition is in ADR 0023's amendment, updated by ADR 0029: (a) the collector's tokens equal the importer's, which migration 0063 made true for 6 of the 7 cards; and (b) the persist diagnostics show the collector's card units reaching `complete`. (b) is not checked yet; 2f checks it read-only first. The "binding key" wording in descriptors.ts:390-404 is stale and is corrected in 2f's pull request.
 
-Mechanism: moving the rule into `ARTIFACT_DATASETS` changes the frozen `terminal-registration-v2` table. Fetch artifacts are append-only, so the collector-vpass terminals already registered keep dataset NULL; parsing them needs a `terminal-registration-v3` bump with carry-over, which re-walks every source's terminals (a cost and blocked-run analysis like ADR 0022's, and a change to the `scripts/artifact-datasets.test.ts` pin). Effects to verify on synthetic data and then with counts:
+Mechanism: `terminal-registration-v2` maps to `ARTIFACT_DATASETS` itself (descriptors.ts:439-444), so moving the rule there would change what an existing registration version means. Fetch artifacts are append-only, so the collector-vpass terminals already registered keep dataset NULL; parsing them needs a `terminal-registration-v3` bump with carry-over, which re-walks every source's terminals (a cost and blocked-run analysis like ADR 0022's, and a change to the `scripts/artifact-datasets.test.ts` pin). Effects to verify on synthetic data and then with counts:
 
 - a card-month read by both producers retires the importer-era purchase event and recognises the collector's on the same (rewritten) entity, so the total is not doubled; recognition keys carry the producer, so every re-captured card-month changes key once;
 - the 7th card becomes a new account (owned by default, section 4), and all its months appear as new purchases;
 - re-captured Vpass statements change producer, so a Vpass settlement accepted before 2f would go stale (`statement_changed`).
-  Hard to undo and touches every source's registration, so it gets its own ADR (the owner approved the release on 2026-11-07, 03:58 UTC).
+
+Hard to undo and touches every source's registration, so it gets its own ADR (the owner approved the release on 2026-11-07, 03:58 UTC).
 
 ### 2g Settlement decisions by an agent, and verification (code + ADRs)
 
 Superseded on 2026-11-07 by the owner's decisions in [section 4](#4-owner-decisions-2026-11-07): the owner does no operator step.
 
 1. **Ownership default** (its own ADR): an account with no recorded ownership claim is treated as the owner's, sole personal, through a closed, versioned evidence reference (`ownership-default:owner-v1`). A recorded claim, a rejected or dated claim, or a `contradicts` relation on the account takes precedence, and the default is never applied to it. The MyJCB root (`card-statement-aggregate`) and the importer- and collector-era identities are each an account under this rule; nothing merges them.
-2. **Settlement accept / withdraw / reject through MCP**: catalogue operations over the same application commands the `カード照合` page uses (plan, simulate, approve, commit), under a delegation in `MCP_DELEGATIONS`, with an audit record. This follows the MCP-first and UI-parity decisions recorded by the roadmap thread's ADR; MCP never writes the database directly.
+2. **Settlement accept / withdraw / reject through MCP**: catalogue operations over the same application commands the `カード照合` page uses (plan, simulate, approve, commit), under a delegation in `MCP_DELEGATIONS`, with an audit record. This follows the owner's MCP-first and UI-parity decisions (section 4), which the roadmap thread's ADR is to record; MCP never writes the database directly. Today the catalogue has no settlement operation and `MCP_DELEGATIONS` is empty.
 3. **Verification** (counts only): one Vpass candidate (SBI Shinsei 0.1.3 or SMBC debit) and one MyJCB candidate (`collector-myjcb` statement, SMBC debit) accepted by the agent; one withdrawn, and a fresh candidate accepted or a wrong one rejected (a withdrawn candidate cannot be accepted again: acceptance requires `proposed`); /purchases figures unchanged (`settlementAddsPurchaseExpense` false) with the 利用 → 請求 → 引落 chain; `/api/v2/activity?basis=cash-movement` shows the accepted debit once and the withdrawal releases its claim. Recorded in card-settlements.md and the roadmap; this closes the done-when.
 
-Order: 2a, 2b, 2c, 2d in parallel threads now; 2e after question 3; 2f after approval. 2g's verification after 2b and 2c. The MyJCB part can run before 2f; the Vpass part waits for 2f, or uses an importer-era month the collector does not re-capture, so the acceptance does not go stale.
+Order: 2a, 2b, 2c, 2d in parallel threads now; 2e and 2f now that questions 2 and 3 are answered. 2g's verification after 2b and 2c. The MyJCB part can run before 2f; the Vpass part waits for 2f, or uses an importer-era month the collector does not re-capture, so the acceptance does not go stale.
 
 ## 3. Questions for the owner (answered 2026-11-07 03:58 UTC)
 
@@ -94,4 +95,4 @@ Order: 2a, 2b, 2c, 2d in parallel threads now; 2e after question 3; 2f after app
 - 03:59 UTC: everything the screens can do, an agent must be able to do through MCP.
 - 04:00 UTC: MCP does not touch the database directly; MCP and the screens use one common API.
 
-The last two are project-wide and are recorded in the MCP-first ADR the roadmap work carries; AGENTS.md's invariants change with it. Until those ADRs merge, AGENTS.md as written still applies.
+The last two are project-wide and are to be recorded in the MCP-first ADR the roadmap work carries (not in the repository yet); AGENTS.md's invariants change with it. Until those ADRs merge, AGENTS.md as written still applies.

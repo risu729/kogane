@@ -126,6 +126,8 @@ ownership was the only blocker. On 2026-11-07 the owner decided that an account 
 recorded owner is assumed to be the owner's, and that settlement decisions are delegated
 to agents through MCP over the same API as the screens
 ([plan, section 4](plans/2026-11-phase2-card-flow.md#4-owner-decisions-2026-11-07)).
+Neither is implemented yet: no ownership default exists, the operation catalogue has no
+settlement operation and `MCP_DELEGATIONS` is empty.
 
 ### Phase 3 — Coverage, collection requests and cross-source identity
 
