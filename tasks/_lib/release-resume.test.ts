@@ -482,7 +482,9 @@ for (const native of [false, true])
     // process) and zipped (one Python process) once per flavor. Each phase
     // restores a private copy of the packed checkout and temp tree, which leaves
     // it only its own restore processes: the five phases used to repeat the pack
-    // and the zip and timed out under load.
+    // and the zip and timed out under load. The hook runs those two processes
+    // once and gets the 30 s budget the repository gives other real-process
+    // setups (#938); each phase keeps the default.
     const { mkdirSync, chmodSync, cpSync } = require("node:fs");
     const { execFileSync, spawnSync } = require("node:child_process");
     const { containerInputDigest } = require("./ci/cf-container-release.mjs");
@@ -628,7 +630,7 @@ for (const native of [false, true])
         return Response.json(value);
       };`,
       );
-    });
+    }, 30_000);
     afterAll(() => {
       if (shared) rmSync(shared, { recursive: true, force: true });
     });
