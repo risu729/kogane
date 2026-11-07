@@ -1,5 +1,5 @@
-// ADR 0081 for the six operations requests: each is served on `/mcp` to a
-// delegated caller (ADR 0063) by the same service as its HTTP route, so the
+// ADR 0081 for the six operations requests: each is served on `/mcp` to an
+// MCP client acting as itself (ADR 0063, ADR 0084) by the same service as its HTTP route, so the
 // two transports give the same answer and store the same request for the
 // same input. Real Worker, official MCP transport; identities, configuration
 // and data are synthetic.
@@ -16,30 +16,12 @@ const DELEGATE = `mcp-client:${OWNER}`;
 const ISSUER = "https://ops-parity-test.cloudflareaccess.com";
 const APP_AUD = "fixture-browser-audience";
 const MCP_AUD = "fixture-mcp-audience";
-const GRANT = {
-  scopes: { sources: "*", accounts: "*" },
-  capabilities: ["summary.read"],
-  budget: { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 2 },
-};
-// Fixed once: a confirmation is bound to the delegation entry it was prepared under.
-const ISSUED_AT = new Date(Date.now() - 60_000).toISOString();
-const NOT_AFTER = new Date(Date.now() + 3_600_000).toISOString();
-const configuration = (capabilities?: readonly string[]) => ({
+// Since ADR 0084 every MCP client holds every operation over the whole store;
+// nothing configures it, and the operator list grades only the HTTP routes.
+const configuration = () => ({
   OPS_API_ENABLED: "true",
   SESSION_REFRESH_POLICY: "",
   OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
-  AGENT_API_GRANTS: JSON.stringify({ [DELEGATE]: GRANT, [OWNER]: GRANT }),
-  MCP_DELEGATIONS: JSON.stringify({
-    [DELEGATE]: {
-      delegatedBy: OWNER,
-      role: capabilities ? "maintainer" : "operator-delegate",
-      ...(capabilities ? { capabilities } : {}),
-      scopes: { sources: "*", accounts: "*", scheduleSources: [] },
-      issuedAt: ISSUED_AT,
-      notAfter: NOT_AFTER,
-      budget: { writesPerDay: 50 },
-    },
-  }),
 });
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
@@ -134,9 +116,22 @@ async function stored(operationId: unknown) {
   return row;
 }
 
-/** A receipt without the fields that name its own operation or its time. */
+/**
+ * A receipt without the fields that name its own operation or its time. The
+ * execution's `expiresAt` is counted from the moment the request was accepted,
+ * so the HTTP and MCP requests, made a few calls apart, differ by a second
+ * whenever they straddle one: it is compared as its lifetime after acceptance
+ * (or null), which is the same on both transports.
+ */
 function receipt(body: Record<string, unknown>) {
-  const { operationId: _id, acceptedAt: _at, updatedAt: _updated, ...rest } = body;
+  const { operationId: _id, acceptedAt, updatedAt: _updated, ...rest } = body;
+  const execution = rest["execution"];
+  if (typeof execution === "object" && execution !== null) {
+    const { expiresAt, ...timeless } = execution as Record<string, unknown>;
+    const lifetimeMs =
+      expiresAt === null ? null : Date.parse(String(expiresAt)) - Date.parse(String(acceptedAt));
+    return { ...rest, execution: { ...timeless, lifetimeMs } };
+  }
   return rest;
 }
 
@@ -149,17 +144,12 @@ async function delegatedRecord(operation: string, idempotencyKey: string) {
     .all();
 }
 
-describe("operations requests over MCP under a delegation (ADR 0081)", () => {
-  it("publishes all six tools to a delegation holding every operations capability, and only those it holds", async () => {
+describe("operations requests over MCP, as the MCP client (ADR 0081, ADR 0084)", () => {
+  it("publishes all six tools to every MCP client, whatever the operator list says (ADR 0084)", async () => {
     expect((await listed(configuration())).sort()).toEqual([...OPS_TOOL_NAMES].sort());
-    // A maintainer holds import, replay and read by its role; projection is the one added.
-    expect(await listed(configuration(["operations.projection.request"]))).toEqual([
-      "kogane.ops.import.request",
-      "kogane.ops.replay.request",
-      "kogane.ops.projection.request",
-      "kogane.ops.operation.get",
-    ]);
-    expect(await listed({ ...configuration(), MCP_DELEGATIONS: "" })).toEqual([]);
+    expect((await listed({ ...configuration(), OPERATOR_SUBJECTS: "[]" })).sort()).toEqual(
+      [...OPS_TOOL_NAMES].sort(),
+    );
   });
 
   it("answers and stores what the HTTP route does for the same replay, rebuild and re-registration", async () => {

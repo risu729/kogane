@@ -76,8 +76,11 @@ What the code does today (main `02a915a`):
    shared service, as most existing tools already do. Results, refusals and error codes
    are the service's, so the UI and MCP give the same answer for the same input.
 3. **Authority is unchanged.** Parity is about what exists, not who may use it.
-   A write over MCP still needs the owner's delegation under ADR 0063, with its
-   confirmation class and audit record. Where ADR 0063 makes an R3 operation not
+   A write over MCP is applied by the MCP client's own principal under ADR
+   0063's confirmation classes and audit record; since
+   [ADR 0084](0084-mcp-operator-authority-without-delegation.md) (2026-11-07)
+   any MCP client Access verifies holds that authority over the whole store,
+   with no `MCP_DELEGATIONS` declaration and no `AGENT_API_GRANTS` table. Where ADR 0063 makes an R3 operation not
    delegable now, its MCP tool exists and refuses every call with a recorded
    refusal until that changes: `schedules.lease.release`, until the server can
    verify that an execution stopped. R4 is outside this rule: ADR 0063 gives it
@@ -111,22 +114,40 @@ What the code does today (main `02a915a`):
 
 ## Verification
 
-- Today: most MCP tools call shared services. The three that ran their own SQL
-  (above) call `delegatedWritesRemaining` and `ownOperationSource` in
-  `packages/application` instead, and `tests/mcp-tools-no-sql.test.ts` fails
-  when `services/app/src/mcp.ts` or a `*-tools.ts` adapter calls a store
-  directly or holds a SQL statement. SQL still runs on the MCP path in helpers
-  of `services/app/src` that the screens share, outside that guard:
-  `scopedParseRuns` in `agent-service.ts`, the proposal store in
-  `proposals.ts`, and the schema probe in `reported-state-api.ts`. They move
-  into `packages/application` next, and join the guard when they do. No
-  catalogue or read-route guard test exists yet.
+- Today: the three tools that ran their own SQL (above) call
+  `delegatedWritesRemaining` and `ownOperationSource` in `packages/application`.
+  The helpers they shared with the screens moved too:
+  the agent service's scoped parse-run window is the read model's
+  `sourceParseRuns`, the proposal store is `commandProposalStore` in
+  `packages/application/src/propose-store.ts`, and the `sqlite_master` checks
+  behind `kogane.capabilities` and the optional routes are `storeHasFeature`
+  in `packages/application/src/query/store-schema.ts`. The identity pages
+  that `kogane.identity.read` shares with `GET /api/identity/*` are
+  `readIdentityPage` and `readIdentityConnections` in
+  `packages/application/src/query/identity-pages.ts`, with the account
+  connection reviews and preferred instrument names beside them; the route
+  keeps only its query-parameter checks. The observation pages' helpers
+  (organization, filter-option labels, normalized decimals, activity facts)
+  are in `packages/application/src/query/` too, since the page reads call
+  them.
+  `tests/mcp-tools-no-sql.test.ts` follows the relative imports from
+  `services/app/src/mcp.ts` and fails when a module it reaches calls a store
+  or the D1 binding directly or holds a SQL statement. It exempts, by name and
+  with the reason, the modules whose remaining SQL only screen routes call
+  (the evidence and report routes). No SQL an MCP
+  tool runs is left in `services/app`. An exemption fails once its module
+  holds no SQL.
 - The six `ops.*` tools: `services/app/test/delegated-ops-parity.test.ts`
   checks that a delegation holding every `operations.*` capability is shown
   all six and a narrower one only those it holds, and that each request gives
   the same receipt and stores the same request over MCP as over its HTTP
   route (collection and session refresh after prepare and confirm), and that
   following it with `kogane.ops.operation.get` reads the same receipt.
+- 2026-11-07 (first slice): the catalogue and read-route guards are in
+  [`ui-mcp-parity.test.ts`](../../services/app/test/ui-mcp-parity.test.ts),
+  with allow-lists of the gaps they found, among them 35 UI read routes with
+  no MCP read
+  ([agent API: parity guards](../agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07)).
 - After the first slice: the catalogue test fails when a `ui` entry lacks a
   published `mcp` tool, and the read-route test fails when a UI read route has
   no MCP read. A test per new tool compares its result with the HTTP route's result
@@ -137,3 +158,10 @@ What the code does today (main `02a915a`):
   on `mcp`, whose catalogue paths are now `ui` and `mcp`
   (`services/app/test/schedule-tools.test.ts`;
   [agent access](../agent-api.md#maintenance-windows)).
+- 2026-11-07: `schedules.survey.decide` is on `ui` and `mcp`
+  (`kogane.schedules.survey.decide`, which an MCP client applies as itself under
+  ADR 0084; five review reasons, and any disable, re-enable or overlap, kept
+  with the operator), and the page's re-survey section is read by
+  `kogane.schedules.survey.read`
+  ([ADR 0050 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07);
+  `services/app/test/delegated-survey.test.ts`).

@@ -31,7 +31,6 @@ import {
 } from "../purchase-display.tsx";
 import { useCardSettlement } from "../reconciliation-api.ts";
 import { CardSettlementDetails } from "../reconciliation-display.tsx";
-import { DelegationStatusNotice } from "../delegation-status.tsx";
 import { Link } from "../router.tsx";
 import { Badge, EmptyState, Kv, KvRow, Notice, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import {
@@ -160,7 +159,10 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
       ownershipSide.blockers.length === 0 &&
       (!ownershipDeclaration ||
         (ownershipDeclaration.role === ownershipSide.role &&
-          ownershipSide.selfDeclarationBlockers.length === 0)) &&
+          (ownershipDeclaration.scope === "owner-default"
+            ? ownershipSide.ownerDefaultBlockers
+            : ownershipSide.selfDeclarationBlockers
+          ).length === 0)) &&
       ownershipMatch !== null &&
       ownership.data.revision ===
         report.data?.expectedRevisions[`card-settlement:${ownershipProposalId}`] &&
@@ -308,7 +310,6 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
           サーバーが試算した対象と差分を確認し、承認してから確定します。確定するまで判断は保存されません。
         </p>
       </div>
-      <DelegationStatusNotice />
       <QueryBoundary query={report} label="確認内容">
         {(data) => (
           <>
@@ -366,7 +367,13 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                               {data.simulation.kind === "relation.reject" ? "却下" : "採用"}します。
                             </p>
                             <CardOwnershipDetails side={ownershipSide} />
-                            {ownershipDeclaration ? (
+                            {ownershipDeclaration?.scope === "owner-default" ? (
+                              <Notice tone="warn" inline role="note">
+                                根拠は所有者の既定（保有者の記録がない口座は本人のものとみなす、2026-11-07
+                                の決定）、適用日は {ownershipDeclaration.declaredOn} です。
+                                銀行・カード会社が名義や法的本人性を確認した証明ではありません。
+                              </Notice>
+                            ) : ownershipDeclaration ? (
                               <Notice tone="warn" inline role="note">
                                 根拠は本人申告（名義未確認）、申告日は{" "}
                                 {ownershipDeclaration.declaredOn} です。

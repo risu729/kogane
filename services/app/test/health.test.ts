@@ -160,7 +160,6 @@ describe("the health route is authenticated (plan 11 §6)", () => {
           PIPELINE: pipeline().binding,
           OPS_API_ENABLED: "true",
           COMMANDS_ENABLED: "true",
-          AGENT_API_GRANTS: JSON.stringify([PROBE_TOKEN]),
           AGENT_GRANTS: JSON.stringify([AGENT, PROBE_TOKEN]),
         },
       });

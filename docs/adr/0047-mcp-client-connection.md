@@ -3,6 +3,10 @@
 - Status: accepted (merged 2026-10-09 in #565)
 - Date: 2026-10-08
 - Issue: #559 (part of)
+- Amended 2026-11-07 by [ADR 0084](0084-mcp-operator-authority-without-delegation.md):
+  `AGENT_API_GRANTS` is removed. The MCP principal `mcp-client:<sub>`, its
+  separate Access application and audience, and its refusal on every non-agent
+  route stand; it now reads and operates over the whole store with no table.
 
 ## Context
 

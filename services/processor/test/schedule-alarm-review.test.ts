@@ -131,6 +131,39 @@ test("provider uncertainty is recorded once and immediate redelivery cannot resu
       .first<string>("status"),
   ).toBe("uncertain");
 });
+test("a holder that stopped itself is recorded uncertain with its own code, never replayed", async () => {
+  for (const code of ["collection_deadline_exceeded", "collection_lease_lost"]) {
+    const nominal = new Date(
+      Date.now() - (code === "collection_lease_lost" ? 180000 : 240000),
+    ).toISOString();
+    await env.DB.prepare(
+      "UPDATE collection_schedules SET enabled=1,next_nominal_at=?,next_run_at=? WHERE id='mizuho-bank'",
+    )
+      .bind(nominal, nominal)
+      .run();
+    let calls = 0;
+    const fake = {
+      ...env,
+      SCHEDULE_MIZUHO: {
+        async runScheduled() {
+          calls++;
+          return { status: "failed", runIds: [], failureCode: code };
+        },
+      },
+    } as unknown as Env;
+    const ctx = state();
+    await new AlarmClass(ctx, fake).alarm();
+    await new AlarmClass(ctx, fake).alarm();
+    expect(calls).toBe(1);
+    expect(
+      await env.DB.prepare(
+        "SELECT status,failure_code FROM collection_schedule_occurrences WHERE schedule_id='mizuho-bank' AND nominal_at=?",
+      )
+        .bind(nominal)
+        .first(),
+    ).toEqual({ status: "uncertain", failure_code: code });
+  }
+});
 test("D1 outage persists a new bookkeeping wakeup instead of exhausting native retries", async () => {
   let calls = 0;
   const ctx = state(),
