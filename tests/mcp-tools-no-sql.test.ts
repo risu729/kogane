@@ -37,9 +37,8 @@ function reachable(entry: string): string[] {
  * SQL moves into packages/application.
  */
 const SCREEN_ONLY_SQL: Record<string, string> = {
-  "normalized-decimals.ts": "balances-v2's page functions, which no MCP tool calls",
-  "observation-organization.ts": "balances-v2's page functions, which no MCP tool calls",
-  "read.ts": "the evidence routes; page-read-tools imports only catalogue",
+  "read.ts":
+    "the evidence routes' run and artifact queries; the MCP path imports only catalogue and raw, which reads R2, not D1",
   "reports-api.ts": "the report routes; capabilities imports only reportArtifactsAvailable",
 };
 
@@ -50,13 +49,7 @@ const SCREEN_ONLY_SQL: Record<string, string> = {
  * a screen-only exemption cannot quietly start covering an MCP call.
  */
 const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
-  "balances-v2.ts": [
-    "balanceProjectionReader",
-    "balanceReadConfigured",
-    "readTarget",
-    "servableSnapshot",
-  ],
-  "read.ts": ["catalogue"],
+  "read.ts": ["catalogue", "raw"],
   "reports-api.ts": ["reportArtifactsAvailable"],
 };
 

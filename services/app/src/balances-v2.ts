@@ -63,9 +63,12 @@ import {
   type PointerRow,
   type ReadProjectionReader,
 } from "../../../packages/storage-d1/src/read/index.ts";
-import { HttpError, json } from "./http";
-import { decimalRows } from "./normalized-decimals";
-import { organizationContext, organizeRows } from "./observation-organization";
+import { HttpError } from "./http";
+import { decimalRows } from "../../../packages/application/src/query/normalized-decimals.ts";
+import {
+  organizationContext,
+  organizeRows,
+} from "../../../packages/application/src/query/observation-organization.ts";
 
 export const V2_LATEST_PATH = "/api/v2/balances/latest";
 export const V2_HISTORY_PATH = "/api/v2/balances/history";
@@ -188,7 +191,7 @@ export interface V2Scope {
   measureView?: "balances" | "summaries";
 }
 
-function scopeOf(url: URL): V2Scope {
+function scopeOf(url: Pick<URL, "searchParams">): V2Scope {
   const view = url.searchParams.get("view");
   return {
     ...(url.searchParams.get("source") ? { source: url.searchParams.get("source")! } : {}),
@@ -201,7 +204,7 @@ function scopeOf(url: URL): V2Scope {
   };
 }
 
-function pageLimit(url: URL): number {
+function pageLimit(url: Pick<URL, "searchParams">): number {
   const text = url.searchParams.get("limit");
   if (text === null) return DEFAULT_PROJECTION_PAGE_LIMIT;
   // One of the offered sizes as written: `Number` alone would also read
@@ -496,7 +499,7 @@ interface Continuation {
  */
 async function continuation(
   target: ReadTarget,
-  url: URL,
+  url: Pick<URL, "searchParams">,
   digest: string,
 ): Promise<Continuation | null> {
   if (target.contractMismatch) throw new HttpError(503, "read_model_unavailable");
@@ -551,8 +554,8 @@ export async function legacyLatestFromProjection(
   if (!snapshot || (await snapshotBehind(reader, snapshot))) return null;
   if ((await snapshotRefusal(target, snapshot)) !== null) return null;
   const rows = await reader.legacyLatestPage(snapshot.snapshot_id, scope, latestOffset, 501);
-  const organized = await organizeRows(env.DB, "balance", rows.map(balanceRowOf), mode);
-  const withDecimals = await decimalRows(env.DB, "balance", organized);
+  const organized = await organizeRows(d1Executor(env.DB), "balance", rows.map(balanceRowOf), mode);
+  const withDecimals = await decimalRows(d1Executor(env.DB), "balance", organized);
   return rows.map((row, index) => ({
     ...withDecimals[index]!,
     interpretation: interpretationOf(row, evidenceOf(row)),
@@ -567,9 +570,9 @@ export async function legacyLatestFromProjection(
  */
 export async function latestBalancePage(
   env: Env,
-  url: URL,
+  url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<Response> {
+): Promise<LatestBalancePage> {
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
@@ -589,8 +592,8 @@ export async function latestBalancePage(
   );
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
-  const organized = await organizeRows(env.DB, "balance", page.map(balanceRowOf), mode);
-  const withDecimals = await decimalRows(env.DB, "balance", organized);
+  const organized = await organizeRows(d1Executor(env.DB), "balance", page.map(balanceRowOf), mode);
+  const withDecimals = await decimalRows(d1Executor(env.DB), "balance", organized);
   const items: LatestBalanceItem[] = page.map((row, index) => {
     const evidence = evidenceOf(row);
     const temporal: unknown = JSON.parse(row.temporal_json);
@@ -644,7 +647,7 @@ export async function latestBalancePage(
       organized.map((row) => row.organization),
     ),
   };
-  return json(body);
+  return body;
 }
 
 /**
@@ -654,9 +657,9 @@ export async function latestBalancePage(
  */
 export async function balanceHistoryPage(
   env: Env,
-  url: URL,
+  url: Pick<URL, "searchParams">,
   mode: IdentityReadMode,
-): Promise<Response> {
+): Promise<BalanceHistoryPage> {
   const target = await readTarget(env);
   const reader = target.reader;
   const scope = scopeOf(url);
@@ -676,8 +679,8 @@ export async function balanceHistoryPage(
   );
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
-  const organized = await organizeRows(env.DB, "balance", page, mode);
-  const withDecimals = await decimalRows(env.DB, "balance", organized);
+  const organized = await organizeRows(d1Executor(env.DB), "balance", page, mode);
+  const withDecimals = await decimalRows(d1Executor(env.DB), "balance", organized);
   const items: BalanceHistoryItem[] = page.map((row, index) => {
     const evidence: BalanceEvidenceMember[] = [
       { ref: `balance:${String(row.id)}`, observationId: row.id, metric: row.metric },
@@ -751,5 +754,5 @@ export async function balanceHistoryPage(
       organized.map((row) => row.organization),
     ),
   };
-  return json(body);
+  return body;
 }
