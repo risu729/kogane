@@ -66,6 +66,7 @@ import {
   RECONSTRUCTED_STATE_MCP_TOOLS,
 } from "./mcp";
 import { reconstructedStateAvailable } from "./reconstructed-state-api";
+import { eventsV2Available } from "./events-api";
 import { opsApiEnabled } from "./ops-api";
 import {
   LEASE_RELEASE_MCP_TOOLS,
@@ -102,11 +103,7 @@ import {
 } from "./delegated-command-tools";
 
 import { CARD_SETTLEMENT_TOOL_NAMES, readMcpTools, REPORTED_STATE_TOOL_NAME } from "./read-tools";
-import {
-  isPageReadToolName,
-  pageReadMcpTools,
-  pageReadNeedsReportedState,
-} from "./page-read-tools";
+import { isPageReadToolName, pageReadMcpTools, pageReadServedWhere } from "./page-read-tools";
 import {
   callDelegatedSurveyTool,
   delegatedSurveyTools,
@@ -256,6 +253,9 @@ export async function agentApi(
     let settlementsServed: Promise<boolean> | undefined;
     const settlements = (): Promise<boolean> =>
       (settlementsServed ??= cardSettlementsAvailable(env));
+    // The events read exists exactly while `GET /api/v2/activity` does.
+    let eventsServed: Promise<boolean> | undefined;
+    const economicEvents = (): Promise<boolean> => (eventsServed ??= eventsV2Available(env));
     const message = await handleMcp(
       request,
       async (name, body) => {
@@ -263,12 +263,11 @@ export async function agentApi(
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (name === REPORTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (CARD_SETTLEMENT_TOOL_NAMES.has(name) && !(await settlements())) return null;
-        if (
-          isPageReadToolName(name) &&
-          pageReadNeedsReportedState(name) &&
-          !(await reconstructed())
-        )
-          return null;
+        if (isPageReadToolName(name)) {
+          const where = pageReadServedWhere(name);
+          if (where === "reportedState" && !(await reconstructed())) return null;
+          if (where === "economicEvents" && !(await economicEvents())) return null;
+        }
         // An MCP client's capabilities also carry the operation authority
         // derived for it (ADR 0084), as a safe status; recorded like any call.
         if (name === "kogane.capabilities" && caller.kind === "mcp-client")
@@ -349,7 +348,10 @@ export async function agentApi(
           reportedState: await reconstructed(),
           cardSettlements: await settlements(),
         }),
-        ...pageReadMcpTools(grant, { reportedState: await reconstructed() }),
+        ...pageReadMcpTools(grant, {
+          reportedState: await reconstructed(),
+          economicEvents: await economicEvents(),
+        }),
         ...(caller.kind === "mcp-client"
           ? [
               ...delegatedCommandTools(env, await delegation()),
@@ -387,12 +389,15 @@ export async function agentApi(
   // Absent, not refused, while the deployment cannot serve it, like its route.
   if (tool === PURCHASES_TOOL_NAME && !(await cardPurchasesAvailable(env)))
     throw new HttpError(404, "not_found");
+  const pageReadWhere = isPageReadToolName(tool) ? pageReadServedWhere(tool) : null;
   if (
     (tool === RECONSTRUCTED_STATE_TOOL_NAME ||
       tool === REPORTED_STATE_TOOL_NAME ||
-      (isPageReadToolName(tool) && pageReadNeedsReportedState(tool))) &&
+      pageReadWhere === "reportedState") &&
     !(await reconstructedStateAvailable(env))
   )
+    throw new HttpError(404, "not_found");
+  if (pageReadWhere === "economicEvents" && !(await eventsV2Available(env)))
     throw new HttpError(404, "not_found");
   if (CARD_SETTLEMENT_TOOL_NAMES.has(tool) && !(await cardSettlementsAvailable(env)))
     throw new HttpError(404, "not_found");

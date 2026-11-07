@@ -33,6 +33,8 @@ import {
   reportedHoldingsChangeAvailable,
 } from "./reported-holdings-change-api";
 import { readRewardRoute } from "./rewards-api";
+import { readEventsRoute } from "./events-api";
+import { ACTIVITY_BASES } from "../../../packages/read-model/src/index";
 import { catalogue } from "./read";
 import { mcpInputSchema } from "./mcp-input-schema";
 
@@ -54,6 +56,12 @@ const IDENTITY_READ = z.enum(["latest", "as-recorded"]);
 const MEASURE_VIEW = z.enum(["balances", "summaries"]);
 const OFFSET = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
+/** Which store-dependent routes this deployment serves. */
+export interface PageReadServed {
+  reportedState: boolean;
+  economicEvents: boolean;
+}
+
 interface PageReadTool<Schema extends z.ZodType> {
   title: string;
   description: string;
@@ -63,10 +71,12 @@ interface PageReadTool<Schema extends z.ZodType> {
   /** The UI route paths this tool answers, for the parity inventory. */
   routes: readonly string[];
   /**
-   * Served only where `GET /api/v2/reported-state` is (the store has its
-   * views), as the route is: otherwise neither listed nor callable.
+   * Served only where its route is: `reportedState` where
+   * `GET /api/v2/reported-state` is (the store has its views),
+   * `economicEvents` where `GET /api/v2/activity` is (migration 0032's
+   * projection). Otherwise neither listed nor callable.
    */
-  needsReportedState?: true;
+  servedWhere?: keyof PageReadServed;
   /** The shared reader, called with the request the route would build. */
   read(env: Env, input: z.infer<Schema>): Promise<unknown>;
 }
@@ -203,11 +213,26 @@ const TOOLS = {
     }),
     capability: "records.read",
     routes: ["/api/v2/reported-holdings-change"],
-    needsReportedState: true,
+    servedWhere: "reportedState",
     read: async (env, params) => {
       if (!(await reportedHoldingsChangeAvailable(env))) throw new HttpError(404, "not_found");
       return readHoldingsChange(env, query(params));
     },
+  }),
+  "kogane.events.read": tool({
+    title: "Economic activity by basis, and obligations",
+    description:
+      "One page of the economic event projection: `activity` (the current event revisions with a leg on the requested `basis`: `cash-movement` (default; money that left or entered an account, e.g. an accepted card settlement debit) or `purchase-recognition` (cost recognised at purchase); each event with its legs, allocations, per-basis totals, evidence and explanation refs) or `obligations` (current obligations with their principal, settlements and remaining amount; takes no `basis`). The two bases are never mixed in one list. The same answer as GET /api/v2/activity or /api/v2/obligations, under records.read and a whole-store read grant. `offset` pages 200 rows; `nextCursor` is the next offset. Served where the projection exists. Read-only.",
+    schema: z.strictObject({
+      collection: z.enum(["activity", "obligations"]),
+      basis: z.enum(ACTIVITY_BASES).optional(),
+      offset: OFFSET.optional(),
+    }),
+    capability: "records.read",
+    routes: ["/api/v2/activity", "/api/v2/obligations"],
+    servedWhere: "economicEvents",
+    read: (env, { collection, ...params }) =>
+      readEventsRoute(env, { pathname: `/api/v2/${collection}`, searchParams: query(params) }),
   }),
 } as const;
 
@@ -253,21 +278,21 @@ function refusedRefs(grant: Grant, capability: AgentCapability): string[] {
   ];
 }
 
-/** Whether this page read exists only where the reported state's views do. */
-export function pageReadNeedsReportedState(name: PageReadToolName): boolean {
-  return (TOOLS[name] as PageReadTool<z.ZodType>).needsReportedState === true;
+/** The store-dependent route this page read exists only beside, if any. */
+export function pageReadServedWhere(name: PageReadToolName): keyof PageReadServed | null {
+  return (TOOLS[name] as PageReadTool<z.ZodType>).servedWhere ?? null;
 }
 
 /**
  * The page reads listed to this grant: exactly those it may call, and of
- * those served only with the reported state's views, only where they are.
+ * those served only beside a store-dependent route, only where it is.
  */
-export function pageReadMcpTools(grant: Grant, served: { reportedState: boolean }) {
+export function pageReadMcpTools(grant: Grant, served: PageReadServed) {
   return PAGE_READ_MCP_TOOLS.filter((definition) => {
     const name = definition.name as PageReadToolName;
+    const where = pageReadServedWhere(name);
     return (
-      (served.reportedState || !pageReadNeedsReportedState(name)) &&
-      refusedRefs(grant, TOOLS[name].capability).length === 0
+      (where === null || served[where]) && refusedRefs(grant, TOOLS[name].capability).length === 0
     );
   });
 }

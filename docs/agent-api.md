@@ -199,6 +199,7 @@ the other delegated MCP tools are described there too.
 | `kogane.balances.read`                 | `POST /api/agent/v1/balances.read`                 | `kogane.balances.read`                 | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                 |
 | `kogane.rewards.read`                  | `POST /api/agent/v1/rewards.read`                  | `kogane.rewards.read`                  | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                 |
 | `kogane.reported-holdings-change.read` | `POST /api/agent/v1/reported-holdings-change.read` | `kogane.reported-holdings-change.read` | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#ui-read-pages))                                                                                                                                                       |
+| `kogane.events.read`                   | `POST /api/agent/v1/events.read`                   | `kogane.events.read`                   | `records.read` on `"*"` sources and accounts, while `eventsV2` is served ([below](#ui-read-pages))                                                                                                                                                                  |
 
 No tool lists or reads the fixed report artifacts (評価レポート): they are
 served to the operator by `GET /api/v2/reports` and
@@ -625,6 +626,7 @@ function, so they cannot disagree on a row, a page bound or a refusal code.
 | `kogane.balances.read`                 | `GET /api/v2/balances/latest`, `/api/v2/balances/history`                                                        | `records.read` on `"*"` sources and accounts |
 | `kogane.rewards.read`                  | `GET /api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                         | `records.read` on `"*"` sources and accounts |
 | `kogane.reported-holdings-change.read` | `GET /api/v2/reported-holdings-change`, while `reportedStateOnDate` is served                                    | `records.read` on `"*"` sources and accounts |
+| `kogane.events.read`                   | `GET /api/v2/activity`, `/api/v2/obligations`, while `eventsV2` is served (no screen reads them)                 | `records.read` on `"*"` sources and accounts |
 
 Input is a closed object. Its keys are the route's query parameters with
 their bounds, plus the field that picks the route (`collection`, `page` or `kind`, or the
@@ -657,6 +659,17 @@ answers the route's own page with the route's own page bound. A raw download
 store lacks the reported state's views it is neither listed nor callable
 (`unknown_tool` on `/mcp`, `404 not_found` on its HTTP path), like
 `kogane.reported-state.read`.
+
+`kogane.events.read` is plan D19 (`docs/plans/2026-10-ai-operation-path.md`):
+`collection` is `activity` or `obligations`, `basis` (`cash-movement`, the
+default, or `purchase-recognition`) and `offset` are the routes' parameters,
+answered by the routes' own `readEventsRoute` (`src/events-api.ts`). No
+screen reads these routes ([ADR 0072](adr/0072-report-artifact-pages.md)),
+so the parity guard lists the tool as one without a UI route. Like its
+routes, it exists only where the events projection (CORE 0032) does: else it
+is neither listed nor callable. It is how an agent reads an accepted card
+settlement's debit: one `card_settlement` event on the `cash-movement` basis,
+gone from the list once withdrawn (its current revision has no leg).
 
 Every MCP client holds the whole-store grant
 ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), so each of these
@@ -1557,7 +1570,7 @@ owner's agreement.
    the scan cannot resolve is not seen. Every other published tool that is
    not a `ui` operation is listed with its reason (`kogane.capabilities`,
    `kogane.explain`, `kogane.reconcile.propose`,
-   `kogane.economic-readiness.read`, `kogane.audit.get`,
+   `kogane.economic-readiness.read`, `kogane.events.read`, `kogane.audit.get`,
    `kogane.schedules.maintenance.read`), so a new read tool is mapped to its
    route and that route leaves the gaps.
 
