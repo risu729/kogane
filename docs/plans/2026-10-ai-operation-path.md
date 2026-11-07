@@ -1,20 +1,27 @@
 # Plan: AI as a delegated operation path, with a common audit log
 
-- Status: **in progress**. Slice S1 (section 8) and S3 declaration core (#628)
-  are implemented on main; slice S7 (the `alarm` and `lane` audit writers) is
-  implemented in its own pull request. This S3 execution slice implements delegated R1
-  operations, bounded preparation machinery and shared history/audit reads;
-  a separate R2 slice adds command and provider-request adapters, and a
-  settings slice adds job prepare/confirm with linked reversal. The integrated
-  follow-up adds maintenance R1/R2 execution; survey acceptance and
-  real-client activation remain distinct work. Slice S8's `監査ログ` page
-  is implemented (proposed until its pull request merges); its delegation
-  status on the schedules and confirm pages is not. See the
+- Status: **in progress**. Slices S1 (section 8, #619), S2 (#565), S4 (#564)
+  and S3 (declaration core #628; execution integration #660, merged
+  2026-10-10) are implemented on main. S3 execution covers delegated R1
+  operations, bounded preparation machinery, shared history/audit reads, R2
+  command and provider-request adapters, job prepare/confirm with linked
+  reversal, and maintenance R1/R2 execution, which deliver parts of S5 and
+  S6. Slice S7 (the `alarm` and `lane` audit writers, #925) and slice S8 (the
+  `監査ログ` page, #923, and the delegation status on the schedules and
+  confirm pages, #926) are implemented on main. Survey decisions (S6) follow
+  the owner's 2026-11-07 conditions
+  ([ADR 0050 amendment](../adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
+  real-client activation remains open. On 2026-11-07
+  [ADR 0084](../adr/0084-mcp-operator-authority-without-delegation.md) removed
+  the `MCP_DELEGATIONS` declaration, its roles and the delegation status
+  (S3's declaration core and S8's status part): the operator's MCP principal
+  now resolves from `OPERATOR_SUBJECTS` and its read grant, and the sections
+  below that describe declarations record the earlier design. See the
   [current resume plan](2026-10-mcp-maintenance-followups.md).
   The decisions it rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and
   [ADR 0064](../adr/0064-common-audit-log.md) (common append-only audit log),
-  both `proposed` until their pull request merges. Each implementation slice
+  both accepted (merged 2026-10-09 in #601). Each implementation slice
   (section 8) is its own pull request with its own independent review; merging
   this plan approves none of them.
 - Written: 2026-10-09, from `origin/main` `c4f611d`, by the AI-operation-path
@@ -1100,7 +1107,8 @@ acceptance and concrete client delegation remain separate owner decisions.
   `delegationRef`; the schedules and confirm pages show it as a read-only
   notice. The route and shape are recorded in
   [ADR 0063's amendment](../adr/0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06-proposed);
-  [agent API](../agent-api.md#the-operators-delegation-status-s8-2026-11-06).
+  [agent API](../agent-api.md#the-operators-mcp-principal-adr-0084-2026-11-07)
+  (removed by ADR 0084).
   Service, contract and desktop/mobile browser tests cover it. The audit page
   is a separate pull request.
 

@@ -6,6 +6,7 @@ import {
   delegatedJobResultSchema,
   type DelegatedJobResult,
   delegatedCan,
+  delegatedWritesRemaining,
   executionFor,
   d1CommandStore,
   prepareDelegatedOperation,
@@ -20,6 +21,7 @@ import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
 import { upstreamOutcome, UpstreamLost } from "./audit";
 import type { ToolResult } from "./agent-service";
+import { mcpInputSchema } from "./mcp-input-schema";
 const TOOL = "kogane.schedules.job.update";
 const CAPABILITY = "schedules.job.update";
 export const EXECUTABLE_SCHEDULE_CAPABILITIES = [
@@ -38,8 +40,7 @@ export function delegatedScheduleTools(env: Env, resolution: DelegationResolutio
     !resolution.principal.capabilities.includes(CAPABILITY)
   )
     return [];
-  const inputSchema = z.toJSONSchema(delegatedJobSchema) as Record<string, unknown>;
-  delete inputSchema["$schema"];
+  const inputSchema = mcpInputSchema(delegatedJobSchema);
   return [
     {
       name: TOOL,
@@ -179,10 +180,7 @@ export async function callDelegatedScheduleTool(
     if (step === "prepare") {
       const preview = await relay("preview");
       if (preview.status !== 200) return preview;
-      const used = await store.first<{ n: number }>(
-        "SELECT count(*) n FROM audit_records WHERE principal=? AND principal_kind='delegated' AND result IN ('applied','accepted') AND recorded_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')",
-        [principal.id],
-      );
+      const remaining = await delegatedWritesRemaining(store, principal);
       const prepared = await prepareDelegatedOperation(
         store,
         audit,
@@ -198,7 +196,7 @@ export async function callDelegatedScheduleTool(
           preview: {
             ...prepared.preview,
             ...(preview.body as Record<string, unknown>),
-            budgetRemaining: Math.max(0, principal.budget.writesPerDay - (used?.n ?? 0)),
+            budgetRemaining: remaining,
             revertAvailable: true,
           },
         },

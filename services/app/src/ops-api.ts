@@ -124,13 +124,15 @@ export const replaySchema = z.strictObject({
   idempotencyKey: IDEMPOTENCY_KEY,
 });
 export const projectionSchema = z.strictObject({
-  // Why a rebuild was asked for. Bounded, single-line, no control characters;
+  // Why a rebuild was asked for. Bounded, single-line, no control characters
+  // (Unicode category Cc, spelled as ranges: the published JSON Schema
+  // `pattern` must not use `\p{…}`, which ChatGPT's validator refuses);
   // it is stored with the request and never interpolated anywhere.
   reason: z
     .string()
     .min(1)
     .max(500)
-    .regex(/^[^\p{Cc}]+$/u),
+    .regex(/^[^\u0000-\u001f\u007f-\u009f]+$/u),
   idempotencyKey: IDEMPOTENCY_KEY,
 });
 export const sessionRefreshSchema = z.strictObject({

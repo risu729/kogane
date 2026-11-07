@@ -1,6 +1,6 @@
 # ADR 0041: Separate maintained documentation from historical records
 
-Status: proposed until this PR merges; accepted upon merge
+Status: accepted (merged 2026-10-04 in #435)
 Date: 2026-10-05
 
 ## Context

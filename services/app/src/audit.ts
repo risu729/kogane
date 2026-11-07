@@ -195,6 +195,18 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // One row per source the coverage answer counts; never the counts themselves.
   if (operation === "instruments.coverage")
     return { rows: Array.isArray(value["rows"]) ? value["rows"].length : 0, truncated: false };
+  // Reviews on the page; truncated when another page follows. An ownership
+  // review is one candidate.
+  if (operation === "card-settlements.read")
+    return {
+      rows: Array.isArray(value["items"]) ? value["items"].length : 0,
+      truncated: value["nextOffset"] !== null && value["nextOffset"] !== undefined,
+    };
+  if (operation === "card-settlements.ownership") return { rows: 1, truncated: false };
+  if (operation === "economic-readiness.read") {
+    const manifest = value["manifest"] as { rows?: unknown } | undefined;
+    return { rows: Array.isArray(manifest?.rows) ? manifest.rows.length : 0, truncated: false };
+  }
   if (operation === "audit.search")
     return {
       rows: Array.isArray(value["records"]) ? value["records"].length : 0,
@@ -229,7 +241,40 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
         (Array.isArray(value["payables"]) ? value["payables"].length : 0),
       truncated: false,
     };
-  if (operation === "instruments.candidates") {
+  // One UI page read (`{ schemaVersion, data }`, src/page-read-tools.ts): the
+  // page's `items` or `rows`, else its first list (connections, transactions, …), truncated
+  // when the page says more follow; one detail is one row.
+  if (operation === "observations.get") return { rows: value["data"] ? 1 : 0, truncated: false };
+  if (
+    operation === "identity.read" ||
+    operation === "store.read" ||
+    operation === "observations.list" ||
+    operation === "balances.read" ||
+    operation === "rewards.read" ||
+    operation === "reported-holdings-change.read"
+  ) {
+    const data = (value["data"] ?? {}) as Record<string, unknown>;
+    const coverage = (data["coverage"] ?? {}) as Record<string, unknown>;
+    const page = (data["page"] ?? {}) as Record<string, unknown>;
+    // `items` or `rows` when the page has them: a reward expiry page lists
+    // its provider display sections before its rows.
+    const list = Array.isArray(data["items"])
+      ? data["items"]
+      : Array.isArray(data["rows"])
+        ? data["rows"]
+        : data;
+    return {
+      rows: countOf(list),
+      truncated: coverage["truncated"] === true || page["hasMore"] === true,
+    };
+  }
+  // A page of statements; a named next page means more remain.
+  if (operation === "card-settlements.unmatched")
+    return {
+      rows: Array.isArray(value["items"]) ? value["items"].length : 0,
+      truncated: typeof value["nextOffset"] === "number",
+    };
+  if (operation === "instruments.candidates" || operation === "accounts.candidates") {
     const items = Array.isArray(value["items"]) ? value["items"].length : 0;
     return {
       rows: items,

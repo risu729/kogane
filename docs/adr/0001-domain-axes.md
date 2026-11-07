@@ -193,7 +193,7 @@ repository lint via `hk`. No production data, D1 or Workers were involved.
 
 ## Amendment 2026-11-06: a relation triple's status is its newest decision
 
-- Status: proposed until the PR that carries it merges, then accepted
+- Status: accepted (merged 2026-11-06 in #957)
 - Date: 2026-11-06
 - Carried by: `projectionRelationsSql` in
   `packages/read-model/src/balance-projection-sql.ts`, `RELATION_SQL` in
@@ -215,7 +215,7 @@ or `rejected` rows; accepting a reconciliation proposal
 `statement_covers`) and the card purchase provider link
 (`services/processor/src/card-purchase-job.ts`, `pending_to_posted`) write
 `accepted` rows; and an agent's `reconcile.propose`
-(`services/app/src/proposals.ts`) writes a `proposed` row for any relation
+(`packages/application/src/propose-store.ts`) writes a `proposed` row for any relation
 kind. No relation write sets `superseded_by` on an earlier relation decision,
 and the 0029 trigger could not let it: a decision is superseded only by a
 later decision on the same `subject_ref`, and each row is its own subject. So

@@ -1,6 +1,6 @@
 # ADR 0019: Reported state on a date from the latest complete capture before it
 
-- Status: proposed
+- Status: accepted (merged 2026-09-27 in #263)
 - Date: 2026-09-26
 - Implemented by: P2-1 of the
   [next-milestone plan](../plans/2026-09-next-milestone.md)
@@ -116,7 +116,7 @@ contract and browser tests, all on synthetic data.
 
 ## Agent read amendment — 2026-11-06 (proposed)
 
-- Status: proposed (accepted when the pull request that adds it merges)
+- Status: accepted (merged 2026-11-06 in #953)
 - Date: 2026-11-06
 
 **Context.** The reported state on a date had a route and a page but no agent

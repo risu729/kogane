@@ -221,6 +221,74 @@ through `kogane.instruments.coverage` (`/mcp`) or
 `POST /api/agent/v1/instruments.coverage`, which require `summary.read` over
 the whole store ([agent API](agent-api.md#instrument-coverage)).
 
+## Aggregator-to-direct account candidates
+
+A MoneyForward account identity names one provider connection registered at
+MoneyForward, which can list several products; its observations are
+connection-scoped and no parser records a branch, an account number or a leaf
+reference for them. The only stored evidence tying such a connection to a
+direct collector's accounts is a current confirmed connection review
+([account connections](account-connections.md)), possible today for SBI
+Shinsei only. `reviewAccountCandidates`
+(`packages/application/src/query/account-candidates.ts`,
+[ADR 0077](adr/0077-account-connection-candidates.md), policy
+`account-candidates-v1`) reads those reviews and answers:
+
+- **candidates**: one per (current confirmed review, direct source account it
+  pinned), proposing `connection_contains` from `connection:<producer>/<key>`
+  to `source_account:<id>`, with evidence `connection-review-confirmed` and
+  the review's artifact refs. Status comes from the newest stored relation of
+  the pair (`accepted`, `rejected`, else `proposed`) under any reference it
+  may have been recorded under, listed as `recordedContainment`: the
+  candidate's own (`this-connection`), another producer's current review of
+  the same identity value (`same-identity-value`), or a reference migration
+  0029 backfilled under a key the identity-value rewrite (migration 0063)
+  later replaced (`legacy-connection-key`, mapped through the review row the
+  backfilled relation's id names). A pair already accepted under any of them
+  is not offered for acceptance again; new decisions are planned under the
+  candidate's own reference. Acceptance is
+  withheld by a `hold`: `evidence-ineligible`, or
+  `direct-account-in-several-connections` when current eligible reviews of two
+  identity values pin the same direct account (none is chosen). Each names
+  the `relation.accept` and `relation.reject` payloads that would decide it,
+  to be planned with a reason through the [change lifecycle](change-lifecycle.md);
+  rejecting an accepted pair withdraws it as a later row;
+- **never `same_account`**: every candidate says why
+  (`aggregator-account-connection-scoped`, and `several-direct-accounts` when
+  one connection pins several direct accounts) and reports a `same_account`
+  relation already stored between its two sides, in either orientation;
+- **connections**: every current review with its state (`confirmed`,
+  `unresolved`, `evidence-ineligible`) and its aggregator source accounts of
+  any producer; **unreviewed**: aggregator source accounts no current review
+  names (`no-connection-review`, `reference-unrecognized`).
+
+A label, an institution name or an amount is never read. Nothing here adopts:
+an accepted `connection_contains` is a subset claim of a `connection:` scope
+no measurement has, so it moves no balance, and no transaction or display is
+merged or suppressed.
+
+It is served to whoever its grant allows, `records.read` over the whole
+store: `GET /api/identity/account-candidates?view=&offset=&sourceAccountId=`
+(`services/app/src/account-candidates-api.ts`, reader grant behind Access),
+`kogane.accounts.candidates` ([agent API](agent-api.md#account-candidates))
+and the page `/identities/account-candidates` (`口座の対応候補`), whose
+buttons plan the named payload with the reason a person writes after reading
+the candidate again; approval and commit happen on the confirmation screen.
+Views `open`, `held`, `decided`, `connections`, `unreviewed`; 50 items a page.
+Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 newest
+relation rows (and 10,000 backfilled relations under a rewritten key),
+refused whole past each. Every read is keyed (ADR 0077, Cost).
+
+Limits today: only SBI Shinsei pairs exist; candidates are listed per
+producer's review (two producers' reviews of one identity value are two
+candidates sharing one status); a plan pins only the revision of the
+candidate's own reference, so a decision recorded under one of the pair's
+other references between planning and commit does not make it stale; the
+balance projection reads every accepted relation row, so a later rejection
+does not remove an earlier acceptance from its declared inputs; no history
+view of a pair; no validity period; no leaf-account equivalence and no dedup
+of aggregator against direct rows.
+
 ## Acceptance gates
 
 - All merged source patterns exercised with synthetic tests; all seven SBI

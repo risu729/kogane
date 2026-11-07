@@ -1,6 +1,6 @@
 # Collection quality completion and scoped acceptance
 
-Status: implementation for review; production acceptance pending
+Status: implemented (merged 2026-11-06 in #968); production acceptance pending
 Date: 2026-10-09
 Issue: [#542](https://github.com/risu729/kogane/issues/542)
 Design: [ADR 0045](../adr/0045-collection-quality-read.md)
