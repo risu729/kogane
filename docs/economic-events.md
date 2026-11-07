@@ -1381,7 +1381,15 @@ on `bun:sqlite`); production had 298 current rows, 6 of them unrecognised
 synthetic store of about 34,000 usage
 observations (180 days of daily captures) and 8,200 live events, the
 unfiltered first page took about 0.4 s in `bun:sqlite`, of which the usage
-pass was about 0.3 s and the selection about 0.04 s. The candidates add two
+pass was about 0.3 s and the selection about 0.04 s. The pass is proven
+equal to the one shipped before #1020 (frozen in
+`packages/application/test/card-purchase-current-legacy-sql.ts`) for the
+page's current keys and the unrecognised count: on the random stores of
+`packages/read-model/test/card-usage-random-store.ts`
+(`card-purchase-current.test.ts`, which also checks the returned unrecognised
+rows are exactly the first ones by observation id up to each bound) and on the
+scaled store without table statistics (`card-purchase-scale.test.ts`, with
+the plan check). The candidates add two
 queries: one pass over the stage-B `pending_to_posted` proposals, re-deriving
 each target's recognition key by primary-key lookups
 (`packages/application/src/query/card-purchase-candidates.ts`), and one lookup
