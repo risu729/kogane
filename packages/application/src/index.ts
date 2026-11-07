@@ -335,6 +335,8 @@ export {
   type ResolvedRef,
   type StoredProposal,
 } from "./propose.ts";
+export { commandProposalStore } from "./propose-store.ts";
+export { STORE_FEATURES, type StoreFeature, storeHasFeature } from "./query/store-schema.ts";
 
 // ── the common audit record and the operation chokepoint (ADR 0064) ─────
 export {
@@ -409,6 +411,8 @@ export {
   laneTickRecord,
   laneWroteAny,
   type LaneWrites,
+  LEASE_EXPIRY_JOB,
+  leaseExpiryWrite,
   occurrenceRef,
 } from "./audit/automatic.ts";
 export {

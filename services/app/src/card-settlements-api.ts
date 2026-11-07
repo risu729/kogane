@@ -1,3 +1,4 @@
+import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
 import { queryCardOwnership } from "../../../packages/application/src/query/card-ownership.ts";
 import {
   queryCardSettlementStatements,
@@ -14,10 +15,7 @@ export const CARD_SETTLEMENT_STATEMENTS_PATH = `${CARD_SETTLEMENT_PATH}/statemen
 
 /** A schema-ahead deployment does not advertise a route it cannot serve. */
 export async function cardSettlementsAvailable(env: Env): Promise<boolean> {
-  const row = await env.DB.prepare(
-    "SELECT count(*) AS present FROM sqlite_master WHERE type='view' AND name IN ('card_settlement_reviews','card_settlement_readiness')",
-  ).first<{ present: number }>();
-  return row?.present === 2;
+  return storeHasFeature(d1Executor(env.DB), "cardSettlements");
 }
 
 /** Operator-only; agents read the same answers through `kogane.card-settlements.*` on a whole-store grant. */

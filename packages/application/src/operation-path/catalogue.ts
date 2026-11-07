@@ -358,6 +358,16 @@ export const OPERATION_CATALOGUE = {
     capability: "",
     paths: ["alarm"],
   },
+  // The `processor-tick` alarm frees a collection lease whose holder went
+  // silent (ADR 0085): applied, and R2 because the next execution may then
+  // contact the provider. A tick that frees nothing records nothing.
+  "alarm.lease.expire": {
+    risk: ["R2"],
+    effect: "applied",
+    quiet: "replayed",
+    capability: "",
+    paths: ["alarm"],
+  },
   // One tick of a lane that wrote rule decisions, economic commits or
   // proposals: R2 when it wrote a decision or a commit (adopted state, the
   // class of `command.commit`), R1 when it wrote proposals only (the class of
@@ -390,6 +400,7 @@ const NOT_TOOLS: readonly OperationName[] = [
   "mcp.request",
   "audit.overflow",
   "alarm.occurrence.claim",
+  "alarm.lease.expire",
   "lane.tick",
 ];
 
