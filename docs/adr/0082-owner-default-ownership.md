@@ -33,7 +33,7 @@ The owner decided on 2026-11-07 (03:59 UTC): "所有者は不明なら私と仮�
 (an account whose owner is unknown may be assumed to be the owner's). In the
 same minutes they chose to delegate settlement decisions to agents through
 MCP, and decided that MCP uses the same API as the screens, never the database
-directly (ADR 0081, in review).
+directly ([ADR 0081](0081-ui-parity-through-mcp.md)).
 
 ## Options considered
 
@@ -77,9 +77,11 @@ in the history; option 2 needs one plan per account, a few in practice.
    (`single_account_scope_unconfirmed`). The commit repeats these checks in
    its receipt guard, as for the self-declaration.
 4. **Who applies it.** Whoever may plan and approve a `relation.accept`: the
-   operator on the page, or a principal the owner delegated
+   operator through the command API, or a principal the owner delegated
    `commands.plan` and `commands.decide.relation` to in `MCP_DELEGATIONS`
-   (ADR 0063). This ADR adds no delegation.
+   (ADR 0063). This ADR adds no delegation. The confirmation page shows and
+   approves an owner-default plan; the card-ownership page does not yet offer
+   to plan one (it plans only the sole-personal self-declaration).
 5. **What it is not.** Not provider-name verification, KYC or a statement of
    when ownership began; joint, family-card and third-party liability are not
    inferred and are not excluded by it either: the owner decided that an
@@ -109,5 +111,6 @@ and its refusals), `packages/read-model/test/ownership-declaration.test.ts`
 placeholder refused by both, a recorded claim winning), and
 `services/processor/test/ownership-review.test.ts` (both sides defaulted on a
 MyJCB root and an SMBC account, the simulation's provenance, another party
-refused, an unresolved root refused, and the next sweep proposing the match
-with `established-same`). No production decision is made by this change.
+refused, an unresolved root refused, the next sweep proposing the match
+with `established-same`, and a claim or contradiction arriving inside the
+commit refusing an approved default on a MyJCB root atomically). No production decision is made by this change.

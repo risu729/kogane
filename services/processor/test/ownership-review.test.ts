@@ -490,15 +490,34 @@ test("the owner default (ADR 0082) names the owner on both sides, admits a card 
   }
 });
 
-for (const conflictKind of ["beneficial_owner", "contradicts"] as const) {
-  test(`a ${conflictKind} judgement arriving inside commit blocks self-declaration atomically`, async () => {
-    const c = await candidate(),
+const aggregateRootResolver: IdentityResolver = (input) => ({
+  account: {
+    key: [input.sourceAccount],
+    label: "synthetic",
+    reason: "synthetic-owner-default",
+    role: input.sourceId === "myjcb" ? "card-statement-aggregate" : "deposit",
+    status: input.sourceId === "myjcb" ? "aggregate" : "provider-local",
+  },
+  instruments: [],
+  issues: [],
+});
+for (const [conflictKind, scope] of [
+  ["beneficial_owner", "sole-personal"],
+  ["contradicts", "sole-personal"],
+  // The owner default on a MyJCB root (ADR 0082): the receipt guard re-checks
+  // the default's own account scope, not the sole-personal one.
+  ["beneficial_owner", "owner-default"],
+  ["contradicts", "owner-default"],
+] as const) {
+  test(`a ${conflictKind} judgement arriving inside commit blocks a ${scope} declaration atomically`, async () => {
+    const c = await candidate(scope === "owner-default" ? aggregateRootResolver : resolver),
       store = d1CommandStore(db);
     const payload = {
       ...c.payload,
+      ...(scope === "owner-default" ? { toRef: OWNER_DEFAULT_PARTY } : {}),
       evidenceRefs: [
         ...c.payload.evidenceRefs,
-        ownershipDeclarationRef("liable_party", "2026-10-10")!,
+        ownershipDeclarationRef("liable_party", "2026-10-10", scope)!,
       ],
     };
     const p = await prepared(payload);
