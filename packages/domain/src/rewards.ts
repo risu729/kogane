@@ -23,21 +23,23 @@ import {
 import {
   addMonths,
   compareTemporal,
-  compareToOpenEnded,
   daysFromCivil,
   formatLocalDate,
   parseLocalDate,
   periodContainsDate,
-  validOpenEndedPeriodValue,
   validTemporalValue,
   validZone,
   type CivilDate,
   type EndOfMonthPolicy,
   type LocalDateValue,
-  type OpenEndedPeriodValue,
   type TemporalOrder,
   type TemporalValue,
 } from "./time.ts";
+import {
+  compareToOpenEnded,
+  validOpenEndedPeriodValue,
+  type OpenEndedPeriodValue,
+} from "./open-ended-period.ts";
 import {
   exactQuantity,
   integerDecimal,
