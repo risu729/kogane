@@ -91,7 +91,7 @@ const TOOLS = {
   "kogane.store.read": tool({
     title: "Store metadata, overview and filter options",
     description:
-      "One of the evidence browser's page reads: `meta` (what this deployment serves, parsing health and months with no rows), `overview` (per source: runs, artifacts and observation counts, latest capture times), or `filter-options` (the sources, accounts, instruments and metrics a `kind` of list can be filtered by; `view` only for balances). The same answer as GET /api/meta, /api/overview or /api/filter-options, under records.read and a whole-store read grant. Read-only.",
+      "One of the evidence browser's page reads: `meta` (what this deployment serves, parsing health and months with no rows), `overview` (row counts per table, the sources with their artifact counts, and the latest fetch and parse runs), or `filter-options` (the sources, accounts, instruments and metrics a `kind` of list can be filtered by; `view` only for balances). The same answer as GET /api/meta, /api/overview or /api/filter-options, under records.read and a whole-store read grant. Read-only.",
     schema: z.strictObject({
       page: z.enum(["meta", "overview", "filter-options"]),
       kind: z.enum(["transactions", "balances", "positions", "artifacts"]).optional(),
@@ -104,7 +104,7 @@ const TOOLS = {
   "kogane.observations.list": tool({
     title: "Lists of transactions, balances, positions or artifacts",
     description:
-      "One page of an evidence browser list: `transactions`, `balances` (the latest grouped balances and their history), `positions` (with valuations) or `artifacts` (stored captures, newest first). Each row carries its normalized decimal and its identity organization. The same answer as GET /api/<kind>, under records.read and a whole-store read grant. Filters are the route's: `source`, `account`, `from`/`to` (YYYY-MM-DD) and `q` for transactions; `instrument`, `metric` and `view` for balances; `offset` (and `latestOffset` for balances) pages up to 500 rows; `cursor` pages artifacts. A filter the list does not take is refused, as on the route. Read-only.",
+      "One page of an evidence browser list: `transactions`, `balances` (the latest grouped balances and their history), `positions` (with valuations) or `artifacts` (stored captures, newest first). Each observation row carries its normalized decimal and its identity organization. The same answer as GET /api/<kind>, under records.read and a whole-store read grant. Filters are the route's: `source`, `account`, `from`/`to` (YYYY-MM-DD) and `q` for transactions; `instrument`, `metric` and `view` for balances; `offset` (and `latestOffset` for balances) pages up to 500 rows; `cursor` pages artifacts. A filter the list does not take is refused, as on the route. Read-only.",
     schema: z.strictObject({
       kind: z.enum(["transactions", "balances", "positions", "artifacts"]),
       source: FILTER_TEXT.optional(),
@@ -127,7 +127,7 @@ const TOOLS = {
   "kogane.observations.get": tool({
     title: "One observation or artifact with its detail",
     description:
-      "One stored observation (`transaction`, `balance`, `position` or `valuation`) with its normalized decimal, identity organization and evidence links, or one `artifact` with its run, parse runs and observation counts. The same answer as GET /api/observations/<kind>/<id> or /api/artifacts/<id>, under records.read and a whole-store read grant. An id the store does not hold is 404 not_found. Read-only; raw bytes are not part of it.",
+      "One stored observation (`transaction`, `balance`, `position` or `valuation`) with its normalized decimal, identity organization and evidence links, or one `artifact` with its run and its parse runs with the observations each produced. The same answer as GET /api/observations/<kind>/<id> or /api/artifacts/<id>, under records.read and a whole-store read grant. An id the store does not hold is 404 not_found. Read-only; raw bytes are not part of it.",
     schema: z.strictObject({
       kind: z.enum(["transaction", "balance", "position", "valuation", "artifact"]),
       id: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
