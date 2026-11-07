@@ -1034,6 +1034,36 @@ describe("policies, digests and the manifest", () => {
     );
   });
 
+  test("the knowledge boundary does not depend on the order of one instant spelled twice", async () => {
+    // One recorded instant in two spellings: a selection order must not pick
+    // which text the manifest (and so the context id) carries.
+    const utc = selectPrice(
+      USD,
+      [candidate({ id: "usd-1", amount: "146", recordedAt: "2026-09-10T00:00:00.000Z" })],
+      BOUND,
+      POLICY,
+      null,
+    );
+    const tokyo = selectPrice(
+      ALPHA,
+      [
+        candidate({
+          key: ALPHA,
+          id: "alpha-1",
+          amount: "7",
+          recordedAt: "2026-09-10T09:00:00+09:00",
+        }),
+      ],
+      BOUND,
+      EQUITY,
+      null,
+    );
+    const manifest = (selections: PriceSelection[]) =>
+      selectionManifest({ policies: [POLICY, EQUITY], calendars: [], bound: BOUND, selections });
+    const forward = await manifest([utc, tokyo]);
+    expect(await manifest([tokyo, utc])).toEqual(forward);
+  });
+
   test("exclusion counts start at zero for every code", () => {
     expect(selectPrice(USD, [], BOUND, POLICY, null).excluded).toEqual(none);
   });

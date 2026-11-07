@@ -135,6 +135,8 @@ What existed before this change:
   event's time is compared at the millisecond only; every writer stores
   milliseconds. The manifest records the mode and the newest `recorded_at`
   actually used, not K, so a later K that changes nothing keeps the context.
+  Of one newest instant written two ways, the larger text is recorded, so the
+  order the selections are handed in never picks the spelling.
 - **The candidate read.** Per wanted key, every row effective inside a coarse
   window (the earliest possibly fresh civil date minus two days, to the bound
   plus two days, compared through `julianday`: a date of another zone, or of

@@ -10,6 +10,7 @@
 // disagreement is `conflict`, not a silent choice. Nothing in this file
 // performs an exchange; `simulateConversion` and `findConversionPaths` return
 // bounded plans and the conditions that still need checking.
+import { canonicalJson } from "./context.ts";
 import {
   hasExactKeys,
   isArrayOf,
@@ -1126,6 +1127,17 @@ function agreementOf(displayed: DisplayedExpiry | null, computed: ComputedExpiry
   return order.order === 0 ? "agree" : "disagree";
 }
 
+/** Text order by Unicode code point: SQLite's BINARY order over UTF-8. */
+function codePointOrder(a: string, b: string): -1 | 0 | 1 {
+  const left = [...a];
+  const right = [...b];
+  for (let index = 0; index < Math.min(left.length, right.length); index += 1) {
+    const order = left[index]!.codePointAt(0)! - right[index]!.codePointAt(0)!;
+    if (order !== 0) return order < 0 ? -1 : 1;
+  }
+  return left.length < right.length ? -1 : left.length > right.length ? 1 : 0;
+}
+
 /**
  * The deadline of a holding under one rule version, with the provider's
  * display and the computed answer kept apart per bucket.
@@ -1193,27 +1205,35 @@ export function estimateExpiry(
 
   // 2. Membership: only a tier-gated rule consumes it.
   const tiers = rule.applicability.tiers;
+  // Claims are listed by tier, then by the claim as it is stored, so the
+  // basis does not depend on the order the membership claims were handed in.
+  // Tiers compare by code point, the order SQLite's BINARY `ORDER BY tier`
+  // gives MEMBERSHIP_SQL's rows; UTF-16 unit order differs from it past U+FFFF.
   const matching =
     tiers === null
       ? []
-      : membership.filter(
-          (state) =>
-            state.programId === holding.programId &&
-            state.holdingRef === holding.holdingRef &&
-            tiers.includes(state.tier),
-        );
+      : membership
+          .filter(
+            (state) =>
+              state.programId === holding.programId &&
+              state.holdingRef === holding.holdingRef &&
+              tiers.includes(state.tier),
+          )
+          .map((state) => {
+            const claim = {
+              tier: state.tier,
+              source: state.source,
+              valid: state.valid,
+              evidenceRefs: [...new Set(state.evidenceRefs)],
+            };
+            return { claim, text: canonicalJson(claim) };
+          })
+          .sort(
+            (a, b) => codePointOrder(a.claim.tier, b.claim.tier) || codePointOrder(a.text, b.text),
+          )
+          .map(({ claim }) => claim);
   const membershipBasis: ExpiryMembershipBasis | null =
-    tiers === null
-      ? null
-      : {
-          requiredTiers: [...new Set(tiers)],
-          claims: matching.map((state) => ({
-            tier: state.tier,
-            source: state.source,
-            valid: state.valid,
-            evidenceRefs: [...new Set(state.evidenceRefs)],
-          })),
-        };
+    tiers === null ? null : { requiredTiers: [...new Set(tiers)], claims: matching };
   const outOfScope = ruleFailure === null && tiers !== null && matching.length === 0;
   if (outOfScope) {
     push(uncertaintyCodes, "membership_out_of_scope");
