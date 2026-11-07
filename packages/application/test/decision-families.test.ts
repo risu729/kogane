@@ -9,7 +9,6 @@ import type { OperationCall } from "../src/audit/call.ts";
 import { CHANGE_KINDS } from "../src/command/contract.ts";
 import {
   DECISION_CAPABILITIES,
-  DECISION_FAMILIES,
   DELEGATION_CAPABILITIES,
   decisionFamilyOf,
   type DelegatedPrincipal,
@@ -109,7 +108,9 @@ describe("DECISION_FAMILIES is the one decidable-family list", () => {
     expect(JSON.stringify(DELEGATION_CAPABILITIES)).toBe(
       JSON.stringify(LEGACY_DELEGATION_CAPABILITIES),
     );
-    expect(DECISION_CAPABILITIES).toEqual(DECISION_FAMILIES.map((f) => `commands.decide.${f}`));
+    expect(JSON.stringify(DECISION_CAPABILITIES)).toBe(
+      JSON.stringify(LEGACY_DELEGATION_CAPABILITIES.slice(1, 4)),
+    );
   });
 
   test("decisionFamilyOf answers every kind as the three spelled-out comparisons did", () => {
