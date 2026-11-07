@@ -223,11 +223,12 @@ others) shows only 表示対象の記録がありません and 接続先を確�
 even though the preview API still serves the fixtures
 ([synthetic display test](../apps/web/test/synthetic-display.browser.test.ts)).
 The preview is therefore a check of the shell and that guard, not of the
-financial pages. 収集スケジュール (`/schedules`) and 監査ログ (`/audit`) are
-drawn outside that guard, but the preview serves neither
-`/api/ops/v1/schedules` nor `/api/v2/audit`: the
-schedules page shows its load-error messages, and the audit page says that
-this source provides no audit log.
+financial pages. 収集スケジュール (`/schedules`), 監査ログ (`/audit`) and
+依頼の経過 (`/operations/op_<id>`) are drawn outside that guard, but the
+preview serves neither `/api/ops/v1/schedules`, `/api/v2/audit` nor
+`/api/ops/v1/operations/{id}`: the schedules page shows its load-error
+messages, the audit page says that this source provides no audit log, and the
+operation page says the operation is not found.
 
 `mise run //experiments/observation-pipeline-local:serve` continues to read the regular local store. Its metadata
 reports the data classification as unknown: an operator may have ingested

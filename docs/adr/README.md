@@ -58,7 +58,7 @@ for current behavior.
 - [ADR 0045: Collection quality is a per-request read of stored stage states, in closed codes](0045-collection-quality-read.md) — accepted
 - [ADR 0046: Maintenance windows as a separately granted agent capability](0046-agent-maintenance-windows.md) — accepted; amended 2026-10-09 by ADR 0063 (the revision is a delegated operation, executable since #660; since ADR 0084 by any MCP client Access admits, over every schedule)
 - [ADR 0047: Connect MCP clients through Cloudflare Access Managed OAuth, as an agent-only principal](0047-mcp-client-connection.md) — accepted; the grant table removed by ADR 0084 (any MCP client the MCP Access application admits reads the whole store); a client connection is not asserted
-- [ADR 0048: Run an accepted collection or session refresh once through the named collector RPC](0048-operation-collector-dispatch.md) — accepted; production dispatch unverified
+- [ADR 0048: Run an accepted collection or session refresh once through the named collector RPC](0048-operation-collector-dispatch.md) — accepted; production dispatch unverified; 2026-11-07 amendment (依頼の経過 page) proposed
 - [ADR 0049: Keep the displayed and the computed reward expiry apart, each with its basis](0049-reward-expiry-basis.md) — accepted; offer simulation amended 2026-11-06 (#937): offer-set bound, caller-named version, reported search stops
 - [ADR 0050: Re-survey official maintenance pages as proposals an operator accepts](0050-maintenance-survey-proposals.md) — accepted; no page enabled until the owner confirms it
 - [ADR 0051: A pure lot engine over a provisional input contract](0051-provisional-lot-engine.md) — accepted; its adapter is ADR 0059

@@ -26,6 +26,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import demo from "./snapshot-worker";
 import worker from "../src/worker";
 import { seedRegistry } from "./fixtures";
+import { validOperationRecord } from "../../../packages/observation-shared/src/operation-contract";
 import { PURCHASES_TOOL_NAME } from "../src/agent-service";
 import { MCP_TOOLS, RECONSTRUCTED_STATE_MCP_TOOLS } from "../src/mcp";
 import { OPS_TOOL_NAMES } from "../src/ops-tools";
@@ -251,6 +252,8 @@ describe("collection requests are accepted, not executed (G3-06, G3-14)", () => 
     expect(read.status).toBe(200);
     const receipt = (await read.json()) as Record<string, any>;
     expect(receipt.schemaVersion).toBe("kogane-operation-v1");
+    // The record the browser's 依頼の経過 page accepts (operation-contract.ts).
+    expect(validOperationRecord(receipt, first.json.operationId)).toBe(true);
     expect(receipt.stages.map((stage: any) => [stage.stage, stage.state])).toEqual([
       ["persisted", "pending"],
       ["registered", "pending"],
@@ -303,6 +306,7 @@ describe("collection requests are accepted, not executed (G3-06, G3-14)", () => 
     const read = await call(`${OPS}/operations/${operationId}`, { environment: ENABLED });
     expect(read.status).toBe(200);
     const receipt = (await read.json()) as Record<string, any>;
+    expect(validOperationRecord(receipt, operationId)).toBe(true);
     expect(receipt.status).toBe("running");
     expect(receipt.targetRef).toBe("collector:sony-bank");
     expect(receipt.stages[0]).toMatchObject({ stage: "persisted", state: "completed" });
@@ -656,6 +660,7 @@ describe("stage progress is evidence, not a guess", () => {
     receipt = (await (
       await call(`${OPS}/operations/${operationId}`, { environment: ENABLED })
     ).json()) as Record<string, any>;
+    expect(validOperationRecord(receipt, operationId)).toBe(true);
     expect(receipt.status).toBe("completed");
     expect(receipt.stages[0]).toMatchObject({
       state: "completed",
@@ -844,6 +849,7 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
     });
     expect(overHttp.status).toBe(200);
     const receipt = (await overHttp.json()) as Record<string, unknown>;
+    expect(validOperationRecord(receipt, accepted.json.operationId)).toBe(true);
     expect(receipt).toMatchObject({
       operationId: accepted.json.operationId,
       status: "accepted",
