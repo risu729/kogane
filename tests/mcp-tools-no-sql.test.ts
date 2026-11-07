@@ -37,26 +37,39 @@ function reachable(entry: string): string[] {
  * SQL moves into packages/application.
  */
 const SCREEN_ONLY_SQL: Record<string, string> = {
-  "account-connections.ts": "observation-organization's organizeRows, below",
   "normalized-decimals.ts": "balances-v2's page functions, which no MCP tool calls",
   "observation-organization.ts": "balances-v2's page functions, which no MCP tool calls",
-  "preferred-instrument-names.ts": "observation-organization's organizeRows, above",
+  "read.ts": "the evidence routes; page-read-tools imports only catalogue",
   "reports-api.ts": "the report routes; capabilities imports only reportArtifactsAvailable",
 };
+
+/**
+ * Modules whose SQL an MCP tool does run today, still to move into
+ * packages/application (ADR 0081 Verification). Nothing may join this list:
+ * a new entry is new SQL on the MCP path.
+ */
+const MCP_SQL_TO_MOVE: Record<string, string> = {
+  "identity-api.ts": "kogane.identity.read shares readIdentityCollection with GET /api/identity/*",
+  "account-connections.ts": "readIdentityCollection's connections and account labels",
+  "preferred-instrument-names.ts": "readIdentityCollection's instrument labels",
+};
+
+const EXEMPT: Record<string, string> = { ...SCREEN_ONLY_SQL, ...MCP_SQL_TO_MOVE };
 
 /**
  * What the graph may import from a module whose other exports run SQL a
  * screen route needs: the functions here issue none, or only through
  * packages/application. Importing anything else from it fails the guard, so
- * an exemption above cannot quietly start covering an MCP call.
+ * a screen-only exemption cannot quietly start covering an MCP call.
  */
 const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   "balances-v2.ts": ["balanceProjectionReader", "balanceReadConfigured", "readTarget"],
+  "read.ts": ["catalogue"],
   "reports-api.ts": ["reportArtifactsAvailable"],
 };
 
 const modules = reachable("mcp.ts");
-const adapters = modules.filter((name) => !(name in SCREEN_ONLY_SQL));
+const adapters = modules.filter((name) => !(name in EXEMPT));
 // A CommandStore, SqlExecutor or D1 call: `store.first<…>(`, `db\n  .prepare(`, …
 // `Promise.all(` is not a store call.
 const STORE_CALL = /(?<!Promise\s*)\??\.\s*(?:first|all|batch|prepare|run|raw)\s*[<(]/gu;
@@ -114,8 +127,8 @@ describe("MCP tools issue no SQL of their own (ADR 0081)", () => {
       expect([...names].filter((id) => !allowed.includes(id))).toEqual([]);
     }
   });
-  test("every screen-only exemption is on the graph and still holds SQL", () => {
-    for (const name of Object.keys(SCREEN_ONLY_SQL)) {
+  test("every exemption is on the graph and still holds SQL", () => {
+    for (const name of Object.keys(EXEMPT)) {
       expect(modules).toContain(name);
       expect(offending(readFileSync(resolve(source, name), "utf8")).length).toBeGreaterThan(0);
     }
