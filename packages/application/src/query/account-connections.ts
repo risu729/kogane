@@ -1,5 +1,14 @@
-import type { AccountConnection } from "../../../packages/observation-shared/src/account-connection-contract";
+// The account connection reviews (migration 0023, docs/account-connections.md):
+// the inventory the identity page lists, and the connection each account row
+// of the identity and organization reads shows. Moved here from
+// `services/app/src/account-connections.ts` (ADR 0081 point 2), so the screens
+// and `kogane.identity.read` read the reviews through one function and no
+// adapter holds this SQL.
+import type { AccountConnection } from "../../../observation-shared/src/account-connection-contract.ts";
+import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 export type { AccountConnection };
+const REVIEWS_SQL =
+  "SELECT * FROM current_account_connection_reviews ORDER BY producer_id,connection_key LIMIT 65";
 interface ReviewRow {
   producer_id: string;
   connection_key: string;
@@ -50,32 +59,27 @@ function presentation(row: ReviewRow): AccountConnection {
     revision: row.revision,
   };
 }
+/** Every current review; more than the inventory bound is refused, not cut. */
+async function reviews(sql: SqlExecutor): Promise<ReviewRow[]> {
+  const rows = await sql.all<ReviewRow>(REVIEWS_SQL, []);
+  if (rows.length > 64) throw new Error("connection_inventory_limit");
+  return rows;
+}
 /** Invoke only behind the existing Access gate. No raw identifiers are returned. */
-export async function listAccountConnections(db: D1Database): Promise<AccountConnection[]> {
-  const rows = await db
-    .prepare(
-      "SELECT * FROM current_account_connection_reviews ORDER BY producer_id,connection_key LIMIT 65",
-    )
-    .all<ReviewRow>();
-  if (rows.results.length > 64) throw new Error("connection_inventory_limit");
-  return rows.results.map((row) => {
+export async function listAccountConnections(sql: SqlExecutor): Promise<AccountConnection[]> {
+  const rows = await reviews(sql);
+  return rows.map((row) => {
     connectionReferenceSet(row.direct_reference_ids_json);
     return presentation(row);
   });
 }
 /** Exact reference IDs determine which direct accounts a retained proof covers. */
 export async function readAccountConnections(
-  db: D1Database,
+  sql: SqlExecutor,
   refs: { referenceId: string; source: string; producer: string; sourceAccount: string }[],
 ): Promise<Map<string, AccountConnection>> {
   if (refs.length > 5501) throw new Error("connection_reference_limit");
-  const rows = await db
-    .prepare(
-      "SELECT * FROM current_account_connection_reviews ORDER BY producer_id,connection_key LIMIT 65",
-    )
-    .all<ReviewRow>();
-  if (rows.results.length > 64) throw new Error("connection_inventory_limit");
-  const parsed = rows.results.map((row) => ({
+  const parsed = (await reviews(sql)).map((row) => ({
     ...row,
     directReferences: connectionReferenceSet(row.direct_reference_ids_json),
   }));
@@ -107,4 +111,19 @@ export async function readAccountConnections(
       });
   }
   return result;
+}
+
+/** A reviewed provider name describes an MF connection, never a leaf account. */
+export function connectionAccountLabel(
+  currentLabel: string,
+  method: "rule" | "manual",
+  source: string,
+  connection: AccountConnection | undefined,
+): string {
+  return source === "moneyforward-me" &&
+    method !== "manual" &&
+    connection &&
+    connection.status !== "evidence-ineligible"
+    ? `${connection.label}（個別口座未確定）`
+    : currentLabel;
 }
