@@ -75,8 +75,9 @@ function classify(path: string): string {
   if (path === "/api/v2/activity" || path === "/api/v2/obligations") return "events_v2";
   if (path === "/api/v2/reports") return "report";
   if (/^\/api\/v2\/reports\/[^/]+(?:\/(?:explanation|export))?$/.test(path)) return "report";
-  if (path.startsWith("/api/v2/rewards")) return "rewards";
-  return path.startsWith("/api/") ? "unknown_api" : "assets";
+  if (path === "/api/v2/rewards" || path.startsWith("/api/v2/rewards/")) return "rewards";
+  // The same boundary `route` answers 404 for: `/api` itself is an API path.
+  return path === "/api" || path.startsWith("/api/") ? "unknown_api" : "assets";
 }
 
 async function route(request: Request, env: Env, url: URL): Promise<Response> {

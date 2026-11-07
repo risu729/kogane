@@ -56,6 +56,15 @@ const DEBIT_ACCOUNT_REASONS: Record<string, string> = {
     "その銀行に口座番号を比較できない口座もあるため、一意と判断できません",
   source_has_no_debit_account_statement: "このカード会社の画面には引落口座の表示がありません",
   evidence_not_recorded: "この候補についての判定はまだ記録されていません",
+  // The page's 「カード情報」 table was refused under the current reader.
+  card_information_absent: "明細に「カード情報」がありません",
+  card_information_ambiguous: "明細に「カード情報」が複数あります",
+  card_information_table_missing: "「カード情報」の表がありません",
+  card_information_table_invalid: "「カード情報」の表の形が想定と異なります",
+  card_information_name_invalid: "金融機関名または支店名を読み取れません",
+  card_information_account_invalid: "科目・口座番号を読み取れません",
+  page_not_utf8: "明細の原本を文字として読めません",
+  raw_object_unreadable: "明細の原本を読み出せません",
 };
 
 function debitAccountReason(code: string): string {

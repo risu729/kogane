@@ -132,8 +132,10 @@ statement are not handled.
 
 ### Provider-stated debit accounts
 
-Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md) and its
-2026-09-27 amendment (proposed). What the code does today:
+Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md), its
+2026-09-27 amendment and its
+[2026-11-07 amendment](adr/0032-provider-stated-debit-accounts.md#amendment-2026-11-07-the-review-shows-the-evidence-under-the-current-reader)
+(proposed). What the code does today:
 
 **The page.** Every MyJCB credit detail page observed in round 4 (the
 confirmed statement and the ショッピングスキップ払い page, live and in the
@@ -205,9 +207,20 @@ grouped `/statements` list) carries `debitAccount`, read with the decision
 history for every review a read returns
 (`packages/application/src/query/card-settlements.ts`,
 `CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL`): the candidate's latest
-`card_settlement_debit_account_evidence` row under the current policy, found
-through `card_settlement_debit_account_evidence_candidate` for the page's
-candidates only (the grouped list's judged candidates, in one read). For example:
+`card_settlement_debit_account_evidence` row under the current policy whose
+cited `card_debit_account_statement` reading was made under the current reader
+version (`CARD_INFORMATION_READER_VERSION`,
+`packages/domain/src/myjcb-card-information.ts`, the constant the lane and the
+settlement sweep also use). The version is part of choosing the newest row, so
+after a reader-version bump a later row citing the earlier reader's reading
+neither shows nor hides an earlier row citing a current reading. The read
+also takes the refusal code of the current reader's reading of the
+candidate's own statement page (the raw object its statement parse run read,
+for its card). Both are found by key for the page's candidates only (the
+grouped list's judged candidates, in one read): the evidence through
+`card_settlement_debit_account_evidence_candidate` and the cited reading's
+primary key, the page's reading through the parse run's and artifact's keys
+and `card_debit_account_statement_object`. For example:
 
 ```json
 {
@@ -227,28 +240,42 @@ candidates only (the grouped list's judged candidates, in one read). For example
 ```
 
 `not_proposed` carries the rule's closed reason and no bank account. A
-candidate without a row is `absent` with a closed reason, never blank:
-`source_has_no_debit_account_statement` (Vpass, which has no reader) or
-`evidence_not_recorded` (a MyJCB candidate the sweep has recorded nothing for
-under the current policy: its page has no `read` row under the current reader
-version yet or was `refused`, its bank has more known accounts than the rule
-is given, or the sweep has not revisited it since the policy changed). A
-malformed row fails the read (`card_settlement_debit_account_evidence_invalid`).
+candidate without such a row is `absent` with a closed reason, never blank,
+and no statement reference, bank account or time:
+
+- `source_has_no_debit_account_statement`: Vpass, which has no reader;
+- the lane's refusal code, when the current reader's reading of the
+  candidate's own page is `refused` (`card_information_absent`,
+  `card_information_ambiguous`, `card_information_table_missing`,
+  `card_information_table_invalid`, `card_information_name_invalid`,
+  `card_information_account_invalid`, `page_not_utf8`,
+  `raw_object_unreadable`; the sweep cites only `read` readings, so such a
+  page never has a row). A refusal under an earlier reader version, of
+  another page or of another card's reading of the page does not count;
+- `evidence_not_recorded`: a MyJCB candidate the sweep has recorded nothing for
+  under the current policy and reader version, with no refusal of its page:
+  the page has no reading under the current reader version yet, its bank has
+  more known accounts than the rule is given, or the sweep has not revisited
+  it since the policy or reader version changed.
+
+A malformed row or a refusal code outside that set fails the read
+(`card_settlement_debit_account_evidence_invalid`).
 The page shows it as `カード会社が示す引落口座`. It is evidence for the
 reviewer only: it adds no acceptance blocker, removes none, and the plan and
 acceptance never read it.
 
 Limits:
 
-- **Only the latest row under the current policy is shown.** The review
-  page shows no earlier outcomes and no row of a superseded policy; they stay
-  in the table.
+- **Only the latest row under the current policy and reader version is
+  shown.** The review page shows no earlier outcomes, no row of a superseded
+  policy and no row citing an earlier reader's reading; they stay in the
+  table.
 - **The review page does not show the displayed bank name, branch or
   digits** of the reading, only the outcome, the bank account the proposal
   names and how many leading digits were compared.
-- **Agents do not read it yet.** The review route is operator-only, and the
-  agent API has no card settlement review read; the evidence reaches agents
-  only when that read exists.
+- **Agents read it through `kogane.card-settlements.read`**
+  ([agent reads](#agent-reads)): each candidate carries `debitAccount` with its
+  outcome, reason, bank source account and compared digit count.
 - **Historical SMBC and SBI Shinsei references remain uncomparable.**
   SMBC's legacy reference carries no account digits. New captures retain the
   successful request's branch, ordinary account type and number in normalized
@@ -388,7 +415,9 @@ Limits:
 The `カード照合` page shows the source facts, evidence links, candidate rationale,
 current readiness blockers and decision history. An authenticated human operator
 can plan an acceptance or rejection; the confirmation page then simulates,
-approves and commits the pinned plan. Agents do not acquire acceptance rights.
+approves and commits the pinned plan. An MCP client does the same through the
+`kogane.command.*` tools with the page's authority
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 
 The page lists statements, not candidates
 (`GET /api/v2/reconciliation/card-settlements/statements`,
@@ -479,8 +508,9 @@ except that a `liable_party` default also admits a MyJCB connection root
 (`card-statement-aggregate`, status `aggregate`); an unresolved placeholder is
 never admitted. The ownership review answers `ownerDefaultBlockers` per side.
 It is a recorded decision per account, planned and committed like any other
-claim, by the operator or by an agent the owner delegated `commands.plan` and
-`commands.decide.relation` to; nothing is defaulted at read time. The
+claim, by the operator or by an MCP client
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)); nothing is
+defaulted at read time. The
 confirmation page shows its provenance and approves it; the card-ownership
 page does not yet offer to plan one, so it is planned through the command API.
 
@@ -508,9 +538,8 @@ joint ownership is not inferred. A correction appends a rejection or a new
 explicit claim and retains prior evidence. Saving ownership does **not** accept
 a settlement: the next scheduled reconciliation pass (normally every five
 minutes) creates a fresh immutable candidate with the new evidence. Refreshing
-the page only reads that state. The operator must review and separately approve
-the resulting settlement candidate. Agents cannot approve these financial
-decisions.
+the page only reads that state. The resulting settlement candidate is reviewed
+and approved separately, by the operator or by an MCP client.
 
 The commit rechecks the source publication/currentness, ownership, allocation
 availability, claim availability and expected candidate revision in the same
@@ -739,8 +768,8 @@ Approval is refused while any of these is missing or changed: a pin, the offered
 action, or the candidate itself. The route is operator-only. An agent reads the
 same candidates through the agent API's `kogane.purchases.explain`
 ([agent API](agent-api.md#card-purchase-explanation)) with every fact and
-blocker but without `actions` or `relation`, so it can report a candidate and
-never review one: the decision stays on this page.
+blocker but without `actions` or `relation`, so it can report a candidate but
+not review it through that read; the review is this page's.
 
 ## Cost
 
@@ -965,6 +994,22 @@ second row on a re-run or for the same bytes of another run, refusals stored
 without values, append-only guards), and the settlement sweep (evidence
 attached, a changed outcome appended, the candidate's facts and eligibility
 unchanged).
+`packages/application/test/card-settlement-query.test.ts` covers the review's
+`debitAccount` on synthetic rows: the latest row under the current policy, a
+later row citing an earlier reader's reading neither shown nor hiding an
+earlier current one, a page refused under the current reader shown as
+`absent` with its code while a refusal under another reader, of another page
+or of another card is not, a current row winning over a refusal, and a
+malformed row or unknown refusal code failing the read.
+`card-settlement-review-scale.test.ts` checks that its plan reaches the
+evidence, the cited reading and the page's reading by key on the scaled store
+without statistics. Wherever every cited reading is current the read returns
+the rows #1019's text did
+(`packages/application/test/card-settlement-debit-account-legacy-sql.ts`):
+`services/processor/test/card-settlement-scale.test.ts` compares the two
+after the sweep, on random stores and the scaled store, and
+`card-debit-account.test.ts` pins the accepted refusal codes to migration
+0060's CHECK.
 `services/processor/test/card-settlement-unmatched.test.ts` runs the sweep on
 synthetic rows for each [unmatched code](#unmatched-statements): two debits
 summing to the total and a partial debit, an equal debit four days late and no
@@ -975,6 +1020,58 @@ integers only.
 Archived production samples were inspected read-only to verify provider field
 shapes; private values are not test fixtures and no live financial decision is
 accepted by those checks.
+
+### First production decisions (2026-11-07)
+
+The first live ownership and card-settlement decisions, the verification of the
+[Phase 2 plan](plans/2026-11-phase2-card-flow.md#2g-settlement-decisions-by-an-agent-and-verification-code--adrs)'s
+unit 2g. An MCP client made them through the Cloudflare MCP Portal with the
+`kogane.command.*` tools, under the owner's approval of 2026-11-07, 16:47 UTC.
+Counts and identifiers only; no amount or account value is recorded here. Every
+decision below is in the audit log under principal `mcp-client:169b1b83…`.
+
+1. **Before.** 426 candidates, all `proposed`, every one blocked by
+   `owner_not_established`. Ten resolved accounts had no ownership claim and
+   empty `ownerDefaultBlockers`: seven card accounts (the MyJCB connection root
+   under two identities, Vpass `card-002` to `card-006`) and three debit
+   accounts (SMBC ordinary yen under two identities, one SBI Shinsei account).
+2. **Owner default.** Ten `relation.accept` decisions (16:48 to 16:53 UTC) with
+   marker `ownership-declaration:owner-default-v1:<role>:2026-11-07` and party
+   `party:owner`: `liable_party` on the seven card accounts,
+   `beneficial_owner` on the three debit accounts. Each plan cited, as its
+   review marker, a candidate whose only blocker was `owner_not_established`.
+3. **Sweep.** A sweep at 16:52 UTC, while the ten were being recorded, proposed
+   7 MyJCB candidates that still carry `owner_not_established` (they cite only
+   the ownership recorded by then). The sweep of 16:56 to 16:57 UTC proposed 55
+   candidates with `ownership: established-same` and no acceptance blocker (14
+   MyJCB, 41 Vpass). Earlier candidates keep their blockers; the sweep
+   appends, it does not rewrite them.
+4. **Decisions.** Accepted one MyJCB candidate (`cs_be06321d`, 2026-09,
+   `collector-myjcb` statement, SMBC debit, debit-account statement
+   `supports`) and one Vpass candidate (`cs_93bffe03`, card-005 2026-08,
+   importer-era statement, SMBC debit) at 17:04 UTC. Withdrew the
+   `cs_93bffe03` acceptance at 17:05 UTC; it keeps its history (`accepted`
+   then `withdrawn`), and the 2026-08 statement's lead became the next proposed
+   candidate (`cs_80687b69`), which is left undecided. Then accepted a Vpass
+   candidate for another statement (`cs_6c1a79c8`, card-005 2026-09, SMBC
+   debit, proposed by the 16:56 sweep) at 17:07 UTC, so one Vpass and one
+   MyJCB settlement stay accepted.
+5. **Purchases.** `kogane.purchases.explain` for 2026-08 and 2026-09 returned
+   the same captured, authorized and refund totals, event counts and zero
+   unresolved before, after acceptance and after withdrawal;
+   `settlementAddsPurchaseExpense` stayed `false` and each decided candidate's
+   `impact.addedPurchaseExpense` and `addedCashMovement` are zero. Of the 80
+   events of 2026-09, the 11 MyJCB and 68 Vpass card-005 ones name their
+   accepted settlement and its bank debit (利用 → 請求 → 引落); the 22 events
+   of 2026-08, whose acceptance was withdrawn, name the next proposed candidate
+   and no bank debit.
+6. **Cash movement.** `kogane.economic-readiness.read` (`bank-movement`) on the
+   three debits returns `economic_claim_held` for the two accepted ones and
+   not for the withdrawn one, so the withdrawal released its claim.
+   `/api/v2/activity?basis=cash-movement` itself has no MCP read (it is not a
+   screen route, so the [parity guard](agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07)
+   does not list it); it was not read in this run, so the roadmap's "the
+   cash-movement view counts the case once" is not yet shown.
 
 ## Automation prerequisites (ADR 0034)
 

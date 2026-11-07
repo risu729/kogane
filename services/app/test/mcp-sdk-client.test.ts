@@ -15,6 +15,12 @@ import {
   PURCHASES_TOOL_NAME,
   RECONSTRUCTED_STATE_TOOL_NAME,
 } from "../src/agent-service";
+import {
+  LEASE_RELEASE_TOOL,
+  SCHEDULE_READ_TOOL,
+  SCHEDULE_UPDATE_TOOL,
+  SURVEY_READ_TOOL,
+} from "../src/schedule-tools";
 import { QUERY_GRANT_CAPABILITIES } from "../../../packages/application/src/index";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 
@@ -84,6 +90,33 @@ function transport(environment: Record<string, unknown>, audience = MCP_AUD) {
 /** Nothing configures an MCP client (ADR 0084). */
 const GRANTED = {};
 
+/**
+ * Every flag that publishes more tools. The Processor is never reached:
+ * listing calls no tool.
+ */
+const EVERY_FEATURE = {
+  SCHEDULES_ENABLED: "true",
+  OPS_API_ENABLED: "true",
+  COMMANDS_ENABLED: "true",
+  PIPELINE: {
+    fetch: async () => {
+      throw new Error("Unexpected Processor request in a tools/list test");
+    },
+  },
+};
+/** Tools only a flag above publishes; their presence proves the flags took effect. */
+const EVERY_FEATURE_TOOLS = [
+  SCHEDULE_READ_TOOL,
+  SURVEY_READ_TOOL,
+  SCHEDULE_UPDATE_TOOL,
+  LEASE_RELEASE_TOOL,
+  "kogane.schedules.survey.decide",
+  "kogane.schedules.job.update",
+  "kogane.command.plan",
+  "kogane.command.approve",
+  "kogane.ops.collection.request",
+];
+
 describe("the official SDK client against /mcp", () => {
   for (const mode of ["legacy", "auto"] as const) {
     it(`initializes, lists and calls the tools (${mode} negotiation)`, async () => {
@@ -120,6 +153,8 @@ describe("the official SDK client against /mcp", () => {
           "kogane.observations.list",
           "kogane.observations.get",
           "kogane.balances.read",
+          "kogane.rewards.read",
+          "kogane.reported-holdings-change.read",
           PURCHASES_TOOL_NAME,
           RECONSTRUCTED_STATE_TOOL_NAME,
         ]);
@@ -144,6 +179,36 @@ describe("the official SDK client against /mcp", () => {
         });
         expect(unknown.isError).toBe(true);
         expect(unknown.structuredContent).toMatchObject({ code: "unsupported_semantics" });
+      } finally {
+        await client.close();
+      }
+    });
+  }
+
+  // Every feature that adds tools is on, so the catalogue is the largest this
+  // Worker publishes. The SDK client validates each descriptor of `tools/list`
+  // (an `inputSchema` must be `type: "object"` at its root): one invalid
+  // descriptor fails the whole list, as it did for Cloudflare's MCP Portal.
+  for (const mode of ["legacy", "auto"] as const) {
+    it(`lists the whole catalogue with every feature on (${mode} negotiation)`, async () => {
+      const client = new Client(
+        { name: "synthetic-sdk-client", version: "0" },
+        { versionNegotiation: { mode } },
+      );
+      await client.connect(transport(EVERY_FEATURE));
+      try {
+        const listed = await client.listTools();
+        const names = listed.tools.map((tool) => tool.name);
+        expect(names).toEqual(expect.arrayContaining(EVERY_FEATURE_TOOLS));
+        expect(new Set(names).size).toBe(names.length);
+        for (const tool of listed.tools) {
+          expect(tool.inputSchema.type, tool.name).toBe("object");
+          // Clients that hand a tool to a model refuse a root combinator.
+          for (const key of ["oneOf", "anyOf", "allOf", "not"])
+            expect(Object.keys(tool.inputSchema), tool.name).not.toContain(key);
+          // ChatGPT refuses a Unicode property escape in a pattern.
+          expect(JSON.stringify(tool.inputSchema), tool.name).not.toMatch(/\\\\[pP]\{/u);
+        }
       } finally {
         await client.close();
       }

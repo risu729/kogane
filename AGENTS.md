@@ -67,8 +67,8 @@ disagree, the document is right and this file is corrected.
 
 - `CI Check` is the required status. It passes only when `Checks` and both
   `Processor` shards succeed ([ci](docs/ci.md#jobs-and-the-required-merge-guard)).
-  The ruleset also blocks merges on CodeQL security alerts of high severity or
-  above and on CodeQL alerts of error level.
+  The ruleset also blocks a merge on every new CodeQL alert the PR introduces, of
+  any severity or level, from [codeql.yml](.github/workflows/codeql.yml).
 - CI has no path filters, retries or test selection. Do not add any.
 - Never skip, disable, quarantine, retry or loosen a test or a deadline to make CI
   pass. Fix the cause, or open a separate PR for the flaky test that explains the

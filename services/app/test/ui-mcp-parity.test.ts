@@ -74,6 +74,9 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/observations/:kind/:id": ["kogane.observations.get"],
   "/api/v2/balances/latest": ["kogane.balances.read"],
   "/api/v2/balances/history": ["kogane.balances.read"],
+  "/api/v2/rewards/holdings": ["kogane.rewards.read"],
+  "/api/v2/rewards/expiry": ["kogane.rewards.read"],
+  "/api/v2/reported-holdings-change": ["kogane.reported-holdings-change.read"],
 };
 
 /** UI read routes with no MCP read yet, and what the UI reads there. */
@@ -86,13 +89,9 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
   "/api/evidence/v1/runs/:run/artifacts": "evidence browser",
   "/api/evidence/v1/runs/:run/artifacts/:artifact": "evidence browser",
   "/api/evidence/v1/runs/:run/artifacts/:artifact/raw": "evidence browser",
-  // Rewards.
-  "/api/v2/rewards/holdings": "reward holdings",
-  "/api/v2/rewards/expiry": "reward expiry",
-  // Reconciliation and reported state.
+  // Card settlements grouped by statement.
   "/api/v2/reconciliation/card-settlements/statements":
     "card settlement review grouped by statement; kogane.card-settlements.read returns the same candidates ungrouped",
-  "/api/v2/reported-holdings-change": "reported holdings between two dates (ADR 0075)",
   // Reports, quality and schedules.
   "/api/v2/reports": "stored report list",
   "/api/v2/reports/:id": "one stored report",
