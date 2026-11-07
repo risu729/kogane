@@ -1,6 +1,6 @@
 # ADR 0014: A shared-R2 collector's producer is `collector-<collector id>`
 
-- Status: proposed
+- Status: accepted (merged 2026-09-27 in #259)
 - Date: 2026-09-26
 - Carried by: the producer constants of every `services/collector-*`
   terminal module, `tests/collector-producers.test.ts`,

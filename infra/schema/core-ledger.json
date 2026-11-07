@@ -1168,6 +1168,12 @@
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "1ef7ff27e5ec9192fc009f8715861c21a28943ff8c173bdfbe1aa45b6a79cc04"
+    },
+    {
+      "file": "0082_collection_lease_heartbeat.sql",
+      "statementCount": 1,
+      "insertStatements": [],
+      "sha256": "9fc317d86b9992daecbe21f9a5c728a31bca609bef4a98f1359755230bb13941"
     }
   ],
   "tables": [
@@ -4639,6 +4645,13 @@
           "notNull": false,
           "default": null,
           "pk": 0
+        },
+        {
+          "name": "heartbeat_at",
+          "type": "TEXT",
+          "notNull": false,
+          "default": null,
+          "pk": 0
         }
       ],
       "primaryKey": [
@@ -4650,7 +4663,7 @@
       "noUpdateTriggers": [],
       "noDeleteTriggers": [],
       "appendOnly": false,
-      "sqlSha256": "0e37658aa4a424b6"
+      "sqlSha256": "bbd1e3377fd6b6e8"
     },
     {
       "name": "collection_run_stages",
@@ -22000,6 +22013,6 @@
       "0071_economic_event_command_kinds.sql",
       "0080_jpoint_program.sql"
     ],
-    "schemaSha256": "836ae255a29499fecfc3eb5450bef0633766074749cde29a074f9c1db7535fa1"
+    "schemaSha256": "13826bb5bfba82b725beef7e1fac5c64294fecf117ac4c0bacd83ccb2128086a"
   }
 }

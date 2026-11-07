@@ -129,8 +129,9 @@ The identity is the tuple of plan 03 §4:
 (source, runId, terminalDigest, registrationContractVersion)
 ```
 
-`registrationContractVersion` is `terminal-registration-v2` (since ADR 0022;
-`v1` before it), the version of the `terminal-v1` → ingest-contract
+`registrationContractVersion` is `terminal-registration-v3` (since
+[ADR 0083](adr/0083-release-vpass-collector-statement-pages.md); `v2` from
+ADR 0022, `v1` before it), the version of the `terminal-v1` → ingest-contract
 derivation in `packages/application/src/collection/descriptors.ts`. When that
 derivation changes what a terminal _means_ in CORE, the same run registers
 again as a new revision and the old registration is kept. A terminal an
@@ -189,9 +190,9 @@ anyway is a no-op rather than a conflict.
 ### 3.1 Collector ids, CORE source ids and producers
 
 A collector names itself in its terminal and in its `runs/<source>/` prefix
-by its **own** id. For most collectors that is the CORE source id; for three
+by its **own** id. For most collectors that is the CORE source id; for four
 it is not (`sbi-shinsei` → `sbi-shinsei-bank`, `prestia-globalpass` →
-`global-pass`, `smbc-direct` → `smbc-bank`), and `v-point-pay-email` shares
+`global-pass`, `prestia-bank` → `prestia`, `smbc-direct` → `smbc-bank`), and `v-point-pay-email` shares
 the `v-point-pay` source with the V Point Pay collector. The mapping is the
 closed table `COLLECTOR_SOURCE_IDS` in
 `packages/application/src/collection/descriptors.ts`:
@@ -386,32 +387,41 @@ What the table maps (from each collector's persist path and each parser's
 full list):
 
 - Mobile Suica `sf-history.json` → `sf-history`; Money Forward's index,
-  detail and monthly pages; MyJCB's discovery, past-months, detail and ledger
-  artifacts; GlobalPass activity pages; the SBI Securities, SBI Shinsei and
+  detail and monthly pages; MyJCB's J-POINT balance, discovery, past-months,
+  detail, ledger and skip-payment schedule artifacts; GlobalPass activity pages; the SBI Securities, SBI Shinsei and
   SBI VC Trade datasets; SMBC's normalized balance and transactions; Sony
   Bank's balance, history pages, history CSVs and wallet pages; St George's
   account snapshot; V Point's balance, SMFG point and history pages; the V
-  Point Pay notification event.
+  Point Pay notification event; PRESTIA Bank's sanitized `balance.html`;
+  since `terminal-registration-v3`, the Vpass collector's statement pages
+  (`months/<yyyymm>/<top|answer>-NNN.json`, `sanitized_provider_capture`) →
+  `statement-page`.
 - Not mapped: evidence no parser reads (manifests, summaries, raw pages beside
   their normalized form); Mizuho, whose parsers read artifacts without a
   dataset; MyJCB `credit-menu.html`, whose parser requires a media type
   parameter a terminal cannot carry.
-- **Withheld: Vpass.** The statement-page rule is kept in
-  `WITHHELD_ARTIFACT_DATASETS` and not applied, so collector-vpass captures
-  are registered but never parsed. A parsed collector capture would become
-  the current statement snapshot of its card-month and retire the importer-era
-  purchases, because it cannot yet bind to the trusted card identity
-  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). It is applied when
-  the collector derives the binding.
+- **Vpass, released by [ADR 0083](adr/0083-release-vpass-collector-statement-pages.md).**
+  ADR 0022 withheld the statement-page rule (`WITHHELD_ARTIFACT_DATASETS`,
+  now empty) until the collector's card binding matched the importer's
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). Only a successful
+  card run's pages are parsed: `statement-page` has run-scope eligibility, and
+  a card run whose card unit is `partial` (a month short of its stated total)
+  is a `partial` run, so its pages get no parse job and are never a current
+  snapshot.
 
 `scripts/artifact-datasets.test.ts` checks the table against both sides:
 every mapped or withheld dataset is accepted by a registered parser, every
 dataset a parser requires from a shared-R2 source is mapped, withheld or named
-unreachable, and the withheld list is pinned.
+unreachable, and the withheld list (empty since ADR 0083) is pinned.
 
-**Contract version and carry-over.** The table is `terminal-registration-v2`;
-`v1`'s derivation (St George's dataset only) is kept beside it
-(`DATASETS_BY_VERSION`). The version is part of the `collection_runs` key and
+**Contract version and carry-over.** The table is `terminal-registration-v3`;
+`v1`'s derivation (St George's dataset only) and `v2`'s (the table without
+Vpass) are kept beside it (`DATASETS_BY_VERSION`). The v2 → v3 bump works as
+the v1 → v2 bump below: v3 changes a descriptor only for collector-vpass
+statement pages, so those card runs register again as second fetch runs and
+every other registered terminal is carried over
+([ADR 0083](adr/0083-release-vpass-collector-statement-pages.md)). The v1 → v2
+bump (ADR 0022): The version is part of the `collection_runs` key and
 of the fetch run's `sourceRunKey`, so the scan gives every persisted terminal
 a v2 row. Then, for a terminal v1 already registered:
 
@@ -626,7 +636,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
 | `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
 | `maintenance_survey`       | `targets`, `due`, `extracted`, `failed`, `windows`, `unchanged`, `proposed`, `reviewPending`, `known`, `failures` (closed failure codes, ADR 0050)                                                                                  |
-| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                                                            |
+| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`, `started`, `declined`, `tracked`, `published`, `unpublished`, `abandoned`                                                                                                 |
 | `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
 | `audit_overflow`           | `counters`, `written`                                                                                                                                                                                                               |
 
@@ -750,9 +760,10 @@ client the Processor registers as.
 
 ## 10. Resources to create before the flag is turned on
 
-The Queue **does not exist yet**. `infra/resources.md` says so per queue
-("to be created by the first deploy"), and the first deploy that carries
-`services/processor/wrangler.jsonc` creates it:
+`services/processor/wrangler.jsonc` declares the Queue consumer and its DLQ
+(its comment records them provisioned on 2026-09-12 with the notification
+rule), and `infra/resources.md` lists the queue as declared. What a fresh
+account needs:
 
 1. `kogane-collection-terminals` and `kogane-collection-terminals-dlq`;
 2. an R2 event-notification rule on `kogane-raw-evidence` for object creation,
@@ -784,8 +795,9 @@ as a stage rather than blocking the run.
 ## 11. Deploy order and rollback
 
 GitHub Actions applies CORE then READ migrations. ADR 0039 deploys named collector RPC entrypoints before the Processor and App, replacing the former order of consumers before
-collectors. The current collection Queue, notification rule and 13 registration
-routes are configured. Deploying a Worker does not invoke a collector.
+collectors. `services/processor/wrangler.jsonc` declares the collection Queue
+consumer and its DLQ; no config file declares the R2 notification rule (only a comment in that
+file records it; §10 lists it), and `config/ingest-clients.json` declares 16 registration routes. Deploying a Worker does not invoke a collector.
 
 Turning a lane flag off pauses its work; terminals and recorded progress remain.
 Projections use READ only. Select only code compatible with the current schema

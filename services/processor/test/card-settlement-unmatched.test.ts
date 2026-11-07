@@ -120,7 +120,12 @@ function store(statements: Row[], debits: Row[]) {
   return { db: { prepare } as unknown as D1Database, inserts };
 }
 
-const NONE = { statement_not_comparable: 0, no_debit_in_window: 0, no_equal_amount_debit: 0 };
+const NONE = {
+  statement_total_refund_or_zero: 0,
+  statement_not_comparable: 0,
+  no_debit_in_window: 0,
+  no_equal_amount_debit: 0,
+};
 const DUE = "2098-09-10";
 /** The exact match's digest as the sweep on main wrote it before `unmatched` existed. */
 const PINNED_DIGEST = "b8bca672e9f849ae3fd75a4299b99755b9d87e0ca2fe352a5c245d2c4f67f5c8";
@@ -191,14 +196,29 @@ test("a statement with nothing to compare is `statement_not_comparable`, read or
     [
       statement(1, null, DUE), // no exact total: no bank read
       statement(2, "30000", null), // no due date: no bank read
-      statement(3, "0", DUE), // a zero total is read, and never matches
       { ...statement(4, "30000", DUE), unit_ref: "" }, // no valid unit: read, never matches
     ],
     [debit(11, "0", DUE), debit(12, "30000", DUE)],
   );
   expect(await cardSettlementSweep(db)).toMatchObject({
     proposed: 0,
-    unmatched: { ...NONE, statement_not_comparable: 4 },
+    unmatched: { ...NONE, statement_not_comparable: 3 },
+  });
+  expect(inserts).toEqual([]);
+});
+
+test("a zero or refund total is `statement_total_refund_or_zero`, with or without a due date", async () => {
+  const { db, inserts } = store(
+    [
+      statement(1, "0", DUE), // read, and never matches
+      statement(2, "-1200", DUE), // a refund: read, and never matches
+      statement(3, "-1200", null), // a refund without a due date: no bank read
+    ],
+    [debit(11, "0", DUE), debit(12, "1200", DUE)],
+  );
+  expect(await cardSettlementSweep(db)).toMatchObject({
+    proposed: 0,
+    unmatched: { ...NONE, statement_total_refund_or_zero: 3 },
   });
   expect(inserts).toEqual([]);
 });
@@ -217,7 +237,12 @@ test("one tick counts each statement once, and its tick row holds counts and clo
   expect(result).toMatchObject({
     proposed: 1,
     written: 1,
-    unmatched: { statement_not_comparable: 1, no_debit_in_window: 1, no_equal_amount_debit: 1 },
+    unmatched: {
+      ...NONE,
+      statement_not_comparable: 1,
+      no_debit_in_window: 1,
+      no_equal_amount_debit: 1,
+    },
   });
   expect(inserts).toHaveLength(1);
   const row = laneTick("card_settlement_sweep", 0, 1, { outcome: "ran", result })!;

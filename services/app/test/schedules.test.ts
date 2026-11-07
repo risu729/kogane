@@ -33,6 +33,9 @@ async function call(
     subject?: string;
     serviceToken?: string;
     body?: string;
+    /** Sent in place of `body`, with the same headers. */
+    rawBody?: BodyInit;
+    contentType?: string;
     origin?: string;
     marker?: string;
     anonymous?: boolean;
@@ -66,8 +69,9 @@ async function call(
       .setIssuedAt()
       .setExpirationTime("5m")
       .sign(keys.privateKey);
-  if (options.body !== undefined) {
-    headers["content-type"] = "application/json";
+  const body = options.rawBody ?? options.body;
+  if (body !== undefined) {
+    headers["content-type"] = options.contentType ?? "application/json";
     headers["origin"] = options.origin ?? "https://fixture.test";
     headers["x-kogane-settings"] = options.marker ?? "1";
   }
@@ -75,7 +79,7 @@ async function call(
     new Request(`https://fixture.test${PATH}${options.suffix ?? ""}`, {
       method: options.method ?? "GET",
       headers,
-      ...(options.body === undefined ? {} : { body: options.body }),
+      ...(body === undefined ? {} : { body }),
     }),
     {
       ...env,
@@ -160,6 +164,33 @@ it("writes require the same origin, a custom header and bounded JSON", async () 
     (await call({ suffix: "/leases/sony-bank", method: "POST", body: "{}" })).response.status,
   ).toBe(200);
 });
+it("a write body is JSON of at most 16 KiB of bytes, refused before the Processor", async () => {
+  const write = (options: Parameters<typeof call>[0]) =>
+    call({ suffix: "/sony-bank", method: "POST", ...options });
+  // 6,000 kana are about 18 KB but 6,000 UTF-16 code units; a streamed body
+  // declares no length to check first.
+  const kana = JSON.stringify({ note: "あ".repeat(6_000) });
+  for (const [options, status, code] of [
+    [{ body: "{}", contentType: "text/plain" }, 415, "json_required"],
+    // The media type is judged before the size: an oversized body that is not
+    // JSON is `415`, declared or streamed, never `413`.
+    [{ body: kana, contentType: "text/plain" }, 415, "json_required"],
+    [{ rawBody: new Blob([kana]).stream(), contentType: "text/plain" }, 415, "json_required"],
+    [{ body: "{}", contentType: "application/json; charset=utf-8" }, 200, null],
+    [{ body: "" }, 400, "invalid_request"],
+    [{ body: '{"bad":' }, 400, "invalid_request"],
+    [{ body: kana }, 413, "request_too_large"],
+    [{ rawBody: new Blob([kana]).stream() }, 413, "request_too_large"],
+    [{ rawBody: new Blob(["{}"]).stream() }, 200, null],
+  ] as const) {
+    const result = await write(options);
+    expect(result.response.status, JSON.stringify(options)).toBe(status);
+    if (code !== null) {
+      expect(await result.response.json()).toMatchObject({ error: code });
+      expect(result.seen).toEqual([]);
+    }
+  }
+});
 it("stopped lease release retains operator, user-session and same-origin boundaries", async () => {
   const request = {
     suffix: "/leases/vpass",
@@ -228,6 +259,16 @@ it("a deployment token has only bodyless future bootstrap authority", async () =
     (await call({ suffix: "/bootstrap", method: "POST", serviceToken: TOKEN, body: "" })).response
       .status,
   ).toBe(200);
+  // A streamed body is bodyless only when it carries no byte.
+  const streamed = await call({
+    suffix: "/bootstrap",
+    method: "POST",
+    serviceToken: TOKEN,
+    rawBody: new Blob(["", "x"]).stream(),
+  });
+  expect(streamed.response.status).toBe(400);
+  expect(await streamed.response.json()).toMatchObject({ error: "invalid_request" });
+  expect(streamed.seen).toEqual([]);
   expect(
     (await call({ suffix: "/bootstrap?now=1", method: "POST", serviceToken: TOKEN })).response
       .status,
