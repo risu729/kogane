@@ -259,6 +259,15 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // The UI's read pages over MCP (ADR 0081): each the route's own reader,
+  // whole-store only (services/app/src/page-read-tools.ts).
+  "identity.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "economic-readiness.read": {
     risk: ["R0"],
     effect: null,

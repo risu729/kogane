@@ -654,6 +654,13 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
+        name: "kogane.identity.read",
+        required: ["collection"],
+        closed: false,
+        properties: ["collection", "identityRead", "offset", "source"],
+        annotations: readOnly,
+      },
+      {
         name: "kogane.purchases.explain",
         required: [],
         closed: false,
@@ -707,6 +714,7 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.accounts.candidates",
       "kogane.card-settlements.unmatched",
       "kogane.economic-readiness.read",
+      "kogane.identity.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -790,6 +798,7 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.accounts.candidates",
       "kogane.card-settlements.unmatched",
       "kogane.economic-readiness.read",
+      "kogane.identity.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);

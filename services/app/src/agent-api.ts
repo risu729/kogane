@@ -100,6 +100,7 @@ import {
 } from "./delegated-command-tools";
 
 import { readMcpTools, REPORTED_STATE_TOOL_NAME } from "./read-tools";
+import { pageReadMcpTools } from "./page-read-tools";
 import {
   callDelegatedDecisionTool,
   delegatedDecisionTools,
@@ -304,6 +305,7 @@ export async function agentApi(
       async () => [
         ...MCP_TOOLS,
         ...readMcpTools(grant, { reportedState: await reconstructed() }),
+        ...pageReadMcpTools(grant),
         ...(caller.kind === "mcp-client"
           ? [
               ...delegatedCommandTools(env, await delegation()),

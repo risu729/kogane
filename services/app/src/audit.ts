@@ -233,6 +233,13 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
         (Array.isArray(value["payables"]) ? value["payables"].length : 0),
       truncated: false,
     };
+  // One identity page (`{ schemaVersion, data }`): its rows (or connections),
+  // truncated when the page says more follow.
+  if (operation === "identity.read") {
+    const data = (value["data"] ?? {}) as Record<string, unknown>;
+    const coverage = (data["coverage"] ?? {}) as Record<string, unknown>;
+    return { rows: countOf(data), truncated: coverage["truncated"] === true };
+  }
   // A page of statements; a named next page means more remain.
   if (operation === "card-settlements.unmatched")
     return {

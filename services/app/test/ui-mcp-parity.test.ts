@@ -60,6 +60,11 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reconstructed-state": ["kogane.reconstructed-state.read"],
   "/api/v2/audit": ["kogane.audit.search"],
   "/api/v2/reconciliation/card-statements-unmatched": ["kogane.card-settlements.unmatched"],
+  // UI read pages (src/page-read-tools.ts): each the route's own reader.
+  "/api/identity/connections": ["kogane.identity.read"],
+  "/api/identity/accounts": ["kogane.identity.read"],
+  "/api/identity/instruments": ["kogane.identity.read"],
+  "/api/identity/coverage": ["kogane.identity.read"],
 };
 
 /** UI read routes with no MCP read yet, and what the UI reads there. */
@@ -89,11 +94,6 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
   "/api/v2/balances/history": "balance history (READ projection)",
   "/api/v2/rewards/holdings": "reward holdings",
   "/api/v2/rewards/expiry": "reward expiry",
-  // Identity pages.
-  "/api/identity/connections": "account connections",
-  "/api/identity/accounts": "provider-local accounts",
-  "/api/identity/instruments": "provider-local instruments",
-  "/api/identity/coverage": "identity coverage per source",
   // Reconciliation and reported state.
   "/api/v2/reconciliation/card-settlements":
     "card settlement review; owned by Phase 2 unit 2g, not by this guard's PR",
