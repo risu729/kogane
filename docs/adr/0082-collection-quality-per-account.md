@@ -219,8 +219,11 @@ Options considered. (1) One service per read that grades grant, scope,
 store, request and bound, with both transports as thin adapters (chosen).
 (2) MCP tools that call the routes' query functions after their own checks:
 two copies of the checks, which ADR 0081 point 2 rules out. (3) Keep the
-table check in the route: the transports would answer one store
-differently.
+table check in the route: the agent read would keep running its query on a
+store without the tables, and the transports would not share that refusal.
+(4) Also move the route onto the service's error codes: it would change the
+route's published answers (404, 413 and the two 400 codes), which nothing
+in ADR 0081 asks for and which this amendment keeps byte-equal.
 
 Decision.
 
@@ -243,9 +246,18 @@ Decision.
   (AGENTS.md, Merging).
 - The summary's Alarm relay (`services/app/src/collection-quality-alarms.ts`)
   is passed to the service by both transports; the service overlays it.
-- A store without the tables is `400 unsupported_semantics`
-  (`store:collection-scheduling`) on the agent transports, for all three
-  reads, and stays `404` on the route.
+- A store without the tables is one refusal, `unavailable`, on every
+  transport and for all three reads, decided at the same step. The agent
+  transports answer it with the service's `FinancialError`,
+  `400 unsupported_semantics` (`store:collection-scheduling`); the route
+  answers it `404 not_found`, as it always has. The route encodes every
+  refusal in its own codes this way (`unknown_source` is `404` there and
+  `400 invalid_query` to an agent, a bound `413 result_limit_exceeded` there
+  and `413 budget_exceeded` to an agent), as decision 7 already did for the
+  account route. So "the same answer for the same input" of ADR 0081 point 2
+  holds here for bodies and for which refusal is made, in which order; the
+  status and code of a refusal differ by transport, as documented in the
+  [agent API](../agent-api.md#collection-quality).
 
 Consequences. The three routes have their MCP reads, so the parity guard's
 route-to-tool map can name `kogane.collection-quality.summary` and
