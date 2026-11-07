@@ -2,7 +2,9 @@ import { applyTestReadMigrations, applyTestSql } from "./migration-setup.ts";
 // ADR 0022 against every real migration: registration gives a shared-R2
 // artifact the dataset its parser reads, and the bump to
 // `terminal-registration-v2` makes a run sealed under v1 without datasets
-// parseable while never parsing one capture twice (INV06).
+// parseable while never parsing one capture twice (INV06). ADR 0083's bump to
+// `terminal-registration-v3` does the same for the Vpass collector's
+// statement pages, and only a successful card run's pages are parsed.
 //
 // Synthetic bytes only: the shared parser fixtures and the Mizuho fixture.
 import { afterAll, beforeAll, expect, test } from "bun:test";
@@ -22,6 +24,11 @@ import {
   STRUCTURE_STEP_RESERVE,
 } from "../../../packages/application/src/collection/index.ts";
 import { myJcbRunPlan } from "../../collector-myjcb/src/shared-collection.ts";
+import {
+  vpassCardRunPlan,
+  type VpassCardRun,
+} from "../../collector-vpass/src/shared-collection.ts";
+import { vpassPayload } from "./card-purchase-world.ts";
 import { mobileSuicaRunPlan } from "../../collector-mobile-suica/src/shared-run.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
 import { sweep } from "../src/worker.ts";
@@ -83,6 +90,8 @@ afterAll(async () => {
 
 /** The version production registered under until ADR 0022. */
 const V1 = "terminal-registration-v1";
+/** The version production registered under until ADR 0083. */
+const V2 = "terminal-registration-v2";
 
 /** One registration under an explicit contract version (the current one when omitted). */
 function register(source: string, runId: string, contractVersion?: string) {
@@ -257,11 +266,12 @@ test("a Mobile Suica run sealed under v1 without datasets registers again under 
   ).toBe(2);
 }, 60000);
 
-test("a collector-vpass capture registers without a dataset, is never parsed and moves no card snapshot", async () => {
-  // ADR 0022 withholds Vpass until the collector derives the trusted card
-  // binding (ADR 0023). A parsed collector capture would become the current
-  // statement snapshot of its card-month and retire the importer-era rows;
-  // an unparsed one is never an eligible snapshot.
+test("a Vpass page under the importer's role gets no dataset under any version, is never parsed and moves no card snapshot", async () => {
+  // The rule ADR 0083 releases names the collector's role
+  // (`sanitized_provider_capture`, ADR 0021). A page stated as a provider
+  // response, the importer's role, matches no rule under v1, v2 or v3, so the
+  // registration is carried over and the page is never parsed; an unparsed
+  // page is never an eligible snapshot.
   const cardUsage = currentCardUsageSql({ afterId: 0, limit: 1000 });
   const eligible = {
     sql: `WITH ${VPASS_STATEMENT_SNAPSHOT_CTES} SELECT COUNT(*) AS n FROM eligible_vpass_snapshots`,
@@ -308,8 +318,8 @@ test("a collector-vpass capture registers without a dataset, is never parsed and
       ),
     ),
   });
-  // Registered under v1, then under v2, which withholds the same dataset and
-  // so carries the registration over.
+  // Registered under v1, then under the current version, which derives the
+  // same descriptors for it and so carries the registration over.
   expect(await register("vpass", "vpass-synthetic-card-001", V1)).toMatchObject({
     outcome: "registered",
     artifacts: 4,
@@ -332,6 +342,126 @@ test("a collector-vpass capture registers without a dataset, is never parsed and
   ).toBe(0);
   expect({ usage: await rows(cardUsage), eligible: await rows(eligible) }).toEqual(before);
   expect(before.eligible).toEqual([{ n: 0 }]);
+}, 60000);
+
+const VPASS_ROWS = [
+  { date: "26/08/03", merchant: "架空店舗C", amount: "1,234", paymentType: "1" },
+];
+const VPASS_TUPLE = {
+  externalId: "E".repeat(32),
+  globalid: "G".repeat(32),
+  cardCode: "C".repeat(13),
+  cardName: "SYNTHETIC CARD",
+};
+const vpassEnvelope = (content: Record<string, unknown>) =>
+  JSON.stringify({ header: { resultCode: 0, vpSessionBean: VPASS_TUPLE }, body: { content } });
+
+/** The collector's real card run: one finalized month whose page states `allCnt`. */
+function collectorVpassRun(session: string, allCnt: number): VpassCardRun {
+  const payload = vpassPayload("web", "202608", VPASS_ROWS);
+  payload.body.content.WebMeisaiTopDisplayServiceBean.webMeisaiTopK3Vo = {
+    ...payload.body.content.WebMeisaiTopDisplayServiceBean.webMeisaiTopK3Vo,
+    allCnt: String(allCnt),
+  };
+  return {
+    sessionRunId: session,
+    cardLabel: "card-001",
+    startedAt: "2026-09-01T00:00:00.000Z",
+    completedAt: "2026-09-01T00:05:00.000Z",
+    cardListRawJson: vpassEnvelope({
+      DropdownListInitDisplayServiceBean: {
+        multiCardInfoList: [{ name: "SYNTHETIC CARD", value: "synthetic-selector-1" }],
+      },
+    }),
+    selectCardRawJson: vpassEnvelope({ MultiCardUpdateBean: {} }),
+    webMeisaiTopRawJson: vpassEnvelope({ WebMeisaiTopDisplayServiceBean: {} }),
+    months: {
+      "202608": {
+        pages: [{ kind: "top", index: 0, rawJson: JSON.stringify(payload) }],
+        transactionCount: VPASS_ROWS.length,
+      },
+    },
+  };
+}
+
+test("ADR 0083: a collector-vpass card run sealed under v2 registers again under v3; only a successful run's pages are parsed and current", async () => {
+  const eligible = {
+    sql: `WITH ${VPASS_STATEMENT_SNAPSHOT_CTES} SELECT f.producer_id AS producer, s.statement_month AS month, COUNT(*) AS n
+          FROM current_vpass_snapshots s JOIN fetch_runs f ON f.id=s.fetch_run_id
+          WHERE f.producer_id='collector-vpass' GROUP BY 1, 2`,
+    args: [],
+  };
+  const vpassJobs = () =>
+    env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM observation_parse_jobs j JOIN fetch_artifacts a ON a.id=j.fetch_artifact_id
+        JOIN fetch_runs r ON r.id=a.fetch_run_id WHERE r.producer_id='collector-vpass'`,
+    ).first<number>("n");
+  const pages = (runId: string) =>
+    env.DB.prepare(
+      `SELECT c.registration_contract_version AS version, COUNT(a.id) AS pages, COUNT(a.dataset) AS with_dataset,
+              (SELECT status FROM observation_fetch_runs o WHERE o.id=c.fetch_run_id) AS status
+         FROM collection_runs c LEFT JOIN fetch_artifacts a ON a.fetch_run_id=c.fetch_run_id AND a.artifact_key GLOB 'months/*'
+        WHERE c.source='vpass' AND c.run_id=? GROUP BY c.id ORDER BY c.id`,
+    )
+      .bind(runId)
+      .all();
+
+  // Complete: the page states the one row it holds; short: it states two.
+  const complete = await vpassCardRunPlan(collectorVpassRun("2026-09-01T00-00-00-000Z", 1));
+  const short = await vpassCardRunPlan(collectorVpassRun("2026-09-02T00-00-00-000Z", 2));
+  for (const plan of [complete, short]) {
+    expect((await persistRun(env.EVIDENCE, plan)).outcome).toBe("persisted");
+    // Production's v2 registration: the page has no dataset, nothing is parsed.
+    expect(await register("vpass", plan.run.runId, V2)).toMatchObject({ outcome: "registered" });
+  }
+  expect(await sweep(env)).toMatchObject({ error: 0 });
+  expect(await vpassJobs()).toBe(0);
+  expect(await rows(eligible)).toEqual([]);
+
+  // v3: the page's descriptor changes, so each run registers again as a new
+  // fetch run in the same acquisition session; nothing is carried over.
+  for (const plan of [complete, short]) {
+    expect(
+      await registerCollectionRun(env, { source: "vpass", runId: plan.run.runId }),
+    ).toMatchObject({ outcome: "registered" });
+  }
+  expect((await pages(complete.run.runId)).results).toEqual([
+    { version: V2, pages: 1, with_dataset: 0, status: "success" },
+    { version: REGISTRATION_CONTRACT_VERSION, pages: 1, with_dataset: 1, status: "success" },
+  ]);
+  expect((await pages(short.run.runId)).results).toEqual([
+    { version: V2, pages: 1, with_dataset: 0, status: "partial" },
+    { version: REGISTRATION_CONTRACT_VERSION, pages: 1, with_dataset: 1, status: "partial" },
+  ]);
+  expect(
+    await env.DB.prepare(
+      `SELECT COUNT(DISTINCT acquisition_session_id) AS n FROM fetch_runs
+        WHERE producer_id='collector-vpass' AND source_run_key GLOB '2026-09-0[12]T*'`,
+    ).first<number>("n"),
+  ).toBe(2);
+
+  // Only the successful run's page gets a job and a published parse (run-scope
+  // eligibility, `unitParseable`); the partial run's page gets neither.
+  await sweep(env);
+  expect(
+    (
+      await env.DB.prepare(
+        `SELECT r.source_run_key LIKE '2026-09-01%' AS complete_run, p.parser_name AS parser, p.status
+           FROM parse_runs p JOIN fetch_artifacts a ON a.id=p.fetch_artifact_id
+           JOIN fetch_runs r ON r.id=a.fetch_run_id WHERE r.producer_id='collector-vpass'`,
+      ).all()
+    ).results,
+  ).toEqual([{ complete_run: 1, parser: "vpass-statement-page", status: "ok" }]);
+  expect(await vpassJobs()).toBe(1);
+  expect(await rows(eligible)).toEqual([{ producer: "collector-vpass", month: "202608", n: 1 }]);
+  // A redelivery adds nothing.
+  for (const plan of [complete, short]) {
+    expect(
+      await registerCollectionRun(env, { source: "vpass", runId: plan.run.runId }),
+    ).toMatchObject({ outcome: "already_registered" });
+  }
+  expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
+  expect(await rows(eligible)).toEqual([{ producer: "collector-vpass", month: "202608", n: 1 }]);
 }, 60000);
 
 test("a Mizuho capture parsed under v1 is carried over by v2, not registered and listed twice", async () => {
