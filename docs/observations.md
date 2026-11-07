@@ -17,6 +17,85 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## PayPay CSV: a signed amount in either amount column is left empty (parser 0.2.2)
+
+2026-11-06. The export states a row's direction by its column: outgoing
+(出金金額) or incoming (入金金額). `paypay-csv` 0.2.1 read each cell with
+`amountToMinorUnits`, which honours a leading `-`/`+`, `△`/`▲` and
+parentheses, and then negated an outgoing value: `-100` in the outgoing column
+became an inflow of 100 and `△5` in the incoming column an outflow of 5, with
+no warning. No document or observation records that the export ever writes a
+sign in either column, or what one would mean (a reversal, a correction, a
+display variant), so the meaning stays unsupported rather than guessed (the
+rule of [ADR 0004](adr/0004-payment-type-shapes-from-evidence.md)). 0.2.2
+leaves such a row without `amountMinor`, `amountText` or `amountScale`, keeps
+the row and its verbatim cells in `extra`, and records the closed warning
+`row N: outgoing amount carries a sign; provider-signed amounts are
+unsupported, amount left empty` (or `incoming`), which names no value. This
+is how the parser already treats a row stating both amounts. Every unsigned
+amount reads as in 0.2.1; no other parser's digest changed.
+
+**Deploying rewrites nothing**: stored runs stay as they are; the processor
+registers 0.2.2 itself and the repair lane re-parses any stored PayPay CSV
+artifact under it. No migration and no operator step. A row that 0.2.0 or
+0.2.1 stored with a sign-derived amount keeps it in that superseded run; the
+0.2.2 run that replaces it carries no amount for the row. Limits: production
+was not read for this release, so whether any stored export carries a signed
+amount is not established; if one does, its meaning needs the owner's
+confirmation before any release reads it. Tests:
+`packages/parsers/test/parsers.test.ts`,
+`packages/parsers/test/paypay-csv-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`.
+
+## PayPay CSV: a transaction date that does not exist gives no asOf (parser 0.2.1)
+
+2026-11-06. `paypay-csv` 0.2.0 read the transaction date column by its shape
+alone, so `2026/02/30 25:61:61` became `2026-02-30T25:61:61+09:00` and
+`2026/13/45 00:00` an equally impossible `asOf`, with no warning. 0.2.1 checks
+the calendar date and clock time and, when either does not exist, leaves
+`asOf` empty and records the existing `row N: datetime ... not recognized`
+warning, as `util.ts`'s refuse-rather-than-guess rule asks; the verbatim
+cell stays in `extra.datetimeVerbatim`. Every date and time that exists reads
+as in 0.2.0, and no other parser's digest changed. **Deploying rewrites
+nothing**: stored 0.2.0 runs stay as they are; the processor registers 0.2.1
+itself and the repair lane re-parses any stored PayPay CSV artifact under it. No
+migration and no operator step: no snapshot policy row names this parser and
+every reader pins it by name. Limits: production was not read for this
+release. Tests: `packages/parsers/test/parsers.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`.
+
+## SBI VC Trade: an ISO timestamp that does not exist is refused (five parsers 0.2.1)
+
+2026-11-06. `providerTimestamp` in `sbi-vc-common.ts` read an ISO 8601
+date-time (`2026-01-03T04:05:06+09:00`) by its shape alone, so a value
+such as `2026-02-30T25:61:61Z` or `2026-13-01T00:00:00+09:00` passed through
+verbatim into `asOf` (execution and cashflow rows, account-margin
+`statusDate`) and `observedAt` (gateway `meta.timestamp`). The slash form
+already refused a date or time that does not exist. The ISO form now gets
+the same calendar and clock check, and its offset must be at most `23:59`;
+a value that exists is still kept verbatim. A refused `executionDatetime`
+or `eventDatetime` fails the page (`timestamp format is not recognized`, as
+for any unrecognised shape); a refused `meta.timestamp` or `statusDate`
+leaves `observedAt` or `asOf` empty, as before for any unrecognised shape
+([details](#sbi-vc-trade-source-separated-parsing) below).
+
+The helper is in the digest closure of all five SBI VC parsers, so each is
+released: `sbi-vc-account-margin`, `sbi-vc-cash-balances`,
+`sbi-vc-cashflows`, `sbi-vc-executions` and `sbi-vc-position-summary` move
+from 0.2.0 to 0.2.1. Every timestamp that exists reads exactly as in 0.2.0,
+and the audited captures and synthetic fixtures use the slash form; no other
+parser's digest changed. **Deploying rewrites nothing**: stored 0.2.0 runs
+and their rows stay as they are (evidence is append-only), the processor
+registers the 0.2.1 releases itself and the repair lane re-parses stored
+captures under them, superseding each 0.2.0 run with its 0.2.1 run. No
+migration and no operator step: the three snapshot policy rows of these
+datasets pin no parser version, and nothing reads them by version. A stored
+capture that carries an impossible ISO execution or event time, if any,
+would become an `error` run under 0.2.1 while its 0.2.0 run stays published.
+Limits: production was not read for this release, so whether any stored
+capture carries an ISO timestamp at all is not established. Tests:
+`packages/parsers/test/sbi-vc-parsers.test.ts`,
+
 ## Sony Bank: a gross-balance update time that does not exist is refused (gross balance 1.0.2)
 
 2026-11-07. `sony-bank-gross-balance` reads `updateDttm` in two forms: an ISO
@@ -1463,7 +1542,10 @@ One parser does cross the line by a small, deliberate step.
 grounds that PayPay displays JST; the CSV states no zone. The verbatim
 string is kept in `extra` as `datetimeVerbatim`, so the addition is
 visible and reversible. Every such step should be this small, this
-documented, and this recoverable.
+documented, and this recoverable. The step never repairs a value: a date or
+clock time that does not exist (`2026/02/30 25:61:61`, `2026/13/45 00:00`)
+gives no `asOf` and the row's `datetime ... not recognized` warning
+(0.2.1; 0.2.0 wrote such a value through as an impossible instant).
 
 ## The parser contract
 
@@ -1661,7 +1743,18 @@ Provider meaning is transcribed without hidden sign or unit guesses:
   fields without an explicit currency remain provider context rather than
   being guessed as JPY;
 - position `totalAmount` becomes quantity. `evaluationPl` stays in `extra`
-  because the payload does not explicitly denominate it.
+  because the payload does not explicitly denominate it;
+- provider timestamps (`meta.timestamp`, `statusDate`, `executionDatetime`,
+  `eventDatetime`) are read in two shapes: the audited slash form
+  `YYYY/MM/DD hh:mm:ss`, which states no zone and is read as JST, and an ISO
+  8601 date-time with seconds and an explicit offset, kept verbatim. Either is
+  refused when its calendar date, clock time or offset does not exist
+  (`2026-02-30T25:61:61Z`, `2026-13-01T00:00:00+09:00`, an offset of
+  `+24:00`); before 0.2.1 the ISO form was checked only for its shape and an
+  impossible value passed through. A refused `executionDatetime` or
+  `eventDatetime` fails the page with `timestamp format is not recognized`; a
+  refused `meta.timestamp` leaves `observedAt` empty and a refused
+  `statusDate` leaves `asOf` empty, the raw value staying in `extra`.
 
 All SBI VC Trade rows use `sbi-vc-trade:main` as source identity. Provider
 account identifiers remain in `extra`, never in the join key. Every row has a
@@ -2626,7 +2719,11 @@ payment is still recorded as negative.
 
 It does not decide what a row with both an outgoing and an incoming amount
 means (warning, amount left empty), does not decide what a row stating
-neither means (warning), and does not decide that two rows sharing a
+neither means (warning), does not decide what an amount that carries its
+own sign means in either column (`-`, `+`, `△`, `▲` or parentheses; since
+0.2.2 a closed warning naming the column and no value, amount left empty;
+0.2.0 and 0.2.1 negated a signed outgoing value, so `-100` read as an inflow,
+and transcribed a signed incoming one), and does not decide that two rows sharing a
 transaction number are one event; the fixture deliberately contains a
 refund reusing the original payment's number, and both rows survive
 intact. It also, today, records point grants as yen — see the
