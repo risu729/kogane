@@ -17,6 +17,7 @@ import { HttpError } from "./http";
 import { commandsEnabled } from "./command-api";
 import { parseRequest } from "./ops-api";
 import { upstreamOutcome, UpstreamLost } from "./audit";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 const ID = z.string().regex(/^[0-9a-f]{64}$/u);
 const KEY = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
@@ -40,8 +41,7 @@ export function isDelegatedCommandTool(name: string): name is DelegatedCommandTo
   return Object.hasOwn(schemas, name);
 }
 const DELEGATED_COMMAND_TOOLS = Object.entries(schemas).map(([name, schema]) => {
-  const generated = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete generated["$schema"];
+  const generated = mcpInputSchema(schema);
   return {
     name,
     title: name.slice(7),

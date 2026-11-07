@@ -163,7 +163,7 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
     return page;
   }
 
-  return { route, http, mcp, direct, listed, expectSameAnswer };
+  return { route, http, mcp, mcpMessage, direct, listed, expectSameAnswer };
 }
 
 /**
