@@ -1116,7 +1116,7 @@ runbook.
 
 ### Owner hand-off, in order
 
-This is the current activation recipe for the approved read grant. The
+This is the current activation recipe for the MCP client. The
 initial empty-audience/empty-grant staging and one-source summary-only grant
 in ADR 0047 are historical; the activation amendment replaces those initial
 values. These steps do not assert that production or any client has passed.
@@ -1142,10 +1142,10 @@ values. These steps do not assert that production or any client has passed.
 4. _Normal deployment and domain attachment_ — deploy the reviewed commit
    through the ordinary pipeline and verify the live App bindings agree
    with both production configs: the dedicated `ACCESS_MCP_AUDIENCE` is
-   distinct from `ACCESS_AUDIENCE`; exactly `mcp-client:<owner-sub>` has
-   `summary.read` and `records.read`, sources/accounts `"*"`, and budgets
-   `maxRows: 100`, `maxProposalTargets: 3`, `maxExplainDepth: 3`.
-   `AGENT_GRANTS` stays empty. The App's version
+   distinct from `ACCESS_AUDIENCE`. No table grants the MCP client any
+   more (ADR 0084): every `mcp-client:<sub>` the MCP application admits holds
+   the whole-store grant ([Grants](#grants)), so there is no grant binding to
+   verify. The App's version
    publication does not synchronize triggers: attach the approved custom
    domain once through the Cloudflare API and verify its destination is
    `kogane-evidence-browser`. A domain declaration is not that attachment.
@@ -1163,9 +1163,10 @@ values. These steps do not assert that production or any client has passed.
 7. _Fresh-session calls_ — in each intended client, start a new conversation
    with only this connector enabled and perform these existing tool calls:
    - `kogane.capabilities` with `{}`: the result must report
-     `principal: "mcp-client:<owner-sub>"`, exactly `summary.read` and
-     `records.read`, whole-store source/account scope and the configured
-     100-row read budget. The bare owner subject is not an alternative identity.
+     `principal: "mcp-client:<owner-sub>"`, every capability of the
+     whole-store grant ([Grants](#grants)), whole-store source/account scope
+     and the published bounds (`maxRows` 1000). The bare owner subject is not
+     an alternative identity.
    - On the first page (no cursor), `kogane.financial.query` with
      `{"intent":"coverage","limit":50}` and with
      `{"intent":"activity","limit":50}`: both must return
@@ -1173,39 +1174,18 @@ values. These steps do not assert that production or any client has passed.
      refusal. Preserve their actual completeness and gap reasons; a missing
      projection or empty data is not proof of a complete financial result.
      `maxRows` is a read budget, not a returned-page size: the shared query
-     requires `offset + limit + 1 <= maxRows` for lookahead. On the first page,
-     99 is the largest allowed limit; an omitted limit defaults to 100 and is
-     refused under this grant. Later cursors consume the same budget.
-   - The same activity query with `limit: 101`: expect a tool error with
-     `code: "budget_exceeded"`, not silent truncation or a widened grant.
-   - Raw evidence remains ungranted: `kogane.explain` on an observation ref
-     returned by a structured read must list `evidence.read` as restricted
-     and expose no raw-locator node. If no observation ref is available,
-     record this check as not checked; do not invent a production locator.
-   - `kogane.reconcile.propose` must receive a schema- and budget-valid
-     negative probe: distinct `from`/`to` and exactly one `evidenceRefs`
-     entry, so two targets plus one evidence ref fit `maxProposalTargets: 3`.
-     This synthetic shape matches the existing parser and names no financial
-     account:
-
-     ```json
-     {
-       "kind": "same_account",
-       "from": "source_account:synthetic-from",
-       "to": "source_account:synthetic-to",
-       "evidenceRefs": ["fetch_artifact:1"],
-       "reason": "synthetic denied capability probe",
-       "method": "ai"
-     }
-     ```
-
-     Expect `code: "unauthorized"` and
-     `capability:interpretation.propose`; the capability refusal occurs before
-     target/evidence resolution. Two evidence refs would instead exceed the
-     parser's target budget and would not test that capability gate.
-     Operator/write tools remain unpublished; attempts cannot approve,
-     commit, change settings or trigger collection. Use only the existing
-     tool schemas and record refusals without copying financial values.
+     requires `offset + limit + 1 <= maxRows` for lookahead, so on the first
+     page 999 is the largest allowed limit.
+   - The same activity query with `limit: 1000`: expect a tool error with
+     `code: "budget_exceeded"`, not silent truncation.
+   - The whole-store grant holds `evidence.read` and
+     `interpretation.propose`, so `kogane.explain` may show raw-locator nodes
+     and `kogane.reconcile.propose` records a proposal: neither is a refusal
+     probe any more, and no proposal is sent as an activation check.
+     The operation tools are published and apply as the client itself
+     (ADR 0084, [ops-api](ops-api.md#mcp)); none is called as an activation
+     check. Use only the existing tool schemas and record refusals without
+     copying financial values.
      There is no source outside this grant: all sources and accounts are in
      scope, so an outside-source refusal is not this activation's acceptance
      test. Corroborate the session with the MCP application's Access logs and
@@ -1217,13 +1197,13 @@ values. These steps do not assert that production or any client has passed.
 8. _Refresh and subsequent session_ — verify the actual OAuth refresh under
    the approved posture policy and repeat a read in a fresh client session.
    Record registration, login, initial tool call and refresh separately.
-   Proposals, raw evidence and delegated writes require separate reviewed
-   grants/implementation; this activation grants none of them.
+   The whole-store grant includes proposals, raw-evidence identifiers and
+   the operations of ADR 0063 (ADR 0084); no step above exercises them.
 
 Revocation, fastest first: remove the owner from the MCP application's policy
 (Access refuses at the next refresh, at most one access-token lifetime
-later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
-(`401` or `403` at the Worker); disconnect the client.
+later); unset `ACCESS_MCP_AUDIENCE` and deploy (`401` at the Worker);
+disconnect the client.
 
 ### Gaps, with the evidence and the owner's question
 
