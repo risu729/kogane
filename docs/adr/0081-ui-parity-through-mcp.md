@@ -203,15 +203,18 @@ risu chose option 1.
   the download's integrity checks, and the bytes read are hashed again and
   compared with the catalogue. An object over 1 MiB is refused before it is
   read (`413 raw_too_large`); the browser still downloads it.
-- The delegation list read is not built. At 06:00 UTC the same day risu
-  removed the `MCP_DELEGATIONS` allow-list itself, and with it the route and
-  its table, so there is no list left to read.
+- The delegation list read is not built. At 06:00 UTC (15:00 JST) the same
+  day risu decided to remove the `MCP_DELEGATIONS` allow-list itself;
+  [ADR 0084](0084-mcp-operator-authority-without-delegation.md) removed it
+  together with `GET /api/v2/delegations` and the table it showed, so there
+  is no list to read.
 
 ### Consequences
 
 An agent with `evidence.read` can read any raw object the operator can
-download, up to 1 MiB, with the same refusals. The committed MCP grant holds
-no `evidence.read`, so by configuration no client reads raw bytes. Each call
+download, up to 1 MiB, with the same refusals. Every MCP client holds the
+whole-store grant, `evidence.read` included (ADR 0084), so every client the
+MCP Access application admits can read them. Each call
 is an R0 read of one object in the audit log, which records the object's
 count, never its bytes. `services/app/test/page-read-raw.test.ts` compares
 the decoded bytes with both downloads and checks the refusals, the size
