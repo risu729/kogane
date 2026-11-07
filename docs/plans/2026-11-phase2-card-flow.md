@@ -95,4 +95,4 @@ Order: 2a, 2b, 2c, 2d in parallel threads now; 2e and 2f now that questions 2 an
 - 03:59 UTC: everything the screens can do, an agent must be able to do through MCP.
 - 04:00 UTC: MCP does not touch the database directly; MCP and the screens use one common API.
 
-The last two are project-wide and are to be recorded in the MCP-first ADR the roadmap work carries (not in the repository yet); AGENTS.md's invariants change with it. Until those ADRs merge, AGENTS.md as written still applies.
+The last two are project-wide and are recorded in [ADR 0081](../adr/0081-ui-parity-through-mcp.md). Writes over MCP still need an `MCP_DELEGATIONS` entry ([ADR 0063](../adr/0063-delegated-ai-operation-path.md)); until one exists, AGENTS.md as written still applies.
