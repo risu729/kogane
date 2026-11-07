@@ -152,7 +152,12 @@ function ParseRunCard({ run }: { run: ParseRunDetail }): ReactNode {
             この解析から作成された記録はありません。収集範囲の完全性や残高ゼロを示すものではありません。
           </p>
         )}
-        <Pager {...view} total={run.observations.length} onChange={setPage} />
+        <Pager
+          {...view}
+          total={run.observations.length}
+          onChange={setPage}
+          label={`解析 #${String(run.id)}の記録のページ`}
+        />
         {old ? (
           <p className="footnote">
             同じ原本の解析 #{run.superseded_by_parse_run_id}

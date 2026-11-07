@@ -37,13 +37,7 @@ export interface DateRange {
   end: string;
 }
 
-export type BackfillPhase =
-  | "idle"
-  | "waiting_for_approval"
-  | "running"
-  | "success"
-  | "partial"
-  | "failed";
+type BackfillPhase = "idle" | "waiting_for_approval" | "running" | "success" | "partial" | "failed";
 
 export interface BackfillProgress {
   phase: BackfillPhase;

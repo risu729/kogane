@@ -75,7 +75,7 @@ import { readPublishedSnapshotAt, runReadProjection } from "./read-projection.ts
 const CANDIDATE_LIMIT = 5001;
 const CANDIDATE_BOUND = 5000;
 /** Rows written per invocation, so one cron tick is bounded whatever the size. */
-export const PROJECTION_WRITE_BUDGET = 1000;
+const PROJECTION_WRITE_BUDGET = 1000;
 const ORGANIZATION_CHUNK = 500;
 const DECIMAL_CHUNK = 80;
 /** Coverage claims read per build; enough for every published container dataset. */
@@ -90,7 +90,7 @@ const CAPTURE_ATTEMPTS = 3;
  * refuses and seals nothing rather than sealing a truncated set that looks
  * complete (05 §3). The code travels to the outbox as a `blocked` reason.
  */
-export class ProjectionBudgetError extends Error {
+class ProjectionBudgetError extends Error {
   readonly code: string;
   constructor(code: string) {
     super(code);
@@ -469,7 +469,7 @@ function projectionInput(
  * parse) is unchanged: this PR does not relax it, and disagreeing evidence
  * stays a conflict rather than being collapsed.
  */
-export async function collectCandidates(db: D1Like): Promise<ProjectionCandidate[]> {
+async function collectCandidates(db: D1Like): Promise<ProjectionCandidate[]> {
   const rows = await readCandidates(db);
   const ids = rows.map((row) => row.id);
   const [organization, origins, decimals, coverage] = await Promise.all([
@@ -558,7 +558,7 @@ export async function collectCandidates(db: D1Like): Promise<ProjectionCandidate
  * because `publishedHighWaterParseRunId` still pins a snapshot's history
  * window.
  */
-export async function currentProjectionInputs(db: D1Like): Promise<ProjectionInputs> {
+async function currentProjectionInputs(db: D1Like): Promise<ProjectionInputs> {
   const row = await createCoreProjectionSource(d1Executor(db)).projectionInputs();
   return {
     publishedHighWaterParseRunId: row.published_high_water,

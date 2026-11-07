@@ -33,7 +33,7 @@ export interface FetchTransport {
   fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
 }
 
-export interface NormalizedTransaction {
+interface NormalizedTransaction {
   id: string;
   date: string;
   amount: number;

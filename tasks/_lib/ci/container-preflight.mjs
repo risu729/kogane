@@ -1,5 +1,6 @@
 // GET-only by default; explicit credential probe mints and discards one five-minute pull credential.
-import { pathToFileURL } from "node:url";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { cloudflareApi, isBasicApplicationConfiguration } from "./cf-container-release.mjs";
 
 const targets = [
@@ -231,7 +232,22 @@ export async function containerPreflight({ registryCredentialProbe = false, ...o
   return { counts, credentialProbe: await probeRegistryCredentials(options) };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+/**
+ * Whether node was started with this module, compared by real path: node
+ * resolves the main module through symlinks but leaves `argv[1]` as given, and
+ * a raw comparison would skip the command and exit 0 through a symlinked path.
+ */
+function invokedDirectly() {
+  try {
+    return (
+      process.argv[1] !== undefined &&
+      realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
+}
+if (invokedDirectly()) {
   try {
     const mode = process.env.REGISTRY_CREDENTIAL_PROBE;
     if (mode !== undefined && mode !== "false" && mode !== "true")

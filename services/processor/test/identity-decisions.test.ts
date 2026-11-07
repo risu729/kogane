@@ -1014,3 +1014,174 @@ test("migration 0029 on 0017-0035 with seeded rows: every legacy manual once, re
     await local.dispose();
   }
 }, 60_000);
+
+test("a command racing another command under its operation id writes none of its rows", async () => {
+  const mine = await seedParse(140, "sony-bank", "sony-bank:race-mine:JPY");
+  const theirs = await seedParse(141, "sony-bank", "sony-bank:race-theirs:JPY");
+  await identifyParse(db, mine, labelled("race rule"));
+  await identifyParse(db, theirs, labelled("race rule"));
+  const mineRef = (await currentMapping(140)).source_account_id;
+  const theirsRef = (await currentMapping(141)).source_account_id;
+  await db
+    .prepare("INSERT INTO accounts VALUES('race-target','手動確認済み口座','deposit','identified')")
+    .run();
+  expect(
+    await run(
+      command({
+        operationId: "op-race-setup-141",
+        referenceId: theirsRef,
+        targetId: "race-target",
+      }),
+    ),
+  ).toMatchObject({ ok: true });
+  const assign = command({
+    operationId: "op-key-race-140",
+    referenceId: mineRef,
+    targetId: "race-target",
+  });
+  // A release of another subject takes the same key between this assign's
+  // reads and its batch. It writes no mapping row, so the mapping id this
+  // assign derives from the key is still free; the decision id is not.
+  const racing = new Proxy(db, {
+    get(target_, property) {
+      if (property === "batch")
+        return async (statements: D1PreparedStatement[]) => {
+          expect(
+            await run({
+              ...assign,
+              action: "release-override",
+              referenceId: theirsRef,
+              expectedRevision: 2,
+              targetId: null,
+            }),
+          ).toMatchObject({ ok: true, replayed: false });
+          return target_.batch(statements);
+        };
+      const value = Reflect.get(target_, property) as unknown;
+      return typeof value === "function" ? (value as Function).bind(target_) : value;
+    },
+  });
+  expect(await executeIdentityCommand(racing, assign, IDENTITY_POLICY_VERSION)).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+  });
+  // No manual mapping that no decision describes: the subject is as the rule left it.
+  expect(await count("account_mappings", "source_account_id=?", mineRef)).toBe(1);
+  expect(await currentMapping(140)).toMatchObject({ revision: 1, method: "rule" });
+  expect(await count("protected_mapping_subjects", "subject_ref=?", mineRef)).toBe(0);
+  expect(await count("decision_revisions", "subject_ref=?", mineRef)).toBe(0);
+  expect(await count("active_manual_overrides", "subject_ref=?", theirsRef)).toBe(0);
+});
+
+/** The database, with `before` run against it just ahead of the command's own batch. */
+function racingBatch(before: () => Promise<void>): D1Database {
+  return new Proxy(db, {
+    get(target_, property) {
+      if (property === "batch")
+        return async (statements: D1PreparedStatement[]) => {
+          await before();
+          return target_.batch(statements);
+        };
+      const value = Reflect.get(target_, property) as unknown;
+      return typeof value === "function" ? (value as Function).bind(target_) : value;
+    },
+  });
+}
+
+test("a release racing an assign of another subject under its operation id supersedes nothing", async () => {
+  const mine = await seedParse(142, "sony-bank", "sony-bank:release-race-mine:JPY");
+  const theirs = await seedParse(143, "sony-bank", "sony-bank:release-race-theirs:JPY");
+  await identifyParse(db, mine, labelled("race rule"));
+  await identifyParse(db, theirs, labelled("race rule"));
+  const mineRef = (await currentMapping(142)).source_account_id;
+  const theirsRef = (await currentMapping(143)).source_account_id;
+  await db
+    .prepare(
+      "INSERT INTO accounts VALUES('release-race-target','手動確認済み口座','deposit','identified')",
+    )
+    .run();
+  const setup = command({
+    operationId: "op-release-race-setup-142",
+    referenceId: mineRef,
+    targetId: "release-race-target",
+  });
+  expect(await run(setup)).toMatchObject({ ok: true });
+  const release = command({
+    operationId: "op-release-race-142",
+    action: "release-override",
+    referenceId: mineRef,
+    expectedRevision: 2,
+    targetId: null,
+  });
+  // An assign of another subject takes the same key first. Its decision id is
+  // the one this release derives, but it describes the other subject.
+  const racing = racingBatch(async () => {
+    expect(
+      await run({
+        ...release,
+        action: "assign",
+        referenceId: theirsRef,
+        expectedRevision: 1,
+        targetId: "release-race-target",
+      }),
+    ).toMatchObject({ ok: true, replayed: false });
+  });
+  expect(await executeIdentityCommand(racing, release, IDENTITY_POLICY_VERSION)).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+  });
+  expect(await count("active_manual_overrides", "subject_ref=?", mineRef)).toBe(1);
+  expect(await count("protected_mapping_subjects", "subject_ref=?", mineRef)).toBe(1);
+  expect(await count("active_manual_overrides", "subject_ref=?", theirsRef)).toBe(1);
+});
+
+test("a resent release whose batch runs after a later assign leaves that assign's override in force", async () => {
+  const parse = await seedParse(144, "sony-bank", "sony-bank:resend-race:JPY");
+  await identifyParse(db, parse, labelled("race rule"));
+  const ref = (await currentMapping(144)).source_account_id;
+  await db
+    .prepare(
+      "INSERT INTO accounts VALUES('resend-race-target','手動確認済み口座','deposit','identified')",
+    )
+    .run();
+  expect(
+    await run(
+      command({
+        operationId: "op-resend-race-assign-1",
+        referenceId: ref,
+        targetId: "resend-race-target",
+      }),
+    ),
+  ).toMatchObject({ ok: true });
+  const release = command({
+    operationId: "op-resend-race-release",
+    action: "release-override",
+    referenceId: ref,
+    expectedRevision: 2,
+    targetId: null,
+  });
+  // Both sends read no ledger row. The first commits, then a new assign
+  // commits at the same revision, and only then does the resend's batch run:
+  // its ledger row is the first send's own, but the new override is not one
+  // the release saw.
+  const later = command({
+    operationId: "op-resend-race-assign-2",
+    referenceId: ref,
+    expectedRevision: 2,
+    targetId: "resend-race-target",
+  });
+  const racing = racingBatch(async () => {
+    expect(await run(release)).toMatchObject({ ok: true, replayed: false });
+    expect(await run(later)).toMatchObject({ ok: true, replayed: false });
+  });
+  expect(await executeIdentityCommand(racing, release, IDENTITY_POLICY_VERSION)).toMatchObject({
+    ok: true,
+    replayed: true,
+  });
+  const active = await db
+    .prepare("SELECT revision,operation_id FROM active_manual_overrides WHERE subject_ref=?")
+    .bind(ref)
+    .all<{ revision: number; operation_id: string }>();
+  expect(active.results).toEqual([{ revision: 3, operation_id: later.operationId }]);
+  expect(await count("protected_mapping_subjects", "subject_ref=?", ref)).toBe(1);
+});

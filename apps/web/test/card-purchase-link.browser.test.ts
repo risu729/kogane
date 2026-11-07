@@ -16,6 +16,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import {
   capturedPurchase,
@@ -510,4 +511,26 @@ describe.if(runnable)("pending-to-posted link review", () => {
       await page.screenshot({ path: `${prefix}-link-confirm-mobile.png`, fullPage: true });
     await page.close();
   }, 30_000);
+
+  test("list, review and confirmation pass the accessibility audit", async () => {
+    const list = await openList();
+    await list
+      .getByRole("region", { name: "確認待ちの未確定・確定の対応候補", exact: true })
+      .waitFor();
+    expect(await auditView(list)).toEqual([]);
+    await list.close();
+    const page = await openDetail();
+    await page.getByRole("button", { name: "同一の利用として統合", exact: true }).waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page.getByLabel("判断の理由", { exact: true }).fill("同じ利用と確認した");
+    await page.getByRole("button", { name: "同一の利用として統合", exact: true }).click();
+    await page.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
+    await page
+      .getByRole("region", { name: "未確定と確定の明細の対応", exact: true })
+      .getByRole("list", { name: "未確定の明細と確定の明細" })
+      .waitFor();
+    await page.getByRole("button", { name: "承認する", exact: true }).waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 });

@@ -183,6 +183,8 @@ describe("the agent reads the operator's page", () => {
         }),
       );
       expect(validAgentCardPurchasePage(explanation.data)).toBe(true);
+      // The agent is told, as the page tells the operator, that no refund is allocated.
+      expect(explanation.data.coverage.refundsAllocated).toBe(false);
     }
 
     const page = await queryCardPurchases(w.sql);
