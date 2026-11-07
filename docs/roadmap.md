@@ -181,9 +181,10 @@ Issues: [#559](https://github.com/risu729/kogane/issues/559),
 done only when it also works from the UI and MCP (layer 16 criteria).
 Delegations and grants are owner decisions and never part of an agent PR.
 Every screen operation also exists as an MCP operation over the same
-application service ([ADR 0081](adr/0081-ui-parity-through-mcp.md)); the first
-unit of this track inventories screen operations against MCP tools and adds
-the catalogue guard test.
+application service ([ADR 0081](adr/0081-ui-parity-through-mcp.md)). The
+inventory and its guard tests landed on 2026-11-07 with allow-lists of the
+known gaps ([agent API: parity guards](agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07));
+each later unit of this track closes gaps and shrinks those lists.
 
 ### New sources
 

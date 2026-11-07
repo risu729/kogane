@@ -110,6 +110,13 @@ What the code does today (main `02a915a`):
 
 - Today: most MCP tools call shared services; three run their own SQL (above);
   no guard test exists yet.
+- 2026-11-07 (first slice): the guards are in
+  [`ui-mcp-parity.test.ts`](../../services/app/test/ui-mcp-parity.test.ts),
+  with allow-lists of the gaps they found
+  ([agent API: parity guards](../agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07)).
+  The inventory also found a fourth adapter with its own SQL,
+  `scopedParseRuns` in `agent-service.ts` (`kogane.context.open`), and 34 UI
+  read routes with no MCP read.
 - After the first slice: the catalogue test fails when a `ui` entry lacks a
   published `mcp` tool, and the read-route test fails when a UI read route has
   no MCP read. A test per new tool compares its result with the HTTP route's result

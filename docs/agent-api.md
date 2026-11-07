@@ -1375,3 +1375,74 @@ approval and settings do not depend on it. A failed read, including a failed
 re-read after an earlier answer, says the state cannot be confirmed and shows
 no entry. With the committed empty `MCP_DELEGATIONS` both pages say that no
 delegation exists.
+
+## UI and MCP parity guards (ADR 0081, 2026-11-07)
+
+[ADR 0081](adr/0081-ui-parity-through-mcp.md) point 4 is enforced by
+[`services/app/test/ui-mcp-parity.test.ts`](../services/app/test/ui-mcp-parity.test.ts).
+It compares the UI against the tools `tools/list` publishes to the widest
+caller this Worker serves: an MCP client whose grant holds every agent
+capability over the whole store and whose delegation (`operator-delegate`)
+holds every delegation capability, with `COMMANDS_ENABLED`, `OPS_API_ENABLED`
+and `SCHEDULES_ENABLED` on. It has three guards, each with an allow-list of
+the gaps known when it landed. The allow-lists in the test are authoritative;
+the tables below are the state on 2026-11-07. A fixed gap must leave its list
+in the same PR (the test fails on a listed gap that is no longer one), and a
+new entry is a regression of ADR 0081 that needs the owner's agreement.
+
+1. **Catalogue operations.** Every `OPERATION_CATALOGUE` entry whose paths
+   include `ui` also lists `mcp` and has its `kogane.<operation>` tool
+   published, unless it is R4. `audit.overflow` is a record, not an
+   operation, and is excluded by name. The six `ops.*` operations pass: since
+   #660 `delegatedOpsTools` publishes them to a delegation holding their
+   `operations.*` capability.
+
+   | Gap                       | What is missing                                                               |
+   | ------------------------- | ----------------------------------------------------------------------------- |
+   | `schedules.survey.decide` | a delegated tool over the survey proposal writer                              |
+   | `schedules.lease.release` | a tool that refuses every call with a recorded refusal (ADR 0081 point 3, R3) |
+
+2. **Read routes.** The test reads every API path named in `apps/web/src`
+   (string and template literals, path constants of `apps/web/src` and
+   `packages/observation-shared/src`, one-line path helpers; see
+   [`ui-routes.ts`](../services/app/test/ui-routes.ts)) and fails on a path no
+   listed route serves, and on a listed route the UI no longer names. Each
+   route is mapped to the MCP tools that read the same service, listed as a
+   gap, or listed as not a read route (`/api/command/v1/:operation` is the
+   catalogue's `command.*`, guard 1). A path the UI builds from an expression
+   the scan cannot resolve is not seen.
+
+   | UI read route                         | MCP read                                        |
+   | ------------------------------------- | ----------------------------------------------- |
+   | `/api/v2/query`                       | `kogane.financial.query`, `kogane.context.open` |
+   | `/api/identity/instrument-candidates` | `kogane.instruments.candidates`                 |
+   | `/api/identity/account-candidates`    | `kogane.accounts.candidates`                    |
+   | `/api/identity/instrument-history`    | `kogane.instruments.history`                    |
+   | `/api/identity/instrument-coverage`   | `kogane.instruments.coverage`                   |
+   | `/api/v2/card-purchases`              | `kogane.purchases.explain`                      |
+   | `/api/v2/reported-state`              | `kogane.reported-state.read`                    |
+   | `/api/v2/reconstructed-state`         | `kogane.reconstructed-state.read`               |
+   | `/api/v2/audit`                       | `kogane.audit.search`, `kogane.audit.get`       |
+
+   The 34 gaps, by group:
+
+   | Group                    | Routes with no MCP read                                                                                                                              |
+   | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | Page plumbing            | `/api/meta`, `/api/overview`, `/api/filter-options`                                                                                                  |
+   | v1 observations          | `/api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`, `/api/artifacts/:id`, `/api/observations/:kind/:id`, `/api/raw/:sha256`    |
+   | Evidence browser         | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact`, `…/runs/:run/artifacts/:artifact/raw` |
+   | Balances and rewards     | `/api/v2/balances/latest`, `/api/v2/balances/history`, `/api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                          |
+   | Identity pages           | `/api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage`                                         |
+   | Reconciliation and state | `/api/v2/reconciliation/card-settlements`, `…/card-settlements/ownership` (Phase 2 unit 2g), `/api/v2/reported-holdings-change`                      |
+   | Reports and quality      | `/api/v2/reports`, `/api/v2/reports/:id`, `…/:id/explanation`, `…/:id/export`, `/api/collection-quality`, `/api/collection-quality/:source`          |
+   | Operator pages           | `/api/ops/v1/schedules` (`kogane.schedules.maintenance.read` covers the maintenance part only), `/api/v2/delegations`                                |
+
+3. **No SQL in MCP adapters** (ADR 0081 point 2). The files that define or
+   serve MCP tools (`mcp.ts`, `agent-api.ts`, `agent-service.ts`,
+   `read-tools.ts`, `schedule-tools.ts`, `ops-tools.ts`,
+   `delegated-*-tools.ts`) contain no SQL statement outside comments, except
+   one each in `agent-service.ts` (`scopedParseRuns`, the parse-run window of
+   `kogane.context.open`), `delegated-maintenance-tools.ts` and
+   `delegated-schedule-tools.ts` (the 24-hour delegated write count) and
+   `ops-tools.ts` (the `ops_requests` lookup of `kogane.ops.operation.get`).
+   The scan reads those files only, not the modules they import.
