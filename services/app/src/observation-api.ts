@@ -1,7 +1,8 @@
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { evidenceReader, type FilterOptionsKind, type ObservationKind } from "./observations";
-import { decimalRows } from "./normalized-decimals";
-import { describeActivities } from "./activity-presentation";
-import { organizedFilterOptions } from "./organized-filter-options";
+import { decimalRows } from "../../../packages/application/src/query/normalized-decimals.ts";
+import { describeActivities } from "../../../packages/application/src/query/activity-presentation.ts";
+import { organizedFilterOptions } from "../../../packages/application/src/query/organized-filter-options.ts";
 import { presentLatestBalances, describeBalanceRows } from "./balance-presentation";
 import { HttpError, json } from "./http";
 import { centralStoreCapabilities } from "./capabilities";
@@ -11,7 +12,7 @@ import {
   observationOrganizations,
   organizationContext,
   organizationKey,
-} from "./observation-organization";
+} from "../../../packages/application/src/query/observation-organization.ts";
 import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract";
 import {
   allowedQueryParameters,
@@ -180,7 +181,7 @@ export async function readObservationRoute(
     if (measureView && kind !== "balances") throw new HttpError(400, "invalid_query");
     return {
       body: await organizedFilterOptions(
-        env.DB,
+        d1Executor(env.DB),
         kind,
         await reader.filterOptions({
           kind: kind as FilterOptionsKind,
@@ -208,13 +209,13 @@ export async function readObservationRoute(
   if (path === "/api/overview") return { body: boundedPage({ ...(await reader.overview()) }) };
   if (path === "/api/transactions") {
     const transactions = await organizeRows(
-      env.DB,
+      d1Executor(env.DB),
       "transaction",
       await decimalRows(
-        env.DB,
+        d1Executor(env.DB),
         "transaction",
         await describeActivities(
-          env.DB,
+          d1Executor(env.DB),
           await reader.listTransactions({
             source: filter.source,
             account: filter.account,
@@ -284,7 +285,7 @@ export async function readObservationRoute(
     const projected =
       compat ??
       presentLatestBalances(
-        await organizeRows(env.DB, "balance", candidates, identityRead),
+        await organizeRows(d1Executor(env.DB), "balance", candidates, identityRead),
         filter.metric,
       );
     const latest = compat ?? projected.slice(latestOffset, latestOffset + 501);
@@ -297,15 +298,19 @@ export async function readObservationRoute(
       offset,
     });
     const organizedHistory = await organizeRows(
-      env.DB,
+      d1Executor(env.DB),
       "balance",
       history.slice(0, 500),
       identityRead,
     );
     return {
       body: {
-        latest: await decimalRows(env.DB, "balance", latest.slice(0, 500)),
-        history: await decimalRows(env.DB, "balance", describeBalanceRows(organizedHistory)),
+        latest: await decimalRows(d1Executor(env.DB), "balance", latest.slice(0, 500)),
+        history: await decimalRows(
+          d1Executor(env.DB),
+          "balance",
+          describeBalanceRows(organizedHistory),
+        ),
         interpretationContext: organizationContext(identityRead, [
           ...latest.slice(0, 500).map((row) => row.organization),
           ...organizedHistory.map((row) => row.organization),
@@ -326,21 +331,21 @@ export async function readObservationRoute(
       offset,
     });
     const normalizedPositions = await decimalRows(
-      env.DB,
+      d1Executor(env.DB),
       "position",
       entries.map((entry) => entry.position),
     );
     const normalizedValuations = new Map(
       (
         await decimalRows(
-          env.DB,
+          d1Executor(env.DB),
           "valuation",
           entries.flatMap((entry) => entry.valuations),
         )
       ).map((row) => [row.id, row.normalized]),
     );
     const organizations = await observationOrganizations(
-      env.DB,
+      d1Executor(env.DB),
       entries.flatMap((entry) => [
         { kind: "position" as const, id: entry.position.id },
         ...entry.valuations.map(({ id }) => ({ kind: "valuation" as const, id })),
@@ -400,8 +405,8 @@ export async function readObservationRoute(
     if (observation) {
       // Detail routes accept no parameters, so they always read `latest`.
       const ref = { kind: observation[1] as ObservationKind, id };
-      const organizations = await observationOrganizations(env.DB, [ref]);
-      const [decimal] = await decimalRows(env.DB, ref.kind, [{ id }]);
+      const organizations = await observationOrganizations(d1Executor(env.DB), [ref]);
+      const [decimal] = await decimalRows(d1Executor(env.DB), ref.kind, [{ id }]);
       return {
         body: {
           ...result,

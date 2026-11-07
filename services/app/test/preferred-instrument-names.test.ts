@@ -5,7 +5,10 @@ import { preferredInstrumentNames } from "../../../packages/application/src/quer
 import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import { identifyParse } from "../../processor/src/identity-store";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
-import { observationOrganizations, organizeRows } from "../src/observation-organization";
+import {
+  observationOrganizations,
+  organizeRows,
+} from "../../../packages/application/src/query/observation-organization.ts";
 
 beforeAll(async () => {
   await seedRegistry();
@@ -225,7 +228,7 @@ it("observation organization shares preferred names and evidence while retaining
   )
     .bind(data.parseId)
     .all<{ id: number; security_name: string; security_code: string }>();
-  const rows = await organizeRows(env.DB, "position", positions.results);
+  const rows = await organizeRows(d1Executor(env.DB), "position", positions.results);
   expect(rows[0]).toMatchObject({
     security_name: "Original English",
     security_code: "INTEGRATED",
@@ -245,7 +248,7 @@ it("observation organization shares preferred names and evidence while retaining
     FROM current_instrument_mappings WHERE identifier_id=?`)
     .bind(reference)
     .run();
-  const manual = await observationOrganizations(env.DB, [
+  const manual = await observationOrganizations(d1Executor(env.DB), [
     { kind: "position", id: positions.results[0]!.id },
   ]);
   expect(
@@ -269,7 +272,7 @@ it("organizes more than 500 distinct instruments without exceeding the name look
     .bind(data.parseId)
     .all<{ id: number }>();
   const result = await observationOrganizations(
-    env.DB,
+    d1Executor(env.DB),
     positions.results.map(({ id }) => ({ kind: "position", id })),
   );
   expect(result.size).toBe(501);
