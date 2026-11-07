@@ -1384,11 +1384,12 @@ It compares the UI against the tools `tools/list` publishes to the widest
 caller this Worker serves: an MCP client whose grant holds every agent
 capability over the whole store and whose delegation (`operator-delegate`)
 holds every delegation capability, with `COMMANDS_ENABLED`, `OPS_API_ENABLED`
-and `SCHEDULES_ENABLED` on. It has three guards, each with an allow-list of
-the gaps known when it landed. The allow-lists in the test are authoritative;
-the tables below are the state on 2026-11-07. A fixed gap must leave its list
-in the same PR (the test fails on a listed gap that is no longer one), and a
-new entry is a regression of ADR 0081 that needs the owner's agreement.
+and `SCHEDULES_ENABLED` on and a Processor binding. It has three guards, each
+with an allow-list of the gaps known when it landed. The allow-lists in the
+test are authoritative; the tables below are the state on 2026-11-07. A fixed
+gap must leave its list in the same PR (the test fails on a listed gap that is
+no longer one), and a new entry is a regression of ADR 0081 that needs the
+owner's agreement.
 
 1. **Catalogue operations.** Every `OPERATION_CATALOGUE` entry whose paths
    include `ui` also lists `mcp` and has its `kogane.<operation>` tool
@@ -1406,11 +1407,20 @@ new entry is a regression of ADR 0081 that needs the owner's agreement.
    (string and template literals, path constants of `apps/web/src` and
    `packages/observation-shared/src`, one-line path helpers; see
    [`ui-routes.ts`](../services/app/test/ui-routes.ts)) and fails on a path no
-   listed route serves, and on a listed route the UI no longer names. Each
-   route is mapped to the MCP tools that read the same service, listed as a
-   gap, or listed as not a read route (`/api/command/v1/:operation` is the
+   listed route serves, and on a listed route the UI no longer names. A
+   file-local path builder is resolved at its calls
+   (`path("accounts", …)` in `identity-api.ts` names
+   `/api/identity/accounts`), and a segment built from an expression matches
+   only a `:name` segment of a route, never a literal one. Each route is
+   mapped to the MCP tools that read the same service, listed as a gap, or
+   listed as not a read route (`/api/command/v1/:operation` is the
    catalogue's `command.*`, guard 1). A path the UI builds from an expression
-   the scan cannot resolve is not seen.
+   the scan cannot resolve is not seen. Every other published tool that is
+   not a `ui` operation is listed with its reason (`kogane.capabilities`,
+   `kogane.explain`, `kogane.reconcile.propose`,
+   `kogane.economic-readiness.read`, `kogane.audit.get`,
+   `kogane.schedules.maintenance.read`), so a new read tool is mapped to its
+   route and that route leaves the gaps.
 
    | UI read route                         | MCP read                                        |
    | ------------------------------------- | ----------------------------------------------- |
@@ -1422,7 +1432,7 @@ new entry is a regression of ADR 0081 that needs the owner's agreement.
    | `/api/v2/card-purchases`              | `kogane.purchases.explain`                      |
    | `/api/v2/reported-state`              | `kogane.reported-state.read`                    |
    | `/api/v2/reconstructed-state`         | `kogane.reconstructed-state.read`               |
-   | `/api/v2/audit`                       | `kogane.audit.search`, `kogane.audit.get`       |
+   | `/api/v2/audit`                       | `kogane.audit.search`                           |
 
    The 34 gaps, by group:
 
@@ -1440,9 +1450,12 @@ new entry is a regression of ADR 0081 that needs the owner's agreement.
 3. **No SQL in MCP adapters** (ADR 0081 point 2). The files that define or
    serve MCP tools (`mcp.ts`, `agent-api.ts`, `agent-service.ts`,
    `read-tools.ts`, `schedule-tools.ts`, `ops-tools.ts`,
-   `delegated-*-tools.ts`) contain no SQL statement outside comments, except
-   one each in `agent-service.ts` (`scopedParseRuns`, the parse-run window of
-   `kogane.context.open`), `delegated-maintenance-tools.ts` and
+   `delegated-*-tools.ts`; the test fails when another file of
+   `services/app/src` names a `kogane.` tool) contain no SQL statement outside
+   comments, except one each in `agent-service.ts` (`scopedParseRuns`, the
+   parse-run window of a source-scoped grant's context, behind
+   `kogane.context.open`, `kogane.financial.query`, `kogane.explain` and
+   `kogane.reconcile.propose`), `delegated-maintenance-tools.ts` and
    `delegated-schedule-tools.ts` (the 24-hour delegated write count) and
    `ops-tools.ts` (the `ops_requests` lookup of `kogane.ops.operation.get`).
    The scan reads those files only, not the modules they import.

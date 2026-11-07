@@ -3,7 +3,8 @@
 // 1. Every catalogue operation on the `ui` path is also on `mcp`, and its tool
 //    is published in the MCP tool list, unless it is R4.
 // 2. Every API route the web UI reads has an MCP read, through the explicit
-//    route-to-tool map below.
+//    route-to-tool map below, and every other published read tool is mapped
+//    or listed, so a tool that closes a route gap cannot leave it listed.
 // 3. No MCP adapter file runs SQL of its own (ADR 0081, point 2).
 //
 // Each guard has an allow-list of the gaps known when it landed
@@ -57,14 +58,14 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/card-purchases": ["kogane.purchases.explain"],
   "/api/v2/reported-state": ["kogane.reported-state.read"],
   "/api/v2/reconstructed-state": ["kogane.reconstructed-state.read"],
-  "/api/v2/audit": ["kogane.audit.search", "kogane.audit.get"],
+  "/api/v2/audit": ["kogane.audit.search"],
 };
 
 /** UI read routes with no MCP read yet, and what the UI reads there. */
 const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
   // Deployment and page plumbing.
   "/api/meta":
-    "deployment features and store capabilities; kogane.capabilities reports the grant, not these",
+    "parsingHealth and globalPassEmptyMonths; kogane.capabilities carries the same store capabilities (its api field) but not these",
   "/api/overview": "overview counts of the observation store",
   "/api/filter-options": "filter choices of the v1 list pages",
   // v1 observation lists and detail (the evidence browser's record side).
@@ -110,6 +111,23 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
   "/api/v2/delegations": "the operator's delegation status page",
 };
 
+/**
+ * Published tools that are neither a `ui` operation (guard 1) nor mapped from
+ * a UI read route above, and why. A new read tool must be mapped or listed
+ * here, so a tool that closes a gap above cannot leave the gap listed.
+ */
+const TOOLS_WITHOUT_UI_ROUTE: Readonly<Record<string, string>> = {
+  "kogane.capabilities":
+    "the grant and the store capabilities; /api/meta carries more (a gap above)",
+  "kogane.explain": "an evidence graph of one ref, not the observation detail (a gap above)",
+  "kogane.reconcile.propose": "an agent's relation proposal; no screen offers it",
+  "kogane.economic-readiness.read": "economic row readiness; no screen reads it",
+  "kogane.audit.get":
+    "one audit record by id (readAuditRecordForGrant); the audit page reads pages only (readAuditPage, kogane.audit.search)",
+  "kogane.schedules.maintenance.read":
+    "the maintenance part of /api/ops/v1/schedules (a gap above)",
+};
+
 /** Paths the UI names that are not read routes. */
 const NOT_READ_ROUTES: Readonly<Record<string, string>> = {
   "/api/command/v1": "the change lifecycle's path prefix constant",
@@ -123,7 +141,7 @@ const NOT_READ_ROUTES: Readonly<Record<string, string>> = {
 const SQL_GAPS: Readonly<Record<string, { count: number; what: string }>> = {
   "services/app/src/agent-service.ts": {
     count: 1,
-    what: "scopedParseRuns, the parse-run window of kogane.context.open",
+    what: "scopedParseRuns, the parse-run window a source-scoped grant opens a context with (context.open, financial.query, explain, reconcile.propose)",
   },
   "services/app/src/delegated-maintenance-tools.ts": {
     count: 1,
@@ -147,8 +165,10 @@ const APP_SOURCES = import.meta.glob("../src/*.ts", {
   import: "default",
   eager: true,
 }) as Record<string, string>;
+// Upper case only, as this repository writes SQL: with `i`, a `select`
+// identifier and a later `import … from` would count as a statement.
 const SQL_STATEMENT =
-  /\b(?:SELECT\s[\s\S]*?\sFROM|INSERT\s+INTO|UPDATE\s+\w+\s+SET|DELETE\s+FROM)\b/giu;
+  /\b(?:SELECT\s[\s\S]*?\sFROM|(?:INSERT|REPLACE)(?:\s+OR\s+[A-Z]+)?\s+INTO|UPDATE(?:\s+OR\s+[A-Z]+)?\s+\w+\s+SET|DELETE\s+FROM)\b/gu;
 
 // ── the widest published tool list ───────────────────────────────────────
 
@@ -312,6 +332,21 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
     expect(routes.filter((route) => !patterns.some((p) => routeServes(route, p)))).toEqual([]);
   });
 
+  it("every other published tool is mapped from a UI route or listed", async () => {
+    const tools = await publishedTools();
+    const mapped = new Set(Object.values(READ_ROUTE_TOOLS).flat());
+    const uiOperation = (tool: string) => {
+      const name = tool.slice("kogane.".length);
+      return (
+        Object.hasOwn(OPERATION_CATALOGUE, name) &&
+        (OPERATION_CATALOGUE[name as OperationName].paths as readonly string[]).includes("ui")
+      );
+    };
+    expect([...tools].filter((tool) => !mapped.has(tool) && !uiOperation(tool)).sort()).toEqual(
+      Object.keys(TOOLS_WITHOUT_UI_ROUTE).sort(),
+    );
+  });
+
   it("every mapped tool is published", async () => {
     const tools = await publishedTools();
     const unpublished = Object.entries(READ_ROUTE_TOOLS).flatMap(([route, names]) =>
@@ -326,10 +361,15 @@ describe("MCP adapters run no SQL of their own (ADR 0081, point 2)", () => {
     .map(([file, text]) => [file.replace(/^\.\.\//u, "services/app/"), text] as const)
     .filter(([file]) => ADAPTER_FILE.test(file));
 
-  it("scans the adapter files", () => {
-    expect(adapters.map(([file]) => file)).toEqual(
-      expect.arrayContaining(["services/app/src/mcp.ts", "services/app/src/read-tools.ts"]),
-    );
+  it("scans every file that names an MCP tool", () => {
+    // A tool name in code, not in a comment: a new tool file the pattern
+    // misses fails here instead of escaping the scan.
+    const naming = Object.entries(APP_SOURCES)
+      .filter(([, text]) => /["'`]kogane\.[a-z]/u.test(withoutComments(text)))
+      .map(([file]) => file.replace(/^\.\.\//u, "services/app/"))
+      .sort();
+    expect(adapters.map(([file]) => file).sort()).toEqual(naming);
+    expect(naming).toContain("services/app/src/mcp.ts");
   });
 
   it("only the known files run SQL, each its known number of statements", () => {

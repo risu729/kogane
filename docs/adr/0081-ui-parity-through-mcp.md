@@ -115,7 +115,8 @@ What the code does today (main `02a915a`):
   with allow-lists of the gaps they found
   ([agent API: parity guards](../agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07)).
   The inventory also found a fourth adapter with its own SQL,
-  `scopedParseRuns` in `agent-service.ts` (`kogane.context.open`), and 34 UI
+  `scopedParseRuns` in `agent-service.ts` (the parse-run window behind
+  `kogane.context.open` and the other context-opening tools), and 34 UI
   read routes with no MCP read.
 - After the first slice: the catalogue test fails when a `ui` entry lacks a
   published `mcp` tool, and the read-route test fails when a UI read route has
