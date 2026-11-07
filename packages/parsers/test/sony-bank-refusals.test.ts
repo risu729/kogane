@@ -1,10 +1,11 @@
-// Fail-closed pins for the Sony Bank history and WALLET parsers (ADR 0004:
+// Fail-closed pins for the Sony Bank gross-balance, history and WALLET parsers (ADR 0004:
 // refuse rather than guess). Inputs are synthetic mutations of the anonymous
 // fixtures under tests/fixtures/observation-pipeline/sony-bank-parser-boundaries.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  sonyBankGrossBalance,
   sonyBankHistoryCsv,
   sonyBankHistoryJson,
   sonyBankWalletHistory,
@@ -31,6 +32,37 @@ function meta(dataset: string, overrides: Partial<ArtifactMeta> = {}): ArtifactM
     ...overrides,
   };
 }
+
+describe("sony-bank gross balance", () => {
+  const body = (): Record<string, unknown> =>
+    JSON.parse(text("gross-balance.json")) as Record<string, unknown>;
+  const parse = (updateDttm: string) =>
+    sonyBankGrossBalance.parse(
+      encode(JSON.stringify({ ...body(), updateDttm })),
+      meta("gross-balance"),
+    );
+
+  test("updateDttm keeps a clock time that exists, in either form, as before", () => {
+    expect(parse("2026/09/01 00:00:00").observations[0]?.asOf).toBe("2026-09-01T00:00:00");
+    expect(parse("2026-09-01 23:59:59").observations[0]?.asOf).toBe("2026-09-01T23:59:59");
+    expect(parse("2026-09-01T12:34:56.000+09:00").observations[0]?.asOf).toBe(
+      "2026-09-01T12:34:56.000+09:00",
+    );
+  });
+
+  test("updateDttm with a clock time that does not exist is refused, never repaired", () => {
+    for (const value of [
+      "2026/09/01 24:00:00",
+      "2026/09/01 12:60:00",
+      "2026/09/01 12:00:60",
+      "2026/09/01 99:99:99",
+      "2026-09-01T25:00:00",
+    ])
+      expect(() => parse(value), value).toThrow("updateDttm is invalid");
+    // The calendar date was already checked in both forms.
+    expect(() => parse("2026/02/30 00:00:00")).toThrow("updateDttm is not a calendar date");
+  });
+});
 
 describe("sony-bank history JSON pages", () => {
   type Page = Record<string, unknown> & { transactionHistInfo: Record<string, unknown>[] };

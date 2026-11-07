@@ -17,6 +17,38 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Sony Bank: a gross-balance update time that does not exist is refused (gross balance 1.0.2)
+
+2026-11-07. `sony-bank-gross-balance` reads `updateDttm` in two forms: an ISO
+date-time with milliseconds and `+09:00`, kept verbatim, and a zone-less
+`YYYY/MM/DD hh:mm:ss` (or `-` and `T`) form, kept as a zone-less local
+date-time (`2026-09-01T12:34:56`). 1.0.1 checked the calendar date of both
+forms but the clock time of the ISO form only, so `2026/09/01 24:61:99` became
+the `asOf` `2026-09-01T24:61:99` of every gross balance row, with no warning.
+1.0.2 checks the clock of the zone-less form the same way (hour at most 23,
+minute and second at most 59) and refuses the artifact (`updateDttm is
+invalid`), as it already did for an ISO value with such a clock or for a
+calendar date that does not exist. Every time that exists reads as in 1.0.1;
+the zone-less form still gets no zone, because no document states the one the
+provider means.
+
+`sony-bank.ts` holds all four Sony parsers, so each is released:
+`sony-bank-gross-balance` 1.0.1 to 1.0.2, and, with only their digests
+moved, `sony-bank-history-json` 1.0.0 to 1.0.1, `sony-bank-history-csv` 1.0.1
+to 1.0.2 and `sony-bank-wallet-history` 1.0.2 to 1.0.3, which read every
+artifact exactly as before. No other parser's digest changed. **Deploying
+rewrites nothing**: stored runs and their rows stay as they are (evidence is
+append-only); the processor registers the new releases itself and the repair
+lane re-parses stored Sony captures under them, each new `ok` run superseding
+the older one, which stays stored. No migration and no operator step: the
+gross-balance snapshot policy row pins no parser version, and no reader pins
+these parsers by version. A stored gross-balance capture whose `updateDttm`
+names a clock time that does not exist, if any, becomes an `error` run under
+1.0.2 while its 1.0.1 run stays published. Limits: production was not read for
+this release, so whether any stored capture carries such a value is not
+established. Tests: `packages/parsers/test/sony-bank-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`.
+
 ## SBI Shinsei activity rows record the provider-id origin (activity parser 0.1.3)
 
 2026-10-09, [ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin).
