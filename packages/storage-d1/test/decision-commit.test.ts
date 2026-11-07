@@ -239,6 +239,30 @@ INSERT INTO operation_receipts(operation_id,principal,operation_kind,payload_dig
     expect(before).toMatchObject({ receipts: 0, approvalUses: 1, committedPlans: 0 });
   });
 
+  test("without table statistics the reservation finds a ledger row by its key and scans neither key table", () => {
+    expect(
+      db.query("SELECT count(*) AS n FROM sqlite_master WHERE name LIKE 'sqlite_stat%'").get(),
+    ).toEqual({ n: 0 });
+    const [reservation] = commitWrites({ [SUBJECT]: 0 });
+    const plan = (
+      db
+        .query(`EXPLAIN QUERY PLAN ${reservation!.sql}`)
+        .all(...(reservation!.binds as never[])) as {
+        detail: string;
+      }[]
+    ).map((row) => row.detail);
+    // The ledger condition is one primary-key probe, read from the index alone.
+    expect(plan).toContain(
+      "SEARCH decision_operations USING COVERING INDEX sqlite_autoindex_decision_operations_1 (operation_id=?)",
+    );
+    expect(plan).toContain(
+      "SEARCH operation_receipts USING COVERING INDEX sqlite_autoindex_operation_receipts_1 (operation_id=?)",
+    );
+    expect(
+      plan.filter((detail) => /^SCAN (decision_operations|operation_receipts)\b/u.test(detail)),
+    ).toEqual([]);
+  });
+
   test("the revision expression answers 0 for a subject with no history", async () => {
     seed({ [SUBJECT]: 0 });
     const guard = db

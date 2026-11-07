@@ -360,7 +360,12 @@ reusing such a key found the other route's ledger row and decision as if they
 were its own: an identity commit answered an accepted receipt and wrote
 nothing, and a relation commit tried to link the identity decision, which the
 0029 `entity_relations_provenance` trigger refused with an unexplained SQL
-error. The receipt reservation now also requires that no ledger row holds the
+error; a relation commit under a key the rule acceptance used skipped its own
+ledger row and wrote its decision and relation against the rule's. The rule
+acceptance's keys are `reconciliation-<digest>`, while a review commits under
+the key its caller chose (the web client's is `op-` and part of the approval
+id), so a reviewer judging a proposal the rule accepted commits as before. The
+receipt reservation now also requires that no ledger row holds the
 key, so such a commit writes nothing and answers `idempotency_conflict` with
 its plan open and its approval unspent; the caller commits again under a fresh
 operation id. Stored ids are unchanged (nothing is re-derived). The other
