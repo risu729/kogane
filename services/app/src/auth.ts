@@ -165,9 +165,9 @@ const MCP_CLIENT_PREFIX = "mcp-client:";
  * - `mcp-client`: an identity that reached `/mcp` through the MCP Access
  *   application (Cloudflare Access Managed OAuth). Whoever signed in — the
  *   operator included — is **agent-only** here: `principal` is
- *   `mcp-client:<sub>`, its grant is that name's `AGENT_API_GRANTS` entry and
- *   nothing else, and no grader may turn it back into the subject it came
- *   from. The bare subject is deliberately not part of this object.
+ *   `mcp-client:<sub>`, it reads and acts with the whole-store grant ADR 0084
+ *   gives every proved caller, and no grader may turn it back into the
+ *   subject it came from. The bare subject is deliberately not part of this object.
  * - `browser`: a session of this Worker's own Access application on an
  *   `/api/agent/v1/*` route; `principal` is its subject, as before.
  */

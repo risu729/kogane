@@ -228,6 +228,11 @@ describe("the record builder", () => {
       effect: "accepted",
       paths: ["alarm"],
     });
+    expect(OPERATION_CATALOGUE["alarm.lease.expire"]).toMatchObject({
+      risk: ["R2"],
+      effect: "applied",
+      paths: ["alarm"],
+    });
     expect(OPERATION_CATALOGUE["lane.tick"]).toMatchObject({
       risk: ["R2", "R1"],
       effect: "applied",
@@ -235,6 +240,7 @@ describe("the record builder", () => {
     });
     for (const path of ["agent-http", "mcp"] as const) {
       expect(toolOperation("kogane.alarm.occurrence.claim", path)).toBeNull();
+      expect(toolOperation("kogane.alarm.lease.expire", path)).toBeNull();
       expect(toolOperation("kogane.lane.tick", path)).toBeNull();
     }
   });

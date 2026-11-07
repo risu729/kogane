@@ -110,9 +110,10 @@ async function artifactOf(options: {
 
 /**
  * A revoked or expired session that re-authentication did not restore needs a
- * person: the passkey must be re-registered or the account unblocked. The
- * collector never retries a login past its single cooled-down attempt, so this
- * is reported rather than worked around (12 §3, G3-10, G3-11).
+ * person: the passkey must be re-registered, the account unblocked or the
+ * provider's terms agreed. Logins are only retried on a cooldown (hourly while
+ * an agreement is pending), so this is reported rather than worked around
+ * (12 §3, G3-10, G3-11).
  */
 export function waitingForHuman(health: HealthState): boolean {
   if (health.lastReauthErrorCode !== null) return true;

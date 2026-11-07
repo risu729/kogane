@@ -1,5 +1,9 @@
-import type { ObservationKind } from "../../../packages/observation-shared/src/api-contract";
-import { resolveFinancialProduct } from "../../../packages/observation-shared/src/financial-products";
+// The organization (account, instruments, product) shown beside observation
+// rows. Moved here from `services/app/src/observation-organization.ts` (ADR
+// 0081 point 2) so the observation and balance routes and their MCP page
+// reads organize rows through one function.
+import type { ObservationKind } from "../../../observation-shared/src/api-contract";
+import { resolveFinancialProduct } from "../../../observation-shared/src/financial-products";
 import {
   DEFAULT_IDENTITY_READ_MODE,
   type IdentityReadMode,
@@ -7,18 +11,18 @@ import {
   identityReleaseFor,
   interpretationContext,
   organizationSql,
-} from "../../../packages/read-model/src/index";
-import { readAccountConnections } from "./account-connections";
-import { connectionAccountLabel } from "./account-connection-display";
+} from "../../../read-model/src/index";
+import { connectionAccountLabel, readAccountConnections } from "./account-connections.ts";
 import {
   preferredInstrumentNames,
   type PreferredInstrumentName,
-} from "./preferred-instrument-names";
+} from "./preferred-instrument-names.ts";
+import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import type {
   ObservationOrganization,
   OrganizedAccount,
   OrganizedInstrument,
-} from "../../../packages/observation-shared/src/organization-contract";
+} from "../../../observation-shared/src/organization-contract";
 
 type Ref = { kind: ObservationKind; id: number };
 interface OrganizationRow {
@@ -81,7 +85,7 @@ const unavailable = (): ObservationOrganization => ({
  * they never change which account or instrument a row is attributed to.
  */
 export async function observationOrganizations(
-  db: D1Database,
+  reads: SqlExecutor,
   references: readonly Ref[],
   mode: IdentityReadMode = DEFAULT_IDENTITY_READ_MODE,
 ): Promise<Map<string, ObservationOrganization>> {
@@ -97,11 +101,10 @@ export async function observationOrganizations(
   >();
   const sql = organizationSql(mode);
   for (let start = 0; start < refs.length; start += 500) {
-    const rows = await db
-      .prepare(sql)
-      .bind(JSON.stringify(refs.slice(start, start + 500)))
-      .all<OrganizationRow>();
-    for (const row of rows.results) {
+    const rows = await reads.all<OrganizationRow>(sql, [
+      JSON.stringify(refs.slice(start, start + 500)),
+    ]);
+    for (const row of rows) {
       accountRefs.set(row.account_reference, {
         referenceId: row.account_reference,
         source: row.source,
@@ -184,14 +187,14 @@ export async function observationOrganizations(
   const names = new Map<string, PreferredInstrumentName>();
   for (let start = 0; start < identifiers.length; start += 500) {
     for (const [id, name] of await preferredInstrumentNames(
-      db,
+      reads,
       identifiers.slice(start, start + 500),
     )) {
       names.set(id, name);
     }
   }
   const connections = accountRefs.size
-    ? await readAccountConnections(db, [...accountRefs.values()])
+    ? await readAccountConnections(reads, [...accountRefs.values()])
     : new Map();
   for (const organization of output.values()) {
     if (organization.account) {
@@ -223,13 +226,13 @@ export async function observationOrganizations(
 }
 
 export async function organizeRows<T extends { id: number }>(
-  db: D1Database,
+  reads: SqlExecutor,
   kind: ObservationKind,
   rows: readonly T[],
   mode: IdentityReadMode = DEFAULT_IDENTITY_READ_MODE,
 ): Promise<(T & { organization: ObservationOrganization })[]> {
   const organizations = await observationOrganizations(
-    db,
+    reads,
     rows.map(({ id }) => ({ kind, id })),
     mode,
   );

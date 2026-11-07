@@ -1,9 +1,13 @@
-import type { TransactionRow } from "../../../packages/observation-shared/src/api-contract";
-import { classifyActivity } from "../../../packages/observation-shared/src/activity-semantics";
+// The parser facts the transaction list shows beside each row. Moved here from
+// `services/app/src/activity-presentation.ts` (ADR 0081 point 2) so the list
+// route and `kogane.observations.list` read them through one function.
+import type { TransactionRow } from "../../../observation-shared/src/api-contract";
+import { classifyActivity } from "../../../observation-shared/src/activity-semantics";
+import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 
 /** Only narrowly selected parser facts from the very same B row reach the collection API. */
 export async function describeActivities(
-  db: D1Database,
+  reads: SqlExecutor,
   rows: TransactionRow[],
 ): Promise<TransactionRow[]> {
   if (rows.length > 501) throw new Error("activity_presentation_budget");
@@ -19,13 +23,11 @@ export async function describeActivities(
   ))`;
   for (let offset = 0; offset < rows.length; offset += 80) {
     const ids = rows.slice(offset, offset + 80).map((row) => row.id);
-    const result = await db
-      .prepare(
-        `SELECT id, CASE WHEN json_valid(extra_json) THEN ${projection} ELSE '{}' END AS facts FROM transaction_observations WHERE id IN (${ids.map(() => "?").join(",")})`,
-      )
-      .bind(...ids)
-      .all<{ id: number; facts: string }>();
-    for (const row of result.results) facts.set(row.id, JSON.parse(row.facts));
+    const result = await reads.all<{ id: number; facts: string }>(
+      `SELECT id, CASE WHEN json_valid(extra_json) THEN ${projection} ELSE '{}' END AS facts FROM transaction_observations WHERE id IN (${ids.map(() => "?").join(",")})`,
+      ids,
+    );
+    for (const row of result) facts.set(row.id, JSON.parse(row.facts));
   }
   return rows.map((row) => ({
     ...row,

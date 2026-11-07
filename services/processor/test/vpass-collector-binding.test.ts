@@ -284,14 +284,18 @@ describe("ADR 0023 a registered collector card run", () => {
       unit_kind: "card",
       steps: "extracted",
     });
-    // Only the binding carries a dataset here: the statement pages' dataset is
-    // the registration table's (ADR 0022), not this change's.
+    // The binding and, since ADR 0083 (`terminal-registration-v3`), the
+    // statement page carry a dataset; the card list, selection and discovery
+    // responses do not.
     expect(
-      all<{ n: number }>(
-        "SELECT count(*) AS n FROM fetch_artifacts WHERE fetch_run_id=? AND dataset IS NOT NULL",
+      all<{ artifact_key: string; dataset: string }>(
+        "SELECT artifact_key,dataset FROM fetch_artifacts WHERE fetch_run_id=? AND dataset IS NOT NULL ORDER BY artifact_key",
         run,
       ),
-    ).toEqual([{ n: 1 }]);
+    ).toEqual([
+      { artifact_key: "card-identity-binding.json", dataset: "card-identity-binding" },
+      { artifact_key: "months/202608/top-000.json", dataset: "statement-page" },
+    ]);
 
     // Every financial artifact of the card unit binds to the one token.
     const trusted = all<{

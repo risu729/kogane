@@ -4,6 +4,7 @@
 // writer's own version check: this module never writes a rule itself.
 import { z } from "zod";
 import {
+  OPERATOR_ONLY_PROPOSAL_REASONS,
   PROPOSAL_REASONS,
   SURVEY_FAILURE_CODES,
   type MaintenanceSurveyProposalView,
@@ -23,7 +24,12 @@ import {
   maintenanceSurveyEnabled,
   type SurveyConfig,
 } from "./config.ts";
-import type { OperationCall, RevisionField } from "../../../../packages/application/src/index.ts";
+import {
+  OPERATOR_ONLY_HEADER,
+  type OperationCall,
+  type RevisionField,
+} from "../../../../packages/application/src/index.ts";
+import { operatorOnlyAcceptance } from "./diff.ts";
 import type { SqlWrite } from "../../../../packages/storage-d1/src/core/operations.ts";
 
 /**
@@ -47,8 +53,14 @@ export interface RevisionWrite {
     scope: MaintenanceRule["scope"];
   };
   provenance: { referenceUrl: string; verifiedAt: string; decisionRef: string };
-  actor: { kind: "operator"; id: string };
+  /** The operator, or a principal the owner delegated (`mcp-client:<sub>`). */
+  actor: { kind: "operator" | "delegated"; id: string };
   reason: typeof ACCEPTED_REASON;
+}
+/** The proposal an acceptance writes, as the trusted writer options name it. */
+interface AcceptedProposal {
+  id: number;
+  ruleId: string;
 }
 type RevisionResult =
   | { ok: true; ruleId: string; revision: number; reconciled: boolean }
@@ -78,11 +90,56 @@ export interface RevisionAppend {
  * rule. `append` adds the decision's own statements to the revision's batch,
  * so the revision and the decision are one write (ADR 0064).
  */
-export type MaintenanceRevisionWriter = (
+export type MaintenanceRevisionWriter<O = never> = (
   env: Env,
   write: RevisionWrite,
   append: (saved: SavedRevision) => RevisionAppend,
+  options?: O,
 ) => Promise<RevisionResult>;
+/** What a delegated acceptance's prepare learns from the writer's validation chain. */
+type RevisionPrepareResult =
+  | {
+      ok: true;
+      currentRevision: number;
+      deferralClass: "within-7d" | "within-31d" | "beyond-31d";
+      budgetRemaining: number | null;
+    }
+  | { ok: false; code: string; status: number };
+/** The writer's validation chain without the write (`prepareMaintenanceRevision`). */
+type MaintenanceRevisionPreparer<O> = (
+  env: Env,
+  write: RevisionWrite,
+  options?: O,
+) => Promise<RevisionPrepareResult>;
+
+/**
+ * A decision by a delegated principal, as the private route
+ * (`delegated-survey.ts`) has verified it: the attenuated source, the step,
+ * and for an acceptance the expected base revision and the audit record the
+ * revision cites. The decision row and the revision name `actor`.
+ */
+export interface DelegatedSurveyDecision<O> {
+  /** The schedule source the delegation was attenuated to; another source's proposal is not found. */
+  source: string;
+  /** `apply` rejects (R1); `prepare` and `confirm` accept (R2). */
+  step: "apply" | "prepare" | "confirm";
+  /** Accept only: the proposal's base revision the caller decided on. */
+  baseRevision?: number;
+  /** Accept only: `delegated-audit:aud_<uuid>`, the prepare record a confirm cites. */
+  decisionRef?: string;
+  /**
+   * Accept: the writer's trusted options for this proposal, which only the
+   * private route constructs (`MaintenanceWriteOptions`); this module never
+   * names a bound.
+   */
+  writerOptions?: (proposal: AcceptedProposal) => O;
+  /** Accept prepare: the writer's chain without the write. */
+  prepare?: MaintenanceRevisionPreparer<O>;
+  /** A batch that raised: the delegation's closed refusal it stands for, if any. */
+  batchFailure?: () => Promise<Response | null>;
+  /** Accept: the source's current rules (latest revision of each), read at each step. */
+  rules?: (source: string) => Promise<readonly MaintenanceRule[]>;
+}
 
 /**
  * The reason an accepted proposal's revision carries: a closed code of
@@ -125,6 +182,13 @@ interface ProposalRow {
 function refuse(code: string, status: number): Response {
   return Response.json({ error: code }, { status });
 }
+/** An acceptance the owner kept with the operator (R3), marked so the App records it so. */
+function operatorOnly(): Response {
+  return Response.json(
+    { error: "operation_not_delegable" },
+    { status: 403, headers: { [OPERATOR_ONLY_HEADER]: "1" } },
+  );
+}
 
 /**
  * Accept or reject one undecided proposal, as `actor` (an operator the App
@@ -137,16 +201,20 @@ function refuse(code: string, status: number): Response {
  * record exist together or not at all (ADR 0064), and a proposal decided by
  * someone else in between rolls the revision back with them.
  */
-export async function decideSurveyProposal(
+export async function decideSurveyProposal<O = never>(
   env: Env,
   id: number,
   value: unknown,
   actor: string,
-  writer: MaintenanceRevisionWriter,
+  writer: MaintenanceRevisionWriter<O>,
   audit: OperationCall,
+  delegated?: DelegatedSurveyDecision<O>,
 ): Promise<Response> {
   const parsed = decisionSchema.safeParse(value);
   if (!parsed.success) return refuse("invalid_request", 400);
+  // Reject is the direct step and accept the two-step one, never the other way.
+  if (delegated && (parsed.data.decision === "reject") !== (delegated.step === "apply"))
+    return refuse("invalid_request", 400);
   const row = await env.DB.prepare(
     `SELECT p.*,f.url,f.fetched_at,f.sha256,d.decision FROM maintenance_survey_proposals p
      JOIN maintenance_survey_fetches f ON f.id=p.fetch_id
@@ -154,7 +222,10 @@ export async function decideSurveyProposal(
   )
     .bind(id)
     .first<ProposalRow & { decision: string | null }>();
-  if (!row) return refuse("proposal_not_found", 404);
+  // A proposal of a source outside the delegation answers exactly like one that
+  // does not exist, before anything else about it is said.
+  if (!row || (delegated && row.source !== delegated.source))
+    return refuse("proposal_not_found", 404);
   if (row.decision !== null) return refuse("proposal_already_decided", 409);
   const decidedAt = new Date().toISOString();
   const target = `maintenance-survey-proposal:${id}`;
@@ -174,17 +245,82 @@ export async function decideSurveyProposal(
       },
       { kind: "target" },
     );
-    const [rejected, recorded] = await env.DB.batch([
-      env.DB.prepare(
-        `INSERT INTO maintenance_survey_decisions(proposal_id,decision,actor,decided_at)
+    let rejected: D1Result | undefined, recorded: D1Result | undefined;
+    try {
+      [rejected, recorded] = await env.DB.batch([
+        env.DB.prepare(
+          `INSERT INTO maintenance_survey_decisions(proposal_id,decision,actor,decided_at)
        SELECT ?,'rejected',?,? WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions WHERE proposal_id=?)`,
-      ).bind(id, actor, decidedAt, id),
-      env.DB.prepare(record.sql).bind(...record.binds),
-    ]);
+        ).bind(id, actor, decidedAt, id),
+        env.DB.prepare(record.sql).bind(...record.binds),
+      ]);
+    } catch (error) {
+      // A delegated record's guard (budget, expiry) raised: nothing was written.
+      const refusal = delegated?.batchFailure ? await delegated.batchFailure() : null;
+      if (refusal) return refusal;
+      throw error;
+    }
     audit.settle(recorded?.meta.changes);
     return rejected?.meta.changes === 1
       ? Response.json({ decided: "rejected" })
       : refuse("proposal_already_decided", 409);
+  }
+  if (delegated) {
+    if (row.base_revision !== delegated.baseRevision) return refuse("revision_conflict", 409);
+    // The owner kept these acceptances with the operator (R3): refused at
+    // prepare and at confirm, whatever else holds.
+    const reasons = closedReasons(row.reasons_json);
+    if (reasons.some((r) => (OPERATOR_ONLY_PROPOSAL_REASONS as readonly string[]).includes(r)))
+      return operatorOnly();
+  }
+  const ruleId = row.rule_id ?? proposedRuleId(row.source, row.id);
+  const write: RevisionWrite = {
+    source: row.source,
+    ruleId,
+    expectedRevision: row.base_revision,
+    change: {
+      timezone: row.timezone,
+      pattern: JSON.parse(row.pattern_json) as MaintenancePattern,
+      enabled: row.enabled === 1,
+      scope: row.scope,
+    },
+    provenance: {
+      referenceUrl: row.url,
+      verifiedAt: row.fetched_at,
+      decisionRef: delegated?.decisionRef ?? proposalRef(row.id),
+    },
+    actor: { kind: delegated ? "delegated" : "operator", id: actor },
+    reason: ACCEPTED_REASON,
+  };
+  const options = delegated?.writerOptions?.({ id: row.id, ruleId });
+  if (delegated && (options === undefined || !delegated.rules))
+    return refuse("scheduling_unavailable", 503);
+  // The same reservation against the rules as they stand now: a disable, a
+  // re-enable, or a rule beside another one it overlaps, whatever the reasons
+  // recorded when the page was read.
+  if (
+    delegated?.rules &&
+    operatorOnlyAcceptance(write.change, ruleId, await delegated.rules(row.source))
+  )
+    return operatorOnly();
+  if (delegated?.step === "prepare") {
+    if (!delegated.prepare) return refuse("scheduling_unavailable", 503);
+    const checked = await delegated.prepare(env, write, options);
+    if (!checked.ok) return refuse(checked.code, checked.status);
+    return Response.json({
+      ok: true,
+      proposalId: row.id,
+      source: row.source,
+      kind: row.kind,
+      status: row.status,
+      reasons: closedReasons(row.reasons_json),
+      ruleId,
+      baseRevision: row.base_revision,
+      currentRevision: checked.currentRevision,
+      change: write.change,
+      deferralClass: checked.deferralClass,
+      budgetRemaining: checked.budgetRemaining,
+    });
   }
   const append = (revision: SavedRevision): RevisionAppend => {
     const ref = `maintenance-rule:${revision.ruleId}@${revision.revision}`;
@@ -223,29 +359,11 @@ export async function decideSurveyProposal(
   };
   let saved: RevisionResult;
   try {
-    saved = await writer(
-      env,
-      {
-        source: row.source,
-        ruleId: row.rule_id ?? proposedRuleId(row.source, row.id),
-        expectedRevision: row.base_revision,
-        change: {
-          timezone: row.timezone,
-          pattern: JSON.parse(row.pattern_json) as MaintenancePattern,
-          enabled: row.enabled === 1,
-          scope: row.scope,
-        },
-        provenance: {
-          referenceUrl: row.url,
-          verifiedAt: row.fetched_at,
-          decisionRef: proposalRef(row.id),
-        },
-        actor: { kind: "operator", id: actor },
-        reason: ACCEPTED_REASON,
-      },
-      append,
-    );
+    saved = await writer(env, write, append, options);
   } catch {
+    // A delegated record's guard (budget, expiry, a used confirmation) raised.
+    const refusal = delegated?.batchFailure ? await delegated.batchFailure() : null;
+    if (refusal) return refusal;
     // The batch raised and wrote nothing: the revision, the decision and the
     // record were rolled back together. A decision that now exists is the
     // reason; otherwise the store failed.
@@ -286,13 +404,20 @@ function closedReasons(json: string): ProposalReason[] {
   return PROPOSAL_REASONS.filter((r) => values.includes(r));
 }
 
-/** Read-only: each allowlisted page's freshness and the undecided proposals. */
+/**
+ * Read-only: each allowlisted page's freshness and the undecided proposals.
+ * `sources` narrows the proposals and their count to those sources before the
+ * bound on shown proposals applies (the agent read); omitted, every source.
+ */
 export async function maintenanceSurveyView(
   env: Env,
   now: number,
   config: SurveyConfig = loadSurveyConfig(),
+  sources?: readonly string[],
 ): Promise<MaintenanceSurveyView> {
   const db = env.DB;
+  const only = sources ? ` AND p.source IN (SELECT value FROM json_each(?))` : "";
+  const onlyBinds = sources ? [JSON.stringify(sources)] : [];
   const laneEnabled = maintenanceSurveyEnabled(env);
   const [cursorRows, proposalRows, countRows] = await db.batch<unknown>([
     db.prepare("SELECT * FROM maintenance_survey_cursors"),
@@ -302,14 +427,16 @@ export async function maintenanceSurveyView(
           (SELECT MAX(r.revision) FROM provider_maintenance_rules r
             WHERE r.id=COALESCE(p.rule_id,p.source||'-survey-'||p.id)) AS current_revision
          FROM maintenance_survey_proposals p JOIN maintenance_survey_fetches f ON f.id=p.fetch_id
-         WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions d WHERE d.proposal_id=p.id)
+         WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions d WHERE d.proposal_id=p.id)${only}
          ORDER BY p.id LIMIT ?`,
       )
-      .bind(PROPOSALS_SHOWN),
-    db.prepare(
-      `SELECT count(*) AS n FROM maintenance_survey_proposals p
-       WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions d WHERE d.proposal_id=p.id)`,
-    ),
+      .bind(...onlyBinds, PROPOSALS_SHOWN),
+    db
+      .prepare(
+        `SELECT count(*) AS n FROM maintenance_survey_proposals p
+       WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions d WHERE d.proposal_id=p.id)${only}`,
+      )
+      .bind(...onlyBinds),
   ]);
   const cursors = (cursorRows?.results ?? []) as CursorRow[];
   const proposals = (proposalRows?.results ?? []) as (ProposalRow & {

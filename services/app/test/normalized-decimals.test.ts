@@ -1,7 +1,8 @@
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
-import { decimalRows } from "../src/normalized-decimals";
+import { decimalRows } from "../../../packages/application/src/query/normalized-decimals.ts";
 import { validNormalizedDecimal } from "../../../packages/observation-shared/src/normalized-decimal";
 beforeAll(seedRegistry);
 it("D1 insertion triggers persist text-only exact values and API reads only selected IDs", async () => {
@@ -27,7 +28,7 @@ it("D1 insertion triggers persist text-only exact values and API reads only sele
     ids.push(row!.id);
   }
   const rows = await decimalRows(
-    env.DB,
+    d1Executor(env.DB),
     "balance",
     ids.map((id) => ({ id })),
   );
@@ -40,10 +41,10 @@ it("D1 insertion triggers persist text-only exact values and API reads only sele
   expect(rows.map((row) => row.normalized.coefficient)).toEqual(["0", "1", null, null]);
   expect(rows[1]!.normalized.scale).toBe(8);
   expect(rows.every((row) => validNormalizedDecimal(row.normalized))).toBe(true);
-  expect((await decimalRows(env.DB, "balance", [{ id: ids[1]! }])).map((row) => row.id)).toEqual([
-    ids[1],
-  ]);
-  await expect(decimalRows(env.DB, "balance", [{ id: 99999999 }])).rejects.toThrow(
+  expect(
+    (await decimalRows(d1Executor(env.DB), "balance", [{ id: ids[1]! }])).map((row) => row.id),
+  ).toEqual([ids[1]]);
+  await expect(decimalRows(d1Executor(env.DB), "balance", [{ id: 99999999 }])).rejects.toThrow(
     "missing_db_decimal",
   );
 });

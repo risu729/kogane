@@ -12,6 +12,9 @@
 //     economic commits or proposals, naming the ranges it wrote; `applied`
 //     when the stage returned, `failed` with the tick's code when it threw
 //     after writing. A tick that wrote nothing records nothing.
+//   * `alarm.lease.expire` — one `applied` record per collection execution
+//     lease the `processor-tick` alarm frees because its holder went silent
+//     (ADR 0085), joined to the release statement just before it.
 import type { SqlWrite } from "../../../storage-d1/src/core/operations.ts";
 import { type AuditRow, auditEffectWrite, AuditRecordError, buildAuditRecord } from "./record.ts";
 import { AUDIT_RESULT_CODE, type LaneProposalKind } from "./vocabulary.ts";
@@ -81,6 +84,51 @@ export interface LaneRange {
   count: number;
   from: number;
   to: number;
+}
+
+/** The alarm job whose tick frees stale collection leases (ADR 0085). */
+export const LEASE_EXPIRY_JOB = "processor-tick";
+
+/**
+ * The `applied` record of one stale lease the Processor's tick freed, as the
+ * statement right after the release UPDATE in the same batch. It is written
+ * only when that UPDATE changed the row (`changes()=1`) and left the source
+ * unlocked, so a holder whose heartbeat landed first, or a lease the operator
+ * released in between, writes no record. Like the operator's release it
+ * carries the release diff only: no lease reference, no time.
+ */
+export function leaseExpiryWrite(
+  source: string,
+  recordedAt: string,
+  correlationId: string,
+): SqlWrite {
+  const row = buildAuditRecord(
+    {
+      path: "alarm",
+      subject: null,
+      principal: `alarm:${LEASE_EXPIRY_JOB}`,
+      principalKind: "automatic",
+      correlationId,
+    },
+    {
+      operation: "alarm.lease.expire",
+      // Freeing a lease lets the next execution contact the provider.
+      riskClass: "R2",
+      result: "applied",
+      targetRef: `collection-lease:${source}`,
+      scope: { namespace: "schedule-source", source },
+      diff: { kind: "release", released: true },
+    },
+    recordedAt,
+  );
+  return auditEffectWrite(
+    row,
+    {
+      sql: "changes()=1 AND EXISTS(SELECT 1 FROM collection_execution_leases WHERE source=? AND lease_ref IS NULL)",
+      binds: [source],
+    },
+    { kind: "each" },
+  );
 }
 
 /** What one lane tick wrote, as ranges over the tables it writes. */
