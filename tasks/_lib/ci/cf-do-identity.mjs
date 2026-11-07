@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseJsonc } from "../../../scripts/jsonc.ts";
@@ -149,7 +149,22 @@ export function verifyDoIdentity(before, after) {
     throw new Error("cf_do_namespace_identity_changed");
 }
 
-if (fileURLToPath(import.meta.url) === resolve(process.argv[1] ?? "")) {
+/**
+ * Whether node was started with this module, compared by real path: node
+ * resolves the main module through symlinks but leaves `argv[1]` as given, and
+ * a raw comparison would skip the command and exit 0 through a symlinked path.
+ */
+function invokedDirectly() {
+  try {
+    return (
+      process.argv[1] !== undefined &&
+      realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
+    );
+  } catch {
+    return false;
+  }
+}
+if (invokedDirectly()) {
   const [mode, baselinePath] = process.argv.slice(2);
   if (!["capture", "verify", "validate"].includes(mode) || !baselinePath)
     throw new Error("cf_do_invalid_command");
