@@ -67,7 +67,9 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
   },
   "packages/collection/src/schedule-result.ts": {
     count: 1,
-    reason: "compared with the lease refusal constant; only a closed code is returned",
+    reason:
+      "compared with the lease refusal constant and the closed lease stop codes; only a " +
+      "closed code is returned",
   },
   "packages/collection/src/writer.ts": {
     count: 1,
@@ -131,9 +133,11 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
     count: 2,
     reason: "a CollectionError's message is one of its closed FAILURE_CODES",
   },
-  "services/collector-st-george/src/worker-policy.ts": {
+  "services/collector-st-george/src/result.ts": {
     count: 1,
-    reason: "passed to safeFailureCode, which admits only the closed failure codes",
+    reason:
+      "compared with the two lease stop codes, otherwise passed to safeFailureCode, which " +
+      "admits only the closed failure codes",
   },
   "services/collector-vpoint-pay/src/state.ts": {
     count: 1,

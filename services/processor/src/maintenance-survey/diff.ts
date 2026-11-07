@@ -35,7 +35,8 @@ function sorted(reasons: Iterable<ProposalReason>): ProposalReason[] {
   const set = new Set(reasons);
   return PROPOSAL_REASONS.filter((r) => set.has(r));
 }
-function same(w: WindowCandidate, rule: MaintenanceRule): boolean {
+type Window = Pick<WindowCandidate, "timezone" | "pattern">;
+function same(w: Window, rule: MaintenanceRule): boolean {
   return patternKey(w.timezone, w.pattern) === patternKey(rule.timezone, rule.pattern);
 }
 /**
@@ -44,7 +45,7 @@ function same(w: WindowCandidate, rule: MaintenanceRule): boolean {
  * overlap, or an overlapping dated interval. A match is a guess about which rule a window revises, which
  * is why every `changed` draft still needs an operator's acceptance.
  */
-function corresponds(w: WindowCandidate, rule: MaintenanceRule): boolean {
+function corresponds(w: Window, rule: MaintenanceRule): boolean {
   const p = w.pattern,
     q = rule.pattern;
   if (p.kind === "weekly" && q.kind === "weekly")
@@ -64,6 +65,28 @@ function corresponds(w: WindowCandidate, rule: MaintenanceRule): boolean {
   if (p.kind === "once" && q.kind === "once")
     return Date.parse(p.from) < Date.parse(q.to) && Date.parse(q.from) < Date.parse(p.to);
   return false;
+}
+
+/**
+ * Whether accepting `change` at `ruleId` does something the owner kept with
+ * the operator (ADR 0050 amendment, option A), judged against the source's
+ * rules as they stand now rather than when the page was read: it disables a
+ * rule, re-enables one the operator disabled, or would sit beside another
+ * enabled rule it equals or overlaps. The proposal's reasons say the same at
+ * survey time; this catches a rule added or changed since, and a reading
+ * whose reasons were never set.
+ */
+export function operatorOnlyAcceptance(
+  change: Window & { enabled: boolean },
+  ruleId: string,
+  rules: readonly MaintenanceRule[],
+): boolean {
+  if (!change.enabled) return true;
+  if (rules.some((rule) => rule.id === ruleId && !rule.enabled)) return true;
+  return rules.some(
+    (rule) =>
+      rule.id !== ruleId && rule.enabled && (same(change, rule) || corresponds(change, rule)),
+  );
 }
 
 /**

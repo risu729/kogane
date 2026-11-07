@@ -80,6 +80,50 @@ describe("card purchase HTTP contract", () => {
     expect(validCardPurchasePage(unknownShape)).toBe(false);
   });
 
+  test("unrecognised reasons are closed, add up to the total, and say when partial", () => {
+    type Reasons = ReturnType<typeof purchasePage>["coverage"]["unrecognizedReasons"];
+    const withReasons = (reasons: Reasons, total = 3) => {
+      const page = clone(purchasePage());
+      page.coverage.unrecognizedCurrentRows = total;
+      page.coverage.unrecognizedReasons = reasons as never;
+      return page;
+    };
+    const fixture = purchasePage().coverage.unrecognizedReasons;
+    expect(validCardPurchasePage(withReasons(fixture))).toBe(true);
+    expect(validCardPurchasePage(withReasons({ complete: true, counts: [] }, 0))).toBe(true);
+    // A partial count adds up to less than the total, never to it or more.
+    expect(validCardPurchasePage(withReasons({ ...fixture, complete: false }, 4))).toBe(true);
+    for (const [reasons, total] of [
+      [{ ...fixture, complete: false }, 3],
+      [{ complete: true, counts: [] }, 3],
+      [{ ...fixture }, 4],
+      [{ complete: true, counts: [{ sourceId: "vpass", reasonCode: "guessed", rows: 3 }] }, 3],
+      [{ complete: true, counts: [{ sourceId: "smbc", reasonCode: "amount_zero", rows: 3 }] }, 3],
+      [
+        {
+          complete: true,
+          counts: [
+            { sourceId: "vpass", reasonCode: "amount_zero", rows: 3 },
+            { sourceId: "vpass", reasonCode: "amount_zero", rows: 0 },
+          ],
+        },
+        3,
+      ],
+      [
+        {
+          complete: true,
+          counts: [
+            { sourceId: "vpass", reasonCode: "amount_zero", rows: 1 },
+            { sourceId: "vpass", reasonCode: "amount_zero", rows: 2 },
+          ],
+        },
+        3,
+      ],
+      [{ complete: true, counts: [], amount: 1 }, 0],
+    ] as const)
+      expect(validCardPurchasePage(withReasons(reasons as never, total))).toBe(false);
+  });
+
   test("refuses any figure the contract does not name, at every level", () => {
     const page = purchasePage();
     const unit = page.summary.units[0]!;

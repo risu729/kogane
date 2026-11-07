@@ -1,5 +1,6 @@
 import { delegatedMaintenanceRoute } from "./delegated-maintenance";
 import { delegatedScheduleRoute } from "./delegated-schedules";
+import { delegatedSurveyRoute } from "./delegated-survey";
 import { retireReplacedJobsSql } from "./job-retirement-sql.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { PersistedObservation } from "../../../packages/parsers/src/scheduled-payment.ts";
@@ -1811,11 +1812,14 @@ const defaultStages: ScheduledStages = {
     }),
   // ADR 0048: a collector request reaches the same named RPC binding the
   // alarm calls, and only for connections OPS_COLLECTOR_DISPATCH_CONNECTIONS
-  // names.
+  // names. An import whose registration threw is logged by its error class
+  // only; the lane goes on and the request is looked at again later.
   operations: (env, context) =>
     dispatchOperations(collectionEnv(env), {
       budget: context.registration,
       collectors: (connection) => collectorBinding<CollectorRpc>(env, connection.workspace),
+      onFailure: (code) =>
+        console.log(JSON.stringify({ event: "operation_dispatch_registration_failed", code })),
     }),
   maintenanceSurvey: (env) =>
     maintenanceSurveyLane(env, { transport: (url, init) => fetch(url, init) }),
@@ -2059,7 +2063,8 @@ export default {
     // that did not arrive that way is refused, not answered. Read-only.
     const delegatedScheduling =
       (await delegatedMaintenanceRoute(request, env, url)) ??
-      (await delegatedScheduleRoute(request, env, url));
+      (await delegatedScheduleRoute(request, env, url)) ??
+      (await delegatedSurveyRoute(request, env, url));
     if (delegatedScheduling) return delegatedScheduling;
     const scheduling = await scheduleRoute(request, env, url);
     const qualityAlarms = await collectionQualityAlarmRoute(request, env, url);

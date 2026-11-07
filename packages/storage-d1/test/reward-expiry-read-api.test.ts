@@ -290,13 +290,11 @@ describe("READ expiry keeps the two dates and the history reasons apart", () => 
         visibilityRevision: snapshot.visibility_revision,
       },
     };
-    const response = await rewardExpiryFromRead(
+    const body = (await rewardExpiryFromRead(
       context,
       new URL("https://fixture.test/api/v2/rewards/expiry"),
       PROGRAM,
-    );
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as ExpiryBody;
+    )) as unknown as ExpiryBody;
     expect(body.snapshot.snapshotId).toBe(started.snapshotId);
     expect(body.snapshot.evaluatedAt).toBe(EVALUATED_AT);
     expect(body.snapshot.evaluationCalendar).toBe(REWARD_EVALUATION_CALENDAR);

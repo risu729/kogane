@@ -1,15 +1,16 @@
 // Synthetic full-schema cardinalities. No remote bindings or disabled guards.
 import { env } from "cloudflare:test";
+import { d1Executor } from "../../../packages/read-model/src/d1";
 import { beforeAll, expect, it } from "vitest";
 import { seedFixturePost, seedFixtureObject } from "./ingest-fixtures";
 import { seedRegistry, seedRun, supersedeParse } from "./fixtures";
-import { identityQuery } from "../src/identity-api";
-import { organizedFilterOptions } from "../src/organized-filter-options";
-import { observationOrganizations } from "../src/observation-organization";
+import { identityQuery } from "../../../packages/application/src/query/identity-pages";
+import { organizedFilterOptions } from "../../../packages/application/src/query/organized-filter-options.ts";
+import { observationOrganizations } from "../../../packages/application/src/query/observation-organization.ts";
 import {
   preferredInstrumentNames,
   PREFERRED_INSTRUMENT_NAMES_SQL,
-} from "../src/preferred-instrument-names";
+} from "../../../packages/application/src/query/preferred-instrument-names";
 
 const token = (card: number) => `vpass-card-v1-${String(card + 1).repeat(64)}`;
 const bytes = new TextEncoder().encode('{"synthetic":true}');
@@ -280,7 +281,7 @@ it("representative parse/run/pin cardinalities preserve current identity eligibi
   }>();
   started = performance.now();
   const names = await preferredInstrumentNames(
-    env.DB,
+    d1Executor(env.DB),
     references.results.map((row) => row.id),
   );
   expect(names.size).toBe(references.results.length);
@@ -296,7 +297,7 @@ it("representative parse/run/pin cardinalities preserve current identity eligibi
     source_account: string;
   }>();
   started = performance.now();
-  const filters = await organizedFilterOptions(env.DB, "transactions", {
+  const filters = await organizedFilterOptions(d1Executor(env.DB), "transactions", {
     sources: [],
     instruments: [],
     metrics: [],
@@ -316,7 +317,7 @@ it("representative parse/run/pin cardinalities preserve current identity eligibi
   ).all<{ id: number }>();
   started = performance.now();
   const organized = await observationOrganizations(
-    env.DB,
+    d1Executor(env.DB),
     observed.results.map(({ id }) => ({ kind: "transaction", id })),
   );
   const productTime = Math.round(performance.now() - started);
