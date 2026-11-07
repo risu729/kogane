@@ -18,15 +18,19 @@ export function scheduledResult(value: unknown): ScheduledResult {
         ? v.manifest
         : v
   ) as Record<string, unknown>;
-  const supplied = Array.isArray(v.runIds) ? v.runIds : [body.runId];
+  // A run whose terminal was not written is not a persisted run, whatever its
+  // provider outcome: its id is not reported, so no history or operation trail
+  // links to a run that does not exist (ADR 0039, ADR 0048).
+  const unwritten =
+    terminal.persisted === false ||
+    (typeof body.persistence === "string" &&
+      !["persisted", "already_persisted", "stored"].includes(body.persistence));
+  const supplied = Array.isArray(v.runIds) ? v.runIds : unwritten ? [] : [body.runId];
   const runIds = [
     ...new Set(supplied.filter((id): id is string => typeof id === "string" && RUN_ID.test(id))),
   ].slice(0, 100);
   const failed =
-    !["success", "partial", "stored", "completed"].includes(String(body.status)) ||
-    terminal.persisted === false ||
-    (typeof body.persistence === "string" &&
-      !["persisted", "already_persisted", "stored"].includes(body.persistence));
+    !["success", "partial", "stored", "completed"].includes(String(body.status)) || unwritten;
   return {
     status: failed ? "failed" : "completed",
     runIds,

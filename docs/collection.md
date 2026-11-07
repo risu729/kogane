@@ -693,6 +693,12 @@ provider was contacted and no production bucket was read or written.
 | `vmoney-history-page-*.json` | `collector_derived` | one V Money history page each                           |
 | `collection-summary.json`    | `collector_summary` | the collector's own page/total counts                   |
 
+Both history walks stop at the page whose rows reach `results.total`. Before
+the total is reached, a page with no rows or with fewer rows than the first
+page stops the collection (`premature-end`) instead of ending the walk: an
+early end of history has not been observed. Only the first V Money page may
+answer with an empty `results`, read as an empty history.
+
 Each `collector_derived` artifact states one `reencoded` step by
 `collector-v-point` at the producer version with no input (ADR 0021): the
 bytes are `Response.text()` encoded again as UTF-8, the same content but not
