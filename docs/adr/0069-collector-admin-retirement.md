@@ -1,6 +1,6 @@
 # ADR 0069: Retire collector-local public admin bearer entrypoints in bounded slices
 
-- Status: proposed (accepted when this PR merges)
+- Status: accepted (merged 2026-10-10 in #665)
 - Date: 2026-10-10
 
 ## Context

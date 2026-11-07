@@ -13,7 +13,6 @@ import {
 } from "./agent-api";
 import { auditLogCode, beginAudit } from "./audit";
 import { AUDIT_PATH, auditApi } from "./audit-api";
-import { DELEGATION_STATUS_PATH, delegationApi } from "./delegation-api";
 import { commandApi, isCommandPath } from "./command-api";
 import { classifyOpsPath, opsApi } from "./ops-api";
 import { healthApi } from "./health";
@@ -24,6 +23,7 @@ import {
   cardSettlementsApi,
   CARD_SETTLEMENT_PATH,
   CARD_OWNERSHIP_PATH,
+  CARD_SETTLEMENT_STATEMENTS_PATH,
 } from "./card-settlements-api";
 import { cardPurchasesApi, CARD_PURCHASES_PATH } from "./card-purchases-api";
 import { reportedStateApi, REPORTED_STATE_PATH } from "./reported-state-api";
@@ -34,6 +34,11 @@ import {
 import { reconstructedStateApi, RECONSTRUCTED_STATE_PATH } from "./reconstructed-state-api";
 import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
+import { accountCandidatesApi } from "./account-candidates-api";
+import {
+  CARD_STATEMENTS_UNMATCHED_PATH,
+  cardStatementsUnmatchedApi,
+} from "./card-statements-unmatched-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
 import { instrumentHistoryApi } from "./instrument-history-api";
 import { instrumentCoverageApi } from "./instrument-coverage-api";
@@ -49,8 +54,12 @@ function classify(path: string): string {
   if (ops !== null) return ops;
   if (isCommandPath(path)) return "command";
   if (path === AUDIT_PATH) return "audit";
-  if (path === DELEGATION_STATUS_PATH) return "delegations";
-  if (path === CARD_SETTLEMENT_PATH || path === CARD_OWNERSHIP_PATH)
+  if (
+    path === CARD_SETTLEMENT_PATH ||
+    path === CARD_OWNERSHIP_PATH ||
+    path === CARD_SETTLEMENT_STATEMENTS_PATH ||
+    path === CARD_STATEMENTS_UNMATCHED_PATH
+  )
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
   if (path === REPORTED_STATE_PATH) return "reported_state";
@@ -66,8 +75,9 @@ function classify(path: string): string {
   if (path === "/api/v2/activity" || path === "/api/v2/obligations") return "events_v2";
   if (path === "/api/v2/reports") return "report";
   if (/^\/api\/v2\/reports\/[^/]+(?:\/(?:explanation|export))?$/.test(path)) return "report";
-  if (path.startsWith("/api/v2/rewards")) return "rewards";
-  return path.startsWith("/api/") ? "unknown_api" : "assets";
+  if (path === "/api/v2/rewards" || path.startsWith("/api/v2/rewards/")) return "rewards";
+  // The same boundary `route` answers 404 for: `/api` itself is an API path.
+  return path === "/api" || path.startsWith("/api/") ? "unknown_api" : "assets";
 }
 
 async function route(request: Request, env: Env, url: URL): Promise<Response> {
@@ -115,11 +125,12 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // The operator's read of the audit record (ADR 0064); a page load, not recorded.
   const auditResponse = await catalogue(() => auditApi(env, url, subject));
   if (auditResponse) return auditResponse;
-  // The operator's read of the delegation table (ADR 0063); a page load, not recorded.
-  const delegationResponse = await delegationApi(env, url, subject);
-  if (delegationResponse) return delegationResponse;
   const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
   if (settlementResponse) return settlementResponse;
+  const unmatchedResponse = await catalogue(() =>
+    cardStatementsUnmatchedApi(request, env, url, subject),
+  );
+  if (unmatchedResponse) return unmatchedResponse;
   // Operator-only and read-only; 404 unless CORE 0047 exists
   // (docs/economic-events.md, HTTP).
   const purchaseResponse = await catalogue(() => cardPurchasesApi(request, env, url, subject));
@@ -145,6 +156,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
     instrumentCandidatesApi(request, env, url, subject),
   );
   if (candidatesResponse) return candidatesResponse;
+  const accountCandidatesResponse = await catalogue(() =>
+    accountCandidatesApi(request, env, url, subject),
+  );
+  if (accountCandidatesResponse) return accountCandidatesResponse;
   const historyResponse = await catalogue(() => instrumentHistoryApi(request, env, url, subject));
   if (historyResponse) return historyResponse;
   const instrumentCoverageResponse = await catalogue(() =>

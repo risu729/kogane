@@ -1,6 +1,6 @@
 # ADR 0028: The SBI Shinsei parsers accept the shapes the stored captures carry, with the unknowns kept as reasons
 
-- Status: proposed; amended 2026-09-27 (the trailing characters are letters;
+- Status: accepted (merged 2026-09-27 in #277); amended 2026-09-27 (the trailing characters are letters;
   parser 1.0.2, migration 0059; see
   [the amendment](#amendment-2026-09-27-the-two-trailing-characters-are-letters-parser-102))
 - Date: 2026-09-27

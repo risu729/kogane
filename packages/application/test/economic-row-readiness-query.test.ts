@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 import { beforeAll, expect, test } from "bun:test";
+import { readEconomicRowReadinessForGrant } from "../src/query/economic-row-readiness-read.ts";
 import { queryEconomicRowReadiness } from "../src/query/economic-row-readiness.ts";
 import {
   ECONOMIC_ROW_READINESS_SQL,
@@ -98,6 +99,19 @@ test("coherent read, provider identity admission, unresolved principal, zero wri
   expect(result.status).toBe("ok");
   if (result.status !== "ok") throw Error(JSON.stringify(result));
   expect(calls).toBe(1);
+  // S0b preserves the existing SQL snapshot, safe manifest and all digest bytes.
+  expect(
+    await readEconomicRowReadinessForGrant({
+      grant: {
+        principal: "synthetic-reader",
+        capabilities: ["records.read"],
+        scopes: { sources: "*", accounts: "*" },
+        budget: { maxRows: 2, maxProposalTargets: 1, maxExplainDepth: 1 },
+      },
+      sql: store,
+      request: request(),
+    }),
+  ).toEqual(result);
   expect(result.manifest.rows[0]!.identity).toBe("admitted");
   expect(result.manifest.rows[0]!.reasons).toEqual(["ownership_unresolved"]);
   expect(result.writerEnabled).toBe(false);

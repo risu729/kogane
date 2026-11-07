@@ -1,6 +1,6 @@
 # ADR 0076: Classify SBI Shinsei's FX board and stage references as non-account statements under identity policy version 2
 
-- Status: proposed
+- Status: accepted (merged 2026-11-06 in #948)
 - Date: 2026-11-06
 - Carried by:
   `packages/identity/src/other.ts` (`SBI_SHINSEI_POLICY_VERSION`),

@@ -40,7 +40,11 @@ pending rows, custom date ranges and unattended cloud authentication. AUD is an
 explicit source configuration, not an observed DOM currency label.
 
 The Durable Object serializes attempts and records uncertainty before bank I/O.
-Authentication/network failures require an explicit operator resume. Pending
+Authentication/network failures require an explicit operator resume, and so
+does a collection its lease holder stopped
+([ADR 0085](../adr/0085-collection-lease-heartbeat.md)): its failed run keeps
+the reason `deadline-exceeded` (the 13-minute deadline) or
+`collection-interrupted` (the lease was lost). Pending
 validated evidence is retained in bounded chunks until the shared terminal is
 verified, so storage retries do not repeat authentication. Credentials, cookies,
 hidden form state and raw capture bodies never enter this state or Git.
