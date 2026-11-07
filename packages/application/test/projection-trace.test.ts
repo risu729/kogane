@@ -22,6 +22,7 @@ import {
   readOperation,
   recordCollectorOutcome,
   recordOperationStage,
+  requestCollection,
 } from "../src/index.ts";
 import type { Principal } from "../src/command/contract.ts";
 import { migratedDatabase, sqliteCommandStore } from "./sqlite-store.ts";
@@ -103,6 +104,11 @@ async function adoptedCollection(core: Database, stamp = true): Promise<void> {
      VALUES(?,'collection','operator-1',?,?,'sony-bank','{}','accepted','dispatch_pending',0,0,?,?)`,
     [OP, OP, "c".repeat(64), ACCEPTED, ACCEPTED],
   );
+  await adoptAndPublish(core, OP, stamp);
+}
+
+/** An accepted collection's execution, through adoption and the tracker's `published` batch. */
+async function adoptAndPublish(core: Database, OP: string, stamp: boolean): Promise<void> {
   const store = sqliteCommandStore(core);
   const context = {
     store,
@@ -350,6 +356,141 @@ describe("projected is derived at read time", () => {
       evidenceRef: null,
       failureCode: "projection_revision_unrecorded",
     });
+    expect(record.status).toBe("running");
+    covering.close();
+    local.close();
+  });
+});
+
+describe("a re-send under the same key answers what a read does", () => {
+  const REQUEST = {
+    source: "sony-bank",
+    requestedScope: { from: "2026-01-01", to: "2026-01-31" },
+  };
+
+  /** A READ executor that counts the statements it is asked to run. */
+  function counting(inner: SqlExecutor): { store: SqlExecutor; calls: () => number } {
+    let calls = 0;
+    return {
+      store: {
+        first: <T>(sql: string, args: readonly unknown[] = []) => {
+          calls++;
+          return inner.first<T>(sql, args);
+        },
+        all: <T>(sql: string, args: readonly unknown[] = []) => {
+          calls++;
+          return inner.all<T>(sql, args);
+        },
+      },
+      calls: () => calls,
+    };
+  }
+
+  /** Re-sends the request and checks its answer against the read of the same operation. */
+  async function resendEqualsRead(
+    core: Database,
+    idempotencyKey: string,
+    readStore: SqlExecutor | null,
+  ): Promise<OperationReceipt> {
+    const store = sqliteCommandStore(core);
+    const resent = await requestCollection({
+      store,
+      readStore,
+      principal: PRINCIPAL,
+      now: PUBLISHED,
+      request: { ...REQUEST, idempotencyKey },
+    });
+    if (!resent.ok) throw new Error("re-send refused");
+    expect(resent.replayed).toBe(true);
+    const read = await readOperation({
+      store,
+      readStore,
+      principal: PRINCIPAL,
+      now: PUBLISHED,
+      operationId: resent.receipt.operationId,
+    });
+    if (!read.ok) throw new Error("receipt missing");
+    // An acceptance answer carries no execution; everything else is the read's.
+    expect(resent.receipt).toEqual({ ...read.receipt, execution: null });
+    return resent.receipt;
+  }
+
+  test("a first request never reads READ, and a re-send equals the read in every state", async () => {
+    const local = migratedDatabase();
+    const spied = counting(executor(read));
+    const first = await requestCollection({
+      store: sqliteCommandStore(local),
+      readStore: spied.store,
+      principal: PRINCIPAL,
+      now: ACCEPTED,
+      request: { ...REQUEST, idempotencyKey: "resend" },
+    });
+    if (!first.ok) throw new Error("first request refused");
+    expect(first.replayed).toBe(false);
+    expect(first.receipt.status).toBe("accepted");
+    // Not adopted yet: a re-send is answered from the stored row alone.
+    expect((await resendEqualsRead(local, "resend", spied.store)).status).toBe("accepted");
+    expect(spied.calls()).toBe(0);
+
+    const operationId = first.receipt.operationId;
+    await adoptAndPublish(local, operationId, true);
+    const required = projectionRequirement(
+      (
+        local
+          .query(
+            "SELECT evidence_ref FROM ops_request_stages WHERE operation_id=? AND stage='projected'",
+          )
+          .get(operationId) as { evidence_ref: string }
+      ).evidence_ref,
+    )!;
+    const covering = readDatabase();
+    const otherEpoch = readDatabase();
+    publish(otherEpoch, required.sourceRevision + 10, "core-epoch-other");
+    for (const [readStore, reason] of [
+      [null, "read_model_unavailable"],
+      [executor(covering), "read_model_unavailable"],
+      [executor(otherEpoch), "read_model_context_changed"],
+    ] as const) {
+      const record = await resendEqualsRead(local, "resend", readStore);
+      expect(projectedOf(record)).toMatchObject({ state: "pending", failureCode: reason });
+      expect(record.status).toBe("running");
+    }
+    publish(covering, required.sourceRevision - 1, required.coreEpoch);
+    const behind = await resendEqualsRead(local, "resend", executor(covering));
+    expect(projectedOf(behind).failureCode).toBe("projection_behind");
+    expect(behind.status).toBe("running");
+    verifyAt(covering, required.sourceRevision);
+    const covered = await resendEqualsRead(local, "resend", executor(covering));
+    expect(projectedOf(covered)).toMatchObject({
+      state: "completed",
+      evidenceRef: `read-snapshot:${SNAPSHOT}`,
+      failureCode: null,
+    });
+    expect(covered.status).toBe("completed");
+    // Derived on the re-send too: the stored rows did not move.
+    expect(
+      local.query("SELECT status FROM ops_requests WHERE operation_id=?").get(operationId),
+    ).toEqual({ status: "running" });
+    otherEpoch.close();
+    covering.close();
+    local.close();
+  });
+
+  test("a re-send of a publication without a stored requirement is unrecorded, as the read", async () => {
+    const local = migratedDatabase();
+    const first = await requestCollection({
+      store: sqliteCommandStore(local),
+      principal: PRINCIPAL,
+      now: ACCEPTED,
+      request: { ...REQUEST, idempotencyKey: "resend-unrecorded" },
+    });
+    if (!first.ok) throw new Error("first request refused");
+    await adoptAndPublish(local, first.receipt.operationId, false);
+    const now = coreRevision(local);
+    const covering = readDatabase();
+    publish(covering, now.source_revision + 10, now.core_epoch);
+    const record = await resendEqualsRead(local, "resend-unrecorded", executor(covering));
+    expect(projectedOf(record).failureCode).toBe("projection_revision_unrecorded");
     expect(record.status).toBe("running");
     covering.close();
     local.close();

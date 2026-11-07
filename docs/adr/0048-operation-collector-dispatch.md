@@ -365,8 +365,10 @@ not keep is the revision at which a given parse was published:
   `projection_behind`, at or above the requirement `completed` with the
   request `completed` and the stored rows unchanged; another pointer epoch and
   a restored CORE are `read_model_context_changed`; a publication without a
-  requirement is `projection_revision_unrecorded`; the write and the three
-  reads are keyed lookups on stores without statistics.
+  requirement is `projection_revision_unrecorded`; a re-send under the same
+  key answers the read's record in each of these states, and a first request
+  runs no READ statement; the write and the three reads are keyed lookups on
+  stores without statistics.
 - `services/app/test/ops-api.test.ts`: a collection accepted over HTTP and
   one over MCP read `read_model_unavailable`, then `projection_behind`, then
   `completed` with the same stages on both transports against a synthetic
