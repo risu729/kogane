@@ -32,8 +32,14 @@ import {
   type CivilDate,
   type EndOfMonthPolicy,
   type LocalDateValue,
+  type TemporalOrder,
   type TemporalValue,
 } from "./time.ts";
+import {
+  compareToOpenEnded,
+  validOpenEndedPeriodValue,
+  type OpenEndedPeriodValue,
+} from "./open-ended-period.ts";
 import {
   exactQuantity,
   integerDecimal,
@@ -412,6 +418,24 @@ export type RewardUncertaintyCode = (typeof REWARD_UNCERTAINTY_CODES)[number];
 
 // ── conversion offers ────────────────────────────────────────────────
 
+/**
+ * When an offer can be applied for. `open-ended` is a standing offer whose
+ * provider announces no end date; `unknown` means the period was not
+ * established and is never read as a standing offer.
+ */
+export type OfferValidity = TemporalValue | OpenEndedPeriodValue;
+
+export function validOfferValidity(value: unknown): value is OfferValidity {
+  return validTemporalValue(value) || validOpenEndedPeriodValue(value);
+}
+
+/** `clock` against an offer's validity; `ordered` with a non-zero order is outside it. */
+export function compareOfferValidity(clock: TemporalValue, validity: OfferValidity): TemporalOrder {
+  return validity.kind === "open-ended"
+    ? compareToOpenEnded(clock, validity)
+    : compareTemporal(clock, validity);
+}
+
 export interface ConversionOffer {
   offerId: string;
   version: string;
@@ -434,8 +458,9 @@ export interface ConversionOffer {
   eligibleRestrictionRefs: readonly string[];
   /** Tiers the offer is open to; `null` means every tier. */
   eligibleTiers: readonly string[] | null;
-  validTime: TemporalValue;
-  applicationDeadline: TemporalValue;
+  validTime: OfferValidity;
+  /** Last day to apply; `null` means the provider announces no deadline (a standing offer). */
+  applicationDeadline: TemporalValue | null;
   processingPolicyRef: string;
   /** Calendar days between an accepted application and the destination credit. */
   processingDays: number;
@@ -899,8 +924,8 @@ export function validConversionOffer(value: unknown): value is ConversionOffer {
     isArrayOf(isOneOf(BUCKET_KINDS), 10)(value.eligibleBucketKinds) &&
     isRefList(value.eligibleRestrictionRefs, 100) &&
     (value.eligibleTiers === null || isRefList(value.eligibleTiers, 100)) &&
-    validTemporalValue(value.validTime) &&
-    validTemporalValue(value.applicationDeadline) &&
+    validOfferValidity(value.validTime) &&
+    (value.applicationDeadline === null || validTemporalValue(value.applicationDeadline)) &&
     REF(value.processingPolicyRef) &&
     isSafeInt(value.processingDays, 0, 3650) &&
     REF(value.roundingPolicyRef) &&
@@ -1534,12 +1559,14 @@ export function availableForOffer(
       push(uncertaintyCodes, "membership_self_reported");
   }
   if (clock) {
-    const validity = compareTemporal(clock, offer.validTime);
+    const validity = compareOfferValidity(clock, offer.validTime);
     if (validity.kind === "ordered" && validity.order !== 0)
       push(uncertaintyCodes, "offer_not_valid_at_clock");
-    const deadline = compareTemporal(clock, offer.applicationDeadline);
-    if (deadline.kind === "ordered" && deadline.order > 0)
-      push(uncertaintyCodes, "application_deadline_passed");
+    if (offer.applicationDeadline !== null) {
+      const deadline = compareTemporal(clock, offer.applicationDeadline);
+      if (deadline.kind === "ordered" && deadline.order > 0)
+        push(uncertaintyCodes, "application_deadline_passed");
+    }
   }
   const summed = sumQuantities(
     offer.fromUnitRef,

@@ -256,7 +256,8 @@ export function findConversionPaths(
         continue;
       }
       const appliedOn = state.day;
-      const deadlineDay = dayNumber(offer.applicationDeadline);
+      const deadlineDay =
+        offer.applicationDeadline === null ? null : dayNumber(offer.applicationDeadline);
       if (deadlineDay !== null && appliedOn > deadlineDay) {
         rejected.push({
           offerRef,
