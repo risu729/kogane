@@ -27,6 +27,18 @@ test("the alarm keeps each known refusal distinct, without passing arbitrary tex
   });
 });
 
+test("a run the coordinator could not persist is not reported as a persisted run", () => {
+  // The coordinator's own answer when the terminal write failed: the run is
+  // kept pending under its id and has no terminal yet.
+  expect(
+    stGeorgeScheduledResult({
+      status: "failed",
+      reason: "persistence-incomplete",
+      runId: "00000000-0000-4000-8000-000000000000",
+    }),
+  ).toEqual({ status: "failed", runIds: [], failureCode: "terminal_persistence_failed" });
+});
+
 test("result logging contains no provider response, labels or exception text", () => {
   const log = spyOn(console, "log").mockImplementation(() => {});
   try {
