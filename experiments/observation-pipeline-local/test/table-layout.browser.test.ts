@@ -368,9 +368,7 @@ describe.if(runnable)("transaction columns at desktop and phone widths", () => {
           });
           expect(fallbackBounds.textLeft).toBeGreaterThanOrEqual(fallbackBounds.cellLeft);
           expect(fallbackBounds.textRight).toBeLessThanOrEqual(fallbackBounds.cellRight);
-          const region = page
-            .getByRole("region", { name: "取引の記録", exact: true })
-            .and(page.locator("[tabindex]"));
+          const region = page.getByRole("region", { name: "取引の記録の表", exact: true });
           await region.focus();
           expect(await region.evaluate((element) => document.activeElement === element)).toBe(true);
           if (width === 390) {

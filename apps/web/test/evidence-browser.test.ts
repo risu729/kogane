@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import type {
   EvidenceArtifactDetail,
   EvidenceArtifactList,
@@ -311,6 +312,29 @@ describe.if(runnable)("production evidence navigation", () => {
     await page.getByRole("button", { name: "再試行", exact: true }).click();
     await page.getByRole("alert").waitFor({ state: "detached" });
     expect(await page.locator("tbody").innerText()).toContain("一部取得");
+    await page.close();
+  }, 60_000);
+
+  test("history, run and file views pass the accessibility audit", async () => {
+    runStatus = metadataStatus = 200;
+    const page = await browser.newPage();
+    await page.goto(origin, { waitUntil: "networkidle" });
+    await page.getByRole("heading", { name: "取得履歴と原本", exact: true }).waitFor();
+    await page.locator("tbody tr").first().waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page
+      .getByRole("link", { name: /保存ファイルを見る/u })
+      .first()
+      .click();
+    await page.getByRole("heading", { name: "保存ファイル", exact: true }).waitFor();
+    await page.locator("tbody tr").first().waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page
+      .getByRole("link", { name: /ファイルの詳細/u })
+      .first()
+      .click();
+    await page.getByRole("link", { name: "保存ファイルをダウンロード", exact: true }).waitFor();
+    expect(await auditView(page)).toEqual([]);
     await page.close();
   }, 60_000);
 });

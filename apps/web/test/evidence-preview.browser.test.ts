@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import { secureResponse } from "../../../services/app/src/http.ts";
 import type {
   EvidenceArtifactDetail,
@@ -218,4 +219,12 @@ describe.if(runnable)("inline original preview under production CSP", () => {
       await page.close();
     }
   });
+
+  test("an open preview passes the accessibility audit", async () => {
+    const page = await open(json, "application/json");
+    await page.getByRole("button", { name: "内容を表示", exact: true }).click();
+    await page.locator(".preview-code span[class]").first().waitFor();
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 });
