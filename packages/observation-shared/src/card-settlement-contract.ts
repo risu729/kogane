@@ -2,6 +2,7 @@ import type { CardSettlementReviewPage } from "../../domain/src/card-settlement-
 import { validQuantity } from "../../domain/src/values.ts";
 import { validTemporalValue } from "../../domain/src/time.ts";
 import { validSourceFactRef } from "../../domain/src/events.ts";
+import { CARD_DEBIT_ACCOUNT_REASONS } from "../../domain/src/card-debit-account.ts";
 
 const record = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -12,6 +13,41 @@ const revision = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
 const status = (value: unknown) =>
   ["proposed", "accepted", "rejected", "withdrawn"].includes(String(value));
+
+/** The provider-stated debit-account evidence: read-only, never a blocker. */
+function validDebitAccount(value: unknown): boolean {
+  if (!record(value) || !text(value.policy)) return false;
+  if (value.outcome === "absent")
+    return (
+      ["source_has_no_debit_account_statement", "evidence_not_recorded"].includes(
+        String(value.reason),
+      ) &&
+      [
+        value.statementRef,
+        value.bankSourceId,
+        value.bankSourceAccount,
+        value.visibleDigitCount,
+        value.recordedAt,
+      ].every((field) => field === null)
+    );
+  if (!validSourceFactRef(value.statementRef) || !text(value.recordedAt)) return false;
+  if (value.outcome === "not_proposed")
+    return (
+      (CARD_DEBIT_ACCOUNT_REASONS as readonly unknown[]).includes(value.reason) &&
+      [value.bankSourceId, value.bankSourceAccount, value.visibleDigitCount].every(
+        (field) => field === null,
+      )
+    );
+  return (
+    ["supports", "names_other_account"].includes(String(value.outcome)) &&
+    value.reason === null &&
+    text(value.bankSourceId) &&
+    text(value.bankSourceAccount) &&
+    typeof value.visibleDigitCount === "number" &&
+    Number.isSafeInteger(value.visibleDigitCount) &&
+    value.visibleDigitCount > 0
+  );
+}
 
 /** Validate the wire shape only. Financial effects are never recalculated by a client. */
 export function validCardSettlementReviewPage(value: unknown): value is CardSettlementReviewPage {
@@ -39,6 +75,7 @@ export function validCardSettlementReviewPage(value: unknown): value is CardSett
       !Array.isArray(row.history) ||
       row.history.length > 20 ||
       typeof row.historyTruncated !== "boolean" ||
+      !validDebitAccount(row.debitAccount) ||
       !text(row.createdAt) ||
       ![row.decisionRevisionId, row.eventId, row.obligationId, row.settlementId].every(nullableText)
     )
