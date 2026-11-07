@@ -29,7 +29,7 @@ Schema digest: `8fa09c72e7bdc5b392582048e5e7a7f76e8daed529b5572b183f4afb0b586508
 Tables without both an append-only `*_no_update` and `*_no_delete` guard (mutable by design —
 pointers, checkpoints, leases, configuration, and the READ-side projections):
 
-balance_read_snapshots, balance_snapshot_pointer, read_build_checkpoints, read_instance, reward_build_checkpoints, reward_expiry_snapshots, reward_provider_display_checkpoints, reward_snapshot_pointer
+balance_read_snapshots, balance_snapshot_pointer, current_balance_projection, read_build_checkpoints, read_instance, reward_build_checkpoints, reward_conversion_simulations, reward_expiry_estimates, reward_expiry_estimates_v2, reward_expiry_snapshots, reward_provider_display_checkpoints, reward_provider_expiry_sections, reward_snapshot_input_refs, reward_snapshot_pointer, scope_relations, snapshot_input_refs
 
 ## Tables
 
@@ -37,20 +37,20 @@ balance_read_snapshots, balance_snapshot_pointer, read_build_checkpoints, read_i
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | `balance_read_snapshots` | read-projection | READ: one build of the projection, keyed by content and attempt (05 §4) | yes | no | no | — | — | 21 | 0 | 2 | 2 |
 | `balance_snapshot_pointer` | read-operational | READ: the active snapshot, switched in the same batch as the seal (05 §5) | yes | no | no | — | balance_snapshot_pointer_no_delete | 8 | 1 | 0 | 3 |
-| `current_balance_projection` | read-projection | READ: the candidate measurements of one snapshot (04 §2) | yes | no | yes | current_balance_projection_sealed_no_update | current_balance_projection_sealed_no_delete | 38 | 1 | 3 | 4 |
+| `current_balance_projection` | read-projection | READ: the candidate measurements of one snapshot (04 §2) | yes | no | no | — | — | 38 | 1 | 3 | 4 |
 | `read_build_checkpoints` | read-operational | READ: where a bounded build got to, committed with its chunk (05 §4) | yes | no | no | — | — | 7 | 1 | 0 | 2 |
 | `read_instance` | read-operational | READ: the identity of this physical database; a rebuild is a new one (05 §7) | yes | no | no | — | read_instance_no_delete | 4 | 0 | 0 | 3 |
 | `reward_build_checkpoints` | read-operational | READ: where a bounded reward build got to, committed with its chunk (05 §4) | yes | no | no | — | — | 7 | 1 | 0 | 2 |
-| `reward_conversion_simulations` | read-projection | READ: saved simulations replayed under the snapshot's fixed offers (04 §2, G2-20) | yes | no | yes | reward_conversion_simulations_sealed_no_update | reward_conversion_simulations_sealed_no_delete | 13 | 1 | 2 | 5 |
-| `reward_expiry_estimates` | read-projection | READ: the estimated deadlines of one snapshot (04 §2, second stage) | yes | no | yes | reward_expiry_estimates_sealed_no_update | reward_expiry_estimates_sealed_no_delete | 23 | 1 | 3 | 5 |
-| `reward_expiry_estimates_v2` | read-projection | READ: corrected bucket kinds and displayed expiry of a fixed snapshot (ADR 0049 amendment) | yes | no | yes | reward_expiry_estimates_v2_sealed_no_update | reward_expiry_estimates_v2_sealed_no_delete | 23 | 1 | 3 | 5 |
+| `reward_conversion_simulations` | read-projection | READ: saved simulations replayed under the snapshot's fixed offers (04 §2, G2-20) | yes | no | no | — | — | 13 | 1 | 2 | 5 |
+| `reward_expiry_estimates` | read-projection | READ: the estimated deadlines of one snapshot (04 §2, second stage) | yes | no | no | — | — | 23 | 1 | 3 | 5 |
+| `reward_expiry_estimates_v2` | read-projection | READ: corrected bucket kinds and displayed expiry of a fixed snapshot (ADR 0049 amendment) | yes | no | no | — | — | 23 | 1 | 3 | 5 |
 | `reward_expiry_snapshots` | read-projection | READ: one reward build under one fixed evaluation input (04 §2, 05 §3) | yes | no | no | — | — | 28 | 0 | 2 | 3 |
 | `reward_provider_display_checkpoints` | read-operational | READ: bounded provider display stream progress committed with its chunk (ADR 0068) | yes | no | no | — | — | 6 | 1 | 0 | 2 |
-| `reward_provider_expiry_sections` | read-projection | READ: non-additive provider expiry display sections of one fixed reward snapshot (ADR 0068) | yes | no | yes | reward_provider_sections_no_update | reward_provider_sections_sealed_no_delete | 6 | 1 | 2 | 4 |
-| `reward_snapshot_input_refs` | read-projection | READ: rules, offers and claims copied from the fixed reward input (04 §3) | yes | no | yes | reward_snapshot_input_refs_no_update | reward_snapshot_input_refs_no_delete | 6 | 1 | 1 | 3 |
+| `reward_provider_expiry_sections` | read-projection | READ: non-additive provider expiry display sections of one fixed reward snapshot (ADR 0068) | yes | no | no | reward_provider_sections_no_update | — | 6 | 1 | 2 | 4 |
+| `reward_snapshot_input_refs` | read-projection | READ: rules, offers and claims copied from the fixed reward input (04 §3) | yes | no | no | reward_snapshot_input_refs_no_update | — | 6 | 1 | 1 | 3 |
 | `reward_snapshot_pointer` | read-operational | READ: the active reward snapshot, switched in the same batch as the seal (05 §5) | yes | no | no | — | reward_snapshot_pointer_no_delete | 9 | 1 | 0 | 3 |
-| `scope_relations` | read-projection | READ: the typed scope relations of one snapshot (04 §2, §3) | yes | no | yes | scope_relations_sealed_no_update | scope_relations_sealed_no_delete | 8 | 1 | 1 | 4 |
-| `snapshot_input_refs` | read-projection | READ: CORE references and digests copied from the fixed input (04 §3) | yes | no | yes | snapshot_input_refs_no_update | snapshot_input_refs_no_delete | 6 | 1 | 1 | 3 |
+| `scope_relations` | read-projection | READ: the typed scope relations of one snapshot (04 §2, §3) | yes | no | no | — | — | 8 | 1 | 1 | 4 |
+| `snapshot_input_refs` | read-projection | READ: CORE references and digests copied from the fixed input (04 §3) | yes | no | no | snapshot_input_refs_no_update | — | 6 | 1 | 1 | 3 |
 
 Full column, foreign-key, index and trigger detail per table is in
 `infra/schema/read-ledger.json`; the markdown keeps the retention decision readable.

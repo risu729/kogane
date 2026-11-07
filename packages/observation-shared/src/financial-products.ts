@@ -83,7 +83,7 @@ export const FINANCIAL_PRODUCT_SOURCES = [
     verifiedAt: VERIFIED_AT,
   },
 ] as const;
-export const FINANCIAL_INSTITUTIONS = [
+const FINANCIAL_INSTITUTIONS = [
   { id: "sony-bank", name: "ソニー銀行" },
   { id: "sbi-shinsei-bank", name: "SBI新生銀行" },
   { id: "smbc-bank", name: "三井住友銀行" },

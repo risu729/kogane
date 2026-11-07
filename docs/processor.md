@@ -114,12 +114,13 @@ ADR 0024 every tick counted a page, and a held tick on the first page, whose
 cursor is null, also counted a cycle.
 
 A registration that **throws** — R2 or CORE unavailable, or a refusal CORE
-made that the derivation did not foresee — is counted in the lane's `failed`,
-and that count is all the lane's log line and tick record carry: the error
-itself is neither logged nor recorded (`collectionScan` hands its class name
-to an `onFailure` hook, which the deployed cron does not pass). Nothing is
-recorded for that run, the page still advances and the next walk tries it
-again. It spends none of the
+made that the derivation did not foresee — is counted in the lane's `failed`
+and logged by its error class only, one
+`{"event":"collection_scan_registration_failed","code":…}` line per throw
+(`collectionScanStage` in `src/worker.ts`; the code is one of the finite
+built-in class labels of §7, never the error's writable name or message).
+Nothing is recorded for that run, the page still advances and the next walk
+tries it again. It spends none of the
 five, so failing runs never stop the page by themselves (G1-13; ADR 0024,
 amendment of 2026-11-06). Before that amendment each throw spent one, and a
 page with five or more terminals that throw on every attempt held the cursor
@@ -700,21 +701,26 @@ principal `lane:<lane>` (hyphens for underscores), operation `lane.tick`,
 `applied`, or `failed` when the stage threw after writing. Before such a lane
 runs, `runScheduled` reads one high-water mark of the tables it may write;
 after it, the lane's own rows above the mark, by its decision actor, commit
-principal or proposal method. The record's references are inclusive ranges of
-those rows (`decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`,
-`proposals:<kind>:<a>-<b>`) and its diff the number of the lane's own rows in
-each; it copies none of the tick row's counts. An idle tick, a lane whose flag
-is off and every other lane write no record. The mark and the record are read
-and written outside the lane's metered scope, and a failure to read or write
-them is logged as `{"event":"lane_audit_record_failed","lane":…,"code":…}` and
-changes nothing the lane did.
+principal or proposal method, each read a range on the table's key without
+table statistics ([audit log: cost](audit-log.md#cost)). The record's
+references are inclusive ranges of those rows (`decision-revisions:<a>-<b>`,
+`commit-seq:<epoch>:<a>-<b>`, `proposals:<kind>:<a>-<b>`) and its diff the
+number of the lane's own rows in each; it copies none of the tick row's
+counts. An idle tick, a lane whose flag is off and every other lane write no
+record. The mark and the record are read and written outside the lane's
+metered scope, and a failure to read or write them is logged as
+`{"event":"lane_audit_record_failed","lane":…,"code":…}` and changes nothing
+the lane did.
 
 ## 7. Operations dispatch
 
 The App accepts an operations-API request, stores it and answers 202;
 notifying the executor is a separate step that may be lost, so the request
 stays `dispatch_pending` until someone takes it (02 §5,
-[ops-api.md](ops-api.md)). `operation_dispatch` is that someone.
+[ops-api.md](ops-api.md)). `operation_dispatch` is that someone. An import's
+run id is checked at acceptance against the bucket key's run grammar, so the
+App stores no import whose terminal key cannot be formed
+([ops-api.md](ops-api.md#routes)).
 
 | Kind                                       | What the Processor does                                                                                               | What it completes                                                                         |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
@@ -766,6 +772,11 @@ a separate operation that does not close the old one. The ADR 0048 expiry
 applies to collector starts only; an import expiry would be a new decision.
 `services/processor/test/operation-dispatch.test.ts` ("an import has no
 expiry") pins this.
+
+An import whose stored payload names no source or run, or a source or run id
+the bucket key grammar refuses (the App's run grammar also admits `:`, which
+no terminal key can carry), fails at once with `operation_payload_invalid`
+and writes no stage row; it is not looked at again.
 
 An import whose registration **throws** — R2 or CORE unavailable, or a
 refusal CORE made that the derivation did not foresee — is treated as the

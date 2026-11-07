@@ -94,7 +94,7 @@ const ABSENT: D1Health = {
  * reach my own database" would be reporting on the import as much as on the
  * binding.
  */
-export async function d1Health(database: D1Database | undefined): Promise<D1Health> {
+async function d1Health(database: D1Database | undefined): Promise<D1Health> {
   if (!database || typeof database.prepare !== "function") return { ...ABSENT };
   const health: D1Health = { ...ABSENT, bound: true };
   try {

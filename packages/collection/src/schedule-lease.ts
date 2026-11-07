@@ -222,7 +222,11 @@ export async function withCollectionLease<T>(
     await releaseOwnLease(db, source, ref);
   });
   try {
-    return await Promise.race([running, forcedStop]);
+    const result = await Promise.race([running, forcedStop]);
+    // A stopped holder cannot become successful by resolving during the grace
+    // period. Its stop remains uncertain even when the action swallows it.
+    controller.signal.throwIfAborted();
+    return result;
   } catch (error) {
     // An action that failed because its holder stopped reports why it stopped.
     const reason: unknown = controller.signal.reason;

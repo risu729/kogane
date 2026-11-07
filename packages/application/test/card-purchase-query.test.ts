@@ -212,6 +212,7 @@ describe("card purchase explanation", () => {
       ]),
       unrecognizedCurrentRows: 0,
       unrecognizedReasons: { complete: true, counts: [] },
+      refundsAllocated: false,
       limit: CARD_PURCHASE_PAGE_SIZE,
     });
   });

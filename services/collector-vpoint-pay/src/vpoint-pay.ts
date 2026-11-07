@@ -296,21 +296,21 @@ function defaultFetch(input: string | URL | Request, init?: RequestInit): Promis
   return fetch(input, init);
 }
 
-export class VPointPayHttpError extends Error {
+class VPointPayHttpError extends Error {
   constructor(operation: string, status: number) {
     super(`V Point Pay ${operation} failed with HTTP ${status}`);
     this.name = "VPointPayHttpError";
   }
 }
 
-export class VPointPayProtocolError extends Error {
+class VPointPayProtocolError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "VPointPayProtocolError";
   }
 }
 
-export class VPointPayReauthenticationRequiredError extends Error {
+class VPointPayReauthenticationRequiredError extends Error {
   constructor(status: number) {
     super(`V Point Pay app reauthentication is required (HTTP ${status})`);
     this.name = "VPointPayReauthenticationRequiredError";

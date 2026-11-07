@@ -28,7 +28,15 @@ import { IDENTITY_COLLECTIONS } from "../../../packages/application/src/query/id
 import { readIdentityCollection } from "./identity-api";
 import { parseRequest } from "./ops-api";
 import { readObservationRoute } from "./observation-api";
+import {
+  readHoldingsChange,
+  reportedHoldingsChangeAvailable,
+} from "./reported-holdings-change-api";
+import { readRewardRoute } from "./rewards-api";
+import { readEventsRoute } from "./events-api";
+import { ACTIVITY_BASES } from "../../../packages/read-model/src/index";
 import { catalogue } from "./read";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 /** The result envelope of every page read: the route's answer, under `data`. */
 const PAGE_READ_SCHEMA_VERSION = "kogane-page-read-v1";
@@ -48,6 +56,12 @@ const IDENTITY_READ = z.enum(["latest", "as-recorded"]);
 const MEASURE_VIEW = z.enum(["balances", "summaries"]);
 const OFFSET = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
+/** Which store-dependent routes this deployment serves. */
+export interface PageReadServed {
+  reportedState: boolean;
+  economicEvents: boolean;
+}
+
 interface PageReadTool<Schema extends z.ZodType> {
   title: string;
   description: string;
@@ -56,6 +70,13 @@ interface PageReadTool<Schema extends z.ZodType> {
   capability: AgentCapability;
   /** The UI route paths this tool answers, for the parity inventory. */
   routes: readonly string[];
+  /**
+   * Served only where its route is: `reportedState` where
+   * `GET /api/v2/reported-state` is (the store has its views),
+   * `economicEvents` where `GET /api/v2/activity` is (migration 0032's
+   * projection). Otherwise neither listed nor callable.
+   */
+  servedWhere?: keyof PageReadServed;
   /** The shared reader, called with the request the route would build. */
   read(env: Env, input: z.infer<Schema>): Promise<unknown>;
 }
@@ -161,6 +182,58 @@ const TOOLS = {
     read: (env, { collection, ...params }) =>
       observationBody(env, `/api/v2/balances/${collection}`, params),
   }),
+  "kogane.rewards.read": tool({
+    title: "Reward holdings and expiry",
+    description:
+      "One page of the reward read: `holdings` (each programme's provider-observed quantity in its own unit, with membership) or `expiry` (the published reward snapshot's expiry estimates, with the provider's own display sections). The same answer as GET /api/v2/rewards/holdings or /api/v2/rewards/expiry, under records.read and a whole-store read grant. `program` narrows to one programme; `offset` pages holdings, `limit` and `cursor` page expiry. Expiry is 503 while no reward snapshot is published. Read-only; no exchange or simulation is run.",
+    schema: z.strictObject({
+      collection: z.enum(["holdings", "expiry"]),
+      program: ROUTE_TEXT.optional(),
+      offset: OFFSET.optional(),
+      limit: z.number().int().min(1).max(1000).optional(),
+      cursor: FILTER_TEXT.optional(),
+    }),
+    capability: "records.read",
+    routes: ["/api/v2/rewards/holdings", "/api/v2/rewards/expiry"],
+    read: (env, { collection, ...params }) =>
+      readRewardRoute(env, {
+        pathname: `/api/v2/rewards/${collection}`,
+        searchParams: query(params),
+      }),
+  }),
+  "kogane.reported-holdings-change.read": tool({
+    title: "Reported holdings of two dates side by side",
+    description:
+      "The holdings each provider reported on two dates (YYYY-MM-DD, Asia/Tokyo, not after today), side by side per provider holding key, with the exact change where both dates list a holding; optionally one source or one account. The same answer as GET /api/v2/reported-holdings-change, under records.read and a whole-store read grant. Provider figures only: nothing is added up, valued or netted. Served where GET /api/v2/reported-state is. Read-only.",
+    schema: z.strictObject({
+      from: ROUTE_TEXT,
+      to: ROUTE_TEXT,
+      source: ROUTE_TEXT.optional(),
+      account: ROUTE_TEXT.optional(),
+    }),
+    capability: "records.read",
+    routes: ["/api/v2/reported-holdings-change"],
+    servedWhere: "reportedState",
+    read: async (env, params) => {
+      if (!(await reportedHoldingsChangeAvailable(env))) throw new HttpError(404, "not_found");
+      return readHoldingsChange(env, query(params));
+    },
+  }),
+  "kogane.events.read": tool({
+    title: "Economic activity by basis, and obligations",
+    description:
+      "One page of the economic event projection: `activity` (the current event revisions with a leg on the requested `basis`: `cash-movement` (default; money that left or entered an account, e.g. an accepted card settlement debit) or `purchase-recognition` (cost recognised at purchase); each event with its legs, allocations, per-basis totals, evidence and explanation refs) or `obligations` (current obligations with their principal, settlements and remaining amount; takes no `basis`). The two bases are never mixed in one list. The same answer as GET /api/v2/activity or /api/v2/obligations, under records.read and a whole-store read grant. `offset` pages 200 rows; `nextCursor` is the next offset. Served where the projection exists. Read-only.",
+    schema: z.strictObject({
+      collection: z.enum(["activity", "obligations"]),
+      basis: z.enum(ACTIVITY_BASES).optional(),
+      offset: OFFSET.optional(),
+    }),
+    capability: "records.read",
+    routes: ["/api/v2/activity", "/api/v2/obligations"],
+    servedWhere: "economicEvents",
+    read: (env, { collection, ...params }) =>
+      readEventsRoute(env, { pathname: `/api/v2/${collection}`, searchParams: query(params) }),
+  }),
 } as const;
 
 /** The JSON answer of one observation route; a raw download is not a page read. */
@@ -186,8 +259,7 @@ export const PAGE_READ_ROUTES: Record<PageReadToolName, readonly string[]> = Obj
 ) as Record<PageReadToolName, readonly string[]>;
 
 const PAGE_READ_MCP_TOOLS = Object.entries(TOOLS).map(([name, definition]) => {
-  const inputSchema = z.toJSONSchema(definition.schema) as Record<string, unknown>;
-  delete inputSchema["$schema"];
+  const inputSchema = mcpInputSchema(definition.schema);
   return {
     name,
     title: definition.title,
@@ -206,12 +278,23 @@ function refusedRefs(grant: Grant, capability: AgentCapability): string[] {
   ];
 }
 
-/** The page reads listed to this grant: exactly those it may call. */
-export function pageReadMcpTools(grant: Grant) {
-  return PAGE_READ_MCP_TOOLS.filter(
-    (definition) =>
-      refusedRefs(grant, TOOLS[definition.name as PageReadToolName].capability).length === 0,
-  );
+/** The store-dependent route this page read exists only beside, if any. */
+export function pageReadServedWhere(name: PageReadToolName): keyof PageReadServed | null {
+  return (TOOLS[name] as PageReadTool<z.ZodType>).servedWhere ?? null;
+}
+
+/**
+ * The page reads listed to this grant: exactly those it may call, and of
+ * those served only beside a store-dependent route, only where it is.
+ */
+export function pageReadMcpTools(grant: Grant, served: PageReadServed) {
+  return PAGE_READ_MCP_TOOLS.filter((definition) => {
+    const name = definition.name as PageReadToolName;
+    const where = pageReadServedWhere(name);
+    return (
+      (where === null || served[where]) && refusedRefs(grant, TOOLS[name].capability).length === 0
+    );
+  });
 }
 
 /**

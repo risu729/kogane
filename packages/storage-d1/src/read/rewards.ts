@@ -22,12 +22,11 @@ import type {
 import { readOutputDigest, readSnapshotId } from "./identity.ts";
 import { runBatch, type D1Like, type D1StatementLike } from "../d1.ts";
 
-/** Rows written per batch, and complete snapshots kept besides the published one. */
-export const REWARD_WRITE_CHUNK = 100;
-export const REWARD_RETAINED_SNAPSHOTS = 2;
+/** Complete snapshots kept besides the published one. */
+const REWARD_RETAINED_SNAPSHOTS = 2;
 
 /** A reward CORE reference copied into the snapshot (04 §3). */
-export type RewardInputRefKind =
+type RewardInputRefKind =
   | "expiry_rule"
   | "conversion_offer"
   | "reward_program"

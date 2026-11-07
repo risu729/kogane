@@ -70,7 +70,7 @@ export function isRegistrationContractVersion(value: string): value is Registrat
 }
 
 /** The external id namespace every shared-R2 acquisition session is recorded under. */
-export const EXTERNAL_ID_NAMESPACE = "shared-r2";
+const EXTERNAL_ID_NAMESPACE = "shared-r2";
 
 /**
  * Terminal `source` → CORE `sources.id`.

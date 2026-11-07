@@ -127,7 +127,7 @@ interface RunRow {
   completed_at: string | null;
 }
 
-export function reportsRoute(path: string): { reportId: string; view: string } | null {
+function reportsRoute(path: string): { reportId: string; view: string } | null {
   const match = /^\/api\/v2\/reports\/([^/]+)(?:\/(explanation|export))?$/.exec(path);
   if (!match) return null;
   let reportId: string;

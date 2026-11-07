@@ -13,7 +13,6 @@ import {
   insertParseIssues,
   insertParseRun,
   listArtifacts,
-  openStore,
   publishParseRun,
   putRawObject,
   upsertSource,
@@ -33,6 +32,7 @@ import type {
   PositionObservation,
   ValuationObservation,
 } from "../../../packages/parsers/src/types.ts";
+import { openTestStore } from "./test-store.ts";
 
 /**
  * Datasets seeded on `coverage-v1` with `replaces_previous_on_complete_empty = 0`
@@ -53,7 +53,7 @@ export function closeStores(): void {
 }
 export function database(): Store {
   const directory = mkdtempSync(join(tmpdir(), "kogane-current-snapshots-"));
-  const store = openStore(directory);
+  const store = openTestStore(directory);
   cleanup.push(() => {
     store.db.close();
     rmSync(directory, { recursive: true, force: true });

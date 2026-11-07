@@ -1,9 +1,12 @@
 // Pure reward conversion arithmetic and bounded route traversal.
 // Contracts remain exported from rewards.ts for existing callers.
-import type { ConversionOffer, ConversionPlan, MembershipState } from "./rewards.ts";
+import type { ConversionOffer, ConversionPlan, MembershipState, OfferValidity } from "./rewards.ts";
+import { validOpenEndedPeriodValue } from "./open-ended-period.ts";
 import { CONVERSION_SEARCH_RELEASE, REWARD_POLICY_RELEASE } from "./reward-releases.ts";
 import {
   civilFromDays,
+  periodContainsDate,
+  validTemporalValue,
   daysFromCivil,
   formatLocalDate,
   parseLocalDate,
@@ -190,6 +193,50 @@ function dayText(day: number): string {
 }
 
 /**
+ * Whole-day evidence only; an instant or unknown value proves no day. A
+ * standing offer (`open-ended`) covers its first day and every later day.
+ */
+function coversApplicationDay(
+  value: OfferValidity,
+  day: string,
+  zone: string | null,
+): boolean | null {
+  const date = parseLocalDate(day);
+  if (date === null) return null;
+  if (value.kind === "open-ended") {
+    if (!validOpenEndedPeriodValue(value)) return null;
+    if (zone !== null && value.zone !== null && zone !== value.zone) return null;
+    return day >= value.start;
+  }
+  if (!validTemporalValue(value) || value.kind === "unknown" || value.kind === "instant")
+    return null;
+  if (zone !== null && value.zone !== null && zone !== value.zone) return null;
+  if (value.kind === "local-date") return value.value === day;
+  return periodContainsDate(value, date);
+}
+
+/** Membership uncertainty remains a review reason, never an inferred entitlement. */
+function offerConditionsAt(
+  offer: ConversionOffer,
+  membership: readonly MembershipState[],
+  day: string,
+  zone: string | null,
+): "offer_not_valid_at_clock" | "needs_rule_verification" | null {
+  const valid = coversApplicationDay(offer.validTime, day, zone);
+  if (valid === null) return "needs_rule_verification";
+  if (!valid) return "offer_not_valid_at_clock";
+  if (offer.eligibleTiers === null) return null;
+  const established = membership.some(
+    (claim) =>
+      claim.programId === offer.sourceProgramRef &&
+      offer.eligibleTiers!.includes(claim.tier) &&
+      claim.source === "provider" &&
+      coversApplicationDay(claim.valid, day, zone) === true,
+  );
+  return established ? null : "needs_rule_verification";
+}
+
+/**
  * Bounded search for 1..maxDepth chains of offers from a start quantity to a
  * goal unit. Remaining balance and time are part of the state, so this is not
  * a shortest-path over rates: a hop is only taken if its minimum, increment,
@@ -256,7 +303,14 @@ export function findConversionPaths(
         continue;
       }
       const appliedOn = state.day;
-      const deadlineDay = dayNumber(offer.applicationDeadline);
+      const zone = start.clock.kind === "unknown" ? null : start.clock.zone;
+      const condition = offerConditionsAt(offer, start.membership ?? [], dayText(appliedOn), zone);
+      if (condition !== null) {
+        rejected.push({ offerRef, reasonCode: condition });
+        continue;
+      }
+      const deadlineDay =
+        offer.applicationDeadline === null ? null : dayNumber(offer.applicationDeadline);
       if (deadlineDay !== null && appliedOn > deadlineDay) {
         rejected.push({
           offerRef,

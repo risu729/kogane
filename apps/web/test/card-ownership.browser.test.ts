@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { ownershipReview } from "../../../packages/application/test/card-ownership-fixture.ts";
 import {
@@ -353,4 +354,12 @@ describe.if(runnable)("explicit card ownership review", () => {
     expect(review.sides[0]!.claims[0]!.decisionRevisionId).toBe("decision-old");
     await page.close();
   });
+
+  test("the ownership review passes the accessibility audit", async () => {
+    const page = await open();
+    await page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true }).waitFor();
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 });

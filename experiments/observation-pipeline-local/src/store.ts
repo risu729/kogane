@@ -40,12 +40,25 @@ export interface Store {
  */
 const SCHEMA_VERSION = 6;
 
-export function openStore(stateDir?: string): Store {
+export interface OpenStoreOptions {
+  /**
+   * The caller deletes the store when it is done (the synthetic export), so
+   * nothing in it has to survive a crash. Such a store skips SQLite's fsync on
+   * every commit: building one from the fixtures commits a few hundred times
+   * (every schema statement autocommits), and on a loaded machine those
+   * fsyncs, not the work, dominate the build. Never set it for `state/` or any
+   * store an operator keeps.
+   */
+  disposable?: boolean;
+}
+
+export function openStore(stateDir?: string, options: OpenStoreOptions = {}): Store {
   const root = stateDir ?? join(EXPERIMENT_ROOT, "state");
   const blobDir = join(root, "blobs");
   mkdirSync(blobDir, { recursive: true });
   const db = new Database(join(root, "kogane-poc.sqlite"), { create: true });
   db.exec("PRAGMA foreign_keys = ON;");
+  if (options.disposable === true) db.exec("PRAGMA synchronous = OFF;");
   const found = (db.query("PRAGMA user_version").get() as { user_version: number }).user_version;
   if (![0, 2, 3, 4, 5, SCHEMA_VERSION].includes(found)) {
     throw new Error(

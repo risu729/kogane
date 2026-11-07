@@ -261,8 +261,8 @@ export async function collectionScan(
       // refusal CORE made that the derivation did not foresee. Counted, not
       // recorded, and never allowed to stop the page or pin the cursor on
       // this run forever (G1-13). Only `onFailure` hears the class name, never
-      // the message; the deployed cron passes none, so the lane's log line
-      // carries the `failed` count alone.
+      // the message; the deployed cron's stage logs it as
+      // `collection_scan_registration_failed`.
       options.onFailure?.(safeFailureCode(error));
       summary.failed += 1;
       return true;

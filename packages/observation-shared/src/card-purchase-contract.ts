@@ -54,6 +54,7 @@ const COVERAGE_KEYS = [
   "unsupportedShapes",
   "unrecognizedCurrentRows",
   "unrecognizedReasons",
+  "refundsAllocated",
   "limit",
 ];
 const UNRECOGNIZED_REASONS_KEYS = ["complete", "counts"];
@@ -406,6 +407,7 @@ function validPage(value: unknown, candidate: (value: unknown) => boolean): bool
     coverage.unsupportedShapes.every(member(CARD_USAGE_EXCLUSIONS)) &&
     count(coverage.unrecognizedCurrentRows) &&
     validUnrecognizedReasons(coverage.unrecognizedReasons, coverage.unrecognizedCurrentRows) &&
+    coverage.refundsAllocated === false &&
     coverage.limit === CARD_PURCHASE_PAGE_LIMIT &&
     value.items.every((item) => validItem(item, candidate))
   );

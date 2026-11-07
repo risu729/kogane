@@ -18,6 +18,7 @@ import {
   READ_CLASSIFICATION,
   READ_PROFILE,
   REPO_ROOT,
+  applyMigrations,
   buildSchemaLedger,
   renderSchemaMarkdown,
   splitSqlStatements,
@@ -150,6 +151,37 @@ describe("G0-01 CORE schema ledger", () => {
       "publication_events",
     ])
       expect(ledger.tables.find((table) => table.name === name)?.appendOnly).toBe(true);
+  });
+
+  test("a guard counts only when it refuses every update or delete, not when a WHEN clause lets some through", () => {
+    // The flag is the schema's actual mutability (docs/infra-ledgers.md), so
+    // a trigger named `*_no_update` whose WHEN clause allows a pointer to be
+    // set is not an append-only guard. `decision_revisions` is the case on
+    // disk: its `superseded_by` is set once, like the supersede-only tables.
+    const { db } = applyMigrations(REPO_ROOT);
+    const conditional = new Set(
+      (
+        db.query("SELECT name, sql FROM sqlite_master WHERE type='trigger'").all() as {
+          name: string;
+          sql: string;
+        }[]
+      )
+        .filter((trigger) =>
+          /\sWHEN\s/iu.test(trigger.sql.replaceAll(/--[^\n]*/gu, "").split(/\bBEGIN\b/iu)[0]!),
+        )
+        .map((trigger) => trigger.name),
+    );
+    db.close();
+    for (const table of ledger.tables)
+      for (const name of [...table.noUpdateTriggers, ...table.noDeleteTriggers])
+        expect({ table: table.name, trigger: name, conditional: conditional.has(name) }).toEqual({
+          table: table.name,
+          trigger: name,
+          conditional: false,
+        });
+    expect(ledger.tables.find((table) => table.name === "decision_revisions")?.appendOnly).toBe(
+      false,
+    );
   });
 
   test("the migration inventory records the seed and backfill migrations of 06 §1", () => {
