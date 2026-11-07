@@ -277,6 +277,24 @@ is unbound or no snapshot is sealed it answers
 blocking warning — it never computes a holding from the raw observation rows
 behind the projection.
 
+The snapshot is the one the v2 balance routes would serve, checked the same
+way (`servableSnapshot` in `services/app/src/balances-v2.ts`; 05 §7). A
+published snapshot those routes refuse is answered `unavailable` with their
+closed code as the gap reason, the reason of the `freshness`, `numeric` and
+`valuation` dimensions and a blocking warning, and no unit is returned:
+
+| Situation                                                      | Reason code                      |
+| -------------------------------------------------------------- | -------------------------------- |
+| READ is unbound, or nothing is published                       | `projection_not_built`           |
+| The READ database has another contract version                 | `read_model_unavailable`         |
+| CORE was restored under a new epoch                            | `read_model_context_changed`     |
+| A use restriction changed after the snapshot was last verified | `read_model_restriction_changed` |
+
+A restriction refuses the whole snapshot until the next build re-verifies it
+at the new visibility revision; filtering rows out of it would leave every
+figure at its old value. `packages/application/test/query.test.ts` and
+`services/app/test/holdings-read.test.ts` pin each case.
+
 With a sealed snapshot it returns the adopted set of that snapshot as one
 figure per unit, in exact integer arithmetic, with the number of adopted
 measurements behind each one. Only `sum-disjoint` currency stocks qualify
