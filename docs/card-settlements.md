@@ -398,6 +398,43 @@ retracts the interpretation, never the bank movement or original evidence.
 Rejected and withdrawn candidates remain in history; a different correspondence
 is reviewed as a different candidate. Historical citations keep resolving.
 
+### Correcting a match
+
+Each candidate has its own page, `/reconciliation/<proposalId>`: its review
+(open, with the actions its status allows and its decision history) and, under
+`同じ請求・出金の他の候補`, the candidates it competes with. Those are the other
+candidates that share its `statement_key`, its `bank_key`, or its statement's
+(source, resolved account, period) in the facts: the three terms by which an
+accepted review makes every other one `allocation_already_used`. Every status
+is listed, newest first, 50 to a page, each with its statement and debit
+facts, its status, the blockers of a proposed one, and a link to its own page.
+The list decides nothing and offers no action.
+
+A wrong acceptance is corrected in two approved plans through the lifecycle
+above: the accepted candidate's withdrawal on its page, then the right
+candidate's acceptance on its own page, which its competitor list links. Each
+is a new decision; the withdrawn acceptance, its receipt and the evidence stay
+in history. Until the withdrawal commits, the right candidate shows
+`allocation_already_used` and its acceptance cannot be planned.
+
+The pages read `GET /api/v2/reconciliation/card-settlements?relatedTo=<proposalId>`
+(operator-only like the list, with an optional `offset`; not combined with
+`proposalId`; `404` when the candidate does not exist), which returns the
+list's DTO (`queryRelatedCardSettlements`). The `カード照合` list links each
+candidate to its page; the purchase chain's 引落 step links to the statement's
+settlement review, the confirmation screen and the ownership review back to
+the candidate's page.
+
+Limits:
+
+- A candidate that shares only the debit's alias class (the same provider row
+  under another producer or namespace, so another `bank_key`) is not listed;
+  the commit's claim guard still refuses its acceptance.
+- The list shows no `claim_available`, as on the `カード照合` list, so a
+  competitor shown without a blocker can still be refused at plan time.
+- No agent reads the competitor list: the route is operator-only, and the MCP
+  catalogue has no read for it.
+
 ## Financial meaning and limits
 
 Acceptance allocates the observed payment to a statement. It adds no new cash
@@ -455,6 +492,9 @@ recognised card purchase: 利用 → 請求 → 引落. An agent with a whole-st
   the new acceptance. While it is accepted, the page shows its
   `card_settlement` event, its `settlement` allocation and the bank debit its
   facts cite; a proposed, rejected or withdrawn review is named without a debit.
+  The step links to that review's own page
+  ([correcting a match](#correcting-a-match)); with no review, to the
+  `カード照合` list.
 - A statement that cannot be shown is a reason, never a zero: `not_posted` for a
   pending row, `statement_not_collected`, or `period_unrecognized` when the
   provider period is in no recognised shape. A MyJCB confirmed capture stored
@@ -631,6 +671,15 @@ container was shared with other jobs, so treat these as orders of magnitude):
 | settlement acceptance commit guard         | 120 ms    | 31 ms  |
 | ownership review guard, candidate term     | 113 ms    | 33 ms  |
 
+The competitor read of [correcting a match](#correcting-a-match)
+(`CARD_SETTLEMENT_RELATED_SQL`) chooses its candidates the same way: a union
+of three branches, each finding the asked candidate by its key and its
+competitors through one index (`card_settlement_candidates_statement`,
+`card_settlement_candidates_bank`, `card_settlement_candidates_statement_period`),
+then judges only that page. It has no shipped text to equal; its timing has
+not been measured. A statement's competitors grow with its recaptures (one
+candidate per recapture once its debit is in), so the list pages.
+
 The shipped guards were cheaper than the plan reads because SQLite evaluated
 the view's flags for the one row the guard names. The reads by id joined the
 view and evaluated them for every candidate. A rejection or withdrawal guard reads no flag.
@@ -700,6 +749,19 @@ Synthetic tests cover authoritative totals, missing/ambiguous dates and totals,
 refunds, unconfirmed pages, ownership blockers, stale plans, idempotent decisions,
 allocation conflicts and withdrawal history. Browser tests exercise the explicit
 review/approval flow and refuse a detail revision that changed after planning.
+They also open a candidate's own page from the list, read its competitors
+(`relatedTo`), plan the withdrawal of a wrong acceptance there and link to the
+competing candidate; the confirmation links back to the candidate's page.
+The competitor read is compared on the random stores
+(`card-settlement-review-differential.test.ts`) with the reservation's three
+terms over every candidate, each review as the shipped review read shows it;
+dropping any one term fails that comparison. On the scaled store
+(`card-settlement-review-scale.test.ts`) its pages equal each competitor's own
+review read, and its plan scans no candidate table. The App route
+(`services/app/test/card-settlements-api.test.ts`) lists competitors by each
+term, never the candidate itself or an unrelated one, pages them, answers
+`404` for a missing candidate and refuses mixed or repeated filters and
+non-operators.
 The pending-to-posted review is tested the same way. Its plans carry the
 candidate's own relation, and its confirmation refuses a pin, action or
 candidate that changed after planning.

@@ -225,8 +225,12 @@ function SourceRows({ view }: { view: CardPurchaseView }): ReactNode {
 export function PurchaseChain({ view }: { view: CardPurchaseView }): ReactNode {
   const features = useFeatures();
   const { statement, settlement } = view;
+  // The statement's own settlement review when there is one, where its match
+  // is corrected; otherwise the list of candidates.
   const reconciliation = features.cardSettlementReconciliation ? (
-    <Link to="/reconciliation">カード照合で確認</Link>
+    <Link to={settlement === null ? "/reconciliation" : `/reconciliation/${settlement.proposalId}`}>
+      カード照合で確認
+    </Link>
   ) : null;
   return (
     <ol className="chain" aria-label="利用から請求、引落までの経路">

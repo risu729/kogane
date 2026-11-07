@@ -10,6 +10,18 @@ let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let issuer: string;
 let jwks: { keys: unknown[] };
 let sequence = 0;
+/**
+ * A candidate over the synthetic statement and debit rows, under the given
+ * keys and, when given, another statement period in its facts.
+ */
+let insertCandidate: (
+  id: string,
+  statementKey: string,
+  bankKey: string,
+  digest: string,
+  createdAt: string,
+  period?: string,
+) => Promise<void>;
 beforeAll(async () => {
   await seedRegistry();
   for (const source of ["myjcb", "smbc-bank"])
@@ -24,26 +36,29 @@ beforeAll(async () => {
   const cardRun = await seedRun({ source: "myjcb", count: 1 });
   const bankRun = await seedRun({ source: "smbc-bank", count: 1 });
   async function parse(artifactId: number) {
-    const row =
-      await env.DB.prepare(`INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
-      VALUES(?,'card-settlement-api-fixture','1','2026-09-11T00:00:00Z','ok','[]') RETURNING id`)
-        .bind(artifactId)
-        .first<{ id: number }>();
+    const row = await env.DB.prepare(
+      `INSERT INTO parse_runs(fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
+      VALUES(?,'card-settlement-api-fixture','1','2026-09-11T00:00:00Z','ok','[]') RETURNING id`,
+    )
+      .bind(artifactId)
+      .first<{ id: number }>();
     await publishParse(row!.id);
     return row!.id;
   }
   const cardParse = await parse(cardRun.artifacts[0]!.id);
   const bankParse = await parse(bankRun.artifacts[0]!.id);
-  const card =
-    await env.DB.prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,instrument,raw_locator,extra_json)
-    VALUES(?,'synthetic-card','credit_statement_payment_amount','JPY','synthetic-card','{}') RETURNING id`)
-      .bind(cardParse)
-      .first<{ id: number }>();
-  const bank =
-    await env.DB.prepare(`INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json)
-    VALUES(?,'synthetic-bank','JPY','synthetic-bank','{}') RETURNING id`)
-      .bind(bankParse)
-      .first<{ id: number }>();
+  const card = await env.DB.prepare(
+    `INSERT INTO balance_observations(parse_run_id,source_account,metric,instrument,raw_locator,extra_json)
+    VALUES(?,'synthetic-card','credit_statement_payment_amount','JPY','synthetic-card','{}') RETURNING id`,
+  )
+    .bind(cardParse)
+    .first<{ id: number }>();
+  const bank = await env.DB.prepare(
+    `INSERT INTO transaction_observations(parse_run_id,source_account,currency,raw_locator,extra_json)
+    VALUES(?,'synthetic-bank','JPY','synthetic-bank','{}') RETURNING id`,
+  )
+    .bind(bankParse)
+    .first<{ id: number }>();
   const facts = settlementFacts(true);
   facts.statement.ref = {
     kind: "balance",
@@ -56,14 +71,49 @@ beforeAll(async () => {
     revision: `parse_run:${bankParse}`,
   };
   facts.bankDebit.sourceId = "smbc-bank";
-  await env.DB.prepare(`INSERT INTO card_settlement_candidates
+  insertCandidate = async (id, statementKey, bankKey, digest, createdAt, period) => {
+    await env.DB.prepare(
+      `INSERT INTO card_settlement_candidates
     (id,statement_key,bank_key,statement_observation_id,statement_parse_run_id,bank_observation_id,bank_parse_run_id,policy_release,facts_json,proposal_digest,created_at)
-    VALUES('card-settlement-synthetic','statement-synthetic','bank-synthetic',?,?,?,?,'card-statement-settlement-v1',?,?,'2026-09-11T00:00:00Z')`)
-    .bind(card!.id, cardParse, bank!.id, bankParse, JSON.stringify(facts), "a".repeat(64))
-    .run();
+    VALUES(?,?,?,?,?,?,?,'card-statement-settlement-v1',?,?,?)`,
+    )
+      .bind(
+        id,
+        statementKey,
+        bankKey,
+        card!.id,
+        cardParse,
+        bank!.id,
+        bankParse,
+        JSON.stringify({
+          ...facts,
+          statement: {
+            ...facts.statement,
+            period: period ?? facts.statement.period,
+          },
+        }),
+        digest,
+        createdAt,
+      )
+      .run();
+  };
+  await insertCandidate(
+    "card-settlement-synthetic",
+    "statement-synthetic",
+    "bank-synthetic",
+    "a".repeat(64),
+    "2026-09-11T00:00:00Z",
+  );
   keys = await generateKeyPair("RS256", { extractable: true });
   jwks = {
-    keys: [{ ...(await exportJWK(keys.publicKey)), kid: "fixture", alg: "RS256", use: "sig" }],
+    keys: [
+      {
+        ...(await exportJWK(keys.publicKey)),
+        kid: "fixture",
+        alg: "RS256",
+        use: "sig",
+      },
+    ],
   };
 });
 beforeEach(() => {
@@ -117,7 +167,10 @@ async function call(
     new Request(`https://fixture.test${path}`, {
       method: options.method ?? "GET",
       headers: token
-        ? { "cf-access-jwt-assertion": token, "x-kogane-verified-actor": "synthetic-operator" }
+        ? {
+            "cf-access-jwt-assertion": token,
+            "x-kogane-verified-actor": "synthetic-operator",
+          }
         : {},
     }),
     {
@@ -187,7 +240,12 @@ describe("card settlement review boundary", () => {
     const response = await call(PATH + "/ownership?proposalId=card-settlement-synthetic");
     expect(response.status).toBe(200);
     const data = (await response.json()) as {
-      sides: { role: string; accountId: string | null; claims: unknown[]; blockers: string[] }[];
+      sides: {
+        role: string;
+        accountId: string | null;
+        claims: unknown[];
+        blockers: string[];
+      }[];
     };
     expect(data.sides.map((side) => side.role)).toEqual(["liable_party", "beneficial_owner"]);
     expect(
@@ -216,5 +274,83 @@ describe("card settlement review boundary", () => {
     expect((await call(PATH + "/ownership")).status).toBe(400);
     expect((await call(path + "&offset=0")).status).toBe(400);
     expect((await call(PATH + "/ownership?proposalId=missing")).status).toBe(404);
+  });
+  // Last: it adds candidates the tests above do not expect.
+  it("lists the candidates a review competes with, by statement, debit or statement month, never itself", async () => {
+    const day = (n: number) => `2026-09-1${n}T00:00:00Z`;
+    // The same statement key, another debit, another month in the facts.
+    await insertCandidate(
+      "cs-same-statement",
+      "statement-synthetic",
+      "bank-b",
+      "b".repeat(64),
+      day(2),
+      "2026-08",
+    );
+    // The same debit key, another statement key and month.
+    await insertCandidate(
+      "cs-same-debit",
+      "statement-b",
+      "bank-synthetic",
+      "c".repeat(64),
+      day(3),
+      "2026-07",
+    );
+    // Only the same (source, account, month) in the facts.
+    await insertCandidate("cs-same-month", "statement-c", "bank-c", "d".repeat(64), day(4));
+    // Nothing shared.
+    await insertCandidate(
+      "cs-unrelated",
+      "statement-d",
+      "bank-d",
+      "e".repeat(64),
+      day(5),
+      "2026-06",
+    );
+    const response = await call(PATH + "?relatedTo=card-settlement-synthetic");
+    expect(response.status).toBe(200);
+    const page = (await response.json()) as {
+      apiVersion: number;
+      items: { proposalId: string; status: string }[];
+      nextOffset: number | null;
+    };
+    expect(page.apiVersion).toBe(2);
+    expect(page.items.map((item) => item.proposalId)).toEqual([
+      "cs-same-month",
+      "cs-same-debit",
+      "cs-same-statement",
+    ]);
+    expect(page.nextOffset).toBeNull();
+    const second = (await (
+      await call(PATH + "?relatedTo=card-settlement-synthetic&offset=2")
+    ).json()) as {
+      items: { proposalId: string }[];
+    };
+    expect(second.items.map((item) => item.proposalId)).toEqual(["cs-same-statement"]);
+    // The relation is symmetric through the shared key.
+    const back = (await (await call(PATH + "?relatedTo=cs-same-debit")).json()) as {
+      items: { proposalId: string }[];
+    };
+    expect(back.items.map((item) => item.proposalId)).toEqual(["card-settlement-synthetic"]);
+    expect((await call(PATH + "?relatedTo=missing")).status).toBe(404);
+    for (const query of [
+      "?relatedTo=a&relatedTo=b",
+      "?relatedTo=a&proposalId=a",
+      "?relatedTo=%2Fetc",
+      "?relatedTo=",
+      "/ownership?proposalId=card-settlement-synthetic&relatedTo=card-settlement-synthetic",
+    ])
+      expect((await call(PATH + query)).status).toBe(400);
+    for (const [subject, status] of [
+      [null, 401],
+      ["ungranted", 403],
+      ["synthetic-agent", 403],
+    ] as const)
+      expect((await call(PATH + "?relatedTo=card-settlement-synthetic", { subject })).status).toBe(
+        status,
+      );
+    expect(
+      await env.DB.prepare("SELECT count(*) AS count FROM card_settlement_decisions").first(),
+    ).toEqual({ count: 0 });
   });
 });

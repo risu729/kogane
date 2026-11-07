@@ -30,8 +30,10 @@ import { CARD_OWNERSHIP_CANDIDATE_SQL } from "../src/query/card-ownership.ts";
 import {
   CARD_SETTLEMENT_PAGE_SIZE,
   CARD_SETTLEMENT_PAGE_SQL,
+  CARD_SETTLEMENT_RELATED_SQL,
   CARD_SETTLEMENT_REVIEW_SQL,
   queryCardSettlements,
+  queryRelatedCardSettlements,
 } from "../src/query/card-settlements.ts";
 import {
   LEGACY_CARD_OWNERSHIP_CANDIDATE_SQL,
@@ -166,6 +168,39 @@ describe("card settlement readiness reads on a scaled store without statistics",
   );
 
   test(
+    "each review's competitors are the reservation's, each as its own review read shows it",
+    async () => {
+      let seen = 0;
+      for (const { id } of sample(FULL ? 1 : 4)) {
+        const ids = (
+          db
+            .query(
+              `SELECT c.id FROM card_settlement_candidates c WHERE c.id<>?1 AND EXISTS(
+                SELECT 1 FROM card_settlement_candidates a WHERE a.id=?1
+                AND (c.statement_key=a.statement_key OR c.bank_key=a.bank_key
+                 OR (json_extract(c.facts_json,'$.statement.sourceId')=json_extract(a.facts_json,'$.statement.sourceId')
+                  AND json_extract(c.facts_json,'$.statement.accountId')=json_extract(a.facts_json,'$.statement.accountId')
+                  AND json_extract(c.facts_json,'$.statement.period')=json_extract(a.facts_json,'$.statement.period'))))
+               ORDER BY c.created_at DESC,c.id DESC LIMIT ?2`,
+            )
+            .all(id, CARD_SETTLEMENT_PAGE_SIZE) as { id: string }[]
+        ).map((row) => row.id);
+        const page = await queryRelatedCardSettlements(executor(false), id);
+        expect(page?.items.map((item) => item.proposalId)).toEqual(ids);
+        for (const item of page?.items ?? []) {
+          const own = await queryCardSettlements(executor(false), { proposalId: item.proposalId });
+          expect(own.items).toEqual([item]);
+        }
+        seen += ids.length;
+      }
+      // Each recapture of a paid bill is a candidate of the same statement.
+      expect(seen).toBeGreaterThan(0);
+      expect(await queryRelatedCardSettlements(executor(false), "cs_missing")).toBeNull();
+    },
+    TIMEOUT,
+  );
+
+  test(
     "the readiness CTEs keep their frozen text's columns, and claim_available its definition",
     () => {
       // ADR 0054 G1b: the frozen text is the CTEs before claim_available
@@ -211,6 +246,14 @@ describe("card settlement readiness reads on a scaled store without statistics",
         ["review_page"],
       ],
       [CARD_SETTLEMENT_REVIEW_SQL, LEGACY_CARD_SETTLEMENT_REVIEWS_SQL, [id, 51, 0], []],
+      // The competitors' union (`related_review`) is read whole; each of its
+      // three branches searches the candidates by its own index.
+      [
+        CARD_SETTLEMENT_RELATED_SQL,
+        LEGACY_CARD_SETTLEMENT_REVIEWS_SQL,
+        [id, 51, 0],
+        ["related_review"],
+      ],
       [CARD_OWNERSHIP_CANDIDATE_SQL, LEGACY_CARD_OWNERSHIP_CANDIDATE_SQL, [id], []],
       [CARD_SETTLEMENT_PLAN_SQL, LEGACY_CARD_SETTLEMENT_PLAN_SQL, [id], []],
       [OWNERSHIP_REVIEW_CANDIDATE_SQL, LEGACY_OWNERSHIP_REVIEW_CANDIDATE_SQL, [id], []],

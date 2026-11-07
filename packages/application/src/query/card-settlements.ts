@@ -102,18 +102,78 @@ export const CARD_SETTLEMENT_REVIEW_SQL = reviewsSql(
   "SELECT id FROM card_settlement_candidates WHERE id=?1 ORDER BY created_at DESC,id DESC LIMIT ?2 OFFSET ?3",
 );
 
+/**
+ * The other candidates `?1` competes with: those sharing its statement key,
+ * its bank key, or its statement's (source, resolved account, period), the
+ * three terms by which an accepted review makes every other one
+ * `allocation_already_used` (card-settlement-readiness.ts). Each term is found
+ * through its own index (`card_settlement_candidates_statement`, `_bank` and
+ * `_statement_period`); a missing account or period matches nothing, as in the
+ * reservation. Every status is listed, so the correction of a wrong acceptance
+ * (its withdrawal, then another candidate's acceptance) starts from it
+ * (docs/card-settlements.md, Correcting a match).
+ */
+export const CARD_SETTLEMENT_RELATED_SQL = reviewsSql(`SELECT id FROM (
+ SELECT related.id,related.created_at FROM card_settlement_candidates anchor
+  JOIN card_settlement_candidates related ON related.statement_key=anchor.statement_key
+  WHERE anchor.id=?1
+ UNION SELECT related.id,related.created_at FROM card_settlement_candidates anchor
+  JOIN card_settlement_candidates related ON related.bank_key=anchor.bank_key
+  WHERE anchor.id=?1
+ UNION SELECT related.id,related.created_at FROM card_settlement_candidates anchor
+  JOIN card_settlement_candidates related
+   ON json_extract(related.facts_json,'$.statement.sourceId')=json_extract(anchor.facts_json,'$.statement.sourceId')
+   AND json_extract(related.facts_json,'$.statement.accountId')=json_extract(anchor.facts_json,'$.statement.accountId')
+   AND json_extract(related.facts_json,'$.statement.period')=json_extract(anchor.facts_json,'$.statement.period')
+  WHERE anchor.id=?1
+ ) related_review WHERE id<>?1 ORDER BY created_at DESC,id DESC LIMIT ?2 OFFSET ?3`);
+/** Whether the candidate `?1` exists, by its key. */
+export const CARD_SETTLEMENT_EXISTS_SQL =
+  "SELECT 1 AS present FROM card_settlement_candidates WHERE id=?1";
+
 /** Offset lists and exact-id reads share the same financial and explanation DTO. */
 export async function queryCardSettlements(
   sql: SqlExecutor,
   input: { offset?: number; proposalId?: string } = {},
 ): Promise<CardSettlementReviewPage> {
-  const offset = input.offset ?? 0;
+  return reviewPage(
+    sql,
+    (input.proposalId ?? null) === null ? CARD_SETTLEMENT_PAGE_SQL : CARD_SETTLEMENT_REVIEW_SQL,
+    input.proposalId ?? null,
+    checkedOffset(input.offset),
+  );
+}
+
+/**
+ * A page of the candidates `proposalId` competes with
+ * (CARD_SETTLEMENT_RELATED_SQL), in the list's DTO and order, or null when
+ * `proposalId` names no candidate.
+ */
+export async function queryRelatedCardSettlements(
+  sql: SqlExecutor,
+  proposalId: string,
+  input: { offset?: number } = {},
+): Promise<CardSettlementReviewPage | null> {
+  const offset = checkedOffset(input.offset);
+  if ((await sql.first<{ present: number }>(CARD_SETTLEMENT_EXISTS_SQL, [proposalId])) === null)
+    return null;
+  return reviewPage(sql, CARD_SETTLEMENT_RELATED_SQL, proposalId, offset);
+}
+
+function checkedOffset(value: number | undefined): number {
+  const offset = value ?? 0;
   if (!Number.isSafeInteger(offset) || offset < 0 || offset > 1_000_000)
     throw new Error("invalid_offset");
-  const rows = await sql.all<ReviewRow>(
-    (input.proposalId ?? null) === null ? CARD_SETTLEMENT_PAGE_SQL : CARD_SETTLEMENT_REVIEW_SQL,
-    [input.proposalId ?? null, CARD_SETTLEMENT_PAGE_SIZE + 1, offset],
-  );
+  return offset;
+}
+
+async function reviewPage(
+  sql: SqlExecutor,
+  text: string,
+  proposalId: string | null,
+  offset: number,
+): Promise<CardSettlementReviewPage> {
+  const rows = await sql.all<ReviewRow>(text, [proposalId, CARD_SETTLEMENT_PAGE_SIZE + 1, offset]);
   const items = rows.slice(0, CARD_SETTLEMENT_PAGE_SIZE).map(review);
   if (items.length > 0) {
     const history = await sql.all<HistoryRow>(

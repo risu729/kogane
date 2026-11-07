@@ -1,5 +1,8 @@
 import { queryCardOwnership } from "../../../packages/application/src/query/card-ownership.ts";
-import { queryCardSettlements } from "../../../packages/application/src/query/card-settlements.ts";
+import {
+  queryCardSettlements,
+  queryRelatedCardSettlements,
+} from "../../../packages/application/src/query/card-settlements.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { principalFor } from "./grants";
 import { HttpError, json } from "./http";
@@ -32,7 +35,7 @@ export async function cardSettlementsApi(
     throw new HttpError(403, "operator_required");
   for (const [key, value] of url.searchParams) {
     if (
-      !["offset", "proposalId"].includes(key) ||
+      !["offset", "proposalId", "relatedTo"].includes(key) ||
       url.searchParams.getAll(key).length !== 1 ||
       !value
     )
@@ -43,10 +46,15 @@ export async function cardSettlementsApi(
   if (!/^(0|[1-9]\d*)$/u.test(text) || !Number.isSafeInteger(offset) || offset > 1_000_000)
     throw new HttpError(400, "invalid_offset");
   const proposalId = url.searchParams.get("proposalId");
+  const relatedTo = url.searchParams.get("relatedTo");
   if (
     proposalId !== null &&
-    (!/^[A-Za-z0-9_-]{1,128}$/u.test(proposalId) || url.searchParams.has("offset"))
+    (!/^[A-Za-z0-9_-]{1,128}$/u.test(proposalId) ||
+      url.searchParams.has("offset") ||
+      relatedTo !== null)
   )
+    throw new HttpError(400, "invalid_query");
+  if (relatedTo !== null && (ownership || !/^[A-Za-z0-9_-]{1,128}$/u.test(relatedTo)))
     throw new HttpError(400, "invalid_query");
   if (ownership) {
     if (proposalId === null || url.searchParams.has("offset"))
@@ -54,6 +62,12 @@ export async function cardSettlementsApi(
     const review = await queryCardOwnership(d1Executor(env.DB), proposalId);
     if (!review) throw new HttpError(404, "not_found");
     return json({ apiVersion: 2, ...review });
+  }
+  if (relatedTo !== null) {
+    // The candidates an acceptance of `relatedTo` competes with, paged like the list.
+    const related = await queryRelatedCardSettlements(d1Executor(env.DB), relatedTo, { offset });
+    if (!related) throw new HttpError(404, "not_found");
+    return json({ apiVersion: 2, ...related });
   }
   const page = await queryCardSettlements(d1Executor(env.DB), {
     offset,

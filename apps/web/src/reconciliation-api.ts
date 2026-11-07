@@ -32,3 +32,23 @@ export function useCardSettlement(proposalId: string | null) {
     retry: false,
   });
 }
+
+/**
+ * The candidates `proposalId` competes with: those sharing its statement, its
+ * bank debit or its statement month, every status, newest first.
+ */
+export function useRelatedCardSettlements(proposalId: string, offset: number) {
+  const features = useFeatures();
+  return useQuery({
+    queryKey: ["card-settlements", "related", proposalId, offset],
+    enabled: features.known && features.cardSettlementReconciliation,
+    queryFn: ({ signal }) =>
+      getJson<CardSettlementReviewPage>(
+        `${CARD_SETTLEMENT_PATH}?relatedTo=${encodeURIComponent(proposalId)}${
+          offset === 0 ? "" : `&offset=${offset}`
+        }`,
+        signal,
+      ),
+    retry: false,
+  });
+}
