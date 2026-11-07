@@ -54,6 +54,7 @@ export {
   type ReaderOptions,
   ResultLimitExceededError,
   type SourceFetchRunCount,
+  type SourceParseRun,
   type SqlExecutor,
   type TransactionQuery,
 } from "./reader";

@@ -1,5 +1,6 @@
 import { delegatedMaintenanceRoute } from "./delegated-maintenance";
 import { delegatedScheduleRoute } from "./delegated-schedules";
+import { delegatedSurveyRoute } from "./delegated-survey";
 import { retireReplacedJobsSql } from "./job-retirement-sql.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { PersistedObservation } from "../../../packages/parsers/src/scheduled-payment.ts";
@@ -2059,7 +2060,8 @@ export default {
     // that did not arrive that way is refused, not answered. Read-only.
     const delegatedScheduling =
       (await delegatedMaintenanceRoute(request, env, url)) ??
-      (await delegatedScheduleRoute(request, env, url));
+      (await delegatedScheduleRoute(request, env, url)) ??
+      (await delegatedSurveyRoute(request, env, url));
     if (delegatedScheduling) return delegatedScheduling;
     const scheduling = await scheduleRoute(request, env, url);
     const qualityAlarms = await collectionQualityAlarmRoute(request, env, url);

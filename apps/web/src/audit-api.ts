@@ -98,6 +98,7 @@ export const AUDIT_OPERATION_LABELS: Readonly<Record<string, string>> = {
   "reported-state.read": "指定日の保有状況の照会",
   "purchases.explain": "カード利用の説明",
   "schedules.maintenance.read": "定例停止時間の照会",
+  "schedules.survey.read": "定例停止の再調査の提案の照会",
   "instruments.history": "銘柄の対応付けの履歴の照会",
   "instruments.coverage": "銘柄の整理状況の照会",
   "accounts.candidates": "口座の対応候補の照会",
@@ -112,6 +113,7 @@ export const AUDIT_OPERATION_LABELS: Readonly<Record<string, string>> = {
   "mcp.request": "MCPのリクエスト（操作の特定前）",
   "audit.overflow": "上限を超えた記録の日次集計",
   "alarm.occurrence.claim": "定期収集の実行の受付",
+  "alarm.lease.expire": "停止した実行の自動解除",
   "lane.tick": "処理レーンの1回の実行",
 };
 
