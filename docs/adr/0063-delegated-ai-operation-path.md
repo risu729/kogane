@@ -1,18 +1,28 @@
 # ADR 0063: The AI is a delegated operation path: a verified MCP principal the owner names may apply operations within capability, scope, confirmation and audit
 
-- Status: proposed (accepted when its pull request merges). Common auditing and
-  delegation declarations are implemented on main; this S3 execution slice adds
-  delegated R1 operations and shared read adapters. A separate R2 slice adds
-  command decisions and provider-request confirmation. A further settings slice adds
-  job prepare/confirm and audit-linked reversal. The integrated maintenance
-  adapter adds R1 apply and R2 prepare/confirm through #564's sole writer;
-  survey acceptance remains pending an owner decision. The slices are in the
+- Status: accepted (merged 2026-10-09 in #601). Common auditing (#619) and
+  delegation declarations (#628) are implemented on main. The S3 execution
+  integration (#660, merged 2026-10-10) adds delegated R1 operations, shared
+  read adapters, R2 command decisions and provider-request confirmation, job
+  prepare/confirm with audit-linked reversal, and maintenance R1 apply and R2
+  prepare/confirm through #564's sole writer; survey rejection (R1) and
+  acceptance (R2) followed on 2026-11-07 under the owner's adoption conditions
+  ([ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). The slices are in the
   [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
+- Superseded in part (2026-11-07) by
+  [ADR 0084](0084-mcp-operator-authority-without-delegation.md): items 2 and 4
+  (the `MCP_DELEGATIONS` declaration, its roles, declared capabilities, scopes,
+  lifetimes and budgets), the delegation part of item 11 and the 2026-11-06
+  delegation-status amendment. Any MCP client Access verifies now resolves,
+  over the whole store, and `AGENT_API_GRANTS` is removed too; the other items
+  stand. Text below that says `MCP_DELEGATIONS` is empty or names
+  `AGENT_API_GRANTS` describes the state before ADR 0084.
 - Date: 2026-10-09
 - Amends: [ADR 0013](0013-agent-card-purchase-read.md) (the read-only
   premise), [ADR 0039](0039-alarm-schedule-management.md) ("agents and service
   tokens cannot edit settings"), ADR 0046 (#564, merged: its framing of the agent
-  maintenance write), ADR 0047 (#565, open: the agent-only attenuation where it
+  maintenance write), [ADR 0050](0050-maintenance-survey-proposals.md) ("no
+  agent decides", by its 2026-11-07 amendment), ADR 0047 (#565, open: the agent-only attenuation where it
   makes MCP read and propose only), and the AGENTS.md rule "Agents never
   approve or commit a change".
 - Depends on: ADR 0047 (#565) for authentication and the `mcp-client:<sub>`
@@ -326,7 +336,10 @@ an audit record; R4 is never delegated. A delegated decision is recorded with
   add a line pointing to this ADR when they next change. ADR 0046 (#564) does,
   in its amendment of 2026-10-09 (slice S4).
 - Stopped-execution lease release stays the operator's until the server can
-  verify that an execution stopped.
+  verify that an execution stopped. Since ADR 0085 (2026-11-07) the server does
+  verify it, from ten minutes of heartbeat silence, and frees such a lease
+  itself on the `alarm` path; the operator's release stays R3, refused over
+  MCP (ADR 0084).
 
 ## Verification
 
@@ -387,7 +400,7 @@ confirmation index supplies single use in the effect batch. A schedule writer
 must still enforce its native expected revision in that same batch. A tested
 helper alone is not an exposed settings operation. The later settings and
 maintenance amendments install those adapters through the existing writers;
-S6 survey acceptance is still unavailable.
+S6 survey acceptance was still unavailable then (since 2026-11-07: [ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)).
 
 Only installed adapters are advertised: persisted-run import, replay,
 whole-store projection, own operation reads and inert command planning.
@@ -557,3 +570,78 @@ An exact completed retry returns `replayed: true`, `reservation: null` and
 `actualAlarmAt: null`: reservation was not re-observed, not inferred from the
 saved revision. The effect/revision remain identical and no second private
 call, reconciliation, effect audit or budget charge occurs.
+
+## Operator delegation status amendment — 2026-11-06 (proposed)
+
+- Status: accepted (merged 2026-11-06 in #926). Plan slice S8,
+  the delegation-status part; the audit page is a separate pull request.
+- Date: 2026-11-06
+
+**Context.** Item 2 makes `MCP_DELEGATIONS` the only source of a delegated
+principal, and item 11 revokes one by editing it or letting `notAfter` pass.
+Until now no browser route showed the operator what that table says: an entry
+could be in force, not yet valid, expired, or the whole table void
+(`delegation_misconfigured`) without the owner seeing it anywhere but in an
+MCP client's refusals. `kogane.capabilities` tells the MCP client only its own
+inert or ready status and deliberately omits delegator, scope, reference and
+expiry. The plan's slice S8 asks for the delegation in force on the schedules
+and confirm pages, the two pages whose operations a delegate may also apply.
+
+**Options considered.**
+
+1. A field in `GET /api/ops/v1/schedules`. That read is relayed to the
+   Processor, which does not hold `MCP_DELEGATIONS`, is served only under
+   `SCHEDULES_ENABLED`, and is not what the confirm page reads.
+2. Reuse `kogane.capabilities` or an `/api/agent/v1/*` route. Those answer the
+   calling agent about itself and are graded by its grant; the operator's view
+   of every entry does not belong on an agent path.
+3. Show the raw configuration, or name the entry that made it invalid. That
+   echoes unvalidated text, and the table is all-or-nothing anyway: the page
+   would show a delegation no call honours.
+4. A dedicated operator-only read (chosen).
+
+**Decision.** `GET /api/v2/delegations`, on the browser Access application
+only, answered only to a subject whose principal holds the operator's
+`interpretation.accept` (the audit read's check; `403 operator_required`
+otherwise; a query string is `400 invalid_query`). It reads
+`MCP_DELEGATIONS`, `OPERATOR_SUBJECTS` and `AGENT_API_GRANTS` through
+`parseDelegations`, the resolver's own parser, at the server's sub-second
+clock, and answers `kogane-delegation-status-v1`:
+
+- `configuration`: `none` (shipped empty value or `{}`), `misconfigured`
+  (the table the resolver refuses; no entry and no reason is shown) or
+  `valid`;
+- `delegations`, only when `valid`, ordered by principal: `principal`,
+  `delegatedBy`, `role`, the effective `capabilities` (role bundle plus the
+  entry's own, in vocabulary order), the three scope axes, `issuedAt`,
+  `notAfter`, `writesPerDay`, `state` (`in_force`, `not_yet_valid`,
+  `expired`, the resolver's `[issuedAt, notAfter)` window at `evaluatedAt`)
+  and `delegationRef`, the same `dlg_` reference audit records carry.
+
+The contract (`packages/observation-shared/src/delegation-status-contract.ts`)
+admits exactly these keys at every level, closed codes and vocabularies only,
+and checks that each state agrees with its window at `evaluatedAt`. Nothing in
+the answer names a secret, a token, an Access audience or issuer, the read
+grant's budget or the raw configuration. Reading it is a page load and is not
+recorded (ADR 0064). The schedules and confirm pages show it as a compact,
+read-only notice with no control, stating the time the states were read; a
+failed read, including a failed re-read after an earlier answer, says the
+state cannot be confirmed rather than showing none or the earlier answer.
+
+**Consequences.** The owner sees, on the pages a delegate can act on, exactly
+which delegations a call would honour and when each ends, and sees a void
+table as void. The route changes no authority: it resolves no caller, grants
+nothing and reaches no writer. Showing the reason for `misconfigured` stays
+out of scope; the owner reads the deployment configuration for that.
+
+**Verification.** Synthetic tests only: the App's real Worker route
+(operator, agent, stranger and `mcp-client:` subjects, an MCP-audience
+assertion, a query string, `POST`; empty, valid, not-yet-valid, expired at
+millisecond bounds, and six misconfigured tables), the application builder
+against `resolveDelegation` (same reference, capabilities and nanosecond
+window) and the wire vocabulary pinned to the delegation vocabulary, the
+contract's exact-key, closed-code, ordering and state-window refusals, and
+production-bundle browser tests of both pages at 1280 and 390 px for every
+configuration and an unreadable answer, and a failed re-read on the
+schedules page. The committed `MCP_DELEGATIONS` stays empty; no grant, Access
+setting, delegation or deployment changes.

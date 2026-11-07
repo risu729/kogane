@@ -130,6 +130,11 @@ r0 != r1  → discard it and retry, bounded (3 attempts, then `pending`)
 A mixture of two contexts is never accepted, and an endlessly moving store
 yields `pending(input_capture_unstable)` instead of spinning (G2-02).
 
+The relations captured are the current row of each relation triple (its
+newest decision, or its newest proposal when it has none), not every stored
+row ([balance read model](balance-read-model.md#how-a-row-gets-its-state),
+step 4), so the declared-relation budget below counts current triples.
+
 The canonical bytes are written to the DATA bucket at
 `projection-inputs/<inputDigest>/input.json` and recorded in
 `projection_input_records` (digest, the job that captured it first,
@@ -158,7 +163,7 @@ an expiry from "now" has fixed that instant too (05 §3).
 | --------------------------- | ----- | ------------------------------------------------------------------------ |
 | Candidates                  | 5,000 | `refused(candidate_limit_exceeded)` — the existing read bound, unchanged |
 | Coverage claims             | 5,000 | `refused(coverage_claim_budget_exceeded)`                                |
-| Declared relations          | 5,000 | `refused(relation_budget_exceeded)`                                      |
+| Declared relations          | 5,000 | `refused(relation_budget_exceeded)`, counted in current triples          |
 | Derived relations stored    | 5,000 | `refused(scope_relation_budget_exceeded)`                                |
 | Rows written per invocation | 1,000 | the build continues on the next tick                                     |
 

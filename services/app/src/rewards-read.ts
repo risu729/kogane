@@ -42,7 +42,7 @@ import {
   validRewardExpiryBasis,
   type RewardExpiryBasis,
 } from "../../../packages/observation-shared/src/reward-contract.ts";
-import { HttpError, json } from "./http";
+import { HttpError } from "./http";
 import { REWARD_PROJECTION_RELEASE } from "../../../packages/read-model/src/reward-projection";
 import { REWARD_READ_RELEASE } from "../../../packages/read-model/src/rewards";
 
@@ -112,11 +112,13 @@ async function snapshotRefusal(
   return null;
 }
 
-function pageLimit(url: URL): number {
+function pageLimit(url: Pick<URL, "searchParams">): number {
   const text = url.searchParams.get("limit");
   if (text === null) return DEFAULT_REWARD_READ_PAGE_LIMIT;
+  // One of the offered sizes as written: `Number` alone would also read
+  // "0x19", "2.5e1" or " 25" as 25.
   const limit = Number(text);
-  if (!(REWARD_READ_PAGE_LIMITS as readonly number[]).includes(limit))
+  if (String(limit) !== text || !(REWARD_READ_PAGE_LIMITS as readonly number[]).includes(limit))
     throw new HttpError(400, "invalid_limit");
   return limit;
 }
@@ -143,7 +145,7 @@ interface Continuation {
  */
 async function continuation(
   context: RewardReadContext,
-  url: URL,
+  url: Pick<URL, "searchParams">,
   digest: string,
 ): Promise<Continuation> {
   const text = url.searchParams.get("cursor");
@@ -270,9 +272,9 @@ function snapshotEnvelope(snapshot: RewardSnapshotRow) {
 /** `GET /api/v2/rewards/expiry` from the published reward snapshot. */
 export async function rewardExpiryFromRead(
   context: RewardReadContext,
-  url: URL,
+  url: Pick<URL, "searchParams">,
   program: string | undefined,
-): Promise<Response> {
+): Promise<Record<string, unknown>> {
   const limit = pageLimit(url);
   const digest = await filterDigest("/api/v2/rewards/expiry", {
     program: program ?? null,
@@ -287,7 +289,7 @@ export async function rewardExpiryFromRead(
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
-  return json({
+  return {
     providerDisplaySections: await rewardProviderSections(
       context.read,
       resolved.snapshot.snapshot_id,
@@ -309,14 +311,14 @@ export async function rewardExpiryFromRead(
           : null,
     },
     snapshot: snapshotEnvelope(resolved.snapshot),
-  });
+  };
 }
 
 /** `GET /api/v2/rewards/simulations`: the saved simulations of the snapshot. */
 export async function rewardSimulationsFromRead(
   context: RewardReadContext,
-  url: URL,
-): Promise<Response> {
+  url: Pick<URL, "searchParams">,
+): Promise<Record<string, unknown>> {
   const limit = pageLimit(url);
   const digest = await filterDigest("/api/v2/rewards/simulations", { limit });
   const resolved = await continuation(context, url, digest);
@@ -327,7 +329,7 @@ export async function rewardSimulationsFromRead(
   const hasMore = rows.length > limit;
   const page = rows.slice(0, limit);
   const last = page[page.length - 1];
-  return json({
+  return {
     rows: page.map(simulationDto),
     page: {
       limit,
@@ -344,5 +346,5 @@ export async function rewardSimulationsFromRead(
           : null,
     },
     snapshot: snapshotEnvelope(resolved.snapshot),
-  });
+  };
 }

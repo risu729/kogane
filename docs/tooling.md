@@ -23,11 +23,15 @@ fixed toolchain:
   (`bun install --frozen-lockfile`), never by a task that downloads a tool on
   demand. Tool lockfiles use format version 3 and `lockfile_mode = "generate"`,
   which rebuilds them from current requests while reusing unchanged artifacts.
+  mise 2026.10.10 is the minimum because the web browser-install task uses
+  native `skip_if`: it installs Chromium only in CI without `CHROMIUM_PATH`.
+  Locally, supply an installed Chromium through that variable.
 - **Bun** is the package manager and the test runner for pure TypeScript. The
   repository is one Bun workspace with a single root `bun.lock` and
   `linker = "isolated"`, so a workspace sees only what it declares and
-  conflicting pins (TypeScript 6.0.3 and 7.0.2, five Wrangler versions) coexist
-  instead of being reconciled by hoisting. Every workspace pins TypeScript
+  conflicting pins (TypeScript 6.0.3 and 7.0.2) coexist instead of being
+  reconciled by hoisting; every workspace that declares Wrangler pins the same
+  version (4.157.0 today). Every workspace pins TypeScript
   7.0.2 except `services/collector-globalpass`, and both it and the root
   manifest stay below 7 (6.0.3 today). Both need the in-process TypeScript
   compiler API, which 7.0 no longer ships (its `typescript` entry point exports

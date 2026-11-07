@@ -15,7 +15,11 @@ export default defineConfig({
             await readD1Migrations(
               path.join(import.meta.dirname, "../../packages/storage-d1/migrations/core"),
             )
-          ).filter((migration) => migration.name === "0065_alarm_schedules.sql"),
+          ).filter((migration) =>
+            ["0065_alarm_schedules.sql", "0082_collection_lease_heartbeat.sql"].includes(
+              migration.name,
+            ),
+          ),
         },
         serviceBindings: {
           RAW_EVIDENCE_IMPORTER: () =>

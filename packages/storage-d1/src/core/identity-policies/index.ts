@@ -6,6 +6,7 @@ import type { D1Like } from "../../d1.ts";
 import { canonicalDigest } from "../../../../domain/src/context.ts";
 import { DEFAULT_POLICY_FAMILY, defaultSelection } from "./default.ts";
 import { mizuhoPolicy } from "./mizuho.ts";
+import { sbiShinseiPolicy } from "./sbi-shinsei.ts";
 import { vpassPolicy, type VpassBinding } from "./vpass.ts";
 
 /** Highest policy version the current build can select. */
@@ -66,7 +67,11 @@ export interface IdentityPolicyModule {
   ): IdentityPolicySelection | { fallback: string };
 }
 
-const SOURCE_POLICIES: readonly IdentityPolicyModule[] = [vpassPolicy, mizuhoPolicy];
+const SOURCE_POLICIES: readonly IdentityPolicyModule[] = [
+  vpassPolicy,
+  mizuhoPolicy,
+  sbiShinseiPolicy,
+];
 
 export function policyModuleFor(sourceId: string): IdentityPolicyModule | undefined {
   return SOURCE_POLICIES.find((module) => module.sourceId === sourceId);
@@ -147,4 +152,5 @@ export async function dependencyDigest(set: readonly IdentityDependency[]): Prom
 
 export { DEFAULT_POLICY_FAMILY };
 export { MIZUHO_POLICY_VERSION } from "./mizuho.ts";
+export { SBI_SHINSEI_POLICY_VERSION } from "./sbi-shinsei.ts";
 export { trustedVpassBinding, VPASS_POLICY_FAMILY, type VpassBinding } from "./vpass.ts";

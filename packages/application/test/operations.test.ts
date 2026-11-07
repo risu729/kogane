@@ -120,7 +120,13 @@ test("a session refresh needs a person unless the deployment says otherwise (G3-
 // ── the SQL half, against the real migrations ───────────────────────────
 
 import { migratedDatabase, sqliteCommandStore } from "./sqlite-store.ts";
-import { recordDispatch, requestCollection, requestReplay } from "../src/index.ts";
+import {
+  ownOperationSource,
+  recordDispatch,
+  requestCollection,
+  requestProjectionRebuild,
+  requestReplay,
+} from "../src/index.ts";
 import type { CommandStore, Principal } from "../src/command/contract.ts";
 
 // The first build of the migrated CORE image runs every migration; pay it
@@ -197,6 +203,34 @@ function racingStores(store: CommandStore): [CommandStore, CommandStore] {
   };
   return [winner, loser];
 }
+
+test("an operation's source is read only from the caller's own row", async () => {
+  const store = sqliteCommandStore(migratedDatabase());
+  const collection = await requestCollection({
+    store,
+    principal: OPERATOR,
+    now: NOW,
+    request: { ...COLLECTION, idempotencyKey: "own-source" },
+  });
+  const projection = await requestProjectionRebuild({
+    store,
+    principal: OPERATOR,
+    now: NOW,
+    request: { reason: "synthetic", idempotencyKey: "own-projection" },
+  });
+  if (!collection.ok || !projection.ok) throw new Error("both requests must be accepted");
+  const collectionId = collection.receipt.operationId;
+  expect(await ownOperationSource(store, collectionId, OPERATOR.id)).toEqual({
+    sourceId: "sony-bank",
+  });
+  // A request that names no source is told apart from a missing one.
+  expect(await ownOperationSource(store, projection.receipt.operationId, OPERATOR.id)).toEqual({
+    sourceId: null,
+  });
+  // Another principal's operation answers exactly like one that does not exist.
+  expect(await ownOperationSource(store, collectionId, "mcp-client:someone-else")).toBeNull();
+  expect(await ownOperationSource(store, "op_missing", OPERATOR.id)).toBeNull();
+});
 
 test("a raced re-send of the same key and payload is one operation, created once (G3-06, G3-14)", async () => {
   const db = migratedDatabase();

@@ -16,7 +16,7 @@ provenance chain in both directions.
 It is implemented in the observation-pipeline proof of concept
 (`experiments/observation-pipeline-local`): a read-only JSON API in
 `src/api.ts` over the
-queries in `src/queries.ts`, and a React client in `web/` that renders it,
+queries in `src/queries.ts`, and a React client in `apps/web` that renders it,
 served together by `bun src/serve.ts`. This document records what it is for,
 the rules that keep it small, what the code enforces today, and what is
 still open.
@@ -91,9 +91,9 @@ The boundary is written as rules, not intentions:
    on the request that asks for it. No cache, no materialized view, no
    snapshot table.
 4. Deleting it loses no data. If `src/api.ts`, `src/queries.ts`,
-   `src/serve.ts` and `web/` were removed, the pipeline, the store, and
-   every observation would be unchanged. Only `src/money.ts` would have to
-   stay, because the parsers import it too. That is the test of whether it
+   `src/serve.ts` and `apps/web` were removed, the pipeline, the store, and
+   every observation would be unchanged. The money module the client
+   re-exports is `packages/parsers/src/money.ts`, which the parsers own. That is the test of whether it
    has stayed a tool.
 5. It records no interpretation. Identity, links, classification, and
    every derived figure remain out of scope exactly as `docs/roadmap.md`
@@ -134,11 +134,11 @@ identifiers only, see [read model](read-model.md#card-snapshot-currentness-and-c
 The web app shows each as a notice; the local store omits both.
 
 The schema for this object and for the query parameters each capability
-unlocks lives once, in `shared/api-schema.ts`. The local server's parameter
+unlocks lives once, in `packages/observation-shared/src/api-schema.ts`. The local server's parameter
 rejection, the production Worker's, the response validator, and the client's
 request builder all derive from it. This local server advertises no list
 capability, so it answers 400 to any query parameter; that is the contract,
-not an omission. `test/api-conformance.ts` holds the checks every
+not an omission. `packages/observation-shared/test-support/api-conformance.ts` holds the checks every
 implementation must pass; `test/api-conformance.test.ts` runs them here and
 `services/app/test/conformance.test.ts` runs the same module
 against the demo and the production Worker under workerd.
@@ -290,8 +290,8 @@ document the browser itself navigated to.
 the browser covers those four: the kind whitelist, the counted tables, the
 per-artifact counts, and the parse-run normalizer in `src/queries.ts` each
 enumerate them by name, and the client enumerates them again in
-`web/src/router.tsx` and in the response types it restates in
-`web/src/api.ts`.
+`apps/web/src/router.tsx` and in the response types it restates in
+`apps/web/src/api.ts`.
 
 Rewards are therefore not one missing page. Adding the table means
 touching the whitelist, the count list, the artifact index, the
@@ -352,20 +352,21 @@ The pieces:
   constant applied by each current-state view rather than a phrase
   repeated per route. The SQL was carried over verbatim from the module it
   replaced, including the source-qualified keys described below.
-- `src/money.ts` — the minor-unit table, `formatAmount` and `amountSign`.
-  It imports no runtime API, so the same module runs on Bun, on Workers,
-  and in the browser. `src/parsers/util.ts` re-exports `minorUnitExponent`
-  from it, and `web/src/money.ts` is a ten-line re-export that keeps
+- `packages/parsers/src/money.ts` — the minor-unit table, `formatAmount` and
+  `amountSign`. It imports no runtime API, so the same module runs on Bun, on
+  Workers, and in the browser. `packages/parsers/src/parsers/util.ts`
+  re-exports `minorUnitExponent` from it, and `apps/web/src/money.ts` is a
+  re-export that keeps
   "nothing in the client formats an amount itself" enforceable by grep.
 - `src/api.ts` — a Hono app. Every route it defines is a GET, and any
   method other than GET or HEAD is refused before routing.
 - `src/serve.ts` — the Bun entry point: binds loopback only, serves the
   built client, and falls back to `index.html` so that client routes
   deep-link.
-- `web/` — a React client built by Vite: a hand-written pushState router
-  (`web/src/router.tsx`, so there is no routing dependency), a typed fetch
-  layer (`web/src/api.ts`), shared presentational components
-  (`web/src/ui.tsx`), one page per route under `web/src/pages/`, and one
+- `apps/web` — a React client built by Vite: a hand-written pushState router
+  (`apps/web/src/router.tsx`, so there is no routing dependency), a typed fetch
+  layer (`apps/web/src/api.ts`), shared presentational components
+  (`apps/web/src/ui.tsx`), one page per route under `apps/web/src/pages/`, and one
   plain stylesheet whose colours are custom properties, with light and
   dark through `prefers-color-scheme`.
 
@@ -388,7 +389,7 @@ What the split buys: the queries are testable without rendering anything —
 involved — and one money module means the parser that writes an amount and
 the page that displays it cannot drift apart about what a minor unit is.
 
-What it costs: the client restates every response shape in `web/src/api.ts`
+What it costs: the client restates every response shape in `apps/web/src/api.ts`
 rather than importing it, because `src/queries.ts` reaches `bun:sqlite`
 through `src/store.ts` and that has no business in a browser bundle. A
 column added to an observation table now lands in `src/queries.ts`, in
@@ -399,7 +400,7 @@ change breaks — made slightly larger.
 ## What the code enforces
 
 The following is implemented in `src/queries.ts`, `src/api.ts` and the
-client under `web/`, rather than left to care. Most of it is asserted in
+client under `apps/web`, rather than left to care. Most of it is asserted in
 `test/api.test.ts` or in `test/browser.test.ts`, which drives a real
 Chromium. Two of the rules below carried over into the code but lost their
 tests in the rebuild, and each says so in place.
@@ -522,7 +523,8 @@ back byte for byte, hashing to the digest in the URL, and that they carry
 
 Descriptions, counterparty names, security names, and `extra_json` were
 written by an institution, not by us. React escapes every string it
-interpolates, and `dangerouslySetInnerHTML` appears nowhere in `web/` —
+interpolates, and `dangerouslySetInnerHTML` is used nowhere in `apps/web`
+(only a comment in `apps/web/src/ui.tsx` names it) —
 that pair is the whole of the argument, which is why it is worth keeping
 greppable. `test/browser.test.ts` plants a description containing
 `<script>window.__xss = true</script>`, loads the transaction list in a
@@ -536,7 +538,7 @@ and the argument that rested on it has to go with it. There is a
 JavaScript bundle now, it holds the current view's response in memory, and
 an escaping mistake would have a richer environment to act in than it
 would have had before. What replaces it is narrower: the bundle is our own
-code, built from `web/` at build time, and provider bytes reach it only as
+code, built from `apps/web` at build time, and provider bytes reach it only as
 JSON data that is only ever rendered as text.
 
 The provider's bytes themselves are covered by the rule above rather than
@@ -548,7 +550,7 @@ The client links to that route and never fetches it.
 
 ### Money is formatted without float arithmetic
 
-`formatAmount` lives in `src/money.ts` and is imported by the parsers, the
+`formatAmount` lives in `packages/parsers/src/money.ts` and is imported by the parsers, the
 API and the client alike. It widens minor units with `BigInt` and formats
 by string manipulation. A value that is not an integer is printed as
 stored rather than rounded; an instrument with no known minor-unit
@@ -586,7 +588,7 @@ literal names; an unknown kind is a 404. Ids are accepted only as digits
 and only as safe integers, and `test/api.test.ts` asserts that `1e3`,
 `0x10`, `1.5`, `-1`, `%201` and `abc` are each refused rather than
 coerced. The request text itself never reaches SQL. The client applies the
-same two rules in `web/src/router.tsx` before it asks, but that is a
+same two rules in `apps/web/src/router.tsx` before it asks, but that is a
 convenience: the API validates independently of anything the client did.
 
 ### The local server is loopback-only
@@ -685,16 +687,18 @@ opts those paths out of the `Sec-Fetch-Mode` heuristic:
 ```
 
 An array of route patterns for `run_worker_first` needs Wrangler 4.20.0 or
-later. This is untested here, because nothing is deployed yet; it is
-recorded now because it is cheap to read and expensive to debug.
+later. The App Worker's config (`services/app/wrangler.jsonc`) sets
+`run_worker_first: true` instead, so every request, navigations included,
+reaches the Worker first; its assets directory is
+`../../apps/web/dist-production`.
 
 ## The agent API and the shared query service
 
 The Worker also serves a small, default-off agent API and one shared query
 route, both of which run the application service in `packages/application`
 rather than a second implementation. See [Agent API](agent-api.md) for the
-grants, tools, result contract, error codes, prompt-injection rules and the
-`AGENT_API_GRANTS` configuration; the deployment facts are:
+grants, tools, result contract, error codes and prompt-injection rules; the
+deployment facts are:
 
 - `POST /api/agent/v1/{capabilities,context.open,financial.query,explain,reconcile.propose}`,
   `POST /api/agent/v1/purchases.explain` while card purchase recognition is
@@ -705,12 +709,12 @@ grants, tools, result contract, error codes, prompt-injection rules and the
   same closed 401/403 answers. Everything outside them is refused with 405.
 - The principal on both is the subject `authenticate` returned; no route reads
   an actor from a request body or a header.
-- With `AGENT_API_GRANTS` absent or empty — the deployed default — every one
-  of the agent routes answers 403 for every authenticated principal, and the
-  local synthetic snapshot adapter never serves them at all. It is a different variable
-  from the change lifecycle's `AGENT_GRANTS` and `OPERATOR_SUBJECTS`; see
-  [Agent API](agent-api.md) for why they must not be merged. All three are
-  allow-lists, so none of them grants anything by being absent.
+- Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+  there is no agent grant table: every caller the Access gate proved reads
+  the whole store on the agent routes, and the local synthetic snapshot
+  adapter never serves them at all. The change lifecycle's `AGENT_GRANTS` and
+  `OPERATOR_SUBJECTS` grade only the UI's command and operations routes; both
+  are allow-lists, so neither grants anything by being absent.
 - The agent API's only write is a relation _proposal_: one
   `decision_revisions` row of kind `propose` and one `entity_relations` row
   with status `proposed` (migration 0029). No reader adopts a proposed
@@ -851,5 +855,22 @@ tables. Every answer is checked by `validApiResponse` against
 
 A missing stage is a reason, never a zero or an empty success: a source with
 no capture has no cells and `latestFetchRun: null` with `no_registered_run`. A
-capture time is shown as stored; nothing computes an age. There is no page for
-these routes yet.
+capture time is shown as stored; nothing judges an age against a threshold.
+
+Open `/collection-quality` and choose a source. It shows source reasons and
+last attempts alongside the source/unit/dataset/period cells. Actual Alarm
+reservation reads distinguish `observed` (a nullable time) from `unavailable`;
+stored enabled settings alone are not an armed reservation. Next nominal and
+maintenance-adjusted due times are shown separately from the actual reservation
+and the last attempt's actual start. Reservation reads never reconcile settings.
+A unit with no original file still appears with `unit_without_artifacts`; the
+absence of a stored unit/period is not inferred as complete acquisition.
+
+Published observation counts distinguish no rows from a missing acquisition.
+No rows never prove zero transactions. Missing sealed identity runs and
+unresolved current account mappings have separate reasons. Provider retention
+caps stay `retention_not_assessed`; page/coverage failures keep their stored
+closed causes. Older-current and not-in-latest states identify newer acquisition
+gaps without an invented stale threshold. Continuation and empty page messages
+never claim full history. Production scope verification remains separate
+([checklist](plans/2026-10-collection-quality-completion.md)).

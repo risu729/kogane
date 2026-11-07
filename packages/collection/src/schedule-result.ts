@@ -1,3 +1,5 @@
+import { LEASE_ABORT_CODES, type LeaseAbortCode } from "./schedule-lease";
+
 export interface ScheduledResult {
   status: "completed" | "failed";
   runIds: string[];
@@ -42,17 +44,33 @@ export function scheduledResult(value: unknown): ScheduledResult {
 const LEASE_REFUSAL = "collection_busy_or_uncertain";
 
 /**
+ * Whether a closed failure code means the holder stopped itself after it may
+ * have contacted the provider (ADR 0085): the outcome is uncertain, like a
+ * dispatch whose answer was lost, and it is never replayed.
+ */
+export function isLeaseAbortCode(code: string | null): code is LeaseAbortCode {
+  return code !== null && (LEASE_ABORT_CODES as readonly string[]).includes(code);
+}
+
+/**
  * The closed result of a collection that threw. A lease refusal happens before
  * the collector contacts anyone, so it is reported as `collection_busy` rather
  * than as a failed collection: the alarm's receipt and an operation can then
  * tell "another execution holds this source" from "the provider attempt
- * failed". Every other error stays `collection_failed`. No error text leaves.
+ * failed". A holder that stopped itself reports its own closed code
+ * (`collection_deadline_exceeded`, `collection_lease_lost`). Every other error
+ * stays `collection_failed`. No error text leaves.
  */
 export function scheduledFailure(error: unknown, runIds: readonly string[] = []): ScheduledResult {
-  const busy = error instanceof Error && error.message === LEASE_REFUSAL;
+  const message = error instanceof Error ? error.message : null;
   return {
     status: "failed",
     runIds: [...runIds],
-    failureCode: busy ? "collection_busy" : "collection_failed",
+    failureCode:
+      message === LEASE_REFUSAL
+        ? "collection_busy"
+        : isLeaseAbortCode(message)
+          ? message
+          : "collection_failed",
   };
 }

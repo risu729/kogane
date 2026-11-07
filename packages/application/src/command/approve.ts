@@ -147,13 +147,17 @@ export async function approve(
     ...(audit ? [audit] : []),
   ]);
   input.audit?.settle(recorded?.changes);
+  let stored = { expiresAt, usesRemaining: uses };
   if (insert?.changes !== 1) {
-    const existing = await store.first<{ approval_id: string }>(
-      "SELECT approval_id FROM approvals WHERE approval_id=?1",
+    const existing = await store.first<{ expires_at: string; uses_remaining: number }>(
+      "SELECT expires_at,uses_remaining FROM approvals WHERE approval_id=?1",
       [approvalId],
     );
-    // A replay of the same approval at the same instant is the same receipt.
+    // A replay of the same approval at the same instant is the same receipt:
+    // the stored row's lifetime, not the one the replay asked for (its TTL is
+    // not part of the approval id).
     if (!existing) return commandError("plan_not_open", [plan.planId]);
+    stored = { expiresAt: existing.expires_at, usesRemaining: existing.uses_remaining };
   }
   return {
     ok: true,
@@ -165,8 +169,7 @@ export async function approve(
       approverActor: input.actor.id,
       approverVerification: "server",
       scope,
-      expiresAt,
-      usesRemaining: uses,
+      ...stored,
       createdAt,
     },
   };

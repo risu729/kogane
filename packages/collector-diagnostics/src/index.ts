@@ -20,6 +20,9 @@ const STAGES = new Set([
   // U09: the shared DATA target writes the run's terminal manifest instead of
   // a per-source collector manifest and a central import.
   "terminal-write",
+  // Vpass: the card run's shared DATA write (`persistCardRun`), after the
+  // provider collection itself succeeded.
+  "shared-persist",
   "central-import",
   "connection-collection",
   "domestic-collection",

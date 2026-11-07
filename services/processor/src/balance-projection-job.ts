@@ -44,6 +44,7 @@ import {
   organizationSql,
   projectionBuildDigest,
   projectionInputManifest,
+  projectionRelationsSql,
   ResultLimitExceededError,
   type CoreRevisionRow,
   type EntityRelationRow,
@@ -367,12 +368,14 @@ async function readCoverage(db: D1Like): Promise<CoverageFacts> {
   return { groups, byParseRun };
 }
 
-const RELATION_SQL = `SELECT id, kind, from_ref, to_ref, status, decision_revision_id
-  FROM entity_relations
-  WHERE kind IN ('same_account','connection_contains','account_has_pocket','statement_covers')
-  ORDER BY id LIMIT ${RELATION_ROW_BOUND + 1}`;
+// The newest decision of each relation triple: a later rejection withdraws an
+// earlier acceptance (ADR 0001's amendment of 2026-11-06).
+const RELATION_SQL = projectionRelationsSql(RELATION_ROW_BOUND);
 
-/** The declared relations of one build; over the bound is a refusal, not a cut. */
+/**
+ * The declared relations of one build, the current row of each triple; over
+ * the bound (current triples) is a refusal, not a cut.
+ */
 async function readRelationRows(db: D1Like): Promise<EntityRelationRow[]> {
   const rows = await db.prepare(RELATION_SQL).all<EntityRelationRow>();
   if (rows.results.length > RELATION_ROW_BOUND)

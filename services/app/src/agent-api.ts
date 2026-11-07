@@ -12,16 +12,16 @@ import {
 // `/mcp`, a seventh path (`purchases.explain`) only while the deployment
 // serves card purchase recognition and an eighth (`reconstructed-state.read`)
 // only while it serves the reconstructed state, each with a bounded JSON body, each behind
-// the same Access gate as every read route, and each behind a grant looked up
-// by the verified principal. `AGENT_API_GRANTS` absent means no principal has
-// a grant, so every agent route answers 403 — that is the deployed default,
-// and the test snapshot adapter never serves these paths at all.
+// the same Access gate as every read route. No table grants these routes any
+// more (ADR 0084, 2026-11-07): an MCP client gets the whole-store grant
+// (`fullGrant`), a browser session what the UI gives its subject
+// (`agentGrant`), and the test snapshot adapter never serves
+// these paths at all. Control over which tools an MCP client uses lives in
+// the MCP client's own settings.
 //
 // `GET /api/v2/query` is the same query service under the reader authority
-// the browser already has over every other GET route: a signed-in human sees
-// what those routes already show, so the UI does not depend on
-// `AGENT_API_GRANTS`
-// and an agent grant is never widened to serve a page.
+// the browser already has over every other GET route (`readerGrant`), with no
+// proposal capability.
 //
 // The principal of the shared query route is the subject `authenticate`
 // returned. An agent path receives an `AgentCaller` decided at the boundary
@@ -33,12 +33,12 @@ import {
 // header (review rule 9, addendum 10 section 5).
 import {
   DEFAULT_QUERY_LIMIT,
+  fullGrant,
   type Grant,
-  grantFor,
   type OperationCall,
   type OperationName,
-  parseGrants,
   parseQueryRequest,
+  resolvePrincipal,
   subjectOfPrincipal,
   toolOperation,
 } from "../../../packages/application/src/index";
@@ -56,6 +56,7 @@ import {
 import { auditContext, auditedTool, recordThrown, recordTransportStatus } from "./audit";
 import { type AgentCaller, authenticate } from "./auth";
 import { cardPurchasesAvailable } from "./card-purchases-api";
+import { cardSettlementsAvailable } from "./card-settlements-api";
 import { grantsUsable } from "./grants";
 import {
   assertAgentTransport,
@@ -67,9 +68,13 @@ import {
 import { reconstructedStateAvailable } from "./reconstructed-state-api";
 import { opsApiEnabled } from "./ops-api";
 import {
+  LEASE_RELEASE_MCP_TOOLS,
+  LEASE_RELEASE_TOOL,
+  leaseReleaseTool,
   readScheduleTool,
   SCHEDULE_READ_TOOL,
   SCHEDULE_UPDATE_TOOL,
+  SURVEY_READ_TOOL,
   scheduleToolsFor,
   schedulesServed,
 } from "./schedule-tools";
@@ -85,7 +90,7 @@ import {
   callDelegatedMaintenanceTool,
   delegatedMaintenanceTools,
 } from "./delegated-maintenance-tools";
-import { HttpError, json } from "./http";
+import { boundedRead, HttpError, json } from "./http";
 import { mcpDelegationCapabilities, resolveMcpDelegation } from "./delegation";
 
 import { commandsEnabled } from "./command-api";
@@ -96,7 +101,18 @@ import {
   isDelegatedCommandTool,
 } from "./delegated-command-tools";
 
-import { readMcpTools } from "./read-tools";
+import { CARD_SETTLEMENT_TOOL_NAMES, readMcpTools, REPORTED_STATE_TOOL_NAME } from "./read-tools";
+import {
+  isPageReadToolName,
+  pageReadMcpTools,
+  pageReadNeedsReportedState,
+} from "./page-read-tools";
+import {
+  callDelegatedSurveyTool,
+  delegatedSurveyTools,
+  EXECUTABLE_SURVEY_CAPABILITIES,
+  isDelegatedSurveyTool,
+} from "./delegated-survey-tools";
 import {
   callDelegatedDecisionTool,
   delegatedDecisionTools,
@@ -130,60 +146,20 @@ export function classifyAgentPath(path: string): string | null {
 
 /** Read a bounded JSON body. An oversized or malformed body never reaches a tool. */
 async function boundedJson(request: Request): Promise<unknown> {
-  const declared = request.headers.get("content-length");
-  if (declared !== null && Number(declared) > MAX_REQUEST_BYTES)
-    throw new HttpError(413, "request_too_large");
-  const body = request.body;
-  if (body === null) return {};
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > MAX_REQUEST_BYTES) {
-      await reader.cancel();
-      throw new HttpError(413, "request_too_large");
-    }
-    chunks.push(value);
-  }
-  if (size === 0) return {};
-  const joined = new Uint8Array(size);
-  let offset = 0;
-  for (const chunk of chunks) {
-    joined.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  // An absent or zero-byte body is `{}`: no argument, not malformed JSON.
+  const { text, bytes } = await boundedRead(request, MAX_REQUEST_BYTES);
+  if (bytes === 0) return {};
   try {
-    return JSON.parse(new TextDecoder().decode(joined));
+    return JSON.parse(text);
   } catch {
     throw new HttpError(400, "invalid_body");
   }
 }
 
 /**
- * The grant of the caller, or `null`. Absent configuration grants nothing:
- * this table is an allow-list, and a principal it does not name reads nothing
- * here (`403 agent_api_not_configured`).
- *
- * `AGENT_API_GRANTS` is this API's table (principal -> grant). It is a
- * different variable from the command path's `AGENT_GRANTS`, which is a JSON
- * *array* of subjects that path treats as agents, and from `OPERATOR_SUBJECTS`,
- * which is the array of subjects it treats as the human operator. Keeping them
- * apart is not tidiness: the parsers reject each other's shape, and since the
- * command path is now an allow-list on both sides, a value in the wrong
- * variable refuses rather than promoting anyone
- * (docs/agent-api.md, "Relationship to the change lifecycle").
- */
-export function agentGrant(env: Env, principal: string): Grant | null {
-  return grantFor(parseGrants(env.AGENT_API_GRANTS), principal);
-}
-
-/**
  * The authority a signed-in browser reader already has: everything the
- * existing GET routes serve, and no proposal capability. It is not read from
- * `AGENT_API_GRANTS`, and it can never propose or accept.
+ * existing GET routes serve, and no proposal capability. It can never
+ * propose or accept.
  */
 export function readerGrant(principal: string): Grant {
   return {
@@ -191,6 +167,30 @@ export function readerGrant(principal: string): Grant {
     scopes: { sources: "*", accounts: "*" },
     capabilities: ["summary.read", "records.read", "evidence.read"],
     budget: { maxRows: 1000, maxProposalTargets: 1, maxExplainDepth: 6 },
+  };
+}
+
+/**
+ * ADR 0084: an MCP client the MCP Access application admitted reads and
+ * proposes over the whole store. A browser session on the HTTP agent routes
+ * holds what the UI gives the same subject, by the UI's own lists: the
+ * operator (`OPERATOR_SUBJECTS`) the whole store; a subject in `AGENT_GRANTS`,
+ * which may propose through the command routes, the reader grant plus that
+ * proposal; anyone else the GET routes' reader grant, which reaches no audit
+ * log, maintenance window or proposal. No table decides any of it, and
+ * unreadable lists fall back to the reader grant.
+ */
+function agentGrant(env: Env, caller: AgentCaller): Grant {
+  const full = fullGrant(caller.principal);
+  if (caller.kind === "mcp-client") return full;
+  const resolved = resolvePrincipal(env, caller.principal);
+  if (!resolved.ok) return readerGrant(caller.principal);
+  if (resolved.principal.kind === "human") return full;
+  const reader = readerGrant(caller.principal);
+  return {
+    ...reader,
+    capabilities: [...reader.capabilities, "interpretation.propose"],
+    budget: full.budget,
   };
 }
 
@@ -211,10 +211,9 @@ export async function agentApi(
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
   if (url.search) throw new HttpError(400, "invalid_query");
   assertAgentTransport(request, url);
-  const grant = agentGrant(env, caller.principal);
-  if (grant === null) throw new HttpError(403, "agent_api_not_configured");
-  // Query/proposal clocks keep their existing whole-second contract. Authority
-  // validity must not round backwards across a subsecond issuedAt/notAfter.
+  const grant = agentGrant(env, caller);
+  // Query/proposal clocks keep their existing whole-second contract; the
+  // operation envelope keeps the millisecond instant.
   const delegationNow = new Date().toISOString();
   const now = delegationNow.replace(/\.\d{3}Z$/u, "Z");
   const context = toolContext(env, grant, now);
@@ -226,8 +225,10 @@ export async function agentApi(
     // inside `callOpsTool`, exactly as their HTTP routes are. With
     // `OPS_API_ENABLED` off they are neither listed nor callable, so the MCP
     // surface matches the routes this deployment actually serves. An MCP
-    // client is never an operator (ADR 0047): they are not published to one,
-    // and `callOpsTool` refuses its caller object before any grader runs.
+    // client is never an operator (ADR 0047): `callOpsTool` refuses its caller
+    // object before any grader runs. Every MCP client is published the
+    // delegated operations tools instead, acting as itself under the
+    // authority ADR 0084 gives it.
     const ops = opsApiEnabled(env);
     // A deployment whose command grant lists cannot be read grades nobody, so
     // it can authorize none of the operations tools; publishing them would
@@ -243,19 +244,33 @@ export async function agentApi(
     // that depends on it: `initialize`, `ping` and notifications touch no table.
     let served: Promise<boolean> | undefined;
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
-    // Reads require schedules.read; the write is separately listed to a resolved delegation.
+    // Reads require schedules.read; the write is separately listed to a resolved MCP principal.
     const schedules = schedulesServed(env);
-    // The reconstructed state likewise exists exactly while its GET route does.
+    // The reconstructed state likewise exists exactly while its GET route does,
+    // and so does the dated reported state: both are served where
+    // `GET /api/v2/reported-state` is (`reconstructedStateAvailable`).
     let reconstructedServed: Promise<boolean> | undefined;
     const reconstructed = (): Promise<boolean> =>
       (reconstructedServed ??= reconstructedStateAvailable(env));
+    // The card settlement reads exist exactly while the カード照合 route does.
+    let settlementsServed: Promise<boolean> | undefined;
+    const settlements = (): Promise<boolean> =>
+      (settlementsServed ??= cardSettlementsAvailable(env));
     const message = await handleMcp(
       request,
       async (name, body) => {
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
-        // An MCP client's capabilities also carry its delegation declaration
-        // (#628, inert: nothing executes under it); recorded like any call.
+        if (name === REPORTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
+        if (CARD_SETTLEMENT_TOOL_NAMES.has(name) && !(await settlements())) return null;
+        if (
+          isPageReadToolName(name) &&
+          pageReadNeedsReportedState(name) &&
+          !(await reconstructed())
+        )
+          return null;
+        // An MCP client's capabilities also carry the operation authority
+        // derived for it (ADR 0084), as a safe status; recorded like any call.
         if (name === "kogane.capabilities" && caller.kind === "mcp-client")
           return toolCall(request, env, caller, name, async (audit) => {
             const result = await callTool(name, body, { ...context, audit });
@@ -267,7 +282,11 @@ export async function agentApi(
                 delegation: await mcpDelegationCapabilities(env, caller, delegationNow, [
                   ...(ops ? EXECUTABLE_OPS_CAPABILITIES : []),
                   ...(delegatedSchedulesServed(env)
-                    ? [...EXECUTABLE_SCHEDULE_CAPABILITIES, "schedules.maintenance.update" as const]
+                    ? [
+                        ...EXECUTABLE_SCHEDULE_CAPABILITIES,
+                        "schedules.maintenance.update" as const,
+                        ...EXECUTABLE_SURVEY_CAPABILITIES,
+                      ]
                     : []),
                   ...(commandsEnabled(env) && env.PIPELINE
                     ? [...EXECUTABLE_COMMAND_CAPABILITIES, ...EXECUTABLE_DECISION_CAPABILITIES]
@@ -280,6 +299,15 @@ export async function agentApi(
           return toolCall(request, env, caller, name, async (audit) => {
             if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
             return callDelegatedMaintenanceTool(body, env, await delegation(), audit);
+          });
+        // Listed while the settings routes exist, and refused for every caller
+        // (ADR 0081 point 3): the release stays the operator's in the UI.
+        if (schedules && name === LEASE_RELEASE_TOOL && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async () => leaseReleaseTool());
+        if (isDelegatedSurveyTool(name) && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async (audit) => {
+            if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
+            return callDelegatedSurveyTool(body, env, await delegation(), audit);
           });
         if (isDelegatedScheduleTool(name) && caller.kind === "mcp-client")
           return toolCall(request, env, caller, name, async (audit) => {
@@ -309,17 +337,27 @@ export async function agentApi(
         // The maintenance read is graded by this API's grant, as on its HTTP route.
         if (schedules && name === SCHEDULE_READ_TOOL)
           return toolCall(request, env, caller, name, () => readScheduleTool(body, env, grant));
+        if (schedules && name === SURVEY_READ_TOOL)
+          return toolCall(request, env, caller, name, () =>
+            readScheduleTool(body, env, grant, "survey"),
+          );
         return null;
       },
       async () => [
         ...MCP_TOOLS,
-        ...readMcpTools(grant),
+        ...readMcpTools(grant, {
+          reportedState: await reconstructed(),
+          cardSettlements: await settlements(),
+        }),
+        ...pageReadMcpTools(grant, { reportedState: await reconstructed() }),
         ...(caller.kind === "mcp-client"
           ? [
               ...delegatedCommandTools(env, await delegation()),
               ...delegatedDecisionTools(env, await delegation()),
               ...delegatedScheduleTools(env, await delegation()),
               ...delegatedMaintenanceTools(env, await delegation()),
+              ...(schedules ? LEASE_RELEASE_MCP_TOOLS : []),
+              ...delegatedSurveyTools(env, await delegation()),
             ]
           : []),
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),
@@ -349,7 +387,14 @@ export async function agentApi(
   // Absent, not refused, while the deployment cannot serve it, like its route.
   if (tool === PURCHASES_TOOL_NAME && !(await cardPurchasesAvailable(env)))
     throw new HttpError(404, "not_found");
-  if (tool === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructedStateAvailable(env)))
+  if (
+    (tool === RECONSTRUCTED_STATE_TOOL_NAME ||
+      tool === REPORTED_STATE_TOOL_NAME ||
+      (isPageReadToolName(tool) && pageReadNeedsReportedState(tool))) &&
+    !(await reconstructedStateAvailable(env))
+  )
+    throw new HttpError(404, "not_found");
+  if (CARD_SETTLEMENT_TOOL_NAMES.has(tool) && !(await cardSettlementsAvailable(env)))
     throw new HttpError(404, "not_found");
   const body = await boundedJson(request);
   const outcome = (await toolCall(request, env, caller, tool, (audit) =>

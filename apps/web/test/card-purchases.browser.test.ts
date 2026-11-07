@@ -111,6 +111,11 @@ describe.if(runnable)("card purchase explanation", () => {
     expect(main).toContain("引落は購入費用に加算しません");
     // The unrecognised count is across every statement month, and says so.
     expect(main).toContain("3 件は、カード利用として認識されていないため、どの請求月の一覧にも");
+    // Each reason with its count, as the server counted it.
+    expect(main).toContain("Vpass · 1回払い以外（分割・リボ・ボーナス払いなど）");
+    expect(main).toContain("MyJCB · 対象の利用だが、まだ処理していない");
+    expect(main).toContain("payment_type_unsupported");
+    expect(main).not.toContain("理由は一部の明細についてだけ数えています");
     // The statement total is reference only, behind its own disclosure.
     await page.getByText("カード会社の請求総額（参考）", { exact: true }).click();
     expect(await page.locator("main").innerText()).toContain("1734 JPY");
