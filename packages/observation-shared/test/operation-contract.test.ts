@@ -235,6 +235,16 @@ describe("operation record contract", () => {
     ).toBe(false);
   });
 
+  test("a connection is an alarm job id within the 0068 bound", () => {
+    const withConnection = (connectionId: string | null) =>
+      validOperationRecord(record({ execution: execution({ connectionId }) }));
+    expect(withConnection(null)).toBe(true);
+    expect(withConnection("a".repeat(100))).toBe(true);
+    expect(withConnection("a".repeat(101))).toBe(false);
+    expect(withConnection("Synthetic")).toBe(false);
+    expect(withConnection("run:synthetic")).toBe(false);
+  });
+
   test("refuses more runs than the trail reads", () => {
     const runs = Array.from({ length: 101 }, (_, index) => run({ runId: `run-${index}` }));
     expect(validOperationRecord(record({ execution: execution({ runs }) }))).toBe(false);

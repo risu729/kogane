@@ -310,9 +310,10 @@ page is not parity-complete:
   checks its own `ops_requests` row and the delegation's source scope with a
   query in `services/app`, which ADR 0081 does not allow an MCP tool to do.
   Open PR #1027 moves that query into `packages/application`; it is not
-  changed here because #1027 edits the same lines. Open PR #1034 lets the
-  operator's MCP principal act with the UI authority, but as its own
-  principal, so it does not close the first limit.
+  changed here because #1027 edits the same lines. Open PR #1034 gives
+  every MCP client the MCP Access application admits the UI's operation
+  authority, but still as its own principal `mcp-client:<sub>`, never as the
+  operator, so it does not close the first limit.
 
 **Verification.** `packages/observation-shared/test/operation-contract.test.ts`
 (the validator); `packages/application/test/operation-record-contract.test.ts`
