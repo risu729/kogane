@@ -636,7 +636,7 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
 | `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
 | `maintenance_survey`       | `targets`, `due`, `extracted`, `failed`, `windows`, `unchanged`, `proposed`, `reviewPending`, `known`, `failures` (closed failure codes, ADR 0050)                                                                                  |
-| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`, `started`, `declined`, `tracked`, `published`, `unpublished`, `abandoned`                                                                                                 |
+| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed` (including imports whose registration threw, §7), `awaiting`, `started`, `declined`, `tracked`, `published`, `unpublished`, `abandoned`                                                |
 | `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
 | `audit_overflow`           | `counters`, `written`                                                                                                                                                                                                               |
 
@@ -731,6 +731,32 @@ tick, as the alarm awaits its own.
 A failed dispatch never deletes the request. An import whose terminal is not
 in the bucket is retried, not failed: the collector may still be running.
 
+An import whose registration **throws** — R2 or CORE unavailable, or a
+refusal CORE made that the derivation did not foresee — is treated as the
+collection scan treats one (§2): it is not a verdict about the terminal, so no
+stage row is written for it. It is counted in the tick's `failed` and logged
+as `{"event":"operation_dispatch_registration_failed","code":…}` with the
+error's class only, never its message. Collection and dispatch diagnostic callbacks
+share `safeFailureCode`, which uses built-in type checks and never reads the
+exception's writable name, constructor or message. Its finite labels are
+`AggregateError`, `EvalError`, `RangeError`, `ReferenceError`, `SyntaxError`,
+`TypeError`, `URIError` and `Error`; a custom Error is generic `Error`, and
+unclassifiable or non-error throws become `unknown`. The request stays `dispatch_pending`
+and `accepted`: its `dispatch_attempts` goes up by one, its `failure_code` is
+`registration_failed` and its `available_at_ms` moves five minutes ahead.
+The queue is ordered by `available_at_ms`, so the request moves behind every
+request already due; the requests after it in the same tick are still
+dispatched, the collector executions are still tracked, and the lane tick is
+`ran`. It is registered on a later look once the cause is gone; the
+`registration_failed` code stays on the request after that, as every retry
+code does, because a dispatch that names no code keeps the last one. **Open
+limit:** there is no cap. A throw that never goes away (a refusal no code
+classifies) is retried every five minutes for as long as the lane runs, one
+more `dispatch_attempts` and one more `failed` each time, and nothing closes
+the request. If recording the attempt also fails
+(CORE itself unavailable), that error fails the lane tick as any other D1
+error in the lane does.
+
 ## 8. Retired legacy import
 
 The importer and ingest Workers, old Queues and per-source buckets have been
@@ -819,7 +845,10 @@ runs, failed and mapped-source terminals, per-unit runs sharing one
 acquisition session, the lane order with flags off and on, the metered
 bindings against Miniflare and (in `services/collector-st-george`'s
 worker test) real workerd D1 and R2, the append-only triggers, the
-bootstrap SQL applied twice to a fresh CORE, and `wrangler deploy --dry-run`.
+bootstrap SQL applied twice to a fresh CORE, an import dispatch whose
+registration throws (R2 failing on its first read: the lane completes, the
+request behind it is dispatched in the same tick, and the one that threw is
+registered on a later look), and `wrangler deploy --dry-run`.
 
 Production deployment, resource identity and migration verification are recorded
 in [legacy-retirement.md](legacy-retirement.md). These checks do not establish
