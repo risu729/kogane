@@ -203,6 +203,16 @@ function requests(): string[] {
         { relatedTo: "missing" },
       ])
         structured.push(query(path, { offset, ...filter }, null));
+    // Each key repeated, with equal and with different values: a list the
+    // service refuses, never the first value served alone.
+    for (const repeated of [
+      "offset=0&offset=0",
+      "proposalId=cs-0000&proposalId=cs-0000",
+      "proposalId=cs-0000&proposalId=cs-alone",
+      "statementKey=statement-bulk&statementKey=statement-bulk",
+      "relatedTo=cs-0000&relatedTo=cs-0000",
+    ])
+      structured.push(`${path}?${repeated}`);
     for (const offset of OFFSETS)
       for (const proposalId of PROPOSALS)
         for (const statementKey of STATEMENTS)
