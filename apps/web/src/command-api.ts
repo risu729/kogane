@@ -116,7 +116,10 @@ const MESSAGES: Record<string, string> = {
     "この変更は、まだ対応していない内容を含むため受け付けられません。再試行しても結果は変わりません。",
   needs_rule_verification:
     "適用するルールの確認が済んでいないため受け付けられません。ルールを確認してから計画し直してください。",
-  budget_exceeded: "処理できる件数の上限を超えました。対象を絞ってから計画し直してください。",
+  // The command path's only bound is the whole store's identity observations
+  // (instrument-candidate-context.ts), which no narrower plan avoids.
+  budget_exceeded:
+    "処理できる件数の上限を超えているため、この変更は受け付けられません。再試行しても結果は変わりません。",
   evidence_restricted: "この根拠を使う権限がないため、この操作は受け付けられません。",
   invalid_payload: "入力した識別名、理由、根拠を確認してください。",
   invalid_command:

@@ -552,8 +552,9 @@ After a commit the receipt panel distinguishes `受理` (accepted) from
 replaces a later one. A refusal from any step (simulate, approve, commit or the
 re-check) is shown by a fixed message for its closed code, and every code in
 `COMMAND_ERROR_CODES` has its own (`apps/web/src/command-api.ts`); the
-server's text is never shown, and only an unknown code falls back to a message
-chosen by HTTP status.
+server's text is never shown, and a code outside that list (such as the App's
+`invalid_request` or `internal_error`) falls back to a message chosen by HTTP
+status.
 
 A plan that reviews something shown elsewhere adds a panel that reads the
 reviewed item back from the server. The panel compares the plan's pins with that
