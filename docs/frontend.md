@@ -225,7 +225,7 @@ even though the preview API still serves the fixtures
 The preview is therefore a check of the shell and that guard, not of the
 financial pages. 収集スケジュール (`/schedules`) and 監査ログ (`/audit`) are
 drawn outside that guard, but the preview serves neither
-`/api/ops/v1/schedules`, `/api/v2/delegations` nor `/api/v2/audit`: the
+`/api/ops/v1/schedules` nor `/api/v2/audit`: the
 schedules page shows its load-error messages, and the audit page says that
 this source provides no audit log.
 

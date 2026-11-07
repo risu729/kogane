@@ -1239,12 +1239,20 @@ event already retired keeps the period it had.
 - `activity({ basis, offset })` — current event revisions with at least one leg
   on the requested basis, their legs, their live allocations, one total per
   (basis, unit), and `explanationRefs` running event → legs → allocations →
-  source facts → raw locators.
+  source facts → raw locators. A (basis, unit) with a leg that is not exact
+  keeps its total, unknown with that leg's status and reason (the first such
+  leg by index), so an accepted card settlement lists its exact
+  `cash-movement` total beside an `obligation-change` total that is `missing`
+  with `statement_principal_and_fees_unknown`; it is never zero and never
+  left out (INV05).
 - `obligations({ offset })` — principal, live settlements, `settled`,
   `outstanding` (`principal − settled`, exact arithmetic), confirmed and
   projected fee totals kept apart, and the unresolved differences the
   settlements declared. When either side is not exact, `outstanding` is `null`
-  with an `outstandingReasonCode`; it is never zero-filled (INV05).
+  with an `outstandingReasonCode`; it is never zero-filled (INV05). A fee
+  total is `null` only when there is no such fee: a fee that is not exact, or
+  in another unit than the principal, leaves it unknown with a reason (the
+  fee's own status and reason, or a `conflict` with `unit_mismatch`).
 - `reconciliationSignals({ subjectRefs })` — the latest published
   provider-reported balance beside the amount the adopted events'
   `cash-movement` legs imply, and their `difference` with reason codes (`snapshot_boundary_unknown`,
@@ -1409,9 +1417,9 @@ while `cardPurchaseRecognition` is, calls the same `queryCardPurchases`, and
 returns its page as `data`, figures, coverage, chain and `explanationRefs`
 unchanged, with each candidate's `actions` and `relation` removed: an agent
 sees which links are proposed and why, and every review stays with the
-operator. It needs an `AGENT_API_GRANTS` grant with `records.read` over
-`"*"` sources and accounts (the page cannot yet be recomputed inside a
-narrower scope, so a listed grant is refused rather than answered), the
+operator. It needs `records.read` over `"*"` sources and accounts, which
+every proved caller holds since ADR 0084 (the page cannot yet be recomputed
+inside a narrower scope, so a narrower grant would be refused), the
 10,000-event bound is `413 budget_exceeded` there, and it writes nothing
 either.
 

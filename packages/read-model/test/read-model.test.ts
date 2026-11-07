@@ -83,6 +83,7 @@ function everyRead(reader: ObservationReader): Promise<unknown>[] {
     reader.parsingHealth(),
     reader.globalPassEmptyMonths(),
     reader.fetchRunCounts(["s", "sony-bank"]),
+    reader.sourceParseRuns(["s", "sony-bank"]),
     reader.listTransactions(NO_FILTER),
     reader.listTransactions(FULL_TRANSACTION_SCOPE),
     reader.listLatestBalances({ ...NO_FILTER, limit: CANDIDATE_LIMIT }),
