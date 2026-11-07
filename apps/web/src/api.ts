@@ -22,6 +22,7 @@ import type {
   TransactionRow,
   BalanceRow,
   BalanceHistoryRow,
+  BalanceHistoryPage,
   LatestBalancePage,
   PositionWithValuations,
   ArtifactRow,
@@ -285,6 +286,29 @@ export function useLatestBalances(
     enabled,
     queryFn: ({ signal }) =>
       getJson<LatestBalancePage>(`/api/v2/balances/latest${request.suffix}`, signal),
+  });
+}
+
+/**
+ * The v2 balance history page: the same fixed context, its own budget.
+ * @public No page calls it yet. An open pull request's UI/MCP parity scan of
+ * `apps/web/src` reads its route literal (docs/unused-report.md).
+ */
+export function useBalanceHistory(
+  view?: MeasureView,
+  cursor?: string | null,
+): UseQueryResult<BalanceHistoryPage, Error> {
+  const features = useFeatures();
+  const request = useListRequest("/api/v2/balances/history", {
+    ...(view ? { view } : {}),
+    ...(cursor ? { cursor } : {}),
+  });
+  const enabled = request.enabled && features.balanceReadModel;
+  return useQuery({
+    queryKey: ["balances-history", request.suffix],
+    enabled,
+    queryFn: ({ signal }) =>
+      getJson<BalanceHistoryPage>(`/api/v2/balances/history${request.suffix}`, signal),
   });
 }
 

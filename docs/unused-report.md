@@ -47,7 +47,7 @@ report it.
 
 ## Findings
 
-Checked on 2026-11-07 against `02a915ac`. The command above is authoritative as
+Checked on 2026-11-07 against `de86e9d2`. The command above is authoritative as
 the tree changes.
 
 No unresolved imports, undeclared dependencies, unused files or unused
@@ -73,6 +73,10 @@ these, kept on purpose:
   in-page collection logic; removing it needs those documents revised.
 - `SCHEDULES_PATH` in `services/app/src/schedules-api.ts`, which an open pull
   request imports.
+- `useBalanceHistory` in `apps/web/src/api.ts`. No page calls it, but it holds
+  the only `/api/v2/balances/history` literal in `apps/web/src`, and an open
+  pull request's UI/MCP parity test scans those literals and lists that route
+  as one the UI names; it is tagged `@public` until that is settled.
 
 An unused finding alone is still not a deletion decision; the review below
 applies to every removal.
