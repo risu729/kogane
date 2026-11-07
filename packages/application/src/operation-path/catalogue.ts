@@ -241,6 +241,14 @@ export const OPERATION_CATALOGUE = {
     capability: "summary.read",
     paths: AGENT,
   },
+  // One source's collection quality cells per account (ADR 0082): the page's service.
+  "collection-quality.accounts": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "evidence.read",
+    paths: AGENT,
+  },
   // Account correspondence candidates (ADR 0077): read-only, the page's service.
   "accounts.candidates": {
     risk: ["R0"],

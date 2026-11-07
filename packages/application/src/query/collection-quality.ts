@@ -10,6 +10,7 @@
 // `COLLECTOR_SOURCE_IDS` entries that register under it.
 import { COLLECTOR_SOURCE_IDS, WITHHELD_ARTIFACT_DATASETS } from "../collection/descriptors.ts";
 import {
+  ACCOUNT_COVERAGE_SQL,
   CELL_QUALITY_SQL,
   COLLECTION_QUALITY_ROW_BOUND,
   ONE_SOURCE_QUALITY_SQL,
@@ -18,6 +19,7 @@ import {
   TERMINAL_QUALITY_SQL,
   UNCOMPOSED_QUERY_RULE_PARSERS,
   UNREGISTERED_QUALITY_SQL,
+  type AccountCoverageRow,
   type CellQualityRow,
   type ScheduleQualityRow,
   type SourceQualityRow,
@@ -25,9 +27,23 @@ import {
   type UnregisteredQualityRow,
 } from "../../../read-model/src/collection-quality.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
+import type { FinancialError } from "../../../domain/src/result.ts";
+import { financialError } from "../errors.ts";
+import { type Grant, grantAllows } from "../grants.ts";
 import {
+  ACCOUNT_COVERAGE_API_VERSION,
+  ACCOUNT_COVERAGE_CELL_BOUND,
+  ACCOUNT_COVERAGE_ENTRY_BOUND,
   CELL_REASONS,
   COLLECTION_QUALITY_API_VERSION,
+  MAPPING_STATUSES,
+  OBSERVATION_KINDS,
+  type AccountCoverage,
+  type AccountCoverageAccount,
+  type AccountCoveragePeriod,
+  type AccountStanding,
+  type MappingStatus,
+  type ObservationKind,
   COLLECTION_QUALITY_PAGE,
   SOURCE_REASONS,
   type CellReason,
@@ -416,4 +432,195 @@ export async function queryCollectionQualityCells(
       nextOffset: truncated ? input.offset + COLLECTION_QUALITY_PAGE : null,
     },
   };
+}
+
+// ── accounts (ADR 0082) ───────────────────────────────────────────────────
+
+/** One `accounts_json` entry: `[capture, account id, label, mapping status, kind, observations]`. */
+type NamedAccount = [
+  capture: "newest" | "current",
+  accountId: string,
+  label: string,
+  status: MappingStatus,
+  kind: ObservationKind,
+  observations: number,
+];
+
+interface AccountBucket {
+  label: string;
+  statuses: Set<MappingStatus>;
+  /** `JSON.stringify([dataset, parser, kind])` → its periods, in cell order. */
+  types: Map<string, AccountCoveragePeriod[]>;
+}
+
+const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * `GET /api/collection-quality/<sourceId>/accounts`: every cell of the source,
+ * regrouped by the accounts its captures' observations name, then by data
+ * type (dataset, parser, observation kind) and period; the cells whose
+ * captures' observations name no account are listed apart with their
+ * reasons. Null when the source is not a visible CORE source. More cells than
+ * `ACCOUNT_COVERAGE_CELL_BOUND`, or more account period entries than
+ * `ACCOUNT_COVERAGE_ENTRY_BOUND`, is refused whole
+ * (`CollectionQualityLimitError`), never cut.
+ *
+ * Each entry carries the cell's own state and reasons (`cell` above), so the
+ * two views of one store cannot disagree. Nothing is inferred: a unit key is
+ * never read as an account, a period no cell has is not listed (and is
+ * neither claimed missing nor covered), and an account whose mapping is not
+ * `identified` keeps that status.
+ */
+export async function queryAccountCoverage(
+  executor: SqlExecutor,
+  input: { sourceId: string },
+): Promise<AccountCoverage | null> {
+  const source = await executor.first<SourceQualityRow>(ONE_SOURCE_QUALITY_SQL, [input.sourceId]);
+  if (source === null) return null;
+  const rows = await executor.all<AccountCoverageRow>(ACCOUNT_COVERAGE_SQL, [input.sourceId]);
+  if (rows.length > ACCOUNT_COVERAGE_CELL_BOUND) throw new CollectionQualityLimitError();
+  const accounts = new Map<string, AccountBucket>();
+  const unattributed: AccountCoverage["unattributed"] = [];
+  let entries = 0;
+  for (const row of rows) {
+    const value = cell(row);
+    // Observations per (account, kind) and capture; mapping statuses per account.
+    const counts = new Map<string, { current: number; newest: number }>();
+    for (const [capture, accountId, label, status, kind, observations] of JSON.parse(
+      row.accounts_json,
+    ) as NamedAccount[]) {
+      let bucket = accounts.get(accountId);
+      if (bucket === undefined) {
+        bucket = { label, statuses: new Set(), types: new Map() };
+        accounts.set(accountId, bucket);
+      }
+      bucket.statuses.add(status);
+      const key = JSON.stringify([accountId, kind]);
+      const seen = counts.get(key) ?? { current: 0, newest: 0 };
+      seen[capture] += observations;
+      counts.set(key, seen);
+    }
+    if (counts.size === 0) {
+      unattributed.push({
+        dataset: value.dataset,
+        parser: value.parser,
+        unitKey: value.unitKey,
+        period: value.period,
+        currentRule: value.currentRule,
+        state: value.state,
+        reasons: value.reasons,
+      });
+      continue;
+    }
+    for (const [key, seen] of counts) {
+      const [accountId, kind] = JSON.parse(key) as [string, ObservationKind];
+      // The current capture names the account when it can; else only the newest does.
+      const inCurrent = seen.current > 0 && value.current !== null;
+      const standing: AccountStanding = !inCurrent
+        ? "newest-not-current"
+        : value.state === "current"
+          ? "current"
+          : "older-current";
+      const bucket = accounts.get(accountId)!;
+      // Only a cell with a parser has observations, so its parser is named.
+      const type = JSON.stringify([value.dataset, value.parser, kind]);
+      const periods = bucket.types.get(type) ?? [];
+      bucket.types.set(type, periods);
+      periods.push({
+        unitKey: value.unitKey,
+        period: value.period,
+        currentRule: value.currentRule,
+        cellState: value.state,
+        standing,
+        capture: inCurrent
+          ? value.current!
+          : { fetchRunId: value.newest.fetchRunId, capturedAt: value.newest.capturedAt },
+        observations: inCurrent ? seen.current : seen.newest,
+        reasons: value.reasons,
+      });
+      entries += 1;
+    }
+  }
+  if (entries > ACCOUNT_COVERAGE_ENTRY_BOUND) throw new CollectionQualityLimitError();
+  const kindOrder = (kind: ObservationKind): number => OBSERVATION_KINDS.indexOf(kind);
+  return {
+    apiVersion: ACCOUNT_COVERAGE_API_VERSION,
+    sourceId: source.source_id,
+    latestFetchRun: fetchRun(source),
+    cells: rows.length,
+    accounts: [...accounts.entries()]
+      .sort(([a], [b]) => byText(a, b))
+      .map(([accountId, bucket]): AccountCoverageAccount => ({
+        accountId,
+        label: bucket.label,
+        statuses: MAPPING_STATUSES.filter((status) => bucket.statuses.has(status)),
+        dataTypes: [...bucket.types.entries()]
+          .map(([type, periods]) => {
+            const [dataset, parser, kind] = JSON.parse(type) as [
+              string | null,
+              string,
+              ObservationKind,
+            ];
+            return { dataset, parser, kind, periods };
+          })
+          .sort(
+            (a, b) =>
+              byText(a.dataset ?? "", b.dataset ?? "") ||
+              byText(a.parser, b.parser) ||
+              kindOrder(a.kind) - kindOrder(b.kind),
+          ),
+      })),
+    unattributed,
+  };
+}
+
+/** Errors of the account read carry this request id: no context is opened for it. */
+const ACCOUNT_COVERAGE_REQUEST = "collection-quality.accounts";
+/** A CORE source id as the collection quality routes accept one. */
+export const COLLECTION_QUALITY_SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
+
+export type AccountCoverageOutcome =
+  | { ok: true; coverage: AccountCoverage }
+  | { ok: false; error: FinancialError };
+
+/**
+ * `queryAccountCoverage` under a grant: the one service both the page's route
+ * and the agent read call (ADR 0081). The grant needs `evidence.read` over
+ * the whole store, as every collection quality read does, decided before
+ * anything is read; a malformed or invisible source is `invalid_query`
+ * (`source`), and more cells or periods than the bounds is `budget_exceeded`,
+ * never a cut answer.
+ */
+export async function readAccountCoverageForGrant(input: {
+  grant: Grant;
+  sql: SqlExecutor;
+  sourceId: unknown;
+}): Promise<AccountCoverageOutcome> {
+  const fail = (
+    code: "unauthorized" | "evidence_restricted" | "invalid_query" | "budget_exceeded",
+    refs: string[],
+  ): AccountCoverageOutcome => ({
+    ok: false,
+    error: financialError(code, ACCOUNT_COVERAGE_REQUEST, refs),
+  });
+  if (!grantAllows(input.grant, "evidence.read"))
+    return fail("unauthorized", ["capability:evidence.read"]);
+  const narrowed = [
+    ...(input.grant.scopes.sources === "*" ? [] : ["scope:source"]),
+    ...(input.grant.scopes.accounts === "*" ? [] : ["scope:account"]),
+  ];
+  if (narrowed.length > 0) return fail("evidence_restricted", narrowed);
+  if (typeof input.sourceId !== "string" || !COLLECTION_QUALITY_SOURCE.test(input.sourceId))
+    return fail("invalid_query", ["source"]);
+  try {
+    const coverage = await queryAccountCoverage(input.sql, { sourceId: input.sourceId });
+    return coverage === null ? fail("invalid_query", ["source"]) : { ok: true, coverage };
+  } catch (error) {
+    if (error instanceof CollectionQualityLimitError)
+      return fail("budget_exceeded", [
+        `budget:cells=${String(ACCOUNT_COVERAGE_CELL_BOUND)}`,
+        `budget:periods=${String(ACCOUNT_COVERAGE_ENTRY_BOUND)}`,
+      ]);
+    throw error;
+  }
 }

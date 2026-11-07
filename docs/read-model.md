@@ -342,19 +342,21 @@ the compatibility adapter uses. See
 ## Collection quality
 
 `src/collection-quality.ts` ([ADR 0045](adr/0045-collection-quality-read.md))
-holds the SQL behind `GET /api/collection-quality` and
-`GET /api/collection-quality/<sourceId>`; `packages/application/src/query/collection-quality.ts`
+holds the SQL behind `GET /api/collection-quality`,
+`GET /api/collection-quality/<sourceId>` and
+`GET /api/collection-quality/<sourceId>/accounts`; `packages/application/src/query/collection-quality.ts`
 maps its rows to the contract and the closed reason codes. It is not an
 `ObservationReader` method: like the dated reads it is composed by an
 application query over an executor.
 
-| Text                       | Reads                                                                                                                                                        | Bound                                                    |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
-| `SCHEDULE_QUALITY_SQL`     | every `collection_schedules` row, its newest receipt by `nominal_at` (the unique index) and its held lease                                                   | 201 rows; more is refused                                |
-| `TERMINAL_QUALITY_SQL`     | the `collection_runs` rows of exactly the (collector, run id) pairs a receipt names, with the newest `registered` stage and the visible fetch run            | the pairs given                                          |
-| `UNREGISTERED_QUALITY_SQL` | never-registered terminals of the given collectors, once per run by its newest row, grouped by code                                                          | every row of those sources, by index; grows with history |
-| `SOURCE_QUALITY_SQL`       | every visible source and its newest visible fetch run, read by id                                                                                            | 201 rows; more is refused                                |
-| `CELL_QUALITY_SQL`         | one source's visible artifacts named by a dataset, a job or a recorded parse; their jobs, parses, publications, claims and unit outcomes; current membership | 501 cells from an offset                                 |
+| Text                       | Reads                                                                                                                                                                           | Bound                                                    |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `SCHEDULE_QUALITY_SQL`     | every `collection_schedules` row, its newest receipt by `nominal_at` (the unique index) and its held lease                                                                      | 201 rows; more is refused                                |
+| `TERMINAL_QUALITY_SQL`     | the `collection_runs` rows of exactly the (collector, run id) pairs a receipt names, with the newest `registered` stage and the visible fetch run                               | the pairs given                                          |
+| `UNREGISTERED_QUALITY_SQL` | never-registered terminals of the given collectors, once per run by its newest row, grouped by code                                                                             | every row of those sources, by index; grows with history |
+| `SOURCE_QUALITY_SQL`       | every visible source and its newest visible fetch run, read by id                                                                                                               | 201 rows; more is refused                                |
+| `CELL_QUALITY_SQL`         | one source's visible artifacts named by a dataset, a job or a recorded parse; their jobs, parses, publications, claims and unit outcomes; current membership                    | 501 cells from an offset                                 |
+| `ACCOUNT_COVERAGE_SQL`     | the cell read's CTEs unchanged, plus the accounts the newest and current captures' sealed identity observations map to ([ADR 0082](adr/0082-collection-quality-per-account.md)) | 2,001 cells, unpaged; more is refused                    |
 
 A cell is (dataset, parser, fetch unit, period, MyJCB statement state,
 currentness rule). Its newest capture is its newest fetch run by capture time;
@@ -411,6 +413,16 @@ took roughly 10 to 50 ms on `bun:sqlite`. The amendment's fixture also exercises
 SMBC, MoneyForward, V Point and MyJCB past-month captures and checks the same
 indexed plan boundaries; timings are indicative, not asserted. Not measured
 on remote D1; no production scope/completeness proof is claimed.
+
+`ACCOUNT_COVERAGE_SQL` shares the cell read's CTEs (`CELL_RESULT_CTES`; the
+cell page's text is pinned by its digest) and adds, per capture artifact, the
+published parse, the newest sealed eligible identity run, its identity
+observations, their current account mappings and accounts, each by key; it
+reads no observation table. The current capture's members and the per-cell
+account lists are joined through automatic indexes over its own CTEs, built
+once. On the scaled store it took roughly 5 to 80 ms per source on
+`bun:sqlite` (printed, not asserted), with no identity rows; its added cost
+grows with the identity observations of the captures it reads.
 
 ## Knowledge selector
 

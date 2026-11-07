@@ -1,6 +1,7 @@
 // Additional read adapters over the existing history, instrument coverage
 // (ADR 0073), dated reported state, account correspondence candidates
-// (ADR 0077) and common audit readers.
+// (ADR 0077), collection quality per account (ADR 0082) and common audit
+// readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -21,6 +22,10 @@ import {
   ACCOUNT_SOURCE_ACCOUNT_ID,
   reviewAccountCandidates,
 } from "../../../packages/application/src/query/account-candidates.ts";
+import {
+  COLLECTION_QUALITY_SOURCE,
+  readAccountCoverageForGrant,
+} from "../../../packages/application/src/query/collection-quality.ts";
 import { readInstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
 import { ECONOMIC_ROW_READINESS_SCHEMA } from "../../../packages/domain/src/economic-row-readiness.ts";
@@ -82,6 +87,10 @@ const schemas = {
       .max(64),
     knowledge: z.literal("current"),
   }),
+  // The route's one path segment (ADR 0082): the source whose cells are regrouped.
+  "kogane.collection-quality.accounts": z.strictObject({
+    source: z.string().regex(COLLECTION_QUALITY_SOURCE),
+  }),
   "kogane.audit.search": z.strictObject({
     filters: z.record(z.string(), z.string()).optional(),
     cursor: z.string().min(1).max(400).nullable().optional(),
@@ -107,6 +116,8 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "One page of the ADR 0077 account correspondence candidates: which direct provider source accounts a reviewed aggregator connection contains, on which evidence, with closed status, hold and same-account reasons, under records.read and a whole-store read grant. Read-only; never proposes same_account. A candidate names the relation.accept or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
+  "kogane.collection-quality.accounts":
+    "One source's collection quality cells regrouped by the accounts their newest or current capture's observations name (ADR 0082): per account its mapping statuses and data types (dataset, parser, observation kind), each with its periods, closed standing and reasons, and apart the cells no observation attributes to an account. The same answer as GET /api/collection-quality/<source>/accounts, under evidence.read and a whole-store read grant. A period no capture has is not listed and not claimed missing; nothing is inferred from a unit key.",
   "kogane.audit.search":
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
   "kogane.audit.get":
@@ -143,6 +154,8 @@ export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
       case "kogane.accounts.candidates":
       case "kogane.economic-readiness.read":
         return grantAllows(grant, "records.read") && wholeStore(grant);
+      case "kogane.collection-quality.accounts":
+        return grantAllows(grant, "evidence.read") && wholeStore(grant);
       case "kogane.audit.search":
       case "kogane.audit.get":
         return grantAllows(grant, "audit.read") && grant.scopes.accounts === "*";
@@ -240,6 +253,19 @@ export async function callReadTool(
             auditOutcome: { result: "failed", code: outcome.reason },
           };
         return { status: 200, body: outcome };
+      }
+      case "kogane.collection-quality.accounts": {
+        // The page's own service (ADR 0081): grant, perimeter, source and
+        // bounds are decided there, once for both transports.
+        const input = parseRequest(schemas[name], body ?? {});
+        const outcome = await readAccountCoverageForGrant({
+          grant,
+          sql: d1Executor(env.DB),
+          sourceId: input.source,
+        });
+        return outcome.ok
+          ? { status: 200, body: outcome.coverage }
+          : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       }
       case "kogane.audit.search": {
         const input = parseRequest(schemas[name], body ?? {});

@@ -1,6 +1,8 @@
 // `GET /api/collection-quality` and `GET /api/collection-quality/<sourceId>`:
 // per configured job, per source and per source × unit × dataset × period,
-// what each collection stage last did, in closed codes
+// what each collection stage last did, in closed codes; and
+// `GET /api/collection-quality/<sourceId>/accounts`, the same cells regrouped
+// by the accounts their captures' observations name (ADR 0082)
 // (packages/application/src/query/collection-quality.ts, ADR 0045,
 // docs/evidence-browser.md). Read-only, GET-only, and served under the reader
 // authority every signed-in subject already has over the evidence routes: it
@@ -9,10 +11,12 @@
 // scheduling tables (CORE 0065) does not serve it.
 import {
   CollectionQualityLimitError,
+  readAccountCoverageForGrant,
   queryCollectionQualityCells,
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
 import {
+  ACCOUNT_COVERAGE_SUFFIX,
   COLLECTION_QUALITY_PATH,
   validCollectionQualityAlarms,
   type CollectionQualitySummary,
@@ -59,7 +63,25 @@ export async function collectionQualityApi(
       await readAlarms(env, summary);
       return json(summary);
     }
-    const sourceId = path.slice(COLLECTION_QUALITY_PATH.length + 1);
+    const rest = path.slice(COLLECTION_QUALITY_PATH.length + 1);
+    if (rest.endsWith(ACCOUNT_COVERAGE_SUFFIX)) {
+      // Every cell of one source, regrouped by account (ADR 0082): no page and no parameter.
+      const sourceId = rest.slice(0, -ACCOUNT_COVERAGE_SUFFIX.length);
+      if (!SOURCE.test(sourceId)) throw new HttpError(404, "not_found");
+      if (url.search) throw new HttpError(400, "invalid_query");
+      // The service the agent read calls too (ADR 0081), under the same grant.
+      const outcome = await readAccountCoverageForGrant({
+        grant,
+        sql: d1Executor(env.DB),
+        sourceId,
+      });
+      if (outcome.ok) return json(outcome.coverage);
+      if (outcome.error.code === "budget_exceeded")
+        throw new HttpError(413, "result_limit_exceeded");
+      if (outcome.error.code === "invalid_query") throw new HttpError(404, "not_found");
+      throw new HttpError(403, "forbidden");
+    }
+    const sourceId = rest;
     if (!SOURCE.test(sourceId)) throw new HttpError(404, "not_found");
     for (const [key, value] of url.searchParams)
       if (key !== "offset" || url.searchParams.getAll(key).length !== 1 || !value)

@@ -931,7 +931,15 @@ describe("tools under each grant shape", () => {
             ]
           : capabilities.includes("summary.read")
             ? PUBLISHED
-            : BASE,
+            : capabilities.includes("evidence.read")
+              ? // The account view of collection quality (ADR 0082), whole store.
+                [
+                  ...AGENT_TOOL_NAMES,
+                  "kogane.collection-quality.accounts",
+                  PURCHASES_TOOL_NAME,
+                  RECONSTRUCTED_STATE_TOOL_NAME,
+                ]
+              : BASE,
       );
       const report = await callTool("kogane.capabilities", {}, { environment });
       expect(report.structuredContent["capabilities"]).toEqual(capabilities);

@@ -195,6 +195,9 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // One row per source the coverage answer counts; never the counts themselves.
   if (operation === "instruments.coverage")
     return { rows: Array.isArray(value["rows"]) ? value["rows"].length : 0, truncated: false };
+  // One row per cell the account read covered; never an account or a period.
+  if (operation === "collection-quality.accounts")
+    return { rows: typeof value["cells"] === "number" ? value["cells"] : 0, truncated: false };
   if (operation === "economic-readiness.read") {
     const manifest = value["manifest"] as { rows?: unknown } | undefined;
     return { rows: Array.isArray(manifest?.rows) ? manifest.rows.length : 0, truncated: false };

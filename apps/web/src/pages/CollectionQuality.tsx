@@ -4,7 +4,14 @@ import { getJson } from "../api.ts";
 import { Link, useLocation } from "../router.tsx";
 import { EmptyState, Kv, KvRow, Panel, QueryBoundary } from "../ui.tsx";
 import {
+  ACCOUNT_COVERAGE_SUFFIX,
   COLLECTION_QUALITY_PATH,
+  type AccountCoverage,
+  type AccountCoveragePeriod,
+  type AccountStanding,
+  type CollectionQualityPeriod,
+  type MappingStatus,
+  type ObservationKind,
   type CollectionQualityCell,
   type CollectionQualityCells,
   type CollectionQualitySchedule,
@@ -271,9 +278,127 @@ function SourceCells({ sourceId, offset }: { sourceId: string; offset: number })
     </QueryBoundary>
   );
 }
+const KIND_LABELS: Record<ObservationKind, string> = {
+  transaction: "取引",
+  balance: "残高",
+  position: "保有",
+  valuation: "評価額",
+};
+const MAPPING_STATUS_LABELS: Record<MappingStatus, string> = {
+  identified: "口座を特定済み",
+  "provider-local": "取得元の中だけで区別した口座",
+  aggregate: "集計された区分",
+  unresolved: "口座の対応が未確定",
+};
+const STANDING_LABELS: Record<AccountStanding, string> = {
+  current: "最新の取得が現在の表示対象",
+  "older-current": "過去の取得が現在の表示対象（新しい取得は採用されていません）",
+  "newest-not-current": "最新の取得にのみあり、現在の表示対象ではありません",
+};
+function periodLabel(period: CollectionQualityPeriod): string {
+  if (period.kind === "latest") return "期間の区分なし";
+  return `${period.value ?? "期間未確定"}${period.state ? ` ${period.state}` : ""}`;
+}
+function AccountPeriod({ value }: { value: AccountCoveragePeriod }): ReactNode {
+  return (
+    <li>
+      <p>
+        期間: {periodLabel(value.period)} · 取得単位: {value.unitKey ?? "区分なし"} ·{" "}
+        {STANDING_LABELS[value.standing]}
+      </p>
+      <p>
+        取得時刻 {value.capture.capturedAt} ·{" "}
+        <Link to={`/runs/r_${value.capture.fetchRunId}`}>取得記録</Link> · この口座の観測{" "}
+        {value.observations} 件
+      </p>
+      <Reasons codes={value.reasons} />
+    </li>
+  );
+}
+function SourceAccounts({ sourceId }: { sourceId: string }): ReactNode {
+  const query = useQuery({
+    queryKey: ["collection-quality", sourceId, "accounts"],
+    queryFn: ({ signal }) =>
+      getJson<AccountCoverage>(
+        `${COLLECTION_QUALITY_PATH}/${encodeURIComponent(sourceId)}${ACCOUNT_COVERAGE_SUFFIX}`,
+        signal,
+      ),
+  });
+  return (
+    <QueryBoundary query={query} label="口座ごとの取得状況">
+      {(data) => (
+        <>
+          <h2>口座 × データ種別 × 期間</h2>
+          <p>
+            この取得元の保存記録 {data.cells}{" "}
+            件を、観測が対応付けられた口座ごとに並べます。保存記録のない期間は列挙できず、欠落とも取得済みとも判定しません。別の取得元にある同じ口座は、その取得元で表示します。
+          </p>
+          {data.accounts.length === 0 ? (
+            <EmptyState>
+              口座に対応付けられた観測がありません。取得や取引がないことの証明ではありません。
+            </EmptyState>
+          ) : (
+            data.accounts.map((account) => (
+              <Panel key={account.accountId} title={account.label}>
+                <div className="panel-body">
+                  <p>
+                    口座 <code>{account.accountId}</code> ·{" "}
+                    {account.statuses.map((status) => MAPPING_STATUS_LABELS[status]).join(" / ")}
+                  </p>
+                  {account.dataTypes.map((type) => (
+                    <section key={`${type.dataset}/${type.parser}/${type.kind}`}>
+                      <h3>
+                        {KIND_LABELS[type.kind]} · {type.dataset ?? "データ種別不明"}
+                      </h3>
+                      <p>解析: {type.parser}</p>
+                      <ul>
+                        {type.periods.map((value) => (
+                          <AccountPeriod
+                            key={JSON.stringify([value.unitKey, value.period, value.currentRule])}
+                            value={value}
+                          />
+                        ))}
+                      </ul>
+                    </section>
+                  ))}
+                </div>
+              </Panel>
+            ))
+          )}
+          <Panel title="口座に対応付けられない保存記録">
+            {data.unattributed.length === 0 ? (
+              <p className="panel-body">なし</p>
+            ) : (
+              <ul className="panel-body">
+                {data.unattributed.map((value) => (
+                  <li
+                    key={JSON.stringify([
+                      value.dataset,
+                      value.parser,
+                      value.unitKey,
+                      value.period,
+                      value.currentRule,
+                    ])}
+                  >
+                    <p>
+                      {value.dataset ?? "データ種別不明"} · 取得単位: {value.unitKey ?? "区分なし"}{" "}
+                      · 期間: {periodLabel(value.period)}
+                    </p>
+                    <Reasons codes={value.reasons} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Panel>
+        </>
+      )}
+    </QueryBoundary>
+  );
+}
 export function CollectionQualityPage(): ReactNode {
   const params = new URLSearchParams(useLocation().split("?", 2)[1] ?? "");
   const sourceId = params.get("source");
+  const byAccount = params.get("view") === "accounts";
   const offsetText = params.get("offset") ?? "0";
   const validOffset = /^(?:0|[1-9][0-9]{0,6})$/u.test(offsetText);
   const query = useQuery({
@@ -340,7 +465,24 @@ export function CollectionQualityPage(): ReactNode {
                       {item.blockedCode ?? "登録待ち"}
                     </p>
                   ))}
-                  {validOffset ? (
+                  <nav aria-label="収集品質の表示単位">
+                    <Link
+                      to={`/collection-quality?source=${encodeURIComponent(sourceId)}`}
+                      current={!byAccount}
+                    >
+                      取得単位ごと
+                    </Link>{" "}
+                    ·{" "}
+                    <Link
+                      to={`/collection-quality?source=${encodeURIComponent(sourceId)}&view=accounts`}
+                      current={byAccount}
+                    >
+                      口座ごと
+                    </Link>
+                  </nav>
+                  {byAccount ? (
+                    <SourceAccounts key={sourceId} sourceId={sourceId} />
+                  ) : validOffset ? (
                     <SourceCells key={sourceId} sourceId={sourceId} offset={Number(offsetText)} />
                   ) : (
                     <EmptyState>
