@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { ownershipDeclarationRef, readOwnershipDeclaration } from "../src/ownership-declaration.ts";
+import {
+  OWNER_DEFAULT_PARTY,
+  ownershipDeclarationRef,
+  readOwnershipDeclaration,
+} from "../src/ownership-declaration.ts";
 import { ownershipReviewRequested } from "../src/ownership-review.ts";
 
 test("a self-declaration records a sole-personal role and date, never provider verification", () => {
@@ -16,6 +20,29 @@ test("a self-declaration records a sole-personal role and date, never provider v
   }
   expect(readOwnershipDeclaration(["balance:1"])).toEqual({ kind: "absent" });
   expect(ownershipDeclarationRef("liable_party", "2027-02-29")).toBeNull();
+});
+
+test("the owner default (ADR 0082) is its own scope of the same closed marker", () => {
+  for (const role of ["liable_party", "beneficial_owner"] as const) {
+    const ref = ownershipDeclarationRef(role, "2026-11-07", "owner-default")!;
+    expect(ref).toBe(`ownership-declaration:owner-default-v1:${role}:2026-11-07`);
+    expect(readOwnershipDeclaration(["balance:1", ref])).toEqual({
+      kind: "self-declared",
+      scope: "owner-default",
+      role,
+      declaredOn: "2026-11-07",
+      providerNameVerified: false,
+    });
+  }
+  expect(OWNER_DEFAULT_PARTY).toBe("party:owner");
+  const both = [
+    ownershipDeclarationRef("liable_party", "2026-11-07")!,
+    ownershipDeclarationRef("liable_party", "2026-11-07", "owner-default")!,
+  ];
+  expect(readOwnershipDeclaration(both)).toEqual({ kind: "invalid" });
+  expect(
+    readOwnershipDeclaration(["ownership-declaration:owner-default-v2:liable_party:2026-11-07"]),
+  ).toEqual({ kind: "invalid" });
 });
 
 test("the reserved provenance namespace fails closed on malformed, multiple or unsupported claims", () => {

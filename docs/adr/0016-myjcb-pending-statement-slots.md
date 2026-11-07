@@ -1,6 +1,6 @@
 # ADR 0016: Key MyJCB pending statements by payment month, current while their position shows them
 
-- Status: proposed
+- Status: accepted (merged 2026-09-27 in #266)
 - Date: 2026-09-26
 - Implemented by: #266
 - Carried by:

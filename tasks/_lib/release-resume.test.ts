@@ -20,6 +20,7 @@ import {
   verifyApplicationBaseline,
 } from "./ci/cf-container-release.mjs";
 import {
+  releaseCompleted,
   selectResumeDeployment,
   verifyArtifactMetadata,
   verifyArtifactBytes,
@@ -1312,3 +1313,19 @@ for (const phase of [
       }
     },
   );
+
+describe("releaseCompleted", () => {
+  test("counts success, and success that GitHub later marked inactive, as completed", () => {
+    expect(releaseCompleted([{ state: "in_progress" }, { state: "success" }])).toBe(true);
+    expect(
+      releaseCompleted([{ state: "in_progress" }, { state: "success" }, { state: "inactive" }]),
+    ).toBe(true);
+    expect(releaseCompleted([{ state: "success" }, { state: "failure" }])).toBe(true);
+  });
+
+  test("leaves an unfinished or failed release resumable", () => {
+    expect(releaseCompleted([])).toBe(false);
+    expect(releaseCompleted([{ state: "in_progress" }, { state: "in_progress" }])).toBe(false);
+    expect(releaseCompleted([{ state: "in_progress" }, { state: "failure" }])).toBe(false);
+  });
+});

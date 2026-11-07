@@ -16,7 +16,9 @@
 // outside the `data` field of a result.
 import {
   capabilitiesFor,
+  commandProposalStore,
   type ContextInputs,
+  d1CommandStore,
   ERROR_STATUS,
   executeQuery,
   explain,
@@ -44,16 +46,14 @@ import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import {
   interpretationContext,
   LATEST_IDENTITY_RELEASE,
-  PAGE_LIMIT,
-  visibleEvidence,
 } from "../../../packages/read-model/src/index";
 import { balanceProjectionReader, balanceReadConfigured } from "./balances-v2";
 import { centralStoreCapabilities } from "./capabilities";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
-import { proposalStore } from "./proposals";
 import type { OperationCall } from "../../../packages/application/src/audit/call.ts";
 
 import { callReadTool, isReadToolName, type ReadToolName } from "./read-tools";
+import { callPageReadTool, isPageReadToolName, type PageReadToolName } from "./page-read-tools";
 
 /** The tools every configured deployment serves. */
 export const AGENT_TOOL_NAMES = [
@@ -80,7 +80,8 @@ export type AgentToolName =
   | (typeof AGENT_TOOL_NAMES)[number]
   | typeof PURCHASES_TOOL_NAME
   | typeof RECONSTRUCTED_STATE_TOOL_NAME
-  | ReadToolName;
+  | ReadToolName
+  | PageReadToolName;
 
 /** Largest request body any agent route reads, in bytes. */
 export const MAX_REQUEST_BYTES = 65_536;
@@ -88,6 +89,7 @@ export const MAX_REQUEST_BYTES = 65_536;
 export function isAgentToolName(value: string): value is AgentToolName {
   return (
     isReadToolName(value) ||
+    isPageReadToolName(value) ||
     value === PURCHASES_TOOL_NAME ||
     value === RECONSTRUCTED_STATE_TOOL_NAME ||
     (AGENT_TOOL_NAMES as readonly string[]).includes(value)
@@ -141,7 +143,7 @@ async function contextInputs(context: ToolContext, overview: Overview): Promise<
   const parseRuns =
     grant.scopes.sources === "*"
       ? overview.parseRuns
-      : await scopedParseRuns(context.db, visibleSources);
+      : await context.reader.sourceParseRuns(visibleSources);
   const builds = [
     ...new Set(parseRuns.map((run) => `${run.parser_name}@${run.parser_version}`)),
   ].sort();
@@ -152,30 +154,6 @@ async function contextInputs(context: ToolContext, overview: Overview): Promise<
     visibleSources,
     interpretation: interpretationContext("latest", LATEST_IDENTITY_RELEASE),
   };
-}
-
-/**
- * The newest visible parse runs of the given sources, newest first: the
- * overview's parse-run window (`visibleEvidence.parseRuns`, the read model's
- * page limit), restricted to those sources before it is bounded.
- */
-async function scopedParseRuns(
-  db: D1Database,
-  sources: readonly string[],
-): Promise<Pick<Overview["parseRuns"][number], "id" | "parser_name" | "parser_version">[]> {
-  if (sources.length === 0) return [];
-  const placeholders = sources.map(() => "?").join(",");
-  const result = await db
-    .prepare(
-      `SELECT p.id, p.parser_name, p.parser_version
-         FROM ${visibleEvidence.parseRuns} p
-         JOIN observation_fetch_artifacts a ON a.id = p.fetch_artifact_id
-        WHERE a.source_id IN (${placeholders})
-        ORDER BY p.id DESC LIMIT ${String(PAGE_LIMIT)}`,
-    )
-    .bind(...sources)
-    .all<{ id: number; parser_name: string; parser_version: string }>();
-  return result.results;
 }
 
 /** `resultRef`: the hand-off id for one answer. Equal inputs give an equal ref. */
@@ -189,6 +167,7 @@ export async function callTool(
   context: ToolContext,
 ): Promise<ToolResult> {
   if (isReadToolName(name)) return callReadTool(name, body, context.env, context.grant);
+  if (isPageReadToolName(name)) return callPageReadTool(name, body, context.env, context.grant);
   switch (name) {
     case "kogane.capabilities": {
       if (body !== undefined && body !== null && Object.keys(body as object).length > 0)
@@ -254,7 +233,7 @@ export async function callTool(
       const outcome = await proposeReconciliation({
         grant: context.grant,
         opened,
-        store: proposalStore(context.db, context.audit),
+        store: commandProposalStore(d1CommandStore(context.db), context.audit),
         request: parsed.value,
         now: context.now,
       });

@@ -46,6 +46,7 @@ import {
   type OperationConnection,
 } from "../../../../packages/collection/src/operation-rpc.ts";
 import { afterMaintenance } from "../../../../packages/collection/src/schedule-model.ts";
+import { isLeaseAbortCode } from "../../../../packages/collection/src/schedule-result.ts";
 import { d1CommandStore } from "../../../../packages/storage-d1/src/core/command-store.ts";
 import type { D1Like } from "../../../../packages/storage-d1/src/d1.ts";
 import { registerCollectionRun, safeFailureCode, type CollectionEnv } from "../collection/index.ts";
@@ -596,15 +597,19 @@ async function dispatchCollector(
             kind: "uncertain",
             reasonCode: threw ? "dispatch_uncertain" : "collector_result_invalid",
           }
-        : result.status === "completed"
-          ? action === "collect"
-            ? { kind: "collected", runIds: result.runIds }
-            : { kind: "refreshed" }
-          : {
-              kind: "failed",
-              reasonCode: result.failureCode ?? "collection_failed",
-              runIds: result.runIds,
-            },
+        : isLeaseAbortCode(result.failureCode)
+          ? // The holder stopped itself after it may have reached the provider
+            // (ADR 0085): uncertain, like a lost answer, and never replayed.
+            { kind: "uncertain", reasonCode: result.failureCode }
+          : result.status === "completed"
+            ? action === "collect"
+              ? { kind: "collected", runIds: result.runIds }
+              : { kind: "refreshed" }
+            : {
+                kind: "failed",
+                reasonCode: result.failureCode ?? "collection_failed",
+                runIds: result.runIds,
+              },
   });
   return "started";
 }

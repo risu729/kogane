@@ -305,7 +305,7 @@ remote D1; see the [amendment's Cost](#cost).]
 
 ## Amendment 2026-10-09: route and page as implemented
 
-- Status: proposed (until its PR merges)
+- Status: accepted (merged 2026-10-09 in #608)
 - Date: 2026-10-09
 - Issue: part of #546; the owner approved this slice on 2026-10-09
   ("候補confirm/reject UI・既存service接続")
@@ -614,7 +614,7 @@ Synthetic data only, no production access:
 
 ## Amendment 2026-10-09: server anchor and history
 
-- Status: proposed (until this PR merges)
+- Status: accepted (merged 2026-10-09 in #629)
 - Date: 2026-10-09
 - Issue: part of #546
 
@@ -975,7 +975,7 @@ closed codes only, never an interval's free-text reason or provider facts.
 
 ## Amendment 2026-10-09: pure temporal selector
 
-- Status: proposed (until this PR merges).
+- Status: accepted (merged 2026-10-10 in #637).
 - Date: 2026-10-09.
 - Issue: part of #546; the issue remains incomplete.
 
@@ -1033,7 +1033,7 @@ semantics; production was not accessed.
 
 ## Amendment 2026-10-10: local temporal journal storage primitives
 
-- Status: proposed; no temporal command or route is enabled.
+- Status: accepted (merged 2026-10-10 in #652); no temporal command or route is enabled.
 - Issue: partial B15/B16/B17/B20 evidence for #546, not product completion.
 
 ### Context, options and decision
@@ -1083,7 +1083,7 @@ price/quantity/cost adapter or second-provider observation is introduced.
 
 ## Amendment 2026-10-10: refuse temporal-to-current command fallback
 
-- Status: proposed (until this PR merges).
+- Status: accepted (merged 2026-10-10 in #652).
 - Issue: bounded refusal part of B14 / #546, not a temporal writer.
 
 ### Context and options considered

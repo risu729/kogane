@@ -1,6 +1,6 @@
 # ADR 0027: The MoneyForward collector derives the account identity the parser requires
 
-- Status: proposed; amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
+- Status: accepted (merged 2026-09-27 in #276); amended by [ADR 0029](0029-data-classification-and-unkeyed-identity.md)
   (the identity is derived without a key; see
   [Amendment: ADR 0029](#amendment-adr-0029-the-identity-needs-no-key))
 - Date: 2026-09-27
@@ -285,7 +285,7 @@ value in place of the `v1` value. The text above is left as it was decided.
 
 ## Amendment 2026-11-04: captured-month ranges preserve gaps
 
-Status: proposed (until its PR merges)
+Status: accepted (merged 2026-11-06 in #915)
 Issue: [#452](https://github.com/risu729/kogane/issues/452)
 
 ### Context and options

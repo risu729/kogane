@@ -6,6 +6,7 @@ import {
   executionFor,
   d1CommandStore,
   bindDelegatedWrite,
+  delegatedWritesRemaining,
   prepareDelegatedOperation,
   confirmDelegatedOperation,
   replayDelegatedConfirmation,
@@ -169,10 +170,7 @@ export async function callDelegatedMaintenanceTool(
         preview.data.expectedRevision !== payload.revision
       )
         throw new UpstreamLost(503, "scheduling_unavailable");
-      const used = await store.first<{ n: number }>(
-        "SELECT count(*) n FROM audit_records WHERE principal=? AND principal_kind='delegated' AND result IN ('applied','accepted') AND recorded_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')",
-        [principal.id],
-      );
+      const remaining = await delegatedWritesRemaining(store, principal);
       const prepared = await prepareDelegatedOperation(
         store,
         audit,
@@ -188,10 +186,7 @@ export async function callDelegatedMaintenanceTool(
           preview: {
             ...prepared.preview,
             ...preview.data,
-            budgetRemaining: Math.min(
-              preview.data.budgetRemaining,
-              Math.max(0, principal.budget.writesPerDay - (used?.n ?? 0)),
-            ),
+            budgetRemaining: Math.min(preview.data.budgetRemaining, remaining),
           },
         },
       };

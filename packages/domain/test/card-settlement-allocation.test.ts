@@ -575,7 +575,7 @@ describe("module surface", () => {
     ])
       expect(new Set(list).size).toBe(list.length);
   });
-  test("no code outside packages/domain calls the planner: it adopts nothing and writes nothing", async () => {
+  test("only the read-only review of statements without a candidate calls the planner: nothing adopts or writes its answer", async () => {
     const root = join(import.meta.dir, "..", "..", "..");
     const callers: string[] = [];
     let scanned = 0;
@@ -594,7 +594,16 @@ describe("module surface", () => {
         )
           callers.push(path);
       }
-    expect(callers).toEqual([]);
+    // ADR 0074, 2026-11-07 amendment: one read-only caller, which writes
+    // nothing, and its wire contract, which imports only the closed code lists.
+    expect(callers.sort()).toEqual([
+      "packages/application/src/query/card-statements-unmatched.ts",
+      "packages/observation-shared/src/card-statements-unmatched-contract.ts",
+    ]);
+    const contract = await Bun.file(
+      join(root, "packages/observation-shared/src/card-statements-unmatched-contract.ts"),
+    ).text();
+    expect(contract).not.toContain("planCardStatementAllocations");
     // The scan read the tree: an empty glob would pass vacuously.
     expect(scanned).toBeGreaterThan(100);
   });
