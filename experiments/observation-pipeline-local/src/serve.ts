@@ -92,7 +92,9 @@ function clientHandler(): (request: Request) => Promise<ClientResult> {
 const demo = process.argv.includes("--demo");
 const temporaryRoot = resolve(tmpdir());
 const previewDir = demo ? mkdtempSync(join(temporaryRoot, "kogane-preview-")) : undefined;
-const store = openStore(previewDir);
+// The preview store is deleted on exit, so it opens disposable (no fsync per
+// commit); the regular store under state/ never does.
+const store = openStore(previewDir, { disposable: previewDir !== undefined });
 if (previewDir !== undefined) {
   process.on("exit", () => {
     store.db.close();

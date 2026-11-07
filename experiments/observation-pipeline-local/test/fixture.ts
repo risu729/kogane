@@ -1,18 +1,15 @@
 import { expect } from "bun:test";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import {
   insertFetchArtifact,
   insertFetchRun,
   insertObservation,
   insertParseRun,
-  openStore,
   publishParseRun,
   putRawObject,
   upsertSource,
   type Store,
 } from "../src/store.ts";
+import { freshTestStore } from "./test-store.ts";
 
 // A two-parse-version dataset shared by the API and client tests. It is built
 // through the store helpers rather than from the fixtures directory, so the
@@ -47,7 +44,7 @@ export interface Fixture {
  * depends on the schema and the store API rather than on the fixtures.
  */
 export function buildFixture(): Fixture {
-  const store = openStore(mkdtempSync(join(tmpdir(), "kogane-ui-")));
+  const store = freshTestStore("kogane-ui-");
   upsertSource(store, {
     id: "demo-bank",
     provider: "Demo Bank",

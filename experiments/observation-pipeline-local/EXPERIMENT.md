@@ -69,6 +69,13 @@ regular store in `state/` (gitignored), whose data classification is reported
 as unknown: an operator may have ingested real evidence into it. Neither is a
 connection to the production D1 or R2.
 
+The preview store and every store a test creates (`test/test-store.ts`) open
+with `openStore(directory, { disposable: true })`, which sets SQLite's
+`synchronous = OFF`: they are deleted afterwards, so no commit waits for an
+fsync. The regular store in `state/` keeps SQLite's default durability, and
+the test helper refuses any directory outside the system temporary directory
+or inside this experiment.
+
 `local-pipeline:serve` binds loopback only and has no authentication: it
 renders real financial evidence and must never be reachable from a network.
 The same holds for the dev server, which binds localhost unless it is given
