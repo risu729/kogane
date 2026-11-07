@@ -505,7 +505,13 @@ over, and — since ADR 0048 — starts a `collection` or an unattended
 `operationRequestPayload(store, operationId)` is the reader the executor uses
 to see what was accepted — the dispatch acts on the durable row, never on the
 contents of a notification. No branch of it completes an operation merely by
-handing the work over.
+handing the work over. An import whose re-registration throws (R2 or CORE
+unavailable) neither fails the lane nor holds the head of the queue: it stays
+`dispatch_pending` with `failureCode: "registration_failed"`, one more
+dispatch attempt and a retry time five minutes ahead, while the requests
+behind it are dispatched in the same tick (`docs/processor.md` §7). It is
+retried with no cap, and the code stays on the record after a later look
+registers it, as every retry code does.
 
 Only collections and unattended session refreshes expire (24 h,
 [collector execution](#collector-execution-adr-0048)). A replay or projection

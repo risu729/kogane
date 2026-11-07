@@ -5,8 +5,8 @@ import { beforeAll, expect, it } from "vitest";
 import { seedFixturePost, seedFixtureObject } from "./ingest-fixtures";
 import { seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import { identityQuery } from "../../../packages/application/src/query/identity-pages";
-import { organizedFilterOptions } from "../src/organized-filter-options";
-import { observationOrganizations } from "../src/observation-organization";
+import { organizedFilterOptions } from "../../../packages/application/src/query/organized-filter-options.ts";
+import { observationOrganizations } from "../../../packages/application/src/query/observation-organization.ts";
 import {
   preferredInstrumentNames,
   PREFERRED_INSTRUMENT_NAMES_SQL,
@@ -297,7 +297,7 @@ it("representative parse/run/pin cardinalities preserve current identity eligibi
     source_account: string;
   }>();
   started = performance.now();
-  const filters = await organizedFilterOptions(env.DB, "transactions", {
+  const filters = await organizedFilterOptions(d1Executor(env.DB), "transactions", {
     sources: [],
     instruments: [],
     metrics: [],
@@ -317,7 +317,7 @@ it("representative parse/run/pin cardinalities preserve current identity eligibi
   ).all<{ id: number }>();
   started = performance.now();
   const organized = await observationOrganizations(
-    env.DB,
+    d1Executor(env.DB),
     observed.results.map(({ id }) => ({ kind: "transaction", id })),
   );
   const productTime = Math.round(performance.now() - started);

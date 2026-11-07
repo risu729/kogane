@@ -524,3 +524,11 @@ flag停止、未適用migration、promoterがskipし続ける候補、未完のp
 J-POINT's observed total is one unclassified holding in points:j-point. Its provider-expiring portion is a non-additive display section attached to the exact total source fact, carried inside the same fixed READ snapshot. The portion is not another bucket and does not enter by-kind/consumable totals, conversion or a computed expiry rule. The total's expiry stays unattached; no remainder is computed.
 
 Not-displayed and unknown sections are stored even with zero display rows, and the UI calls the expiry unconfirmed. They never become zero or no expiry. READ 0005 adds provider display sections/checkpoints and immutable snapshot section counts. projection-input-v3 / projection-v4 fixed inputs and output digests include the bounded provider stream; publication waits for verification of every stream. Existing rule-derived estimates retain their rule-reference guards and pagination. Provider sections in the expiry response are a complete bounded companion set from the same resolved sealed snapshot.
+
+## Conversion module boundary
+
+`packages/domain/src/reward-conversion.ts` owns pure conversion amount simulation
+and bounded route traversal. `rewards.ts` re-exports its existing public API;
+reward contracts, bucket eligibility, expiry and redemption remain in that file.
+The extraction preserves derivation releases and returned values. The finite-domain
+tests cover conversion amounts and all directed offer graphs on three units.

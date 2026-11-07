@@ -1,6 +1,17 @@
 import { expect, test } from "bun:test";
-import { Miniflare, convertV4MiniflareOptions } from "miniflare";
+import { createRequire } from "node:module";
+import { Miniflare, Request as MiniflareRequest, convertV4MiniflareOptions } from "miniflare";
 import { miniflareHttpProxyGuarded } from "./miniflare-http-proxy.ts";
+
+test("Miniflare captures the locked Undici Request after the HTTP guard", () => {
+  const require = createRequire(import.meta.url);
+  const undici = require("undici") as { Request: typeof Request };
+  // A mixed bootstrap lets the guard replace fetch while Miniflare's Request
+  // still extends Bun's previous class; locked fetch then rejects that object.
+  const request = new MiniflareRequest("https://example.test/transport-bootstrap");
+  expect(miniflareHttpProxyGuarded()).toBe(true);
+  expect(request instanceof undici.Request).toBe(true);
+});
 
 function startRuntime(): Miniflare {
   return new Miniflare(
