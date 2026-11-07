@@ -170,3 +170,60 @@ test("both progress counts read jobs by key from the examined ids, without table
     db.close();
   }
 }, 60000);
+
+test("a progress update fenced on a cursor another sweep or step already moved changes nothing", async () => {
+  for (const id of [7200, 7300, 7301])
+    await seedArtifact(
+      env,
+      id,
+      "smbc-bank",
+      "balance-normalized",
+      "balance.normalized.json",
+      balance,
+    );
+  const now = Date.now();
+  // Work item: two sweeps read cursor 0 and examined the same page.
+  await env.DB.prepare(
+    "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,lane,created_at_ms) VALUES(7200,?,?,'pending','incremental',?)",
+  )
+    .bind(PARSER, VERSION, now)
+    .run();
+  const { id: itemId } = (await workItem(7200))!;
+  const itemStep = (from: number, to: number, examined: number[], complete: boolean) =>
+    env.DB.prepare(WORK_ITEM_PROGRESS_SQL)
+      .bind(itemId, from, to, JSON.stringify(examined), complete ? 1 : 0, now)
+      .run();
+  expect((await itemStep(0, 7200, [7200], false)).meta.changes).toBe(1);
+  expect((await itemStep(0, 7200, [7200], false)).meta.changes).toBe(0);
+  expect(await workItem(7200)).toMatchObject({ outcome: null, jobs_created: 1 });
+  // The last, empty page completes the item without counting anything again.
+  expect((await itemStep(7200, 7200, [], true)).meta.changes).toBe(1);
+  expect(await workItem(7200)).toMatchObject({ outcome: "jobs_created", jobs_created: 1 });
+
+  // Replay plan: two steps read creation cursor 0 and the same range.
+  const plan = await env.DB.prepare(
+    `INSERT INTO observation_replay_plans(created_at_ms,updated_at_ms,source_id,parser_name,parser_version,artifact_id_from,artifact_id_high_water,status,reason)
+     VALUES(?1,?1,'smbc-bank',?2,?3,7299,7301,'running','synthetic fence') RETURNING id`,
+  )
+    .bind(now, PARSER, VERSION)
+    .first<number>("id");
+  for (const id of [7300, 7301])
+    await env.DB.prepare(
+      "INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,lane,created_at_ms,replay_plan_id) VALUES(?,?,?,'pending','replay',?,?)",
+    )
+      .bind(id, PARSER, VERSION, now, plan)
+      .run();
+  const planStep = (from: number, to: number, examined: number[], complete: boolean) =>
+    env.DB.prepare(REPLAY_STEP_PROGRESS_SQL)
+      .bind(to, complete ? 1 : 0, now, JSON.stringify(examined), plan, from)
+      .run();
+  const jobsCreated = () =>
+    env.DB.prepare("SELECT jobs_created FROM observation_replay_plans WHERE id=?")
+      .bind(plan)
+      .first<number>("jobs_created");
+  expect((await planStep(0, 7300, [7300], false)).meta.changes).toBe(1);
+  expect((await planStep(0, 7300, [7300], false)).meta.changes).toBe(0);
+  expect(await jobsCreated()).toBe(1);
+  expect((await planStep(7300, 7301, [7301], true)).meta.changes).toBe(1);
+  expect(await jobsCreated()).toBe(2);
+}, 30000);
