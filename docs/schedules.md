@@ -42,10 +42,12 @@ A running execution proves it is alive
 ([ADR 0085](adr/0085-collection-lease-heartbeat.md)): it writes the lease's
 `heartbeat_at` on D1's clock with its claim and every minute while it runs. If
 a process dies during collection, its heartbeat stops, and the Processor's
-5-minute tick frees the lease once the heartbeat is 10 minutes old (a lease
-claimed by a build without heartbeats, which has none or only one older than
-its claim: once it is 60 minutes old). Each such
-release is recorded (`alarm.lease.expire`, principal `alarm:processor-tick`).
+5-minute `processor-tick` alarm frees the lease once the heartbeat is 10
+minutes old (a lease claimed by a build without heartbeats, which has none or
+only one older than its claim: once it is 60 minutes old). Each such release
+is recorded (`alarm.lease.expire`, principal `alarm:processor-tick`). Only that
+alarm frees leases: the release workflow's `/bootstrap`, which runs the same
+reservation repair, frees none.
 Freeing a lease starts and replays nothing: the next nominal occurrence, or a
 new operations request, simply finds the source free.
 
@@ -106,7 +108,8 @@ named collector RPC and the same lease
 held the request waits (`collection_lease_held`) instead of starting. The
 Processor's dispatch only reads the lease and never releases or replaces it;
 the collector acquires and releases it exactly as for an alarm run, and a
-stopped execution's lease is still released only by the operator. A collector that finds its lease held reports `collection_busy` (alarm
+stopped execution's lease is freed by the `processor-tick` alarm or the
+operator, as above. A collector that finds its lease held reports `collection_busy` (alarm
 receipts included) rather than `collection_failed`; St George, whose session
 coordinator records a refused lease as a failed run, still reports
 `collection_failed` and then refuses later runs until the operator resumes it.
