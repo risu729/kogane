@@ -106,8 +106,8 @@ stopped, because the server has no way to know that it stopped.
    (`started_at`) and D1's can only move its lease to this longer rule. An older
    build's claim under a leftover heartbeat is judged by the shorter rule only
    if its isolate clock lags D1 by more than the time between that heartbeat
-   and the claim, which spans a person noticing the stopped execution and
-   releasing it. The release names the exact reference it
+   and the claim, which is at least the time until a person released the
+   lease. The release names the exact reference it
    read and re-checks staleness in the same statement, so a heartbeat or an
    operator release that lands in between wins.
 5. **Each release is recorded.** In the same batch, right after the UPDATE, an

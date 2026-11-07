@@ -36,7 +36,7 @@ test("a keepalive stopped at its deadline rejects with the code and leaves healt
     object.leaseTiming = {
       heartbeatMs: 60_000,
       heartbeatLossMs: 180_000,
-      deadlineMs: 50,
+      deadlineMs: 200,
       graceMs: 60_000,
     };
     await state.storage.put("health", PREVIOUS);
@@ -44,7 +44,11 @@ test("a keepalive stopped at its deadline rejects with the code and leaves healt
     vi.spyOn(globalThis, "fetch").mockImplementation(
       (_input, init) =>
         new Promise<Response>((_, reject) => {
-          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+          // Like the real fetch, a signal already aborted rejects at once.
+          if (init?.signal?.aborted) return reject(new Error("aborted"));
+          init?.signal?.addEventListener("abort", () => reject(new Error("aborted")), {
+            once: true,
+          });
         }),
     );
     vi.spyOn(console, "log").mockImplementation(() => undefined);
