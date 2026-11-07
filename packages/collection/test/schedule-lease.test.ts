@@ -372,3 +372,71 @@ test("a heartbeat whose answer never comes still counts as missing", async () =>
   expect(state.heartbeatSql.length).toBeGreaterThanOrEqual(3);
   expect(state.ref).toBeNull();
 });
+
+/** Every action settlement is covered both before a stop and after either stop code. */
+for (const stop of ["none", "deadline", "lost"] as const) {
+  for (const outcome of ["fulfilled", "rejected"] as const) {
+    test(`a ${outcome} action preserves the ${stop} lease outcome`, async () => {
+      const { db, state } = leaseStore();
+      const actionError = new Error("synthetic action failure");
+      let stopReason: unknown;
+      let forced = 0;
+      const result = await withCollectionLease(
+        { SCHEDULE_DB: db },
+        "synthetic",
+        (signal) => {
+          const settle = () => {
+            if (outcome === "rejected") throw actionError;
+            return "synthetic action value";
+          };
+          if (stop === "none") return Promise.resolve().then(settle);
+          if (stop === "lost") state.ref = "newer-execution";
+          return new Promise<string>((resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => {
+                stopReason = signal.reason;
+                // Both resolving and wrapping the stop must preserve its code.
+                if (outcome === "fulfilled") resolve("synthetic action value");
+                else reject(actionError);
+              },
+              { once: true },
+            );
+          });
+        },
+        {
+          timing: {
+            heartbeatMs: stop === "lost" ? 1 : 60_000,
+            heartbeatLossMs: 120_000,
+            deadlineMs: stop === "deadline" ? 1 : 60_000,
+            graceMs: 60_000,
+          },
+          forceStop: () => {
+            forced += 1;
+          },
+        },
+      ).then(
+        (value) => ({ status: "fulfilled" as const, value }),
+        (error: unknown) => ({ status: "rejected" as const, error }),
+      );
+      if (stop === "none") {
+        expect(result).toEqual(
+          outcome === "fulfilled"
+            ? { status: "fulfilled", value: "synthetic action value" }
+            : { status: "rejected", error: actionError },
+        );
+        expect(stopReason).toBeUndefined();
+      } else {
+        expect(result.status).toBe("rejected");
+        if (result.status !== "rejected") throw new Error("expected lease stop");
+        expect(result.error).toBe(stopReason);
+        expect(result.error).toBeInstanceOf(CollectionLeaseAbort);
+        expect(scheduledFailure(result.error).failureCode).toBe(
+          stop === "deadline" ? "collection_deadline_exceeded" : "collection_lease_lost",
+        );
+      }
+      expect(state.ref).toBe(stop === "lost" ? "newer-execution" : null);
+      expect(forced).toBe(0);
+    });
+  }
+}

@@ -127,11 +127,23 @@ export async function runSharedCollection(
     };
   });
 }
-function defaultWindow(now: Date): {
+/**
+ * Yesterday's JST date and the JST month it falls in, from that month's first
+ * day. The bank's dates are Japanese calendar dates, so the window is computed
+ * in JST whatever the Worker's UTC clock says, and it ends on the last finished
+ * JST day: a window ending today would mark a day still in progress `complete`,
+ * and a month's last day would never be requested again once the next run's
+ * window starts on the new month. On the first of a month the run therefore
+ * requests the whole previous month; the new month's first day comes the next day.
+ * Open limit: only the run on the 1st requests the previous month's last day, so
+ * a missed or failed run on the 1st leaves that day unrequested; reaching back
+ * across the month boundary would be an unobserved request shape (ADR 0004).
+ */
+export function defaultWindow(now: Date): {
   from: string;
   to: string;
 } {
-  const to = now.toISOString().slice(0, 10);
+  const to = new Date(now.getTime() + (9 - 24) * 60 * 60 * 1000).toISOString().slice(0, 10);
   return { from: `${to.slice(0, 8)}01`, to };
 }
 function requiredSecret(value: string | undefined, name: string): string {

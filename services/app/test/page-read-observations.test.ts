@@ -72,7 +72,7 @@ describe("observation page reads", () => {
 
   it("are listed only to records.read over the whole store", async () => {
     const names = (grant: unknown) =>
-      pageReadMcpTools(grant as never)
+      pageReadMcpTools(grant as never, { reportedState: true })
         .map((tool) => tool.name)
         .filter((name) => (TOOLS as readonly string[]).includes(name));
     expect(names(RECORDS_GRANT)).toEqual([...TOOLS]);
