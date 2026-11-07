@@ -68,10 +68,11 @@ into `needs-rule-verification`.
   stored text that does not parse). It is never read as a standing offer, and the
   reader never turns damaged text into `open-ended` or `null`.
 - `availableForOffer` checks neither an `unknown` deadline nor an `unknown` validity
-  and adds no code for them (a limit; `/offers/simulate` calls it without a clock,
-  so it checks neither field there). Route search rejects an `unknown` validity or
-  deadline as `needs_rule_verification` (see "Search eligibility at each hop"),
-  which is why a standing offer stores `open-ended` and `null` instead of `unknown`.
+  and adds no code for them, nor for a clock inside a `period` deadline (a limit;
+  `/offers/simulate` calls it without a clock, so it checks neither field there).
+  Route search rejects an `unknown` validity or deadline as
+  `needs_rule_verification` (see "Search eligibility at each hop"), which is why a
+  standing offer stores `open-ended` and `null` instead of `unknown`.
 - No migration: both columns already hold JSON text, and nothing writes offer rows
   today (§3).
 
