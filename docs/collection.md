@@ -322,10 +322,14 @@ Terminal fields: `producer: collector-sony-bank`; one unit `account`
 (`unitKind: account`) whose `artifactCount` counts every artifact but
 `manifest.json`, which belongs to the run and names no unit (ADR 0021; until
 then the manifest named the unit and was counted in it); ranges
-`request-window` (the requested `from`/`to`; a scheduled run requests
+`request-window` (the requested `from`/`to`; every run, from the alarm or
+from an operations-API `collect`, neither of which carries a window, requests
 yesterday's JST date, the last finished JST day, from the first of its JST
 month, `defaultWindow`, so a run on the 1st requests the whole previous month
-and each day is requested after it ends) and, when wallet
+and each day is requested after it ends; an open limit: the previous month's
+last day is requested only by a run on the 1st, so if that run is missed or
+fails, no later run requests that day, because a window that crosses a month
+boundary is a request shape nobody has observed, ADR 0004) and, when wallet
 statements were collected, `wallet-months`; one `terminal` report carrying the outcome;
 `requestedScope.scopeKind = date_range` over the same window;
 `coverageStatus` `complete` for a successful window, `partial` for a partial

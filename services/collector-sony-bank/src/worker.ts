@@ -135,6 +135,9 @@ export async function runSharedCollection(
  * and a month's last day would never be requested again once the next run's
  * window starts on the new month. On the first of a month the run therefore
  * requests the whole previous month; the new month's first day comes the next day.
+ * Open limit: only the run on the 1st requests the previous month's last day, so
+ * a missed or failed run on the 1st leaves that day unrequested; reaching back
+ * across the month boundary would be an unobserved request shape (ADR 0004).
  */
 export function defaultWindow(now: Date): {
   from: string;
