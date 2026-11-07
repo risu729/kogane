@@ -472,7 +472,13 @@ async function accept(input: AcceptInput): Promise<CommandResult<AcceptedOperati
   // answer with someone else's request.
   if (row.payload_digest !== payloadDigest)
     return commandError("idempotency_conflict", [operationId]);
-  const receipt = receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId]));
+  // A re-send answers with the same record a read does, `projected` derived
+  // the same way (ADR 0048, amended): never the stored requirement reference.
+  const receipt = await withProjection(
+    store,
+    input.readStore,
+    receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId])),
+  );
   return { ok: true, receipt, replayed };
 }
 

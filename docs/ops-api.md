@@ -460,7 +460,8 @@ whenever it is read, and writes nothing:
 | `pending`, no `failureCode`                                | `adopted` is not complete                                                                              |
 
 The record's `status` reads `completed` when the stored status is `running`
-and every stage, this one included, is `completed`. The stored request stays
+and every stage, this one included, is `completed`; a re-send of the request
+answers with that same status. The stored request stays
 `running` and its `projected` row `pending`, so the answer follows READ: it
 falls back to `running` with the reason if READ is lost or CORE is restored
 under a new epoch. Coverage compares revisions over the whole CORE input, so

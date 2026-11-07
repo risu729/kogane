@@ -1037,6 +1037,12 @@ describe("operations over /mcp: every MCP client, as itself (ADR 0047, ADR 0084)
     });
     expect(projected(viaMcp)).toEqual(projected(http!));
     expect(viaMcp.stages).toEqual(http!.stages);
+    // A re-send answers with the status a read does.
+    const resent = await ops("/collections", { ...COLLECTION, idempotencyKey: "projected-http" });
+    expect(resent).toEqual({
+      status: 202,
+      json: { operationId: ids[0], status: "completed" },
+    });
   });
 
   it("never shows the operator's browser receipt to its MCP principal", async () => {

@@ -326,7 +326,8 @@ not keep is the revision at which a given parse was published:
     (epochs differ) or `projection_revision_unrecorded` (published without a
     stored revision). Never `completed` for a reason (INV05).
 - The record's `status` reads `completed` when the stored status is `running`
-  and every stage of the kind, the derived one included, is `completed`.
+  and every stage of the kind, the derived one included, is `completed`. A
+  re-send under the same key answers from the same derivation.
   `ops_requests.status` and the stage row are not changed.
 
 ### Consequences
