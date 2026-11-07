@@ -313,9 +313,11 @@ proposal; (C) `proposed` only. The owner chose A.
 
 **Decision.**
 
-1. _Who._ An MCP client whose resolved delegation holds
-   `schedules.survey.decide` (the `maintainer` role holds it), for a proposal
-   whose source is in the delegation's `scopes.scheduleSources`. The tool is
+1. _Who._ An MCP client, as itself
+   ([ADR 0084](0084-mcp-operator-authority-without-delegation.md): every MCP
+   client Access verifies resolves with every operation capability over the
+   whole store; this amendment was drafted under ADR 0063's delegations and
+   ADR 0084 replaced them before it merged). The tool is
    `kogane.schedules.survey.decide`; its private Processor route is
    `/internal/delegated-survey`, which calls the same `decideSurveyProposal`
    as the screen.
@@ -341,7 +343,7 @@ proposal; (C) `proposed` only. The owner chose A.
 4. _Bounds._ The delegated maintenance bounds: no newly caused joined deferral
    over 31 days (`maintenance_deferral_too_long`), the 30-per-day count of
    delegated revisions (shared with `kogane.schedules.maintenance.update`) and
-   the delegation's daily budget. The 31-day ceiling limits lengthening only.
+   the principal's fixed daily budget. The 31-day ceiling limits lengthening only.
 5. _Kept with the operator (option A)._ An acceptance of a proposal carrying
    `rule_absent_from_page` (it disables a rule), `rule_disabled_by_operator`
    (it re-enables one the operator disabled), `ambiguous_rule_match` (a new
@@ -361,17 +363,18 @@ proposal; (C) `proposed` only. The owner chose A.
    `<source>-survey-<id>` at expected revision 0; that id held by another
    source's rule is `revision_conflict`. The public maintenance tool cannot
    pass it.
-7. _Reading._ `kogane.schedules.survey.read` (`schedules.read`, scoped by
-   `scopes.scheduleSources`, MCP only) returns the page's re-survey section for
-   those sources: lane state, page freshness and undecided proposals, with
+7. _Reading._ `kogane.schedules.survey.read` (`schedules.read`, MCP only,
+   optionally one `source`) returns the page's re-survey section for the
+   caller's sources: lane state, page freshness and undecided proposals, with
    closed codes and the page URL, fetch time and SHA-256, never page text.
    The sources narrow the query before the page's bound on shown proposals,
    so another source's backlog neither hides these nor shows in `truncated`.
 8. _Conflicts._ An operator and an agent deciding one proposal: the first
    write wins on the decision's primary key, and the other gets
    `409 proposal_already_decided` with nothing written. A rule that moved since
-   the proposal is `409 revision_conflict`. A proposal of a source outside the
-   delegation answers `404 proposal_not_found`, exactly as a missing id does.
+   the proposal is `409 revision_conflict`. A proposal of another source than
+   the call's `source` answers `404 proposal_not_found`, exactly as a missing
+   id does.
 
 **Consequences.** An agent can clear routine proposals. The ones that would
 disable, re-enable or duplicate a rule, or that the page itself puts in doubt,
@@ -379,8 +382,7 @@ stay on the schedules page. With option A no human sits between a page reading
 and an accepted rule, which is what option 1 above was rejected for; the
 preview carries no page text, and the URL an agent may fetch is untrusted
 data. Nothing changes in production while every page in
-`config/maintenance-survey.json` is `"fetch": "disabled"` and no delegation
-holds the capability.
+`config/maintenance-survey.json` is `"fetch": "disabled"`.
 
 **Verification.** `services/app/test/delegated-survey.test.ts` (real local D1,
 the App adapter, the private route and the unchanged writer): rejection and

@@ -114,8 +114,8 @@ change (owner, 2026-11-06 13:25 UTC). Examples:
 - adds or changes a migration (`packages/storage-d1/migrations/`) or a resource in
   `infra/resources.json`; rollback restores no database
   ([CI/CD: rollback](docs/ci-cd.md#rollback-plan-11-7));
-- changes a feature flag, grant, delegation, Access audience, secret name or
-  binding in a `wrangler.jsonc`;
+- changes a feature flag, grant, `OPERATOR_SUBJECTS`, Access audience or
+  policy, secret name or binding in a `wrangler.jsonc`;
 - adds an agent or MCP operation or capability in
   `packages/application/src/operation-path/catalogue.ts`;
 - changes `.github/workflows/`, the release ledger or the rollback floor;
@@ -151,26 +151,25 @@ UTC.
   accepts it (INV07, [ADR 0001](docs/adr/0001-domain-axes.md);
   [economic events](docs/economic-events.md#what-is-automatic-and-what-is-proposal-only)).
 - Heuristics, rule proposal passes and AI proposals only propose (INV07
-  above), and an agent without an explicit delegation only reads and
-  proposes: it never approves, commits or changes a setting
+  above). Besides the human operator in the browser, an operation is applied
+  only by an MCP client: `mcp-client:<sub>`, verified by Cloudflare Access on
+  the dedicated MCP application. No server-side table grants or narrows it
+  (owner, 2026-11-07): it reads the whole store and acts as itself, never as
+  the operator, under the operation's confirmation class (R1 direct, R2
+  prepare/confirm; R3 refused), through the common command layer, and with an
+  audit record. The MCP Access policy decides who that can be, and the owner
+  limits tools in the MCP client. A rule, heuristic or the HTTP agent route
+  only reads and proposes
   ([change lifecycle](docs/change-lifecycle.md#grants),
-  [agent API](docs/agent-api.md#card-purchase-explanation)). Besides the
-  human operator, only a principal that Cloudflare Access verified on the
-  dedicated MCP application, and that the owner delegated by name, may apply
-  an operation: within its delegated capabilities, scope and expiry, under
-  the operation's confirmation class, through the common command layer, and
-  with an audit record. Grants, Access, delegations, secrets and deployment
-  are never delegated
+  [agent API](docs/agent-api.md#card-purchase-explanation)). Grants, Access,
+  the operator list, secrets and deployment (R4) are never operations
   ([ADR 0063](docs/adr/0063-delegated-ai-operation-path.md),
-  [ADR 0064](docs/adr/0064-common-audit-log.md)). Delegated execution is
-  implemented (slice S3 of the
-  [plan](docs/plans/2026-10-ai-operation-path.md)), but `MCP_DELEGATIONS` in
-  `services/app/wrangler.jsonc` is empty, so no delegation exists and in
-  practice no agent approves, commits or changes a setting.
+  [ADR 0064](docs/adr/0064-common-audit-log.md),
+  [ADR 0084](docs/adr/0084-mcp-operator-authority-without-delegation.md)).
 - Every operation and read the web UI offers is also an MCP operation or read,
   and both call the same application service; an MCP tool issues no SQL and
   reads no R2 on its own. A screen operation without its MCP tool is not done.
-  Who may use a tool is still ADR 0063's delegation
+  Who may use a tool is the bullet above
   ([ADR 0081](docs/adr/0081-ui-parity-through-mcp.md)).
 - Amounts are exact decimals added in `packages/domain` (`sumQuantities` and
   friends refuse mixed units and inexact values, INV03), not summed in SQL

@@ -54,6 +54,7 @@ import { proposalStore } from "./proposals";
 import type { OperationCall } from "../../../packages/application/src/audit/call.ts";
 
 import { callReadTool, isReadToolName, type ReadToolName } from "./read-tools";
+import { callPageReadTool, isPageReadToolName, type PageReadToolName } from "./page-read-tools";
 
 /** The tools every configured deployment serves. */
 export const AGENT_TOOL_NAMES = [
@@ -80,7 +81,8 @@ export type AgentToolName =
   | (typeof AGENT_TOOL_NAMES)[number]
   | typeof PURCHASES_TOOL_NAME
   | typeof RECONSTRUCTED_STATE_TOOL_NAME
-  | ReadToolName;
+  | ReadToolName
+  | PageReadToolName;
 
 /** Largest request body any agent route reads, in bytes. */
 export const MAX_REQUEST_BYTES = 65_536;
@@ -88,6 +90,7 @@ export const MAX_REQUEST_BYTES = 65_536;
 export function isAgentToolName(value: string): value is AgentToolName {
   return (
     isReadToolName(value) ||
+    isPageReadToolName(value) ||
     value === PURCHASES_TOOL_NAME ||
     value === RECONSTRUCTED_STATE_TOOL_NAME ||
     (AGENT_TOOL_NAMES as readonly string[]).includes(value)
@@ -189,6 +192,7 @@ export async function callTool(
   context: ToolContext,
 ): Promise<ToolResult> {
   if (isReadToolName(name)) return callReadTool(name, body, context.env, context.grant);
+  if (isPageReadToolName(name)) return callPageReadTool(name, body, context.env, context.grant);
   switch (name) {
     case "kogane.capabilities": {
       if (body !== undefined && body !== null && Object.keys(body as object).length > 0)

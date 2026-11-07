@@ -15,11 +15,6 @@ import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
 const PATH = "/api/v2/reported-state";
 const TOOL_PATH = "/api/agent/v1/reported-state.read";
-const FULL_GRANT = {
-  scopes: { sources: "*", accounts: "*" },
-  capabilities: ["summary.read", "records.read"],
-  budget: { maxRows: 100, maxProposalTargets: 1, maxExplainDepth: 3 },
-};
 /** The MCP Access application's audience (ADR 0047); `/mcp` accepts nothing else. */
 const MCP_AUDIENCE = "fixture-mcp-audience";
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
@@ -260,20 +255,8 @@ describe("reported state on a date", () => {
 });
 
 describe("the agent tool", () => {
-  // Through `/mcp` the same subject is the agent-only `mcp-client:<sub>`
-  // (ADR 0047), so it has a grant under that name too.
-  const granted = {
-    AGENT_API_GRANTS: JSON.stringify({
-      "agent-principal": FULL_GRANT,
-      "mcp-client:agent-principal": FULL_GRANT,
-    }),
-  };
-  const withGrant = (grant: unknown) => ({
-    AGENT_API_GRANTS: JSON.stringify({
-      "agent-principal": grant,
-      "mcp-client:agent-principal": grant,
-    }),
-  });
+  // Every proved caller reads with the whole-store grant (ADR 0084).
+  const granted = {};
   const listed = async (environment: Record<string, unknown>, schema = true) =>
     (
       (await (
@@ -332,7 +315,7 @@ describe("the agent tool", () => {
     expect(await counts()).toEqual(before);
   });
 
-  it("is listed with the route's parameters to a whole-store records.read grant only", async () => {
+  it("is listed with the route's parameters to every MCP client while the route is served", async () => {
     const tool = READ_MCP_TOOLS.find((entry) => entry.name === REPORTED_STATE_TOOL_NAME)!;
     expect(tool.inputSchema).toMatchObject({
       type: "object",
@@ -355,15 +338,6 @@ describe("the agent tool", () => {
       openWorldHint: false,
     });
     expect(await listed(granted)).toContain(REPORTED_STATE_TOOL_NAME);
-    // The committed MCP reader grant's shape: summary.read and records.read
-    // over the whole store.
-    expect(await listed(withGrant(FULL_GRANT))).toContain(REPORTED_STATE_TOOL_NAME);
-    for (const grant of [
-      { ...FULL_GRANT, capabilities: ["summary.read"] },
-      { ...FULL_GRANT, scopes: { sources: ["smbc-bank"], accounts: "*" } },
-      { ...FULL_GRANT, scopes: { sources: "*", accounts: ["acct-synthetic"] } },
-    ])
-      expect(await listed(withGrant(grant))).not.toContain(REPORTED_STATE_TOOL_NAME);
     expect(await listed(granted, false)).not.toContain(REPORTED_STATE_TOOL_NAME);
   });
 
@@ -403,38 +377,8 @@ describe("the agent tool", () => {
     });
   });
 
-  it("needs records.read over the whole store, checked before the body is validated", async () => {
-    const refusals: [unknown, Record<string, unknown>][] = [
-      [
-        { ...FULL_GRANT, capabilities: ["summary.read"] },
-        { code: "unauthorized", refs: ["capability:records.read"] },
-      ],
-      [
-        { ...FULL_GRANT, scopes: { sources: ["smbc-bank"], accounts: "*" } },
-        { code: "evidence_restricted", refs: ["scope:source"] },
-      ],
-      [
-        { ...FULL_GRANT, scopes: { sources: "*", accounts: ["acct-synthetic"] } },
-        { code: "evidence_restricted", refs: ["scope:account"] },
-      ],
-    ];
-    for (const [grant, expected] of refusals) {
-      // A malformed body is not reached: the grant decides first.
-      const http = await call(TOOL_PATH, {
-        subject: "agent-principal",
-        body: { date: "not-a-date" },
-        environment: withGrant(grant),
-      });
-      expect(http.status).toBe(403);
-      expect(await http.json()).toMatchObject({ schemaVersion: "financial-error-v1", ...expected });
-      const viaMcp = await mcpCall({ date: today }, { environment: withGrant(grant) });
-      expect(viaMcp.result?.isError).toBe(true);
-      expect(viaMcp.result?.structuredContent).toMatchObject(expected);
-    }
-    // No grant at all, and no Access identity.
-    expect(
-      (await call(TOOL_PATH, { subject: "agent-principal", body: { date: today } })).status,
-    ).toBe(403);
+  it("needs an Access identity", async () => {
+    // No Access identity.
     expect(
       (await call(TOOL_PATH, { subject: null, body: { date: today }, environment: granted }))
         .status,

@@ -7,9 +7,16 @@
   prepare/confirm with audit-linked reversal, and maintenance R1 apply and R2
   prepare/confirm through #564's sole writer; survey rejection (R1) and
   acceptance (R2) followed on 2026-11-07 under the owner's adoption conditions
-  ([ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). The committed `MCP_DELEGATIONS` is empty, so no
-  delegation exists and nothing executes under one. The slices are in the
+  ([ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). The slices are in the
   [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
+- Superseded in part (2026-11-07) by
+  [ADR 0084](0084-mcp-operator-authority-without-delegation.md): items 2 and 4
+  (the `MCP_DELEGATIONS` declaration, its roles, declared capabilities, scopes,
+  lifetimes and budgets), the delegation part of item 11 and the 2026-11-06
+  delegation-status amendment. Any MCP client Access verifies now resolves,
+  over the whole store, and `AGENT_API_GRANTS` is removed too; the other items
+  stand. Text below that says `MCP_DELEGATIONS` is empty or names
+  `AGENT_API_GRANTS` describes the state before ADR 0084.
 - Date: 2026-10-09
 - Amends: [ADR 0013](0013-agent-card-purchase-read.md) (the read-only
   premise), [ADR 0039](0039-alarm-schedule-management.md) ("agents and service
