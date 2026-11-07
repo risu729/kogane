@@ -776,8 +776,26 @@ export function buildSchemaLedger(
       .map((trigger) => trigger.name)
       .sort();
     const entry = profile.classification[row.name];
-    const noUpdateTriggers = triggers.filter((name) => name.endsWith("_no_update"));
-    const noDeleteTriggers = triggers.filter((name) => name.endsWith("_no_delete"));
+    // A guard is a trigger that refuses every update (or delete) of the
+    // table. One whose WHEN clause lets some through — `decision_revisions`
+    // lets `superseded_by` be set once — is not, whatever its name says.
+    const unconditional = new Set(
+      triggerRows
+        .filter(
+          (trigger) =>
+            trigger.tbl_name === row.name &&
+            !/\sWHEN\s/iu.test(
+              (trigger.sql ?? "").replaceAll(/--[^\n]*/gu, "").split(/\bBEGIN\b/iu)[0]!,
+            ),
+        )
+        .map((trigger) => trigger.name),
+    );
+    const noUpdateTriggers = triggers.filter(
+      (name) => name.endsWith("_no_update") && unconditional.has(name),
+    );
+    const noDeleteTriggers = triggers.filter(
+      (name) => name.endsWith("_no_delete") && unconditional.has(name),
+    );
     return {
       name: row.name,
       classification: entry?.classification ?? "unclassified-keep",

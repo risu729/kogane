@@ -600,9 +600,9 @@ routes, H8 the agents' proposal route) and 20 reads (D1–D20). Operations with
    record will be its only durable trace. It stays R3.
 5. Agent-facing contracts for the review queues (D8, D9): only the purchases
    page has one (`validAgentCardPurchasePage`).
-6. D2–D4, D6, D7, D11–D14, D17–D19: the routes exist, no MCP tool does, and
-   none is proven computable inside a listed scope. D5's tool exists,
-   whole-store only.
+6. D2–D4, D6, D7, D11–D14, D17, D18: the routes exist, no MCP tool does, and
+   none is proven computable inside a listed scope. D5's and D19's
+   (`kogane.events.read`) tools exist, whole-store only.
 7. W1, W2, W4, W5: the writers exist, no agent adapter does.
 8. #564's tool exists only on its branch, with a free-text reason.
 

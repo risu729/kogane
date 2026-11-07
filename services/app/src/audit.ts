@@ -251,11 +251,14 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     operation === "observations.list" ||
     operation === "balances.read" ||
     operation === "rewards.read" ||
-    operation === "reported-holdings-change.read"
+    operation === "reported-holdings-change.read" ||
+    operation === "events.read"
   ) {
     const data = (value["data"] ?? {}) as Record<string, unknown>;
     const coverage = (data["coverage"] ?? {}) as Record<string, unknown>;
     const page = (data["page"] ?? {}) as Record<string, unknown>;
+    // The events pages name their coverage `dataCoverage` (A10).
+    const dataCoverage = (data["dataCoverage"] ?? {}) as Record<string, unknown>;
     // `items` or `rows` when the page has them: a reward expiry page lists
     // its provider display sections before its rows.
     const list = Array.isArray(data["items"])
@@ -265,7 +268,10 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
         : data;
     return {
       rows: countOf(list),
-      truncated: coverage["truncated"] === true || page["hasMore"] === true,
+      truncated:
+        coverage["truncated"] === true ||
+        dataCoverage["truncated"] === true ||
+        page["hasMore"] === true,
     };
   }
   // A page of statements; a named next page means more remain.

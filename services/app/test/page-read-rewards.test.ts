@@ -140,7 +140,9 @@ describe("reward and holdings-change page reads", () => {
     ]);
     expect(PAGE_READ_ROUTES[CHANGE]).toEqual(["/api/v2/reported-holdings-change"]);
     const names = (grant: unknown, reportedState: boolean) =>
-      pageReadMcpTools(grant as never, { reportedState }).map((tool) => tool.name);
+      pageReadMcpTools(grant as never, { reportedState, economicEvents: true }).map(
+        (tool) => tool.name,
+      );
     expect(names(RECORDS_GRANT, true)).toEqual(expect.arrayContaining([REWARDS, CHANGE]));
     // The holdings change exists only where the reported state's views do.
     expect(names(RECORDS_GRANT, false)).toContain(REWARDS);

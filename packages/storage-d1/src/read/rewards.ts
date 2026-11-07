@@ -108,7 +108,7 @@ export interface RewardSnapshotRow {
 }
 
 /** The published reward snapshot; only through the pointer, never "the newest". */
-const ACTIVE_REWARD_SNAPSHOT_SQL = `SELECT ${snapshotColumns("s.")}
+export const ACTIVE_REWARD_SNAPSHOT_SQL = `SELECT ${snapshotColumns("s.")}
   FROM reward_snapshot_pointer p
   JOIN reward_expiry_snapshots s ON s.snapshot_id=p.snapshot_id AND s.status='complete'
   WHERE p.id=1`;
@@ -161,43 +161,43 @@ export async function currentRewardContext(
 }
 
 /** A snapshot a cursor names; absent or retired means the context expired. */
-const REWARD_SNAPSHOT_SQL = `SELECT ${SNAPSHOT_COLUMNS} FROM reward_expiry_snapshots
+export const REWARD_SNAPSHOT_SQL = `SELECT ${SNAPSHOT_COLUMNS} FROM reward_expiry_snapshots
   WHERE snapshot_id=?1 AND status='complete'`;
 
-const REWARD_POINTER_SQL = `SELECT snapshot_id, source_revision, visibility_revision,
+export const REWARD_POINTER_SQL = `SELECT snapshot_id, source_revision, visibility_revision,
     core_epoch, read_instance_id, evaluated_at, output_digest, switched_at
   FROM reward_snapshot_pointer WHERE id=1`;
 
 /** The build of this content that may still be continued or reused. */
-const REWARD_SNAPSHOT_FOR_CONTENT_SQL = `SELECT ${SNAPSHOT_COLUMNS}
+export const REWARD_SNAPSHOT_FOR_CONTENT_SQL = `SELECT ${SNAPSHOT_COLUMNS}
   FROM reward_expiry_snapshots WHERE content_key=?1 AND status IN ('building','complete')
   ORDER BY status='building' DESC, attempt DESC LIMIT 1`;
 
-const OLDEST_BUILDING_REWARD_SNAPSHOT_SQL = `SELECT ${SNAPSHOT_COLUMNS}
+export const OLDEST_BUILDING_REWARD_SNAPSHOT_SQL = `SELECT ${SNAPSHOT_COLUMNS}
   FROM reward_expiry_snapshots WHERE status='building'
   ORDER BY created_at, snapshot_id LIMIT 1`;
 
-const NEXT_REWARD_ATTEMPT_SQL =
+export const NEXT_REWARD_ATTEMPT_SQL =
   "SELECT coalesce(max(attempt),0)+1 AS attempt FROM reward_expiry_snapshots WHERE content_key=?1";
 
 /** Written rows of a build, in contract order, with their digests. */
-const WRITTEN_REWARD_ESTIMATE_DIGESTS_SQL = `SELECT row_seq, row_digest
+export const WRITTEN_REWARD_ESTIMATE_DIGESTS_SQL = `SELECT row_seq, row_digest
   FROM reward_expiry_estimates_v2 WHERE snapshot_id=?1 ORDER BY row_seq`;
-const WRITTEN_REWARD_SIMULATION_DIGESTS_SQL = `SELECT row_seq, row_digest
+export const WRITTEN_REWARD_SIMULATION_DIGESTS_SQL = `SELECT row_seq, row_digest
   FROM reward_conversion_simulations WHERE snapshot_id=?1 ORDER BY row_seq`;
 
-const REWARD_CHECKPOINT_SQL = `SELECT position, rows_written
+export const REWARD_CHECKPOINT_SQL = `SELECT position, rows_written
   FROM reward_build_checkpoints WHERE snapshot_id=?1 AND stage=?2`;
 
 /** Builds that may be retired: complete or abandoned, never the published one. */
-const RETIREABLE_REWARD_SNAPSHOTS_SQL = `SELECT snapshot_id FROM reward_expiry_snapshots
+export const RETIREABLE_REWARD_SNAPSHOTS_SQL = `SELECT snapshot_id FROM reward_expiry_snapshots
   WHERE snapshot_id<>?1 AND status IN ('complete','building')
     AND snapshot_id<>coalesce((SELECT p.snapshot_id FROM reward_snapshot_pointer p
       WHERE p.id=1),'')
   ORDER BY created_at DESC, snapshot_id DESC LIMIT 50 OFFSET ?2`;
 
 /** One page of a published snapshot's estimates, in deadline-and-contract order. */
-const REWARD_ESTIMATE_PAGE_SQL = `SELECT snapshot_id, row_key, row_seq, program_id,
+export const REWARD_ESTIMATE_PAGE_SQL = `SELECT snapshot_id, row_key, row_seq, program_id,
     holding_ref, bucket_ref, rule_id, rule_version, bucket_kind, state, deadline_basis, expires_on,
     amount_coefficient, amount_scale, amount_status, unit_ref, provider_observed_json,
     policy_estimated_json, reason_codes_json, uncertainty_codes_json, basis_refs_json, row_digest,
@@ -206,7 +206,7 @@ const REWARD_ESTIMATE_PAGE_SQL = `SELECT snapshot_id, row_key, row_seq, program_
   WHERE snapshot_id=?1 AND (?2 IS NULL OR program_id=?2) AND row_seq>?3
   ORDER BY row_seq LIMIT ?4`;
 
-const REWARD_SIMULATION_PAGE_SQL = `SELECT snapshot_id, request_digest, row_seq,
+export const REWARD_SIMULATION_PAGE_SQL = `SELECT snapshot_id, request_digest, row_seq,
     reproducibility, reason_code, request_json, offer_id, offer_version, result_json,
     search_coverage, evaluated_at, policy_release, row_digest
   FROM reward_conversion_simulations
