@@ -358,8 +358,22 @@ describe("the reward routes over the READ database", () => {
 
   it("G3-04: a cursor naming a snapshot built before a use restriction is refused", async () => {
     // Later than every other build here, so this snapshot is the published one.
-    const before = await build("2026-12-02T00:00:00.000Z");
-    expect(["complete", "unchanged"]).toContain(before.status);
+    const earlier = await build("2026-12-02T00:00:00.000Z");
+    expect(["complete", "unchanged"]).toContain(earlier.status);
+    const opened = (await (await call("/api/v2/rewards/expiry?limit=25")).json()) as ExpiryPage;
+    const held = opened.page.nextCursor!;
+    expect(decodeReadCursor(held)!.snapshotId).toBe(earlier.snapshotId);
+
+    // A rebuild with no restriction in between publishes a newer snapshot,
+    // but leaves the epoch and visibility revision where they were: a reader
+    // still paging the older, retained snapshot keeps its fixed list.
+    const before = await build("2026-12-03T00:00:00.000Z");
+    expect(before.status).toBe("complete");
+    expect(before.snapshotId).not.toBe(earlier.snapshotId);
+    const kept = await call(`/api/v2/rewards/expiry?limit=25&cursor=${held}`);
+    expect(kept.status).toBe(200);
+    expect(((await kept.json()) as ExpiryPage).snapshot.snapshotId).toBe(earlier.snapshotId);
+
     const first = (await (await call("/api/v2/rewards/expiry?limit=25")).json()) as ExpiryPage;
     const cursor = first.page.nextCursor!;
     expect(decodeReadCursor(cursor)!.snapshotId).toBe(before.snapshotId);
@@ -373,7 +387,7 @@ describe("the reward routes over the READ database", () => {
        VALUES('balance:synthetic-reward-restricted','no-reuse','2026-09-12T00:00:00Z','[]',
          'operator:1','Synthetic: the evidence may no longer be reused.')`,
     ).run();
-    const after = await build("2026-12-03T00:00:00.000Z");
+    const after = await build("2026-12-04T00:00:00.000Z");
     expect(after.status).toBe("complete");
     expect(after.snapshotId).not.toBe(before.snapshotId);
     expect((await call("/api/v2/rewards/expiry?limit=25")).status).toBe(200);
