@@ -65,11 +65,14 @@ test("diagnostics never read throwing name or constructor accessors", () => {
       throw new Error("synthetic private constructor");
     },
   });
-  const hostileProxy = new Proxy({}, {
-    getPrototypeOf() {
-      throw new Error("synthetic private prototype");
+  const hostileProxy = new Proxy(
+    {},
+    {
+      getPrototypeOf() {
+        throw new Error("synthetic private prototype");
+      },
     },
-  });
+  );
   expect(safeFailureCode(unreadableName)).toBe("Error");
   expect(safeFailureCode(unreadableConstructor)).toBe("Error");
   expect(safeFailureCode(hostileProxy)).toBe("unknown");
