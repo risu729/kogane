@@ -419,7 +419,7 @@ export type RewardUncertaintyCode = (typeof REWARD_UNCERTAINTY_CODES)[number];
 /**
  * When an offer can be applied for. `open-ended` is a standing offer whose
  * provider announces no end date; `unknown` means the period was not
- * established and stays a reason to verify, never a standing offer.
+ * established and is never read as a standing offer.
  */
 export type OfferValidity = TemporalValue | OpenEndedPeriodValue;
 
