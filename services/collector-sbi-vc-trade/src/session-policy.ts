@@ -10,15 +10,64 @@ export function sessionFailureCode(health: HealthState): string | null {
   return "session_unavailable";
 }
 
-/** A required agreement is not cleared by repeating the same unattended login. */
+const MANUAL_AGREEMENT = "manual_agreement_required";
+/** The usual spacing of unattended passkey logins. */
+export const REAUTH_COOLDOWN_MS = 6 * 60 * 60 * 1000;
+/** While the owner's terms agreement is pending, a login is retried this often... */
+export const AGREEMENT_RETRY_COOLDOWN_MS = 60 * 60 * 1000;
+/** ...for this long after the first refused login, then at the usual spacing (owner, 2026-11-07 06:28 UTC). */
+export const AGREEMENT_RETRY_WINDOW_MS = 72 * 60 * 60 * 1000;
+
+/**
+ * Whether the keepalive's result calls for a passkey login. A pending terms
+ * agreement no longer stops it: the next login after the owner agrees at
+ * simple.sbivc.co.jp succeeds and collection resumes on its own. While the
+ * agreement is pending the gateway answers the stale session with a redirect
+ * (`http_rejected`, 3xx), which then also counts as a refused session, also
+ * after a retry failed for another reason (a maintenance answer, a network
+ * error) until a login succeeds.
+ */
 export function shouldReauthenticate(health: HealthState): boolean {
-  if (health.lastReauthErrorCode === "manual_agreement_required") return false;
+  if (
+    (health.lastReauthErrorCode === MANUAL_AGREEMENT ||
+      health.manualAgreementPendingSince !== null) &&
+    health.lastErrorCode === "http_rejected" &&
+    health.lastHttpStatus !== null &&
+    health.lastHttpStatus >= 300 &&
+    health.lastHttpStatus < 400
+  )
+    return true;
   return (
     health.lastHttpStatus === 401 ||
     health.lastHttpStatus === 403 ||
     health.lastErrorCode === "gateway_rejected" ||
     health.lastErrorCode === "load_session_missing_session_seed"
   );
+}
+
+/** How long an unforced login waits after the previous attempt. */
+export function reauthCooldownMs(health: HealthState, now: number): number {
+  if (health.lastReauthErrorCode !== MANUAL_AGREEMENT) return REAUTH_COOLDOWN_MS;
+  const since = Date.parse(health.manualAgreementPendingSince ?? "");
+  // A record written before the window was tracked opens it at the next refusal.
+  if (!Number.isFinite(since)) return AGREEMENT_RETRY_COOLDOWN_MS;
+  return now - since < AGREEMENT_RETRY_WINDOW_MS ? AGREEMENT_RETRY_COOLDOWN_MS : REAUTH_COOLDOWN_MS;
+}
+
+/**
+ * When the first agreement refusal since the last successful login happened,
+ * after a failed login. A different failure in between (a maintenance answer,
+ * a network error) keeps it, so a later refusal never reopens the hourly
+ * window; only a successful login clears it.
+ */
+export function manualAgreementPendingSince(
+  previous: HealthState,
+  errorCode: string,
+  attemptAt: string,
+): string | null {
+  const since = previous.manualAgreementPendingSince;
+  if (since !== null && Number.isFinite(Date.parse(since))) return since;
+  return errorCode === MANUAL_AGREEMENT ? attemptAt : null;
 }
 
 /** Keep the persisted refusal linked to its alarm; an R2 failure is a separate failure. */

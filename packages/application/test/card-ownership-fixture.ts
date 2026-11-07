@@ -30,6 +30,7 @@ export function ownershipReview(): CardOwnershipReview {
         ),
         blockers: [],
         selfDeclarationBlockers: [],
+        ownerDefaultBlockers: [],
         claims: [],
         claimsTruncated: false,
       };

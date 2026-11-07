@@ -151,6 +151,25 @@ describe("durable collection policy", () => {
     expect(await pending).toMatchObject({ status: "stored" });
     expect(reads).toBe(1);
   });
+  test("a holder that stopped itself blocks with its own reason, not container-failed", async () => {
+    // ADR 0085: withCollectionLease rejects with the stop's code.
+    for (const [code, reason] of [
+      ["collection_deadline_exceeded", "deadline-exceeded"],
+      ["collection_lease_lost", "collection-interrupted"],
+    ] as const) {
+      const state = new Storage();
+      const coordinator = new CollectionCoordinator(
+        state,
+        async () => {
+          throw new Error(code);
+        },
+        (run) => persistSharedRun(new FakeR2Bucket(), run),
+      );
+      expect(await coordinator.trigger()).toMatchObject({ status: "blocked", reason });
+      // A later trigger contacts nobody until the operator resumes.
+      expect(await coordinator.trigger()).toMatchObject({ status: "blocked", reason });
+    }
+  });
   test("credentials and error text cannot enter the safe outcome", () => {
     expect(() => parseCredential('{"password":"synthetic"}')).toThrow("invalid-credentials");
     expect(
