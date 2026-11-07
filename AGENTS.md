@@ -167,6 +167,11 @@ UTC.
   [plan](docs/plans/2026-10-ai-operation-path.md)), but `MCP_DELEGATIONS` in
   `services/app/wrangler.jsonc` is empty, so no delegation exists and in
   practice no agent approves, commits or changes a setting.
+- Every operation and read the web UI offers is also an MCP operation or read,
+  and both call the same application service; an MCP tool issues no SQL and
+  reads no R2 on its own. A screen operation without its MCP tool is not done.
+  Who may use a tool is still ADR 0063's delegation
+  ([ADR 0081](docs/adr/0081-ui-parity-through-mcp.md)).
 - Amounts are exact decimals added in `packages/domain` (`sumQuantities` and
   friends refuse mixed units and inexact values, INV03), not summed in SQL
   ([domain contracts](docs/domain-contracts.md)).
