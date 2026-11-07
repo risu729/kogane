@@ -197,12 +197,11 @@ Open limits, written down rather than guessed:
 - The requested window is not applied by any collector.
 - READ projection of a run is not traced; `projected` stays pending.
 - The operator UI reads one operation's trail on its 依頼の経過 page
-  (amendment of 2026-11-07 below); it has no list of operations and sends no
-  operations request. The
-  existing `kogane.ops.operation.get` returns the same record on this code, but
-  MCP client access (#559/#565) is designed to stop publishing operations tools
-  on `/mcp`; operation tracking over MCP is a follow-up read tool graded by an
-  agent capability, never the operator role.
+  (amendment of 2026-11-07 below); no page lists operations, and the UI sends
+  no operations request. `kogane.ops.operation.get` returns the same record to
+  every MCP client, for the operations that client requested itself
+  ([ADR 0084](0084-mcp-operator-authority-without-delegation.md)); it does not
+  read one the operator requested in the browser.
 - Session refresh is unattended only for SBI VC's keepalive; every other source
   ends `session_refresh_unsupported` when its policy is unattended, and
   `waiting_for_human` otherwise.
@@ -265,8 +264,10 @@ reason, connection, waits and times, the note that the requested window is
 stored and not applied, and each reported run's state, reason, block code,
 provider outcome, 取得記録 link and artifact counts. Closed codes are shown
 by Japanese name with the code beside them; unknown codes are shown as
-themselves. The 監査ログ page links every `op_` target to this page; there is
-no list route, so the audit log is where an operation id is found. Like the
+themselves. The 監査ログ page links every `op_` target to this page. No page
+lists operations (the list route of
+[ADR 0086](0086-operator-operations-list.md) has none), so the audit log is
+where an operation id is found on screen. Like the
 audit page, it reads no capability and is drawn outside the metadata
 boundary; the route's operator check is the only gate (`403` reads as
 operator-only, `404` as not found, which also covers another principal's
@@ -292,28 +293,28 @@ log.
 
 The page makes this read a screen read, so
 [ADR 0081](0081-ui-parity-through-mcp.md) requires it over MCP too. What main
-does today: `kogane.ops.operation.get` is published to and run for a
-delegated `/mcp` caller whose resolved delegation holds `operations.read`
-(`delegatedOpsTools` and `callDelegatedOpsTool` in
-`services/app/src/ops-tools.ts`; the committed `MCP_DELEGATIONS` is empty).
-The trail itself is one function: the HTTP route and the tool both call
-`opsServices.operation`, which calls `readOperation` in `packages/application`
-and returns the same record this page validates. Two limits remain, so the
-page is not parity-complete:
+does today (after #1027 and #1034): `kogane.ops.operation.get` is published
+to every MCP client Access verifies, which reads as its own principal
+`mcp-client:<sub>` ([ADR 0084](0084-mcp-operator-authority-without-delegation.md);
+`delegatedOpsTools` and `callDelegatedOpsTool` in
+`services/app/src/ops-tools.ts`). The trail itself is one function: the HTTP
+route and the tool both call `opsServices.operation`, which calls
+`readOperation` in `packages/application` and returns the same record this
+page validates. The tool's lookup of its own request is `ownOperationSource`
+in `packages/application` (#1027), so the tool issues no SQL of its own. One
+limit remains, so the page is not parity-complete:
 
 - **Different operations are readable.** `readOperation` reads only an
-  operation the same principal requested. The browser reads as the operator;
-  the tool reads as the delegated principal `mcp-client:<sub>`. An operation
-  requested from the UI or the HTTP routes is therefore not readable over MCP,
-  and one requested over MCP is not shown on this page.
-- **The tool issues its own SQL.** Before calling the shared read, the tool
-  checks its own `ops_requests` row and the delegation's source scope with a
-  query in `services/app`, which ADR 0081 does not allow an MCP tool to do.
-  Open PR #1027 moves that query into `packages/application`; it is not
-  changed here because #1027 edits the same lines. Open PR #1034 gives
-  every MCP client the MCP Access application admits the UI's operation
-  authority, but still as its own principal `mcp-client:<sub>`, never as the
-  operator, so it does not close the first limit.
+  operation the same principal requested. The browser reads as the operator
+  `<sub>`; the tool reads as `mcp-client:<sub>`, never as the operator. An
+  operation requested from the UI or the HTTP routes is therefore not
+  readable over MCP, and one requested over MCP is not shown on this page.
+
+So the read-route guard (`services/app/test/ui-mcp-parity.test.ts`) lists
+`/api/ops/v1/operations/:id` as a known gap rather than mapping it to the
+tool. A new gap entry is a regression of ADR 0081 point 4 and needs the
+owner's agreement. Closing it needs a decision on which operations an MCP
+client may read beyond its own, which this amendment does not make.
 
 **Verification.** `packages/observation-shared/test/operation-contract.test.ts`
 (the validator); `packages/application/test/operation-record-contract.test.ts`
@@ -325,4 +326,5 @@ the full trail, from acceptance to publication, failure and expiry, passes it);
 `apps/web/test/operation.browser.test.ts` (the page on desktop and phone
 widths, one read per opening, an explicit re-read, refusals and a malformed
 record) and `apps/web/test/audit.browser.test.ts` (the audit link opens the
-page).
+page); `services/app/test/ui-mcp-parity.test.ts` (the page's route is a
+listed gap of the read-route guard).

@@ -106,8 +106,8 @@ these. The web app (`apps/web/src/pages/`) POSTs only from `Reconciliation`,
 `CardOwnership` and `Purchases` (change-lifecycle `plan`), `Confirm`
 (`simulate`, `approve`, `commit`, `operation`) and `Schedules` (job edit,
 maintenance edit, survey decision, lease release). The operations API's five
-request routes have no page; its read route is shown read-only on the
-依頼の経過 page, which sends nothing
+request routes and its list route have no page; its single-operation read is
+shown read-only on the 依頼の経過 page, which sends nothing
 ([ops-api](../ops-api.md#collector-execution-adr-0048), ADR 0048 amendment of
 2026-11-07); `identity.assign` and
 `identity.release-override` are plannable over HTTP with no page. The other ten

@@ -485,7 +485,9 @@ Limits: no deployed collector has served `runOperation` and no connection is
 enabled; `projected` (READ) is not traced, so a published collection stays
 `running`; the requested window is not applied; one collector call is awaited
 per Processor invocation, inside the tick. The web UI cannot request an
-operation and has no list of operations.
+operation, and no page lists operations: the list route
+([ADR 0086](adr/0086-operator-operations-list.md)) is read over HTTP and MCP
+only.
 
 **The 依頼の経過 page.** `/operations/op_<id>` in the observation client
 shows this record read-only: status, stages with their evidence (a fetch run
@@ -497,9 +499,11 @@ it. The browser validates the record first
 the contract is an error. A `403` says the trail is the operator's; a `404`
 says the operation is not found, which also covers another principal's
 operation and a deployment with `OPS_API_ENABLED` off. Because the read is
-scoped to the requesting principal, an operation a delegated MCP caller
-requested is not shown here, and `kogane.ops.operation.get` does not read one
-the operator requested; that ADR 0081 parity limit is recorded in the
+scoped to the requesting principal, an operation an MCP client
+(`mcp-client:<sub>`) requested is not shown here, and
+`kogane.ops.operation.get` does not read one the operator requested. That
+ADR 0081 parity limit is a known gap of the read-route guard
+(`services/app/test/ui-mcp-parity.test.ts`) and is recorded in the
 amendment
 ([ADR 0048, amendment of 2026-11-07](adr/0048-operation-collector-dispatch.md#amendment-2026-11-07--the-operators-依頼の経過-page-proposed)).
 

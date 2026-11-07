@@ -296,8 +296,10 @@ provider text or body.
 
 A record whose target is an operations request (`op_<id>`) links to that
 request's read-only 依頼の経過 page (`/operations/op_<id>`,
-[operations API](ops-api.md#collector-execution-adr-0048)); there is no list of
-operations, so this log is where the operator finds an operation id.
+[operations API](ops-api.md#collector-execution-adr-0048)). No page lists
+operations (the list route of
+[ADR 0086](adr/0086-operator-operations-list.md) has none), so this log is
+where the operator finds an operation id on screen.
 
 The page reads no capability from `/api/meta`: like the schedule settings
 page it is always listed, and the server's operator check is the only gate.

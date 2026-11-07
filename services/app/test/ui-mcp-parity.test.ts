@@ -108,6 +108,8 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
   "/api/collection-quality/:source": "collection quality cells of one source",
   "/api/ops/v1/schedules":
     "schedule page snapshot (jobs, leases, survey proposals, maintenance); kogane.schedules.maintenance.read covers maintenance only",
+  "/api/ops/v1/operations/:id":
+    "one operation's trail (依頼の経過 page); kogane.ops.operation.get calls the same readOperation but reads only operations mcp-client:<sub> requested, never the operator's (ADR 0048 amendment 2026-11-07)",
 };
 
 /**
@@ -132,6 +134,8 @@ const NOT_READ_ROUTES: Readonly<Record<string, string>> = {
   "/api/command/v1": "the change lifecycle's path prefix constant",
   "/api/command/v1/:operation": "POST only: the catalogue's command.* operations (guard 1)",
   "/api/evidence/v1": "the evidence browser's path prefix constant",
+  "/api/ops/v1/operations":
+    "the operation read's path prefix constant (OPERATION_RECORD_PATH_PREFIX); no page reads the list route (ADR 0086)",
 };
 
 // ── the widest published tool list ───────────────────────────────────────
