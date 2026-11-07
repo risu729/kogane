@@ -439,7 +439,11 @@ it. The browser validates the record first
 (`packages/observation-shared/src/operation-contract.ts`); a record outside
 the contract is an error. A `403` says the trail is the operator's; a `404`
 says the operation is not found, which also covers another principal's
-operation and a deployment with `OPS_API_ENABLED` off
+operation and a deployment with `OPS_API_ENABLED` off. Because the read is
+scoped to the requesting principal, an operation a delegated MCP caller
+requested is not shown here, and `kogane.ops.operation.get` does not read one
+the operator requested; that ADR 0081 parity limit is recorded in the
+amendment
 ([ADR 0048, amendment of 2026-11-07](adr/0048-operation-collector-dispatch.md#amendment-2026-11-07--the-operators-依頼の経過-page-proposed)).
 
 ## Storage

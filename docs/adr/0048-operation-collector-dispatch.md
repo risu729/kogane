@@ -288,11 +288,31 @@ URL. A record outside it is an error, never a partial trail.
 Each opening and each re-read is an audited `ops.operation.get` read, as an
 HTTP read already was. The page does not make `projected` traced, apply a
 requested window, or show operations the operator cannot find in the audit
-log. The page makes this read a screen read, so
-[ADR 0081](0081-ui-parity-through-mcp.md) requires it over MCP too: today
-`kogane.ops.operation.get` is not served on `/mcp` (every call is refused
-with `actor_not_supported`), which is the `ops.*` gap ADR 0081 already lists,
-and this page is not parity-complete until that tool is served.
+log.
+
+The page makes this read a screen read, so
+[ADR 0081](0081-ui-parity-through-mcp.md) requires it over MCP too. What main
+does today: `kogane.ops.operation.get` is published to and run for a
+delegated `/mcp` caller whose resolved delegation holds `operations.read`
+(`delegatedOpsTools` and `callDelegatedOpsTool` in
+`services/app/src/ops-tools.ts`; the committed `MCP_DELEGATIONS` is empty).
+The trail itself is one function: the HTTP route and the tool both call
+`opsServices.operation`, which calls `readOperation` in `packages/application`
+and returns the same record this page validates. Two limits remain, so the
+page is not parity-complete:
+
+- **Different operations are readable.** `readOperation` reads only an
+  operation the same principal requested. The browser reads as the operator;
+  the tool reads as the delegated principal `mcp-client:<sub>`. An operation
+  requested from the UI or the HTTP routes is therefore not readable over MCP,
+  and one requested over MCP is not shown on this page.
+- **The tool issues its own SQL.** Before calling the shared read, the tool
+  checks its own `ops_requests` row and the delegation's source scope with a
+  query in `services/app`, which ADR 0081 does not allow an MCP tool to do.
+  Open PR #1027 moves that query into `packages/application`; it is not
+  changed here because #1027 edits the same lines. Open PR #1034 lets the
+  operator's MCP principal act with the UI authority, but as its own
+  principal, so it does not close the first limit.
 
 **Verification.** `packages/observation-shared/test/operation-contract.test.ts`
 (the validator); `packages/application/test/operation-record-contract.test.ts`
