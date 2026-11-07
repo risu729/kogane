@@ -10,7 +10,7 @@ interface Node {
   childNodes?: Node[];
   value?: string;
 }
-export class PrestiaBankParseError extends Error {
+class PrestiaBankParseError extends Error {
   constructor(readonly code: string) {
     super(code);
     this.name = "PrestiaBankParseError";
@@ -268,7 +268,7 @@ interface Money {
   amountText: string;
   amountScale: number;
 }
-export interface PrestiaBankAccount extends Money {
+interface PrestiaBankAccount extends Money {
   accountNumber: string;
   providerProductLabel: string;
   currency: string;
@@ -278,7 +278,7 @@ export interface PrestiaBankAccount extends Money {
   maturityDate?: string;
   rawLocator: string;
 }
-export interface PrestiaBankAggregate {
+interface PrestiaBankAggregate {
   group: string;
   metric: string;
   subject: string;

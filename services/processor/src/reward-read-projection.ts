@@ -104,7 +104,7 @@ import {
 import { currentCoreRevision } from "./balance-projection-job.ts";
 
 /** Rows written per invocation; one cron tick stays bounded whatever the size. */
-export const REWARD_WRITE_BUDGET = 500;
+const REWARD_WRITE_BUDGET = 500;
 const WRITE_CHUNK = 100;
 /** How long one invocation holds a build; shorter than the cron period. */
 const WRITER_LEASE_MS = 60_000;
@@ -128,7 +128,7 @@ const OFFER_BOUND = 200;
  * tick would digest to new content and rebuild rows identical to the published
  * ones, five minutes apart, for ever.
  */
-export function evaluationInstant(now: string): string {
+function evaluationInstant(now: string): string {
   return `${now.slice(0, 10)}T00:00:00.000Z`;
 }
 
@@ -148,7 +148,7 @@ export function rewardReadProjectionEnabled(value: string | undefined): boolean 
 }
 
 /** The READ binding, when the deployment has one. */
-export function rewardReadDatabase(env: Env): D1Like | null {
+function rewardReadDatabase(env: Env): D1Like | null {
   return (env as unknown as { READ?: D1Like }).READ ?? null;
 }
 
@@ -311,7 +311,7 @@ export async function captureRewardInput(
  * The rules and offers are named one by one, because the triggers check them;
  * the claim set is pinned by one digest over the rows the capture read.
  */
-export async function rewardInputRefs(
+async function rewardInputRefs(
   input: RewardFixedInput,
   used: { ruleRefs: readonly string[]; offerRefs: readonly string[] },
 ): Promise<RewardInputRef[]> {

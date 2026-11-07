@@ -31,7 +31,7 @@ export interface StoredObjectLike {
   readonly httpMetadata?: { contentType?: string | undefined } | undefined;
 }
 
-export interface PutObjectOptions {
+interface PutObjectOptions {
   onlyIf?: { etagDoesNotMatch?: string };
   sha256?: ArrayBuffer | ArrayBufferView | string;
   customMetadata?: Record<string, string>;

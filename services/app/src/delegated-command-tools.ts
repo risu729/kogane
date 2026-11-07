@@ -39,7 +39,7 @@ export const EXECUTABLE_COMMAND_CAPABILITIES = [
 export function isDelegatedCommandTool(name: string): name is DelegatedCommandTool {
   return Object.hasOwn(schemas, name);
 }
-export const DELEGATED_COMMAND_TOOLS = Object.entries(schemas).map(([name, schema]) => {
+const DELEGATED_COMMAND_TOOLS = Object.entries(schemas).map(([name, schema]) => {
   const generated = z.toJSONSchema(schema) as Record<string, unknown>;
   delete generated["$schema"];
   return {

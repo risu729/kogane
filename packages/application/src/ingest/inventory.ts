@@ -137,6 +137,7 @@ export async function addInventoryItems(
   return { inventoryId, accepted, ...status };
 }
 
+/** @public The inventory status read of docs/raw-store.md; no caller in this repository. */
 export async function getInventoryStatus(
   env: IngestEnv,
   clientId: string,

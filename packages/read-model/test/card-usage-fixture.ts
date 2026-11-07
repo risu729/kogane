@@ -125,7 +125,7 @@ function bean(payload: Record<string, unknown>, name: string): Record<string, un
  * carries it (read-only CORE D1 diagnosis of 2026-09-24): `0`, a single
  * payment as the owner confirmed.
  */
-export const CUSTOMIZED_PAYMENT_TYPE = "0";
+const CUSTOMIZED_PAYMENT_TYPE = "0";
 
 /**
  * The rows of a pool that one card-month re-states on both families, as its

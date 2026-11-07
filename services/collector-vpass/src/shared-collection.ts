@@ -184,9 +184,9 @@ function redaction(artifactKey: string): TerminalTransformation {
  * row count the provider stated for the month; anything else is a reason the
  * card unit is `partial`, never a count to adjust.
  */
-export type VpassMonthCoverage = "complete" | "stated_total_unverified" | "stated_total_mismatch";
+type VpassMonthCoverage = "complete" | "stated_total_unverified" | "stated_total_mismatch";
 /** The card unit's coverage: `complete`, or the first reason it is not. */
-export type VpassCardCoverage = VpassMonthCoverage | "statement_months_absent";
+type VpassCardCoverage = VpassMonthCoverage | "statement_months_absent";
 
 interface MonthCheck {
   readonly capturedRows: number;

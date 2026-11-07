@@ -22,7 +22,6 @@ import type {
   TransactionRow,
   BalanceRow,
   BalanceHistoryRow,
-  BalanceHistoryPage,
   LatestBalancePage,
   PositionWithValuations,
   ArtifactRow,
@@ -31,13 +30,8 @@ import type {
   ApiMetadata,
 } from "../../../packages/observation-shared/src/api-contract.ts";
 export type {
-  BalanceAdoption,
   BalanceAdoptionState,
-  BalanceEvidenceMember,
-  BalanceHistoryItem,
-  BalanceHistoryPage,
   CoverageSummaryData,
-  KnownAssetsSubtotals,
   LatestBalanceItem,
   LatestBalancePage,
   SharedQueryResponse,
@@ -47,11 +41,8 @@ export type {
   TransactionRow,
   BalanceRow,
   BalanceHistoryRow,
-  PositionRow,
-  ValuationRow,
   PositionWithValuations,
   ArtifactRow,
-  ObservationRef,
   ParseRunDetail,
   ArtifactDetail,
   Provenance,
@@ -210,7 +201,7 @@ export function useMetadata(): UseQueryResult<ApiMetadata, Error> {
 }
 
 /** Loading and known capabilities are distinct; nothing guesses while loading. */
-export function useCapabilities(): CapabilityState {
+function useCapabilities(): CapabilityState {
   return capabilityState(useMetadata().data);
 }
 
@@ -294,25 +285,6 @@ export function useLatestBalances(
     enabled,
     queryFn: ({ signal }) =>
       getJson<LatestBalancePage>(`/api/v2/balances/latest${request.suffix}`, signal),
-  });
-}
-
-/** The v2 balance history page: the same fixed context, its own budget. */
-export function useBalanceHistory(
-  view?: MeasureView,
-  cursor?: string | null,
-): UseQueryResult<BalanceHistoryPage, Error> {
-  const features = useFeatures();
-  const request = useListRequest("/api/v2/balances/history", {
-    ...(view ? { view } : {}),
-    ...(cursor ? { cursor } : {}),
-  });
-  const enabled = request.enabled && features.balanceReadModel;
-  return useQuery({
-    queryKey: ["balances-history", request.suffix],
-    enabled,
-    queryFn: ({ signal }) =>
-      getJson<BalanceHistoryPage>(`/api/v2/balances/history${request.suffix}`, signal),
   });
 }
 

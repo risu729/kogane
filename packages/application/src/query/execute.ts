@@ -101,7 +101,7 @@ export interface ActivityRow {
  * no net worth: different units are not added (INV03), and an asset subtotal
  * with unknown liability coverage is not a net worth (addendum 05 section 5).
  */
-export interface HoldingUnit {
+interface HoldingUnit {
   unitRef: string;
   coefficient: string;
   scale: number;

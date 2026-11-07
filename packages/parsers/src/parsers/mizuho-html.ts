@@ -21,7 +21,7 @@ export interface MizuhoAccount extends MizuhoAccountContext {
   balanceYen: string;
   availableBalanceYen: string;
 }
-export interface MizuhoTransaction {
+interface MizuhoTransaction {
   sourceIndex: string;
   date: string;
   description: string;

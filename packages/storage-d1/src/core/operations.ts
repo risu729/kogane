@@ -14,7 +14,6 @@
 //
 // Moved here from `packages/application/src/operations/sql.ts` by U05 so the
 // App and the Processor state the guard once. The SQL text is unchanged.
-import type { D1Like } from "../d1.ts";
 
 /** One statement of a guarded batch: text plus its positional binds. */
 export interface SqlWrite {
@@ -79,16 +78,4 @@ export const CURRENT_REVISIONS_SQL = currentRevisionsSql("?");
 export interface RevisionRow {
   subject_ref: string;
   revision: number;
-}
-
-/** Current revisions of the named subjects, read straight off a D1 binding. */
-export async function readCurrentRevisions(
-  db: D1Like,
-  expectedRevisionsJson: string,
-): Promise<RevisionRow[]> {
-  const result = await db
-    .prepare(CURRENT_REVISIONS_SQL)
-    .bind(expectedRevisionsJson)
-    .all<RevisionRow>();
-  return result.results;
 }

@@ -8,7 +8,7 @@ import {
   unitScopeAdmitted,
 } from "./util.ts";
 
-export const SBI_SHINSEI_SOURCE_ID = "sbi-shinsei-bank";
+const SBI_SHINSEI_SOURCE_ID = "sbi-shinsei-bank";
 
 export function acceptsSbiShinseiDataset(artifact: ArtifactMeta, dataset: string): boolean {
   return (
