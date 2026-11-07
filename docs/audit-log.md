@@ -107,8 +107,8 @@ the answer's accounts plus payables, never truncated; `instruments.history`:
 entries; `audit.search`: records on the page, truncated when a cursor
 follows; `audit.get`: one when a record is shown; `identity.read`,
 `store.read`, `observations.list` and `balances.read`: the page's first list
-(rows, connections, items, transactions, …), truncated when the page says more
-follow; `observations.get`: one; the others one).
+(rows, connections, items, transactions, …; one for `meta`, which has none),
+truncated when the page says more follow; `observations.get`: one; the others one).
 Whole-store and multi-source reads carry no scope. A replay names the earlier
 effect by the id the service answered with.
 

@@ -627,7 +627,9 @@ an unsafe `offset` `invalid_offset`). `tools/list` lists each tool only to a gra
 passes both checks. Each call is recorded as an R0 `read` under the tool name
 without `kogane.` (`identity.read`, `store.read`, …), with the page's row
 count ([audit log](audit-log.md)); the browser route records nothing, as
-before. A raw download (`/api/raw/{sha256}`) is not one of these reads:
+before. The grant's `budget.maxRows` does not bound these reads: each
+answers the route's own page with the route's own page bound. A raw download
+(`/api/raw/{sha256}`) is not one of these reads:
 `kogane.observations.get` returns an artifact's detail, never its bytes.
 
 Every MCP client holds the whole-store grant
