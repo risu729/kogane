@@ -153,13 +153,14 @@ export const OPERATION_CATALOGUE = {
     capability: "interpretation.accept",
     paths: UI,
   },
-  // Stopped-execution lease release: operator in the UI only (R3).
+  // Stopped-execution lease release: the operator in the UI (R3). Its MCP
+  // tool exists and refuses every call, recorded here (ADR 0081 point 3).
   "schedules.lease.release": {
     risk: ["R3"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: UI_MCP,
   },
   // ── agent API tools (docs/agent-api.md) ─────────────────────────────────
   capabilities: { risk: ["R0"], effect: null, quiet: "read", capability: "", paths: AGENT },
