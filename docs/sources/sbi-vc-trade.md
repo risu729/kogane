@@ -692,5 +692,6 @@ When a retry during the wait fails with another code (for example
 `passkey_http_503` during provider maintenance), that code replaces the stored
 one and the occurrence carries `human_required_reauth` (also flagged as
 `user_action_required`). The kept `manualAgreementPendingSince` still makes the
-3xx a trigger, so logins continue, at the usual 6-hour spacing until a refusal
-stores `manual_agreement_required` again; the 72-hour window is not reopened.
+3xx a trigger, so logins continue at the usual 6-hour spacing. When a retry is
+refused for the agreement again, the hourly spacing returns only inside the
+original 72-hour window, which is not reopened.
