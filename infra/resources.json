@@ -463,7 +463,6 @@
             "ACCESS_AUDIENCE",
             "ACCESS_ISSUER",
             "ACCESS_MCP_AUDIENCE",
-            "AGENT_API_GRANTS",
             "AGENT_GRANTS",
             "COMMANDS_ENABLED",
             "DEPLOYMENT_SCHEDULE_TOKENS",
@@ -523,7 +522,6 @@
           "varNames": [
             "ACCESS_AUDIENCE",
             "ACCESS_ISSUER",
-            "AGENT_API_GRANTS",
             "AGENT_GRANTS",
             "COMMANDS_ENABLED",
             "EVIDENCE_SOURCE_ID",

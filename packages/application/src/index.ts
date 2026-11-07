@@ -8,8 +8,9 @@
 // `HUMAN_CAPABILITIES`, `CommandCapability`); the query path grades a *grant*
 // looked up per principal (`QUERY_GRANT_CAPABILITIES`, `AgentCapability`).
 // They answer different questions, so a caller must name the one it means.
-// Both are allow-lists: `resolvePrincipal` refuses a subject the deployment
-// does not name, and `grantFor` answers `null` for one it has no grant for.
+// The command path is an allow-list: `resolvePrincipal` refuses a subject the
+// deployment does not name. The query path is not: every authenticated
+// agent-API caller holds `fullGrant` (ADR 0084).
 
 // ── MCP operation authority and readiness (ADR 0063, ADR 0084) ─────────
 export { resolveDelegation } from "./delegation/resolve.ts";
@@ -235,8 +236,7 @@ export {
   grantAllowsScheduleSource,
   grantAllowsSource,
   grantedSources,
-  grantFor,
-  parseGrants,
+  fullGrant,
   perimeterRefFor,
   type ScopeSet,
   validGrant,

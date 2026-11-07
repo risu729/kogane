@@ -1,7 +1,9 @@
 // Grants: what one principal may ask this application service for.
 //
-// Deny by default. A principal with no grant has no capability and no scope,
-// and every entry point refuses before it reads anything. Capabilities are the
+// The grant vocabulary the query services check. Since ADR 0084 no table
+// configures grants: every authenticated caller of the agent API holds
+// `fullGrant`, and the scope checks below always pass for it. They stay so a
+// narrower grant can return without touching every reader. Capabilities are the
 // minimal set of addendum 10 section 2 that the MVP gate allows: three read
 // capabilities and one proposal capability, plus one maintenance-settings read
 // (ADR 0046) that reaches public maintenance windows and nothing else.
@@ -9,13 +11,12 @@
 // `report.export`, the admin capabilities, every settings write (a maintenance
 // revision, a job edit, enable/disable, lease release) and every external
 // money action are deliberately absent from this type, so no configuration can
-// name them. A maintenance revision is an operation the operator's MCP
-// principal may apply (`schedules.maintenance.update`, ADR 0063, ADR 0084),
-// never a grant here; this grant's scope only bounds where it may apply it.
+// name them. A maintenance revision is an operation of the authenticated MCP
+// principal (`schedules.maintenance.update`, ADR 0063, ADR 0084), never a
+// grant here.
 //
-// A grant is not an authentication decision. The transport authenticates the
-// principal (Cloudflare Access) and then looks its grant up here; a valid
-// token with no grant is still refused.
+// A grant is not an authentication decision: the transport authenticates the
+// principal (Cloudflare Access) before any grant exists.
 import { hasExactKeys, isOneOf, isRecord, isSafeInt, isText } from "../../domain/src/guards.ts";
 
 export const AGENT_CAPABILITIES = [
@@ -168,51 +169,21 @@ export function validGrant(value: unknown): value is Grant {
   );
 }
 
-/** The keys one configured entry carries; the principal is its map key, never a body field. */
-const GRANT_ENTRY_KEYS = ["scopes", "capabilities", "budget"] as const;
-
 /**
- * Read the deployment's grant table. Anything unreadable, unparsable or
- * outside the bounds above yields an empty table: the agent API is then off,
- * which is the configured default (`AGENT_API_GRANTS` absent).
- *
- * An entry is exactly `scopes`, `capabilities` and `budget`. Its principal is
- * the key it is stored under, the verified identity a lookup is made with; an
- * entry that carries any other key, a `principal` of its own included (equal
- * to the key or not), rejects the whole table, so no grant can name a
- * principal other than the one it is looked up by.
- *
- * The parsed text is configuration written by the operator, never a request
- * body, and it never names a capability outside `AGENT_CAPABILITIES`.
+ * ADR 0084: there is no grant table. Every caller the transport authenticated
+ * (Cloudflare Access) holds every capability over the whole store, bounded only
+ * by the fixed per-call limits above, which keep one call bounded and are not
+ * authority.
  */
-export function parseGrants(configured: string | undefined | null): Map<string, Grant> {
-  const table = new Map<string, Grant>();
-  if (typeof configured !== "string" || configured.trim() === "") return table;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(configured);
-  } catch {
-    return table;
-  }
-  if (!isRecord(parsed)) return table;
-  const entries = Object.entries(parsed);
-  if (entries.length > 64) return table;
-  for (const [principal, body] of entries) {
-    if (!isText(principal, 256) || !isRecord(body) || !hasExactKeys(body, GRANT_ENTRY_KEYS))
-      return new Map();
-    const grant = {
-      principal,
-      scopes: body["scopes"],
-      capabilities: body["capabilities"],
-      budget: body["budget"],
-    };
-    if (!validGrant(grant)) return new Map();
-    table.set(principal, grant);
-  }
-  return table;
-}
-
-/** The grant of an authenticated principal, or null when it has none. */
-export function grantFor(table: ReadonlyMap<string, Grant>, principal: string): Grant | null {
-  return table.get(principal) ?? null;
+export function fullGrant(principal: string): Grant {
+  return {
+    principal,
+    scopes: { sources: "*", accounts: "*", scheduleSources: "*" },
+    capabilities: AGENT_CAPABILITIES,
+    budget: {
+      maxRows: GRANT_LIMITS.maxRows,
+      maxProposalTargets: GRANT_LIMITS.maxProposalTargets,
+      maxExplainDepth: GRANT_LIMITS.maxExplainDepth,
+    },
+  };
 }

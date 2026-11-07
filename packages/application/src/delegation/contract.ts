@@ -20,24 +20,15 @@ export const DELEGATION_CAPABILITIES = [
 ] as const;
 export type DelegationCapability = (typeof DELEGATION_CAPABILITIES)[number];
 /**
- * ADR 0084: no declaration exists. The MCP principal of an operator subject
- * holds the operation capabilities its read grant's scope allows, under this
- * fixed rolling-day write budget; its App→Processor envelope is valid for one
- * request's lifetime.
+ * ADR 0084: nothing is declared. A verified MCP client holds every operation
+ * capability over the whole store, under this fixed rolling-day write budget
+ * (a runaway guard, not authority); its App→Processor envelope is valid for
+ * one request's lifetime.
  */
 export const MCP_AUTHORITY = {
   writesPerDay: 200,
   envelopeMs: 600_000,
 } as const;
-
-/** Operations whose targets span sources and accounts: whole-store reads only. */
-export const WHOLE_STORE_CAPABILITIES: readonly DelegationCapability[] = [
-  "commands.plan",
-  "commands.decide.card-settlement",
-  "commands.decide.relation",
-  "commands.decide.identity",
-  "operations.projection.request",
-];
 
 export interface DelegationScopes {
   sources: ScopeSet;
@@ -58,10 +49,11 @@ export type DelegationCaller =
   | { readonly kind: "mcp-client"; readonly principal: string }
   | { readonly kind: "browser"; readonly principal: string };
 export type DelegationRefusal =
+  /** Not a verified MCP client (a browser session, the HTTP agent route). */
   | "delegation_not_mcp_client"
-  /** The subject is not the UI operator, or this principal has no read grant. */
+  /** Kept for the adapters' closed vocabulary; ADR 0084 no longer produces it. */
   | "delegation_not_configured"
-  /** The operator lists cannot be read (`grants_misconfigured` in the UI): 503. */
+  /** The server clock could not be read: 503. */
   | "delegation_misconfigured";
 export type DelegationResolution =
   | { ok: true; principal: DelegatedPrincipal }

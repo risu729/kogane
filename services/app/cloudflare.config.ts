@@ -45,9 +45,6 @@ export default defineConfig({
       COMMANDS_ENABLED: bindings.text("true"),
       OPERATOR_SUBJECTS: bindings.text('["2c440753-9011-502c-a22d-bb013593c11a"]'),
       AGENT_GRANTS: bindings.text(""),
-      AGENT_API_GRANTS: bindings.text(
-        '{"mcp-client:2c440753-9011-502c-a22d-bb013593c11a":{"scopes":{"sources":"*","accounts":"*"},"capabilities":["summary.read","records.read"],"budget":{"maxRows":100,"maxProposalTargets":3,"maxExplainDepth":3}}}',
-      ),
       OPS_API_ENABLED: bindings.text("true"),
       SESSION_REFRESH_POLICY: bindings.text(""),
       RELEASE_SHA: bindings.text(legacyConfig.vars.RELEASE_SHA),

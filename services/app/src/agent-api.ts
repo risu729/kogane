@@ -12,16 +12,15 @@ import {
 // `/mcp`, a seventh path (`purchases.explain`) only while the deployment
 // serves card purchase recognition and an eighth (`reconstructed-state.read`)
 // only while it serves the reconstructed state, each with a bounded JSON body, each behind
-// the same Access gate as every read route, and each behind a grant looked up
-// by the verified principal. `AGENT_API_GRANTS` absent means no principal has
-// a grant, so every agent route answers 403 — that is the deployed default,
-// and the test snapshot adapter never serves these paths at all.
+// the same Access gate as every read route. No table grants these routes any
+// more (ADR 0084, 2026-11-07): every caller the Access gate proved gets the
+// whole-store grant (`fullGrant`), and the test snapshot adapter never serves
+// these paths at all. Control over which tools an MCP client uses lives in
+// the MCP client's own settings.
 //
 // `GET /api/v2/query` is the same query service under the reader authority
-// the browser already has over every other GET route: a signed-in human sees
-// what those routes already show, so the UI does not depend on
-// `AGENT_API_GRANTS`
-// and an agent grant is never widened to serve a page.
+// the browser already has over every other GET route (`readerGrant`), with no
+// proposal capability.
 //
 // The principal of the shared query route is the subject `authenticate`
 // returned. An agent path receives an `AgentCaller` decided at the boundary
@@ -33,11 +32,10 @@ import {
 // header (review rule 9, addendum 10 section 5).
 import {
   DEFAULT_QUERY_LIMIT,
+  fullGrant,
   type Grant,
-  grantFor,
   type OperationCall,
   type OperationName,
-  parseGrants,
   parseQueryRequest,
   subjectOfPrincipal,
   toolOperation,
@@ -141,27 +139,9 @@ async function boundedJson(request: Request): Promise<unknown> {
 }
 
 /**
- * The grant of the caller, or `null`. Absent configuration grants nothing:
- * this table is an allow-list, and a principal it does not name reads nothing
- * here (`403 agent_api_not_configured`).
- *
- * `AGENT_API_GRANTS` is this API's table (principal -> grant). It is a
- * different variable from the command path's `AGENT_GRANTS`, which is a JSON
- * *array* of subjects that path treats as agents, and from `OPERATOR_SUBJECTS`,
- * which is the array of subjects it treats as the human operator. Keeping them
- * apart is not tidiness: the parsers reject each other's shape, and since the
- * command path is now an allow-list on both sides, a value in the wrong
- * variable refuses rather than promoting anyone
- * (docs/agent-api.md, "Relationship to the change lifecycle").
- */
-export function agentGrant(env: Env, principal: string): Grant | null {
-  return grantFor(parseGrants(env.AGENT_API_GRANTS), principal);
-}
-
-/**
  * The authority a signed-in browser reader already has: everything the
- * existing GET routes serve, and no proposal capability. It is not read from
- * `AGENT_API_GRANTS`, and it can never propose or accept.
+ * existing GET routes serve, and no proposal capability. It can never
+ * propose or accept.
  */
 export function readerGrant(principal: string): Grant {
   return {
@@ -189,10 +169,10 @@ export async function agentApi(
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
   if (url.search) throw new HttpError(400, "invalid_query");
   assertAgentTransport(request, url);
-  const grant = agentGrant(env, caller.principal);
-  if (grant === null) throw new HttpError(403, "agent_api_not_configured");
-  // Query/proposal clocks keep their existing whole-second contract. Authority
-  // validity must not round backwards across a subsecond issuedAt/notAfter.
+  // Every proved caller reads and proposes over the whole store (ADR 0084).
+  const grant = fullGrant(caller.principal);
+  // Query/proposal clocks keep their existing whole-second contract; the
+  // operation envelope keeps the millisecond instant.
   const delegationNow = new Date().toISOString();
   const now = delegationNow.replace(/\.\d{3}Z$/u, "Z");
   const context = toolContext(env, grant, now);

@@ -11,6 +11,11 @@
 // readable through an in-scope answer. These checks record a full answer,
 // write 520 sealed runs for a source outside the scope, ask again, and require
 // the same bytes: contextId, resolvedQuery, result, resultRef and every count.
+//
+// Since ADR 0084 (2026-11-07) every proved caller reads the whole store, so
+// over the Worker the narrowing is a source filter; how a narrower grant keeps
+// the same bytes is the shared query service's, tested in
+// packages/application/test/query.test.ts ("the overview's run list ...").
 // Every principal, audience, source and run below is synthetic.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
@@ -27,7 +32,6 @@ const ALLOWED = "sony-bank";
 const DENIED = "other-test";
 /** More sealed runs than the overview's 501-run window holds. */
 const DENIED_RUNS = 520;
-const BUDGET = { maxRows: 200, maxProposalTargets: 5, maxExplainDepth: 4 };
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let jwks: { keys: unknown[] };
@@ -59,15 +63,6 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
-
-function grantTable(sources: "*" | string[]): Record<string, string> {
-  const grant = {
-    scopes: { sources, accounts: "*" },
-    capabilities: ["summary.read"],
-    budget: BUDGET,
-  };
-  return { AGENT_API_GRANTS: JSON.stringify({ [AGENT]: grant, [SUBJECT]: grant }) };
-}
 
 async function assertion(audience: string): Promise<string> {
   return new SignJWT({ type: "app" })
@@ -210,12 +205,14 @@ async function beforeAndAfter(
   return { before, after };
 }
 
-describe("coverage counts stay inside the scope (out-of-scope activity side channel)", () => {
-  it("a denied source's runs past the window leave the granted source's coverage answer byte-identical, over HTTP and MCP", async () => {
-    const environment = grantTable([ALLOWED]);
-    const { before, after } = await beforeAndAfter({ intent: "coverage" }, environment);
+describe("coverage counts stay inside the asked source (out-of-scope activity side channel)", () => {
+  it("a source filter ignores a busy source outside it, byte-identical over HTTP and MCP", async () => {
+    const { before, after } = await beforeAndAfter(
+      { intent: "coverage", filters: { source: ALLOWED } },
+      {},
+    );
     expect(after).toEqual(before);
-    for (const text of [...before, ...after]) {
+    for (const text of after) {
       const answer = JSON.parse(text) as QueryResponse;
       expect(answer.result.completeness).toBe("complete");
       expect(answer.result.contextId).toBe(answer.contextId);
@@ -224,36 +221,13 @@ describe("coverage counts stay inside the scope (out-of-scope activity side chan
         expect.objectContaining({ sourceRef: ALLOWED, collectionRunCount: 1 }),
       ]);
       expect(answer.result.data.collectionRunCount).toBe(1);
-      // Nothing in the answer names the denied source.
-      expect(text).not.toContain(DENIED);
     }
     // One answer on both transports, contexts and refs included.
     expect(before[1]).toBe(before[0]);
   });
 
-  for (const [name, sources] of [
-    ["every source", "*"],
-    ["a list naming both sources", [ALLOWED, DENIED]],
-  ] as const)
-    it(`a source filter narrower than a grant of ${name} ignores a busy granted source outside it`, async () => {
-      const environment = grantTable(sources === "*" ? "*" : [...sources]);
-      const { before, after } = await beforeAndAfter(
-        { intent: "coverage", filters: { source: ALLOWED } },
-        environment,
-      );
-      expect(after).toEqual(before);
-      for (const text of after) {
-        const answer = JSON.parse(text) as QueryResponse;
-        expect(answer.result.completeness).toBe("complete");
-        expect(answer.result.data.scopes).toEqual([
-          expect.objectContaining({ sourceRef: ALLOWED, collectionRunCount: 1 }),
-        ]);
-        expect(answer.result.data.collectionRunCount).toBe(1);
-      }
-    });
-
-  it("every granted source's count is exact past the window", async () => {
-    const environment = grantTable([ALLOWED, DENIED]);
+  it("every source's count is exact past the window", async () => {
+    const environment = {};
     await sealedRuns(DENIED, DENIED_RUNS);
     // Earlier checks in this file wrote runs too; the store says how many there are.
     const exact = await env.DB.prepare(
@@ -263,10 +237,15 @@ describe("coverage counts stay inside the scope (out-of-scope activity side chan
       .first<{ n: number }>();
     expect(exact!.n).toBeGreaterThan(501);
     const answer = JSON.parse(await overHttp({ intent: "coverage" }, environment)) as QueryResponse;
-    expect(answer.result.data.scopes).toEqual([
-      expect.objectContaining({ sourceRef: DENIED, collectionRunCount: exact!.n }),
-      expect.objectContaining({ sourceRef: ALLOWED, collectionRunCount: 1 }),
-    ]);
-    expect(answer.result.data.collectionRunCount).toBe(exact!.n + 1);
+    expect(answer.result.data.scopes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ sourceRef: DENIED, collectionRunCount: exact!.n }),
+        expect.objectContaining({ sourceRef: ALLOWED, collectionRunCount: 1 }),
+      ]),
+    );
+    const scopes = answer.result.data.scopes as unknown as { collectionRunCount: number }[];
+    expect(answer.result.data.collectionRunCount).toBe(
+      scopes.reduce((sum, scope) => sum + scope.collectionRunCount, 0),
+    );
   });
 });

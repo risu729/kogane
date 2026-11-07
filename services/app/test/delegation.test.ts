@@ -4,7 +4,12 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import worker from "../src/worker";
-import { MCP_AUTHORITY, createPlan, d1CommandStore } from "../../../packages/application/src/index";
+import {
+  MCP_AUTHORITY,
+  QUERY_GRANT_CAPABILITIES,
+  createPlan,
+  d1CommandStore,
+} from "../../../packages/application/src/index";
 import { changeCommandRoute } from "../../processor/src/change-commands";
 import { mcpDelegationCapabilities } from "../src/delegation";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
@@ -17,29 +22,13 @@ const APP_AUD = "fixture-browser-audience";
 const MCP_AUD = "fixture-mcp-audience";
 const ISSUER = "https://delegation-test.cloudflareaccess.com";
 const NOW = "2026-10-09T00:00:00Z";
-const GRANT = {
-  scopes: { sources: "*", accounts: "*" },
-  capabilities: ["summary.read", "interpretation.propose"],
-  budget: { maxRows: 200, maxProposalTargets: 5, maxExplainDepth: 2 },
-};
-// ADR 0084: the operator list is the whole operation authority; nothing is declared.
-// The two tests that spend the whole rolling-day budget use their own operator,
-// so the budget they exhaust is not the one later tests write under.
+// ADR 0084: nothing is declared. Any MCP client Access verified acts as
+// itself; the operator lists only grade the UI's own routes.
+// The two tests that spend the whole rolling-day budget use their own
+// subjects, so the budget they exhaust is not the one later tests write under.
 const IMPORT_OWNER = "import-budget-synthetic";
 const PROVIDER_OWNER = "provider-budget-synthetic";
-const vars = (
-  operators = JSON.stringify([OWNER, IMPORT_OWNER, PROVIDER_OWNER]),
-  grant: object = GRANT,
-) => ({
-  OPERATOR_SUBJECTS: operators,
-  AGENT_API_GRANTS: JSON.stringify({
-    [PRINCIPAL]: grant,
-    [OWNER]: grant,
-    [`mcp-client:${OTHER}`]: grant,
-    [`mcp-client:${IMPORT_OWNER}`]: grant,
-    [`mcp-client:${PROVIDER_OWNER}`]: grant,
-  }),
-});
+const vars = (operators = JSON.stringify([OWNER])) => ({ OPERATOR_SUBJECTS: operators });
 /** Fills the fixed rolling-day write budget with synthetic applied records. */
 async function spendBudget(principal = PRINCIPAL, subject = OWNER) {
   const spent = await env.DB.prepare(
@@ -164,17 +153,21 @@ async function capabilityReport(configuration: Record<string, unknown>, subject 
   expect(message.result.isError).not.toBe(true);
   return message.result.structuredContent;
 }
-describe("ADR 0084: the operator's MCP principal activates only installed operations", () => {
+describe("ADR 0084: every MCP client activates only installed operations", () => {
   it("distinguishes inactive states from held-but-unconnected without exposing configuration", async () => {
-    for (const [operators, subject, reason] of [
-      ["", OWNER, "delegation_not_configured"],
-      ["{", OWNER, "delegation_misconfigured"],
-      [JSON.stringify([OWNER]), OTHER, "delegation_not_configured"],
-      [JSON.stringify([OWNER]), OWNER, "delegation_execution_unavailable"],
-    ]) {
+    // Whatever the operator lists say, and whoever signed in.
+    for (const [operators, subject] of [
+      ["", OWNER],
+      ["{", OWNER],
+      [JSON.stringify([OWNER]), OTHER],
+      [JSON.stringify([OWNER]), OWNER],
+    ] as const) {
       const report = await capabilityReport(vars(operators), subject);
-      expect(report["capabilities"]).toEqual(GRANT.capabilities);
-      expect(report["delegation"]).toMatchObject({ available: false, reason });
+      expect(report["capabilities"]).toEqual([...QUERY_GRANT_CAPABILITIES]);
+      expect(report["delegation"]).toMatchObject({
+        available: false,
+        reason: "delegation_execution_unavailable",
+      });
       const text = JSON.stringify(report["delegation"]);
       for (const forbidden of [OWNER, PRINCIPAL, "dlg_", "writesPerDay", "notAfter", "scopes"])
         expect(text).not.toContain(forbidden);
@@ -245,7 +238,7 @@ describe("ADR 0084: the operator's MCP principal activates only installed operat
       expect(JSON.stringify(await ui.json())).not.toContain("delegation");
     }
   });
-  it("the operator's MCP principal is published only installed tools and cannot reach browser operator routes", async () => {
+  it("an MCP client is published only installed tools and cannot reach browser operator routes", async () => {
     const configuration = { ...vars(), OPS_API_ENABLED: "true", COMMANDS_ENABLED: "true" };
     const response = await send("/mcp", rpcBody("tools/list", {}), configuration);
     const message = (await response.json()) as { result: { tools: { name: string }[] } };
@@ -286,36 +279,27 @@ describe("ADR 0084: the operator's MCP principal activates only installed operat
     expect(unauthenticated.status).toBe(401);
     expect(JSON.stringify(await unauthenticated.json())).not.toContain(OWNER);
   });
-  it("the adapter grades the subject as the UI does and never promotes a browser caller", async () => {
-    // An MCP-namespaced name in AGENT_GRANTS is not the subject: still the operator.
+  it("the adapter reads no operator list and never promotes a browser caller", async () => {
+    for (const configuration of [
+      vars(),
+      { ...vars(), AGENT_GRANTS: JSON.stringify([PRINCIPAL]) },
+      { ...vars(), AGENT_GRANTS: JSON.stringify([OWNER]) },
+      vars("{"),
+    ])
+      expect(
+        await mcpDelegationCapabilities(
+          configuration,
+          { kind: "mcp-client", principal: PRINCIPAL },
+          NOW,
+        ),
+      ).toMatchObject({ configuration: "valid", available: false });
     expect(
-      await mcpDelegationCapabilities(
-        { ...vars(), AGENT_GRANTS: JSON.stringify([PRINCIPAL]) },
-        { kind: "mcp-client", principal: PRINCIPAL },
-        NOW,
-      ),
-    ).toMatchObject({ configuration: "valid", available: false });
-    // A subject in both lists has no defined role in the UI, and none here.
-    expect(
-      await mcpDelegationCapabilities(
-        { ...vars(), AGENT_GRANTS: JSON.stringify([OWNER]) },
-        { kind: "mcp-client", principal: PRINCIPAL },
-        NOW,
-      ),
-    ).toMatchObject({ reason: "delegation_misconfigured", capabilities: [], available: false });
-    const configuration = vars();
-    expect(
-      await mcpDelegationCapabilities(
-        configuration,
-        { kind: "browser", principal: PRINCIPAL },
-        NOW,
-      ),
+      await mcpDelegationCapabilities(vars(), { kind: "browser", principal: PRINCIPAL }, NOW),
     ).toMatchObject({ reason: "delegation_not_mcp_client", capabilities: [], available: false });
   });
   it("uses real MCP transport for atomic delegated import, replay and bounded authority", async () => {
     vi.useRealTimers();
-    const grant = { ...GRANT, scopes: { sources: ["sony-bank"], accounts: "*" } };
-    const configuration = { ...vars(undefined, grant), OPS_API_ENABLED: "true" };
+    const configuration = { ...vars(), OPS_API_ENABLED: "true" };
     const invoke = async (
       name: string,
       arguments_: unknown,
@@ -383,36 +367,12 @@ describe("ADR 0084: the operator's MCP principal activates only installed operat
     ).toBe(0);
     const receipt = await invoke("kogane.ops.operation.get", { operationId });
     expect(receipt.result.isError).not.toBe(true);
-    const narrowed = {
-      ...configuration,
-      ...vars(undefined, { ...grant, scopes: { ...grant.scopes, sources: [] } }),
-    };
-    const denied = await invoke("kogane.ops.operation.get", { operationId }, narrowed);
-    const missing = await invoke(
-      "kogane.ops.operation.get",
-      { operationId: `op_${"0".repeat(64)}` },
-      narrowed,
-    );
-    expect(denied.result.structuredContent).toEqual(missing.result.structuredContent);
-    const revoked = await invoke("kogane.ops.import.request", arguments_, {
-      ...configuration,
-      OPERATOR_SUBJECTS: "",
-    });
-    expect(revoked.result.structuredContent).toEqual({ error: "delegation_not_configured" });
     const browser = await send("/api/command/v1/plan", {}, configuration);
     expect(browser.status).toBe(401);
   });
 
   it("returns identical history and scoped audit data through HTTP and MCP using shared readers", async () => {
-    const grant = {
-      ...GRANT,
-      capabilities: ["records.read", "audit.read"],
-      scopes: { sources: "*", accounts: "*", scheduleSources: "*" },
-    };
-    const configuration = {
-      ...vars(),
-      AGENT_API_GRANTS: JSON.stringify({ [OWNER]: grant, [PRINCIPAL]: grant }),
-    };
+    const configuration = vars();
     const invoke = async (
       name: string,
       arguments_: unknown,
@@ -490,32 +450,10 @@ describe("ADR 0084: the operator's MCP principal activates only installed operat
     const detailHttp = await send("/api/agent/v1/audit.get", detail, configuration, OWNER, APP_AUD);
     const detailMcp = await invoke("kogane.audit.get", detail);
     expect(await detailHttp.json()).toEqual(detailMcp.structuredContent);
-    const narrowedGrant = {
-      ...grant,
-      scopes: { ...grant.scopes, sources: ["sony-bank"], scheduleSources: [] },
-    };
-    const narrowed = {
-      ...configuration,
-      AGENT_API_GRANTS: JSON.stringify({ [OWNER]: narrowedGrant, [PRINCIPAL]: narrowedGrant }),
-    };
-    const refusedHttp = await send(
-      "/api/agent/v1/instruments.history",
-      args,
-      narrowed,
-      OWNER,
-      APP_AUD,
-    );
-    const refusedMcp = await invoke("kogane.instruments.history", args, narrowed);
-    expect(refusedHttp.status).toBe(403);
-    expect(refusedMcp.isError).toBe(true);
-    expect(await refusedHttp.json()).toEqual(refusedMcp.structuredContent);
-    const missing = await invoke(
-      "kogane.audit.get",
-      { auditId: "aud_00000000-0000-4000-8000-000000000000" },
-      narrowed,
-    );
-    const denied = await invoke("kogane.audit.get", detail, narrowed);
-    expect(denied.structuredContent).toEqual(missing.structuredContent);
+    const missing = await invoke("kogane.audit.get", {
+      auditId: "aud_00000000-0000-4000-8000-000000000000",
+    });
+    expect(missing.isError).toBe(true);
     expect(
       await env.DB.prepare(
         "SELECT count(*) AS n FROM instrument_mappings WHERE identifier_id='delegated-history-identifier'",
@@ -734,10 +672,8 @@ it("real MCP R2 owner decision prepares, confirms through the existing writer, a
 
 it("provider-contact requests use R2, pin human session policy, refuse expired preparation and roll back spent budget", async () => {
   vi.useRealTimers();
-  // A source-listed read grant: provider requests stay inside its source axis.
-  const grant = { ...GRANT, scopes: { sources: ["sony-bank"], accounts: "*" } };
   const configuration = {
-    ...vars(undefined, grant),
+    ...vars(),
     OPS_API_ENABLED: "true",
     SESSION_REFRESH_POLICY: "",
   };
@@ -838,7 +774,7 @@ it("provider-contact requests use R2, pin human session policy, refuse expired p
   expect(effects.results[0]!.confirms_audit_id).toBeTruthy();
 });
 
-it("MCP schedule job tools are installed only for a resolved grant and write only through prepared native confirmation", async () => {
+it("MCP schedule job tools are installed for an MCP client and write only through prepared native confirmation", async () => {
   vi.useRealTimers();
   const { delegatedScheduleRoute } = await import("../../processor/src/delegated-schedules");
   const pipeline = {
@@ -863,9 +799,8 @@ it("MCP schedule job tools are installed only for a resolved grant and write onl
       return response;
     }),
   };
-  const grant = { ...GRANT, scopes: { sources: "*", accounts: "*", scheduleSources: ["vpass"] } };
   const configured = {
-    ...vars(undefined, grant),
+    ...vars(),
     SCHEDULES_ENABLED: "true",
     PIPELINE: pipeline,
   };
@@ -960,10 +895,11 @@ it("MCP schedule job tools are installed only for a resolved grant and write onl
     APP_AUD,
   );
   expect(http.status).toBe(404);
-  const revoked = await invoke(
+  // The operator lists grade the UI, not an MCP client: emptying them changes nothing here.
+  const unlisted = await invoke(
     "kogane.schedules.job.update",
     { ...body, step: "confirm", confirmationDigest: cfm },
     { ...configured, OPERATOR_SUBJECTS: "" },
   );
-  expect(revoked.result.structuredContent).toEqual({ error: "delegation_not_configured" });
+  expect(unlisted.result.structuredContent).toEqual(retried.result.structuredContent);
 });

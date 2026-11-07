@@ -1,38 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import {
-  DELEGATION_CAPABILITIES,
-  MCP_AUTHORITY,
-  WHOLE_STORE_CAPABILITIES,
-} from "../src/delegation/contract.ts";
+import { DELEGATION_CAPABILITIES, MCP_AUTHORITY } from "../src/delegation/contract.ts";
 import { resolveDelegation } from "../src/delegation/resolve.ts";
 import {
   delegationCapabilities,
   delegationExecutionReadiness,
 } from "../src/delegation/readiness.ts";
-import type { Grant } from "../src/grants.ts";
 
 const OWNER = "owner-synthetic";
 const PRINCIPAL = `mcp-client:${OWNER}`;
 const NOW = "2026-10-09T00:00:00.000Z";
-function grant(scopes: Partial<Grant["scopes"]> = {}, principal = PRINCIPAL): Grant {
-  return {
-    principal,
-    scopes: { sources: "*", accounts: "*", scheduleSources: "*", ...scopes },
-    capabilities: ["summary.read"],
-    budget: { maxRows: 10, maxProposalTargets: 1, maxExplainDepth: 1 },
-  };
-}
 const resolve = (change: Partial<Parameters<typeof resolveDelegation>[0]> = {}) =>
-  resolveDelegation({
-    grants: { OPERATOR_SUBJECTS: JSON.stringify([OWNER]), AGENT_GRANTS: "" },
-    readGrant: grant(),
-    caller: { kind: "mcp-client", principal: PRINCIPAL },
-    now: NOW,
-    ...change,
-  });
+  resolveDelegation({ caller: { kind: "mcp-client", principal: PRINCIPAL }, now: NOW, ...change });
 
-describe("ADR 0084: the MCP principal of the UI operator, derived, never declared", () => {
-  test("the operator's MCP principal holds every operation capability within its read grant", async () => {
+describe("ADR 0084: any MCP client Access verified acts with the UI's authority, nothing configured", () => {
+  test("a verified MCP client holds every operation capability over the whole store", async () => {
     const resolution = await resolve();
     expect(resolution.ok).toBe(true);
     if (!resolution.ok) return;
@@ -46,6 +27,9 @@ describe("ADR 0084: the MCP principal of the UI operator, derived, never declare
       notAfter: new Date(Date.parse(NOW) + MCP_AUTHORITY.envelopeMs).toISOString(),
     });
     expect(resolution.principal.delegationRef).toMatch(/^dlg_[0-9a-f]{64}$/u);
+    // Another verified subject is just as able, as itself.
+    const other = await resolve({ caller: { kind: "mcp-client", principal: "mcp-client:other" } });
+    expect(other.ok && other.principal.delegator).toBe("other");
   });
   test("a browser caller, even naming an MCP principal, never yields one", async () => {
     for (const principal of [OWNER, PRINCIPAL])
@@ -53,81 +37,27 @@ describe("ADR 0084: the MCP principal of the UI operator, derived, never declare
         ok: false,
         code: "delegation_not_mcp_client",
       });
-    expect(await resolve({ caller: { kind: "mcp-client", principal: OWNER } })).toEqual({
-      ok: false,
-      code: "delegation_not_mcp_client",
-    });
   });
-  test("only a subject the UI grades as the operator; agents and strangers get nothing", async () => {
+  test("a principal outside the actor shape is refused, whatever its kind claims", async () => {
     for (const principal of [
-      "mcp-client:other-synthetic",
+      OWNER,
       "mcp-client:",
       `mcp-client:${PRINCIPAL}`,
       "mcp-client: bad",
       `mcp-client:${"a".repeat(129)}`,
     ])
-      expect(
-        await resolve({
-          caller: { kind: "mcp-client", principal },
-          readGrant: grant({}, principal),
-        }),
-      ).toEqual({ ok: false, code: "delegation_not_configured" });
-    expect(
-      await resolve({ grants: { OPERATOR_SUBJECTS: "", AGENT_GRANTS: JSON.stringify([OWNER]) } }),
-    ).toEqual({ ok: false, code: "delegation_not_configured" });
-    expect(await resolve({ grants: { OPERATOR_SUBJECTS: "[]" } })).toEqual({
-      ok: false,
-      code: "delegation_not_configured",
-    });
+      expect(await resolve({ caller: { kind: "mcp-client", principal } })).toEqual({
+        ok: false,
+        code: "delegation_not_mcp_client",
+      });
   });
-  test("unreadable or overlapping operator lists are a misconfiguration, as in the UI", async () => {
-    for (const grants of [
-      { OPERATOR_SUBJECTS: "{" },
-      { OPERATOR_SUBJECTS: JSON.stringify([OWNER]), AGENT_GRANTS: "[1]" },
-      { OPERATOR_SUBJECTS: JSON.stringify([OWNER]), AGENT_GRANTS: JSON.stringify([OWNER]) },
-    ])
-      expect(await resolve({ grants })).toEqual({ ok: false, code: "delegation_misconfigured" });
+  test("an unreadable clock is a misconfiguration", async () => {
     expect(await resolve({ now: "not a time" })).toEqual({
       ok: false,
       code: "delegation_misconfigured",
     });
   });
-  test("without its own read grant the principal has no operation authority", async () => {
-    expect(await resolve({ readGrant: null })).toEqual({
-      ok: false,
-      code: "delegation_not_configured",
-    });
-    expect(await resolve({ readGrant: grant({}, "mcp-client:other-synthetic") })).toEqual({
-      ok: false,
-      code: "delegation_not_configured",
-    });
-  });
-  test("the scope is the read grant's; a missing schedule axis is none", async () => {
-    const { scheduleSources: _, ...scopes } = grant({ sources: ["fixture-source"] }).scopes;
-    const narrow = await resolve({ readGrant: { ...grant(), scopes } });
-    expect(narrow.ok).toBe(true);
-    if (!narrow.ok) return;
-    expect(narrow.principal.scopes).toEqual({
-      sources: ["fixture-source"],
-      accounts: "*",
-      scheduleSources: [],
-    });
-  });
-  test("command and projection capabilities need whole source and account reads", async () => {
-    for (const scopes of [{ sources: ["fixture-source"] }, { accounts: ["fixture-account"] }]) {
-      const resolution = await resolve({ readGrant: grant(scopes) });
-      expect(resolution.ok).toBe(true);
-      if (!resolution.ok) continue;
-      expect(resolution.principal.capabilities).toEqual(
-        DELEGATION_CAPABILITIES.filter((c) => !WHOLE_STORE_CAPABILITIES.includes(c)),
-      );
-      for (const capability of WHOLE_STORE_CAPABILITIES)
-        expect(delegationExecutionReadiness(resolution, capability, [capability]).reason).toBe(
-          "delegation_capability_denied",
-        );
-    }
-  });
-  test("the reference has no clock, and changes with the authority it names", async () => {
+  test("the reference has no clock, and names its principal", async () => {
     const ref = async (change: Partial<Parameters<typeof resolveDelegation>[0]> = {}) => {
       const resolution = await resolve(change);
       if (!resolution.ok) throw new Error(resolution.code);
@@ -135,13 +65,9 @@ describe("ADR 0084: the MCP principal of the UI operator, derived, never declare
     };
     const base = await ref();
     expect(await ref({ now: "2026-12-31T23:59:59.999Z" })).toBe(base);
-    expect(await ref({ readGrant: grant({ scheduleSources: ["fixture-source"] }) })).not.toBe(base);
-    expect(await ref({ readGrant: grant({ sources: ["fixture-source"] }) })).not.toBe(base);
-  });
-  test("removing the operator or the grant revokes on the next resolution", async () => {
-    expect((await resolve()).ok).toBe(true);
-    expect((await resolve({ grants: { OPERATOR_SUBJECTS: "" } })).ok).toBe(false);
-    expect((await resolve({ readGrant: null })).ok).toBe(false);
+    expect(await ref({ caller: { kind: "mcp-client", principal: "mcp-client:other" } })).not.toBe(
+      base,
+    );
   });
 });
 
@@ -207,12 +133,12 @@ describe("readiness is not authority", () => {
   });
   test("the public report never returns identities, scope, expiry, budget or reference", async () => {
     for (const resolution of [
-      await resolve({ readGrant: grant({ sources: ["fixture-source"] }) }),
-      await resolve({ grants: { OPERATOR_SUBJECTS: "{" } }),
+      await resolve(),
+      await resolve({ now: "not a time" }),
       await resolve({ caller: { kind: "mcp-client", principal: "other-synthetic" } }),
     ]) {
       const text = JSON.stringify(delegationCapabilities(resolution));
-      for (const forbidden of [OWNER, "fixture-source", "notAfter", "writesPerDay", "dlg_"])
+      for (const forbidden of [OWNER, "notAfter", "writesPerDay", "dlg_"])
         expect(text).not.toContain(forbidden);
     }
   });
