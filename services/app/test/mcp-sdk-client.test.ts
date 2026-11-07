@@ -206,6 +206,8 @@ describe("the official SDK client against /mcp", () => {
           // Clients that hand a tool to a model refuse a root combinator.
           for (const key of ["oneOf", "anyOf", "allOf", "not"])
             expect(Object.keys(tool.inputSchema), tool.name).not.toContain(key);
+          // ChatGPT refuses a Unicode property escape in a pattern.
+          expect(JSON.stringify(tool.inputSchema), tool.name).not.toMatch(/\\\\[pP]\{/u);
         }
       } finally {
         await client.close();
