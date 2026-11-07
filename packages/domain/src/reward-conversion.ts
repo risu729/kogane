@@ -107,7 +107,6 @@ export function simulateConversion(
   };
 }
 
-
 function localDate(value: TemporalValue): CivilDate | null {
   if (value.kind === "local-date") return parseLocalDate(value.value);
   if (value.kind === "instant") return parseLocalDate(value.value.slice(0, 10));

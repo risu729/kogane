@@ -72,7 +72,11 @@ test("all 24,300 bounded amount-policy combinations match the integer oracle", (
     for (let increment = 1; increment <= 3; increment++)
       for (let minimum = 0; minimum <= 4; minimum++)
         for (const cap of [null, 0, 1, 2, 3, 4, 5, 6, 7, 8])
-          for (const [numerator, denominator] of [[1, 1], [1, 2], [2, 3]] as const)
+          for (const [numerator, denominator] of [
+            [1, 1],
+            [1, 2],
+            [2, 3],
+          ] as const)
             for (const mode of ROUNDING_MODES) {
               cases++;
               const permitted = Math.min(balance, cap ?? balance);
@@ -103,7 +107,9 @@ test("all 24,300 bounded amount-policy combinations match the integer oracle", (
                 throw new Error("expected exact plan");
               const expectedUse = expectedFeasible ? use : 0;
               expect(decimalToString(plan.use.value.value)).toBe(String(expectedUse));
-              expect(decimalToString(plan.remainder.value.value)).toBe(String(balance - expectedUse));
+              expect(decimalToString(plan.remainder.value.value)).toBe(
+                String(balance - expectedUse),
+              );
               expect(decimalToString(plan.receive.value.value)).toBe(
                 String(expectedFeasible ? rounded(use * numerator, denominator, mode) : 0),
               );

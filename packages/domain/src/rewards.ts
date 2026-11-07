@@ -35,7 +35,6 @@ import {
   type TemporalValue,
 } from "./time.ts";
 import {
-  compareDecimals,
   exactQuantity,
   integerDecimal,
   sumQuantities,
@@ -1705,4 +1704,3 @@ function negate(quantity: Quantity): Quantity["value"] {
     normalizationVersion: quantity.value.normalizationVersion,
   };
 }
-
