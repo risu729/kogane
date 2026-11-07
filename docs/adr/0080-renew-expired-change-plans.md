@@ -76,6 +76,11 @@ Approvals, commits and receipts are unchanged: they bind the stored plan id.
   answered an expired plan again, as before this ADR.
 - An expired plan is still `planned` or `approved` in `change_plans`; a
   reader that lists open plans by status alone sees it, as before.
+- The lookups and the insert are separate statements. Two callers whose
+  clocks fall on either side of a window boundary can each create a renewal,
+  so two open plans of the same change can exist at once. Both pin the same
+  revisions, so once one commits the other is refused `stale_context`: the
+  change applies at most once (SC17, INV06), as with any two plans of it.
 - No migration, no new error code, no new route.
 
 ## Verification
@@ -85,6 +90,9 @@ mappings): a change planned again after its plan expired gets a new, open
 plan that approves and commits while the expired row stays unchanged and
 unapprovable; re-planning within a plan's lifetime, across a window
 boundary, returns that plan, and a third plan follows a second expiry; a
+plan re-planned at the exact instant it expires (a window start) is renewed;
+two renewals taken by clocks on either side of a boundary commit once, the
+other refused `stale_context`; a
 renewal simulates fresh until another decision moves its pin, then stale with
 the plain digest of the moved data; a first plan keeps the documented digest;
 a row whose id is no derivation of its content simulates stale.

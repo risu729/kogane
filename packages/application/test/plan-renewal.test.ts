@@ -143,6 +143,74 @@ describe("a change planned again after its plan expired", () => {
     expect(f.rows()).toHaveLength(3);
   });
 
+  test("at the exact instants a plan expires and a window begins, the lapsed plan is renewed", async () => {
+    const f = await fixture();
+    const first = await f.plan(0);
+    if (!first.ok) throw new Error(first.error);
+    // 15 minutes in is both the first plan's expiry and the start of window 1.
+    const renewed = await f.plan(15);
+    if (!renewed.ok) throw new Error(renewed.error);
+    expect(renewed.created).toBe(true);
+    expect(renewed.plan.planId).not.toBe(first.plan.planId);
+    // Just before 30 minutes in, the renewal of window 1 is still the answer.
+    const before = await f.plan(29.999);
+    expect(before.ok && before.plan.planId).toBe(renewed.plan.planId);
+    expect(before.ok && before.created).toBe(false);
+    // 30 minutes in: the renewal expires exactly as window 2 begins.
+    const third = await f.plan(30);
+    if (!third.ok) throw new Error(third.error);
+    expect(third.created).toBe(true);
+    expect(new Set([first.plan.planId, renewed.plan.planId, third.plan.planId]).size).toBe(3);
+  });
+
+  test("two open renewals from clocks on either side of a window boundary commit at most once", async () => {
+    const f = await fixture();
+    const first = await f.plan(0);
+    if (!first.ok) throw new Error(first.error);
+    // A caller whose clock reads window 2 renews first; a caller whose clock
+    // still reads window 1 then finds no renewal of window 0 and takes its own.
+    const ahead = await f.plan(31);
+    const behind = await f.plan(29);
+    if (!ahead.ok) throw new Error(ahead.error);
+    if (!behind.ok) throw new Error(behind.error);
+    expect(ahead.created).toBe(true);
+    expect(behind.created).toBe(true);
+    expect(ahead.plan.planId).not.toBe(behind.plan.planId);
+    const approved = async (plan: { planId: string; planDigest: string }) => {
+      const result = await approve(f.store, {
+        planId: plan.planId,
+        planDigest: plan.planDigest,
+        actor: OPERATOR,
+        scope: [],
+        ttlSeconds: 600,
+        now: at(32),
+      });
+      if (!result.ok) throw new Error(result.error);
+      return result.approval.approvalId;
+    };
+    const aheadApproval = await approved(ahead.plan);
+    const behindApproval = await approved(behind.plan);
+    const once = await commit(f.store, {
+      operationId: "op-renewal-ahead",
+      principal: OPERATOR,
+      planId: ahead.plan.planId,
+      approvalId: aheadApproval,
+      planners: planners(f.w.db),
+      now: at(33),
+    });
+    expect(once.ok).toBe(true);
+    // The other plan pinned the same revisions, which that commit moved.
+    const twice = await commit(f.store, {
+      operationId: "op-renewal-behind",
+      principal: OPERATOR,
+      planId: behind.plan.planId,
+      approvalId: behindApproval,
+      planners: planners(f.w.db),
+      now: at(33),
+    });
+    expect(twice.ok ? "committed" : twice.error).toBe("stale_context");
+  });
+
   test("a renewed plan simulates as fresh until a pin moves, then as stale", async () => {
     const f = await fixture();
     const first = await f.plan(0);
