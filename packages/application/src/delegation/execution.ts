@@ -234,7 +234,7 @@ export function guardDelegatedEffect(
 }
 
 /**
- * How many writes this delegated principal had applied or accepted in the last
+ * How many writes this delegated principal has applied or accepted in the last
  * 24 hours. The budget guard on every effect write and the preview's
  * `budgetRemaining` count the same rows, so the preview never promises a write
  * the guard would refuse.

@@ -13,11 +13,26 @@ const adapters = [
     .filter((name) => name.endsWith("-tools.ts"))
     .sort(),
 ];
-// A CommandStore, SqlExecutor or D1 call: `store.first<…>(`, `db.prepare(`, …
+// A CommandStore, SqlExecutor or D1 call: `store.first<…>(`, `db\n  .prepare(`, …
 // `Promise.all(` is not a store call.
-const STORE_CALL = /(?<!Promise)\.(?:first|all|batch|prepare|run|raw)\s*[<(]/u;
-// A string literal that starts a SQL statement.
-const SQL_TEXT = /["'`]\s*(?:SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH)\s/iu;
+const STORE_CALL = /(?<!Promise\s*)\??\.\s*(?:first|all|batch|prepare|run|raw)\s*[<(]/gu;
+// Any use of the D1 binding other than handing it to d1CommandStore/d1Executor.
+const D1_MEMBER = /\bDB\s*\??\.\s*\w/gu;
+// A string literal that starts a SQL statement, possibly on the next line.
+// Upper case only, with the clause that follows, so prose ("Update a job") passes.
+const SQL_TEXT =
+  /["'`]\s*(?:SELECT\s|INSERT\s+INTO\s|UPDATE\s+\w+\s+SET\s|DELETE\s+FROM\s|REPLACE\s+INTO\s|WITH\s+\w+\s+AS\s*\()/gu;
+
+function offending(text: string) {
+  const found: { line: number; text: string }[] = [];
+  for (const pattern of [STORE_CALL, D1_MEMBER, SQL_TEXT])
+    for (const match of text.matchAll(pattern))
+      found.push({
+        line: text.slice(0, match.index).split("\n").length,
+        text: match[0].replace(/\s+/gu, " ").trim(),
+      });
+  return found.sort((a, b) => a.line - b.line);
+}
 
 describe("MCP tools issue no SQL of their own (ADR 0081)", () => {
   test("the adapter list is not empty", () => {
@@ -27,19 +42,19 @@ describe("MCP tools issue no SQL of their own (ADR 0081)", () => {
   });
   for (const name of adapters)
     test(name, () => {
-      const lines = readFileSync(resolve(source, name), "utf8").split("\n");
-      const offending = lines
-        .map((line, index) => ({ line: index + 1, text: line.trim() }))
-        .filter(({ text }) => STORE_CALL.test(text) || SQL_TEXT.test(text));
-      expect(offending).toEqual([]);
+      expect(offending(readFileSync(resolve(source, name), "utf8"))).toEqual([]);
     });
   test("the guard catches the shapes it names", () => {
-    expect(STORE_CALL.test("await store.first<{ n: number }>(")).toBe(true);
-    expect(STORE_CALL.test("context.store.all(")).toBe(true);
-    expect(STORE_CALL.test("env.DB.prepare(")).toBe(true);
-    expect(STORE_CALL.test("await Promise.all([a, b])")).toBe(false);
-    expect(SQL_TEXT.test('"SELECT source_id FROM ops_requests"')).toBe(true);
-    expect(SQL_TEXT.test("`select count(*) n FROM audit_records`")).toBe(true);
-    expect(SQL_TEXT.test('"selected"')).toBe(false);
+    const hit = (text: string) => offending(text).length > 0;
+    expect(hit("await store.first<{ n: number }>(")).toBe(true);
+    expect(hit("context.store.all(")).toBe(true);
+    expect(hit("await db\n  .prepare(sql)")).toBe(true);
+    expect(hit("await env.DB.exec(sql)")).toBe(true);
+    expect(hit("const q = `\n  SELECT id FROM t`;")).toBe(true);
+    expect(hit('"SELECT source_id FROM ops_requests"')).toBe(true);
+    expect(hit("d1CommandStore(env.DB)")).toBe(false);
+    expect(hit("await Promise.all([a, b])")).toBe(false);
+    expect(hit('description: "Update a schedule job, with care."')).toBe(false);
+    expect(hit('"selected"')).toBe(false);
   });
 });

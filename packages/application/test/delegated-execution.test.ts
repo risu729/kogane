@@ -128,6 +128,8 @@ describe("delegated writer transaction", () => {
     // The preview's count and the guard's count are one query: zero left means refused.
     expect(await delegatedWritesRemaining(store, p)).toBe(0);
     expect(await delegatedWritesRemaining(store, principal(3))).toBe(2);
+    // A budget lowered below what was already used leaves zero, never a negative count.
+    expect(await delegatedWritesRemaining(store, { ...p, budget: { writesPerDay: 0 } })).toBe(0);
     expect(() => write(b, db)).toThrow();
     expect(await delegatedBatchFailure(store, b)).toMatchObject({
       code: "delegation_budget_exceeded",
