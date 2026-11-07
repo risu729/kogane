@@ -4,12 +4,13 @@
 // of the evidence browser must leave it out, while the consistency view of
 // migration 0026 lists it for the audit path. Publishing it through the same
 // pointer move the writer performs is what makes it visible, and only that.
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { evidenceReader } from "../src/observations";
 import { identityApi } from "../src/identity-api";
 import { observationApi } from "../src/observation-api";
-import { observationOrganizations } from "../src/observation-organization";
+import { observationOrganizations } from "../../../packages/application/src/query/observation-organization.ts";
 import { publishParse, seedRegistry, seedRun, supersedeParse } from "./fixtures";
 import { CANDIDATE_LIMIT } from "../../../packages/read-model/src/index";
 
@@ -177,7 +178,7 @@ describe("publication gate: candidate invisibility", () => {
         .bind(C1)
         .first<number>("n"),
     ).toBe(0);
-    const organization = await observationOrganizations(env.DB, [
+    const organization = await observationOrganizations(d1Executor(env.DB), [
       { kind: "transaction", id: candidate.tx },
     ]);
     expect([...organization.values()].map((o) => o.state)).toEqual(["unavailable"]);
@@ -213,7 +214,7 @@ describe("publication gate: candidate invisibility", () => {
     expect(await api(`/api/identity/coverage?source=${SB}`)).toMatchObject({
       rows: [{ eligible: 4, organized: 4, identified: 4 }],
     });
-    const organization = await observationOrganizations(env.DB, [
+    const organization = await observationOrganizations(d1Executor(env.DB), [
       { kind: "transaction", id: candidate.tx },
       { kind: "transaction", id: published.tx },
     ]);
