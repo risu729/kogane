@@ -874,13 +874,15 @@ test("the deployed scan stage logs each thrown registration by a closed code onl
     collectionScanStage(harness.env as unknown as Env, context, (line) => lines.push(line));
   throws.push("Error");
   expect(await stage()).toMatchObject({ listed: 3, registered: 2, failed: 1 });
-  // A class name outside the closed grammar is reported as `unknown`.
+  // The code is the built-in class, never the writable name (#989/#1050):
+  // a renamed Error is still `Error`, and the name's text is not logged.
   throws.push("Outage: " + poisoned);
   expect(await stage()).toMatchObject({ registered: 0, failed: 1 });
   expect(lines.map((line) => JSON.parse(line))).toEqual([
     { event: "collection_scan_registration_failed", code: "Error" },
-    { event: "collection_scan_registration_failed", code: "unknown" },
+    { event: "collection_scan_registration_failed", code: "Error" },
   ]);
+  expect(lines.join("\n")).not.toContain("Outage");
   expect(lines.join("\n")).not.toContain("synthetic r2 outage");
   expect(lines.join("\n")).not.toContain(poisoned);
   // A tick with nothing thrown logs no failure line.

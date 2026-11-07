@@ -116,9 +116,8 @@ A registration that **throws** — R2 or CORE unavailable, or a refusal CORE
 made that the derivation did not foresee — is counted in the lane's `failed`
 and logged by its error class only, one
 `{"event":"collection_scan_registration_failed","code":…}` line per throw
-(`collectionScanStage` in `src/worker.ts`; a class name outside
-`[A-Za-z][A-Za-z0-9_]{0,63}` is logged as `unknown`, and the message never
-is); nothing is recorded for that run, the
+(`collectionScanStage` in `src/worker.ts`; the code is one of the finite
+built-in class labels of §7, never the error's writable name or message); nothing is recorded for that run, the
 page still advances and the next cycle tries it again. One failing run never
 stops the page and never pins the cursor (G1-13). A seal CORE's completeness
 trigger refuses (`run_inventory_incomplete`) is not in this class: it is a
