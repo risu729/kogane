@@ -571,9 +571,16 @@ review, `{"relatedTo": id}` with an optional `offset` for the candidates a
 review competes with, [correcting a match](#correcting-a-match)) is
 `GET /api/v2/reconciliation/card-settlements` with the same parameters, and
 `kogane.card-settlements.ownership` (`{"proposalId": id}`) is its
-`/ownership` read. Both call the page's services
-(`packages/application/src/query/card-settlements-read.ts`), answer exactly
-the route's body and write only the R0 audit record of the call. They exist
+`/ownership` read. The route and both tools are adapters over the same two
+functions, `readCardSettlementsForGrant` and `readCardOwnershipForGrant`
+(`packages/application/src/query/card-settlements-read.ts`), so the request
+rules, the refusals and their codes are the service's on every path
+([ADR 0081](adr/0081-ui-parity-through-mcp.md) point 2). The route turns its
+query string into the tool's arguments (a plain decimal `offset` becomes a
+number, any other `offset` text stays text, a repeated key becomes a list)
+and reads under the browser's reader grant; a tool reads under the caller's
+grant. The tools answer exactly the route's body and write only the R0 audit
+record of the call. They exist
 exactly while the route does: where its views are absent they are not listed,
 the HTTP path is `404` and the MCP name `unknown_tool`. They are refused
 `unauthorized` without `records.read` and `evidence_restricted` on a narrowed
@@ -581,13 +588,34 @@ source or account scope, before the request is validated: a review joins a
 card account to a bank account, so a narrowed grant could see an account
 outside it. A list read deeper than the grant's `maxRows` (`offset + 50`
 above it, for a page, a statement's or a review's competitors) is
-`413 budget_exceeded` (`budget:maxRows=<n>`); a page's
-`nextOffset` is the route's, so the next page may be refused. A malformed
-request, or more than one of `proposalId`, `statementKey` and `relatedTo`, is
-`400 invalid_query`; a `proposalId` or `relatedTo` that names no candidate is
-`404 not_found`, and a `statementKey` with no candidate is an empty page, as
-on the route. None of these refusals reads a store row; the only statement
-before them is the `sqlite_master` check the route also runs. Deciding a review or recording ownership stays a plan through the change
+`413 budget_exceeded` (`budget:maxRows=<n>`), before the anchor of a
+`relatedTo` read is looked up. The page's reader grant and every MCP client's
+grant ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md))
+hold the same `maxRows`, 1000 (`GRANT_LIMITS.maxRows`), so the route and the
+tools page equally deep: offset 950 is the last page either reads. A page's
+`nextOffset` does not look at the budget, so the page after offset 950 is
+named and then refused. A malformed request (an `offset` that is not an
+integer from 0 to 1,000,000, a key outside the four, an empty or repeated
+value), or more than one of `proposalId`, `statementKey` and `relatedTo`, is
+`400 invalid_query` (`financial-error-v1`, `refs: ["request"]`, or
+`["proposalId"]` on `/ownership`); a `proposalId` or `relatedTo` that names
+no candidate is `404 not_found`, and a `statementKey` with no candidate is an
+empty page. None of these refusals reads a store row; the only statement
+before them is the `sqlite_master` check every path runs.
+
+Until 2026-11-07 the route parsed its own query and called the queries
+directly. It answered a malformed `offset` with `400 invalid_offset` and its
+other malformed requests with `400 invalid_query` as `{error, requestId}`,
+and it read any `offset` up to 1,000,000, so it served pages past offset 950
+that the tools refused. Now both are the service's answers above. The page
+itself does not read the flat list: it reads statements
+(below), and pages a statement's candidates and a review's competitors 50 at a
+time (36 candidates per statement on average on the scaled store of
+[Cost](#cost)). A statement or a competitor list of more than 1,000
+candidates would be readable only to offset 950. `/statements` is not one of
+these reads: it has no MCP read yet (a listed gap of the parity guard) and
+keeps its own rules (`offset` only; `400 invalid_offset`, up to 1,000,000,
+not bounded by a grant). Deciding a review or recording ownership stays a plan through the change
 lifecycle, graded there; on MCP any client the MCP Access application admits
 plans and decides as itself
 ([ADR 0063](adr/0063-delegated-ai-operation-path.md),
@@ -614,7 +642,8 @@ in history. Until the withdrawal commits, the right candidate shows
 `allocation_already_used` and its acceptance cannot be planned.
 
 The pages read `GET /api/v2/reconciliation/card-settlements?relatedTo=<proposalId>`
-(operator-only like the list, with an optional `offset`; not combined with
+(operator-only like the list, with an optional `offset` within the reader
+grant's budget; not combined with
 `proposalId` or `statementKey`, nor on the `/ownership` or `/statements`
 routes; `404` when the candidate does not exist), which returns the list's
 DTO, debit-account evidence and history included
@@ -989,7 +1018,18 @@ non-operators. Over MCP and the agent HTTP route
 `kogane.card-settlements.read` with `relatedTo` or `statementKey` answers the
 route's body, `not_found` for a missing anchor, and refuses
 mixed filters and pages past `maxRows`; the service's own refusals precede
-every read (`packages/application/test/card-settlements-read.test.ts`).
+every read (`packages/application/test/card-settlements-read.test.ts`). The
+same file sends offsets -1, 0, 950, 951, 1,000,000, 1,000,001, 10^20, 1.5,
+non-numeric and empty to the route, the agent HTTP route and MCP, each under
+its own grant, and gets one status and one body on all three. The route's
+adapter is compared with the handler it replaced
+(`services/app/test/card-settlements-api-frozen.ts`) on a store of 1,101
+candidates, over every offset alone and beside each filter plus a fixed
+sample of 600 combinations of offsets, filters, unknown and repeated keys, on
+the list, `/ownership` and `/statements`: every answer is byte-identical
+except the two changes recorded under [Agent reads](#agent-reads), and
+methods and non-operators answer as before
+(`services/app/test/card-settlements-api-differential.test.ts`).
 The pending-to-posted review is tested the same way. Its plans carry the
 candidate's own relation, and its confirmation refuses a pin, action or
 candidate that changed after planning.

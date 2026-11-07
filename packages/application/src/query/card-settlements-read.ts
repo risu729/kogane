@@ -1,11 +1,16 @@
-// Grant boundary for the `カード照合` pages' reads (ADR 0081): the review list,
-// one statement's candidates, one review or the candidates it competes with,
-// and the ownership review of one candidate. The services are the pages' own
-// (`queryCardSettlements`, `queryRelatedCardSettlements`,
-// `queryCardOwnership`); this file
-// adds no SQL and no writer. A review joins a card statement to a bank debit of
-// another source and account, and its ownership side reads both accounts'
-// claims, so only a whole-store grant may read it.
+// The `カード照合` pages' reads (ADR 0081 point 2): the review list, one
+// statement's candidates, one review or the candidates it competes with, and
+// the ownership review of one candidate. Both the page route
+// (`GET /api/v2/reconciliation/card-settlements` and its `/ownership` read,
+// under the browser's reader grant) and the MCP and agent HTTP tools
+// (`kogane.card-settlements.read`, `kogane.card-settlements.ownership`, under
+// the caller's grant) are adapters over these two functions: the request
+// rules, the refusal codes and the row budget are decided here, once. The
+// queries are the pages' own (`queryCardSettlements`,
+// `queryRelatedCardSettlements`, `queryCardOwnership`); this file adds no SQL
+// and no writer. A review joins a card statement to a bank debit of another
+// source and account, and its ownership side reads both accounts' claims, so
+// only a whole-store grant may read it.
 import type { CardOwnershipReview } from "../../../domain/src/card-ownership-review.ts";
 import type { CardSettlementReviewPage } from "../../../domain/src/card-settlement-review.ts";
 import type { FinancialError, FinancialErrorCode } from "../../../domain/src/result.ts";
@@ -19,10 +24,10 @@ import {
   queryRelatedCardSettlements,
 } from "./card-settlements.ts";
 
-/** The route's proposal id pattern (`services/app/src/card-settlements-api.ts`). */
+/** A proposal id, as the pages and the tools name a candidate. */
 export const CARD_SETTLEMENT_PROPOSAL_ID = /^[A-Za-z0-9_-]{1,128}$/u;
 export const CARD_SETTLEMENTS_MAX_OFFSET = 1_000_000;
-/** The route's statement key bound (`statementKey` above 1024 characters is refused). */
+/** The statement key bound (`statementKey` above 1024 characters is refused). */
 export const CARD_SETTLEMENT_STATEMENT_KEY_MAX = 1024;
 
 export type CardSettlementsReadOperation = "card-settlements.read" | "card-settlements.ownership";
@@ -51,10 +56,14 @@ function refusal(
  * One page of reviews (`offset`), of one statement's candidates
  * (`statementKey`), of the candidates a review competes with (`relatedTo`), or
  * one review (`proposalId`), as the pages read them. `proposalId` takes no
- * other key; `statementKey` and `relatedTo` each take `offset` only. The
- * grant's `maxRows` bounds how deep a caller pages: `offset + 50` (one for a
- * `proposalId` read) above it is `budget_exceeded`, before any read. A
- * `proposalId` or `relatedTo` that names no candidate is `not_found`.
+ * other key; `statementKey` and `relatedTo` each take `offset` only. Every
+ * malformed request, an `offset` that is not an integer from 0 to
+ * `CARD_SETTLEMENTS_MAX_OFFSET` included, is `invalid_query`. The grant's
+ * `maxRows` bounds how deep a caller pages: `offset + 50` (one for a
+ * `proposalId` read) above it is `budget_exceeded`, before any read. The page
+ * route's reader grant and every MCP client's grant hold the same
+ * `maxRows` (`GRANT_LIMITS.maxRows`), so both refuse alike. A `proposalId` or
+ * `relatedTo` that names no candidate is `not_found`.
  */
 export async function readCardSettlementsForGrant(input: {
   grant: Grant;

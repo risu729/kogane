@@ -66,7 +66,8 @@ const schemas = {
   "kogane.instruments.history": z.strictObject({
     identifierId: z.string().regex(INSTRUMENT_IDENTIFIER_ID),
   }),
-  // The route's query parameters, as a body; the patterns are the route's own.
+  // The page route's query parameters, as a body: the published shape of the
+  // service's request rules (`readCardSettlementsForGrant`), which decide.
   "kogane.reported-state.read": z.strictObject({
     date: z.string().regex(REPORTED_STATE_DATE),
     source: z.string().regex(REPORTED_STATE_SOURCE).optional(),
@@ -105,7 +106,8 @@ const schemas = {
       .max(64),
     knowledge: z.literal("current"),
   }),
-  // The route's query parameters, as a body; the patterns are the route's own.
+  // The page route's query parameters, as a body: the published shape of the
+  // service's request rules (`readCardSettlementsForGrant`), which decide.
   "kogane.card-settlements.read": z.strictObject({
     offset: z.number().int().min(0).max(CARD_SETTLEMENTS_MAX_OFFSET).optional(),
     proposalId: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID).optional(),
