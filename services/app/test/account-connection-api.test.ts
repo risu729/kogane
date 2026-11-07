@@ -152,7 +152,8 @@ it("applies only eligible automatic MF connection names without altering origina
 });
 
 it("retains manual display names even when a reviewed connection name is eligible", async () => {
-  const { connectionAccountLabel } = await import("../src/account-connection-display");
+  const { connectionAccountLabel } =
+    await import("../../../packages/application/src/query/account-connections");
   expect(
     connectionAccountLabel("手動指定", "manual", "moneyforward-me", {
       label: "三井住友銀行（MoneyForward連携）",
