@@ -155,6 +155,57 @@ test("an import whose terminal is not there stays pending and is never failed aw
   expect(record.receipt.status).toBe("accepted");
 });
 
+test("an import has no expiry: a missing terminal is looked at every five minutes, past a day", async () => {
+  // Unlike a collection (ADR 0048's 24 hours), nothing closes an import whose
+  // terminal is not there: the collector may still be running. This pins the
+  // limit docs/processor.md §7 and docs/ops-api.md state.
+  const harness = withDispatch();
+  const accepted = await requestImport({
+    store: harness.store,
+    principal: PRINCIPAL,
+    now: NOW,
+    request: { source: SOURCE, runId: "run-late" },
+  });
+  if (!accepted.ok) throw new Error("acceptance failed");
+  const operationId = accepted.receipt.operationId;
+  const at = (offsetMs: number) => () => new Date(Date.parse(NOW) + offsetMs);
+  const minute = 60_000;
+  const day = 24 * 60 * minute;
+
+  expect(await dispatchOperations(harness.env, { now: at(minute) })).toMatchObject({ retried: 1 });
+  // Not due again until five minutes after that look.
+  expect(await dispatchOperations(harness.env, { now: at(5 * minute) })).toMatchObject({
+    claimed: 0,
+  });
+  expect(await dispatchOperations(harness.env, { now: at(6 * minute) })).toMatchObject({
+    retried: 1,
+  });
+  // A day and more after acceptance: still looked at, still not closed.
+  expect(await dispatchOperations(harness.env, { now: at(day + minute) })).toMatchObject({
+    claimed: 1,
+    retried: 1,
+    failed: 0,
+  });
+  const waiting = await receipt(harness, operationId);
+  if (!waiting.ok) throw new Error("receipt missing");
+  expect(waiting.receipt).toMatchObject({
+    status: "accepted",
+    failureCode: "terminal_not_found",
+    dispatch: { state: "dispatch_pending", attempts: 3 },
+    execution: null,
+  });
+
+  // The terminal lands late; the next look registers it.
+  await persistSyntheticRun(harness, { run: { runId: "run-late" } });
+  expect(await dispatchOperations(harness.env, { now: at(day + 6 * minute) })).toMatchObject({
+    dispatched: 1,
+  });
+  const registered = await receipt(harness, operationId);
+  if (!registered.ok) throw new Error("receipt missing");
+  expect(registered.receipt.dispatch.state).toBe("dispatched");
+  expect(stageOf(registered.receipt.stages, "registered")?.state).toBe("completed");
+});
+
 test("an import the tick's registration budget cannot start waits for a later tick", async () => {
   // The scan spent the cron invocation's shared registration budget first
   // (issue #87). Nothing is registered and nothing is failed: the request
