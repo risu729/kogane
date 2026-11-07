@@ -291,4 +291,36 @@ describe("SBI identity", () => {
     expect(aggregate.instruments.some((item) => item.role === "security")).toBe(false);
     expect(() => sbiIdentity(input({ sourceId: "other" }))).toThrow();
   });
+
+  test("a provider market or custody code that names an inherited property is not in the table", () => {
+    // The trade parser carries the provider's market wording verbatim
+    // (`extra.marketLabel`); a table lookup must read only the table's own
+    // entries, never Object.prototype's, or a word such as `constructor`
+    // would become a MIC (and a function bound to D1, failing the run).
+    for (const word of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+      const trade = sbiIdentity(
+        input({
+          kind: "transaction",
+          sourceAccount: "sbi-securities:domestic",
+          securityCode: null,
+          market: null,
+          extra: { accountLabel: "SYN", issueCode: "1234", marketLabel: word },
+        }),
+      );
+      const security = trade.instruments.find((item) => item.role === "security")!;
+      expect(security).toMatchObject({
+        namespace: "sbi-security-code",
+        scope: "JP",
+        value: "1234",
+        reason: "provider-code-without-global-crosswalk",
+        details: { securityCode: "1234", countryCode: "JP", providerMarket: word },
+      });
+      expect(trade.issues).toContain("security-without-global-crosswalk");
+
+      const custody = sbiIdentity(
+        input({ sourceAccount: `sbi-securities:domestic:deposit-type=${word}` }),
+      );
+      expect(custody.account.label).toBe(`SBI証券 国内株式 預り区分未確定（区分コード: ${word}）`);
+    }
+  });
 });
