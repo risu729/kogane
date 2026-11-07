@@ -1624,16 +1624,18 @@ owner's agreement.
    | `/api/v2/balances/latest`, `/api/v2/balances/history`                                                        | `kogane.balances.read` ([UI read pages](#ui-read-pages))                 |
    | `/api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                         | `kogane.rewards.read` ([UI read pages](#ui-read-pages))                  |
    | `/api/v2/reported-holdings-change`                                                                           | `kogane.reported-holdings-change.read` ([UI read pages](#ui-read-pages)) |
+   | `/api/v2/reports`, `/api/v2/reports/:id`, `/api/v2/reports/:id/explanation`                                  | `kogane.reports.read` ([UI read pages](#ui-read-pages))                  |
+   | `/api/collection-quality`, `/api/collection-quality/:source`                                                 | `kogane.collection-quality.read` ([UI read pages](#ui-read-pages))       |
 
-   The 14 gaps, by group:
+   The 9 gaps, by group:
 
-   | Group               | Routes with no MCP read                                                                                                                              |
-   | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | v1 raw download     | `/api/raw/:sha256`                                                                                                                                   |
-   | Evidence browser    | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact`, `…/runs/:run/artifacts/:artifact/raw` |
-   | Card settlements    | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped)                         |
-   | Reports and quality | `/api/v2/reports`, `/api/v2/reports/:id`, `…/:id/explanation`, `…/:id/export`, `/api/collection-quality`, `/api/collection-quality/:source`          |
-   | Operator pages      | `/api/ops/v1/schedules` (`kogane.schedules.maintenance.read` covers the maintenance part and `kogane.schedules.survey.read` the re-survey section)   |
+   | Group            | Routes with no MCP read                                                                                                                              |
+   | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | v1 raw download  | `/api/raw/:sha256`                                                                                                                                   |
+   | Evidence browser | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact`, `…/runs/:run/artifacts/:artifact/raw` |
+   | Card settlements | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped)                         |
+   | Report export    | `/api/v2/reports/:id/export` (not served over MCP, [ADR 0072](adr/0072-report-artifact-pages.md) amendment)                                          |
+   | Operator pages   | `/api/ops/v1/schedules` (`kogane.schedules.maintenance.read` covers the maintenance part and `kogane.schedules.survey.read` the re-survey section)   |
 
 ADR 0081 point 2 (no SQL in an MCP adapter) has its own guard,
 [`tests/mcp-tools-no-sql.test.ts`](../tests/mcp-tools-no-sql.test.ts).
