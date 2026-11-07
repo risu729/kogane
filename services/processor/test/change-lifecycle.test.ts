@@ -592,6 +592,59 @@ test("an identity assignment that loses its key to a relation writes no mapping"
   expect(loser).toEqual({ plan: "approved", uses: 1 });
 });
 
+test("an override release that loses its key to a relation writes no decision and supersedes nothing", async () => {
+  // The release's decision and supersession statements require a ledger row
+  // under the key, not its own; without the receipt guard on each, they ran
+  // on the relation's row and the decision log's append-only trigger refused
+  // the loser's batch with an SQL error instead of the conflict.
+  const winnerRef = `source_account:${(await seedParse(266, "smbc-bank:race-relation-2")).ref}`;
+  const winner = await approvedRelation(winnerRef);
+  const mapping = await seedParse(267, "smbc-bank:race-release");
+  const assignPlan = await planFor(mapping.ref, await target("target-race-release"));
+  expect(
+    await commitWith(
+      "op-race-release-assign",
+      assignPlan,
+      (await approveFor(assignPlan)).approvalId,
+    ),
+  ).toMatchObject({ ok: true, replayed: false });
+  const released = await createPlan(
+    "identity.release-override",
+    { subject: "account", referenceId: mapping.ref, reason: "synthetic raced release" },
+    { actor: operator, baseContextId: "identity-current-v1", now: NOW, ttlSeconds: 900 },
+    store,
+  );
+  if (!released.ok) throw new Error(`plan failed: ${released.error}`);
+  const releaseApproval = await approveFor(released.plan);
+  const activeOverrides = () =>
+    db
+      .prepare(
+        "SELECT count(*) AS n FROM decision_revisions WHERE subject_ref=? AND decision_kind='assign' AND superseded_by IS NULL",
+      )
+      .bind(mapping.ref)
+      .first<{ n: number }>();
+  expect(await activeOverrides()).toEqual({ n: 1 });
+  const before = await counts();
+  const raced = racedBeforeBatch(db, async () => {
+    expect(
+      await commitWith("op-race-release", winner.plan, winner.approval.approvalId),
+    ).toMatchObject({ ok: true, replayed: false });
+  });
+  const result = await commit(d1CommandStore(raced), {
+    operationId: "op-race-release",
+    principal: operator,
+    planId: released.plan.planId,
+    approvalId: releaseApproval.approvalId,
+    planners: changeMutationPlanners(raced),
+    now: NOW,
+  });
+  expect(result).toEqual({ ok: false, error: "idempotency_conflict", refs: ["op-race-release"] });
+  const after = await counts();
+  expect(after.decisions).toBe(before.decisions + 1);
+  expect(after.relations).toBe(before.relations + 1);
+  expect(await activeOverrides()).toEqual({ n: 1 });
+});
+
 test("an identical commit that loses the same race returns the stored receipt and writes nothing", async () => {
   const ref = `source_account:${(await seedParse(262, "smbc-bank:race-replay")).ref}`;
   const { plan, approval } = await approvedRelation(ref);

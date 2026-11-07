@@ -339,15 +339,17 @@ receipt rather than the error. Before
 loser could still close its own plan, spend its approval and, where its
 planner derived ids the winner had not written (a relation losing to a card
 settlement, say), write its own decision and relation (an identity assignment
-losing to a relation wrote its manual mapping with no decision), or fail on
-the shared `decision_operations` row with an SQL error instead of the conflict.
+losing to a relation wrote its manual mapping with no decision), or fail
+with an SQL error instead of the conflict (on the shared `decision_operations`
+row, or, for an override release losing to a relation, on the decision log's
+append-only trigger).
 `decision-commit-receipt-guard.test.ts` (storage-d1) holds the earlier
 statement text frozen and proves the guarded statements equal to it on random
 and scaled stores wherever no other payload holds the key, silent where one
 does, and searching the receipt by key without table statistics; the
 processor tests race a commit against another payload of the same kind and
 of another kind (a relation against a card settlement, both ways, and an
-identity assignment against a relation), and
+identity assignment and an override release against a relation), and
 against an identical commit (a relation, a settlement rejection and a
 settlement acceptance), through a D1 wrapper that commits the winner between
 the loser's reads and its batch.
@@ -644,8 +646,9 @@ already recorded is never undone by a DELETE — an undo is a new revision
   commit that loses its key to another payload between its reads and its
   batch → `idempotency_conflict` with its plan open, its approval unspent and
   nothing written (an identity assignment losing to a relation writes no
-  mapping), and one that loses it to an identical commit → the stored
-  receipt without spending a second approval use; typed
+  mapping, an override release no decision), and one that loses it to an
+  identical commit → the stored receipt without spending a second approval
+  use; typed
   relations with their own decision and no derived `same_account` (SC06); an
   agent refused approval and commit; approval digest/expiry/scope binding; the
   outbox publishing once and a duplicate delivery changing nothing; an
