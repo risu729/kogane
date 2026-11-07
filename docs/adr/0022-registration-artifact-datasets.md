@@ -1,6 +1,7 @@
 # ADR 0022: Give registered shared-R2 artifacts their parser dataset
 
-- Status: accepted (merged 2026-09-27 in #269)
+- Status: accepted (merged 2026-09-27 in #269); the Vpass withholding ended by
+  [ADR 0083](0083-release-vpass-collector-statement-pages.md) (2026-11-07)
 - Date: 2026-09-26
 - Carried by:
   [processor §3.4](../processor.md#34-artifact-datasets-adr-0022),
@@ -337,3 +338,15 @@ importer registered). The v2 table maps it in place, for the same reasons as
 the `exchange-rate` amendment above, with the same window: a terminal
 registered under v2 before this change deploys keeps that artifact without a
 dataset and unparsed, so its board finds no stage and promotes nothing.
+
+## Amendment (2026-11-07, ADR 0083): Vpass released under `terminal-registration-v3`
+
+[ADR 0083](0083-release-vpass-collector-statement-pages.md) moves the
+withheld Vpass statement-page rule into `ARTIFACT_DATASETS` unchanged and
+bumps the contract to `terminal-registration-v3` with this ADR's carry-over;
+`WITHHELD_ARTIFACT_DATASETS` is empty, and v1 and v2 stay reproducible in
+`DATASETS_BY_VERSION`. Only a successful card run's pages are parsed (run-scope
+eligibility), so a `partial` card run, which never binds, never retires the
+importer-era purchases, which was the reason for the withholding; a
+successful run whose binding failed closed still can (ADR 0083,
+Consequences). The text above is left as it was decided.

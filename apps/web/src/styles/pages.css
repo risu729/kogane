@@ -560,6 +560,24 @@
   min-width: 0;
 }
 
+.settlement-statement {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.settlement-older {
+  display: grid;
+  gap: var(--space-3);
+  min-width: 0;
+  padding-inline-start: var(--space-4);
+  border-inline-start: 2px solid var(--panel-2);
+}
+
+.settlement-older > summary {
+  font-size: var(--text-sm);
+}
+
 .settlement-disclosure > summary {
   padding: var(--space-3) var(--space-6);
   font-size: var(--text-sm);
