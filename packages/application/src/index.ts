@@ -345,6 +345,8 @@ export {
   type ResolvedRef,
   type StoredProposal,
 } from "./propose.ts";
+export { commandProposalStore } from "./propose-store.ts";
+export { STORE_FEATURES, type StoreFeature, storeHasFeature } from "./query/store-schema.ts";
 
 // ── the common audit record and the operation chokepoint (ADR 0064) ─────
 export {
@@ -473,6 +475,14 @@ export {
   delegatedMaintenanceSchema,
   delegatedMaintenanceResultSchema,
 } from "./delegation/maintenance.ts";
+
+export {
+  delegatedSurveyPayloadSchema,
+  delegatedSurveySchema,
+  delegatedSurveyResultSchema,
+  OPERATOR_ONLY_HEADER,
+  type DelegatedSurveyPayload,
+} from "./delegation/survey.ts";
 
 export {
   readEconomicRowReadinessForGrant,

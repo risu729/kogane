@@ -187,6 +187,8 @@ the other delegated MCP tools are described there too.
 | `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                                                                                                                                   |
 | `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | an MCP client, as itself (ADR 0084) ([below](#maintenance-windows))                                                                                                                                                                                                 |
 | `kogane.schedules.lease.release`      | none                                            | `kogane.schedules.lease.release`      | nothing grants it: listed to every MCP client while `SCHEDULES_ENABLED` is on, and every call is `403 operation_not_delegable` ([below](#maintenance-windows))                                                                                                      |
+| `kogane.schedules.survey.read`        | none                                            | `kogane.schedules.survey.read`        | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                                                                                                                                   |
+| `kogane.schedules.survey.decide`      | none                                            | `kogane.schedules.survey.decide`      | an MCP client, as itself (ADR 0084), while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                                                                                                                |
 | `kogane.instruments.history`          | `POST /api/agent/v1/instruments.history`        | `kogane.instruments.history`          | `records.read` on `"*"` sources and accounts                                                                                                                                                                                                                        |
 | `kogane.audit.search`                 | `POST /api/agent/v1/audit.search`               | `kogane.audit.search`                 | `audit.read` with `"*"` accounts                                                                                                                                                                                                                                    |
 | `kogane.audit.get`                    | `POST /api/agent/v1/audit.get`                  | `kogane.audit.get`                    | `audit.read` with `"*"` accounts                                                                                                                                                                                                                                    |
@@ -749,6 +751,43 @@ not relayed to the Processor; it is recorded once as `refused` on `mcp` at R3.
 It has no `/api/agent/v1` route, and a browser session on `/mcp` is not offered
 it. A lease that will not clear is released by the operator on the schedules
 page ([schedules](schedules.md#settings-api)).
+
+**Re-survey proposals** (`kogane.schedules.survey.read`, operation
+`schedules.survey.read`, R0; `kogane.schedules.survey.decide`, operation
+`schedules.survey.decide`; [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)).
+The read is graded like the maintenance read (`schedules.read`, `scheduleSources`,
+`source` optional) and is on `/mcp` only. It returns the schedules page's
+re-survey section for those sources: `enabled`, `targets` (freshness and last
+failure code per page), `proposals` (id, source, kind, rule, `baseRevision`,
+`current`, zone, pattern, enabled, scope, status, closed reasons, page URL, fetch
+time, SHA-256) and `truncated`. The sources narrow the query before the page's
+bound of 200 shown proposals. It never carries page text.
+
+The decision is an operation an MCP client applies as itself
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), listed while
+`SCHEDULES_ENABLED` is on; it has no `/api/agent/v1` route. Its arguments are
+`decision`, `source`, `proposalId`, `step` and `idempotencyKey`. A rejection is
+`step: "apply"` (R1). An acceptance adds `baseRevision` and takes
+`step: "prepare"`, then `"confirm"` with `confirmationDigest` (R2). Both go
+through the page's own `decideSurveyProposal` and the one maintenance writer.
+The prepare preview carries the proposal's kind, status, reasons, rule, base and
+current revision, the change, the deferral class, the remaining daily count (the
+tighter of the writer's 30-per-day count and the principal's fixed daily budget)
+and `revert: "maintenance-revision"`. Undoing an acceptance is a further
+maintenance revision, by the operator or `kogane.schedules.maintenance.update`.
+An exact retry answers `replayed: true`.
+
+Refusals are closed codes:
+
+- `proposal_not_found`: a missing proposal, or one of another source than `source`.
+- `proposal_already_decided`: the proposal was decided already, by the operator or anyone else.
+- `revision_conflict`: a stale `baseRevision`, or a rule that moved.
+- `maintenance_deferral_too_long`: the deferral exceeds the 31-day ceiling.
+- `maintenance_write_budget_exceeded` (429): the 30-per-day count of delegated revisions is spent.
+- `delegation_budget_exceeded` (429): the principal's daily budget is spent; nothing is written.
+- `confirmation_required`, `confirmation_invalid`, `confirmation_expired`: a confirm without its digest, with one prepared for another payload, or after ten minutes.
+- `idempotency_conflict`: the key was used for another payload.
+- `operation_not_delegable`: an acceptance of a proposal with `rule_absent_from_page`, `rule_disabled_by_operator`, `ambiguous_rule_match`, `cancellation_stated` or `contradictory_windows`, or one that, against the source's rules at prepare or confirm, would disable a rule, re-enable a disabled one, or equal or overlap another enabled rule. It is recorded at R3 and stays with the operator on the schedules page; rejecting such a proposal is allowed.
 
 ## Contexts, cursors and hand-off
 
@@ -1383,7 +1422,8 @@ prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
 state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
 the committed MCP financial-reader grant receives no schedule authority.
-S6 survey acceptance remains unavailable pending the separate owner decision;
+S6 survey acceptance remained unavailable pending the separate owner decision
+(delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.
 
 ## The MCP client's operation authority (ADR 0084, 2026-11-07)
@@ -1443,9 +1483,9 @@ owner's agreement.
    #660 `delegatedOpsTools` publishes them, and since ADR 0084 to every MCP
    client (`ops.operation.list` with its tool since
    [ADR 0086](adr/0086-operator-operations-list.md)), and `schedules.lease.release` passes with a tool
-   that refuses every call (ADR 0081 point 3). One gap remains:
-   `schedules.survey.decide`, which needs a delegated tool over the survey
-   proposal writer.
+   that refuses every call (ADR 0081 point 3). `schedules.survey.decide`
+   passes with `kogane.schedules.survey.decide` (ADR 0050, 2026-11-07
+   amendment), so no gap remains.
 
 2. **Read routes.** The test reads every API path named in `apps/web/src`
    (string and template literals, path constants of `apps/web/src` and
@@ -1484,15 +1524,15 @@ owner's agreement.
 
    The 30 gaps, by group:
 
-   | Group                    | Routes with no MCP read                                                                                                                                                                                                                                                                                                           |
-   | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | Page plumbing            | `/api/meta`, `/api/overview`, `/api/filter-options`                                                                                                                                                                                                                                                                               |
-   | v1 observations          | `/api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`, `/api/artifacts/:id`, `/api/observations/:kind/:id`, `/api/raw/:sha256`                                                                                                                                                                                 |
-   | Evidence browser         | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact`, `…/runs/:run/artifacts/:artifact/raw`                                                                                                                                                                              |
-   | Balances and rewards     | `/api/v2/balances/latest`, `/api/v2/balances/history`, `/api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                                                                                                                                                                                       |
-   | Reconciliation and state | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped), `/api/v2/reported-holdings-change`                                                                                                                                                                  |
-   | Reports and quality      | `/api/v2/reports`, `/api/v2/reports/:id`, `…/:id/explanation`, `…/:id/export`, `/api/collection-quality`, `/api/collection-quality/:source`                                                                                                                                                                                       |
-   | Operator pages           | `/api/ops/v1/schedules` (`kogane.schedules.maintenance.read` covers the maintenance part only); `/api/ops/v1/operations/:id` (`kogane.ops.operation.get` reads only the MCP client's own operations, [ADR 0048 amendment](adr/0048-operation-collector-dispatch.md#amendment-2026-11-07--the-operators-依頼の経過-page-proposed)) |
+   | Group                    | Routes with no MCP read                                                                                                                                                                                                                                                                                                                                                               |
+   | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | Page plumbing            | `/api/meta`, `/api/overview`, `/api/filter-options`                                                                                                                                                                                                                                                                                                                                   |
+   | v1 observations          | `/api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`, `/api/artifacts/:id`, `/api/observations/:kind/:id`, `/api/raw/:sha256`                                                                                                                                                                                                                                     |
+   | Evidence browser         | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact`, `…/runs/:run/artifacts/:artifact/raw`                                                                                                                                                                                                                                  |
+   | Balances and rewards     | `/api/v2/balances/latest`, `/api/v2/balances/history`, `/api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                                                                                                                                                                                                                                           |
+   | Reconciliation and state | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped), `/api/v2/reported-holdings-change`                                                                                                                                                                                                                      |
+   | Reports and quality      | `/api/v2/reports`, `/api/v2/reports/:id`, `…/:id/explanation`, `…/:id/export`, `/api/collection-quality`, `/api/collection-quality/:source`                                                                                                                                                                                                                                           |
+   | Operator pages           | `/api/ops/v1/schedules` (`kogane.schedules.maintenance.read` covers the maintenance part and `kogane.schedules.survey.read` the re-survey section); `/api/ops/v1/operations/:id` (`kogane.ops.operation.get` reads only the MCP client's own operations, [ADR 0048 amendment](adr/0048-operation-collector-dispatch.md#amendment-2026-11-07--the-operators-依頼の経過-page-proposed)) |
 
 ADR 0081 point 2 (no SQL in an MCP adapter) has its own guard,
 [`tests/mcp-tools-no-sql.test.ts`](../tests/mcp-tools-no-sql.test.ts).

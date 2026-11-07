@@ -24,7 +24,8 @@ import {
 } from "../../../packages/application/src/index";
 import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
-import { IDENTITY_COLLECTIONS, readIdentityCollection } from "./identity-api";
+import { IDENTITY_COLLECTIONS } from "../../../packages/application/src/query/identity-pages.ts";
+import { readIdentityCollection } from "./identity-api";
 import { parseRequest } from "./ops-api";
 import { catalogue } from "./read";
 
