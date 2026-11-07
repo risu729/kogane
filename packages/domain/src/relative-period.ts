@@ -29,6 +29,7 @@ const ZONE_OFFSET_SECONDS: Readonly<Record<string, number>> = { "Asia/Tokyo": 9 
  * midnight into the wrong day.
  */
 export function civilDateInZone(instant: string, zone: string): CivilDate | null {
+  if (!Object.hasOwn(ZONE_OFFSET_SECONDS, zone)) return null;
   const offset = ZONE_OFFSET_SECONDS[zone];
   const parsed = parseInstant(instant);
   if (offset === undefined || parsed === null) return null;

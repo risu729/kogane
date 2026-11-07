@@ -15,16 +15,18 @@ import {
   PURCHASES_TOOL_NAME,
   RECONSTRUCTED_STATE_TOOL_NAME,
 } from "../src/agent-service";
+import {
+  LEASE_RELEASE_TOOL,
+  SCHEDULE_READ_TOOL,
+  SCHEDULE_UPDATE_TOOL,
+  SURVEY_READ_TOOL,
+} from "../src/schedule-tools";
+import { QUERY_GRANT_CAPABILITIES } from "../../../packages/application/src/index";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 
 const APP_AUD = "fixture-app-audience";
 const MCP_AUD = "fixture-mcp-audience";
 const OWNER = "00000000-0000-4000-8000-0000000000cc";
-const GRANT = {
-  scopes: { sources: "*", accounts: "*" },
-  capabilities: ["summary.read"],
-  budget: { maxRows: 200, maxProposalTargets: 3, maxExplainDepth: 3 },
-};
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let jwks: { keys: unknown[] };
@@ -85,7 +87,35 @@ function transport(environment: Record<string, unknown>, audience = MCP_AUD) {
   });
 }
 
-const GRANTED = { AGENT_API_GRANTS: JSON.stringify({ [`mcp-client:${OWNER}`]: GRANT }) };
+/** Nothing configures an MCP client (ADR 0084). */
+const GRANTED = {};
+
+/**
+ * Every flag that publishes more tools. The Processor is never reached:
+ * listing calls no tool.
+ */
+const EVERY_FEATURE = {
+  SCHEDULES_ENABLED: "true",
+  OPS_API_ENABLED: "true",
+  COMMANDS_ENABLED: "true",
+  PIPELINE: {
+    fetch: async () => {
+      throw new Error("Unexpected Processor request in a tools/list test");
+    },
+  },
+};
+/** Tools only a flag above publishes; their presence proves the flags took effect. */
+const EVERY_FEATURE_TOOLS = [
+  SCHEDULE_READ_TOOL,
+  SURVEY_READ_TOOL,
+  SCHEDULE_UPDATE_TOOL,
+  LEASE_RELEASE_TOOL,
+  "kogane.schedules.survey.decide",
+  "kogane.schedules.job.update",
+  "kogane.command.plan",
+  "kogane.command.approve",
+  "kogane.ops.collection.request",
+];
 
 describe("the official SDK client against /mcp", () => {
   for (const mode of ["legacy", "auto"] as const) {
@@ -103,12 +133,28 @@ describe("the official SDK client against /mcp", () => {
           mode === "legacy" ? "2025-11-25" : "2026-07-28",
         );
         const listed = await client.listTools();
-        // The agent tools, the instrument coverage (a whole-store summary.read
-        // grant, ADR 0073), the purchase explanation (CORE 0047 is applied; the
-        // retired reader name is not read) and the reconstructed state's read.
+        // The agent tools, every read tool the whole-store grant answers, the
+        // purchase explanation (CORE 0047 is applied; the retired reader name
+        // is not read) and the reconstructed state's read.
         expect(listed.tools.map((tool) => tool.name)).toEqual([
           ...AGENT_TOOL_NAMES,
+          "kogane.instruments.history",
+          "kogane.reported-state.read",
           "kogane.instruments.coverage",
+          "kogane.accounts.candidates",
+          "kogane.card-settlements.unmatched",
+          "kogane.economic-readiness.read",
+          "kogane.card-settlements.read",
+          "kogane.card-settlements.ownership",
+          "kogane.audit.search",
+          "kogane.audit.get",
+          "kogane.identity.read",
+          "kogane.store.read",
+          "kogane.observations.list",
+          "kogane.observations.get",
+          "kogane.balances.read",
+          "kogane.rewards.read",
+          "kogane.reported-holdings-change.read",
           PURCHASES_TOOL_NAME,
           RECONSTRUCTED_STATE_TOOL_NAME,
         ]);
@@ -116,7 +162,7 @@ describe("the official SDK client against /mcp", () => {
         expect(capabilities.isError).toBe(false);
         expect(capabilities.structuredContent).toMatchObject({
           principal: `mcp-client:${OWNER}`,
-          capabilities: ["summary.read"],
+          capabilities: [...QUERY_GRANT_CAPABILITIES],
         });
         const coverage = await client.callTool({
           name: "kogane.financial.query",
@@ -126,24 +172,51 @@ describe("the official SDK client against /mcp", () => {
         expect(coverage.structuredContent).toMatchObject({
           schemaVersion: "kogane-query-response-v1",
         });
-        // A capability the grant lacks is a tool error the model can read.
-        const activity = await client.callTool({
+        // A refusal is a tool error the model can read.
+        const unknown = await client.callTool({
           name: "kogane.financial.query",
-          arguments: { intent: "activity" },
+          arguments: { intent: "net-worth" },
         });
-        expect(activity.isError).toBe(true);
-        expect(activity.structuredContent).toMatchObject({ code: "unauthorized" });
+        expect(unknown.isError).toBe(true);
+        expect(unknown.structuredContent).toMatchObject({ code: "unsupported_semantics" });
       } finally {
         await client.close();
       }
     });
   }
 
-  it("cannot connect without a grant, or with a token minted for the browser application", async () => {
-    for (const [environment, audience] of [
-      [{ AGENT_API_GRANTS: "" }, MCP_AUD],
-      [GRANTED, APP_AUD],
-    ] as const) {
+  // Every feature that adds tools is on, so the catalogue is the largest this
+  // Worker publishes. The SDK client validates each descriptor of `tools/list`
+  // (an `inputSchema` must be `type: "object"` at its root): one invalid
+  // descriptor fails the whole list, as it did for Cloudflare's MCP Portal.
+  for (const mode of ["legacy", "auto"] as const) {
+    it(`lists the whole catalogue with every feature on (${mode} negotiation)`, async () => {
+      const client = new Client(
+        { name: "synthetic-sdk-client", version: "0" },
+        { versionNegotiation: { mode } },
+      );
+      await client.connect(transport(EVERY_FEATURE));
+      try {
+        const listed = await client.listTools();
+        const names = listed.tools.map((tool) => tool.name);
+        expect(names).toEqual(expect.arrayContaining(EVERY_FEATURE_TOOLS));
+        expect(new Set(names).size).toBe(names.length);
+        for (const tool of listed.tools) {
+          expect(tool.inputSchema.type, tool.name).toBe("object");
+          // Clients that hand a tool to a model refuse a root combinator.
+          for (const key of ["oneOf", "anyOf", "allOf", "not"])
+            expect(Object.keys(tool.inputSchema), tool.name).not.toContain(key);
+          // ChatGPT refuses a Unicode property escape in a pattern.
+          expect(JSON.stringify(tool.inputSchema), tool.name).not.toMatch(/\\\\[pP]\{/u);
+        }
+      } finally {
+        await client.close();
+      }
+    });
+  }
+
+  it("cannot connect with a token minted for the browser application", async () => {
+    for (const [environment, audience] of [[GRANTED, APP_AUD]] as const) {
       const client = new Client({ name: "synthetic-sdk-client", version: "0" });
       await expect(client.connect(transport(environment, audience))).rejects.toThrow();
       await client.close();

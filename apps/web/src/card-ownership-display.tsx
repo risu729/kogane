@@ -76,7 +76,13 @@ export function CardOwnershipDetails({ side }: { side: CardOwnershipSide }): Rea
                     ? "（期間の指定あり。この照合では自動適用しません）"
                     : ""}
                   <br />
-                  {declaration.kind === "self-declared" ? (
+                  {declaration.kind === "self-declared" && declaration.scope === "owner-default" ? (
+                    <>
+                      根拠: 所有者の既定（記録のない口座は本人のもの） · 適用日:{" "}
+                      {declaration.declaredOn}
+                      <br />
+                    </>
+                  ) : declaration.kind === "self-declared" ? (
                     <>
                       根拠: 本人申告（名義未確認） · 申告日: {declaration.declaredOn}
                       <br />

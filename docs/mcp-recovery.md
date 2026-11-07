@@ -220,7 +220,8 @@ copy browser cookies or inspect stored credentials as a reconnect shortcut.
 
 If recovery fails, distinguish host connection state, upstream portal OAuth,
 Access authorization and Kogane grant refusals. Worker refusals such as
-`authentication_required`, `agent_api_not_configured`, `source_not_granted` or
-`delegation_not_configured` require their own evidence; they are not equivalent
+`authentication_required`, `delegation_not_mcp_client`,
+`delegation_not_configured` or `delegation_misconfigured` (and, before
+ADR 0084, `agent_api_not_configured` and `source_not_granted`) require their own evidence; they are not equivalent
 to the host's `UNAUTHORIZED` error. Gather only timestamps, HTTP/closed codes
 and whether discovery or a live tool call succeeded before changing anything.
