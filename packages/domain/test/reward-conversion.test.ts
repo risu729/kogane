@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { findConversionPaths, simulateConversion } from "../src/reward-conversion.ts";
-import type { ConversionOffer } from "../src/rewards.ts";
-import type { LocalDateValue } from "../src/time.ts";
+import type { ConversionOffer, MembershipState, OfferValidity } from "../src/rewards.ts";
+import type { LocalDateValue, TemporalValue } from "../src/time.ts";
 import { decimalLiteral, decimalToString, exactQuantity, ROUNDING_MODES } from "../src/values.ts";
 
 const day = (value: string): LocalDateValue => ({
@@ -155,6 +155,157 @@ test("all 64 directed three-unit graphs at depths 1..3 match simple-path enumera
   expect(cases).toBe(192);
 });
 
+test("all 960 offer/membership/day/hop combinations require evidence at the application day", () => {
+  const period = (start: string, end: string, endExclusive = false): TemporalValue => ({
+    kind: "period",
+    start,
+    end,
+    endExclusive,
+    zone: "Asia/Tokyo",
+    granularity: "day",
+  });
+  const validityCases: { value: OfferValidity; admittedDays: number[]; unknown?: boolean }[] = [
+    { value: period("2026-09-09", "2026-09-10"), admittedDays: [0, 1] },
+    { value: day("2026-09-09"), admittedDays: [0] },
+    { value: day("2026-09-10"), admittedDays: [1] },
+    {
+      value: { kind: "unknown", reasonCode: "not_observed" },
+      admittedDays: [],
+      unknown: true,
+    },
+    {
+      value: {
+        kind: "instant",
+        value: "2026-09-09T00:00:00+09:00",
+        zone: "Asia/Tokyo",
+        basis: "provider",
+      },
+      admittedDays: [],
+      unknown: true,
+    },
+    {
+      value: { ...day("2026-09-09"), zone: "Europe/London" },
+      admittedDays: [],
+      unknown: true,
+    },
+    { value: period("2026-09-09", "2026-09-10", true), admittedDays: [0] },
+    // Standing offers: no end, so every day from the first one on.
+    {
+      value: { kind: "open-ended", start: "2026-09-09", zone: "Asia/Tokyo" },
+      admittedDays: [0, 1, 2],
+    },
+    { value: { kind: "open-ended", start: "2026-09-10", zone: null }, admittedDays: [1, 2] },
+    {
+      value: { kind: "open-ended", start: "2026-09-09", zone: "Europe/London" },
+      admittedDays: [],
+      unknown: true,
+    },
+  ];
+  const claim = (overrides: Partial<MembershipState> = {}): MembershipState => ({
+    programId: "program:a",
+    holdingRef: "holding:a",
+    tier: "gold",
+    valid: period("2026-09-09", "2026-09-10"),
+    source: "provider",
+    evidenceRefs: ["evidence:membership"],
+    ...overrides,
+  });
+  const membershipCases: { claims: MembershipState[]; admittedDays: number[] }[] = [
+    { claims: [], admittedDays: [] },
+    { claims: [claim({ valid: day("2026-09-09") })], admittedDays: [0] },
+    { claims: [claim()], admittedDays: [0, 1] },
+    { claims: [claim({ tier: "silver" })], admittedDays: [] },
+    { claims: [claim({ programId: "program:other" })], admittedDays: [] },
+    { claims: [claim({ source: "self-reported" })], admittedDays: [] },
+    { claims: [claim({ valid: validityCases[4]!.value as TemporalValue })], admittedDays: [] },
+    { claims: [claim({ valid: validityCases[3]!.value as TemporalValue })], admittedDays: [] },
+  ];
+  let cases = 0;
+  for (const secondHop of [false, true])
+    for (const offset of [0, 1, 2])
+      for (const validity of validityCases)
+        for (const tierLimited of [false, true])
+          for (const membership of membershipCases) {
+            cases++;
+            const final = offer({
+              offerId: "offer:final",
+              fromUnitRef: secondHop ? "points:x" : "points:a",
+              validTime: validity.value,
+              eligibleTiers: tierLimited ? ["gold"] : null,
+            });
+            const offers = secondHop
+              ? [
+                  offer({
+                    offerId: "offer:bridge",
+                    toUnitRef: "points:x",
+                    processingDays: offset,
+                  }),
+                  final,
+                ]
+              : [final];
+            const result = findConversionPaths(
+              offers,
+              {
+                quantity: quantity(4),
+                clock: day(
+                  secondHop ? "2026-09-09" : ["2026-09-09", "2026-09-10", "2026-09-11"][offset]!,
+                ),
+                membership: membership.claims,
+              },
+              "points:b",
+              {
+                maxDepth: 2,
+                maxCandidates: 8,
+                maxExpansions: 100,
+                requiredCompletionBy: null,
+              },
+            );
+            const permitted =
+              validity.admittedDays.includes(offset) &&
+              (!tierLimited || membership.admittedDays.includes(offset));
+            expect(result.paths.length).toBe(permitted ? 1 : 0);
+            if (!permitted) {
+              const reason = validity.unknown
+                ? "needs_rule_verification"
+                : !validity.admittedDays.includes(offset)
+                  ? "offer_not_valid_at_clock"
+                  : "needs_rule_verification";
+              expect(result.rejected).toContainEqual({
+                offerRef: "offer:final@v1",
+                reasonCode: reason,
+              });
+            }
+            expect(result.stoppedBy).toEqual([]);
+          }
+  expect(cases).toBe(960);
+});
+
+test("a processing delay past the representable date range remains uncertain", () => {
+  const endOfRange = day("9999-12-31");
+  const bridge = offer({
+    offerId: "offer:bridge",
+    toUnitRef: "points:x",
+    validTime: endOfRange,
+    applicationDeadline: endOfRange,
+    processingDays: 1,
+  });
+  const final = offer({
+    offerId: "offer:final",
+    fromUnitRef: "points:x",
+  });
+  const result = findConversionPaths(
+    [bridge, final],
+    { quantity: quantity(4), clock: endOfRange },
+    "points:b",
+    { maxDepth: 2, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null },
+  );
+  expect(result.paths).toEqual([]);
+  expect(result.rejected).toContainEqual({
+    offerRef: "offer:final@v1",
+    reasonCode: "needs_rule_verification",
+  });
+});
+
 test("a standing offer with no deadline is a route at any later day", () => {
   const standing = offer({
     validTime: { kind: "open-ended", start: "2026-04-01", zone: "Asia/Tokyo" },
@@ -171,4 +322,14 @@ test("a standing offer with no deadline is a route at any later day", () => {
     expect(result.paths).toHaveLength(1);
     expect(result.rejected).toEqual([]);
   }
+  const before = findConversionPaths(
+    [standing],
+    { quantity: quantity(4), clock: day("2026-03-31") },
+    "points:b",
+    budget,
+  );
+  expect(before.paths).toEqual([]);
+  expect(before.rejected).toEqual([
+    { offerRef: "offer:a-b@v1", reasonCode: "offer_not_valid_at_clock" },
+  ]);
 });

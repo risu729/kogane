@@ -565,3 +565,31 @@ and bounded route traversal. `rewards.ts` re-exports its existing public API;
 reward contracts, bucket eligibility, expiry and redemption remain in that file.
 The extraction preserves derivation releases and returned values. The finite-domain
 tests cover conversion amounts and all directed offer graphs on three units.
+
+## Search eligibility at each hop
+
+The route search checks an offer's validity and membership at its applied calendar
+day, including after an earlier hop's processing delay. `conversion-search-v2`
+requires a local date or containing civil period in a compatible zone. An instant,
+unknown time or zone mismatch cannot establish a whole application day and yields
+`needs_rule_verification`; a known day outside the offer's period yields
+`offer_not_valid_at_clock`. A standing offer (`open-ended` validity, §1) covers its
+first day and every later day, so it stays a route instead of becoming
+`needs_rule_verification`; a `null` deadline is never passed.
+
+The `/offers/simulate` goal search starts from today's UTC date as a `local-date`
+with zone `null` (`services/app/src/rewards-api.ts`). A `null` zone is compatible with
+any offer zone, so an `Asia/Tokyo` offer is checked against the UTC date: between
+00:00 and 09:00 JST that is the previous JST day, and an offer's first or last day can
+be judged one day off at the boundary.
+
+For a tier-limited offer, a provider membership claim must name the source program,
+an admitted tier and a validity date/period covering that same day. Missing,
+self-reported, another program's or out-of-period claims remain
+`needs_rule_verification`, rather than proving entitlement. These rejection rows
+describe an unestablished condition, not proof that a future application is impossible.
+No provider terms, quota, fee or acceptance policy is inferred.
+
+The exhaustive eligibility test covers all 960 combinations of ten validity
+shapes (including three standing-offer shapes), eight membership scenarios, restricted/unrestricted tiers, three application
+days and direct/two-hop routes. The existing deadline and completion rules are unchanged.
