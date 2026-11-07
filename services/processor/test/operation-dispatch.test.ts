@@ -233,7 +233,7 @@ test("a throwing CORE registration backs off while the next import progresses", 
         "SELECT operation_id FROM ops_requests ORDER BY available_at_ms,operation_id LIMIT 1",
       )
       .get()!.operation_id,
-  ).toBe(operations[0]);
+  ).toBe(operations[0]!);
   harness.db.exec(`CREATE TRIGGER synthetic_import_failure BEFORE INSERT ON fetch_run_seals
     WHEN (SELECT source_run_key FROM fetch_runs WHERE id=NEW.fetch_run_id) GLOB 'run-001:*'
     BEGIN SELECT RAISE(ABORT, 'synthetic_unlisted_refusal'); END`);
