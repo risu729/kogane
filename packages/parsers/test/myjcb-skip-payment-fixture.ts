@@ -6,8 +6,8 @@
 // amount is invented.
 import type { ArtifactMeta } from "../src/types.ts";
 
-export const SKIP_HEADING = "ショッピングスキップ払いご利用明細(未確定分)";
-export const AS_OF_HEADING =
+const SKIP_HEADING = "ショッピングスキップ払いご利用明細(未確定分)";
+const AS_OF_HEADING =
   "2026年3月20日(金)時点のショッピングスキップ払いご利用明細(2026年5月以降のお支払い分)";
 export const SKIP_HEAD =
   '<div class="head"><div class="cell">ご利用日</div><div class="cell">ご利用先など<br>お支払日</div><div class="cell">今後のお支払い金額</div></div>';

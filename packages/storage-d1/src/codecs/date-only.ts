@@ -18,8 +18,3 @@ export function encodeDateOnly(date: CivilDate | null): string | null {
 export function decodeDateOnly(value: unknown): CivilDate | null {
   return typeof value === "string" ? parseLocalDate(value) : null;
 }
-
-/** Whether a column value is a well-formed, existing calendar date. */
-export function isDateOnly(value: unknown): value is string {
-  return decodeDateOnly(value) !== null;
-}

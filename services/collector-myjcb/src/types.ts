@@ -168,7 +168,7 @@ export interface UnreadMonth {
  */
 export const SCHEDULE_PAGE_CODES = ["scheduled_payments_page", "schedule_page_fetch"] as const;
 
-export type SchedulePageCode = (typeof SCHEDULE_PAGE_CODES)[number];
+type SchedulePageCode = (typeof SCHEDULE_PAGE_CODES)[number];
 
 export interface SchedulePage {
   /** The page's `detailMonth` position in the menu, not a calendar month. */

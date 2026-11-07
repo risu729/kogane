@@ -26,7 +26,7 @@ export const B = "acct-test-b";
 export const CARD = "acct-test-card";
 const ACCOUNTS = [A, B, CARD];
 
-export interface FixtureLeg {
+interface FixtureLeg {
   subject?: string;
   unit?: string;
   amount: string | null;

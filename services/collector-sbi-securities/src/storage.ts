@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
-import type { Artifact, ArtifactManifest, CollectionManifest } from "./types";
+import type { Artifact, ArtifactManifest } from "./types";
 
 export async function storeArtifact(options: {
   bucket: R2Bucket;
@@ -25,29 +25,6 @@ export async function storeArtifact(options: {
     bytes,
     ...(options.artifact.window ? { window: options.artifact.window } : {}),
   };
-}
-
-export async function storeManifest(options: {
-  bucket: R2Bucket;
-  prefix: string;
-  manifest: CollectionManifest;
-}): Promise<string> {
-  const key = `${options.prefix}/manifest.json`;
-  const body = JSON.stringify(options.manifest);
-  await options.bucket.put(key, body, {
-    httpMetadata: { contentType: "application/json" },
-    customMetadata: {
-      source: options.manifest.source,
-      status: options.manifest.status,
-      runId: options.manifest.runId,
-    },
-  });
-  return key;
-}
-
-export function runPrefix(startedAt: string, runId: string): string {
-  const date = startedAt.slice(0, 10).replaceAll("-", "/");
-  return `raw/sbi-securities/${date}/${runId}`;
 }
 
 function safeDataset(value: string): string {

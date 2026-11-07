@@ -1,11 +1,6 @@
 import { manifestFailure } from "./diagnostics";
 import type { CollectionManifest, RawArtifact, StoredArtifact } from "./types";
 
-export function runPrefix(startedAt: string, runId: string): string {
-  const date = startedAt.slice(0, 10).replaceAll("-", "/");
-  return `raw/sony-bank/${date}/${runId}`;
-}
-
 export async function storeArtifact(options: {
   bucket: R2Bucket;
   prefix: string;

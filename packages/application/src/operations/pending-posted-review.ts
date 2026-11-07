@@ -55,7 +55,7 @@ import { candidateMerge, candidateSplit } from "./card-purchase-links.ts";
 import type { ResolvedPlan } from "./targets.ts";
 
 /** What a review does, decided from the proposal and the relation, never from the caller. */
-export type PendingPostedMode = "accept" | "reject" | "withdraw";
+type PendingPostedMode = "accept" | "reject" | "withdraw";
 
 export interface PendingPostedReview {
   mode: PendingPostedMode;

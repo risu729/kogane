@@ -145,7 +145,7 @@ async function boundedBody(request: Request): Promise<string> {
   return text;
 }
 /** The settings write a POST names, or null for a path that is not one. */
-export function scheduleOperation(suffix: string): OperationName | null {
+function scheduleOperation(suffix: string): OperationName | null {
   if (suffix === "/maintenance") return "schedules.maintenance.update";
   if (/^\/leases\/[a-z0-9-]{1,100}$/u.test(suffix)) return "schedules.lease.release";
   if (/^\/proposals\/[1-9][0-9]{0,15}$/u.test(suffix)) return "schedules.survey.decide";

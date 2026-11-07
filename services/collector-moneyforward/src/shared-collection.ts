@@ -181,7 +181,7 @@ export async function moneyForwardRunPlan(input: SharedRunInput): Promise<Persis
 }
 
 /** The plan and the identity state it was built with (for the diagnostic). */
-export async function moneyForwardRunPlanWithIdentity(
+async function moneyForwardRunPlanWithIdentity(
   input: SharedRunInput,
 ): Promise<{ plan: PersistRunPlan; identity: MoneyForwardIdentityState }> {
   const outcome: ProviderOutcome = input.status;

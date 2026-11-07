@@ -1,21 +1,18 @@
 // Wire contract shared by runtime validation and the rewards screen.
 import type { RewardProviderExpirySection } from "../../domain/src/reward-expiry-observations.ts";
-import type { Quantity, ValueState } from "../../domain/src/values.ts";
+import type { Quantity } from "../../domain/src/values.ts";
 import type { TemporalValue } from "../../domain/src/time.ts";
 import {
   BUCKET_KINDS,
   validBucketExpiryBasis,
   type BucketKind,
   type BucketExpiryBasis,
-  type ComputedExpiry,
-  type DisplayedExpiry,
 } from "../../domain/src/rewards.ts";
 /** Provider enum values are never guessed into a supported kind. */
 export function validRewardBucketKind(value: unknown): value is BucketKind {
   return typeof value === "string" && (BUCKET_KINDS as readonly string[]).includes(value);
 }
 
-export type RewardValue = ValueState;
 export type RewardQuantity = Quantity;
 export type RewardTime = TemporalValue;
 
@@ -109,8 +106,6 @@ export interface RewardReadExpiryRow {
  * closed reason it is unavailable. The wire shape is the domain's.
  */
 export type RewardExpiryBasis = BucketExpiryBasis;
-export type RewardDisplayedExpiry = DisplayedExpiry;
-export type RewardComputedExpiry = ComputedExpiry;
 
 /** Exact-key check of one basis: the shared response check and the screen both use it. */
 export function validRewardExpiryBasis(value: unknown): value is RewardExpiryBasis {
