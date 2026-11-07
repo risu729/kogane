@@ -46,6 +46,13 @@ async function relay(
     throw new HttpError(503, "scheduling_unavailable");
   }
 }
+/**
+ * The schedules page's snapshot as the Processor answers it, relayed with no
+ * actor: the page's GET and `kogane.schedules.read` (ADR 0081) both read it.
+ */
+export function relayScheduleSnapshot(env: Env): Promise<Response> {
+  return relay(new Request("https://kogane.invalid/", { method: "GET" }), env, "");
+}
 /** Service tokens cannot edit settings. This only reconciles future reservations. */
 export async function scheduleBootstrapApi(
   request: Request,
@@ -180,7 +187,7 @@ async function scheduleRoute(
   if (url.search) throw new HttpError(400, "invalid_query");
   if (!principalCan(principalFor(env, subject), "interpretation.accept"))
     throw new HttpError(403, "operator_required");
-  if (request.method === "GET" && suffix === "") return relay(request, env, "");
+  if (request.method === "GET" && suffix === "") return relayScheduleSnapshot(env);
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
   // A job id, a lease release, or the decision on one survey proposal (ADR 0050).
   throw new HttpError(404, "not_found");

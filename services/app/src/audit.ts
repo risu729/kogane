@@ -245,7 +245,8 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
   // page's `items` or `rows`, else its first list (connections, transactions, …), truncated
   // when the page says more follow (`coverage.truncated`, `page.hasMore`, a
   // `nextCursor`); one detail is one row.
-  if (operation === "observations.get") return { rows: value["data"] ? 1 : 0, truncated: false };
+  if (operation === "observations.get" || operation === "evidence.raw.read")
+    return { rows: value["data"] ? 1 : 0, truncated: false };
   // The report list's items, truncated while a cursor follows (the list has no
   // `coverage` or `page`); one report or one explanation is one row, never its
   // events.
@@ -264,7 +265,8 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     operation === "reported-holdings-change.read" ||
     operation === "events.read" ||
     operation === "collection-quality.read" ||
-    operation === "evidence.read"
+    operation === "evidence.read" ||
+    operation === "schedules.read"
   ) {
     const data = (value["data"] ?? {}) as Record<string, unknown>;
     const coverage = (data["coverage"] ?? {}) as Record<string, unknown>;
