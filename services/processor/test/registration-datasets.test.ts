@@ -367,9 +367,7 @@ test("a Vpass page under the importer's role gets no dataset under any version, 
   expect(before.eligible).toEqual([{ n: 0 }]);
 }, 60000);
 
-const VPASS_ROWS = [
-  { date: "26/08/03", merchant: "架空店舗C", amount: "1,234", paymentType: "1" },
-];
+const VPASS_ROWS = [{ date: "26/08/03", merchant: "架空店舗C", amount: "1,234", paymentType: "1" }];
 const VPASS_TUPLE = {
   externalId: "E".repeat(32),
   globalid: "G".repeat(32),
