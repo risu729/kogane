@@ -116,9 +116,19 @@ async function stored(operationId: unknown) {
   return row;
 }
 
-/** A receipt without the fields that name its own operation or its time. */
+/**
+ * A receipt without the fields that name its own operation or its time. The
+ * execution's `expiresAt` is counted from the moment the request was accepted,
+ * so the HTTP and MCP requests, made a few calls apart, differ by a second
+ * whenever they straddle one.
+ */
 function receipt(body: Record<string, unknown>) {
   const { operationId: _id, acceptedAt: _at, updatedAt: _updated, ...rest } = body;
+  const execution = rest["execution"];
+  if (typeof execution === "object" && execution !== null) {
+    const { expiresAt: _expires, ...timeless } = execution as Record<string, unknown>;
+    return { ...rest, execution: timeless };
+  }
   return rest;
 }
 
