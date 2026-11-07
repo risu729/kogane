@@ -7,23 +7,25 @@ import {
   type InstrumentIdentity,
 } from "./types.ts";
 
-const LABELS: Record<string, string> = {
-  vpass: "Vpassカード明細",
-  "global-pass": "GLOBAL PASSデビット明細",
-  prestia: "SMBC信託銀行 PRESTIA",
-  myjcb: "MyJCB請求口座",
-  "smbc-bank": "三井住友銀行 円普通預金",
-  "mizuho-bank": "みずほ銀行 普通預金",
-  "st-george": "St.George",
-  "sony-bank": "ソニー銀行",
-  "sbi-shinsei-bank": "SBI新生銀行 預金口座",
-  "sbi-vc-trade": "SBI VCトレード口座",
-  "v-point": "Vポイント",
-  "v-point-pay": "VポイントPay",
-  "mobile-suica": "モバイルSuica SF",
-  "moneyforward-me": "MoneyForward連携口座",
-  paypay: "PayPay利用履歴",
-};
+// A Map, not an object literal, so that only its own entries match (an object
+// literal would also answer for inherited names such as `constructor`).
+const LABELS: ReadonlyMap<string, string> = new Map([
+  ["vpass", "Vpassカード明細"],
+  ["global-pass", "GLOBAL PASSデビット明細"],
+  ["prestia", "SMBC信託銀行 PRESTIA"],
+  ["myjcb", "MyJCB請求口座"],
+  ["smbc-bank", "三井住友銀行 円普通預金"],
+  ["mizuho-bank", "みずほ銀行 普通預金"],
+  ["st-george", "St.George"],
+  ["sony-bank", "ソニー銀行"],
+  ["sbi-shinsei-bank", "SBI新生銀行 預金口座"],
+  ["sbi-vc-trade", "SBI VCトレード口座"],
+  ["v-point", "Vポイント"],
+  ["v-point-pay", "VポイントPay"],
+  ["mobile-suica", "モバイルSuica SF"],
+  ["moneyforward-me", "MoneyForward連携口座"],
+  ["paypay", "PayPay利用履歴"],
+]);
 
 /**
  * The SBI Shinsei identity policy version that classifies the parser's two
@@ -69,7 +71,7 @@ export function otherIdentity(input: IdentityInput): IdentityPlan {
   const plan: IdentityPlan = {
     account: {
       key: [a],
-      label: LABELS[input.sourceId] ?? "未識別の取得元口座",
+      label: LABELS.get(input.sourceId) ?? "未識別の取得元口座",
       role: "source-account",
       status: "unresolved",
       reason: "unrecognized-source-account",

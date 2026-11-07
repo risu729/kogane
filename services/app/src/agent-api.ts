@@ -102,7 +102,11 @@ import {
 } from "./delegated-command-tools";
 
 import { CARD_SETTLEMENT_TOOL_NAMES, readMcpTools, REPORTED_STATE_TOOL_NAME } from "./read-tools";
-import { pageReadMcpTools } from "./page-read-tools";
+import {
+  isPageReadToolName,
+  pageReadMcpTools,
+  pageReadNeedsReportedState,
+} from "./page-read-tools";
 import {
   callDelegatedSurveyTool,
   delegatedSurveyTools,
@@ -132,12 +136,17 @@ export function isAgentPath(path: string): boolean {
   return path === MCP_PATH || path.startsWith(AGENT_PREFIX);
 }
 
+/**
+ * Route label for the request log: a closed code. A path that names no tool
+ * is `agent_unknown`, so the caller's path text never reaches the log.
+ */
 export function classifyAgentPath(path: string): string | null {
   if (path === MCP_PATH) return "mcp";
   if (path === SHARED_QUERY_PATH) return "shared_query";
-  if (path.startsWith(AGENT_PREFIX))
-    return `agent_${path.slice(AGENT_PREFIX.length).replace(/\W/gu, "_")}`;
-  return null;
+  if (!path.startsWith(AGENT_PREFIX)) return null;
+  const rest = path.slice(AGENT_PREFIX.length);
+  const known = toolForPath(path) !== null || `kogane.${rest}` === SCHEDULE_READ_TOOL;
+  return `agent_${known ? rest.replace(/\W/gu, "_") : "unknown"}`;
 }
 
 /** Read a bounded JSON body. An oversized or malformed body never reaches a tool. */
@@ -259,6 +268,12 @@ export async function agentApi(
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (name === REPORTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (CARD_SETTLEMENT_TOOL_NAMES.has(name) && !(await settlements())) return null;
+        if (
+          isPageReadToolName(name) &&
+          pageReadNeedsReportedState(name) &&
+          !(await reconstructed())
+        )
+          return null;
         // An MCP client's capabilities also carry the operation authority
         // derived for it (ADR 0084), as a safe status; recorded like any call.
         if (name === "kogane.capabilities" && caller.kind === "mcp-client")
@@ -339,7 +354,7 @@ export async function agentApi(
           reportedState: await reconstructed(),
           cardSettlements: await settlements(),
         }),
-        ...pageReadMcpTools(grant),
+        ...pageReadMcpTools(grant, { reportedState: await reconstructed() }),
         ...(caller.kind === "mcp-client"
           ? [
               ...delegatedCommandTools(env, await delegation()),
@@ -378,7 +393,9 @@ export async function agentApi(
   if (tool === PURCHASES_TOOL_NAME && !(await cardPurchasesAvailable(env)))
     throw new HttpError(404, "not_found");
   if (
-    (tool === RECONSTRUCTED_STATE_TOOL_NAME || tool === REPORTED_STATE_TOOL_NAME) &&
+    (tool === RECONSTRUCTED_STATE_TOOL_NAME ||
+      tool === REPORTED_STATE_TOOL_NAME ||
+      (isPageReadToolName(tool) && pageReadNeedsReportedState(tool))) &&
     !(await reconstructedStateAvailable(env))
   )
     throw new HttpError(404, "not_found");

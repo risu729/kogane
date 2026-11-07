@@ -71,12 +71,27 @@ export function isOpsPath(path: string): boolean {
   return path === OPS_PREFIX || path.startsWith(`${OPS_PREFIX}/`);
 }
 
-/** Route label for the request log; identifiers never reach it. */
+/** The first path segments this prefix serves: the six routes, health and schedules. */
+const OPS_ROUTE_HEADS: readonly string[] = [
+  "collections",
+  "imports",
+  "replays",
+  "projections",
+  "sessions",
+  "operations",
+  "health",
+  "schedules",
+];
+
+/**
+ * Route label for the request log: a closed code. Neither identifiers nor any
+ * other path text the caller sent reach it; an unserved segment is `unknown`.
+ */
 export function classifyOpsPath(path: string): string | null {
   if (!isOpsPath(path)) return null;
   const rest = path.slice(OPS_PREFIX.length).replace(/^\//u, "");
   const head = rest.split("/")[0] ?? "";
-  return `ops_${/^[a-z]{1,32}$/u.test(head) ? head : "unknown"}`;
+  return `ops_${OPS_ROUTE_HEADS.includes(head) ? head : "unknown"}`;
 }
 
 // ── request schemas ─────────────────────────────────────────────────────
@@ -131,13 +146,15 @@ export const replaySchema = z.strictObject({
   idempotencyKey: IDEMPOTENCY_KEY,
 });
 export const projectionSchema = z.strictObject({
-  // Why a rebuild was asked for. Bounded, single-line, no control characters;
+  // Why a rebuild was asked for. Bounded, single-line, no control characters
+  // (Unicode category Cc, spelled as ranges: the published JSON Schema
+  // `pattern` must not use `\p{…}`, which ChatGPT's validator refuses);
   // it is stored with the request and never interpolated anywhere.
   reason: z
     .string()
     .min(1)
     .max(500)
-    .regex(/^[^\p{Cc}]+$/u),
+    .regex(/^[^\u0000-\u001f\u007f-\u009f]+$/u),
   idempotencyKey: IDEMPOTENCY_KEY,
 });
 export const sessionRefreshSchema = z.strictObject({
