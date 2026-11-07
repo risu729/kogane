@@ -655,9 +655,11 @@ What the collector does now
 - The usual re-authentication triggers apply while an agreement is pending
   (HTTP 401/403, `gateway_rejected`, a missing session seed). A healthy
   keepalive that still carries the old code does not log in.
-- While `manual_agreement_required` is stored, `http_rejected` with a 3xx status
-  is also a trigger, because that is how the gateway refuses the stale
-  session. Outside that state a 3xx stays a plain failure, as before.
+- While an agreement is pending (`manual_agreement_required` is stored, or
+  `manualAgreementPendingSince` is set because a later retry failed for another
+  reason), `http_rejected` with a 3xx status is also a trigger, because that is
+  how the gateway refuses the stale session. Outside that state a 3xx stays a
+  plain failure, as before.
 - An unforced login waits 1 hour after the previous attempt while the stored
   code is `manual_agreement_required`, for 72 hours after the first refused
   login since the last successful one (`manualAgreementPendingSince` in the
@@ -686,10 +688,9 @@ stops at `isAgreed` counts as a failed login, and whether each one e-mails the
 owner, is unknown. The 72-hour window bounds the hourly logins to at most 72,
 about 60 at the usual 75-minute cadence; after it, one login every 6 hours.
 
-Limit: when a login during the wait fails with a code other than
-`manual_agreement_required` (for example `passkey_http_503` during provider
-maintenance), that code replaces the stored one, so the gateway's 3xx is no
-longer a trigger. Logins then resume only on HTTP 401/403, `gateway_rejected`
-or a missing session seed, or by a forced `POST /reauth`; until then the
-occurrence carries `human_required_reauth`, which collection quality also flags
-as `user_action_required`.
+When a retry during the wait fails with another code (for example
+`passkey_http_503` during provider maintenance), that code replaces the stored
+one and the occurrence carries `human_required_reauth` (also flagged as
+`user_action_required`). The kept `manualAgreementPendingSince` still makes the
+3xx a trigger, so logins continue, at the usual 6-hour spacing until a refusal
+stores `manual_agreement_required` again; the 72-hour window is not reopened.

@@ -52,6 +52,14 @@ describe("SBI VC session refusal diagnostics", () => {
     expect(shouldReauthenticate({ ...redirected, lastReauthErrorCode: null })).toBe(false);
     expect(shouldReauthenticate({ ...redirected, lastHttpStatus: 503 })).toBe(false);
     expect(shouldReauthenticate({ ...redirected, lastHttpStatus: null })).toBe(false);
+    // A retry that failed for another reason keeps the wait open until a login succeeds.
+    const interrupted = {
+      ...redirected,
+      lastReauthErrorCode: "passkey_http_503",
+      manualAgreementPendingSince: "2026-11-07T04:30:00.000Z",
+    };
+    expect(shouldReauthenticate(interrupted)).toBe(true);
+    expect(shouldReauthenticate({ ...interrupted, manualAgreementPendingSince: null })).toBe(false);
   });
   test("logins are hourly for 72 hours after the first agreement refusal, then six-hourly", () => {
     const now = Date.parse("2026-11-07T06:00:00.000Z");

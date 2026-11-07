@@ -23,11 +23,14 @@ export const AGREEMENT_RETRY_WINDOW_MS = 72 * 60 * 60 * 1000;
  * agreement no longer stops it: the next login after the owner agrees at
  * simple.sbivc.co.jp succeeds and collection resumes on its own. While the
  * agreement is pending the gateway answers the stale session with a redirect
- * (`http_rejected`, 3xx), which then also counts as a refused session.
+ * (`http_rejected`, 3xx), which then also counts as a refused session, also
+ * after a retry failed for another reason (a maintenance answer, a network
+ * error) until a login succeeds.
  */
 export function shouldReauthenticate(health: HealthState): boolean {
   if (
-    health.lastReauthErrorCode === MANUAL_AGREEMENT &&
+    (health.lastReauthErrorCode === MANUAL_AGREEMENT ||
+      health.manualAgreementPendingSince !== null) &&
     health.lastErrorCode === "http_rejected" &&
     health.lastHttpStatus !== null &&
     health.lastHttpStatus >= 300 &&

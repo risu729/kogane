@@ -21,7 +21,9 @@ source policy forbids. C still needs a manual step after every agreement.
 
 Decision (owner, 2026-11-07 06:28 UTC): A and D. While the stored code is
 `manual_agreement_required`, the usual re-authentication triggers apply again,
-as does the gateway's 3xx `http_rejected` answer to the stale session; an
+as does the gateway's 3xx `http_rejected` answer to the stale session (which
+stays a trigger until a login succeeds, also after a retry that failed for
+another reason); an
 unforced login waits 1 hour after the previous attempt for 72 hours from the
 first refused login since the last successful login, then the usual 6 hours.
 The collector still never sends `setAgreement`. Collection quality reports
