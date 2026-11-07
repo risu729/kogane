@@ -88,7 +88,7 @@ import {
 /** The release of this module's mapping rules; pinned in every manifest. */
 export const LOT_ADAPTER_RELEASE = "lot-adapter-c-v1";
 /** The shape of the outer manifest. */
-export const LOTS_ON_SELECTION_MANIFEST_SCHEMA = "lots-on-selection-manifest-v1";
+const LOTS_ON_SELECTION_MANIFEST_SCHEMA = "lots-on-selection-manifest-v1";
 
 /**
  * The event kinds this adapter reads (a closed list). `trade` and
@@ -101,16 +101,15 @@ export const LOTS_ON_SELECTION_MANIFEST_SCHEMA = "lots-on-selection-manifest-v1"
  * `LOT_ADAPTER_RELEASE`.
  */
 export const LOT_ADAPTER_KINDS = ["trade", "transfer", "corporate_action"] as const;
-export type LotAdapterKind = (typeof LOT_ADAPTER_KINDS)[number];
 /**
  * The states of a reserved `trade` that move a quantity (a closed list; no
  * state family for trades exists yet). A `trade` in state `unknown` with no
  * legs and no claims is a withdrawal; every other state is `writer_unsupported`.
  */
-export const LOT_TRADE_STATES = ["executed", "settled"] as const;
+const LOT_TRADE_STATES = ["executed", "settled"] as const;
 
 /** `instrument_mappings.status` (CORE 0018). Only the first two place a book. */
-export const LOT_INSTRUMENT_STATUSES = [
+const LOT_INSTRUMENT_STATUSES = [
   "identified",
   "provider-local",
   "aggregate",
@@ -119,7 +118,7 @@ export const LOT_INSTRUMENT_STATUSES = [
 export type LotInstrumentStatus = (typeof LOT_INSTRUMENT_STATUSES)[number];
 const PLACEABLE_STATUSES: readonly LotInstrumentStatus[] = ["identified", "provider-local"];
 /** The identity subject a seal pins for a leg unit (the `REVISION_OF` prefix). */
-export const INSTRUMENT_MAPPING_PREFIX = "instrument_mapping:";
+const INSTRUMENT_MAPPING_PREFIX = "instrument_mapping:";
 
 /**
  * Why a revision's input was held, or what a mapped input does not state.
@@ -154,7 +153,7 @@ const UNSUPPORTED_CODES: readonly LotAdapterCode[] = [
 ];
 const INDETERMINATE_CODES: readonly LotAdapterCode[] = ["knowledge_unlogged"];
 /** Codes that never hold an input: they travel with it and the engine keeps the value unknown. */
-export const LOT_ADAPTER_NOTE_CODES = [
+const LOT_ADAPTER_NOTE_CODES = [
   "time_role_missing",
   "consideration_missing",
   "fee_unknown",
@@ -163,7 +162,7 @@ export const LOT_ADAPTER_NOTE_CODES = [
 const isNote = (code: LotAdapterCode) =>
   (LOT_ADAPTER_NOTE_CODES as readonly LotAdapterCode[]).includes(code);
 
-export interface LotAdapterHolder {
+interface LotAdapterHolder {
   /** A resolved account id (`accounts.id`). */
   accountId: string;
   /** Opaque to the adapter and the engine (ADR 0051); which source decides it is open (#545, #546). */
@@ -209,17 +208,17 @@ export interface LotAdapterRequest {
   policy: LotPolicy | null;
 }
 
-export interface LotBookKey {
+interface LotBookKey {
   holderRef: string;
   instrumentRef: string;
   wrapperKey: string;
 }
 
-export const LOT_ADAPTER_OUTCOMES = ["mapped", "held", "no_movement"] as const;
-export type LotAdapterOutcome = (typeof LOT_ADAPTER_OUTCOMES)[number];
+const LOT_ADAPTER_OUTCOMES = ["mapped", "held", "no_movement"] as const;
+type LotAdapterOutcome = (typeof LOT_ADAPTER_OUTCOMES)[number];
 
 /** One revision the adapter read (a security claim, an instrument leg, or a reserved kind). */
-export interface LotAdapterEntry {
+interface LotAdapterEntry {
   /** `event:<id>@<revision>`. */
   ref: string;
   /**
@@ -236,15 +235,10 @@ export interface LotAdapterEntry {
   books: LotBookKey[];
 }
 
-export const LOT_ADAPTER_BOOK_STATUSES = [
-  "fed",
-  "unsupported",
-  "indeterminate",
-  "needs_review",
-] as const;
-export type LotAdapterBookStatus = (typeof LOT_ADAPTER_BOOK_STATUSES)[number];
+const LOT_ADAPTER_BOOK_STATUSES = ["fed", "unsupported", "indeterminate", "needs_review"] as const;
+type LotAdapterBookStatus = (typeof LOT_ADAPTER_BOOK_STATUSES)[number];
 
-export interface LotAdapterBook extends LotBookKey {
+interface LotAdapterBook extends LotBookKey {
   /** `fed` when every revision touching it was mapped; otherwise the worst group of its codes. */
   status: LotAdapterBookStatus;
   /** The holding codes of the revisions touching it (notes excluded). */
@@ -781,7 +775,7 @@ export function adaptSelectionToLots(
 // ---------------------------------------------------------------------------
 // Composition with the engine and the outer manifest
 
-export const LOTS_ON_SELECTION_STATUSES = [
+const LOTS_ON_SELECTION_STATUSES = [
   "unsupported",
   "refused",
   "indeterminate",

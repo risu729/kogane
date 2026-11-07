@@ -5,6 +5,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser, type Page } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import {
   holdingsChangeBody,
   holdingsChangeWorld,
@@ -193,4 +194,11 @@ describe.if(runnable)("reported holdings change between two dates", () => {
       if (prefix) await page.screenshot({ path: `${prefix}-${name}.png`, fullPage: true });
       await page.close();
     }, 30_000);
+
+  test("the compared panel passes the accessibility audit", async () => {
+    const page = await open();
+    await compare(page, "2026-09-01");
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
 });

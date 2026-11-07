@@ -50,7 +50,7 @@ export function validEconomicRowReadinessRequest(
   });
 }
 
-export type ReadinessReason =
+type ReadinessReason =
   | Extract<IdentityAdmission, { admitted: false }>["refusal"]
   | "observation_missing"
   | "evidence_not_current"

@@ -419,7 +419,8 @@ because an earlier step failed shows as `skipped`; `not reached` appears only
 when the step id is absent from the job's context altogether) and carries the
 deploy Action's `deployment-targets` for the ones that uploaded. The `success`
 status is refused by the ledger script itself while any planned Worker is not
-`deployed`, on top of the workflow's own `success()` condition.
+`deployed`, and when it reads no progress record of the run at all, on top of
+the workflow's own `success()` condition.
 Each deploy step is identified as `deploy-<ledger name>` for exactly that
 reason, and a test fails if a new one omits it.
 

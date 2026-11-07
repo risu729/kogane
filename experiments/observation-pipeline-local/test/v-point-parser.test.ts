@@ -7,13 +7,13 @@ import { ingestRunDirectory } from "../src/ingest.ts";
 import { runParsers } from "../src/parse.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import { currentTransactions, latestBalances } from "../src/queries.ts";
-import { openStore } from "../src/store.ts";
 import {
   vPointBalanceInfo,
   vPointHistoryPage,
   vPointSmfgPoint,
 } from "../../../packages/parsers/src/parsers/v-point.ts";
 import type { ArtifactMeta } from "../../../packages/parsers/src/types.ts";
+import { freshTestStore } from "./test-store.ts";
 
 const fixture = (name: string): Uint8Array =>
   readFileSync(
@@ -80,7 +80,7 @@ describe("V Point Layer B routing and run gate", () => {
   });
 
   test("a newest complete empty history snapshot clears older current rows", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-v-point-current-")));
+    const store = freshTestStore("kogane-v-point-current-");
     ingestRunDirectory(store, runFixture("00000000-0000-4000-8000-000000000001", false), {
       id: "v-point",
       provider: "V Point",
@@ -96,7 +96,7 @@ describe("V Point Layer B routing and run gate", () => {
   });
 
   test("an incompletely parsed run cannot replace the last complete snapshot", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-v-point-incomplete-")));
+    const store = freshTestStore("kogane-v-point-incomplete-");
     ingestRunDirectory(store, runFixture("00000000-0000-4000-8000-000000000001", false), {
       id: "v-point",
       provider: "V Point",
@@ -117,7 +117,7 @@ describe("V Point Layer B routing and run gate", () => {
   });
 
   test("a complete retry recovers after a transient parse error", () => {
-    const store = openStore(mkdtempSync(join(tmpdir(), "kogane-v-point-retry-")));
+    const store = freshTestStore("kogane-v-point-retry-");
     ingestRunDirectory(store, runFixture("00000000-0000-4000-8000-000000000001", false), {
       id: "v-point",
       provider: "V Point",

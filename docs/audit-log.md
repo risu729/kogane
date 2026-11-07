@@ -322,9 +322,23 @@ and by the caps above. Each claimed collection occurrence adds one row (about
 a dozen a day with today's jobs), and each writing tick of an audited lane one
 row; an audited lane adds one mark statement before it runs and one range read
 per table it writes after it, each on the table's key, so it reads only what
-was written since its mark. A claim's one-record-per-occurrence check reads
-the earlier records of its job's target (`schedule:<job id>`) through the
-target index, one more for each claimed occurrence of that job.
+was written since its mark. `services/processor/test/lane-audit-plans.test.ts`
+asserts every plan of `src/lane-audit.ts` without table statistics, including
+`resolveLaneRef`'s. The `reconciliation_proposals` reads write `+kind`: as
+#925 shipped them (`GROUP BY kind`, and `kind=?3` in the reference read) the
+planner walked the whole `reconciliation_proposals_kind_stage` index for the
+grouping order on every tick of `reconciliation_sweep` and
+`purchase_recognition`, and the reference read sought every proposal of its
+kind. The test keeps both shipped texts (with their SHA-256) and proves the
+current reads return the same rows in the same order on synthetic stores of up
+to 20,000 proposals. On a synthetic store with 25 proposals past the mark,
+D1's `rows_read` for the tick's proposal read under Miniflare was the table's
+size as shipped (1,000, 10,000, 100,000 and 300,000) and 43 now at every size;
+a reference read naming 25 proposals reported every proposal of its kind (one
+in seven of the table) as shipped and 25 now. A claim's
+one-record-per-occurrence check reads the earlier records of its job's target
+(`schedule:<job id>`) through the target index, one more for each claimed
+occurrence of that job.
 
 ## Not recorded, and other limits
 
@@ -404,7 +418,9 @@ page's contract),
 collection occurrence, none for the processor tick and keepalive, a claim
 rolled back with its record), `services/processor/test/lane-audit.test.ts`
 (ranges that name exactly the lane's rows with other writers' rows in between,
-idle, off and unaudited lanes, a failed tick, a record that cannot be written)
+idle, off and unaudited lanes, a failed tick, a record that cannot be written),
+`services/processor/test/lane-audit-plans.test.ts` (every lane audit read is a
+key range without table statistics; the proposal reads equal the shipped text),
 `services/processor/test/card-purchase-lane-audit.test.ts` (the deployed
 purchase recognition lane's decisions, commits and candidates),
 `apps/web/test/audit-contract.test.ts` (the page

@@ -157,15 +157,20 @@ ORDER BY s.created_at DESC,s.relevance DESC,p.id,target.position`;
 
 /**
  * Per `[from, to]` triple of `?1`: the relation rows it has (what a plan pins
- * as `relation:pending_to_posted|<from>|<to>`) and the latest one's status,
- * latest by creation time and then by insertion order.
+ * as `relation:pending_to_posted|<from>|<to>`) and its current status: the
+ * newest decision (`accepted`, `rejected` or `released`) by creation time and
+ * then by insertion order, or the newest proposal when it has no decision. A
+ * proposal recorded after a decision changes nothing (INV07), so it must not
+ * close an accepted link to withdrawal (ADR 0017's amendment of 2026-11-06).
+ * The merge guard of services/processor/src/card-purchase-job.ts reads the
+ * same status.
  */
-const CANDIDATE_RELATIONS_SQL = `SELECT json_extract(w.value,'$[0]') AS from_ref,json_extract(w.value,'$[1]') AS to_ref,
+export const CANDIDATE_RELATIONS_SQL = `SELECT json_extract(w.value,'$[0]') AS from_ref,json_extract(w.value,'$[1]') AS to_ref,
  (SELECT count(*) FROM entity_relations r WHERE r.kind='${PENDING_POSTED_RELATION_KIND}'
    AND r.from_ref=json_extract(w.value,'$[0]') AND r.to_ref=json_extract(w.value,'$[1]')) AS revision,
  (SELECT r.status FROM entity_relations r WHERE r.kind='${PENDING_POSTED_RELATION_KIND}'
    AND r.from_ref=json_extract(w.value,'$[0]') AND r.to_ref=json_extract(w.value,'$[1]')
-   ORDER BY r.created_at DESC,r.rowid DESC LIMIT 1) AS status
+   ORDER BY r.status<>'proposed' DESC,r.created_at DESC,r.rowid DESC LIMIT 1) AS status
 FROM json_each(?1) w`;
 
 /** One proposal resolved for review; `view` is what the operator page shows. */

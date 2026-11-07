@@ -82,7 +82,7 @@ export const GLOBALPASS_SANITIZER_ELEMENTS = [
   "video",
   "other",
 ] as const;
-export type GlobalPassSanitizerElement = (typeof GLOBALPASS_SANITIZER_ELEMENTS)[number];
+type GlobalPassSanitizerElement = (typeof GLOBALPASS_SANITIZER_ELEMENTS)[number];
 
 /** The attribute a refusal was about, as a closed class, never its name as written. */
 export const GLOBALPASS_SANITIZER_ATTRIBUTES = [
@@ -97,10 +97,10 @@ export const GLOBALPASS_SANITIZER_ATTRIBUTES = [
   "url_attribute",
   "value",
 ] as const;
-export type GlobalPassSanitizerAttribute = (typeof GLOBALPASS_SANITIZER_ATTRIBUTES)[number];
+type GlobalPassSanitizerAttribute = (typeof GLOBALPASS_SANITIZER_ATTRIBUTES)[number];
 
 /** Whether the check ran on the page as received or on the redacted output. */
-export type GlobalPassSanitizerPhase = "input" | "output";
+type GlobalPassSanitizerPhase = "input" | "output";
 
 export interface GlobalPassSanitizerDetail {
   readonly expectation: GlobalPassSanitizerExpectation;

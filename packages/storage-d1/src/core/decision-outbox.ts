@@ -42,11 +42,7 @@ const SWEEP_RUNS = 8;
 /** A pending poll is re-scheduled for the next tick, not backed off. */
 const PENDING_RETRY_MS = 30_000;
 
-export const OUTBOX_TARGETS = [
-  "identity-projection",
-  "balance-projection",
-  "agent-notify",
-] as const;
+const OUTBOX_TARGETS = ["identity-projection", "balance-projection", "agent-notify"] as const;
 export type OutboxTarget = (typeof OUTBOX_TARGETS)[number];
 
 export interface OutboxRow {
@@ -111,7 +107,7 @@ export type OutboxProcessor = (db: D1Like, row: OutboxRow) => Promise<ProcessorO
  * number of runs it sealed, which is what a reader can check against
  * `identity_run_seals`.
  */
-export const identityProjectionProcessor: OutboxProcessor = async (db) => {
+const identityProjectionProcessor: OutboxProcessor = async (db) => {
   const swept = await identitySweep(db, resolveIdentity, SWEEP_RUNS);
   return completedOutcome("identity_swept", `identity-runs:${String(swept.identifiedRuns)}`);
 };
@@ -122,7 +118,7 @@ export const identityProjectionProcessor: OutboxProcessor = async (db) => {
  * closed honestly rather than left pending for ever. That is not the same as
  * an unregistered processor, which is blocked.
  */
-export const agentNotifyProcessor: OutboxProcessor = async () =>
+const agentNotifyProcessor: OutboxProcessor = async () =>
   completedOutcome("no_agent_transport", "agent-notify:none");
 
 /**

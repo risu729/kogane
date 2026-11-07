@@ -22,12 +22,11 @@ import type {
 import { readOutputDigest, readSnapshotId } from "./identity.ts";
 import { runBatch, type D1Like, type D1StatementLike } from "../d1.ts";
 
-/** Rows written per batch, and complete snapshots kept besides the published one. */
-export const REWARD_WRITE_CHUNK = 100;
-export const REWARD_RETAINED_SNAPSHOTS = 2;
+/** Complete snapshots kept besides the published one. */
+const REWARD_RETAINED_SNAPSHOTS = 2;
 
 /** A reward CORE reference copied into the snapshot (04 §3). */
-export type RewardInputRefKind =
+type RewardInputRefKind =
   | "expiry_rule"
   | "conversion_offer"
   | "reward_program"
@@ -109,7 +108,7 @@ export interface RewardSnapshotRow {
 }
 
 /** The published reward snapshot; only through the pointer, never "the newest". */
-export const ACTIVE_REWARD_SNAPSHOT_SQL = `SELECT ${snapshotColumns("s.")}
+const ACTIVE_REWARD_SNAPSHOT_SQL = `SELECT ${snapshotColumns("s.")}
   FROM reward_snapshot_pointer p
   JOIN reward_expiry_snapshots s ON s.snapshot_id=p.snapshot_id AND s.status='complete'
   WHERE p.id=1`;
@@ -162,43 +161,43 @@ export async function currentRewardContext(
 }
 
 /** A snapshot a cursor names; absent or retired means the context expired. */
-export const REWARD_SNAPSHOT_SQL = `SELECT ${SNAPSHOT_COLUMNS} FROM reward_expiry_snapshots
+const REWARD_SNAPSHOT_SQL = `SELECT ${SNAPSHOT_COLUMNS} FROM reward_expiry_snapshots
   WHERE snapshot_id=?1 AND status='complete'`;
 
-export const REWARD_POINTER_SQL = `SELECT snapshot_id, source_revision, visibility_revision,
+const REWARD_POINTER_SQL = `SELECT snapshot_id, source_revision, visibility_revision,
     core_epoch, read_instance_id, evaluated_at, output_digest, switched_at
   FROM reward_snapshot_pointer WHERE id=1`;
 
 /** The build of this content that may still be continued or reused. */
-export const REWARD_SNAPSHOT_FOR_CONTENT_SQL = `SELECT ${SNAPSHOT_COLUMNS}
+const REWARD_SNAPSHOT_FOR_CONTENT_SQL = `SELECT ${SNAPSHOT_COLUMNS}
   FROM reward_expiry_snapshots WHERE content_key=?1 AND status IN ('building','complete')
   ORDER BY status='building' DESC, attempt DESC LIMIT 1`;
 
-export const OLDEST_BUILDING_REWARD_SNAPSHOT_SQL = `SELECT ${SNAPSHOT_COLUMNS}
+const OLDEST_BUILDING_REWARD_SNAPSHOT_SQL = `SELECT ${SNAPSHOT_COLUMNS}
   FROM reward_expiry_snapshots WHERE status='building'
   ORDER BY created_at, snapshot_id LIMIT 1`;
 
-export const NEXT_REWARD_ATTEMPT_SQL =
+const NEXT_REWARD_ATTEMPT_SQL =
   "SELECT coalesce(max(attempt),0)+1 AS attempt FROM reward_expiry_snapshots WHERE content_key=?1";
 
 /** Written rows of a build, in contract order, with their digests. */
-export const WRITTEN_REWARD_ESTIMATE_DIGESTS_SQL = `SELECT row_seq, row_digest
+const WRITTEN_REWARD_ESTIMATE_DIGESTS_SQL = `SELECT row_seq, row_digest
   FROM reward_expiry_estimates_v2 WHERE snapshot_id=?1 ORDER BY row_seq`;
-export const WRITTEN_REWARD_SIMULATION_DIGESTS_SQL = `SELECT row_seq, row_digest
+const WRITTEN_REWARD_SIMULATION_DIGESTS_SQL = `SELECT row_seq, row_digest
   FROM reward_conversion_simulations WHERE snapshot_id=?1 ORDER BY row_seq`;
 
-export const REWARD_CHECKPOINT_SQL = `SELECT position, rows_written
+const REWARD_CHECKPOINT_SQL = `SELECT position, rows_written
   FROM reward_build_checkpoints WHERE snapshot_id=?1 AND stage=?2`;
 
 /** Builds that may be retired: complete or abandoned, never the published one. */
-export const RETIREABLE_REWARD_SNAPSHOTS_SQL = `SELECT snapshot_id FROM reward_expiry_snapshots
+const RETIREABLE_REWARD_SNAPSHOTS_SQL = `SELECT snapshot_id FROM reward_expiry_snapshots
   WHERE snapshot_id<>?1 AND status IN ('complete','building')
     AND snapshot_id<>coalesce((SELECT p.snapshot_id FROM reward_snapshot_pointer p
       WHERE p.id=1),'')
   ORDER BY created_at DESC, snapshot_id DESC LIMIT 50 OFFSET ?2`;
 
 /** One page of a published snapshot's estimates, in deadline-and-contract order. */
-export const REWARD_ESTIMATE_PAGE_SQL = `SELECT snapshot_id, row_key, row_seq, program_id,
+const REWARD_ESTIMATE_PAGE_SQL = `SELECT snapshot_id, row_key, row_seq, program_id,
     holding_ref, bucket_ref, rule_id, rule_version, bucket_kind, state, deadline_basis, expires_on,
     amount_coefficient, amount_scale, amount_status, unit_ref, provider_observed_json,
     policy_estimated_json, reason_codes_json, uncertainty_codes_json, basis_refs_json, row_digest,
@@ -207,7 +206,7 @@ export const REWARD_ESTIMATE_PAGE_SQL = `SELECT snapshot_id, row_key, row_seq, p
   WHERE snapshot_id=?1 AND (?2 IS NULL OR program_id=?2) AND row_seq>?3
   ORDER BY row_seq LIMIT ?4`;
 
-export const REWARD_SIMULATION_PAGE_SQL = `SELECT snapshot_id, request_digest, row_seq,
+const REWARD_SIMULATION_PAGE_SQL = `SELECT snapshot_id, request_digest, row_seq,
     reproducibility, reason_code, request_json, offer_id, offer_version, result_json,
     search_coverage, evaluated_at, policy_release, row_digest
   FROM reward_conversion_simulations

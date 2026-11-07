@@ -101,7 +101,7 @@ Pages compose these instead of writing their own markup or rules:
 | Filters                       | `.filter-grid` with `.filter-field` controls, one bar per panel spanning edge to edge                                                 |
 | Free-text and checkbox inputs | `.field` (label + input/textarea) and `.check-field`; never a bare native control                                                     |
 | Actions                       | `.button` in a `.button-row`; toggles carry `aria-pressed`                                                                            |
-| Paging                        | `Pagination` (offset or cursor) rendering `.pagination`                                                                               |
+| Paging                        | `Pagination` (offset or cursor) rendering `.pagination`, a named group whose status speaks its label; one label per pager on a page   |
 | Tables                        | `.table-scroll` region with `role="region"`, `tabIndex`, a `<caption>` and a class that sets `min-width`; `.cell-time` for timestamps |
 | Disclosures                   | `.detail-disclosure` (framed; frameless as a panel's last child or when it holds panels) or `.inline-disclosure` (in cells and cards) |
 | Lists                         | `.plain-list` (stacked; an `<ol>` keeps its numbers), `.warning-list` (parser warnings, reason and blocker codes)                     |

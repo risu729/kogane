@@ -44,9 +44,9 @@ const JSON_MEDIA_TYPE = "application/json";
 const UNIT_KEY = "account";
 const UNIT_KIND = "collection";
 
-export const PROVIDER_RESPONSE_ROLE = "provider_response";
-export const COLLECTOR_DERIVED_ROLE = "collector_derived";
-export const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
+const PROVIDER_RESPONSE_ROLE = "provider_response";
+const COLLECTOR_DERIVED_ROLE = "collector_derived";
+const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
 
 /**
  * A run's bytes are held in memory while the terminal is planned. The cap stops
@@ -57,9 +57,9 @@ export const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
 export const MAX_SHARED_RUN_BYTES = 48 * 1024 * 1024;
 
 /** Resuming this source always needs a fresh human approval, never a retry. */
-export const HUMAN_REQUIRED_CODE = "human_required_approval";
+const HUMAN_REQUIRED_CODE = "human_required_approval";
 
-export class SharedCollectionError extends Error {
+class SharedCollectionError extends Error {
   constructor(readonly code: string) {
     super(code);
     this.name = "SharedCollectionError";
@@ -69,7 +69,7 @@ export class SharedCollectionError extends Error {
 const encoder = new TextEncoder();
 
 /** Where the ops API's operation and this attempt enter the terminal (03 §3). */
-export interface SharedRunIdentity {
+interface SharedRunIdentity {
   readonly operationId?: string;
   readonly attemptId: string;
   /**
@@ -176,7 +176,7 @@ function ranges(manifest: BackfillManifest): TerminalRange[] {
 }
 
 /** Bytes a caller already read out of the staging bucket, keyed by object key. */
-export type SharedArtifactBytes = ReadonlyMap<string, Uint8Array>;
+type SharedArtifactBytes = ReadonlyMap<string, Uint8Array>;
 
 export interface SharedRunInput {
   readonly manifest: BackfillManifest;

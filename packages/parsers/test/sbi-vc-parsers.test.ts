@@ -5,6 +5,7 @@ import { PARSERS } from "../src/parsers/registry.ts";
 import { sbiVcAccountMargin } from "../src/parsers/sbi-vc-account-margin.ts";
 import { sbiVcCashBalances } from "../src/parsers/sbi-vc-cash-balances.ts";
 import { sbiVcCashflows } from "../src/parsers/sbi-vc-cashflows.ts";
+import { providerTimestamp } from "../src/parsers/sbi-vc-common.ts";
 import { sbiVcExecutions } from "../src/parsers/sbi-vc-executions.ts";
 import { sbiVcPositionSummary } from "../src/parsers/sbi-vc-position-summary.ts";
 import type { ArtifactMeta, Observation, Parser } from "../src/types.ts";
@@ -503,6 +504,72 @@ describe("SBI VC Trade cashflow pages", () => {
     expect(() =>
       sbiVcCashflows.parse(encode(duplicate), artifact("cashflows-historical-page-0001")),
     ).toThrow(/duplicate cashflow identity/u);
+  });
+});
+
+describe("SBI VC Trade provider timestamps", () => {
+  // Synthetic values only. The audited captures use the slash form; the ISO
+  // form is accepted verbatim, but only when it names a real instant.
+  test("an ISO timestamp is kept verbatim only when its date, clock and offset exist", () => {
+    for (const valid of [
+      "2026-01-03T04:05:06Z",
+      "2026-01-03T04:05:06.123+09:00",
+      "2024-02-29T23:59:59-05:30",
+    ])
+      expect(providerTimestamp(valid)).toBe(valid);
+    for (const impossible of [
+      "2026-02-30T25:61:61Z",
+      "2026-13-01T00:00:00+09:00",
+      "2026-02-29T00:00:00Z",
+      "2026-00-10T00:00:00Z",
+      "2026-04-31T00:00:00Z",
+      "2026-01-01T24:00:00Z",
+      "2026-01-01T00:60:00Z",
+      "2026-01-01T00:00:60Z",
+      "2026-01-01T00:00:00+24:00",
+      "2026-01-01T00:00:00-09:60",
+    ])
+      expect(providerTimestamp(impossible)).toBeUndefined();
+  });
+
+  test("the slash form keeps its calendar refusal and JST reading", () => {
+    expect(providerTimestamp("2026/01/03 04:05:06")).toBe("2026-01-03T04:05:06+09:00");
+    expect(providerTimestamp("2026/02/30 25:61:61")).toBeUndefined();
+  });
+
+  test("an impossible ISO event or execution time fails the page", () => {
+    const cashflows = JSON.parse(
+      new TextDecoder().decode(fixture("cashflows-historical-page-0001")),
+    ) as { body: { list: Record<string, unknown>[] } };
+    cashflows.body.list[0]!["eventDatetime"] = "2026-02-30T25:61:61Z";
+    expect(() =>
+      sbiVcCashflows.parse(encode(cashflows), artifact("cashflows-historical-page-0001")),
+    ).toThrow(/eventDatetime: timestamp format is not recognized/u);
+    const executions = JSON.parse(
+      new TextDecoder().decode(fixture("executions-historical-page-0001")),
+    ) as { body: { list: Record<string, unknown>[] } };
+    executions.body.list[0]!["executionDatetime"] = "2026-13-01T00:00:00+09:00";
+    expect(() =>
+      sbiVcExecutions.parse(encode(executions), artifact("executions-historical-page-0001")),
+    ).toThrow(/executionDatetime: timestamp format is not recognized/u);
+  });
+
+  test("an impossible ISO gateway timestamp or status date gives no instant", () => {
+    const balances = JSON.parse(new TextDecoder().decode(fixture("cash-balances"))) as {
+      meta: Record<string, unknown>;
+    };
+    balances.meta["timestamp"] = "2026-02-30T25:61:61Z";
+    const balanceResult = sbiVcCashBalances.parse(encode(balances), artifact("cash-balances"));
+    expect(balanceResult.observations.length).toBeGreaterThan(0);
+    for (const observation of balanceResult.observations)
+      expect(observation.observedAt).toBeUndefined();
+    const margin = JSON.parse(new TextDecoder().decode(fixture("account-margin"))) as {
+      body: Record<string, unknown>;
+    };
+    margin.body["statusDate"] = "2026-13-01T00:00:00+09:00";
+    const marginResult = sbiVcAccountMargin.parse(encode(margin), artifact("account-margin"));
+    expect(marginResult.observations.length).toBeGreaterThan(0);
+    for (const observation of marginResult.observations) expect(observation.asOf).toBeUndefined();
   });
 });
 

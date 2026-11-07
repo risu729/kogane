@@ -1,6 +1,6 @@
 import type { SbiShinseiCredential } from "./types";
 
-export interface BrowserCollectionSuccess {
+interface BrowserCollectionSuccess {
   ok: true;
   responses: {
     topBalances: string;
@@ -10,7 +10,7 @@ export interface BrowserCollectionSuccess {
   };
 }
 
-export interface BrowserCollectionFailure {
+interface BrowserCollectionFailure {
   ok: false;
   stage: string;
   authenticationAttempted: boolean;

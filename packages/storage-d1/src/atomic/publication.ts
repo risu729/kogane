@@ -63,7 +63,7 @@ const UPSERT_PROJECTION = `ON CONFLICT(fetch_artifact_id,parser_name) DO UPDATE 
  * either — no second `normal` event, no rewritten `published_at`. The event
  * is recorded before the pointer moves so it can name the run it replaces.
  */
-export function publicationStatements(
+function publicationStatements(
   db: D1Like,
   parseId: number,
   publishedAt: string,
@@ -94,7 +94,7 @@ export function publicationStatements(
   ];
 }
 
-export interface PublicationMismatch {
+interface PublicationMismatch {
   fetch_artifact_id: number;
   parser_name: string;
   parse_run_id: number;
@@ -146,7 +146,7 @@ export async function publicationConsistency(
 }
 
 export const REPAIR_LIMIT_DEFAULT = 200;
-export const REPAIR_LIMIT_MAX = 1000;
+const REPAIR_LIMIT_MAX = 1000;
 export const ACTOR_PATTERN = /^[a-z0-9][a-z0-9._:@-]{0,99}$/;
 
 export interface RepairRequest {
