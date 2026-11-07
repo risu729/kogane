@@ -12,24 +12,6 @@ const OWNER = "jobs-cross-auth-owner",
   OTHER = "jobs-cross-auth-other";
 const principal = (subject = OWNER) => `mcp-client:${subject}`;
 const ISSUER = "https://jobs-cross-auth.cloudflareaccess.com";
-const scopes = { sources: ["sony-bank"], accounts: "*", scheduleSources: "*" };
-const grant = {
-  scopes,
-  capabilities: ["summary.read"],
-  budget: { maxRows: 50, maxProposalTargets: 2, maxExplainDepth: 2 },
-};
-const interval = {
-  issuedAt: new Date(Date.now() - 60000).toISOString(),
-  notAfter: new Date(Date.now() + 3600000).toISOString(),
-};
-const entry = (subject = OWNER) => ({
-  delegatedBy: subject,
-  role: "maintainer",
-  capabilities: ["schedules.job.update", "operations.collection.request"],
-  scopes,
-  ...interval,
-  budget: { writesPerDay: 100 },
-});
 let signing: Awaited<ReturnType<typeof generateKeyPair>>, jwks: { keys: unknown[] };
 let calls = 0,
   alarms = 0;
@@ -57,7 +39,7 @@ beforeAll(async () => {
   } as unknown as Parameters<typeof delegatedScheduleRoute>[1];
 });
 afterEach(() => vi.unstubAllGlobals());
-function config(subject = OWNER): Record<string, unknown> {
+function config(): Record<string, unknown> {
   return {
     ...env,
     SCHEDULES_ENABLED: "true",
@@ -65,9 +47,6 @@ function config(subject = OWNER): Record<string, unknown> {
     ACCESS_ISSUER: ISSUER,
     ACCESS_AUDIENCE: "jobs-cross-browser",
     ACCESS_MCP_AUDIENCE: "jobs-cross-mcp",
-    OPERATOR_SUBJECTS: JSON.stringify([OWNER, OTHER]),
-    AGENT_API_GRANTS: JSON.stringify({ [principal(subject)]: grant }),
-    MCP_DELEGATIONS: JSON.stringify({ [principal(subject)]: entry(subject) }),
     PIPELINE: {
       fetch: async (request: Request) => {
         calls++;
@@ -156,7 +135,7 @@ const digest = (value: { structuredContent: ToolBody; isError?: boolean }) => {
   return value.structuredContent.confirmation!.digest;
 };
 
-test("source-less global job replay keeps its original receipt after native change, reobserves no alarm and still requires current wildcard authority", async () => {
+test("source-less global job replay keeps its original receipt after native change, reobserves no alarm, and binds to its principal", async () => {
   const cfg = config(),
     body = await payload("processor-tick", "jobs-cross-global");
   expect(body.source).toBeNull();
@@ -212,81 +191,39 @@ test("source-less global job replay keeps its original receipt after native chan
   expect(await row(body.jobId)).toEqual(current);
   expect(calls).toBe(relayCount);
   expect(alarms).toBe(alarmCount);
-  const another = await jobCall(confirm, config(OTHER), OTHER);
+  const another = await jobCall(confirm, config(), OTHER);
   expect(another.structuredContent).toEqual({ error: "confirmation_invalid" });
-  const removed = await jobCall(confirm, { ...cfg, MCP_DELEGATIONS: "" });
-  expect(removed.structuredContent).toEqual({ error: "delegation_not_configured" });
-  const noCapability = await jobCall(confirm, {
-    ...cfg,
-    MCP_DELEGATIONS: JSON.stringify({ [principal()]: { ...entry(), capabilities: [] } }),
-  });
-  expect(noCapability.structuredContent).toEqual({ error: "capability_not_delegated" });
-  const listed = await jobCall(confirm, {
-    ...cfg,
-    MCP_DELEGATIONS: JSON.stringify({
-      [principal()]: { ...entry(), scopes: { ...scopes, scheduleSources: ["vpass"] } },
-    }),
-  });
-  expect(listed.structuredContent).toEqual({ error: "capability_not_delegated" });
-  const narrowedRead = await jobCall(confirm, {
-    ...cfg,
-    AGENT_API_GRANTS: JSON.stringify({
-      [principal()]: { ...grant, scopes: { ...scopes, scheduleSources: ["vpass"] } },
-    }),
-  });
-  expect(narrowedRead.structuredContent).toEqual({ error: "delegation_misconfigured" });
+  // The operator lists grade the UI only: they neither add nor remove MCP authority.
+  const unlisted = await jobCall(confirm, { ...cfg, OPERATOR_SUBJECTS: JSON.stringify([OTHER]) });
+  expect(unlisted.structuredContent).toEqual(retry.structuredContent);
   expect(await row(body.jobId)).toEqual(current);
   expect(calls).toBe(relayCount);
 });
 
-test("source-bound job attenuation is independent from financial source scope; changed source and other principal cannot consume its prepare", async () => {
+test("a source-bound job's prepare is consumed only by its own payload and principal; operations keep their own source checks", async () => {
   const cfg = config();
-  cfg.MCP_DELEGATIONS = JSON.stringify({
-    [principal()]: { ...entry(), scopes: { ...scopes, scheduleSources: ["vpass"] } },
-  });
   const body = await payload("vpass", "jobs-cross-separated-scopes"),
     prepared = await jobCall({ ...body, step: "prepare" }, cfg);
   const confirm = { ...body, step: "confirm", confirmationDigest: digest(prepared) };
   const before = await row("vpass"),
     relayCount = calls;
   const sourceLie = await jobCall({ ...confirm, source: "sony-bank" }, cfg);
-  expect(sourceLie.structuredContent).toEqual({ error: "capability_not_delegated" });
-  const otherCfg = config(OTHER);
-  otherCfg.MCP_DELEGATIONS = JSON.stringify({
-    [principal(OTHER)]: { ...entry(OTHER), scopes: { ...scopes, scheduleSources: ["vpass"] } },
-  });
-  const other = await jobCall(confirm, otherCfg, OTHER);
+  expect(sourceLie.isError).toBe(true);
+  const other = await jobCall(confirm, cfg, OTHER);
   expect(other.structuredContent).toEqual({ error: "confirmation_invalid" });
-  const attenuated = await jobCall(confirm, {
-    ...cfg,
-    MCP_DELEGATIONS: JSON.stringify({
-      [principal()]: { ...entry(), scopes: { ...scopes, scheduleSources: [] } },
-    }),
-  });
-  expect(attenuated.structuredContent).toEqual({ error: "capability_not_delegated" });
   expect(await row("vpass")).toEqual(before);
   expect(calls).toBe(relayCount);
   const saved = await jobCall(confirm, cfg);
   expect(saved.isError).not.toBe(true);
   expect((await row("vpass")).revision).toBe(body.revision + 1);
-  // R1 import remains governed by the financial source axis, even while settings use vpass.
+  // An R1 import still goes through its own writer.
   const imported = await invoke(
     "kogane.ops.import.request",
     { source: "sony-bank", runId: "synthetic-jobs-cross-run", idempotencyKey: "jobs-cross-import" },
     cfg,
   );
   expect(imported.isError).not.toBe(true);
-  const deniedImport = await invoke(
-    "kogane.ops.import.request",
-    {
-      source: "vpass",
-      runId: "synthetic-jobs-cross-run",
-      idempotencyKey: "jobs-cross-import-denied",
-    },
-    cfg,
-  );
-  expect(deniedImport.structuredContent).toEqual({ error: "target_missing", refs: ["source"] });
-  // Provider request persistence also keeps the financial axis despite narrower settings scope.
+  // A provider request is recorded once, under the MCP principal.
   const collection = {
     source: "sony-bank",
     requestedScope: { from: "2026-10-01", to: "2026-10-02" },
@@ -309,15 +246,4 @@ test("source-bound job attenuation is independent from financial source scope; c
     .bind(principal(), collection.idempotencyKey)
     .first<number>("n");
   expect(collectionAudit).toBe(1);
-  const deniedCollection = await invoke(
-    "kogane.ops.collection.request",
-    {
-      ...collection,
-      source: "vpass",
-      step: "prepare",
-      idempotencyKey: "jobs-cross-collection-denied",
-    },
-    cfg,
-  );
-  expect(deniedCollection.structuredContent).toEqual({ error: "target_missing", refs: ["source"] });
 });

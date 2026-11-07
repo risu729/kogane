@@ -5,6 +5,7 @@
 // subject already has over the other GET routes: it shows provider figures the
 // evidence pages already show, adds none of them up and carries no review
 // action. A store without the views it reads does not serve it.
+import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
 import {
   DatedStateLimitError,
   queryDatedState,
@@ -26,12 +27,7 @@ export const REPORTED_STATE_ACCOUNT = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,127}$/u;
  * table, the provider statement view and the settlement reviews (CORE 0044).
  */
 export async function reportedStateAvailable(env: Env): Promise<boolean> {
-  const row = await env.DB.prepare(
-    `SELECT count(*) AS present FROM sqlite_master
-     WHERE (type='table' AND name='dataset_snapshot_policies')
-        OR (type='view' AND name IN ('card_statement_facts','card_settlement_reviews'))`,
-  ).first<{ present: number }>();
-  return row?.present === 3;
+  return storeHasFeature(d1Executor(env.DB), "datedState");
 }
 
 /** Today's civil date in Asia/Tokyo: a later date has no reported state yet. */

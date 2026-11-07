@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import type {
   CardPurchaseSourceId,
   CardUsageExclusion,
+  CardUsageUnrecognizedReason,
 } from "../../../packages/domain/src/card-purchase.ts";
 import type {
   CardPurchaseCandidate,
@@ -90,6 +91,48 @@ export const EXCLUSION_LABELS: Record<CardUsageExclusion, string> = {
   date_absent: "利用日が記録されていない",
   superseded_representation: "同じ明細のより新しい取得がある",
 };
+
+/** Why a current provider row is outside the list: the exclusions, or not yet reached. */
+export const UNRECOGNIZED_REASON_LABELS: Record<CardUsageUnrecognizedReason, string> = {
+  ...EXCLUSION_LABELS,
+  recognition_pending: "対象の利用だが、まだ処理していない",
+};
+
+function reasonLabel(code: CardUsageUnrecognizedReason): string {
+  return UNRECOGNIZED_REASON_LABELS[code] ?? code;
+}
+
+/**
+ * The unrecognised current rows per source and reason, as the server counted
+ * them; nothing is added up here. A partial count says so.
+ */
+export function UnrecognizedReasons({
+  reasons,
+}: {
+  reasons: CardPurchasePage["coverage"]["unrecognizedReasons"];
+}): ReactNode {
+  if (reasons.counts.length === 0) return null;
+  return (
+    <>
+      <p>理由ごとの件数:</p>
+      <Kv>
+        {reasons.counts.map((entry) => (
+          <KvRow
+            key={`${entry.sourceId}:${entry.reasonCode}`}
+            label={`${SOURCE_LABELS[entry.sourceId]} · ${reasonLabel(entry.reasonCode)}`}
+          >
+            {entry.rows}件 <code className="dim">{entry.reasonCode}</code>
+          </KvRow>
+        ))}
+      </Kv>
+      {reasons.complete ? null : (
+        <p className="footnote">
+          件数が多いため、理由は一部の明細についてだけ数えています。合計件数は上の件数です。
+        </p>
+      )}
+    </>
+  );
+}
 
 /** A stored `transaction:<id>` / `balance:<id>` reference as a link to its record and original. */
 function EvidenceLink({ fact, label }: { fact: SourceFactRef; label: string }): ReactNode {

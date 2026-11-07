@@ -128,7 +128,32 @@ original-URL routing and `reset = true` connection closure. Regression tests
 verify routing, closure and R2 usability after a separate runtime is disposed.
 This restores Miniflare's transport contract without retries or changed test
 deadlines; the exact socket-close race behind the observed CI `ECONNRESET`
-remains inferred. The change affects the test process only. hk's `repository` check
+remains inferred. The change affects the test process only.
+
+D1 bindings obtained through `getD1Database` also pass through
+`services/processor/test/miniflare-d1-lifetime.ts`. The wrapper retains the
+native receiver, method and argument references until each call settles,
+including rejection, then releases them. Its reference snapshot also keeps
+ordinary array elements alive if a caller mutates the array after the call.
+It neither invokes array accessors nor traverses arbitrary argument objects;
+stubs produced only by accessors are outside this temporary guard's scope.
+Synchronous `prepare`, `bind` and `withSession` results keep the same guard;
+native metadata, async results, SQL and error values are forwarded unchanged.
+R2 and bindings read through arbitrary `getBindings` calls are not wrapped.
+
+This addresses the missing-heap-address failure tracked by
+[issue 1049](https://github.com/risu729/kogane/issues/1049) and upstream
+[workers-sdk issue 16230](https://github.com/cloudflare/workers-sdk/issues/16230).
+The native regression pins the proxy protocol to Miniflare
+`5.20260831.0-alpha`: a per-instance transport gate delays only a serialized
+async batch CALL while allowing finalizer FREE requests through. Forced GC
+must make the unguarded control fail in Native revival before the guarded
+call can pass the same window; failure to induce the control fails the test.
+Success, rejection, synchronous outcomes, detached calls, mutable arrays and
+cleanup are also checked independently. No operation is retried and existing
+test deadlines are unchanged.
+
+hk's `repository` check
 invokes this graph, never `check` or `verify`, avoiding recursion. Selected root aliases for old operational `<short>:<verb>` names keep the
 deployment ledger and existing operational instructions working. Workspace
 checks use native names; `ci:<short>` aliases are not retained. New code and docs
