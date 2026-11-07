@@ -37,6 +37,57 @@ describe("card settlement HTTP contract", () => {
     });
     expect(validApiResponse(path, badAmount)).toBe(false);
   });
+  test("debit-account evidence is typed and a missing one is a reason, never absent", () => {
+    const missing = page() as unknown as { items: Record<string, unknown>[] };
+    delete missing.items[0]!.debitAccount;
+    expect(validApiResponse(path, missing)).toBe(false);
+    const statementRef = {
+      kind: "typed-claim",
+      id: "card_debit_account_statement:7",
+      revision: "reader:myjcb-card-information-1.0.0",
+    };
+    const withEvidence = (debitAccount: Record<string, unknown>) => {
+      const value = page();
+      Object.assign(value.items[0]!, { debitAccount });
+      return validApiResponse(path, value);
+    };
+    const supports = {
+      outcome: "supports",
+      reason: null,
+      policy: "card-debit-account-statement-v3",
+      statementRef,
+      bankSourceId: "smbc-bank",
+      bankSourceAccount: "smbc-bank:ordinary-yen",
+      visibleDigitCount: 4,
+      recordedAt: "2026-09-11T00:00:00Z",
+    };
+    expect(withEvidence(supports)).toBe(true);
+    expect(withEvidence({ ...supports, visibleDigitCount: 0 })).toBe(false);
+    expect(withEvidence({ ...supports, reason: "no_matching_account" })).toBe(false);
+    const notProposed = {
+      ...supports,
+      outcome: "not_proposed",
+      reason: "no_matching_account",
+      bankSourceId: null,
+      bankSourceAccount: null,
+      visibleDigitCount: null,
+    };
+    expect(withEvidence(notProposed)).toBe(true);
+    expect(withEvidence({ ...notProposed, reason: "invented" })).toBe(false);
+    expect(withEvidence({ ...notProposed, statementRef: null })).toBe(false);
+    expect(
+      withEvidence({
+        ...notProposed,
+        outcome: "absent",
+        reason: "source_has_no_debit_account_statement",
+        statementRef: null,
+        recordedAt: null,
+      }),
+    ).toBe(true);
+    expect(
+      withEvidence({ ...notProposed, outcome: "absent", reason: "evidence_not_recorded" }),
+    ).toBe(false);
+  });
   test("old metadata does not imply the feature and a nonboolean capability is rejected", () => {
     expect(clientFeatures(CENTRAL_STORE_CAPABILITIES).cardSettlementReconciliation).toBe(false);
     expect(

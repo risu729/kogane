@@ -39,6 +39,54 @@ const BANK_SOURCES: Record<string, string> = {
   "sbi-shinsei-bank": "SBI新生銀行",
 };
 
+/**
+ * What the card provider's own statement of the debit account says about the
+ * candidate (docs/card-settlements.md, Provider-stated debit accounts). It is
+ * evidence to read before accepting, never a blocker or an owner.
+ */
+const DEBIT_ACCOUNT_REASONS: Record<string, string> = {
+  statement_invalid: "引落口座の記録が読めません",
+  bank_not_resolved: "表示された銀行名が既知の銀行に対応しません",
+  account_type_not_resolved: "表示された預金種目が普通・当座のどちらでもありません",
+  account_digits_not_shown: "口座番号の先頭桁が表示されていません",
+  no_comparable_bank_account: "その銀行の口座番号を比較できる口座がありません",
+  no_matching_account: "預金種目と口座番号の先頭桁が一致する口座がありません",
+  ambiguous_accounts: "預金種目と口座番号の先頭桁が一致する口座が複数あります",
+  uncomparable_account_at_bank:
+    "その銀行に口座番号を比較できない口座もあるため、一意と判断できません",
+  source_has_no_debit_account_statement: "このカード会社の画面には引落口座の表示がありません",
+  evidence_not_recorded: "この候補についての判定はまだ記録されていません",
+};
+
+function debitAccountReason(code: string): string {
+  return Object.hasOwn(DEBIT_ACCOUNT_REASONS, code) ? DEBIT_ACCOUNT_REASONS[code]! : code;
+}
+
+function DebitAccountEvidence({
+  evidence,
+}: {
+  evidence: CardSettlementReview["debitAccount"];
+}): ReactNode {
+  if (evidence.outcome === "not_proposed" || evidence.outcome === "absent")
+    return (
+      <span>
+        {evidence.outcome === "not_proposed" ? "判定なし" : "記録なし"}（
+        {debitAccountReason(evidence.reason)}）
+      </span>
+    );
+  const bank = `${bankSourceLabel(evidence.bankSourceId)} · ${evidence.bankSourceAccount}`;
+  return evidence.outcome === "supports" ? (
+    <span>
+      <Badge tone="ok">照合した銀行口座と同じ</Badge> · {bank}（口座番号の先頭
+      {evidence.visibleDigitCount}桁が一致）
+    </span>
+  ) : (
+    <span>
+      <Badge tone="warn">照合した銀行口座とは別の口座</Badge> · {bank}
+    </span>
+  );
+}
+
 export function bankSourceLabel(sourceId: string): string {
   return Object.hasOwn(BANK_SOURCES, sourceId) ? BANK_SOURCES[sourceId]! : sourceId;
 }
@@ -136,6 +184,9 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
             : facts.ownership === "different"
               ? "一致しない"
               : "未確認"}
+        </KvRow>
+        <KvRow label="カード会社が示す引落口座">
+          <DebitAccountEvidence evidence={review.debitAccount} />
         </KvRow>
         <KvRow label="原本への経路">
           <FactLink fact={facts.statement.ref} label="請求の記録と原本" />

@@ -6,9 +6,15 @@ import {
   type CardSettlementStatus,
 } from "../../../domain/src/card-settlement.ts";
 import type {
+  CardSettlementDebitAccountReview,
   CardSettlementReview,
   CardSettlementReviewPage,
 } from "../../../domain/src/card-settlement-review.ts";
+import {
+  CARD_DEBIT_ACCOUNT_POLICY,
+  CARD_DEBIT_ACCOUNT_REASONS,
+  type CardDebitAccountReason,
+} from "../../../domain/src/card-debit-account.ts";
 import { cardSettlementReadinessCtes } from "../../../read-model/src/card-settlement-readiness.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 
@@ -35,6 +41,96 @@ interface HistoryRow {
   status: Exclude<CardSettlementStatus, "proposed">;
   decision_revision_id: string;
   created_at: string;
+}
+
+interface DebitAccountRow {
+  candidate_id: string;
+  statement_id: number;
+  reader_version: string;
+  outcome: string;
+  reason: string | null;
+  proposal_json: string | null;
+  created_at: string;
+}
+
+/**
+ * The latest provider-stated debit-account evidence row of each chosen
+ * candidate under the current policy (`?1` a JSON array of candidate ids,
+ * `?2` the policy), with the reader version of the statement it cites. Found
+ * through `card_settlement_debit_account_evidence_candidate`
+ * (candidate_id, statement_id, policy, id) and the statement's key; the page
+ * holds at most 50 candidates, each with a row per changed outcome.
+ */
+export const CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL = `SELECT candidate_id,statement_id,reader_version,outcome,reason,proposal_json,created_at FROM (
+ SELECT e.candidate_id,e.statement_id,s.reader_version,e.outcome,e.reason,e.proposal_json,e.created_at,
+  ROW_NUMBER() OVER (PARTITION BY e.candidate_id ORDER BY e.id DESC) AS ordinal
+ FROM json_each(?1) selected
+ JOIN card_settlement_debit_account_evidence e ON e.candidate_id=selected.value AND e.policy=?2
+ JOIN card_debit_account_statement s ON s.id=e.statement_id
+) WHERE ordinal=1`;
+
+const reasonCode = (value: unknown): value is CardDebitAccountReason =>
+  (CARD_DEBIT_ACCOUNT_REASONS as readonly unknown[]).includes(value);
+
+/** A malformed evidence row is an unavailable answer, never a missing one. */
+function debitAccountReview(row: DebitAccountRow): CardSettlementDebitAccountReview {
+  const invalid = () => new Error("card_settlement_debit_account_evidence_invalid");
+  const statementRef = {
+    kind: "typed-claim" as const,
+    id: `card_debit_account_statement:${row.statement_id}`,
+    revision: `reader:${row.reader_version}`,
+  };
+  const base = { policy: CARD_DEBIT_ACCOUNT_POLICY, statementRef, recordedAt: row.created_at };
+  if (row.outcome === "not_proposed") {
+    if (!reasonCode(row.reason) || row.proposal_json !== null) throw invalid();
+    return {
+      ...base,
+      outcome: "not_proposed",
+      reason: row.reason,
+      bankSourceId: null,
+      bankSourceAccount: null,
+      visibleDigitCount: null,
+    };
+  }
+  if (row.outcome !== "supports" && row.outcome !== "names_other_account") throw invalid();
+  if (row.reason !== null || row.proposal_json === null) throw invalid();
+  const proposal: unknown = JSON.parse(row.proposal_json);
+  if (
+    proposal === null ||
+    typeof proposal !== "object" ||
+    !("bankSourceId" in proposal) ||
+    !("bankSourceAccount" in proposal) ||
+    !("visibleDigitCount" in proposal) ||
+    typeof proposal.bankSourceId !== "string" ||
+    typeof proposal.bankSourceAccount !== "string" ||
+    typeof proposal.visibleDigitCount !== "number" ||
+    !Number.isSafeInteger(proposal.visibleDigitCount) ||
+    proposal.visibleDigitCount < 1
+  )
+    throw invalid();
+  return {
+    ...base,
+    outcome: row.outcome,
+    reason: null,
+    bankSourceId: proposal.bankSourceId,
+    bankSourceAccount: proposal.bankSourceAccount,
+    visibleDigitCount: proposal.visibleDigitCount,
+  };
+}
+
+/** No evidence row: only MyJCB has a debit-account statement (ADR 0032). */
+function absentDebitAccount(sourceId: string): CardSettlementDebitAccountReview {
+  return {
+    outcome: "absent",
+    reason:
+      sourceId === "myjcb" ? "evidence_not_recorded" : "source_has_no_debit_account_statement",
+    policy: CARD_DEBIT_ACCOUNT_POLICY,
+    statementRef: null,
+    bankSourceId: null,
+    bankSourceAccount: null,
+    visibleDigitCount: null,
+    recordedAt: null,
+  };
 }
 
 /** A malformed persisted candidate is an unavailable answer, never a zero-filled result. */
@@ -73,6 +169,7 @@ function review(row: ReviewRow): CardSettlementReview {
     createdAt: row.created_at,
     history: [],
     historyTruncated: false,
+    debitAccount: absentDebitAccount(facts.statement.sourceId),
   };
 }
 
@@ -139,6 +236,14 @@ export async function queryCardSettlements(
         createdAt: row.created_at,
       }));
       item.historyTruncated = revisions.length > HISTORY_LIMIT;
+    }
+    const evidence = await sql.all<DebitAccountRow>(CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL, [
+      JSON.stringify(items.map((item) => item.proposalId)),
+      CARD_DEBIT_ACCOUNT_POLICY,
+    ]);
+    for (const item of items) {
+      const row = evidence.find((entry) => entry.candidate_id === item.proposalId);
+      if (row) item.debitAccount = debitAccountReview(row);
     }
   }
   return {

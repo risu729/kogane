@@ -200,6 +200,75 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  test("the provider-stated debit account is shown as evidence and never unblocks adoption", async () => {
+    review = settlementReview(true);
+    review.debitAccount = {
+      outcome: "supports",
+      reason: null,
+      policy: "card-debit-account-statement-v3",
+      statementRef: {
+        kind: "typed-claim",
+        id: "card_debit_account_statement:7",
+        revision: "reader:myjcb-card-information-1.0.0",
+      },
+      bankSourceId: "sbi-shinsei-bank",
+      bankSourceAccount: "synthetic-bank",
+      visibleDigitCount: 4,
+      recordedAt: "2026-09-11T00:00:00Z",
+    };
+    let page = await open();
+    let text = await page.locator("main").innerText();
+    expect(text).toContain("カード会社が示す引落口座");
+    expect(text).toContain("照合した銀行口座と同じ");
+    expect(text).toContain("先頭4桁が一致");
+    expect(await page.getByRole("button", { name: "採用内容を確認" }).isDisabled()).toBe(true);
+    await page.close();
+    review = settlementReview();
+    review.debitAccount = {
+      outcome: "names_other_account",
+      reason: null,
+      policy: "card-debit-account-statement-v3",
+      statementRef: {
+        kind: "typed-claim",
+        id: "card_debit_account_statement:7",
+        revision: "reader:myjcb-card-information-1.0.0",
+      },
+      bankSourceId: "sbi-shinsei-bank",
+      bankSourceAccount: "synthetic-other-bank",
+      visibleDigitCount: 4,
+      recordedAt: "2026-09-11T00:00:00Z",
+    };
+    page = await open();
+    text = await page.locator("main").innerText();
+    expect(text).toContain("照合した銀行口座とは別の口座 · SBI新生銀行 · synthetic-other-bank");
+    await page.close();
+    review = settlementReview();
+    review.debitAccount = {
+      outcome: "not_proposed",
+      reason: "ambiguous_accounts",
+      policy: "card-debit-account-statement-v3",
+      statementRef: {
+        kind: "typed-claim",
+        id: "card_debit_account_statement:7",
+        revision: "reader:myjcb-card-information-1.0.0",
+      },
+      bankSourceId: null,
+      bankSourceAccount: null,
+      visibleDigitCount: null,
+      recordedAt: "2026-09-11T00:00:00Z",
+    };
+    page = await open();
+    text = await page.locator("main").innerText();
+    expect(text).toContain("判定なし（預金種目と口座番号の先頭桁が一致する口座が複数あります）");
+    await page.close();
+    review = settlementReview();
+    page = await open();
+    expect(await page.locator("main").innerText()).toContain(
+      "記録なし（この候補についての判定はまだ記録されていません）",
+    );
+    await page.close();
+  });
+
   test("server impact remains separate from purchase expense and requires approve then commit", async () => {
     const page = await open();
     const text = await page.locator("main").innerText();
