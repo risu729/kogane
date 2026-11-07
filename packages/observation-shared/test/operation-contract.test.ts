@@ -216,6 +216,25 @@ describe("operation record contract", () => {
     expect(withRun({ providerOutcome: "ok" as never })).toBe(false);
   });
 
+  test("accepts the longest run id the collector RPC stores, and its persisted evidence", () => {
+    const runId = `r${"x".repeat(199)}`;
+    const persisted = stages("collection").map((stage, index) =>
+      index === 0
+        ? { ...stage, state: "completed" as const, evidenceRef: `run:${runId}`, attempts: 1 }
+        : stage,
+    );
+    expect(
+      validOperationRecord(
+        record({ stages: persisted, execution: execution({ runs: [run({ runId })] }) }),
+      ),
+    ).toBe(true);
+    expect(
+      validOperationRecord(
+        record({ execution: execution({ runs: [run({ runId: `${runId}x` })] }) }),
+      ),
+    ).toBe(false);
+  });
+
   test("refuses more runs than the trail reads", () => {
     const runs = Array.from({ length: 101 }, (_, index) => run({ runId: `run-${index}` }));
     expect(validOperationRecord(record({ execution: execution({ runs }) }))).toBe(false);

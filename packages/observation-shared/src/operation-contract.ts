@@ -156,10 +156,17 @@ export interface OperationRecordWire {
 /** A stored closed code: the 0039 `blocked_code` rule, which every other code here also meets. */
 const CODE = /^[a-z0-9_]{1,64}$/u;
 const SOURCE_ID = /^[a-z0-9-]{1,100}$/u;
-/** A terminal's run id (`RUN_ID` in the ops API). */
-const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u;
-/** A bound target, a connection or a stage's evidence: an identifier, never a URL. */
-const REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u;
+/**
+ * A reported run id: what the collector RPC accepts and stores
+ * (`RUN_ID` in `packages/collection/src/operation-rpc.ts`; `collection_runs.
+ * run_id` is 1–200 characters), which is wider than the import route's.
+ */
+const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
+/**
+ * A bound target, a connection or a stage's evidence: an identifier, never a
+ * URL, within the 0040 bound of 256 characters (`run:<run id>` included).
+ */
+const REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/u;
 /** The evidence browser's fetch-run id. */
 export const EVIDENCE_RUN_ID = /^r_[1-9][0-9]{0,15}$/u;
 

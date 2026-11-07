@@ -64,7 +64,7 @@ export const OPERATION_STATUS_LABELS: Readonly<Record<string, string>> = {
 };
 
 export const OPERATION_DISPATCH_LABELS: Readonly<Record<string, string>> = {
-  not_required: "送出不要",
+  not_required: "引き渡し不要",
   dispatch_pending: "処理への引き渡し待ち",
   dispatched: "処理へ引き渡し済み",
   dispatch_failed: "引き渡しに失敗",
