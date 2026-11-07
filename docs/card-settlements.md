@@ -331,7 +331,7 @@ Every code is present, zero included. The sweep decides the code from the
 rows it has already read and compared, so no query is added and the
 candidates, digests and other counts are what they were. The map reaches the
 log line, the tick row and `laneTicks` in `/status` and `/internal/health`;
-only these three codes and their integer counts are kept, never an amount,
+only these four codes and their integer counts are kept, never an amount,
 date, key or provider text.
 
 Limits:
