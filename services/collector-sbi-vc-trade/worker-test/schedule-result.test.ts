@@ -108,6 +108,93 @@ describe("the login cooldown while an agreement is pending", () => {
     if (!attempted) expect(after).toEqual(stored);
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
+
+  test("a login stopped at isAgreed opens the window once and keeps it until a login succeeds", async () => {
+    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, [
+      "sign",
+      "verify",
+    ]);
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+    // A synthetic key: the provider is a mock, so nothing leaves the runtime.
+    const credential = JSON.stringify({
+      credentialId: "00112233-4455-6677-8899-aabbccddeeff",
+      keyValue: Buffer.from(pkcs8).toString("base64url"),
+      rpId: "sbivc.co.jp",
+      userHandle: Buffer.from([1, 2, 3, 4]).toString("base64url"),
+      counter: "0",
+      keyAlgorithm: "ECDSA",
+      keyCurve: "P-256",
+    });
+    const json = (body: unknown, cookies: string[] = []) => {
+      const headers = new Headers({ "content-type": "application/json" });
+      for (const cookie of cookies) headers.append("set-cookie", `${cookie}; Secure`);
+      return new Response(JSON.stringify({ meta: { status: "OK" }, body }), {
+        status: 200,
+        headers,
+      });
+    };
+    let agreed = false;
+    const stub = env.SESSION_STATE.getByName(`agreement-${crypto.randomUUID()}`);
+    await runInDurableObject(stub, async (instance, state) => {
+      const bindings = (instance as unknown as { env: Env }).env;
+      const original = {
+        PASSKEY_CREDENTIAL: bindings.PASSKEY_CREDENTIAL,
+        SESSION_ENCRYPTION_KEY: bindings.SESSION_ENCRYPTION_KEY,
+      };
+      Object.assign(bindings, {
+        PASSKEY_CREDENTIAL: credential,
+        SESSION_ENCRYPTION_KEY: btoa(String.fromCharCode(...new Uint8Array(32).fill(7))),
+      });
+      try {
+        const fetched = vi
+          .spyOn(globalThis, "fetch")
+          .mockImplementation(async (input) =>
+            String(input).endsWith("/initiateLoginWithPasskey")
+              ? json(
+                  { challenge: "c2ludGhldGlj", rpId: "sbivc.co.jp", userVerification: "required" },
+                  ["JSESSIONID=jsession", "AWSALB=alb", "AWSALBCORS=cors"],
+                )
+              : json({ accountId: "synthetic", isAgreed: agreed }, [
+                  "vct_bff_sid=sid",
+                  ...[0, 1, 2, 3].map((index) => `AWSALBAPP-${index}=app${index}`),
+                ]),
+          );
+        vi.spyOn(console, "error").mockImplementation(() => {});
+        await state.storage.put("health", { ...health, lastReauthErrorCode: null });
+        const first = await instance.runReauthenticate(false);
+        expect(fetched).toHaveBeenCalledTimes(2);
+        expect(first.lastReauthErrorCode).toBe("manual_agreement_required");
+        expect(first.manualAgreementPendingSince).toBe(first.lastReauthAttemptAt);
+        // Inside the hour nothing logs in.
+        expect(await instance.runReauthenticate(false)).toEqual(first);
+        expect(fetched).toHaveBeenCalledTimes(2);
+        await state.storage.put("health", { ...first, lastReauthAttemptAt: minutesAgo(61) });
+        const second = await instance.runReauthenticate(false);
+        expect(fetched).toHaveBeenCalledTimes(4);
+        expect(second.lastReauthAttemptAt).not.toBe(first.lastReauthAttemptAt);
+        expect(second.manualAgreementPendingSince).toBe(first.manualAgreementPendingSince);
+        // Past 72 hours from the first refusal, an hour is no longer enough.
+        const late = {
+          ...second,
+          lastReauthAttemptAt: minutesAgo(61),
+          manualAgreementPendingSince: minutesAgo(73 * 60),
+        };
+        await state.storage.put("health", late);
+        expect(await instance.runReauthenticate(false)).toEqual(late);
+        expect(fetched).toHaveBeenCalledTimes(4);
+        // Once the owner has agreed, a successful login closes the window.
+        agreed = true;
+        const resumed = await instance.runReauthenticate(true);
+        expect(fetched).toHaveBeenCalledTimes(6);
+        expect(resumed).toMatchObject({
+          lastReauthErrorCode: null,
+          manualAgreementPendingSince: null,
+        });
+      } finally {
+        Object.assign(bindings, original);
+      }
+    });
+  });
 });
 
 test.each([true, false])(

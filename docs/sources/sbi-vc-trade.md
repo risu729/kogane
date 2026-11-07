@@ -660,9 +660,11 @@ What the collector does now
   session. Outside that state a 3xx stays a plain failure, as before.
 - An unforced login waits 1 hour after the previous attempt while the stored
   code is `manual_agreement_required`, for 72 hours after the first refused
-  login of the run (`manualAgreementPendingSince` in the health record), and
-  then the usual 6 hours. A record written before this field existed opens the
-  72-hour window at its next refused login. Any other outcome clears the field.
+  login since the last successful one (`manualAgreementPendingSince` in the
+  health record), and then the usual 6 hours. A record written before this
+  field existed opens the 72-hour window at its next refused login. Only a successful login clears the
+  field: a different login failure in between (a maintenance answer, a network
+  error) keeps it, so a later refusal does not reopen the window.
 - The collector still never sends `setAgreement`: agreeing is the owner's act
   (§8 denylist).
 
@@ -681,5 +683,13 @@ Risks the owner accepted with this decision, which also approves these
 unattended production logins: repeated failed logins can lock the account
 (§4) and the provider's rate limit is unconfirmed (§13). Whether a login that
 stops at `isAgreed` counts as a failed login, and whether each one e-mails the
-owner, is unknown. The 72-hour window bounds the hourly logins to about 60;
-after it, one login every 6 hours.
+owner, is unknown. The 72-hour window bounds the hourly logins to at most 72,
+about 60 at the usual 75-minute cadence; after it, one login every 6 hours.
+
+Limit: when a login during the wait fails with a code other than
+`manual_agreement_required` (for example `passkey_http_503` during provider
+maintenance), that code replaces the stored one, so the gateway's 3xx is no
+longer a trigger. Logins then resume only on HTTP 401/403, `gateway_rejected`
+or a missing session seed, or by a forced `POST /reauth`; until then the
+occurrence carries `human_required_reauth`, which collection quality also flags
+as `user_action_required`.

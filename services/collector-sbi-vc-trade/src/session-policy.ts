@@ -51,19 +51,20 @@ export function reauthCooldownMs(health: HealthState, now: number): number {
   return now - since < AGREEMENT_RETRY_WINDOW_MS ? AGREEMENT_RETRY_COOLDOWN_MS : REAUTH_COOLDOWN_MS;
 }
 
-/** When the current run of agreement refusals began; null once a login ends otherwise. */
+/**
+ * When the first agreement refusal since the last successful login happened,
+ * after a failed login. A different failure in between (a maintenance answer,
+ * a network error) keeps it, so a later refusal never reopens the hourly
+ * window; only a successful login clears it.
+ */
 export function manualAgreementPendingSince(
   previous: HealthState,
-  errorCode: string | null,
+  errorCode: string,
   attemptAt: string,
 ): string | null {
-  if (errorCode !== MANUAL_AGREEMENT) return null;
   const since = previous.manualAgreementPendingSince;
-  return previous.lastReauthErrorCode === MANUAL_AGREEMENT &&
-    since !== null &&
-    Number.isFinite(Date.parse(since))
-    ? since
-    : attemptAt;
+  if (since !== null && Number.isFinite(Date.parse(since))) return since;
+  return errorCode === MANUAL_AGREEMENT ? attemptAt : null;
 }
 
 /** Keep the persisted refusal linked to its alarm; an R2 failure is a separate failure. */

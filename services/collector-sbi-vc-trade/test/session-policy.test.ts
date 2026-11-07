@@ -73,13 +73,15 @@ describe("SBI VC session refusal diagnostics", () => {
       reauthCooldownMs({ ...since(1), lastReauthErrorCode: "passkey_login_rejected" }, now),
     ).toBe(REAUTH_COOLDOWN_MS);
   });
-  test("the window opens at the first refusal and closes on any other outcome", () => {
+  test("the window opens at the first refusal and only a successful login closes it", () => {
     const first = "2026-11-07T04:30:00.000Z";
     const later = "2026-11-07T05:30:00.000Z";
     const fresh = { ...health, lastReauthErrorCode: null };
     expect(manualAgreementPendingSince(fresh, "manual_agreement_required", first)).toBe(first);
+    expect(manualAgreementPendingSince(fresh, "passkey_login_rejected", first)).toBeNull();
     const pending = { ...health, manualAgreementPendingSince: first };
     expect(manualAgreementPendingSince(pending, "manual_agreement_required", later)).toBe(first);
+    // A record from before the window was tracked opens it at its next refusal.
     expect(manualAgreementPendingSince(health, "manual_agreement_required", later)).toBe(later);
     expect(
       manualAgreementPendingSince(
@@ -88,16 +90,16 @@ describe("SBI VC session refusal diagnostics", () => {
         later,
       ),
     ).toBe(later);
-    expect(manualAgreementPendingSince(pending, null, later)).toBeNull();
-    expect(manualAgreementPendingSince(pending, "passkey_login_rejected", later)).toBeNull();
-    // A different refusal in between restarts the window at the next agreement refusal.
+    // A different failure in between (maintenance, network) neither closes nor
+    // reopens the window, so the hourly retries stay bounded by the first refusal.
+    expect(manualAgreementPendingSince(pending, "passkey_http_503", later)).toBe(first);
     expect(
       manualAgreementPendingSince(
-        { ...pending, lastReauthErrorCode: "passkey_login_rejected" },
+        { ...pending, lastReauthErrorCode: "passkey_http_503" },
         "manual_agreement_required",
         later,
       ),
-    ).toBe(later);
+    ).toBe(first);
   });
   test("a persisted blocked attempt remains linked to the scheduled occurrence", () => {
     expect(blockedScheduleResult(health, summary)).toEqual({

@@ -7,8 +7,9 @@ Status: proposed (accepted when the PR that carries it merges).
 Context. The 2026-10-10 amendment below made SBI VC's
 `manual_agreement_required` stop every unattended login, leaving the owner's
 forced `POST /reauth` as the only way back. That bearer token is a write-only
-Worker secret, so each terms agreement meant a secret rotation by hand, and in
-production collection stayed stopped from 2026-11-07 04:30 UTC with 1,604
+Worker secret, so each terms agreement meant a secret rotation by hand. In
+production the keepalive reported `manual_agreement_required` at 2026-10-23
+18:00 UTC and again from 2026-11-07 04:30 UTC, and the health record held 1,604
 consecutive keepalive failures. The owner asked (2026-11-07 06:05 UTC) for
 collection to resume automatically.
 
@@ -22,18 +23,20 @@ Decision (owner, 2026-11-07 06:28 UTC): A and D. While the stored code is
 `manual_agreement_required`, the usual re-authentication triggers apply again,
 as does the gateway's 3xx `http_rejected` answer to the stale session; an
 unforced login waits 1 hour after the previous attempt for 72 hours from the
-first refused login, then the usual 6 hours. The collector still never sends
-`setAgreement`. Collection quality reports `manual_agreement_required` as
-`user_action_required`. This replaces the 2026-10-10 sentence that the code
-"prevents repeated automatic login attempts", and narrows its rejected
+first refused login since the last successful login, then the usual 6 hours.
+The collector still never sends `setAgreement`. Collection quality reports
+`manual_agreement_required` as `user_action_required`. This replaces the
+2026-10-10 sentence that the code "prevents repeated automatic login
+attempts", and narrows its rejected
 alternative: what stays rejected is resuming blocked logins without a bound
 or without an owner act, not a bounded retry that succeeds only after the
 owner has agreed.
 
 Consequences. Recovery takes up to about 1 h 15 min after the owner agrees at
-simple.sbivc.co.jp, with no token or `/reauth`. Up to about 60 unattended
-logins happen in the 72-hour window; the owner's decision approves them, with
-the account-lock and rate-limit unknowns recorded in the
+simple.sbivc.co.jp, with no token or `/reauth`. At most 72 unattended logins,
+about 60 at the usual cadence, happen in the 72-hour window; the owner's
+decision approves them, with the account-lock and rate-limit unknowns recorded
+in the
 [source note §16](../sources/sbi-vc-trade.md#16-resuming-after-a-terms-agreement-2026-11-07).
 The blocked collection itself is still recorded as failed, never retried, and
 no coverage is promoted.
@@ -41,8 +44,9 @@ no coverage is promoted.
 Verification: `services/collector-sbi-vc-trade/test/session-policy.test.ts`
 (triggers, cooldown and window), `worker-test/schedule-result.test.ts` (the
 alarm retries the login, keeps the reason, resumes the collection after a
-successful login, and the Durable Object's cooldown at 30 minutes, 61 minutes
-and past 72 hours), and
+successful login, the Durable Object's cooldown at 30 minutes, 61 minutes
+and past 72 hours, and a login stopped at `isAgreed` that opens the window once,
+keeps it and is cleared by a successful login), and
 `packages/application/test/collection-quality-query.test.ts` (the source and
 the blocked unit carry `user_action_required`).
 

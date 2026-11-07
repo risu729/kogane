@@ -33,8 +33,9 @@ export interface HealthState {
   lastReauthSuccessAt: string | null;
   lastReauthErrorCode: string | null;
   /**
-   * The first login of the current run of `manual_agreement_required`
-   * refusals; it bounds the hourly retries. Null otherwise.
+   * The first `manual_agreement_required` refusal since the last successful
+   * login; it bounds the hourly retries. Null until such a refusal, and again
+   * after a successful login.
    */
   manualAgreementPendingSince: string | null;
 }
