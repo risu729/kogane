@@ -21,6 +21,7 @@ import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
 import { upstreamOutcome, UpstreamLost } from "./audit";
 import type { ToolResult } from "./agent-service";
+import { mcpInputSchema } from "./mcp-input-schema";
 const TOOL = "kogane.schedules.job.update";
 const CAPABILITY = "schedules.job.update";
 export const EXECUTABLE_SCHEDULE_CAPABILITIES = [
@@ -39,8 +40,7 @@ export function delegatedScheduleTools(env: Env, resolution: DelegationResolutio
     !resolution.principal.capabilities.includes(CAPABILITY)
   )
     return [];
-  const inputSchema = z.toJSONSchema(delegatedJobSchema) as Record<string, unknown>;
-  delete inputSchema["$schema"];
+  const inputSchema = mcpInputSchema(delegatedJobSchema);
   return [
     {
       name: TOOL,

@@ -21,6 +21,7 @@ import {
   d1CommandStore,
   ERROR_STATUS,
   executeQuery,
+  type HoldingsProjection,
   explain,
   explainCardPurchases,
   financialError,
@@ -44,10 +45,11 @@ import {
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import {
+  type BalanceProjectionReader,
   interpretationContext,
   LATEST_IDENTITY_RELEASE,
 } from "../../../packages/read-model/src/index";
-import { balanceProjectionReader, balanceReadConfigured } from "./balances-v2";
+import { balanceProjectionReader, balanceReadConfigured, servableSnapshot } from "./balances-v2";
 import { centralStoreCapabilities } from "./capabilities";
 import { evidenceReader, type ObservationReader, type Overview } from "./observations";
 import type { OperationCall } from "../../../packages/application/src/audit/call.ts";
@@ -306,9 +308,12 @@ export async function queryResponse(
     reader: context.reader,
     // `holdings` reads the adopted balance projection when READ is bound, and
     // answers `unavailable` when no snapshot is sealed, rather than summing
-    // the observation rows behind it.
+    // the observation rows behind it. Its snapshot is the one the v2 balance
+    // routes would serve: a snapshot they refuse (another READ contract, a
+    // restored CORE, a changed use restriction) is `unavailable` with their
+    // code, never summed.
     projection: balanceReadConfigured(context.env)
-      ? balanceProjectionReader(context.env)
+      ? holdingsProjection(balanceProjectionReader(context.env))
       : undefined,
     overview,
   });
@@ -327,6 +332,15 @@ export async function queryResponse(
       result: outcome.result,
     },
   };
+}
+
+/**
+ * The projection `holdings` reads: the subtotal and coverage queries of one
+ * reader, and the snapshot only through `servableSnapshot`, which is read
+ * when the intent asks for it, not for every query.
+ */
+function holdingsProjection(reader: BalanceProjectionReader): HoldingsProjection {
+  return { reader, servable: async () => await servableSnapshot(reader) };
 }
 
 const OPEN_KEYS = ["query", "knowledgeCutoff", "identityRead"] as const;

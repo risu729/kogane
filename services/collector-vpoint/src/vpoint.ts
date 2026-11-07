@@ -202,8 +202,11 @@ class VPointClient {
     for (let page = 1; page <= MAX_HISTORY_PAGES; page += 1) {
       const response = await this.requestJson(path, formForPage(page));
       const results = response.json.results;
+      // Only a first page answers for the whole history; an empty page after
+      // rows were declared is checked against the total below.
       if (
         emptyResultsAreEmptyHistory &&
+        page === 1 &&
         (!isObject(results) || Object.keys(results).length === 0)
       ) {
         pages.push(response);
@@ -225,10 +228,12 @@ class VPointClient {
       }
       pages.push(response);
       observedRows += rows;
-      if (observedRows >= declaredTotal || rows === 0) {
+      if (observedRows >= declaredTotal) {
         return { pages, total: declaredTotal };
       }
-      if (pageSize !== null && rows < pageSize) {
+      // Short of the total, an empty or short page is an unobserved end of
+      // history: the walk stops rather than storing it as complete.
+      if (rows === 0 || (pageSize !== null && rows < pageSize)) {
         throw new VPointProtocolError("premature-end");
       }
     }
