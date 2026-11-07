@@ -1,17 +1,25 @@
-/** Error-class grammar shared by collection and operation-dispatch diagnostics. */
-const FAILURE_CLASS = /^[A-Za-z][A-Za-z0-9_]{0,63}$/u;
+/** Finite diagnostic labels; writable exception names are never inspected. */
+const FAILURE_CLASSES = [
+  [AggregateError, "AggregateError"],
+  [EvalError, "EvalError"],
+  [RangeError, "RangeError"],
+  [ReferenceError, "ReferenceError"],
+  [SyntaxError, "SyntaxError"],
+  [TypeError, "TypeError"],
+  [URIError, "URIError"],
+  [Error, "Error"],
+] as const;
 
 /**
- * A bounded class code, never an exception message or arbitrary Error.name.
- * Reading a custom name/constructor may itself throw; diagnostics stay safe.
+ * Classify built-in error types without reading name, constructor or message.
+ * A custom Error remains generic Error; an unclassifiable throw is unknown.
  */
 export function safeFailureCode(error: unknown): string {
   try {
-    if (!(error instanceof Error)) return "unknown";
-    const name = error.name;
-    const code: unknown = name === "" ? error.constructor.name : name;
-    return typeof code === "string" && FAILURE_CLASS.test(code) ? code : "unknown";
+    for (const [constructor, code] of FAILURE_CLASSES)
+      if (error instanceof constructor) return code;
   } catch {
-    return "unknown";
+    // A hostile proxy may throw while instanceof walks its prototype chain.
   }
+  return "unknown";
 }

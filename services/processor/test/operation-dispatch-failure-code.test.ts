@@ -1,5 +1,5 @@
 // The real dispatch callback is the Worker log's input. Registration throws
-// remain retries, while every diagnostic code obeys the bounded class grammar.
+// remain retries, while writable error names never reach the diagnostic.
 import { beforeAll, expect, test } from "bun:test";
 import { d1CommandStore, type Principal } from "../../../packages/application/src/index.ts";
 import {
@@ -27,9 +27,10 @@ test("dispatch registration diagnostics refuse unsafe names without changing the
   const named = (name: string) => Object.assign(new Error(privateText), { name });
   const cases: [unknown, string][] = [
     [new TypeError(privateText), "TypeError"],
-    [named(privateText), "unknown"],
-    [named("private\ntext"), "unknown"],
-    [named("A".repeat(65)), "unknown"],
+    [named(privateText), "Error"],
+    [named("synthetic_private_key_123"), "Error"],
+    [named("private\ntext"), "Error"],
+    [named("A".repeat(65)), "Error"],
     [privateText, "unknown"],
     [null, "unknown"],
   ];
@@ -56,6 +57,7 @@ test("dispatch registration diagnostics refuse unsafe names without changing the
     ).toMatchObject({ claimed: 1, dispatched: 0, failed: 1 });
     expect(codes).toEqual([expected]);
     expect(JSON.stringify(codes)).not.toContain(privateText);
+    expect(JSON.stringify(codes)).not.toContain("synthetic_private_key_123");
     const receipt = await readOperation({
       store,
       principal: PRINCIPAL,
