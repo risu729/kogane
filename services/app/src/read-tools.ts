@@ -33,6 +33,8 @@ import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
+import { readObservationList } from "./observation-api";
+import { V2_HISTORY_PATH, V2_LATEST_PATH } from "./balances-v2";
 import {
   readReportedState,
   REPORTED_STATE_ACCOUNT,
@@ -46,8 +48,6 @@ import {
  * path is 404 and the MCP name `unknown_tool`.
  */
 export const REPORTED_STATE_TOOL_NAME = "kogane.reported-state.read";
-import { readObservationList } from "./observation-api";
-import { V2_HISTORY_PATH, V2_LATEST_PATH } from "./balances-v2";
 
 /**
  * `kogane.balances.read` (plan D3): `GET /api/v2/balances/latest` and
