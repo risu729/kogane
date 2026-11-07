@@ -1296,6 +1296,12 @@ the Worker reads. Otherwise the paths 404 like any unknown route and
 `ApiCapabilities`; both stored capability constants default it to `false` and
 the server replaces it with what the store has. `EVENTS_V2_ENABLED` is not read.
 
+The request rules and the read are `readEconomicEvents`
+(`packages/application/src/query/economic-events-read.ts`). The agent tool
+`kogane.events.read` calls the same function with the same parameters, under
+`records.read` over the whole store, and exists exactly while the routes do
+([agent API](agent-api.md#economic-events-and-obligations)).
+
 `services/app/src/card-purchases-api.ts` serves one more read, to an operator
 only:
 

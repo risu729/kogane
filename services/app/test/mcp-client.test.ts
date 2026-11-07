@@ -31,7 +31,7 @@ import {
 } from "../src/agent-service";
 import { principalFor } from "../src/grants";
 import { HttpError } from "../src/http";
-import { REPORTED_STATE_TOOL_NAME } from "../src/read-tools";
+import { EVENTS_TOOL_NAME, REPORTED_STATE_TOOL_NAME } from "../src/read-tools";
 import { opsContext } from "../src/ops-api";
 import { callOpsTool } from "../src/ops-tools";
 import { GRANT_LIMITS, QUERY_GRANT_CAPABILITIES } from "../../../packages/application/src/index";
@@ -60,7 +60,8 @@ const FULL = [...QUERY_GRANT_CAPABILITIES];
  * tools, every read tool the whole-store grant answers, the purchase
  * explanation (CORE 0047 is applied here; the retired `EVENTS_V2_ENABLED`
  * name is not read), and, because this store has the reported state's views,
- * the reconstructed state's read.
+ * the reconstructed state's read and, because it has the A10 projection, the
+ * events read.
  */
 const PUBLISHED = [
   ...AGENT_TOOL_NAMES,
@@ -72,6 +73,7 @@ const PUBLISHED = [
   "kogane.economic-readiness.read",
   "kogane.card-settlements.read",
   "kogane.card-settlements.ownership",
+  EVENTS_TOOL_NAME,
   "kogane.audit.search",
   "kogane.audit.get",
   "kogane.identity.read",

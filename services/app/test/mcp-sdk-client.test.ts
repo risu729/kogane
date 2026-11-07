@@ -102,7 +102,8 @@ describe("the official SDK client against /mcp", () => {
         const listed = await client.listTools();
         // The agent tools, every read tool the whole-store grant answers, the
         // purchase explanation (CORE 0047 is applied; the retired reader name
-        // is not read) and the reconstructed state's read.
+        // is not read), the reconstructed state's read and, because this store
+        // has the A10 projection, the events read.
         expect(listed.tools.map((tool) => tool.name)).toEqual([
           ...AGENT_TOOL_NAMES,
           "kogane.instruments.history",
@@ -113,6 +114,7 @@ describe("the official SDK client against /mcp", () => {
           "kogane.economic-readiness.read",
           "kogane.card-settlements.read",
           "kogane.card-settlements.ownership",
+          "kogane.events.read",
           "kogane.audit.search",
           "kogane.audit.get",
           "kogane.identity.read",

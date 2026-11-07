@@ -468,11 +468,12 @@ describe("served only while card purchase recognition is", () => {
     }
     // A tool list asks once for each tool that depends on the store's schema:
     // this one, the reported state's views, which decide both the reported
-    // and the reconstructed state's reads (asked once for both), and the card
-    // settlement views, which decide both card settlement reads.
+    // and the reconstructed state's reads (asked once for both), the card
+    // settlement views, which decide both card settlement reads, and the A10
+    // projection, which decides the events read.
     const statements: string[] = [];
     await mcp({ method: "tools/list" }, { statements });
-    expect(statements).toHaveLength(3);
+    expect(statements).toHaveLength(4);
     expect(statements.filter((sql) => isSchemaProbe(sql))).toHaveLength(1);
     expect(statements.filter((sql) => sql.includes("card_statement_facts"))).toHaveLength(1);
     expect(
@@ -480,6 +481,7 @@ describe("served only while card purchase recognition is", () => {
         sql.includes("'card_settlement_reviews','card_settlement_readiness'"),
       ),
     ).toHaveLength(1);
+    expect(statements.filter((sql) => sql.includes("economic_event_revisions"))).toHaveLength(1);
   });
 });
 

@@ -573,7 +573,7 @@ each (`result = "read"`, a row count, no data).
 | D16 | 確認画面 (plan view)                                                                       | `kogane.command.simulate` (W10)                                                                                                                                                                                              | `commands.plan`  | the plan's own targets                                                                    |
 | D17 | — → `/api/collection-quality`                                                              | `kogane.collection-quality.read` (new)                                                                                                                                                                                       | `summary.read`   | whole-store only                                                                          |
 | D18 | — → `/api/v2/reports/:id`, `/explanation`                                                  | `kogane.reports.read` (new); `/export` not exposed (`report.export` stays absent); refined by [ADR 0072's amendment](../adr/0072-report-artifact-pages.md#amendment-the-export-link-and-no-agent-report-read-yet-2026-11-06) | `records.read`   | whole-store only                                                                          |
-| D19 | — → `/api/v2/activity`, `/api/v2/obligations`                                              | `kogane.events.read` (new)                                                                                                                                                                                                   | `records.read`   | whole-store only                                                                          |
+| D19 | — → `/api/v2/activity`, `/api/v2/obligations`                                              | `kogane.events.read` (exists)                                                                                                                                                                                                | `records.read`   | whole-store only                                                                          |
 | D20 | 監査ログ (new page) → `GET /api/v2/audit`; `POST /api/agent/v1/audit.search`               | `kogane.audit.search`, `kogane.audit.get` (new)                                                                                                                                                                              | `audit.read`     | scoped by source (section 6.7); a listed account axis is refused                          |
 
 Not exposed on any agent path: `GET /api/ops/v1/health` (the release
@@ -600,9 +600,9 @@ routes, H8 the agents' proposal route) and 20 reads (D1–D20). Operations with
    record will be its only durable trace. It stays R3.
 5. Agent-facing contracts for the review queues (D8, D9): only the purchases
    page has one (`validAgentCardPurchasePage`).
-6. D2–D4, D6, D7, D11–D14, D17–D19: the routes exist, no MCP tool does, and
-   none is proven computable inside a listed scope. D5's tool exists,
-   whole-store only.
+6. D2–D4, D6, D7, D11–D14, D17, D18: the routes exist, no MCP tool does, and
+   none is proven computable inside a listed scope. D5's and D19's tools
+   exist, whole-store only.
 7. W1, W2, W4, W5: the writers exist, no agent adapter does.
 8. #564's tool exists only on its branch, with a free-text reason.
 

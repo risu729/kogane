@@ -101,7 +101,13 @@ import {
   isDelegatedCommandTool,
 } from "./delegated-command-tools";
 
-import { CARD_SETTLEMENT_TOOL_NAMES, readMcpTools, REPORTED_STATE_TOOL_NAME } from "./read-tools";
+import {
+  CARD_SETTLEMENT_TOOL_NAMES,
+  EVENTS_TOOL_NAME,
+  readMcpTools,
+  REPORTED_STATE_TOOL_NAME,
+} from "./read-tools";
+import { eventsV2Available } from "./events-api";
 import { pageReadMcpTools } from "./page-read-tools";
 import {
   callDelegatedSurveyTool,
@@ -252,6 +258,9 @@ export async function agentApi(
     let settlementsServed: Promise<boolean> | undefined;
     const settlements = (): Promise<boolean> =>
       (settlementsServed ??= cardSettlementsAvailable(env));
+    // The events read exists exactly while `GET /api/v2/activity` does (`eventsV2`).
+    let eventsServed: Promise<boolean> | undefined;
+    const events = (): Promise<boolean> => (eventsServed ??= eventsV2Available(env));
     const message = await handleMcp(
       request,
       async (name, body) => {
@@ -259,6 +268,7 @@ export async function agentApi(
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (name === REPORTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (CARD_SETTLEMENT_TOOL_NAMES.has(name) && !(await settlements())) return null;
+        if (name === EVENTS_TOOL_NAME && !(await events())) return null;
         // An MCP client's capabilities also carry the operation authority
         // derived for it (ADR 0084), as a safe status; recorded like any call.
         if (name === "kogane.capabilities" && caller.kind === "mcp-client")
@@ -338,6 +348,7 @@ export async function agentApi(
         ...readMcpTools(grant, {
           reportedState: await reconstructed(),
           cardSettlements: await settlements(),
+          events: await events(),
         }),
         ...pageReadMcpTools(grant),
         ...(caller.kind === "mcp-client"
@@ -383,6 +394,8 @@ export async function agentApi(
   )
     throw new HttpError(404, "not_found");
   if (CARD_SETTLEMENT_TOOL_NAMES.has(tool) && !(await cardSettlementsAvailable(env)))
+    throw new HttpError(404, "not_found");
+  if (tool === EVENTS_TOOL_NAME && !(await eventsV2Available(env)))
     throw new HttpError(404, "not_found");
   const body = await boundedJson(request);
   const outcome = (await toolCall(request, env, caller, tool, (audit) =>

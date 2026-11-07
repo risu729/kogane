@@ -486,3 +486,15 @@ export {
   CARD_SETTLEMENTS_MAX_OFFSET,
   type CardSettlementsReadOutcome,
 } from "./query/card-settlements-read.ts";
+
+export {
+  readEconomicEvents,
+  economicEventsGrantRefusal,
+  ECONOMIC_EVENTS_LISTS,
+  ECONOMIC_EVENTS_MAX_OFFSET,
+  ECONOMIC_EVENTS_PAGE_SIZE,
+  type EconomicEventsList,
+  type EconomicEventsOutcome,
+  type EconomicEventsPage,
+  type EconomicEventsRefusal,
+} from "./query/economic-events-read.ts";

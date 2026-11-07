@@ -203,6 +203,12 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       truncated: value["nextOffset"] !== null && value["nextOffset"] !== undefined,
     };
   if (operation === "card-settlements.ownership") return { rows: 1, truncated: false };
+  // One page of events or obligations, truncated when a next page follows.
+  if (operation === "events.read")
+    return {
+      rows: Array.isArray(value["items"]) ? value["items"].length : 0,
+      truncated: typeof value["nextCursor"] === "string",
+    };
   if (operation === "economic-readiness.read") {
     const manifest = value["manifest"] as { rows?: unknown } | undefined;
     return { rows: Array.isArray(manifest?.rows) ? manifest.rows.length : 0, truncated: false };

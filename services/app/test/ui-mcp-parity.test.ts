@@ -118,6 +118,8 @@ const TOOLS_WITHOUT_UI_ROUTE: Readonly<Record<string, string>> = {
   "kogane.explain": "an evidence graph of one ref, not the observation detail (a gap above)",
   "kogane.reconcile.propose": "an agent's relation proposal; no screen offers it",
   "kogane.economic-readiness.read": "economic row readiness; no screen reads it",
+  "kogane.events.read":
+    "adopted economic events and obligations (readEconomicEvents, GET /api/v2/activity and /api/v2/obligations); no screen reads those routes",
   "kogane.audit.get":
     "one audit record by id (readAuditRecordForGrant); the audit page reads pages only (readAuditPage, kogane.audit.search)",
   "kogane.schedules.maintenance.read":

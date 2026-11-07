@@ -22,7 +22,7 @@ import {
 } from "../src/agent-service";
 import { principalFor } from "../src/grants";
 import { HttpError } from "../src/http";
-import { REPORTED_STATE_TOOL_NAME } from "../src/read-tools";
+import { EVENTS_TOOL_NAME, REPORTED_STATE_TOOL_NAME } from "../src/read-tools";
 import { GRANT_LIMITS, QUERY_GRANT_CAPABILITIES } from "../../../packages/application/src/index";
 import { INITIALIZE_PARAMS, MCP_CLIENT_HEADERS } from "./mcp-headers";
 
@@ -534,6 +534,14 @@ describe("untrusted provider content (AT71)", () => {
         properties: ["proposalId"],
         annotations: readOnly,
       },
+      // Published because this store has the A10 projection (`eventsV2`).
+      {
+        name: "kogane.events.read",
+        required: ["list"],
+        closed: false,
+        properties: ["basis", "list", "offset"],
+        annotations: readOnly,
+      },
       // Published because the whole-store grant carries audit.read (ADR 0084).
       {
         name: "kogane.audit.search",
@@ -612,6 +620,7 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.economic-readiness.read",
       "kogane.card-settlements.read",
       "kogane.card-settlements.ownership",
+      EVENTS_TOOL_NAME,
       "kogane.audit.search",
       "kogane.audit.get",
       "kogane.identity.read",
@@ -695,6 +704,7 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.economic-readiness.read",
       "kogane.card-settlements.read",
       "kogane.card-settlements.ownership",
+      EVENTS_TOOL_NAME,
       "kogane.audit.search",
       "kogane.audit.get",
       "kogane.identity.read",

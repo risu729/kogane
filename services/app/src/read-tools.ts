@@ -1,7 +1,8 @@
 // Additional read adapters over the existing history, instrument coverage
 // (ADR 0073), dated reported state, account correspondence candidates
 // (ADR 0077), card statements without a settlement candidate (ADR 0074's
-// 2026-11-07 amendment) and common audit readers.
+// 2026-11-07 amendment), adopted economic events and obligations (plan D19)
+// and common audit readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -15,6 +16,9 @@ import {
   readCardOwnershipForGrant,
   CARD_SETTLEMENT_PROPOSAL_ID,
   CARD_SETTLEMENTS_MAX_OFFSET,
+  ECONOMIC_EVENTS_LISTS,
+  economicEventsGrantRefusal,
+  readEconomicEvents,
 } from "../../../packages/application/src/index";
 import {
   readAuditForGrant,
@@ -35,6 +39,7 @@ import { readInstrumentHistoryForGrant } from "../../../packages/application/src
 import { ECONOMIC_ROW_READINESS_SCHEMA } from "../../../packages/domain/src/economic-row-readiness.ts";
 import { INSTRUMENT_IDENTIFIER_ID } from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
+import { ACTIVITY_BASES } from "../../../packages/read-model/src/events.ts";
 import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
@@ -60,6 +65,14 @@ export const CARD_SETTLEMENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "kogane.card-settlements.read",
   "kogane.card-settlements.ownership",
 ]);
+
+/**
+ * `kogane.events.read` (plan D19): `GET /api/v2/activity` and
+ * `GET /api/v2/obligations` for an agent. Served exactly while those routes
+ * are (`eventsV2`, the A10 projection exists); otherwise the path is 404 and
+ * the MCP name `unknown_tool`.
+ */
+export const EVENTS_TOOL_NAME = "kogane.events.read";
 
 const schemas = {
   "kogane.instruments.history": z.strictObject({
@@ -112,6 +125,14 @@ const schemas = {
   "kogane.card-settlements.ownership": z.strictObject({
     proposalId: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID),
   }),
+  // The routes' query parameters, as a body, with the service's own limits.
+  // The offset's range is checked by the service too, so an out-of-range
+  // offset keeps the route's code (`invalid_offset`).
+  "kogane.events.read": z.strictObject({
+    list: z.enum(ECONOMIC_EVENTS_LISTS),
+    basis: z.enum(ACTIVITY_BASES).optional(),
+    offset: z.number().int().optional(),
+  }),
   "kogane.audit.search": z.strictObject({
     filters: z.record(z.string(), z.string()).optional(),
     cursor: z.string().min(1).max(400).nullable().optional(),
@@ -143,6 +164,8 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "The card statement to bank debit reviews of the カード照合 page: one page (offset) or one review (proposalId), with the source facts, evidence references, acceptance blockers and decision history, the same answer as GET /api/v2/reconciliation/card-settlements, under records.read and a whole-store read grant. Read-only; deciding a review is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
   "kogane.card-settlements.ownership":
     "The ownership review of one card settlement candidate: both accounts' current mappings, recorded ownership claims, self-declaration and owner-default blockers, the same answer as GET /api/v2/reconciliation/card-settlements/ownership, under records.read and a whole-store read grant. Read-only; recording ownership is a relation plan through the change lifecycle, graded there.",
+  "kogane.events.read":
+    "Adopted economic events (list: activity, on one basis: cash-movement by default or purchase-recognition) or obligations with their settlements, 200 a page from offset. The same answer as GET /api/v2/activity or /api/v2/obligations, under records.read and a whole-store read grant. Every quantity keeps its basis and unit; bases are never merged, and an outstanding amount that is not exact is null with a reason, never zero. Read-only.",
   "kogane.audit.search":
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
   "kogane.audit.get":
@@ -166,11 +189,13 @@ const wholeStore = (grant: Grant) => grant.scopes.sources === "*" && grant.scope
  * answer. A call by any other grant is refused by the service itself, with the
  * same closed code on both transports. `reportedState`: whether this deployment
  * serves `GET /api/v2/reported-state`; `cardSettlements`: whether it serves
- * `GET /api/v2/reconciliation/card-settlements` (`cardSettlementsAvailable`).
+ * `GET /api/v2/reconciliation/card-settlements` (`cardSettlementsAvailable`);
+ * `events`: whether it serves `GET /api/v2/activity` and `/api/v2/obligations`
+ * (`eventsV2Available`).
  */
 export function readMcpTools(
   grant: Grant,
-  served: { reportedState: boolean; cardSettlements: boolean },
+  served: { reportedState: boolean; cardSettlements: boolean; events: boolean },
 ) {
   return READ_MCP_TOOLS.filter((tool) => {
     switch (tool.name as ReadToolName) {
@@ -187,6 +212,8 @@ export function readMcpTools(
       case "kogane.card-settlements.read":
       case "kogane.card-settlements.ownership":
         return served.cardSettlements && grantAllows(grant, "records.read") && wholeStore(grant);
+      case "kogane.events.read":
+        return served.events && economicEventsGrantRefusal(grant) === null;
       case "kogane.audit.search":
       case "kogane.audit.get":
         return grantAllows(grant, "audit.read") && grant.scopes.accounts === "*";
@@ -302,6 +329,20 @@ export async function callReadTool(
         return outcome.ok
           ? { status: 200, body: { apiVersion: 2, ...outcome.review } }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
+      case "kogane.events.read": {
+        // The grant first, before the body is validated; then the routes' own
+        // request rules and reader, so a refusal keeps the route's code.
+        const refused = economicEventsGrantRefusal(grant);
+        if (refused) return { status: ERROR_STATUS[refused.code], body: refused };
+        const input = parseRequest(schemas[name], body ?? {});
+        const parameters = new URLSearchParams();
+        if (input.basis !== undefined) parameters.set("basis", input.basis);
+        if (input.offset !== undefined) parameters.set("offset", String(input.offset));
+        const outcome = await readEconomicEvents(d1Executor(env.DB), input.list, parameters);
+        return outcome.ok
+          ? { status: 200, body: outcome.body }
+          : { status: 400, body: { error: outcome.refusal } };
       }
       case "kogane.economic-readiness.read": {
         // The shared service grades scope before validation or database access.

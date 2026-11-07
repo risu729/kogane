@@ -160,3 +160,90 @@ What the code does today (main `02a915a`):
   `kogane.schedules.survey.read`
   ([ADR 0050 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07);
   `services/app/test/delegated-survey.test.ts`).
+
+## Amendment 2026-11-07: the economic events read, a tool without a screen
+
+- Status: proposed (accepted when the pull request that adds it merges)
+- Date: 2026-11-07
+- Carried by: `readEconomicEvents` and `economicEventsGrantRefusal` in
+  `packages/application/src/query/economic-events-read.ts`,
+  `services/app/src/events-api.ts`, `kogane.events.read` in
+  `services/app/src/read-tools.ts`, the catalogue entry `events.read`,
+  [agent API](../agent-api.md#economic-events-and-obligations)
+
+### Context
+
+`GET /api/v2/activity` and `GET /api/v2/obligations` (architecture addendum
+A10) had a route and a read-model reader, `createEventsReader`, but no agent
+read: plan row D19 of
+[the AI operation path plan](../plans/2026-10-ai-operation-path.md) names
+`kogane.events.read` as new. The `activity` intent of `kogane.financial.query`
+reads provider transaction observations, not adopted events, and its
+`obligations` intent is refused as `unsupported_semantics`. The routes' request
+rules lived in the route handler (`services/app/src/events-api.ts`), so a tool
+would have had to copy them or call into the handler. No screen of
+`apps/web` reads either route, so guard 2 of point 4 has no route to map the
+tool from.
+
+### Options considered
+
+1. **Implement the `obligations` intent of `kogane.financial.query`.**
+   Rejected: that service's intents are graded per scope and paged under a
+   context, and the events projection is neither scoped nor proven inside a
+   listed scope.
+2. **A tool with its own validation over `createEventsReader`.** Rejected:
+   two copies of the request rules drift, which point 2 forbids.
+3. **Move the routes' request rules and read into `packages/application`,
+   and make the route and a read tool adapters over it (chosen).** As point 2
+   asks, and as the card settlement reads did
+   ([card settlements](../card-settlements.md#agent-reads)).
+
+### Decision
+
+- `readEconomicEvents(sql, list, parameters)` holds the routes' request rules
+  (`invalid_query`, `invalid_offset`) and calls `createEventsReader` with a
+  200-entry page. The route maps a path to its list and a refusal to `400`; the
+  tool maps a closed object (`list`, `basis`, `offset`) to the same query
+  parameters, so both answer the same bytes and the same codes.
+- The tool needs `records.read` over `"*"` sources and accounts
+  (`economicEventsGrantRefusal`, graded before the body is read), as ADR 0063
+  decision 10 asks of a new whole-store read. It exists while the routes do
+  (`eventsV2`): otherwise its name is `unknown_tool` and its HTTP agent path
+  `404`. It is R0 (`events.read`, paths `agent-http` and `mcp`): one audit
+  record per served call, whose row count is the page's entries.
+- The page's `raw_object:<sha256>` refs are served unchanged. They are
+  identifiers, the same sha256 `kogane.explain` hands as `raw:<sha256>` under
+  `evidence.read`, and since ADR 0084 every caller on every path holds
+  `evidence.read` (the whole-store grant, and the GET routes' reader grant a
+  browser subject already reads these routes with). The page carries no
+  provider text, so nothing in it needs a `data` field.
+- The tool is listed in guard 2's tools without a UI route, with its reason.
+
+### Consequences
+
+- An MCP client can read adopted events and obligations, the same pages as
+  the routes. No agent tool reads raw bytes (plan row D13 stays open).
+- A grant without `evidence.read` would also get the `raw_object:` refs. No
+  such grant exists; adding one back (ADR 0084 decision 10) must decide this
+  read's refs with it.
+- The grant's `budget.maxRows` does not bound a page; the route's 200 does. A
+  scoped version stays unproven.
+- Adding the tool to the catalogue and to `/mcp` needs the owner's approval
+  before merge.
+
+### Verification
+
+- `packages/application/test/economic-events-read.test.ts`: which requests
+  reach the reader, each refusal before any read, and the grant rule.
+- `services/app/test/events-api.test.ts` ("the agent tool"): both agent paths
+  answer the routes' bodies byte for byte (the HTTP body and the MCP text
+  content) for each list, basis and offset; the routes' raw refs reach every
+  caller and a hostile description on the event's source row reaches none;
+  listing with and without the projection and under narrower grants; route
+  refusals with the route's code and the same status on both paths; grant
+  refusals before the body is read; absence without the projection; one R0
+  audit record per served call with a row count only.
+- `services/app/test/ui-mcp-parity.test.ts` lists the tool without a UI route;
+  the pinned tool lists in `services/app/test/agent-api.test.ts` (schema
+  snapshot included), `services/app/test/mcp-client.test.ts` and the statement
+  count of a tool list in `services/app/test/purchases-explain.test.ts`.

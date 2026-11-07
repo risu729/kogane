@@ -286,6 +286,16 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // Adopted economic events and obligations (plan D19), served while
+  // `GET /api/v2/activity` and `/api/v2/obligations` are; whole-store only
+  // (ADR 0063 decision 10). No screen reads those routes.
+  "events.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   // The UI's read pages over MCP (ADR 0081): each the route's own reader,
   // whole-store only (services/app/src/page-read-tools.ts).
   "identity.read": {
