@@ -17,6 +17,8 @@ The planning snapshot in `data/account-inventory.csv` cannot prove a product is 
 | Sony         | `sony-bank:wallet`                                 | Debit-card activity; not another stored-value deposit                                                                        |
 | Sony         | `sony-bank:gross`, asset 001–011, loan 012–015     | Provider totals/categories, not established product holdings                                                                 |
 | SBI Shinsei  | `sbi-shinsei:{accountNo}`                          | Provider account reference and native unit; source ID is `sbi-shinsei-bank`                                                  |
+| SBI Shinsei  | `sbi-shinsei:fx-board`                             | Exchange-rate board, not an account: `valuation-aggregate`, `aggregate` (policy 2, ADR 0076)                                 |
+| SBI Shinsei  | `sbi-shinsei:customer`                             | Customer stage category, not an account: `qualification-aggregate`, `aggregate` (policy 2, ADR 0076)                         |
 | SBI VC Trade | `sbi-vc-trade:main`                                | Exchange account; separate from SBI Securities and Shinsei                                                                   |
 | V Point      | common bucket indices                              | Provider-local semantic bucket from explicit point type and expiration; missing/conflicting evidence falls back to fetch run |
 | V Point      | store-limited group-item indices                   | Fetch-run-scoped reward buckets, unresolved durable binding                                                                  |
@@ -40,6 +42,16 @@ MoneyForward HMAC identity is stable across ordinal changes; changing an alias
 secret does not authorize a merge. Coarse single-account source scopes remain
 provider-local, not globally identified accounts.
 
+SBI Shinsei's `{accountNo}` is any non-empty provider account id (its layout is
+not observed, so the rule does not narrow it); the two exact parser constants
+`fx-board` and `customer` are the only references the rule reads as
+non-account statements, and only from identity policy 2. Every SBI Shinsei key
+is `[reference, "unit", native unit]` under both versions, so the policy-2
+classification is a new mapping revision of the same source account, and an
+account reference keeps the same source account and account entity
+([ADR 0076](adr/0076-sbi-shinsei-non-account-identity.md),
+[identity operations](identity-operations.md#policy-2-sbi-shinsei-non-account-references)).
+
 Money uses an explicit currency catalog. `CNH` is an offshore-renminbi variant,
 not an ISO 4217 synonym for `CNY`. `V_POINT` is its own reward program. Unknown
 codes are unresolved and source-scoped. SBI VC explicit asset codes are
@@ -59,4 +71,6 @@ settlement. Existing current-snapshot selection and provenance remain unchanged.
 Evidence: `packages/parsers/src/parsers/registry.ts` and each source parser;
 `docs/sources/moneyforward.md` documents HMAC verification. Synthetic boundary
 tests in `packages/identity/test/identity-other.test.ts` cover accepted and
-rejected scopes, changing ordinals, currency roles and product separation.
+rejected scopes, changing ordinals, currency roles and product separation;
+`packages/identity/test/identity-sbi-shinsei.test.ts` holds the SBI Shinsei
+policy-1 and policy-2 golden plans.

@@ -313,6 +313,37 @@ describe("non-SBI account identification", () => {
     expect(otherIdentity(input(source, account)).account.status).toBe("unresolved");
   });
 
+  test("the source label table answers only for its own entries, each unchanged", () => {
+    // The table as it shipped before it became a Map.
+    const shipped: [string, string][] = [
+      ["vpass", "Vpassカード明細"],
+      ["global-pass", "GLOBAL PASSデビット明細"],
+      ["prestia", "SMBC信託銀行 PRESTIA"],
+      ["myjcb", "MyJCB請求口座"],
+      ["smbc-bank", "三井住友銀行 円普通預金"],
+      ["mizuho-bank", "みずほ銀行 普通預金"],
+      ["st-george", "St.George"],
+      ["sony-bank", "ソニー銀行"],
+      ["sbi-shinsei-bank", "SBI新生銀行 預金口座"],
+      ["sbi-vc-trade", "SBI VCトレード口座"],
+      ["v-point", "Vポイント"],
+      ["v-point-pay", "VポイントPay"],
+      ["mobile-suica", "モバイルSuica SF"],
+      ["moneyforward-me", "MoneyForward連携口座"],
+      ["paypay", "PayPay利用履歴"],
+    ];
+    for (const [source, label] of shipped)
+      expect(otherIdentity(input(source, `${source}:synthetic-unaudited`)).account.label).toBe(
+        label,
+      );
+    // An inherited name is not an entry: it gets the unidentified-source label,
+    // never a function or Object.prototype.
+    for (const source of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"])
+      expect(otherIdentity(input(source, `${source}:synthetic`)).account.label).toBe(
+        "未識別の取得元口座",
+      );
+  });
+
   test("MF identity survives ordinal changes but never aliases by name", () => {
     const account = `moneyforward-me:moneyforward-account-v1-${"a".repeat(64)}`;
     const a = otherIdentity(

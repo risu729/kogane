@@ -28,7 +28,13 @@ import {
   type RewardHolding,
   type SearchBudget,
 } from "../src/rewards.ts";
-import { addQuantities, decimalLiteral, type ExactRatio, type Quantity } from "../src/values.ts";
+import {
+  absentQuantity,
+  addQuantities,
+  decimalLiteral,
+  type ExactRatio,
+  type Quantity,
+} from "../src/values.ts";
 import { addMonths, formatLocalDate, parseLocalDate, type LocalDateValue } from "../src/time.ts";
 import { loadFixture, q, quantityText } from "./helpers.ts";
 
@@ -172,6 +178,19 @@ describe("contracts validate", () => {
     expect(validExpiryRule(inactivityRule)).toBe(true);
     expect(validConversionOffer(offer())).toBe(true);
     expect(
+      validConversionOffer(
+        offer({ validTime: { kind: "open-ended", start: "2026-04-01", zone: TOKYO } }),
+      ),
+    ).toBe(true);
+    expect(validConversionOffer(offer({ applicationDeadline: null }))).toBe(true);
+    expect(
+      validConversionOffer(
+        offer({
+          validTime: { kind: "open-ended", start: "2026-04-01", zone: TOKYO, end: null } as never,
+        }),
+      ),
+    ).toBe(false);
+    expect(
       validMembershipState({
         programId: "program:a",
         holdingRef: "holding:member-1",
@@ -243,6 +262,28 @@ describe("SC11 / AT37 / AT43 / AT47 / AT48 — quantity, eligibility and qualifi
     expect(measures).toHaveLength(1);
     expect(quantityText(measures[0]!.quantity)).toBe(fixture.expected.statusIndicator);
     expect(measures[0]!.consumable).toBe(false);
+  });
+
+  test("INV05 a consumable bucket in another unit makes the consumable total a conflict, not a smaller sum", () => {
+    const points = holding("points:program-a", [
+      bucket("bucket:regular", "regular", "points:program-a", "300"),
+      bucket("bucket:foreign", "time-limited", "points:program-b", "500"),
+      bucket("bucket:status", "qualification", "status-points:program-a", "100"),
+    ]);
+    const summary = summarizeHolding(points);
+    expect(summary.consumable).toEqual({
+      unitRef: "points:program-a",
+      value: { status: "conflict", reasonCode: "unit_mismatch" },
+    });
+    expect(summary.error?.code).toBe("unit_mismatch");
+    // Both other-unit buckets stay out of every subtotal, each with its reason.
+    expect(summary.excluded).toEqual([
+      { bucketRef: "bucket:foreign", kind: "time-limited", reasonCode: "unit_mismatch" },
+      { bucketRef: "bucket:status", kind: "qualification", reasonCode: "unit_mismatch" },
+    ]);
+    expect(summary.byKind.map((entry) => [entry.kind, quantityText(entry.quantity)])).toEqual([
+      ["regular", "300"],
+    ]);
   });
 
   test("SYN19 the wallet's JPY and the programme's points are never added", () => {
@@ -588,6 +629,23 @@ describe("SC13 / AT41 / AT49 — eligibility and the application-credit distinct
     ]);
   });
 
+  test("a standing offer with no announced end is available on and after its first day", () => {
+    const standing = {
+      ...transitOffer,
+      validTime: { kind: "open-ended", start: "2026-04-01", zone: TOKYO } as const,
+      applicationDeadline: null,
+    };
+    for (const clock of ["2026-04-01", "2026-09-09", "2099-12-31"])
+      expect(availableForOffer(buckets, standing, [], day(clock))).toMatchObject({
+        state: "available",
+        uncertaintyCodes: [],
+      });
+    expect(availableForOffer(buckets, standing, [], day("2026-03-31"))).toMatchObject({
+      state: "not-eligible",
+      uncertaintyCodes: ["offer_not_valid_at_clock"],
+    });
+  });
+
   test("an unverified offer is needs-rule-verification, not a refusal and not an approval", () => {
     const unverified = availableForOffer(
       buckets,
@@ -726,6 +784,89 @@ describe("SC13 / AT41 / AT49 — eligibility and the application-credit distinct
     );
     expect(returned.observedExpiry).not.toEqual(day("2027-08-01"));
     expect(validRewardBucket(returned)).toBe(true);
+  });
+
+  test("INV05 an event amount that is not exact leaves the positions it moves unknown, never unmoved", () => {
+    const unread = absentQuantity(fixture.pointUnit, "unparsed", "synthetic_amount_unreadable");
+    const event = (
+      eventRef: string,
+      stage: "debited" | "credited" | "returned",
+      quantity: Quantity,
+    ) => ({
+      eventRef,
+      stage,
+      quantity,
+      returnedToBucketRef: null,
+      at: day("2026-09-02"),
+      evidenceRefs: [],
+    });
+    const state = (position: { sourceHeld: Quantity; inTransit: Quantity }) => [
+      position.sourceHeld.value.status === "exact"
+        ? quantityText(position.sourceHeld)
+        : position.sourceHeld.value.reasonCode,
+      position.inTransit.value.status === "exact"
+        ? quantityText(position.inTransit)
+        : position.inTransit.value.reasonCode,
+    ];
+
+    // An unreadable debit moved some amount: neither side still holds what it held.
+    const debit = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [event("event:debit", "debited", unread)],
+      fixture.walletUnit,
+    );
+    expect(debit.positions.map(state)).toEqual([
+      ["synthetic_amount_unreadable", "synthetic_amount_unreadable"],
+    ]);
+
+    // An unreadable credit is not a credit of nothing.
+    const credit = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [
+        event("event:debit", "debited", q(fixture.pointUnit, "5000")),
+        event(
+          "event:credit",
+          "credited",
+          absentQuantity(fixture.walletUnit, "missing", "synthetic_credit_missing"),
+        ),
+      ],
+      fixture.walletUnit,
+    );
+    const credited = credit.positions[1]!.destinationCredited;
+    expect(credited.unitRef).toBe(fixture.walletUnit);
+    expect(credited.value).toEqual({ status: "missing", reasonCode: "synthetic_credit_missing" });
+
+    // An unreadable return does not leave the source as it was before the return.
+    const returned = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [
+        event("event:debit", "debited", q(fixture.pointUnit, "5000")),
+        event("event:return", "returned", unread),
+      ],
+      fixture.walletUnit,
+    );
+    expect(returned.positions.map(state)).toEqual([
+      ["3000", "5000"],
+      ["synthetic_amount_unreadable", "0"],
+    ]);
+
+    // Once unknown, a position stays unknown: a later exact event does not
+    // turn it back into a number, and the credit side stays exact.
+    const later = redemptionPositions(
+      q(fixture.pointUnit, "8000"),
+      [
+        event("event:debit-1", "debited", unread),
+        event("event:debit-2", "debited", q(fixture.pointUnit, "1000")),
+        event("event:credit", "credited", q(fixture.walletUnit, "1000")),
+      ],
+      fixture.walletUnit,
+    );
+    expect(later.positions.map(state)).toEqual([
+      ["synthetic_amount_unreadable", "synthetic_amount_unreadable"],
+      ["synthetic_amount_unreadable", "synthetic_amount_unreadable"],
+      ["synthetic_amount_unreadable", "0"],
+    ]);
+    expect(quantityText(later.positions[2]!.destinationCredited)).toBe("1000");
   });
 });
 
@@ -978,18 +1119,24 @@ describe("SC14 / AT49-AT54 — conversion simulation and bounded search", () => 
       "needs-rule-verification",
     );
     expect(availableForOffer(buckets, standard, [gold], day("2026-09-09")).state).toBe("available");
-    // Three offers between the same pair are three candidates, not one rate.
+    // The missing platinum claim stays uncertain; it cannot become a feasible path.
     const result = findConversionPaths(
       [standard, campaign, memberOnly],
-      { quantity: q("points:a", "2500"), clock: day("2026-09-09") },
+      { quantity: q("points:a", "2500"), clock: day("2026-09-09"), membership: [gold] },
       "points:b",
       budget,
     );
     expect(result.paths.map((path) => path.hops[0]!.offerRef).sort()).toEqual([
-      "offer:a-to-b:member@v1",
       "offer:a-to-b:standard@v1",
     ]);
-    expect(result.rejected.map((r) => r.reasonCode)).toContain("application_deadline_passed");
+    expect(result.rejected).toContainEqual({
+      offerRef: "offer:a-to-b:campaign@v1",
+      reasonCode: "application_deadline_passed",
+    });
+    expect(result.rejected).toContainEqual({
+      offerRef: "offer:a-to-b:member@v1",
+      reasonCode: "needs_rule_verification",
+    });
   });
 
   test("an unverified offer becomes a separate candidate to check, never a proven impossibility", () => {
@@ -1003,6 +1150,131 @@ describe("SC14 / AT49-AT54 — conversion simulation and bounded search", () => 
     expect(result.rejected).toEqual([
       { offerRef: "offer:a-to-b:standard@v1", reasonCode: "needs_rule_verification" },
     ]);
+    // Every offer was examined: this "no path" is the offers', not a cap's.
+    expect(result.expansions).toBe(1);
+    expect(result.stoppedBy).toEqual([]);
+  });
+
+  test("a cap that ends the search early is reported, so it never reads as 'no path'", () => {
+    // Two offers that lead nowhere come first; the only offer to the goal is third.
+    const offers = [
+      offer({ offerId: "offer:a-to-x", toUnitRef: "points:x" }),
+      offer({ offerId: "offer:a-to-y", toUnitRef: "points:y" }),
+      offer({ offerId: "offer:a-to-b" }),
+    ];
+    const start = { quantity: q("points:a", "2500"), clock: day("2026-09-09") };
+    const oneHop = { ...budget, maxDepth: 1 };
+    const complete = findConversionPaths(offers, start, "points:b", oneHop);
+    expect(complete.paths).toHaveLength(1);
+    expect(complete.expansions).toBe(3);
+    expect(complete.stoppedBy).toEqual([]);
+
+    const starved = findConversionPaths(offers, start, "points:b", {
+      ...oneHop,
+      maxExpansions: 2,
+    });
+    expect(starved.paths).toEqual([]);
+    expect(starved.expansions).toBe(2);
+    expect(starved.stoppedBy).toEqual(["max_expansions"]);
+
+    // Two offers reach the goal; a one-candidate list keeps the first and says
+    // that it dropped another.
+    const crowded = findConversionPaths(
+      [offer({ offerId: "offer:a-to-b:first" }), offer({ offerId: "offer:a-to-b:second" })],
+      start,
+      "points:b",
+      { ...oneHop, maxCandidates: 1 },
+    );
+    expect(crowded.paths.map((path) => path.hops[0]!.offerRef)).toEqual(["offer:a-to-b:first@v1"]);
+    expect(crowded.stoppedBy).toEqual(["max_candidates"]);
+    // A full list also stops the search from expanding a state below the depth.
+    const deep = findConversionPaths(
+      [offer({ offerId: "offer:a-to-b:first" }), offer({ offerId: "offer:a-to-b:second" })],
+      start,
+      "points:b",
+      { ...budget, maxDepth: 2, maxCandidates: 1 },
+    );
+    expect(deep.stoppedBy).toEqual(["max_candidates"]);
+  });
+
+  test("an empty stoppedBy is exactly a search no cap cut short, across random small offer graphs", () => {
+    // mulberry32 with a fixed seed, as in values.test.ts: deterministic input.
+    let state = 20261106;
+    const random = () => {
+      state = (state + 0x6d2b79f5) >>> 0;
+      let t = state;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    const pick = <T>(values: readonly T[]): T => values[Math.floor(random() * values.length)]!;
+    const units = ["points:a", "points:b", "points:c", "points:d"];
+    const seen = { complete: 0, maxExpansions: 0, maxCandidates: 0, multiHop: 0 };
+    for (let iteration = 0; iteration < 1500; iteration += 1) {
+      const offers = Array.from({ length: 1 + Math.floor(random() * 8) }, (_, index) =>
+        offer({
+          // An occasional repeated id exercises same-offer reuse across versions.
+          offerId: `offer:random:${index > 0 && random() < 0.15 ? index - 1 : index}`,
+          version: `v${index}`,
+          fromUnitRef: pick(units),
+          toUnitRef: pick(units),
+          ratio: { numerator: pick(["1", "2", "3"]), denominator: pick(["1", "2"]) },
+          minimum: decimalLiteral(pick(["1", "100", "1000"])),
+          increment: decimalLiteral(pick(["1", "100"])),
+          maximumPerRequest: random() < 0.5 ? null : decimalLiteral(pick(["500", "3000"])),
+          sharedQuotaRef: random() < 0.2 ? pick(["quota:x", "quota:y"]) : null,
+          fixedFees: [],
+          applicationDeadline: day(pick(["2026-09-09", "2026-09-12", "2026-12-31"])),
+          processingDays: pick([0, 1, 3]),
+          verification: random() < 0.85 ? "verified" : "needs-rule-verification",
+        }),
+      );
+      const start = {
+        quantity: q(pick(units.slice(0, 2)), pick(["500", "2500", "10000"])),
+        clock: day("2026-09-09"),
+      };
+      const goal = pick(units);
+      const capped: SearchBudget = {
+        maxDepth: 1 + Math.floor(random() * 3),
+        maxCandidates: 1 + Math.floor(random() * 4),
+        maxExpansions: 1 + Math.floor(random() * 30),
+        requiredCompletionBy: null,
+      };
+      const result = findConversionPaths(offers, start, goal, capped);
+      const unbounded = findConversionPaths(offers, start, goal, {
+        ...capped,
+        maxCandidates: Number.MAX_SAFE_INTEGER,
+        maxExpansions: Number.MAX_SAFE_INTEGER,
+      });
+      expect(unbounded.stoppedBy).toEqual([]);
+      // The caps never reorder the search: the paths kept are the first found.
+      expect(result.paths).toEqual(unbounded.paths.slice(0, result.paths.length));
+      if (result.paths.some((path) => path.hops.length > 1)) seen.multiHop += 1;
+      if (result.stoppedBy.length === 0) {
+        // No false negative: nothing the caps left out exists.
+        expect(result.paths).toEqual(unbounded.paths);
+        expect(result.rejected).toEqual(unbounded.rejected);
+        expect(result.expansions).toBe(unbounded.expansions);
+        seen.complete += 1;
+        continue;
+      }
+      // No false positive: a reported stop dropped a path or left an
+      // examination undone.
+      expect(
+        unbounded.paths.length > result.paths.length || unbounded.expansions > result.expansions,
+      ).toBe(true);
+      if (result.stoppedBy.includes("max_expansions")) {
+        expect(result.expansions).toBe(capped.maxExpansions);
+        expect(unbounded.expansions).toBeGreaterThan(result.expansions);
+        seen.maxExpansions += 1;
+      }
+      if (result.stoppedBy.includes("max_candidates")) {
+        expect(result.paths).toHaveLength(capped.maxCandidates);
+        seen.maxCandidates += 1;
+      }
+    }
+    // The generator reaches every branch, so the property is not vacuous.
+    expect(Object.values(seen).every((count) => count > 0)).toBe(true);
   });
 });
 

@@ -289,13 +289,15 @@ artifact key, its role and its media type — through the closed table
 [ADR 0022](adr/0022-registration-artifact-datasets.md)). The artifact tables
 below are its source: a collector that renames an artifact, changes its role
 or declares another media type leaves that artifact without a dataset, and so
-unparsed, until the table follows. Vpass statement pages are withheld and
-registered without a dataset until the collector derives the trusted card
-binding ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). The table is
-registration contract `terminal-registration-v2`: a run registered under v1
-whose artifacts gain a dataset registers again under v2 (its v1 artifacts were
-never parsed), and every other v1 registration is carried over unchanged, so
-no capture is parsed twice.
+unparsed, until the table follows. Vpass statement pages were withheld until
+the collector's card binding matched the importer's
+([ADR 0023](adr/0023-vpass-collector-card-binding.md)) and carry
+`statement-page` since registration contract `terminal-registration-v3`
+([ADR 0083](adr/0083-release-vpass-collector-statement-pages.md)); only a
+successful card run's pages are parsed. A run registered under an earlier
+version whose artifacts gain a dataset registers again under the new version
+(its earlier artifacts were never parsed), and every other registration is
+carried over unchanged, so no capture is parsed twice.
 
 ### Sony Bank (`services/collector-sony-bank`, `kogane-sony-bank-collector-poc`)
 
@@ -322,8 +324,15 @@ Terminal fields: `producer: collector-sony-bank`; one unit `account`
 (`unitKind: account`) whose `artifactCount` counts every artifact but
 `manifest.json`, which belongs to the run and names no unit (ADR 0021; until
 then the manifest named the unit and was counted in it); ranges
-`request-window` (the requested `from`/`to`) and, when wallet statements were
-collected, `wallet-months`; one `terminal` report carrying the outcome;
+`request-window` (the requested `from`/`to`; every run, from the alarm or
+from an operations-API `collect`, neither of which carries a window, requests
+yesterday's JST date, the last finished JST day, from the first of its JST
+month, `defaultWindow`, so a run on the 1st requests the whole previous month
+and each day is requested after it ends; an open limit: the previous month's
+last day is requested only by a run on the 1st, so if that run is missed or
+fails, no later run requests that day, because a window that crosses a month
+boundary is a request shape nobody has observed, ADR 0004) and, when wallet
+statements were collected, `wallet-months`; one `terminal` report carrying the outcome;
 `requestedScope.scopeKind = date_range` over the same window;
 `coverageStatus` `complete` for a successful window, `partial` for a partial
 run, `unknown` for a failure. `manifest.json` is the collector manifest with
@@ -359,9 +368,13 @@ record and does not carry them.)
 
 Terminal fields: `producer: collector-moneyforward-me`; one unit per account
 (`unitKind: account`) holding its detail page and its monthly fragments — the
-run-wide `accounts.html` index belongs to no unit; a `months-<unit>`
-`declared_coverage` range per account covering the monthly fragments that were
-actually captured; one `terminal` report carrying the outcome;
+run-wide `accounts.html` index belongs to no unit; `declared_coverage` month
+ranges cover only consecutive monthly fragments actually captured for each
+account. One contiguous interval retains `months-<unit>`; gaps split it into
+`months-<unit>-<start-month>` intervals. A missing month inside the outer
+bounds is not declared captured. These manifest-based ranges do not prove the
+aggregator's underlying provider data is fresh or its full history is retained;
+one `terminal` report carries the outcome;
 `requestedScope.scopeKind = full_snapshot` (the run asks for whatever the
 aggregator currently shows) listing the accounts as `unitKeys`.
 
@@ -688,6 +701,12 @@ provider was contacted and no production bucket was read or written.
 | `history-page-NNNN.json`     | `collector_derived` | one history page each, in page order                    |
 | `vmoney-history-page-*.json` | `collector_derived` | one V Money history page each                           |
 | `collection-summary.json`    | `collector_summary` | the collector's own page/total counts                   |
+
+Both history walks stop at the page whose rows reach `results.total`. Before
+the total is reached, a page with no rows or with fewer rows than the first
+page stops the collection (`premature-end`) instead of ending the walk: an
+early end of history has not been observed. Only the first V Money page may
+answer with an empty `results`, read as an empty history.
 
 Each `collector_derived` artifact states one `reencoded` step by
 `collector-v-point` at the producer version with no input (ADR 0021): the
@@ -1072,11 +1091,14 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 - Human-required: a collection that cannot start because re-authentication
   failed, or because the session was refused (401/403) and has never
   re-authenticated, is recorded as a **`failed` run with its own terminal**
-  carrying `human_required_reauth`, and `waitingForHuman` is reported on
+  carrying `human_required_reauth` (`manual_agreement_required` while the
+  provider's terms wait for the owner), and `waitingForHuman` is reported on
   `/health`, on the `/collect` 502 body and in the summary. A recoverable
-  session error uses `session_unhealthy` instead. Nothing retries a login: the
-  existing single, 6-hour-cooled-down re-authentication attempt is unchanged
-  (G3-10, G3-11).
+  session error uses `session_unhealthy` instead. The blocked collection
+  retries no login; the keepalive's re-authentication keeps its cooldown,
+  6 hours, or 1 hour for up to 72 hours while a terms agreement is pending
+  ([source note §16](sources/sbi-vc-trade.md#16-resuming-after-a-terms-agreement-2026-11-07);
+  G3-10, G3-11).
 - No deferral: with no service binding in the chain, a run with more than
   eleven artifacts finishes in place. The retired importer path deferred such
   a run to a backfill route, which no longer exists.

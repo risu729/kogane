@@ -1,6 +1,6 @@
 # ADR 0046: Maintenance windows as a separately granted agent capability
 
-Status: accepted (#564 merged on 2026-10-10 JST); the S3 execution amendment remains proposed until its integration PR merges
+Status: accepted (#564 merged on 2026-10-10 JST); the S3 execution amendment is accepted (merged 2026-10-10 in #660)
 Date: 2026-10-08
 Amended by: [ADR 0063](0063-delegated-ai-operation-path.md) item 8, as
 [the amendment below](#amendment-a-delegated-operation-not-an-agent-grant-2026-10-09)
@@ -244,7 +244,10 @@ AI, and not anonymous-agent power
   `owner-instructed` or `correction`; the operator's edit records
   `operator-edit`; an accepted survey proposal records
   `maintenance-survey-proposal-accepted` with its proposal as the decision
-  reference (the only decision reference the writer accepts). The writer
+  reference (the only decision reference the writer accepts from the operator;
+  a delegated acceptance gives the same reason with its
+  `delegated-audit:` reference under the private survey route's trusted
+  option, [ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). The writer
   answers `invalid_reason` for anything else, in place of `reason_required`.
 - **One writer, one batch, one record.** `writeMaintenanceRevision(env,
   write, append)` stays the only code that writes a maintenance revision; it
@@ -360,7 +363,7 @@ capability, and no MCP client has called these tools.
 
 ## S3 maintenance execution and confirmation (2026-10-10)
 
-Status: proposed until the integration PR merges. The implementation reuses
+Status: accepted (merged 2026-10-10 in #660). The implementation reuses
 the reviewed S3/R2/jobs slices and #564's native writer. It was integrated
 against main `c0c4088a`; #652's temporal refusal and #643's release guard are
 preserved. The [integration plan](../plans/2026-10-mcp-maintenance-followups.md)
@@ -410,5 +413,6 @@ prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
 state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
 the committed MCP financial-reader grant receives no schedule authority.
-S6 survey acceptance remains unavailable pending the separate owner decision;
+S6 survey acceptance remained unavailable pending the separate owner decision
+(delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.

@@ -1,6 +1,6 @@
 # ADR 0068: Preserve provider expiry subsets apart from reward holdings
 
-- Status: proposed
+- Status: accepted (merged 2026-10-10 in #675)
 - Date: 2026-10-10
 - Issue: #444
 

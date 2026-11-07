@@ -15,7 +15,7 @@ they do not complete the financial roadmap. The current status, implementation
 limits and delivery order live in the [roadmap](roadmap.md), including the next
 card-purchase → statement → bank-payment milestone.
 
-A feature is complete when its supported UI or MCP flow reaches a useful
+A feature is complete when its supported UI and MCP flows reach a useful
 result with evidence, missing-input explanations and applicable correction or
 confirmation. Types, tables, pure functions and successful API responses are
 building blocks, not acceptance criteria on their own. UI and AI share the

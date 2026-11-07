@@ -129,8 +129,9 @@ The identity is the tuple of plan 03 §4:
 (source, runId, terminalDigest, registrationContractVersion)
 ```
 
-`registrationContractVersion` is `terminal-registration-v2` (since ADR 0022;
-`v1` before it), the version of the `terminal-v1` → ingest-contract
+`registrationContractVersion` is `terminal-registration-v3` (since
+[ADR 0083](adr/0083-release-vpass-collector-statement-pages.md); `v2` from
+ADR 0022, `v1` before it), the version of the `terminal-v1` → ingest-contract
 derivation in `packages/application/src/collection/descriptors.ts`. When that
 derivation changes what a terminal _means_ in CORE, the same run registers
 again as a new revision and the old registration is kept. A terminal an
@@ -189,9 +190,9 @@ anyway is a no-op rather than a conflict.
 ### 3.1 Collector ids, CORE source ids and producers
 
 A collector names itself in its terminal and in its `runs/<source>/` prefix
-by its **own** id. For most collectors that is the CORE source id; for three
+by its **own** id. For most collectors that is the CORE source id; for four
 it is not (`sbi-shinsei` → `sbi-shinsei-bank`, `prestia-globalpass` →
-`global-pass`, `smbc-direct` → `smbc-bank`), and `v-point-pay-email` shares
+`global-pass`, `prestia-bank` → `prestia`, `smbc-direct` → `smbc-bank`), and `v-point-pay-email` shares
 the `v-point-pay` source with the V Point Pay collector. The mapping is the
 closed table `COLLECTOR_SOURCE_IDS` in
 `packages/application/src/collection/descriptors.ts`:
@@ -386,32 +387,41 @@ What the table maps (from each collector's persist path and each parser's
 full list):
 
 - Mobile Suica `sf-history.json` → `sf-history`; Money Forward's index,
-  detail and monthly pages; MyJCB's discovery, past-months, detail and ledger
-  artifacts; GlobalPass activity pages; the SBI Securities, SBI Shinsei and
+  detail and monthly pages; MyJCB's J-POINT balance, discovery, past-months,
+  detail, ledger and skip-payment schedule artifacts; GlobalPass activity pages; the SBI Securities, SBI Shinsei and
   SBI VC Trade datasets; SMBC's normalized balance and transactions; Sony
   Bank's balance, history pages, history CSVs and wallet pages; St George's
   account snapshot; V Point's balance, SMFG point and history pages; the V
-  Point Pay notification event.
+  Point Pay notification event; PRESTIA Bank's sanitized `balance.html`;
+  since `terminal-registration-v3`, the Vpass collector's statement pages
+  (`months/<yyyymm>/<top|answer>-NNN.json`, `sanitized_provider_capture`) →
+  `statement-page`.
 - Not mapped: evidence no parser reads (manifests, summaries, raw pages beside
   their normalized form); Mizuho, whose parsers read artifacts without a
   dataset; MyJCB `credit-menu.html`, whose parser requires a media type
   parameter a terminal cannot carry.
-- **Withheld: Vpass.** The statement-page rule is kept in
-  `WITHHELD_ARTIFACT_DATASETS` and not applied, so collector-vpass captures
-  are registered but never parsed. A parsed collector capture would become
-  the current statement snapshot of its card-month and retire the importer-era
-  purchases, because it cannot yet bind to the trusted card identity
-  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). It is applied when
-  the collector derives the binding.
+- **Vpass, released by [ADR 0083](adr/0083-release-vpass-collector-statement-pages.md).**
+  ADR 0022 withheld the statement-page rule (`WITHHELD_ARTIFACT_DATASETS`,
+  now empty) until the collector's card binding matched the importer's
+  ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). Only a successful
+  card run's pages are parsed: `statement-page` has run-scope eligibility, and
+  a card run whose card unit is `partial` (a month short of its stated total)
+  is a `partial` run, so its pages get no parse job and are never a current
+  snapshot.
 
 `scripts/artifact-datasets.test.ts` checks the table against both sides:
 every mapped or withheld dataset is accepted by a registered parser, every
 dataset a parser requires from a shared-R2 source is mapped, withheld or named
-unreachable, and the withheld list is pinned.
+unreachable, and the withheld list (empty since ADR 0083) is pinned.
 
-**Contract version and carry-over.** The table is `terminal-registration-v2`;
-`v1`'s derivation (St George's dataset only) is kept beside it
-(`DATASETS_BY_VERSION`). The version is part of the `collection_runs` key and
+**Contract version and carry-over.** The table is `terminal-registration-v3`;
+`v1`'s derivation (St George's dataset only) and `v2`'s (the table without
+Vpass) are kept beside it (`DATASETS_BY_VERSION`). The v2 → v3 bump works as
+the v1 → v2 bump below: v3 changes a descriptor only for collector-vpass
+statement pages, so those card runs register again as second fetch runs and
+every other registered terminal is carried over
+([ADR 0083](adr/0083-release-vpass-collector-statement-pages.md)). The v1 → v2
+bump (ADR 0022): The version is part of the `collection_runs` key and
 of the fetch run's `sourceRunKey`, so the scan gives every persisted terminal
 a v2 row. Then, for a terminal v1 already registered:
 
@@ -621,12 +631,12 @@ each such lane to `processor_lane_ticks` (`src/lane-ticks.ts`,
 | `identity_sweep`           | `processedRuns`, `identifiedRuns`, `identifiedObservations`                                                                                                                                                                         |
 | `reconciliation_sweep`     | `slices`, `scanned`, `groups`, `groupsSkipped`, `groupsDeferred`, `proposed`, `known`, `written`, `failed`, `autoAccepted`                                                                                                          |
 | `card_debit_account_sweep` | `scanned`, `read`, `refused`, `written`                                                                                                                                                                                             |
-| `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`                                                                                                                                                                            |
+| `card_settlement_sweep`    | `scanned`, `proposed`, `written`, `debitAccountEvidence`, `unmatched` (statements with no candidate, per closed code; [card-settlements.md](card-settlements.md#unmatched-statements))                                              |
 | `purchase_recognition`     | the whole log line: `scanned`, `recognized`, `revised`, `reanchored`, `retired`, `skipped` (per closed exclusion code), `conflicts`, `failed`, `deferred`, `proposed`, `merged`, `groupsSkipped`                                    |
 | `reward_claims_sweep`      | `scanned`, `promoted`, `skipped` (not the cursor or the release name)                                                                                                                                                               |
 | `price_promotion`          | `scanned`, `promoted`, `basis_unverified`, `unsupported_currency`, `tier_unmatched`, `stage_unstated`, `stage_pending`, `written` (ADR 0020, ADR 0031); its scan position is `price_promotion_cursor`, which the tick does not copy |
 | `maintenance_survey`       | `targets`, `due`, `extracted`, `failed`, `windows`, `unchanged`, `proposed`, `reviewPending`, `known`, `failures` (closed failure codes, ADR 0050)                                                                                  |
-| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed`, `awaiting`                                                                                                                                                                            |
+| `operation_dispatch`       | `claimed`, `dispatched`, `retried`, `failed` (including imports whose registration threw, §7), `awaiting`, `started`, `declined`, `tracked`, `published`, `unpublished`, `abandoned`                                                |
 | `decision_outbox`          | `claimed`, `processed`, `failed`, `waiting`, `blocked`, `published` (not the open-ended `outcomes` map)                                                                                                                             |
 | `audit_overflow`           | `counters`, `written`                                                                                                                                                                                                               |
 
@@ -647,10 +657,12 @@ an `error_code` and `counts_json`:
   name, `unknown` for anything that is not a code) and `counts_json` is `{}`.
 
 A lane whose stage is not wired at all records nothing. Only counts, flags and
-the closed exclusion codes of `purchase_recognition` are copied, by field
-name; the 0049 trigger refuses any text value, so no amount, key, account label
-or provider wording can be stored. A tick killed mid-lane (a Worker limit)
-leaves no row for that lane, and the gap is the signal.
+the closed code maps above (`purchase_recognition`'s exclusion codes,
+`card_settlement_sweep`'s unmatched codes, `maintenance_survey`'s failure
+codes) are copied, by field name; the 0049 trigger refuses any text value, so
+no amount, key, account label or provider wording can be stored. A tick killed
+mid-lane (a Worker limit) leaves no row for that lane, and the gap is the
+signal.
 
 The table is bounded: each insert deletes that lane's rows beyond the latest
 288 (one day of the five-minute alarm) in the same batch. Rows are never
@@ -661,6 +673,27 @@ row that cannot be written is logged as
 the lane did. `GET /status` (`mise run //services/processor:ops status`) and
 `GET /internal/health` (§13) report the latest tick of each lane as
 `laneTicks`; reading them is in [operations.md](operations.md#lane-tick-records).
+
+### 6.2 Lane audit records
+
+Four lanes write rule decisions, economic commits or proposals:
+`reconciliation_sweep`, `card_settlement_sweep`, `purchase_recognition` and
+`maintenance_survey`. Each tick of one of them that wrote any also appends one
+`lane` record to the common audit log (`src/lane-audit.ts`,
+[audit log](audit-log.md#the-processors-own-records-alarm-and-lane),
+[ADR 0064](adr/0064-common-audit-log.md#amendment-the-alarm-and-lane-writers-slice-s7-2026-11-06)):
+principal `lane:<lane>` (hyphens for underscores), operation `lane.tick`,
+`applied`, or `failed` when the stage threw after writing. Before such a lane
+runs, `runScheduled` reads one high-water mark of the tables it may write;
+after it, the lane's own rows above the mark, by its decision actor, commit
+principal or proposal method. The record's references are inclusive ranges of
+those rows (`decision-revisions:<a>-<b>`, `commit-seq:<epoch>:<a>-<b>`,
+`proposals:<kind>:<a>-<b>`) and its diff the number of the lane's own rows in
+each; it copies none of the tick row's counts. An idle tick, a lane whose flag
+is off and every other lane write no record. The mark and the record are read
+and written outside the lane's metered scope, and a failure to read or write
+them is logged as `{"event":"lane_audit_record_failed","lane":…,"code":…}` and
+changes nothing the lane did.
 
 ## 7. Operations dispatch
 
@@ -698,6 +731,32 @@ tick, as the alarm awaits its own.
 A failed dispatch never deletes the request. An import whose terminal is not
 in the bucket is retried, not failed: the collector may still be running.
 
+An import whose registration **throws** — R2 or CORE unavailable, or a
+refusal CORE made that the derivation did not foresee — is treated as the
+collection scan treats one (§2): it is not a verdict about the terminal, so no
+stage row is written for it. It is counted in the tick's `failed` and logged
+as `{"event":"operation_dispatch_registration_failed","code":…}` with the
+error's class only, never its message. Collection and dispatch diagnostic callbacks
+share `safeFailureCode`, which uses built-in type checks and never reads the
+exception's writable name, constructor or message. Its finite labels are
+`AggregateError`, `EvalError`, `RangeError`, `ReferenceError`, `SyntaxError`,
+`TypeError`, `URIError` and `Error`; a custom Error is generic `Error`, and
+unclassifiable or non-error throws become `unknown`. The request stays `dispatch_pending`
+and `accepted`: its `dispatch_attempts` goes up by one, its `failure_code` is
+`registration_failed` and its `available_at_ms` moves five minutes ahead.
+The queue is ordered by `available_at_ms`, so the request moves behind every
+request already due; the requests after it in the same tick are still
+dispatched, the collector executions are still tracked, and the lane tick is
+`ran`. It is registered on a later look once the cause is gone; the
+`registration_failed` code stays on the request after that, as every retry
+code does, because a dispatch that names no code keeps the last one. **Open
+limit:** there is no cap. A throw that never goes away (a refusal no code
+classifies) is retried every five minutes for as long as the lane runs, one
+more `dispatch_attempts` and one more `failed` each time, and nothing closes
+the request. If recording the attempt also fails
+(CORE itself unavailable), that error fails the lane tick as any other D1
+error in the lane does.
+
 ## 8. Retired legacy import
 
 The importer and ingest Workers, old Queues and per-source buckets have been
@@ -727,9 +786,10 @@ client the Processor registers as.
 
 ## 10. Resources to create before the flag is turned on
 
-The Queue **does not exist yet**. `infra/resources.md` says so per queue
-("to be created by the first deploy"), and the first deploy that carries
-`services/processor/wrangler.jsonc` creates it:
+`services/processor/wrangler.jsonc` declares the Queue consumer and its DLQ
+(its comment records them provisioned on 2026-09-12 with the notification
+rule), and `infra/resources.md` lists the queue as declared. What a fresh
+account needs:
 
 1. `kogane-collection-terminals` and `kogane-collection-terminals-dlq`;
 2. an R2 event-notification rule on `kogane-raw-evidence` for object creation,
@@ -761,8 +821,9 @@ as a stage rather than blocking the run.
 ## 11. Deploy order and rollback
 
 GitHub Actions applies CORE then READ migrations. ADR 0039 deploys named collector RPC entrypoints before the Processor and App, replacing the former order of consumers before
-collectors. The current collection Queue, notification rule and 13 registration
-routes are configured. Deploying a Worker does not invoke a collector.
+collectors. `services/processor/wrangler.jsonc` declares the collection Queue
+consumer and its DLQ; no config file declares the R2 notification rule (only a comment in that
+file records it; §10 lists it), and `config/ingest-clients.json` declares 16 registration routes. Deploying a Worker does not invoke a collector.
 
 Turning a lane flag off pauses its work; terminals and recorded progress remain.
 Projections use READ only. Select only code compatible with the current schema
@@ -784,7 +845,10 @@ runs, failed and mapped-source terminals, per-unit runs sharing one
 acquisition session, the lane order with flags off and on, the metered
 bindings against Miniflare and (in `services/collector-st-george`'s
 worker test) real workerd D1 and R2, the append-only triggers, the
-bootstrap SQL applied twice to a fresh CORE, and `wrangler deploy --dry-run`.
+bootstrap SQL applied twice to a fresh CORE, an import dispatch whose
+registration throws (R2 failing on its first read: the lane completes, the
+request behind it is dispatched in the same tick, and the one that threw is
+registered on a later look), and `wrangler deploy --dry-run`.
 
 Production deployment, resource identity and migration verification are recorded
 in [legacy-retirement.md](legacy-retirement.md). These checks do not establish

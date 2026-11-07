@@ -10,9 +10,11 @@ description = "Run the packages/parsers tests."
 run = "node ../../tasks/_lib/coverage-run.mjs bun test"
 
 [tasks."digests"]
-description = "Print the deployed parser digests."
+description = "Regenerate src/parsers/digests.ts from the deployed parser sources."
 hide = true
-run = "bun scripts/parser-digests.ts"
+# The generator writes plain JSON.stringify output; the committed file is in
+# the repository's Oxfmt style, so format it here or every run rewrites it.
+run = ["bun scripts/parser-digests.ts", "oxfmt src/parsers/digests.ts"]
 
 [tasks."freeze-coverage-contract"]
 description = "Re-freeze the coverage-contract fixture from the current parsers."

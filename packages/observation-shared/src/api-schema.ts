@@ -173,6 +173,8 @@ export interface ApiCapabilities {
    * on a date, per account, with the card statements due around it and the
    * coverage that names what is missing. False unless the store the server
    * reads has the snapshot policy table and the statement and settlement views.
+   * `GET /api/v2/reported-holdings-change` is served on the same condition and
+   * has no flag of its own.
    */
   readonly reportedStateOnDate?: boolean;
   /**
@@ -182,6 +184,13 @@ export interface ApiCapabilities {
    * `reportedStateOnDate` is; without CORE 0070 it answers `unavailable`.
    */
   readonly reconstructedStateOnDate?: boolean;
+  /**
+   * `GET /api/v2/reports` lists the fixed report artifacts the report job
+   * stored, newest first, and `GET /api/v2/reports/{id}` re-displays one with
+   * its explanation (docs/calculation-and-reports.md). False unless the store
+   * the server reads has `report_artifacts` (CORE 0034).
+   */
+  readonly reportArtifacts?: boolean;
   /**
    * The authenticated operations API (`/api/ops/v1/*`) is served (02 §4):
    * collection, re-registration, replay, rebuild, session refresh and the
@@ -219,6 +228,7 @@ export const LOCAL_STORE_CAPABILITIES = {
   cardPurchaseRecognition: false,
   reportedStateOnDate: false,
   reconstructedStateOnDate: false,
+  reportArtifacts: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -255,6 +265,7 @@ export const CENTRAL_STORE_CAPABILITIES = {
   cardPurchaseRecognition: false,
   reportedStateOnDate: false,
   reconstructedStateOnDate: false,
+  reportArtifacts: false,
   opsApi: false,
 } as const satisfies ApiCapabilities;
 
@@ -426,7 +437,8 @@ export const REWARD_REQUEST_SCHEMA = {
   // (U16, G2-20). Served only where `rewardsV2ReadModel` is `read-d1`; without
   // a snapshot it is `503`, never an empty success.
   "/api/v2/rewards/simulations": ["cursor", "limit"],
-  "/api/v2/rewards/offers/simulate": ["offer", "quantity", "unit", "goal", "depth"],
+  // `version` names one stored version of `offer`; it is refused without one.
+  "/api/v2/rewards/offers/simulate": ["offer", "version", "quantity", "unit", "goal", "depth"],
 } as const satisfies Record<string, readonly string[]>;
 export type RewardPath = keyof typeof REWARD_REQUEST_SCHEMA;
 

@@ -1,6 +1,6 @@
 # PRESTIA bank Worker integration
 
-- Status: implementation in progress; production deployment/verification pending
+- Status: implemented; merged 2026-10-05 in #437. Production deployment/verification pending
 - Date: 2026-10-05
 - Decision: [ADR 0042](../adr/0042-prestia-bank-worker.md)
 

@@ -29,7 +29,8 @@ export type SurveyOutcome = "extracted" | SurveyFailureCode;
 /**
  * Why a proposal needs a reviewer's judgement beyond the comparison itself. A
  * proposal without a reason is `proposed`; with any it is `review_pending`.
- * Either way nothing is adopted until an operator accepts it.
+ * Either way nothing is adopted until a decision accepts it: the operator's,
+ * or, for a proposal without `OPERATOR_ONLY_PROPOSAL_REASONS`, a delegated principal's.
  */
 export const PROPOSAL_REASONS = [
   /** The page states no year and no weekday that would pin it. */
@@ -60,6 +61,20 @@ export const PROPOSAL_REASONS = [
   "rule_absent_from_page",
 ] as const;
 export type ProposalReason = (typeof PROPOSAL_REASONS)[number];
+/**
+ * The reasons a delegated principal may not accept a proposal for (the owner,
+ * 2026-11-07 06:01 UTC): accepting would disable a rule, re-enable one the
+ * operator disabled, add a rule overlapping several, or adopt a reading the
+ * page itself puts in doubt. Such an acceptance is R3 and stays the operator's
+ * on the schedules page; a delegated rejection of it is still allowed.
+ */
+export const OPERATOR_ONLY_PROPOSAL_REASONS = [
+  "rule_absent_from_page",
+  "rule_disabled_by_operator",
+  "ambiguous_rule_match",
+  "cancellation_stated",
+  "contradictory_windows",
+] as const satisfies readonly ProposalReason[];
 /** A window not in the rules, a revision of one rule, or one rule the page no longer states. */
 export type ProposalKind = "new" | "changed" | "absent";
 

@@ -24,7 +24,7 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
 | ExpiryRule           | `expiry_rules`                                                  | 計算方式のfamilyと、根拠・確認状態・適用範囲               |
 | ConversionOffer      | `conversion_offers`                                             | 倍率は整数比。キャンペーン・会員別は別offer                |
 
-計算は `packages/domain/src/rewards.ts` の純関数で行う。DB・時計・HTTPへ依存しない。
+計算は `packages/domain/src/rewards.ts` と、換算・経路探索を分けた `reward-conversion.ts` の純関数で行う。DB・時計・HTTPへ依存しない。
 
 - `summarizeHolding(holding, qualifications)` — 消費できるbucketだけをプログラム自身の単位で合計し、
   `pending-award` と `qualification` は理由コードつきで除外する。単位違い・未解析があれば合計は
@@ -39,7 +39,40 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
   分けて返す（§2.1、[ADR 0049](adr/0049-reward-expiry-basis.md)）。
 - `redemptionPositions(held, events, destinationUnit)` — 申請・減算・着金・取消・返却を別段階として
   追う。申請だけでは何も動かず、返却は元のlotを復活させず新しいbucket claimになる。
+  数量が exact でない減算は保有と移動中を、着金は着金累計を、返却は保有を、その理由つきの
+  不明値にし、動かなかったもの（0）としては扱わない（INV05）。着金と返却は数量によらず
+  移動中を0に戻す。
 - `findConversionPaths(offers, start, goal, budget)` — 深さと候補数を明示的に制限した探索。
+
+### Standing offers: no end date and no deadline
+
+Owner decision (2026-11-07 12:51 UTC): an offer whose end date is not announced is
+common, and it is a standing offer, not an offer of unknown period. Kogane stores
+"no end" and "no deadline" as values, so the offer stays usable instead of falling
+into `needs-rule-verification`.
+
+| Field                                               | Standing offer                                                   | Bounded offer (unchanged)             |
+| --------------------------------------------------- | ---------------------------------------------------------------- | ------------------------------------- |
+| `validTime` / `valid_time_json`                     | `{"kind":"open-ended","start":"2026-04-01","zone":"Asia/Tokyo"}` | a `local-date`, `period` or `instant` |
+| `applicationDeadline` / `application_deadline_json` | `null` (the JSON text `null`; the column stays `NOT NULL`)       | a `local-date`, `period` or `instant` |
+
+- `start` is the first day the offer is known to apply. When the provider states no
+  start, it is the date of the evidence that shows the offer. A day before `start` is
+  `offer_not_valid_at_clock`; `start` and every later day are inside. An instant
+  counts by its own calendar date. The zone follows the same compatibility rule as
+  `compareTemporal` (`null` is compatible with any zone; a different zone is not
+  comparable).
+- `open-ended` is accepted only where a field says so (an offer's `validTime`); it is
+  not a `TemporalValue`, so no other time field accepts it.
+- `{"kind":"unknown"}` keeps its meaning: the period was not established (including
+  stored text that does not parse). It is never read as a standing offer, and the
+  reader never turns damaged text into `open-ended` or `null`.
+- An `unknown` deadline is not checked, and `availableForOffer` adds no code for an
+  `unknown` validity. Route search rejects an `unknown` validity as
+  `needs_rule_verification` (see "Search eligibility at each hop"), which is why a
+  standing offer stores `open-ended` and `null` instead of `unknown`.
+- No migration: both columns already hold JSON text, and nothing writes offer rows
+  today (§3).
 
 ## 2. 期限の状態
 
@@ -156,6 +189,43 @@ common bucketは種類未確認のまま一覧に残り、算定期限は `unava
 - 未確認の条件は「不可能」ではなく `needs_rule_verification` の別候補として返す。
 - 手数料は各hopの `fixedFees` をそのまま積む。変動手数料は `variableFeePolicyRef` の参照のみで、
   金額は計算しない。
+- The offer set is read once and bounded by one reader page: `CONVERSION_OFFERS_SQL` reads
+  `REWARD_PAGE_LIMIT + 1` (201) rows in `offer_id, version` order, the same read and bound
+  (200) as the READ capture. Every `/offers/simulate` answer carries
+  `offerCoverage: {limit: 200, truncated}`. When more than 200 offers match (all stored
+  offers for a goal search, or the named offer's versions), nothing is computed: the answer
+  is `simulation: null`, `searchCoverage: "bounded"`, `offerCoverage.truncated: true` and
+  `reasonCodes: ["offer_set_too_large"]`, with no `paths` or `rejected` list, so an unread
+  offer never reads as "no path" or as a shorter candidate list (INV05). The route does not
+  page past the bound. An answer with `truncated: false` read every matching stored offer;
+  the depth, candidate and expansion caps still make it `bounded`. A goal search answer also
+  carries `expansions` (offer examinations used across every hop, against
+  `budget.maxExpansions` = 500) and `stoppedBy`, the closed list of caps that ended the
+  search early (`max_expansions`: an offer was left unexamined; `max_candidates`: a goal
+  path was dropped or a state left unexpanded because the 8-candidate list was full). An
+  empty `stoppedBy` means every offer was examined at every reachable state within the
+  depth, so an empty `paths` is the offers' answer; a non-empty one means it may be the cap
+  ([ADR 0049 amendment 2026-11-06](adr/0049-reward-expiry-basis.md#amendment-bounded-offer-set-for-offer-simulation)).
+- Offer versions are append-only reference claims (`PRIMARY KEY(offer_id, version)`, a
+  correction is a new version). No adoption pointer marks one version current, and the
+  version text has no defined order, so the route never picks one. `version` (only with
+  `offer`; without it the request is `400 invalid_query`) selects one stored version. A
+  single simulation for an offer with more than one stored version and no `version` is
+  `simulation: null`, `offerVersions` (every stored `offerId@version`, in reader order) and
+  `reasonCodes: ["offer_version_not_selected"]`; a `version` that is not stored is
+  `no_stored_offer`. A goal search treats each stored version as its own candidate, named
+  by its `offerRef`.
+- A goal search starts from one unit: `unit`, or, without it, the single distinct
+  `fromUnitRef` of the matching offers (all stored offers, or the named offer's versions).
+  The stored offers do not say which unit the caller holds, so the route never picks one.
+  A goal search without `unit` over offers with more than one source unit answers
+  `simulation: null`, `searchCoverage: "bounded"`, the `offerCoverage`, `sourceUnits`
+  (every distinct source unit ref, in code-unit order) and
+  `reasonCodes: ["source_unit_not_selected"]`, with no `paths` or `rejected` list. The
+  list counts every source unit, including the goal unit when an offer leaves it, and
+  whether or not a path from it reaches the goal. `unit` is taken as given and is not
+  checked against the list. The bound check runs first, then `no_stored_offer`
+  ([ADR 0049 amendment 2026-11-06](adr/0049-reward-expiry-basis.md#addendum-a-goal-searchs-starting-unit-is-chosen-by-the-caller)).
 
 ## 5. 価値の扱い
 
@@ -219,8 +289,13 @@ route を広告することはない。未知の reward path は 404 であり�
 | `GET /api/v2/rewards/offers/simulate` | 純粋なquery。offer指定なら単発simulation、goal指定なら深さ制限つき経路探索 |
 
 すべて GET で、書き込みも外部通信も行わない。`Page<T>` = `{rows, coverage:{limit,truncated,nextOffset}}`。
+`/offers/simulate` is not paged: it reads at most 200 offers and reports the bound in
+`offerCoverage`, refusing with `offer_set_too_large` beyond it (§4).
 `offset` はbucket行を歩く。読み取りは公開済みparse runに結び付いたclaimだけを見るため、
 publication pointerの巻き戻しはreward側の表示からも同時に消える。
+The holdings and expiry pages are also the MCP page read `kogane.rewards.read`,
+answered by the routes' own reader `readRewardRoute`
+([agent API](agent-api.md#ui-read-pages)); no agent tool runs `/offers/simulate`.
 
 ## 9. UI
 
@@ -322,7 +397,9 @@ digestなので、**評価日時が変われば別のsnapshotになる**。既�
 COREの `projection_input_records` が参照する。表・prefix・記録の仕組みを増やしていない。
 
 captureが読む各集合には上限があり、超えたら**切り詰めず拒否**する（`rule_set_too_large`、
-`claim_set_too_large`、`offer_set_too_large`、`simulation_set_too_large`）。
+`claim_set_too_large`、`offer_set_too_large`）。Fresh captures read no saved
+simulations (`captureRewardInput` in `services/processor/src/reward-read-projection.ts`
+captures an empty set), so there is no simulation bound.
 
 CORE migration `0041_reward_revision_triggers.sql` が元の5表を0038の依存台帳へ追加し、
 `0077_reward_bucket_claims_v2.sql` が現在のclaim表とrevision triggerを追加する。これが
@@ -356,6 +433,12 @@ CORE migration `0041_reward_revision_triggers.sql` が元の5表を0038の依存
 
 digestは入力ではない。今日のofferで計算し直した別物を「同じsimulation」とは呼ばない。
 
+現状、この表に載る行はない。COREの `conversion_simulations` は0042で削除され、それより前にも
+書き込むwriterは無かった。processorのcaptureは保存済みsimulationを空の集合として固定する
+（`services/processor/src/reward-read-projection.ts`）。したがって公開snapshotに対する
+`GET /api/v2/rewards/simulations` は空の `rows` を返し、Web画面はこのrouteを呼ばない
+（ポイント・前払式残高のページに保存済みsimulationの欄は無い）。保存するwriterを作るときに画面も足す。
+
 ### 読み取り
 
 | route                                 | 公開snapshotなし                    | 公開snapshotあり                                                                 |
@@ -380,6 +463,14 @@ fieldそのものがない応答（このfieldより前のApp）は受け付け�
 `reward_read_model_context_changed` / `reward_read_model_restriction_changed`）を返す。cursorは
 U11と同じ `{snapshotId, readInstanceId, filterDigest, position}` で、別queryのcursorは400
 `cursor_mismatch`、別instance・退役snapshotのcursorは410 `context_expired`。異なるcursorをoffsetとして読み替えることはない。
+
+Retained snapshots: a cursor that still names an older, retained snapshot is refused with the same
+503 code as the published one when the CORE epoch or visibility revision that snapshot was captured
+under has moved since (a use restriction invalidates the rows computed before it); it is never
+continued. A rebuild that moves neither keeps such a cursor readable. The check uses the snapshot's
+own capture, so a snapshot that a later build only re-verified at the new revision (status
+`unchanged`) is still refused once a newer snapshot replaces it; a request without the cursor
+reads the published one. `/api/v2/balances/*` cursors behave the same way.
 
 capability `rewardsV2ReadModel`（`none` / `read-d1`）を `/api/meta` が広告する。`core-d1` は無い。
 COREはreward snapshotを公開したことがなく、都度算定の答えはsnapshotではないからである。
@@ -424,9 +515,9 @@ COREのclaim・rule・offer、保存済み入力と原本は維持する。
   表示し、根拠がない・壊れている行は「記録がありません」と表示すること。
 
 確認していないこと: 本番D1・本番Workerでの動作、実際のprovider規約の現在の内容、
-本番規模でのpage性能、保存済みsimulationの実データ（現状COREに書き込むwriterは無い）。
+本番規模でのpage性能、保存済みsimulationの実データ（保存するwriterが無く、captureは空の集合を固定する）。
 
-[Vポイントサービス利用規約]: docs/sources/v-point.md
+[Vポイントサービス利用規約]: sources/v-point.md
 
 [W09]: 設計レビュー追補99 W09（ANAマイル口座グループ）
 [W10]: 同 W10（ANAマイル有効期限）
@@ -474,3 +565,48 @@ flag停止、未適用migration、promoterがskipし続ける候補、未完のp
 J-POINT's observed total is one unclassified holding in points:j-point. Its provider-expiring portion is a non-additive display section attached to the exact total source fact, carried inside the same fixed READ snapshot. The portion is not another bucket and does not enter by-kind/consumable totals, conversion or a computed expiry rule. The total's expiry stays unattached; no remainder is computed.
 
 Not-displayed and unknown sections are stored even with zero display rows, and the UI calls the expiry unconfirmed. They never become zero or no expiry. READ 0005 adds provider display sections/checkpoints and immutable snapshot section counts. projection-input-v3 / projection-v4 fixed inputs and output digests include the bounded provider stream; publication waits for verification of every stream. Existing rule-derived estimates retain their rule-reference guards and pagination. Provider sections in the expiry response are a complete bounded companion set from the same resolved sealed snapshot.
+
+## Conversion module boundary
+
+`packages/domain/src/reward-conversion.ts` owns pure conversion amount simulation
+and bounded route traversal. `rewards.ts` re-exports its existing public API;
+reward contracts, bucket eligibility, expiry and redemption remain in that file.
+The extraction preserves derivation releases and returned values. The finite-domain
+tests cover conversion amounts and all directed offer graphs on three units.
+
+## Search eligibility at each hop
+
+The route search checks an offer's validity and membership at its applied calendar
+day, including after an earlier hop's processing delay. `conversion-search-v2`
+requires a local date or containing civil period in a compatible zone. An instant,
+unknown time or zone mismatch cannot establish a whole application day and yields
+`needs_rule_verification`; a known day outside the offer's period yields
+`offer_not_valid_at_clock`. A standing offer (`open-ended` validity, §1) covers its
+first day and every later day, so it stays a route instead of becoming
+`needs_rule_verification`; a `null` deadline is never passed.
+
+The `/offers/simulate` goal search starts from today's UTC date as a `local-date`
+with zone `null` (`services/app/src/rewards-api.ts`). A `null` zone is compatible with
+any offer zone, so an `Asia/Tokyo` offer is checked against the UTC date: between
+00:00 and 09:00 JST that is the previous JST day, and an offer's first or last day can
+be judged one day off at the boundary.
+
+For a tier-limited offer, a provider membership claim must name the source program,
+an admitted tier and a validity date/period covering that same day. Missing,
+self-reported, another program's or out-of-period claims remain
+`needs_rule_verification`, rather than proving entitlement. These rejection rows
+describe an unestablished condition, not proof that a future application is impossible.
+No provider terms, quota, fee or acceptance policy is inferred. The `/offers/simulate`
+route passes no membership claims, so every tier-limited offer is
+`needs_rule_verification` there until membership is supplied.
+
+`CONVERSION_SEARCH_RELEASE` is part of the reward projection's build digest
+(`packages/read-model/src/reward-projection.ts`), so the bump to `conversion-search-v2`
+builds a new projection snapshot once; stored snapshots are not rewritten and no
+migration is needed.
+
+The exhaustive eligibility test covers all 960 combinations of ten validity shapes
+(including three standing-offer shapes), eight membership scenarios,
+restricted/unrestricted tiers, three application days and direct/two-hop routes. A
+malformed stored validity establishes no day and stays `needs_rule_verification`. The
+existing deadline and completion rules are unchanged.
