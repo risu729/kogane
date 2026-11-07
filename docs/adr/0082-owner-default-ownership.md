@@ -1,6 +1,6 @@
 # ADR 0082: An account with no recorded owner is the owner's, recorded per account as an owner-default ownership decision
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-11-07
 - Issue: part of [#543](https://github.com/risu729/kogane/issues/543) (Phase 2,
   [plan](../plans/2026-11-phase2-card-flow.md#4-owner-decisions-2026-11-07))
