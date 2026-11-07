@@ -7,10 +7,13 @@ import { parseQueryRequest, querySpecDigest, type QueryRequest } from "../src/qu
 import { CONTEXT_INPUTS, grant, HOSTILE_DESCRIPTION, OVERVIEW, reader } from "./fixture.ts";
 import type { Overview } from "../../../packages/observation-shared/src/api-contract.ts";
 import type { Grant } from "../src/grants.ts";
-import type {
-  BalanceProjectionReader,
-  ProjectionCoverageRow,
-  SubtotalRow,
+import type { HoldingsProjection } from "../src/query/execute.ts";
+import {
+  type BalanceSnapshotRow,
+  type ProjectionCoverageRow,
+  SNAPSHOT_REFUSALS,
+  type SnapshotRefusal,
+  type SubtotalRow,
 } from "../../read-model/src/index";
 
 const anyData = (value: unknown): value is QueryData => value !== null && typeof value === "object";
@@ -23,7 +26,7 @@ async function run(
   grantValue: Grant,
   body: QueryRequest,
   rows = reader(),
-  projection?: BalanceProjectionReader,
+  projection?: HoldingsProjection,
 ) {
   const opened = await openContext(grantValue, CONTEXT_INPUTS, { query: body });
   return executeQuery({
@@ -37,37 +40,47 @@ async function run(
 }
 
 /**
- * A stand-in for A07's sealed projection. Only the three methods `holdings`
- * uses are implemented; anything else would be a read this intent must not do.
+ * A stand-in for A07's sealed projection. Only what `holdings` uses is
+ * implemented: the servable snapshot (or its refusal) and the two snapshot
+ * queries. A refused snapshot's rows throw if read, so the test proves the
+ * refusal is answered before anything is summed.
  */
 function projectionStub(options: {
   snapshot?: boolean;
+  refusal?: SnapshotRefusal;
   rows?: SubtotalRow[];
   coverage?: ProjectionCoverageRow[];
   oversized?: boolean;
-}): BalanceProjectionReader {
-  const unsupported = () => {
-    throw new Error("holdings must not read this");
+}): HoldingsProjection {
+  const snapshot = {
+    snapshot_id: "a".repeat(64),
+    created_at: "2026-09-12T00:00:00Z",
+    row_count: options.rows?.length ?? 0,
+    input_manifest_json: "{}",
+    projection_release: "balance-projection-v1",
+  } as BalanceSnapshotRow;
+  const refused = options.refusal;
+  const guard = () => {
+    if (refused !== undefined) throw new Error("a refused snapshot must not be read");
   };
   return {
-    currentSnapshot: async () =>
-      options.snapshot === false
-        ? null
-        : {
-            snapshot_id: "a".repeat(64),
-            created_at: "2026-09-12T00:00:00Z",
-            row_count: options.rows?.length ?? 0,
-            input_manifest_json: "{}",
-            projection_release: "balance-projection-v1",
-          },
-    snapshot: unsupported,
-    projectionInputs: unsupported,
-    latestPage: unsupported,
-    legacyLatestPage: unsupported,
-    historyPage: unsupported,
-    coverage: async () => options.coverage ?? [],
-    summableQuantities: async () => (options.oversized === true ? null : (options.rows ?? [])),
-  } as unknown as BalanceProjectionReader;
+    servable: async () =>
+      refused !== undefined
+        ? { refusal: refused }
+        : options.snapshot === false
+          ? null
+          : { snapshot },
+    reader: {
+      coverage: async () => {
+        guard();
+        return options.coverage ?? [];
+      },
+      summableQuantities: async () => {
+        guard();
+        return options.oversized === true ? null : (options.rows ?? []);
+      },
+    },
+  };
 }
 
 function adopted(overrides: Partial<SubtotalRow> = {}): SubtotalRow {
@@ -444,6 +457,37 @@ describe("holdings without the adopted projection", () => {
     if (!outcome.ok) return;
     expect(outcome.result.completeness).toBe("unavailable");
   });
+});
+
+describe("holdings over a refused snapshot", () => {
+  // 05 §7: a snapshot built under another CORE epoch, before a use
+  // restriction changed, or in a READ database of another contract is refused
+  // whole. Filtering rows out of it would leave every figure at its old value.
+  for (const refusal of SNAPSHOT_REFUSALS) {
+    test(`${refusal} is unavailable with that code, never a figure`, async () => {
+      const outcome = await run(
+        grant(),
+        request({ intent: "holdings" }),
+        reader(),
+        projectionStub({ refusal, rows: [adopted()] }),
+      );
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) return;
+      expect(validFinancialResult(outcome.result, anyData)).toBe(true);
+      expect(outcome.result.completeness).toBe("unavailable");
+      if (outcome.result.data.intent !== "holdings") throw new Error("unreachable");
+      expect(outcome.result.data.units).toEqual([]);
+      expect(outcome.result.coverage.gaps).toEqual([
+        { reasonCode: refusal, scopeRef: outcome.result.resolvedQuery.perimeterRef },
+      ]);
+      expect(outcome.result.quality.numeric).toEqual({
+        state: "not-applicable",
+        reasonCodes: [refusal],
+        evidenceRefs: [],
+      });
+      expect(outcome.result.warnings).toEqual([{ code: refusal, severity: "blocking" }]);
+    });
+  }
 });
 
 describe("holdings from the adopted projection", () => {
