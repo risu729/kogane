@@ -82,18 +82,17 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reports/:id/explanation": ["kogane.reports.read"],
   "/api/collection-quality": ["kogane.collection-quality.read"],
   "/api/collection-quality/:source": ["kogane.collection-quality.read"],
+  "/api/evidence/v1/meta": ["kogane.evidence.read"],
+  "/api/evidence/v1/sources/:source/runs": ["kogane.evidence.read"],
+  "/api/evidence/v1/runs/:run/artifacts": ["kogane.evidence.read"],
+  "/api/evidence/v1/runs/:run/artifacts/:artifact": ["kogane.evidence.read"],
 };
 
 /** UI read routes with no MCP read yet, and what the UI reads there. */
 const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
-  // The v1 raw download.
+  // The raw downloads.
   "/api/raw/:sha256": "raw evidence download",
-  // The evidence browser.
-  "/api/evidence/v1/meta": "evidence browser",
-  "/api/evidence/v1/sources/:source/runs": "evidence browser",
-  "/api/evidence/v1/runs/:run/artifacts": "evidence browser",
-  "/api/evidence/v1/runs/:run/artifacts/:artifact": "evidence browser",
-  "/api/evidence/v1/runs/:run/artifacts/:artifact/raw": "evidence browser",
+  "/api/evidence/v1/runs/:run/artifacts/:artifact/raw": "the evidence browser's raw download",
   // Card settlements grouped by statement.
   "/api/v2/reconciliation/card-settlements/statements":
     "card settlement review grouped by statement; kogane.card-settlements.read returns the same candidates ungrouped",
