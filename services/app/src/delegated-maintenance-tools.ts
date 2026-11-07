@@ -19,6 +19,7 @@ import { parseRequest } from "./ops-api";
 import { upstreamOutcome, UpstreamLost } from "./audit";
 import { delegatedSchedulesServed } from "./delegated-schedule-tools";
 import type { ToolResult } from "./agent-service";
+import { mcpInputSchema } from "./mcp-input-schema";
 const CAPABILITY = "schedules.maintenance.update";
 export function delegatedMaintenanceTools(env: Env, resolution: DelegationResolution) {
   if (
@@ -27,8 +28,7 @@ export function delegatedMaintenanceTools(env: Env, resolution: DelegationResolu
     !resolution.principal.capabilities.includes(CAPABILITY)
   )
     return [];
-  const inputSchema = z.toJSONSchema(delegatedMaintenanceSchema) as Record<string, unknown>;
-  delete inputSchema["$schema"];
+  const inputSchema = mcpInputSchema(delegatedMaintenanceSchema);
   return [
     {
       name: "kogane.schedules.maintenance.update",

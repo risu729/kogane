@@ -29,6 +29,7 @@ import { readIdentityCollection } from "./identity-api";
 import { parseRequest } from "./ops-api";
 import { readObservationRoute } from "./observation-api";
 import { catalogue } from "./read";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 /** The result envelope of every page read: the route's answer, under `data`. */
 const PAGE_READ_SCHEMA_VERSION = "kogane-page-read-v1";
@@ -186,8 +187,7 @@ export const PAGE_READ_ROUTES: Record<PageReadToolName, readonly string[]> = Obj
 ) as Record<PageReadToolName, readonly string[]>;
 
 const PAGE_READ_MCP_TOOLS = Object.entries(TOOLS).map(([name, definition]) => {
-  const inputSchema = z.toJSONSchema(definition.schema) as Record<string, unknown>;
-  delete inputSchema["$schema"];
+  const inputSchema = mcpInputSchema(definition.schema);
   return {
     name,
     title: definition.title,

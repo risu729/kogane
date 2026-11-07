@@ -27,6 +27,7 @@ import { parseRequest } from "./ops-api";
 import { upstreamOutcome, UpstreamLost } from "./audit";
 import { delegatedSchedulesServed } from "./delegated-schedule-tools";
 import type { ToolResult } from "./agent-service";
+import { mcpInputSchema } from "./mcp-input-schema";
 const SURVEY_DECIDE_TOOL = "kogane.schedules.survey.decide";
 const CAPABILITY = "schedules.survey.decide";
 export const EXECUTABLE_SURVEY_CAPABILITIES = [CAPABILITY] as const;
@@ -40,8 +41,7 @@ export function delegatedSurveyTools(env: Env, resolution: DelegationResolution)
     !resolution.principal.capabilities.includes(CAPABILITY)
   )
     return [];
-  const inputSchema = z.toJSONSchema(delegatedSurveySchema) as Record<string, unknown>;
-  delete inputSchema["$schema"];
+  const inputSchema = mcpInputSchema(delegatedSurveySchema);
   return [
     {
       name: SURVEY_DECIDE_TOOL,
