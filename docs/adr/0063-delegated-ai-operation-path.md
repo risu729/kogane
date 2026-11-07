@@ -5,15 +5,24 @@
   integration (#660, merged 2026-10-10) adds delegated R1 operations, shared
   read adapters, R2 command decisions and provider-request confirmation, job
   prepare/confirm with audit-linked reversal, and maintenance R1 apply and R2
-  prepare/confirm through #564's sole writer; survey acceptance remains pending
-  an owner decision. The committed `MCP_DELEGATIONS` is empty, so no
-  delegation exists and nothing executes under one. The slices are in the
+  prepare/confirm through #564's sole writer; survey rejection (R1) and
+  acceptance (R2) followed on 2026-11-07 under the owner's adoption conditions
+  ([ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). The slices are in the
   [plan](../plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order).
+- Superseded in part (2026-11-07) by
+  [ADR 0084](0084-mcp-operator-authority-without-delegation.md): items 2 and 4
+  (the `MCP_DELEGATIONS` declaration, its roles, declared capabilities, scopes,
+  lifetimes and budgets), the delegation part of item 11 and the 2026-11-06
+  delegation-status amendment. Any MCP client Access verifies now resolves,
+  over the whole store, and `AGENT_API_GRANTS` is removed too; the other items
+  stand. Text below that says `MCP_DELEGATIONS` is empty or names
+  `AGENT_API_GRANTS` describes the state before ADR 0084.
 - Date: 2026-10-09
 - Amends: [ADR 0013](0013-agent-card-purchase-read.md) (the read-only
   premise), [ADR 0039](0039-alarm-schedule-management.md) ("agents and service
   tokens cannot edit settings"), ADR 0046 (#564, merged: its framing of the agent
-  maintenance write), ADR 0047 (#565, open: the agent-only attenuation where it
+  maintenance write), [ADR 0050](0050-maintenance-survey-proposals.md) ("no
+  agent decides", by its 2026-11-07 amendment), ADR 0047 (#565, open: the agent-only attenuation where it
   makes MCP read and propose only), and the AGENTS.md rule "Agents never
   approve or commit a change".
 - Depends on: ADR 0047 (#565) for authentication and the `mcp-client:<sub>`
@@ -329,8 +338,8 @@ an audit record; R4 is never delegated. A delegated decision is recorded with
 - Stopped-execution lease release stays the operator's until the server can
   verify that an execution stopped. Since ADR 0085 (2026-11-07) the server does
   verify it, from ten minutes of heartbeat silence, and frees such a lease
-  itself on the `alarm` path; the operator's release stays R3 and no delegation
-  capability is added.
+  itself on the `alarm` path; the operator's release stays R3, refused over
+  MCP (ADR 0084).
 
 ## Verification
 
@@ -391,7 +400,7 @@ confirmation index supplies single use in the effect batch. A schedule writer
 must still enforce its native expected revision in that same batch. A tested
 helper alone is not an exposed settings operation. The later settings and
 maintenance amendments install those adapters through the existing writers;
-S6 survey acceptance is still unavailable.
+S6 survey acceptance was still unavailable then (since 2026-11-07: [ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)).
 
 Only installed adapters are advertised: persisted-run import, replay,
 whole-store projection, own operation reads and inert command planning.

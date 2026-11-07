@@ -25,6 +25,8 @@ export interface CardOwnershipSide {
   blockers: string[];
   /** Additional blockers for the explicit sole-personal self-declaration only. */
   selfDeclarationBlockers: string[];
+  /** Blockers for the owner-default declaration (ADR 0082); a recorded claim or contradiction still wins. */
+  ownerDefaultBlockers: string[];
   claims: CardOwnershipClaim[];
   claimsTruncated: boolean;
 }

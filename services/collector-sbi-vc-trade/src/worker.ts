@@ -26,7 +26,13 @@ import {
   type SharedRunSummary,
 } from "./shared-collection";
 import { describeArtifact, runPrefix } from "./storage";
-import { blockedScheduleResult, sessionFailureCode, shouldReauthenticate } from "./session-policy";
+import {
+  blockedScheduleResult,
+  manualAgreementPendingSince,
+  reauthCooldownMs,
+  sessionFailureCode,
+  shouldReauthenticate,
+} from "./session-policy";
 import type {
   CollectionFailure,
   CollectionManifest,
@@ -53,8 +59,8 @@ const INITIAL_HEALTH: HealthState = {
   lastReauthAttemptAt: null,
   lastReauthSuccessAt: null,
   lastReauthErrorCode: null,
+  manualAgreementPendingSince: null,
 };
-const REAUTH_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 export class SbiVcSessionState extends DurableObject<Env> {
   #running: Promise<HealthState> | null = null;
   #reauthRunning: Promise<HealthState> | null = null;
@@ -315,7 +321,8 @@ export class SbiVcSessionState extends DurableObject<Env> {
     const attemptAt = new Date().toISOString();
     if (!force && previous.lastReauthAttemptAt) {
       const elapsed = Date.now() - Date.parse(previous.lastReauthAttemptAt);
-      if (Number.isFinite(elapsed) && elapsed < REAUTH_COOLDOWN_MS) return previous;
+      if (Number.isFinite(elapsed) && elapsed < reauthCooldownMs(previous, Date.now()))
+        return previous;
     }
     try {
       if (typeof this.env.PASSKEY_CREDENTIAL !== "string" || !this.env.PASSKEY_CREDENTIAL) {
@@ -330,6 +337,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
         lastReauthAttemptAt: attemptAt,
         lastReauthSuccessAt: attemptAt,
         lastReauthErrorCode: null,
+        manualAgreementPendingSince: null,
       };
       // New session, new generation — written in the same batch as the session
       // it names, so a failed re-authentication above leaves the previous
@@ -347,6 +355,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
         ...previous,
         lastReauthAttemptAt: attemptAt,
         lastReauthErrorCode: errorCode,
+        manualAgreementPendingSince: manualAgreementPendingSince(previous, errorCode, attemptAt),
       };
       await this.ctx.storage.put("health", health);
       console.error(JSON.stringify({ message: "sbi_vc_reauth", outcome: "failure", errorCode }));

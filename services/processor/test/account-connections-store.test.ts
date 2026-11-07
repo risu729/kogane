@@ -5,7 +5,8 @@ import {
   listAccountConnections,
   readAccountConnections,
   connectionReferenceSet,
-} from "../../app/src/account-connections";
+} from "../../../packages/application/src/query/account-connections";
+import { d1Executor } from "../../../packages/read-model/src/d1";
 test("reader rejects malformed, duplicate and oversized reference sets before lookup", () => {
   expect(
     connectionReferenceSet(JSON.stringify(Array.from({ length: 100 }, (_, i) => `ref-${i}`))).size,
@@ -33,6 +34,7 @@ test("D1 retains decisions, rejects untrusted lineage/replacements, and revokes 
   );
   try {
     const db = (await mf.getD1Database("DB")) as unknown as D1Database;
+    const store = d1Executor(db);
     await db.exec(`CREATE TABLE sources(id TEXT PRIMARY KEY);
 CREATE TABLE producers(id TEXT PRIMARY KEY);
 CREATE TABLE source_accounts(id TEXT PRIMARY KEY,source_id TEXT,producer_id TEXT);
@@ -79,7 +81,7 @@ INSERT INTO fetch_artifacts VALUES(1,'moneyforward-me','account-detail',1,'conne
       insert(1, 3, JSON.stringify(Array.from({ length: 101 }, () => "direct-reference"))),
     ).rejects.toThrow();
     await insert(1);
-    expect(await listAccountConnections(db)).toMatchObject([
+    expect(await listAccountConnections(store)).toMatchObject([
       {
         status: "confirmed",
         relation: "same-provider-connection",
@@ -101,14 +103,14 @@ INSERT INTO fetch_artifacts VALUES(1,'moneyforward-me','account-detail',1,'conne
         sourceAccount: "moneyforward-me:connection-test",
       },
     ];
-    expect((await readAccountConnections(db, refs)).size).toBe(2);
+    expect((await readAccountConnections(store, refs)).size).toBe(2);
     expect(
-      (await readAccountConnections(db, [{ ...refs[0]!, producer: "wrong-producer" }])).size,
+      (await readAccountConnections(store, [{ ...refs[0]!, producer: "wrong-producer" }])).size,
     ).toBe(0);
     expect(
       (
         await readAccountConnections(
-          db,
+          store,
           Array.from({ length: 5501 }, () => refs[0]!),
         )
       ).size,
@@ -125,8 +127,8 @@ INSERT INTO fetch_artifacts VALUES(1,'moneyforward-me','account-detail',1,'conne
         .run(),
     ).rejects.toThrow();
     await db.prepare("UPDATE runs SET excluded=1 WHERE id=2").run();
-    expect(await listAccountConnections(db)).toMatchObject([{ status: "evidence-ineligible" }]);
-    expect((await readAccountConnections(db, refs)).get("direct-reference")?.status).toBe(
+    expect(await listAccountConnections(store)).toMatchObject([{ status: "evidence-ineligible" }]);
+    expect((await readAccountConnections(store, refs)).get("direct-reference")?.status).toBe(
       "evidence-ineligible",
     );
     expect(
@@ -135,7 +137,9 @@ INSERT INTO fetch_artifacts VALUES(1,'moneyforward-me','account-detail',1,'conne
     await expect(insert(2)).rejects.toThrow("connection_evidence_invalid");
     await db.prepare("UPDATE runs SET excluded=0 WHERE id=2").run();
     await insert(2);
-    expect(await listAccountConnections(db)).toMatchObject([{ revision: 2, status: "confirmed" }]);
+    expect(await listAccountConnections(store)).toMatchObject([
+      { revision: 2, status: "confirmed" },
+    ]);
     await db.exec(
       "INSERT INTO fetch_artifacts VALUES(5,'moneyforward-me','account-detail',1,'connection-second');",
     );
@@ -144,7 +148,7 @@ INSERT INTO fetch_artifacts VALUES(1,'moneyforward-me','account-detail',1,'conne
         "INSERT INTO account_connection_reviews(producer_id,connection_key,revision,label,status,related_source_id,direct_producer_id,reason,verifier_version,detail_artifact_id,direct_artifact_id,branch_artifact_id,direct_reference_ids_json,created_at) SELECT producer_id,'connection-second',1,label,status,related_source_id,direct_producer_id,reason,verifier_version,5,direct_artifact_id,branch_artifact_id,direct_reference_ids_json,created_at FROM account_connection_reviews WHERE revision=2",
       )
       .run();
-    expect((await readAccountConnections(db, refs)).get("direct-reference")).toMatchObject({
+    expect((await readAccountConnections(store, refs)).get("direct-reference")).toMatchObject({
       status: "unresolved",
       relation: "candidate",
       reason: "複数の連携が同じ取得元の参照に対応しています。個別口座の対応は確定していません。",

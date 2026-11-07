@@ -1,6 +1,9 @@
 import type { FilterOptions } from "../../../packages/observation-shared/src/api-contract";
-import { readAccountConnections } from "./account-connections";
-import { connectionAccountLabel } from "./account-connection-display";
+import {
+  connectionAccountLabel,
+  readAccountConnections,
+} from "../../../packages/application/src/query/account-connections.ts";
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 const KINDS = { transactions: "transaction", balances: "balance", positions: "position" } as const;
 
 /** Display-only metadata. Query values and source-account filter membership do not change. */
@@ -37,7 +40,7 @@ export async function organizedFilterOptions(
   // scope may span multiple producers/targets; never label a truncated subset.
   if (rows.results.length > 5000) throw new Error("filter_organization_budget");
   const connections = await readAccountConnections(
-    db,
+    d1Executor(db),
     rows.results.map((row) => ({
       referenceId: row.reference_id,
       source: row.source_id,

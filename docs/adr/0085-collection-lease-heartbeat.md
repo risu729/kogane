@@ -131,9 +131,8 @@ stopped, because the server has no way to know that it stopped.
    one tick after it turns stale.
 7. **The operator's release stays** as it is (R3, UI only); it now also clears
    `heartbeat_at`, and a live holder whose lease was released aborts within one
-   heartbeat. Lease release over MCP stays the refusing tool of ADR 0081: the
-   lease frees itself, so no delegation capability is added (a new capability
-   would widen every `operator-delegate` grant).
+   heartbeat. Over MCP it stays refused as R3 (`operation_not_delegable`, ADR
+   0084): the lease frees itself, so nothing is added to the MCP path.
 
 The timing leaves margin: a live holder that cannot write stops itself after
 3 minutes and its call fails by 3 minutes 30 seconds, at least 6 minutes 30

@@ -10,12 +10,14 @@
 //     through the official SDK (initialize/notifications/tools on 2025-11-25,
 //     server/discover and tools on 2026-07-28);
 //   * whoever signs in through the MCP application — the operator included —
-//     is the agent-only principal `mcp-client:<sub>`: graded by its own
-//     `AGENT_API_GRANTS` entry and nothing else, never re-classified as the
-//     operator by `principalFor`, `opsContext` or `callOpsTool`, and refused
-//     on every non-agent route;
+//     is the agent-only principal `mcp-client:<sub>`: it reads and proposes
+//     with the whole-store grant (ADR 0084, nothing configures it), is never
+//     re-classified as the operator by `principalFor`, `opsContext` or
+//     `callOpsTool`, and is refused on every non-agent route;
 //   * the operator's own application and its routes are unchanged;
-//   * tools/list, tools/call and the refusals under each grant shape;
+//   * tools/list, tools/call and the refusals a client sees. How a narrower
+//     grant hides what it cannot see (matrix 5, 6) is the shared services',
+//     tested in packages/application (query, explain-propose, context).
 //   * the UI's query route, the HTTP agent route and MCP (both eras) return
 //     one result object with the same gap reasons.
 import { env } from "cloudflare:test";
@@ -32,6 +34,7 @@ import { HttpError } from "../src/http";
 import { REPORTED_STATE_TOOL_NAME } from "../src/read-tools";
 import { opsContext } from "../src/ops-api";
 import { callOpsTool } from "../src/ops-tools";
+import { GRANT_LIMITS, QUERY_GRANT_CAPABILITIES } from "../../../packages/application/src/index";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
@@ -49,38 +52,32 @@ const COLLECTION = {
   requestedScope: { from: "2026-01-01", to: "2026-01-31" },
 };
 
-const WHOLE = { sources: "*", accounts: "*" } as const;
-const BUDGET = { maxRows: 200, maxProposalTargets: 5, maxExplainDepth: 4 };
-const READS = ["summary.read", "records.read", "evidence.read"];
 const OPS_ENABLED = { OPS_API_ENABLED: "true", COMMANDS_ENABLED: "true" };
-
-function grant(
-  capabilities: readonly string[],
-  scopes: { sources: unknown; accounts: unknown } = WHOLE,
-  budget = BUDGET,
-) {
-  return { scopes, capabilities, budget };
-}
-function grants(table: Record<string, unknown>): Record<string, string> {
-  return { AGENT_API_GRANTS: JSON.stringify(table) };
-}
+/** Every capability of the whole-store grant each proved caller gets (ADR 0084). */
+const FULL = [...QUERY_GRANT_CAPABILITIES];
 /**
- * What this deployment publishes on `/mcp` to every grant: the agent tools,
- * the purchase explanation (CORE 0047 is applied here; the retired
- * `EVENTS_V2_ENABLED` name is not read), and, because this store has the
- * reported state's views, the reconstructed state's read.
+ * What this deployment publishes on `/mcp` to every MCP client: the agent
+ * tools, every read tool the whole-store grant answers, the purchase
+ * explanation (CORE 0047 is applied here; the retired `EVENTS_V2_ENABLED`
+ * name is not read), and, because this store has the reported state's views,
+ * the reconstructed state's read.
  */
-/** The tools this deployment lists to a grant that holds no read tool's authority. */
-const BASE = [...AGENT_TOOL_NAMES, PURCHASES_TOOL_NAME, RECONSTRUCTED_STATE_TOOL_NAME];
-/** What it lists to a whole-store `summary.read` grant: the instrument coverage too (ADR 0073). */
 const PUBLISHED = [
   ...AGENT_TOOL_NAMES,
+  "kogane.instruments.history",
+  REPORTED_STATE_TOOL_NAME,
   "kogane.instruments.coverage",
+  "kogane.accounts.candidates",
+  "kogane.card-settlements.unmatched",
+  "kogane.economic-readiness.read",
+  "kogane.card-settlements.read",
+  "kogane.card-settlements.ownership",
+  "kogane.audit.search",
+  "kogane.audit.get",
+  "kogane.identity.read",
   PURCHASES_TOOL_NAME,
   RECONSTRUCTED_STATE_TOOL_NAME,
 ];
-/** A valid reconstructed-state request for an account the store does not hold. */
-const RECONSTRUCTED = { account: "acct-mcp-synthetic", from: "2026-03-01", to: "2026-03-31" };
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let strangerKeys: Awaited<ReturnType<typeof generateKeyPair>>;
@@ -307,7 +304,7 @@ function proposal(extraEvidence = 0, reason = "synthetic proposal from an MCP cl
 
 describe("a client connects through the MCP application, in either protocol era", () => {
   it("initializes, acknowledges, lists and calls on the 2025-11-25 transport", async () => {
-    const environment = grants({ [AGENT]: grant(["summary.read"]) });
+    const environment = {};
     // The first request carries no protocol header: the version is in the body.
     const opened = await send(
       "/mcp",
@@ -346,8 +343,8 @@ describe("a client connects through the MCP application, in either protocol era"
     expect(capabilities.isError).toBe(false);
     expect(capabilities.structuredContent).toMatchObject({
       principal: AGENT,
-      capabilities: ["summary.read"],
-      writes: { proposals: false, adoption: false, externalActions: false },
+      capabilities: FULL,
+      writes: { proposals: true, adoption: false, externalActions: false },
     });
     expect(capabilities.content).toEqual([
       { type: "text", text: JSON.stringify(capabilities.structuredContent) },
@@ -355,7 +352,7 @@ describe("a client connects through the MCP application, in either protocol era"
   });
 
   it("negotiates the revision the client asks for when the SDK speaks it", async () => {
-    const environment = grants({ [AGENT]: grant(["summary.read"]) });
+    const environment = {};
     for (const requested of ["2025-11-25", "2025-06-18", "2025-03-26"]) {
       const response = await send(
         "/mcp",
@@ -376,7 +373,7 @@ describe("a client connects through the MCP application, in either protocol era"
   });
 
   it("serves the stateless 2026-07-28 revision with the same tools and the same answers", async () => {
-    const environment = grants({ [AGENT]: grant(["summary.read"]) });
+    const environment = {};
     const discovered = await result(await modern("server/discover", {}, { environment }));
     expect(discovered["supportedVersions"]).toContain(MODERN);
     expect(discovered["capabilities"]).toMatchObject({ tools: {} });
@@ -401,7 +398,7 @@ describe("a client connects through the MCP application, in either protocol era"
   });
 
   it("offers no GET stream and no session to delete", async () => {
-    const environment = grants({ [AGENT]: grant(["summary.read"]) });
+    const environment = {};
     const stream = await send("/mcp", undefined, {
       environment,
       headers: { accept: "text/event-stream" },
@@ -416,7 +413,7 @@ describe("a client connects through the MCP application, in either protocol era"
   });
 
   it("refuses a cross-origin browser request before it reads a body or a grant", async () => {
-    const environment = grants({ [AGENT]: grant(["summary.read", "interpretation.propose"]) });
+    const environment = {};
     const before = await relationCount();
     const viaMcp = await rpc(
       "tools/call",
@@ -427,7 +424,7 @@ describe("a client connects through the MCP application, in either protocol era"
     expect(await viaMcp.json()).toMatchObject({ error: "origin_not_allowed" });
     const viaHttp = await send("/api/agent/v1/reconcile.propose", proposal(), {
       identity: { via: "app", subject: OTHER },
-      environment: grants({ [OTHER]: grant(["summary.read", "interpretation.propose"]) }),
+      environment,
       headers: { origin: "null" },
     });
     expect(viaHttp.status).toBe(403);
@@ -438,7 +435,7 @@ describe("a client connects through the MCP application, in either protocol era"
   });
 
   it("runs no tool call it cannot answer, and leaves malformed traffic to the SDK's refusals", async () => {
-    const environment = grants({ [AGENT]: grant(["summary.read", "interpretation.propose"]) });
+    const environment = {};
     const before = await relationCount();
     // A tools/call without an id is a notification: accepted, never executed.
     const notification = await send(
@@ -493,10 +490,7 @@ describe("a client connects through the MCP application, in either protocol era"
         "tools/list",
         {},
         {
-          environment: {
-            ...grants({ [AGENT]: grant(["summary.read"]) }),
-            EVENTS_V2_ENABLED: "true",
-          },
+          environment: { EVENTS_V2_ENABLED: "true" },
         },
       ),
     );
@@ -509,10 +503,7 @@ describe("a client connects through the MCP application, in either protocol era"
     // The retired name neither adds a tool nor hides the purchase explanation.
     expect(
       await listTools({
-        environment: {
-          ...grants({ [AGENT]: grant(["summary.read"]) }),
-          EVENTS_V2_ENABLED: "0",
-        },
+        environment: { EVENTS_V2_ENABLED: "0" },
       }),
     ).toEqual(PUBLISHED);
     for (const tool of tools) {
@@ -528,58 +519,40 @@ describe("a client connects through the MCP application, in either protocol era"
 });
 
 describe("the same person: operator in the browser, agent-only through MCP (matrix 1)", () => {
-  // The hardest configuration: the same person is the operator, holds a full
-  // read-and-propose grant under the bare subject, and the agent-only name is
-  // even listed on the command path. Through the MCP application they are
-  // still only `mcp-client:<sub>`, with exactly that entry's grant.
+  // The hardest configuration: the same person is the operator, and the
+  // agent-only name is even listed on the command path. Through the MCP
+  // application they are still only `mcp-client:<sub>`.
   const HOSTILE = {
     ...OPS_ENABLED,
     OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
     AGENT_GRANTS: JSON.stringify([AGENT]),
-    ...grants({
-      [OWNER]: grant([...READS, "interpretation.propose"]),
-      [AGENT]: grant(["summary.read"]),
-    }),
   };
   const browser = { via: "app" as const, subject: OWNER };
 
-  it("is graded by its own entry on /mcp, never by the operator's", async () => {
+  it("reads and proposes on /mcp as itself, never as the operator", async () => {
     const report = await callTool("kogane.capabilities", {}, { environment: HOSTILE });
     expect(report.structuredContent).toMatchObject({
       principal: AGENT,
-      capabilities: ["summary.read"],
-      writes: { proposals: false },
+      capabilities: FULL,
+      writes: { proposals: true, adoption: false, externalActions: false },
     });
     const activity = await callTool(
       "kogane.financial.query",
       { intent: "activity" },
       { environment: HOSTILE },
     );
-    expect(activity.structuredContent).toMatchObject({
-      code: "unauthorized",
-      refs: ["capability:records.read"],
-    });
-    // The whole-store read tools need records.read, which only the operator's
-    // bare-subject entry holds.
+    expect(activity.isError).toBe(false);
     for (const [name, args] of [
-      [RECONSTRUCTED_STATE_TOOL_NAME, RECONSTRUCTED],
       ["kogane.instruments.candidates", {}],
       [PURCHASES_TOOL_NAME, {}],
     ] as const) {
-      const refused = await callTool(name, args, { environment: HOSTILE });
-      expect(refused.isError, name).toBe(true);
-      expect(refused.structuredContent, name).toMatchObject({ code: "unauthorized" });
+      const served = await callTool(name, args, { environment: HOSTILE });
+      expect(served.isError, name).toBe(false);
     }
-    const before = await relationCount();
-    const proposed = await callTool("kogane.reconcile.propose", proposal(), {
-      environment: HOSTILE,
-    });
-    expect(proposed.structuredContent).toMatchObject({ code: "unauthorized" });
-    expect(await relationCount()).toBe(before);
   });
 
   it("keeps the operator's rights on the browser's own routes", async () => {
-    // The HTTP agent route reads the bare subject's grant, as before.
+    // The HTTP agent route answers the bare subject, with the same whole-store grant.
     const http = await send(
       "/api/agent/v1/capabilities",
       {},
@@ -588,10 +561,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
         identity: browser,
       },
     );
-    expect(await http.json()).toMatchObject({
-      principal: OWNER,
-      capabilities: [...READS, "interpretation.propose"],
-    });
+    expect(await http.json()).toMatchObject({ principal: OWNER, capabilities: FULL });
     // The operations route still accepts the operator's request.
     const before = await opsRowCount();
     const accepted = await send("/api/ops/v1/collections", COLLECTION, {
@@ -607,19 +577,32 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
     }
   });
 
-  it("never offers an operations tool on /mcp, and refuses one from the caller object", async () => {
-    expect(await listTools({ environment: HOSTILE })).toEqual(PUBLISHED);
-    const before = await opsRowCount();
-    for (const [name, args] of [
-      ["kogane.ops.collection.request", COLLECTION],
-      ["kogane.ops.projection.request", { reason: "attempt over mcp" }],
-      ["kogane.ops.operation.get", { operationId: "op_synthetic" }],
-    ] as const) {
-      const called = await callTool(name, args, { environment: HOSTILE });
-      expect(called.isError, name).toBe(true);
-      expect(called.structuredContent, name).toEqual({ error: "delegation_not_configured" });
+  // ADR 0084: every MCP client is offered the operations tools as itself,
+  // never as the operator, whatever the command lists say.
+  const OPS_TOOLS = [
+    "kogane.ops.collection.request",
+    "kogane.ops.import.request",
+    "kogane.ops.replay.request",
+    "kogane.ops.projection.request",
+    "kogane.ops.session.refresh",
+    "kogane.ops.operation.get",
+  ];
+  it("offers the operations tools to every MCP client, whatever the command lists say", async () => {
+    for (const environment of [
+      HOSTILE,
+      { ...HOSTILE, OPERATOR_SUBJECTS: "[]" },
+      { ...HOSTILE, OPERATOR_SUBJECTS: "{" },
+    ]) {
+      const listed = await listTools({ environment });
+      expect(listed.filter((name) => name.startsWith("kogane.ops."))).toEqual(OPS_TOOLS);
     }
-    expect(await opsRowCount()).toBe(before);
+    const stranger = { ...HOSTILE, OPERATOR_SUBJECTS: "[]" };
+    const read = await callTool(
+      "kogane.ops.operation.get",
+      { operationId: "op_synthetic" },
+      { environment: stranger, identity: { via: "mcp", subject: OTHER } },
+    );
+    expect(read.structuredContent).not.toEqual({ error: "delegation_not_configured" });
   });
 
   it("is refused by every grader downstream, whatever the lists say", async () => {
@@ -649,10 +632,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
   });
 
   it("records the agent-only principal as a proposal's actor, whatever the request claims (matrix 7)", async () => {
-    const environment = {
-      ...HOSTILE,
-      ...grants({ [AGENT]: grant(["summary.read", "interpretation.propose"]) }),
-    };
+    const environment = HOSTILE;
     // A body that names an actor is refused by the closed schema, and writes nothing.
     const before = await relationCount();
     const claimed = await callTool(
@@ -684,7 +664,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
   });
 
   it("changes no adopted answer through a proposal (matrix 7, AT68)", async () => {
-    const environment = grants({ [AGENT]: grant([...READS, "interpretation.propose"]) });
+    const environment = {};
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date());
     const answers = async () => {
@@ -711,7 +691,6 @@ describe("a token minted for MCP reaches no other route, and /mcp takes no other
     ...OPS_ENABLED,
     SCHEDULES_ENABLED: "true",
     OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
-    ...grants({ [OWNER]: grant(READS), [AGENT]: grant(READS) }),
   };
 
   it("refuses an MCP-application token on every ordinary route", async () => {
@@ -836,45 +815,30 @@ describe("a token minted for MCP reaches no other route, and /mcp takes no other
   });
 });
 
-describe("the grant fails closed (matrix 4)", () => {
-  it("refuses an absent, malformed or revoked grant", async () => {
-    const tables: [Record<string, string>, string][] = [
-      [{}, "no AGENT_API_GRANTS"],
-      [{ AGENT_API_GRANTS: "" }, "the committed empty table"],
-      [{ AGENT_API_GRANTS: "{" }, "unparsable"],
-      [{ AGENT_API_GRANTS: JSON.stringify([AGENT]) }, "a list, not a table"],
-      [
-        {
-          AGENT_API_GRANTS: JSON.stringify({
-            [AGENT]: { ...grant(READS), capabilities: ["interpretation.accept"] },
-          }),
-        },
-        "a capability outside the vocabulary",
-      ],
-      [{ ...grants({ [OWNER]: grant(READS) }) }, "only the bare subject's entry"],
-      [
-        { ...grants({ [OTHER]: grant(READS), [`mcp-client:${OTHER}`]: grant(READS) }) },
-        "revoked: another person only",
-      ],
-    ];
-    for (const [vars, label] of tables) {
-      for (const message of [
-        { method: "tools/list", params: {} },
-        { method: "tools/call", params: { name: "kogane.capabilities", arguments: {} } },
-      ]) {
-        const response = await rpc(message.method, message.params, {
-          environment: { AGENT_API_GRANTS: undefined, ...vars },
-        });
-        expect(response.status, `${label} ${message.method}`).toBe(403);
-        expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
-      }
+describe("no table grants an MCP client (matrix 4, ADR 0084)", () => {
+  it("serves the same tools whatever a leftover AGENT_API_GRANTS says", async () => {
+    for (const leftover of [
+      "",
+      "{",
+      JSON.stringify([AGENT]),
+      JSON.stringify({ [`mcp-client:${OTHER}`]: { capabilities: [] } }),
+    ]) {
+      expect(await listTools({ environment: { AGENT_API_GRANTS: leftover } }), leftover).toEqual(
+        PUBLISHED,
+      );
+      const report = await callTool(
+        "kogane.capabilities",
+        {},
+        { environment: { AGENT_API_GRANTS: leftover } },
+      );
+      expect(report.structuredContent["capabilities"], leftover).toEqual(FULL);
     }
   });
 });
 
 describe("a tool that is not published cannot be called (matrix 8)", () => {
   it("answers unknown_tool, or the caller's refusal, and runs nothing", async () => {
-    const environment = grants({ [AGENT]: grant([...READS, "interpretation.propose"]) });
+    const environment = {};
     const before = { relations: await relationCount(), ops: await opsRowCount() };
     for (const name of [
       "kogane.change.commit",
@@ -902,150 +866,14 @@ describe("a tool that is not published cannot be called (matrix 8)", () => {
   });
 });
 
-describe("tools under each grant shape", () => {
-  const shapes: [string, string[]][] = [
-    ["no capability", []],
-    ["summary.read", ["summary.read"]],
-    ["records.read", ["records.read"]],
-    ["evidence.read", ["evidence.read"]],
-    ["interpretation.propose", ["interpretation.propose"]],
-  ];
-  for (const [label, capabilities] of shapes) {
-    it(`lists the deployment's tools and grades each call: ${label}`, async () => {
-      const environment = grants({ [AGENT]: grant(capabilities) });
-      // The list describes this deployment; the grant is enforced on the call
-      // and described by kogane.capabilities.
-      // Each read tool is listed only to a grant its service answers: the
-      // history to records.read, the instrument coverage to summary.read,
-      // both over the whole store.
-      expect(await listTools({ environment })).toEqual(
-        capabilities.includes("records.read")
-          ? [
-              ...AGENT_TOOL_NAMES,
-              "kogane.instruments.history",
-              REPORTED_STATE_TOOL_NAME,
-              "kogane.accounts.candidates",
-              "kogane.economic-readiness.read",
-              PURCHASES_TOOL_NAME,
-              RECONSTRUCTED_STATE_TOOL_NAME,
-            ]
-          : capabilities.includes("summary.read")
-            ? PUBLISHED
-            : BASE,
-      );
-      const report = await callTool("kogane.capabilities", {}, { environment });
-      expect(report.structuredContent["capabilities"]).toEqual(capabilities);
-      const expected: [string, unknown, string][] = [
-        ["kogane.financial.query", { intent: "coverage" }, "summary.read"],
-        ["kogane.financial.query", { intent: "activity" }, "records.read"],
-        ["kogane.explain", { ref: "source:other-test" }, "summary.read"],
-      ];
-      for (const [tool, args, requires] of expected) {
-        const outcome = await callTool(tool, args, { environment });
-        if (capabilities.includes(requires)) {
-          expect(outcome.isError, `${tool} ${JSON.stringify(args)}`).toBe(false);
-        } else {
-          expect(outcome.isError, `${tool} ${JSON.stringify(args)}`).toBe(true);
-          expect(outcome.structuredContent).toMatchObject({
-            code: "unauthorized",
-            refs: [`capability:${requires}`],
-          });
-        }
-      }
-      // The reconstructed state's read needs records.read over the whole store.
-      const reconstructed = await callTool(RECONSTRUCTED_STATE_TOOL_NAME, RECONSTRUCTED, {
-        environment,
-      });
-      if (capabilities.includes("records.read")) {
-        // Past the grant: the request is read, and the account is unknown here.
-        expect(reconstructed.structuredContent).toMatchObject({
-          code: "evidence_restricted",
-          refs: ["refusal:unknown_account", "account"],
-        });
-      } else {
-        expect(reconstructed.isError).toBe(true);
-        expect(reconstructed.structuredContent).toMatchObject({
-          code: "unauthorized",
-          refs: ["refusal:capability_missing", "capability:records.read"],
-        });
-      }
-      const before = await relationCount();
-      const proposed = await callTool(
-        "kogane.reconcile.propose",
-        proposal(0, `a proposal under ${label}`),
-        { environment },
-      );
-      if (capabilities.includes("interpretation.propose")) {
-        expect(proposed.isError).toBe(false);
-        expect(proposed.structuredContent).toMatchObject({ status: "proposed", adopted: false });
-        expect(await relationCount()).toBe(before + 1);
-      } else {
-        expect(proposed.structuredContent).toMatchObject({
-          code: "unauthorized",
-          refs: ["capability:interpretation.propose"],
-        });
-        expect(await relationCount()).toBe(before);
-      }
-    });
-  }
-});
-
 describe("refusals a client sees", () => {
-  it("scope: a source outside the grant is refused, as a row outside it is", async () => {
-    const environment = grants({
-      [AGENT]: grant(READS, { sources: ["other-test"], accounts: "*" }),
-    });
-    const filtered = await callTool(
-      "kogane.financial.query",
-      { intent: "coverage", filters: { source: "sony-bank" } },
-      { environment },
-    );
-    expect(filtered.isError).toBe(true);
-    expect(filtered.structuredContent).toMatchObject({
-      code: "evidence_restricted",
-      refs: ["scope:source"],
-    });
-    const explained = await callTool(
-      "kogane.explain",
-      { ref: "source:sony-bank" },
-      { environment },
-    );
-    expect(explained.structuredContent).toMatchObject({ code: "evidence_restricted" });
-    const inside = await callTool(
-      "kogane.financial.query",
-      { intent: "coverage" },
-      { environment },
-    );
-    expect(inside.isError).toBe(false);
-    expect(JSON.stringify(inside.structuredContent)).not.toContain("sony-bank");
-  });
-
-  it("raw evidence: no raw locator without evidence.read", async () => {
-    const rows = await callTool(
-      "kogane.financial.query",
-      { intent: "activity" },
-      { environment: grants({ [AGENT]: grant(READS) }) },
-    );
+  it("raw evidence: the whole-store grant reaches a raw locator", async () => {
+    const rows = await callTool("kogane.financial.query", { intent: "activity" });
     const ref = (
       rows.structuredContent["result"]["data"]["rows"] as { observationRef: string }[]
     )[0]!.observationRef;
-    const closed = await callTool(
-      "kogane.explain",
-      { ref },
-      { environment: grants({ [AGENT]: grant(["summary.read", "records.read"]) }) },
-    );
-    expect(closed.isError).toBe(false);
-    expect(closed.structuredContent["restricted"]).toEqual(["evidence.read"]);
-    expect(
-      (closed.structuredContent["nodes"] as { kind: string }[]).some(
-        (node) => node.kind === "raw-locator",
-      ),
-    ).toBe(false);
-    const open = await callTool(
-      "kogane.explain",
-      { ref },
-      { environment: grants({ [AGENT]: grant(READS) }) },
-    );
+    const open = await callTool("kogane.explain", { ref });
+    expect(open.structuredContent["restricted"] ?? []).toEqual([]);
     expect(
       (open.structuredContent["nodes"] as { kind: string }[]).some(
         (node) => node.kind === "raw-locator",
@@ -1053,27 +881,13 @@ describe("refusals a client sees", () => {
     ).toBe(true);
   });
 
-  it("budget: a page or a proposal beyond the grant is refused, never truncated", async () => {
-    const environment = grants({
-      [AGENT]: grant(READS.concat("interpretation.propose"), WHOLE, {
-        maxRows: 10,
-        maxProposalTargets: 3,
-        maxExplainDepth: 2,
-      }),
-    });
-    const page = await callTool(
-      "kogane.financial.query",
-      { intent: "activity", limit: 50 },
-      { environment },
-    );
-    expect(page.isError).toBe(true);
-    expect(page.structuredContent).toMatchObject({
-      code: "budget_exceeded",
-      refs: ["budget:maxRows=10"],
-    });
+  it("budget: a proposal beyond the published targets is refused and writes nothing", async () => {
     const before = await relationCount();
-    const wide = await callTool("kogane.reconcile.propose", proposal(1), { environment });
-    expect(wide.structuredContent).toMatchObject({ code: "budget_exceeded" });
+    const wide = await callTool(
+      "kogane.reconcile.propose",
+      proposal(GRANT_LIMITS.maxProposalTargets),
+    );
+    expect(wide.isError).toBe(true);
     expect(await relationCount()).toBe(before);
   });
 });
@@ -1084,7 +898,7 @@ describe("the UI, HTTP and MCP return one result (AT72)", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date());
     // The same perimeter and read capabilities the browser reader holds.
-    const environment = grants({ [AGENT]: grant(READS), [OTHER]: grant(READS) });
+    const environment = {};
     const browser = { via: "app" as const, subject: OTHER };
     for (const intent of ["coverage", "holdings", "activity", "reported-state"]) {
       const ui = await send(`/api/v2/query?intent=${intent}`, undefined, {
@@ -1135,19 +949,18 @@ describe("the UI, HTTP and MCP return one result (AT72)", () => {
   it("returns one refusal object over HTTP and MCP", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date());
-    const narrow = grant(["summary.read"], { sources: ["other-test"], accounts: "*" });
-    const environment = grants({ [AGENT]: narrow, [OTHER]: narrow });
     for (const [tool, args] of [
-      ["financial.query", { intent: "activity" }],
-      ["financial.query", { intent: "coverage", filters: { source: "sony-bank" } }],
-      ["explain", { ref: "source:sony-bank" }],
-      ["reconcile.propose", proposal()],
+      ["financial.query", { intent: "net-worth" }],
+      ["financial.query", { intent: "activity", limit: GRANT_LIMITS.maxRows + 1 }],
+      ["explain", { ref: "observation:transaction:999999" }],
+      ["reconcile.propose", { ...proposal(), evidenceRefs: ["observation:transaction:999999"] }],
     ] as const) {
+      // The browser session as the operator holds the MCP client's grant.
       const http = await send(`/api/agent/v1/${tool}`, args, {
-        environment,
         identity: { via: "app", subject: OTHER },
+        environment: { OPERATOR_SUBJECTS: JSON.stringify([OTHER]) },
       });
-      const viaMcp = await callTool(`kogane.${tool}`, args, { environment });
+      const viaMcp = await callTool(`kogane.${tool}`, args);
       expect(http.status, tool).toBeGreaterThanOrEqual(400);
       expect(viaMcp.isError, tool).toBe(true);
       expect(viaMcp.structuredContent, tool).toEqual(await http.json());
@@ -1172,7 +985,6 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
 
   it("answers a tool's or the tool list's exception as the Worker does on every route", async () => {
     const environment = {
-      ...grants({ [AGENT]: grant(READS), [OTHER]: grant(READS) }),
       EVENTS_V2_ENABLED: "true",
       DB: failing(),
     };
@@ -1222,7 +1034,7 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
   });
 
   it("writes nothing to the log but the request line, in either era", async () => {
-    const environment = grants({ [AGENT]: grant(["summary.read"]) });
+    const environment = {};
     const log = vi.spyOn(console, "log");
     const warn = vi.spyOn(console, "warn");
     const error = vi.spyOn(console, "error");
@@ -1236,117 +1048,5 @@ describe("an internal failure leaves only a closed code (G3-08)", () => {
     expect(
       log.mock.calls.map(([line]) => (JSON.parse(String(line)) as { event: string }).event),
     ).toEqual(["evidence_request", "evidence_request", "evidence_request"]);
-  });
-});
-
-describe("scope covers every byte of every answer (matrix 5, 6)", () => {
-  // `other-test` is granted; `sony-bank` and its account `mcp-account-a` are not.
-  const DENIED = ["sony-bank", "mcp-account-a", "sa_mcp_sony-bank"];
-  const narrow = grant([...READS, "interpretation.propose"], {
-    sources: ["other-test"],
-    accounts: "*",
-  });
-
-  it("honours an account scope on reads and proposals", async () => {
-    const environment = grants({
-      [AGENT]: grant([...READS, "interpretation.propose"], {
-        sources: "*",
-        accounts: ["mcp-account-b"],
-      }),
-    });
-    const rows = await callTool("kogane.financial.query", { intent: "activity" }, { environment });
-    expect(rows.isError).toBe(false);
-    expect(JSON.stringify(rows.structuredContent)).not.toContain("mcp-account-a");
-    const filtered = await callTool(
-      "kogane.financial.query",
-      { intent: "activity", filters: { account: "mcp-account-a" } },
-      { environment },
-    );
-    expect(filtered.structuredContent).toMatchObject({
-      code: "evidence_restricted",
-      refs: ["scope:account"],
-    });
-    const before = await relationCount();
-    const proposed = await callTool(
-      "kogane.reconcile.propose",
-      proposal(0, "a proposal across the account scope"),
-      { environment },
-    );
-    expect(proposed.structuredContent).toMatchObject({ code: "incomplete_evidence" });
-    expect(await relationCount()).toBe(before);
-  });
-
-  it("never names a source or an account outside the grant, anywhere in an answer", async () => {
-    const environment = { ...grants({ [AGENT]: narrow }), EVENTS_V2_ENABLED: "true" };
-    const rows = await callTool("kogane.financial.query", { intent: "activity" }, { environment });
-    const inScopeRef = (
-      rows.structuredContent["result"]["data"]["rows"] as { observationRef: string }[]
-    )[0]!.observationRef;
-    const calls: [string, unknown][] = [
-      ["kogane.capabilities", {}],
-      ["kogane.context.open", {}],
-      ["kogane.context.open", { query: { intent: "activity" } }],
-      ["kogane.financial.query", { intent: "coverage" }],
-      ["kogane.financial.query", { intent: "holdings" }],
-      ["kogane.financial.query", { intent: "activity" }],
-      ["kogane.financial.query", { intent: "reported-state" }],
-      ["kogane.explain", { ref: "source:other-test" }],
-      ["kogane.explain", { ref: inScopeRef }],
-      ["kogane.explain", { ref: "observation:transaction:999999" }],
-      ["kogane.purchases.explain", {}],
-      ["kogane.instruments.candidates", {}],
-      ["kogane.instruments.candidates", { view: "separated" }],
-      [RECONSTRUCTED_STATE_TOOL_NAME, RECONSTRUCTED],
-    ];
-    for (const [name, args] of calls) {
-      const outcome = await callTool(name, args, { environment });
-      const whole = JSON.stringify(outcome);
-      for (const denied of DENIED)
-        expect(whole, `${name} ${JSON.stringify(args)}`).not.toContain(denied);
-    }
-    const opened = await callTool("kogane.context.open", {}, { environment });
-    expect(opened.structuredContent["context"]["sourceSelectionManifestRef"]).toBe(
-      "sources:other-test",
-    );
-    // tools/list and initialize carry no source at all.
-    const listed = JSON.stringify(await result(await rpc("tools/list", {}, { environment })));
-    for (const denied of DENIED) expect(listed).not.toContain(denied);
-  });
-
-  it("keeps a scoped context unchanged when only a source outside the grant moves", async () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date());
-    const environment = grants({ [AGENT]: narrow, [`mcp-client:${OTHER}`]: grant(READS) });
-    const contextFor = async (identity: Identity) =>
-      (await callTool("kogane.context.open", {}, { environment, identity })).structuredContent[
-        "context"
-      ] as Record<string, string>;
-    const scoped = async () => contextFor({ via: "mcp", subject: OWNER });
-    const whole = async () => contextFor({ via: "mcp", subject: OTHER });
-    const publish = async (source: string, parser: string) => {
-      const parse = await env.DB.prepare(`INSERT INTO parse_runs
-        (fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json)
-        VALUES (?,?,'9','2026-09-08','ok','[]') RETURNING id`)
-        .bind(artifactOf[source], parser)
-        .first<{ id: number }>();
-      await publishParse(parse!.id);
-    };
-
-    const scopedBefore = await scoped();
-    const wholeBefore = await whole();
-    // A new publication by a new parser build, in the source outside the grant.
-    await publish("sony-bank", "out-of-scope-parser");
-    const scopedAfter = await scoped();
-    const wholeAfter = await whole();
-    expect(scopedAfter).toEqual(scopedBefore);
-    // The whole-store context does see it: the digests are not simply constant.
-    expect(wholeAfter["publicationRef"]).not.toBe(wholeBefore["publicationRef"]);
-    expect(wholeAfter["parserBuildManifestRef"]).not.toBe(wholeBefore["parserBuildManifestRef"]);
-    // And the scoped context moves with its own source.
-    await publish("other-test", "in-scope-parser");
-    const scopedMoved = await scoped();
-    expect(scopedMoved["publicationRef"]).not.toBe(scopedBefore["publicationRef"]);
-    expect(scopedMoved["parserBuildManifestRef"]).not.toBe(scopedBefore["parserBuildManifestRef"]);
-    expect(scopedMoved["contextId"]).not.toBe(scopedBefore["contextId"]);
   });
 });
