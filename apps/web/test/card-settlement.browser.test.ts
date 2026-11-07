@@ -601,6 +601,7 @@ describe.if(runnable)("card settlement review", () => {
     // The full list adds the one the group did not carry, and repeats none.
     expect(await page.locator(".settlement-older section.panel").count()).toBe(2);
     expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(3);
+    expect(await auditView(page)).toEqual([]);
     await page.setViewportSize({ width: 390, height: 844 });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),

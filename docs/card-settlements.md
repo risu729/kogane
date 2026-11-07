@@ -413,7 +413,10 @@ statement; when it exceeds the judged ones, `この請求の候補をすべて�
 the statement's whole list, 50 a page, newest first
 (`GET /api/v2/reconciliation/card-settlements?statementKey=…`). Nothing is
 deleted or hidden for good: candidates and decisions stay append-only and every
-candidate keeps its own history and actions. The flat list
+candidate keeps its own history and actions. Every candidate's head shows
+its billing month and when it was created (`候補の作成`), and its region is
+named by the heading, the month and that time, so the candidates of one
+statement are told apart by ear as well as by eye. The flat list
 (`?offset=`) and one review (`?proposalId=`) are unchanged.
 
 A limit: a ready candidate older than the five newest of its statement is never

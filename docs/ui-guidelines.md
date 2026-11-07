@@ -74,7 +74,9 @@ page passes when:
 - No two landmarks, regions or named groups of one role share a name, and no
   two non-empty alerts or status messages share their text. A table's scroll
   region never repeats its panel's name (panel 取引の記録, region
-  取引の記録の表); a table repeated per account carries the account. A pager is
+  取引の記録の表); a table repeated per account carries the account, and a
+  card repeated per candidate carries what tells the candidates apart (a
+  settlement candidate is named by its billing month and creation time). A pager is
   `Pagination`: a named group whose status speaks its label before the count,
   and a page with two pagers gives each its own label. Retry buttons inside
   alerts are distinct by name.
