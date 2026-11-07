@@ -48,6 +48,7 @@ import {
   type OperationCall,
   type OperationName,
 } from "../../../packages/application/src/index";
+import { RUN_ID as TERMINAL_RUN_ID } from "../../../packages/collection/src/keys";
 import { auditContext, auditedRoute } from "./audit";
 import { principalFor } from "./grants";
 import { boundedText, HttpError, json } from "./http";
@@ -99,8 +100,14 @@ const IDEMPOTENCY_KEY = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u)
   .optional();
-/** A run as the terminal contract names it: one path segment, never a key. */
-const RUN_ID = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
+/**
+ * A run as the terminal contract names it: one path segment, never a key.
+ * The grammar is the bucket key's own (`RUN_ID` in `packages/collection`), not
+ * a copy of it: an import names the run whose terminal is
+ * `runs/<source>/<runId>/terminal.json`, so a run id that key refuses could
+ * never register and is refused here, at acceptance, rather than answered 202.
+ */
+const RUN_ID = z.string().regex(TERMINAL_RUN_ID);
 /** A registered parser release id (0028), never a version string a caller invents. */
 const PARSER_RELEASE = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$/u);
 

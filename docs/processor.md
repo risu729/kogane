@@ -692,7 +692,10 @@ changes nothing the lane did.
 The App accepts an operations-API request, stores it and answers 202;
 notifying the executor is a separate step that may be lost, so the request
 stays `dispatch_pending` until someone takes it (02 §5,
-[ops-api.md](ops-api.md)). `operation_dispatch` is that someone.
+[ops-api.md](ops-api.md)). `operation_dispatch` is that someone. An import's
+run id is checked at acceptance against the bucket key's run grammar, so the
+App stores no import whose terminal key cannot be formed
+([ops-api.md](ops-api.md#routes)).
 
 | Kind                                       | What the Processor does                                                                                               | What it completes                                                                         |
 | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
