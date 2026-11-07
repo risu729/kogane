@@ -58,7 +58,7 @@ export interface RevisionWrite {
   reason: typeof ACCEPTED_REASON;
 }
 /** The proposal an acceptance writes, as the trusted writer options name it. */
-export interface AcceptedProposal {
+interface AcceptedProposal {
   id: number;
   ruleId: string;
 }
@@ -97,7 +97,7 @@ export type MaintenanceRevisionWriter<O = never> = (
   options?: O,
 ) => Promise<RevisionResult>;
 /** What a delegated acceptance's prepare learns from the writer's validation chain. */
-export type RevisionPrepareResult =
+type RevisionPrepareResult =
   | {
       ok: true;
       currentRevision: number;
@@ -106,7 +106,7 @@ export type RevisionPrepareResult =
     }
   | { ok: false; code: string; status: number };
 /** The writer's validation chain without the write (`prepareMaintenanceRevision`). */
-export type MaintenanceRevisionPreparer<O> = (
+type MaintenanceRevisionPreparer<O> = (
   env: Env,
   write: RevisionWrite,
   options?: O,

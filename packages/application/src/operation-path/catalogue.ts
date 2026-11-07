@@ -36,7 +36,6 @@ export interface CatalogueEntry {
   paths: readonly AuditPath[];
 }
 
-const UI: readonly SubjectPath[] = ["ui"];
 const UI_MCP: readonly SubjectPath[] = ["ui", "mcp"];
 const AGENT: readonly SubjectPath[] = ["agent-http", "mcp"];
 // The operations requests of docs/ops-api.md: the operator's HTTP routes, and

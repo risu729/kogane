@@ -445,7 +445,6 @@ export {
   replayDelegatedConfirmation,
   delegatedBatchFailure,
   delegatedCommandFamilyAllowed,
-  delegatedWritesRemaining,
 } from "./delegation/execution.ts";
 
 export { assertDelegatedReversal } from "./delegation/reversal.ts";
