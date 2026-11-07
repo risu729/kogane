@@ -70,8 +70,8 @@ All six are authenticated, and all six are refused unless `OPS_API_ENABLED` is
 
 An import's `runId` is checked against the bucket key's own run grammar
 (`RUN_ID` in `packages/collection/src/keys.ts`, imported by
-`services/app/src/ops-api.ts` rather than copied): a letter or digit, then up
-to 199 letters, digits, `.`, `_` or `-`. The import names the run whose
+`services/app/src/ops-api.ts` rather than copied): an ASCII letter or digit, then up
+to 199 ASCII letters, digits, `.`, `_` or `-`. The import names the run whose
 terminal is `runs/<source>/<runId>/terminal.json`, so a run id that key cannot
 carry (a `:`, a `/`, a space, a leading separator) could never register; it is
 refused at acceptance with `400 invalid_request` and `refs: ["runId"]`, and no
@@ -534,14 +534,15 @@ The collector execution services are in
 
 Synthetic data only.
 
-- `services/app/test/ops-api.test.ts` (34 checks over the real
+- `services/app/test/ops-api.test.ts` (35 checks over the real
   Worker, the real migrations and the real store): flag-off behaviour, the
   closed route and verb set with the flag on, `/api/meta` discovery, one
   record per request, re-send, idempotency conflict, per-principal scoping,
   schema refusals of SQL / storage keys / external URLs / unknown keys /
   impossible dates (G3-13), an import run id outside the terminal key's
-  grammar, and that the import schema accepts exactly the run ids
-  `terminalKey` accepts, error bodies that carry no rejected value — not
+  grammar, that the import schema accepts exactly the run ids
+  `terminalKey` accepts and that the MCP import tool publishes that grammar,
+  error bodies that carry no rejected value — not
   the unknown source or release either (G3-08), the four other routes, the
   replay plan written into the 0035 tables exactly once, `waiting_for_human`
   (G3-11), stage progress and completion, the read route's `execution` block

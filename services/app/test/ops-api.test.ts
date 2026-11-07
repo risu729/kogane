@@ -28,9 +28,9 @@ import worker from "../src/worker";
 import { seedRegistry } from "./fixtures";
 import { PURCHASES_TOOL_NAME } from "../src/agent-service";
 import { MCP_TOOLS, RECONSTRUCTED_STATE_MCP_TOOLS } from "../src/mcp";
-import { OPS_TOOL_NAMES } from "../src/ops-tools";
+import { OPS_MCP_TOOLS, OPS_TOOL_NAMES } from "../src/ops-tools";
 import { importSchema } from "../src/ops-api";
-import { CollectionKeyError, terminalKey } from "../../../packages/collection/src/keys";
+import { CollectionKeyError, RUN_ID, terminalKey } from "../../../packages/collection/src/keys";
 import {
   claimCollectorStart,
   d1CommandStore,
@@ -483,6 +483,15 @@ describe("the schema is the boundary (G3-08, G3-13)", () => {
         keyAccepts,
       );
     }
+  });
+
+  // The MCP tool publishes the same grammar it validates with, so a client
+  // that honours the listed pattern never sends a run id the App refuses.
+  it("publishes the terminal key's run grammar on the MCP import tool", () => {
+    const tool = OPS_MCP_TOOLS.find(({ name }) => name === "kogane.ops.import.request");
+    expect(tool?.inputSchema).toMatchObject({
+      properties: { runId: { type: "string", pattern: RUN_ID.source } },
+    });
   });
 
   it("refuses a body larger than the bound before it reaches a schema", async () => {
