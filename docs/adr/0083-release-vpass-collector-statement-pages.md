@@ -2,8 +2,8 @@
 
 - Status: proposed
 - Date: 2026-11-07
-- Issue: part of [#445](https://github.com/risu729/kogane/issues/445) (Phase 2,
-  unit 2f of the [roadmap](../roadmap.md#phase-2--card-usage--statement--bank-debit-current-milestone))
+- Issue: part of [#445](https://github.com/risu729/kogane/issues/445) (Phase 2
+  of the [roadmap](../roadmap.md#phase-2--card-usage--statement--bank-debit-current-milestone))
 - Decided by: the owner, 2026-11-07 04:16 UTC, choosing "release now, limited
   to successful runs" over "hold until every card is `complete`"
 - Carried by: `packages/application/src/collection/descriptors.ts`
@@ -55,11 +55,17 @@ What a released page would do, read from the code:
   `partial` (option 8) is `partial` in `observation_fetch_runs`, so its pages
   get no parse job and are never an eligible snapshot. The importer's three
   `partial` runs are excluded the same way today.
-- **A successful run binds.** Its binding unit and its card unit both
-  succeeded, so `trusted_vpass_card_bindings` admits its pages, identity
-  policy 2 resolves its rows to the token, and the token's account entity is
-  the importer-era one for a rewritten card
+- **A successful run with a binding binds.** When the collector derived a
+  token, the run's binding unit and card unit both succeeded, so
+  `trusted_vpass_card_bindings` admits its pages, identity policy 2 resolves
+  its rows to the token, and the token's account entity is the importer-era
+  one for a rewritten card
   ([ADR 0023's amendment](0023-vpass-collector-card-binding.md#amendment-option-3-implemented)).
+  The binding is not part of run success: when the derivation fails closed
+  (`binding_tuple_absent`, `binding_selection_mismatch`, ...) the run holds
+  only its card unit, can still be `success`, and its pages are parsed with
+  run-scoped, unresolved rows (`services/processor/test/vpass-collector-binding.test.ts`,
+  "without the collector's binding").
 - **Registered pages keep their descriptors.** Fetch artifacts are
   append-only, so a run already registered under `terminal-registration-v2`
   keeps its pages without a dataset unless it registers again.
@@ -122,6 +128,22 @@ What a released page would do, read from the code:
   counted twice; the retired revisions stay readable. From the counts above,
   that is one importer-era card today. Card-months no successful run captured
   keep the importer's snapshot.
+- **A successful run without a binding** (the derivation failed closed)
+  still becomes the current snapshot of its card-month and retires the
+  importer-era purchase event of that card-month; its own rows are skipped
+  as `account_not_resolved`, so the month has no live purchase until a later
+  bound run captures it. Nothing is counted twice. Every collector token seen
+  on 2026-11-07 was derived, so no such run is known, but run-scope
+  eligibility does not prevent one.
+- **Card ordinals are assumed to match.** The current snapshot of a
+  card-month is chosen per (source, card unit key `card-NNN`, month)
+  (`VPASS_STATEMENT_SNAPSHOT_CTES`); only the purchase ranking after it is
+  per resolved account. A collector card whose ordinal is one the importer
+  used for another card would make that other card's importer-era month no
+  longer current (its event retires with nothing to replace it), while the
+  card's own importer-era month under its old ordinal is outranked per
+  account, not counted twice. The counts above showed tokens, not that each
+  card kept its importer ordinal; that is not verified.
 - **The seventh card** (no importer token) becomes a new account entity with
   no owner and no label, and the months its successful runs captured appear as
   new purchases on it. Its ownership is the owner's decision.
@@ -167,9 +189,11 @@ What a released page would do, read from the code:
   short (`partial`) card run registered under v2 have pages without a dataset
   and no job; under v3 each registers again as a second fetch run in its own
   session with the page's dataset; the sweep parses only the successful run's
-  page, which is the one current snapshot of its card-month; a redelivery and
-  a second sweep add nothing. A page under the importer's role gets no dataset
-  under any version and is carried over.
+  page, which is the one current snapshot of its card-month; the trusted view
+  admits both fetch runs of the successful run (one token each) and identity
+  policy 2 pins and seals the parsed page to the v3 run's binding; a
+  redelivery and a second sweep add nothing. A page under the importer's
+  role gets no dataset under any version and is carried over.
 - `services/processor/test/vpass-collector-binding.test.ts`: the collector's
   registered run carries the dataset on its page and its binding, the view,
   identity policy 2 and the purchase-lane card world (the importer-era event

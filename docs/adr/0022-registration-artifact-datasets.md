@@ -346,6 +346,7 @@ withheld Vpass statement-page rule into `ARTIFACT_DATASETS` unchanged and
 bumps the contract to `terminal-registration-v3` with this ADR's carry-over;
 `WITHHELD_ARTIFACT_DATASETS` is empty, and v1 and v2 stay reproducible in
 `DATASETS_BY_VERSION`. Only a successful card run's pages are parsed (run-scope
-eligibility), so a capture that cannot bind never retires the importer-era
-purchases, which was the reason for the withholding. The text above is left
-as it was decided.
+eligibility), so a `partial` card run, which never binds, never retires the
+importer-era purchases, which was the reason for the withholding; a
+successful run whose binding failed closed still can (ADR 0083,
+Consequences). The text above is left as it was decided.

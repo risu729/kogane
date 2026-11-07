@@ -94,7 +94,12 @@ const V1 = "terminal-registration-v1";
 const V2 = "terminal-registration-v2";
 
 /** One registration under an explicit contract version (the current one when omitted). */
-function register(source: string, runId: string, contractVersion?: string) {
+function register(
+  source: string,
+  runId: string,
+  contractVersion?: string,
+  budget?: RegistrationBudget,
+) {
   return registerTerminal({
     env: { DB: env.DB, EVIDENCE: env.EVIDENCE },
     bucket: env.EVIDENCE,
@@ -102,6 +107,7 @@ function register(source: string, runId: string, contractVersion?: string) {
     source,
     runId,
     ...(contractVersion === undefined ? {} : { contractVersion }),
+    ...(budget === undefined ? {} : { budget }),
   });
 }
 
@@ -172,7 +178,7 @@ test("a Mobile Suica run sealed under v1 without datasets registers again under 
 
   // Under v2 its descriptors change, so it registers again: a second fetch
   // run over the same objects, whose normalized rows carry `sf-history`.
-  const v2 = await registerCollectionRun(env, { source: "mobile-suica", runId });
+  const v2 = await register("mobile-suica", runId, V2);
   expect(v2).toMatchObject({ outcome: "registered", artifacts: 3 });
   const v2Run = (v2 as { fetchRunId: number }).fetchRunId;
   expect(v2Run).not.toBe(v1Run);
@@ -247,11 +253,28 @@ test("a Mobile Suica run sealed under v1 without datasets registers again under 
     true,
   );
 
-  // Delivered again, it is the same registration: nothing new, the same rows.
-  expect(await registerCollectionRun(env, { source: "mobile-suica", runId })).toMatchObject({
-    outcome: "already_registered",
-    fetchRunId: v2Run,
-  });
+  // Under v3 (ADR 0083), which changes no Mobile Suica descriptor, it is
+  // carried over to the v2 fetch run, not to v1's (whose descriptors v3 does
+  // not derive) and not registered a third time; delivered again, the same.
+  for (let delivery = 0; delivery < 2; delivery++) {
+    expect(await registerCollectionRun(env, { source: "mobile-suica", runId })).toMatchObject({
+      outcome: "already_registered",
+      fetchRunId: v2Run,
+    });
+  }
+  expect(
+    (
+      await env.DB.prepare(
+        "SELECT registration_contract_version AS version, fetch_run_id FROM collection_runs WHERE source='mobile-suica' AND run_id=? ORDER BY id",
+      )
+        .bind(runId)
+        .all()
+    ).results,
+  ).toEqual([
+    { version: V1, fetch_run_id: v1Run },
+    { version: V2, fetch_run_id: v2Run },
+    { version: REGISTRATION_CONTRACT_VERSION, fetch_run_id: v2Run },
+  ]);
   expect(await sweep(env)).toMatchObject({ parsed: 0, error: 0 });
   expect(await rows(transactions)).toEqual(listed);
   expect(await identitySweep(env.DB, resolveIdentity, 40, "mobile-suica")).toMatchObject({
@@ -454,6 +477,37 @@ test("ADR 0083: a collector-vpass card run sealed under v2 registers again under
   ).toEqual([{ complete_run: 1, parser: "vpass-statement-page", status: "ok" }]);
   expect(await vpassJobs()).toBe(1);
   expect(await rows(eligible)).toEqual([{ producer: "collector-vpass", month: "202608", n: 1 }]);
+  // The second fetch run of the session binds on its own: the view admits the
+  // v3 run (its run key names v3), the pin names the v3 run's binding
+  // artifact, and the v2 run of the same token beside it breaks nothing.
+  // The partial runs bind nowhere.
+  await identitySweep(env.DB, resolveIdentity, 8);
+  expect(
+    (
+      await env.DB.prepare(
+        `SELECT substr(r.source_run_key, instr(r.source_run_key, ':') + 1) AS version,
+                COUNT(DISTINCT b.card_token) AS tokens
+           FROM trusted_vpass_card_bindings b JOIN fetch_artifacts a ON a.id=b.financial_artifact_id
+           JOIN fetch_runs r ON r.id=a.fetch_run_id
+          WHERE r.producer_id='collector-vpass' GROUP BY r.id ORDER BY r.id`,
+      ).all()
+    ).results,
+  ).toEqual([
+    { version: V2, tokens: 1 },
+    { version: REGISTRATION_CONTRACT_VERSION, tokens: 1 },
+  ]);
+  expect(
+    (
+      await env.DB.prepare(
+        `SELECT c.policy_version, substr(r.source_run_key, instr(r.source_run_key, ':') + 1) AS version,
+                (SELECT COUNT(*) FROM identity_run_seals s WHERE s.identity_run_id=i.id) AS sealed
+           FROM identity_vpass_bindings v JOIN identity_runs i ON i.id=v.identity_run_id
+           JOIN identity_run_contexts c ON c.identity_run_id=i.id
+           JOIN fetch_artifacts ba ON ba.id=v.binding_artifact_id
+           JOIN fetch_runs r ON r.id=ba.fetch_run_id`,
+      ).all()
+    ).results,
+  ).toEqual([{ policy_version: 2, version: REGISTRATION_CONTRACT_VERSION, sealed: 1 }]);
   // A redelivery adds nothing.
   for (const plan of [complete, short]) {
     expect(
@@ -539,11 +593,16 @@ test("a Mizuho capture parsed under v1 is carried over by v2, not registered and
     .first<number>("fetch_run_id");
 
   // The carry-over is one bounded step: the preamble and one structure step.
-  const budget = new RegistrationBudget();
-  expect(
-    await registerCollectionRun(env, { source: "mizuho-bank", runId }, { budget }),
-  ).toMatchObject({ outcome: "already_registered", fetchRunId: fetchRun });
-  expect(budget.meter.total).toBeLessThanOrEqual(PREAMBLE_RESERVE + STRUCTURE_STEP_RESERVE);
+  // v2 carries the v1 registration over, and v3 (ADR 0083) the v2 row that
+  // v2 carried over: production's state for every Mizuho terminal.
+  for (const version of [V2, REGISTRATION_CONTRACT_VERSION]) {
+    const budget = new RegistrationBudget();
+    expect(await register("mizuho-bank", runId, version, budget)).toMatchObject({
+      outcome: "already_registered",
+      fetchRunId: fetchRun,
+    });
+    expect(budget.meter.total).toBeLessThanOrEqual(PREAMBLE_RESERVE + STRUCTURE_STEP_RESERVE);
+  }
   expect(
     (
       await env.DB.prepare(
@@ -554,6 +613,7 @@ test("a Mizuho capture parsed under v1 is carried over by v2, not registered and
     ).results,
   ).toEqual([
     { version: V1, fetch_run_id: fetchRun },
+    { version: V2, fetch_run_id: fetchRun },
     { version: REGISTRATION_CONTRACT_VERSION, fetch_run_id: fetchRun },
   ]);
   expect(
