@@ -2,3 +2,4 @@
 .dev.vars.*
 .env
 .env.*
+worker-configuration.d.ts

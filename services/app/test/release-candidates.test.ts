@@ -5,12 +5,13 @@
 // `parse_run_candidates` marker (migration 0028) - and adds what only exists
 // once candidates are real: the operational gap view must stay empty, so no
 // repair route can ever publish a candidate.
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { evidenceReader } from "../src/observations";
 import { identityApi } from "../src/identity-api";
 import { observationApi } from "../src/observation-api";
-import { observationOrganizations } from "../src/observation-organization";
+import { observationOrganizations } from "../../../packages/application/src/query/observation-organization.ts";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { CANDIDATE_LIMIT } from "../../../packages/read-model/src/index";
 
@@ -108,7 +109,7 @@ describe("release candidates are invisible to every reader", () => {
       adopted.bal,
     ]);
     expect((await api(`/api/identity/accounts?source=${SB}`)).rows).toEqual([]);
-    const organization = await observationOrganizations(env.DB, [
+    const organization = await observationOrganizations(d1Executor(env.DB), [
       { kind: "transaction", id: candidate.tx },
     ]);
     expect([...organization.values()].map((o) => o.state)).toEqual(["unavailable"]);

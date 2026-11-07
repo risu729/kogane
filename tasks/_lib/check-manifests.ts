@@ -21,7 +21,10 @@
 //     those are. A missing edge is not a build error but a race: mise runs
 //     independent tasks in parallel, so the check passes whenever the export
 //     happens to have run first and fails on a clean checkout (unified plan
-//     U15, the U02/U03 follow-up).
+//     U15, the U02/U03 follow-up);
+//   * no Wrangler `types` output (`worker-configuration.d.ts`) is tracked:
+//     each workspace's `types` task writes it before every check, so a
+//     committed copy drifts and leaves the working tree dirty.
 //
 // It validates what this repository declares, never what a dependency ships:
 // node_modules is out of scope because git does not track it.
@@ -423,6 +426,24 @@ export function trackedGeneratedFiles(
     );
 }
 
+/** The file `wrangler types` writes beside a workspace's Wrangler config. */
+export const WRANGLER_TYPES_OUTPUT = "worker-configuration.d.ts";
+
+/**
+ * Tracked Wrangler `types` output. Every workspace's `types` task rewrites the
+ * file and its typecheck, test and dry-run tasks depend on that task, so a
+ * committed copy goes stale with the next Wrangler or workerd update and every
+ * check run leaves the working tree dirty. Each workspace git-ignores it.
+ */
+export function trackedWorkerTypes(tracked: readonly string[]): string[] {
+  return tracked
+    .filter((file) => file === WRANGLER_TYPES_OUTPUT || file.endsWith(`/${WRANGLER_TYPES_OUTPUT}`))
+    .map(
+      (file) =>
+        `${file}: Wrangler types output is tracked by git; the workspace types task regenerates it, so remove it from the index and git-ignore it`,
+    );
+}
+
 const SCANNED = [
   "*.md",
   "*.yml",
@@ -539,6 +560,7 @@ export function check(): string[] {
       generated.length === 0 ? [] : trackedFiles(...generated.map((file) => file.path)),
     ),
     ...generatedInputViolations(generated, sources, directories, tasks),
+    ...trackedWorkerTypes(trackedFiles(WRANGLER_TYPES_OUTPUT, `**/${WRANGLER_TYPES_OUTPUT}`)),
   );
   return errors;
 }

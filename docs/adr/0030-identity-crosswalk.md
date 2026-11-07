@@ -5,7 +5,7 @@
   [amendment of 2026-09-28](#amendment-2026-09-28-a-one-time-identity-value-rewrite-replaces-the-crosswalk),
   accepted for its staging migration 0062
   ([#357](https://github.com/risu729/kogane/pull/357)); its rewrite migration
-  0063 is proposed and accepted when the change that carries it merges. The
+  0063 is accepted ([#367](https://github.com/risu729/kogane/pull/367), merged 2026-09-29). The
   file keeps its name so that links to it stay valid.
 - Date: 2026-09-27; amended 2026-09-28; 0063 recorded 2026-09-29
 - Carried by (amendment):
@@ -272,7 +272,7 @@ For how the decision is recorded:
 ## Amendment (2026-09-28): a one-time identity-value rewrite replaces the crosswalk
 
 - Status: accepted for 0062 ([#357](https://github.com/risu729/kogane/pull/357));
-  0063 proposed, accepted when the change that carries it merges. It is
+  accepted for 0063 ([#367](https://github.com/risu729/kogane/pull/367)). It is
   carried out by two migrations in two changes: 0062 stages the pairs and
   retires the crosswalk; 0063 performs the rewrite
   ([as implemented](#0063-as-implemented-2026-09-29)).
@@ -468,7 +468,7 @@ What the value is inside the store decides how it can be rewritten:
 
 ### 0063 as implemented (2026-09-29)
 
-- Status: proposed; accepted when the change that carries 0063 merges.
+- Status: accepted (merged 2026-09-29 in #367).
 - Production preconditions the owner reported before it (counts only, read
   with the queries of [identity operations](../identity-operations.md#one-time-identity-value-rewrite)):
   `moneyforward-me` / `shared-rows` 4 pairs (4 distinct old and 4 distinct

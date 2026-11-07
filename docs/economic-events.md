@@ -28,7 +28,7 @@ while `RECONCILIATION_ENABLED` is off.
 
 The implemented Vpass and MyJCB pending/posted slices below are the starting
 point for phases 6–7, not completion of reconciliation or event generation. The
-[next product milestone](roadmap.md#phases-67--reconciliation-and-economic-event-generation)
+[next product milestone](roadmap.md#layers-67--reconciliation-and-economic-event-generation)
 builds on them with card statements and bank debits, review/correction and an
 explanation from purchase through settlement to source evidence. Event, leg,
 allocation and settlement tables still need continuous population from the
@@ -37,17 +37,18 @@ produce the complete economic event or its balance effect.
 
 ## What is automatic and what is proposal-only
 
-| Step                                                      | Who does it                                                                               |
-| --------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| Producing stage A candidates from published observations  | The rule job, whenever `RECONCILIATION_ENABLED` is on                                     |
-| Accepting a candidate                                     | A decision in the decision log, through a guarded command                                 |
-| Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision                                       |
-| Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision                                     |
-| Pairing a recognised pending event with posted events     | The purchase lane's candidate pass: proposals only                                        |
-| Merging a pending and a posted event into one purchase    | A reviewed `relation.accept` (change lifecycle)                                           |
-| Merging a pair the provider itself linked                 | The purchase lane, **still** as recorded `rule` decisions                                 |
-| Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)                                  |
-| Pairing an own-account debit and credit (own transfer)    | Proposal only ([below](#own-transfer-proposals-migration-0072)); nothing adopts one today |
+| Step                                                      | Who does it                                                                                       |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Producing stage A candidates from published observations  | The rule job, whenever `RECONCILIATION_ENABLED` is on                                             |
+| Accepting a candidate                                     | A decision in the decision log, through a guarded command                                         |
+| Accepting a candidate the provider itself linked          | The rule, **still** as a recorded `accept` decision                                               |
+| Recognising an adopted card usage row as a purchase       | The rule job, **still** as a recorded `rule` decision                                             |
+| Pairing a recognised pending event with posted events     | The purchase lane's candidate pass: proposals only                                                |
+| Merging a pending and a posted event into one purchase    | A reviewed `relation.accept` (change lifecycle)                                                   |
+| Merging a pair the provider itself linked                 | The purchase lane, **still** as recorded `rule` decisions                                         |
+| Anything from amount + date closeness, a heuristic, or AI | Proposal only. Never accepted without a decision (INV07)                                          |
+| Pairing an own-account debit and credit (own transfer)    | Proposal only ([below](#own-transfer-proposals-migration-0072)); nothing adopts one today         |
+| Allocating several bank debits to one card statement      | A pure planner only ([ADR 0074](adr/0074-card-statement-allocation-planner.md)); nothing calls it |
 
 [Card purchase recognition](#card-purchase-recognition) runs only while
 `PURCHASE_RECOGNITION_ENABLED` is on, and only for single-payment rows with an
@@ -510,6 +511,12 @@ released`). The DB CHECK is unchanged.
   - `effectiveRate` and `referenceQuoteDifference` — the second returns
     `kind: "estimate"`, deliberately not a fee (UC21).
   - `legTotal` — a total for one basis and unit; two bases are never summed.
+- `src/card-settlement-allocation.ts` — `planCardStatementAllocations`
+  ([ADR 0074](adr/0074-card-statement-allocation-planner.md)): under an
+  explicit policy, the set of whole debits whose exact sum is a statement
+  total, `needs_review` when not unique, and `unsupported` with
+  `in_window_debits_below_total` / `debit_above_total` when no set sums
+  exactly. It computes no remainder and nothing calls it.
 - `src/reconcile.ts` — the stage A/B/C candidate matcher. It returns proposals
   with rationale codes only, always `status: "proposed"`, and
   `autoAcceptable: true` only when the provider itself linked the pair inside
@@ -1236,12 +1243,20 @@ event already retired keeps the period it had.
 - `activity({ basis, offset })` — current event revisions with at least one leg
   on the requested basis, their legs, their live allocations, one total per
   (basis, unit), and `explanationRefs` running event → legs → allocations →
-  source facts → raw locators.
+  source facts → raw locators. A (basis, unit) with a leg that is not exact
+  keeps its total, unknown with that leg's status and reason (the first such
+  leg by index), so an accepted card settlement lists its exact
+  `cash-movement` total beside an `obligation-change` total that is `missing`
+  with `statement_principal_and_fees_unknown`; it is never zero and never
+  left out (INV05).
 - `obligations({ offset })` — principal, live settlements, `settled`,
   `outstanding` (`principal − settled`, exact arithmetic), confirmed and
   projected fee totals kept apart, and the unresolved differences the
   settlements declared. When either side is not exact, `outstanding` is `null`
-  with an `outstandingReasonCode`; it is never zero-filled (INV05).
+  with an `outstandingReasonCode`; it is never zero-filled (INV05). A fee
+  total is `null` only when there is no such fee: a fee that is not exact, or
+  in another unit than the principal, leaves it unknown with a reason (the
+  fee's own status and reason, or a `conflict` with `unit_mismatch`).
 - `reconciliationSignals({ subjectRefs })` — the latest published
   provider-reported balance beside the amount the adopted events'
   `cash-movement` legs imply, and their `difference` with reason codes (`snapshot_boundary_unknown`,
@@ -1338,8 +1353,25 @@ statement totals are listed beside the figures and are never subtracted from
 or compared with them, and `settlementAddsPurchaseExpense` is `false`.
 `coverage` says the list is not a complete transaction history, names the
 excluded shapes, and counts the current provider rows no live event holds,
-across every statement month whatever the filter. All figures are exact
-decimals added in `@kogane/domain`.
+across every statement month whatever the filter. `unrecognizedReasons` splits
+that count per source and closed reason: each such row is classified when the
+page is read by `classifyCardUsage`, the writer's own rule, through the same
+row-to-fact mapping (`packages/application/src/card-usage-fact.ts`), so the
+page reports the reason the writer skips it. A reason is one of
+`CARD_USAGE_EXCLUSIONS`, or `recognition_pending` for a row the rule accepts
+that no live revision holds yet (the writer has not reached it in its cursor
+cycle, or its write conflicted). Only reasons some row has are listed, Vpass
+before MyJCB, each in the closed order of `CARD_USAGE_UNRECOGNIZED_REASONS`
+(`packages/domain/src/card-purchase.ts`). No reason is stored: there is no
+per-row skip table and no migration, and a reason is always the current rule's.
+At most 1,000 rows (`CARD_PURCHASE_UNRECOGNIZED_LIMIT`, lowest observation id
+first) are classified per request; beyond that the total stays exact,
+`complete` is `false` and the counts add up to less than it (INV05: a partial
+count says so, never scaled or zero). The response carries counts and codes
+only. Installments, revolving and bonus payments stay
+`payment_type_unsupported` ([ADR 0004](adr/0004-payment-type-shapes-from-evidence.md));
+the breakdown changes no recognition ([#547](https://github.com/risu729/kogane/issues/547),
+2026-11-07). All figures are exact decimals added in `@kogane/domain`.
 
 Cost per request: one selection of the filter's live events that carries only
 what the figures, the order and the statement links read (a few hundred bytes
@@ -1347,8 +1379,14 @@ per event; evidence, facts and history are read for the page's 50 events
 only), one statement query and one settlement query over the (account,
 source, period) keys of those events, and one pass of the shared current card
 usage query (`packages/read-model/src/card-usage.ts`) for the `current` flags
-and the unrecognised count. That pass reads every current Vpass/MyJCB capture
-and dominates the cost: on a synthetic store of about 34,000 usage
+and the unrecognised rows, which come back whole (up to the bound) for their
+reasons. That pass reads every current Vpass/MyJCB capture and dominates the
+cost. Returning the unrecognised rows whole instead of only counting them
+added about 45 ms on the full-scale store of [read model: cost](read-model.md#cost)
+(10,869 current rows, 4,268 unrecognised: 344 → 389 ms median for the pass
+on `bun:sqlite`); production had 298 current rows, 6 of them unrecognised
+(read-only count, 2026-11-07 04:10 UTC). Earlier measurement: on a
+synthetic store of about 34,000 usage
 observations (180 days of daily captures) and 8,200 live events, the
 unfiltered first page took about 0.4 s in `bun:sqlite`, of which the usage
 pass was about 0.3 s and the selection about 0.04 s. The candidates add two
@@ -1371,9 +1409,9 @@ while `cardPurchaseRecognition` is, calls the same `queryCardPurchases`, and
 returns its page as `data`, figures, coverage, chain and `explanationRefs`
 unchanged, with each candidate's `actions` and `relation` removed: an agent
 sees which links are proposed and why, and every review stays with the
-operator. It needs an `AGENT_API_GRANTS` grant with `records.read` over
-`"*"` sources and accounts (the page cannot yet be recomputed inside a
-narrower scope, so a listed grant is refused rather than answered), the
+operator. It needs `records.read` over `"*"` sources and accounts, which
+every proved caller holds since ADR 0084 (the page cannot yet be recomputed
+inside a narrower scope, so a narrower grant would be refused), the
 10,000-event bound is `413 budget_exceeded` there, and it writes nothing
 either.
 
@@ -1612,3 +1650,12 @@ an SBI Shinsei debit is admitted when a 0.1.3 run stored it and refused with
 refused while another writer holds the debit's key or alias class
 (`claim_available`); a withdrawal releases the claim. The event revision cites
 its statement and bank rows as `SourceFactRef` objects.
+
+A statement is paired with one debit of equal amount only. A statement two
+debits pay together, or one debit pays in part, gets no candidate and no
+reason from the sweep. The pure planner of
+[ADR 0074](adr/0074-card-statement-allocation-planner.md)
+([card settlements](card-settlements.md#multiple-debits-and-partial-payments-adr-0074))
+states those cases in closed codes, but no lane, table, page or writer uses
+it, so a multi-debit statement still cannot be accepted, and partial
+payments and refunds against a statement have no model.

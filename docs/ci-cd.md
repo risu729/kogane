@@ -67,6 +67,29 @@ produces a successful CI run with `head_branch: main` — and its head commit
 is fetchable from this repository. A `workflow_dispatch` supplies the sha by
 hand and is held to the same test through the compare API, below.
 
+A running CI on `main` is never cancelled (owner decision, 2026-11-07 17:01
+UTC). `ci.yml` sets `cancel-in-progress` only for `pull_request`, so a newer
+push to a pull request still replaces its running CI, but a push to `main`
+waits for the running main CI instead of cancelling it. Before this, every push
+to `main` cancelled the running main CI; since a cancelled run releases
+nothing, back-to-back merges left production undeployed from 13:40 to 15:12 UTC
+on 2026-11-07. GitHub still keeps at most one _pending_ run per group, so the
+runs that are waiting replace each other and the newest commit is the one that
+runs next. If five merges land while the first one's CI is still running, they
+produce two CI runs and two releases (the first commit's and the fifth's), and
+the second release carries the three commits in between. Those three show a
+cancelled CI run on `main`; it is not a failure and they are in production.
+
+One gap remains. A re-run or a `workflow_dispatch` of CI on `main` shares the
+group, so one started while a push run is pending replaces that run, and the
+newest commit waits for the next push. A dispatched CI run never releases
+(`deploy.yml` accepts only `event: push`); a re-run keeps `event: push`.
+Re-run main CI only when no main CI is pending, and if the newest commit's push
+run was replaced anyway, re-run that run once the queue is empty. Dispatching
+Deploy with its sha instead releases a commit whose own CI never ran: the
+dispatch is checked against `main` through the compare API, not against a CI
+result.
+
 The called release job holds the concurrency group `production-deploy` with
 `cancel-in-progress: false` and `queue: max`, so one production change runs
 at a time and queued requests wait instead of interrupting a migration or
@@ -102,7 +125,8 @@ caller ever drops it again.
 [ADR 0040](adr/0040-compatible-cf-version-deployment.md) established prebuilt deployment
 for thirteen compatible Workers; [ADR 0042](adr/0042-prestia-bank-worker.md) adds the
 PRESTIA bank Worker, bringing the compatible fleet to fourteen Workers using
-`cf@1.0.0-beta.12` and the pinned `wrangler-deploy-action` v2.1.1. Their native
+`cf@1.0.0-beta.12` and the pinned `wrangler-deploy-action` (v3.0.0 since 2026-11-06;
+no step uses `worker-preview`, the only mode v3 changed). Their native
 `cloudflare.config.ts` and
 `wrangler.config.ts` retain the canonical Wrangler settings; parity guards
 cover bindings, variables, observability, assets and the two already-declared
@@ -262,15 +286,35 @@ is introduced.
 ### The release ledger, and why a late run is harmless (G5-12)
 
 The ledger is the GitHub Deployments API: the newest deployment of the
-`production` environment whose latest status is `success`, with the release
-record in its payload. It needs no commit (a push would need a signature and
-would not start a workflow) and it does not expire the way a cache does.
+`production` environment whose latest status other than `inactive` is
+`success`, with the release record in its payload. It needs no commit (a push
+would need a signature and would not start a workflow) and it does not expire
+the way a cache does.
 
-Concurrency alone would not be enough. GitHub keeps at most one run _pending_
-per group and states that ordering is not guaranteed, so with rapid merges an
-intermediate run is cancelled and a run that started earlier can still reach
-the deploy steps after a newer one finished. The decision is therefore made
-against the ledger, by `git merge-base --is-ancestor` — and it is made **per
+`inactive` is skipped because it is not an outcome. GitHub adds it by itself to
+a successful deployment as soon as another deployment of the environment
+reports `success` later, whichever of the two was created first. The
+empty-payload deployment of the release job's own `environment: production` is
+created before the release record but reports `success` a few seconds after it,
+so the release record is `inactive` by the time the next run reads it. GitHub
+has done this for production deployments since 2026-11-05 20:31 UTC (before
+that, older production deployments kept `success`), and reading `inactive` as
+"did not succeed" stopped every release until the read skipped it. Nothing here
+posts `inactive`, so a failed or unfinished release still reads as failed or
+unfinished. For the same reason a resume treats a deployment with a `success` or
+`inactive` status as already completed.
+
+The ledger step runs from the target commit's checkout, so a release or
+rollback of a commit older than this rule (before
+[#985](https://github.com/risu729/kogane/pull/985)) still reads `inactive` as
+not succeeded and fails closed with "none of the newest 100 production
+deployments succeeded". Roll back only to a commit that contains it.
+
+Concurrency alone would not be enough. GitHub states that ordering is not
+guaranteed, a manual dispatch or re-run of an older commit can start after a
+newer release, and a pending main CI run can be replaced, so a run for an older
+commit can still reach the deploy steps after a newer one finished. The
+decision is therefore made against the ledger, by `git merge-base --is-ancestor` — and it is made **per
 Worker**, because the environment is not one thing that is at one commit:
 
 | The commit the ledger records for a Worker | What the run does with that Worker           |

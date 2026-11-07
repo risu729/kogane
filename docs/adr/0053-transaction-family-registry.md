@@ -8,7 +8,7 @@
 
 ## Context
 
-Phases 6–7 of the [roadmap](../roadmap.md#phases-67--reconciliation-and-economic-event-generation)
+Phases 6–7 of the [roadmap](../roadmap.md#layers-67--reconciliation-and-economic-event-generation)
 ask for events generated continuously from adopted observations for bank
 transfers, FX, remittances, securities, reward exchanges and stored-value
 funding. Today only two writers exist: card purchase recognition (Vpass and
@@ -200,7 +200,7 @@ Locally with synthetic data only:
 
 ## Amendment: SBI Shinsei records its origin (2026-10-09)
 
-- Status: proposed (accepted when the PR that carries it merges)
+- Status: accepted (merged 2026-10-09 in #613)
 - Date: 2026-10-09
 
 `sbi-shinsei-top-balances-and-activity` 0.1.3 records

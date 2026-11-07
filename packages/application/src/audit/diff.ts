@@ -7,12 +7,18 @@
 // so a writer that tried to put a value into the diff fails here, before its
 // batch is sent. The table's own trigger refuses free text a second time.
 //
-// The `lane` kind of the ADR (a lane tick's decision-revision and proposal
-// ranges) belongs to the lane writers of a later slice (plan S7) and has no
-// schema here yet; the table admits the kind, this builder does not.
+// The `lane` kind is a lane tick's record (plan slice S7): the sizes of the
+// ranges its references name — decision revisions, economic commits and
+// proposals by closed proposal kind — and none of `processor_lane_ticks`'
+// cost or progress counts.
 import * as z from "zod/mini";
 import { OPERATION_STATUSES } from "../operations/requests.ts";
-import { AUDIT_MAX_DIFF_BYTES, OVERFLOW_RESULTS, AUDIT_DAILY_CAPS } from "./vocabulary.ts";
+import {
+  AUDIT_MAX_DIFF_BYTES,
+  OVERFLOW_RESULTS,
+  AUDIT_DAILY_CAPS,
+  LANE_PROPOSAL_KINDS,
+} from "./vocabulary.ts";
 
 const count = z.int().check(z.nonnegative());
 const revision = z.int().check(z.nonnegative());
@@ -93,6 +99,23 @@ const overflowDiff = z.strictObject({
   count: count.check(z.positive()),
   cap: z.union([z.literal(AUDIT_DAILY_CAPS.read), z.literal(AUDIT_DAILY_CAPS.refused)]),
 });
+/**
+ * What one lane tick wrote, as counts of the rows its references name: decision
+ * revisions, economic commit-log rows, and proposals per closed kind (each kind
+ * at most once, only kinds with rows). Nothing about the tick's cost or
+ * progress (`processor_lane_ticks`) is copied.
+ */
+const laneDiff = z.strictObject({
+  kind: z.literal("lane"),
+  decisionRevisions: count,
+  commits: count,
+  proposals: z
+    .array(z.strictObject({ kind: z.enum(LANE_PROPOSAL_KINDS), count: count.check(z.positive()) }))
+    .check(
+      z.maxLength(LANE_PROPOSAL_KINDS.length),
+      z.refine((items) => new Set(items.map((item) => item.kind)).size === items.length),
+    ),
+});
 const noneDiff = z.strictObject({ kind: z.literal("none") });
 
 export const auditDiffSchema = z.discriminatedUnion("kind", [
@@ -102,6 +125,7 @@ export const auditDiffSchema = z.discriminatedUnion("kind", [
   readDiff,
   releaseDiff,
   overflowDiff,
+  laneDiff,
   noneDiff,
 ]);
 export type AuditDiff = z.infer<typeof auditDiffSchema>;
@@ -118,7 +142,12 @@ export function auditDiffJson(value: AuditDiff): string {
   const diff =
     parsed.data.kind === "revision"
       ? { ...parsed.data, fields: [...new Set(parsed.data.fields)].sort() }
-      : parsed.data;
+      : parsed.data.kind === "lane"
+        ? {
+            ...parsed.data,
+            proposals: [...parsed.data.proposals].sort((a, b) => a.kind.localeCompare(b.kind)),
+          }
+        : parsed.data;
   const text = JSON.stringify(diff);
   if (new TextEncoder().encode(text).byteLength > AUDIT_MAX_DIFF_BYTES) throw new AuditDiffError();
   return text;

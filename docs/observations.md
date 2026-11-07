@@ -17,6 +17,38 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Sony Bank: a gross-balance update time that does not exist is refused (gross balance 1.0.2)
+
+2026-11-07. `sony-bank-gross-balance` reads `updateDttm` in two forms: an ISO
+date-time with milliseconds and `+09:00`, kept verbatim, and a zone-less
+`YYYY/MM/DD hh:mm:ss` (or `-` and `T`) form, kept as a zone-less local
+date-time (`2026-09-01T12:34:56`). 1.0.1 checked the calendar date of both
+forms but the clock time of the ISO form only, so `2026/09/01 24:61:99` became
+the `asOf` `2026-09-01T24:61:99` of every gross balance row, with no warning.
+1.0.2 checks the clock of the zone-less form the same way (hour at most 23,
+minute and second at most 59) and refuses the artifact (`updateDttm is
+invalid`), as it already did for an ISO value with such a clock or for a
+calendar date that does not exist. Every time that exists reads as in 1.0.1;
+the zone-less form still gets no zone, because no document states the one the
+provider means.
+
+`sony-bank.ts` holds all four Sony parsers, so each is released:
+`sony-bank-gross-balance` 1.0.1 to 1.0.2, and, with only their digests
+moved, `sony-bank-history-json` 1.0.0 to 1.0.1, `sony-bank-history-csv` 1.0.1
+to 1.0.2 and `sony-bank-wallet-history` 1.0.2 to 1.0.3, which read every
+artifact exactly as before. No other parser's digest changed. **Deploying
+rewrites nothing**: stored runs and their rows stay as they are (evidence is
+append-only); the processor registers the new releases itself and the repair
+lane re-parses stored Sony captures under them, each new `ok` run superseding
+the older one, which stays stored. No migration and no operator step: the
+gross-balance snapshot policy row pins no parser version, and no reader pins
+these parsers by version. A stored gross-balance capture whose `updateDttm`
+names a clock time that does not exist, if any, becomes an `error` run under
+1.0.2 while its 1.0.1 run stays published. Limits: production was not read for
+this release, so whether any stored capture carries such a value is not
+established. Tests: `packages/parsers/test/sony-bank-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts`.
+
 ## SBI Shinsei activity rows record the provider-id origin (activity parser 0.1.3)
 
 2026-10-09, [ADR 0018](adr/0018-sbi-shinsei-bank-debit-adapter.md#2026-10-09-release-013-records-the-provider-id-origin).
@@ -1867,9 +1899,14 @@ Other relative labels surveyed (`services/collector-*`,
 ### SMBC Direct normalized parsing
 
 SMBC Direct stores a Shift-JIS provider response and a UTF-8 normalized partner
-for both balance and monthly transactions. The importer proves each pair is
-semantically equal before sealing, so Layer B selects only
-`balance-normalized` and `transactions-normalized`. Registering the raw partner
+for both balance and monthly transactions. The retired importer proved each
+pair semantically equal before sealing; the shared collector
+(`buildSharedRunPlan` in `services/collector-smbc-direct/src/shared-collection.ts`)
+records each normalized artifact as `collector_derived` with a transformation
+from its raw parent, and registration maps only the normalized keys to a
+dataset (`ARTIFACT_DATASETS` in
+`packages/application/src/collection/descriptors.ts`). Layer B therefore
+selects only `balance-normalized` and `transactions-normalized`. Registering the raw partner
 would duplicate every financial fact.
 
 The balance route emits one exact JPY `account_balance`. The monthly route emits
@@ -1888,8 +1925,8 @@ then collapses any cross-range overlap by `(source, sourceAccount, externalId)`.
 Stored observations are not removed, so earlier evidence remains available
 through provenance.
 
-The checked-in local canary first calls the same Layer-A
-`validateSmbcDirectRun`, then requires exactly one parser for every normalized
+The local canary, removed with the importer on 2026-09-13, first called the
+importer's Layer-A `validateSmbcDirectRun`, then required exactly one parser for every normalized
 artifact and none for raw artifacts. A 2026-09-07 production read-only run
 scanned 189 objects and one successful manifest; 94 normalized artifacts
 produced 1,069 transactions and one balance, and 94 raw partners were ignored.
@@ -2665,6 +2702,38 @@ recognition accepts the web code `1` and, on the owner's confirmation
 value stays unsupported until it is observed and confirmed
 ([single payment, per source](economic-events.md#single-payment-per-source)).
 
+The finalized web family's header (`webMeisaiTopK3Vo`) also yields one
+`credit_statement_payment_amount` balance per card-month, on page zero only
+and not while `saiseiStatus` is `1` (still being created): the amount from
+`payTotal`, `_kogane.period` from `seikyuYm` (which must equal the artifact's
+month) and `_kogane.paymentDate` from `shiharaiDate` (a `YYYY年M月D日` calendar
+date). The customized family's `shiharaiKin1/2/3` yield no total. The total's
+`as_of` is the first day of the `seikyuYm` month (`YYYY-MM-01`), not
+`shiharaiDate`. The MyJCB statement total differs: its `as_of` is the dated
+`お支払い金額合計` due date and its period is that date's month. The Vpass
+parser does not require `shiharaiDate` to fall in the `seikyuYm` month; a
+synthetic test (`vpass-statement-total.test.ts`) keeps a `2026-09-01` payment
+date under a `2026-08` period.
+
+No statement consumer reads this `as_of`. The view `card_statement_facts`
+(migration 0044) and the dated statement facts take `_kogane.period` and
+`_kogane.paymentDate`, and so do the settlement sweep's three-day debit window
+and readiness ([card settlements](card-settlements.md)), reported-state
+payables and the card purchase statement links. The due date and both sides of
+the debit window are civil dates in `Asia/Tokyo`, so no instant conversion or
+month boundary is involved. Only the generic balance and observation views
+read `as_of`: the latest-balance query ranks a card's statement totals by it
+(its fetch unit is the card), so the newest statement month is the one listed,
+the balance projection types `YYYY-MM-01` as a provider local date, and the
+balance history and observation detail pages print the stored value. Those
+pages therefore show the statement month's first day as the 基準日 (on the
+latest-balance page with local-date precision), which is a day the provider
+did not state; the due date is not shown there. This is a limit of the parser
+today. Moving `as_of` to `shiharaiDate` would be a parser release: like
+[1.2.0](#vpass-page-qualified-external-ids-statement-parser-120), its re-parse
+would give every Vpass statement row a new observation under a new parse run
+and rewrite nothing stored.
+
 The provider issues no row id. A transaction's external id is
 `vpass:<card>:<month>:<family>:<fingerprint>:<occurrence>` on the first page
 (`top-000`) and `vpass:<card>:<month>:<family>:<fingerprint>:<page>:<occurrence>`
@@ -2861,9 +2930,12 @@ no resume. That is fine for four artifacts and wrong for a full backfill.
 linear in artifacts, not in observations. Storage grows by one full copy
 of that parser's observations, permanently, because nothing is deleted.
 The number of artifacts a real sweep would touch is not recorded in this
-repository; both deployed collectors run on a daily Cron
-(`0 21 * * *`), and `services/collector-sbi-securities`'s README records a
-backfill invocation as `scripts/backfill.sh 2024-08-28 2026-05-29`. At
+repository; both collectors deployed when this was written ran on a daily
+Cron (`0 21 * * *`; collection now runs on Processor alarm schedules,
+[ADR 0039](adr/0039-alarm-schedule-management.md)), and
+`services/collector-sbi-securities`'s README recorded a backfill invocation
+as `scripts/backfill.sh 2024-08-28 2026-05-29`, a script it now lists as
+retired. At
 that horizon a retention policy for superseded observations becomes a real
 question, and it is one this document leaves open rather than answering by
 assertion.

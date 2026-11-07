@@ -350,6 +350,18 @@ describe.if(runnable)("operator schedule administration", () => {
     }
   }, 30000);
 
+  test("one trailing slash opens the same schedules page with its own caption", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 960 } });
+    try {
+      await page.goto(`${origin}/schedules/`);
+      await page.getByRole("heading", { name: "収集スケジュール", exact: true }).waitFor();
+      expect(await page.getByText("管理者による設定変更", { exact: true }).count()).toBe(1);
+      expect(await page.getByText("閲覧専用", { exact: true }).count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  });
+
   for (const width of [1280, 390])
     test(`daily time edits persist and exact evidence links remain visible at ${width}px`, async () => {
       const page = await browser.newPage({ viewport: { width, height: 960 } });

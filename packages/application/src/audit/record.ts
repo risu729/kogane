@@ -35,6 +35,8 @@ import {
   type AuditResult,
   type AuditStep,
   AUDIT_PATHS,
+  AUTOMATIC_PRINCIPAL,
+  type AutomaticPath,
   isAuditRef,
   RISK_CLASSES,
   type RiskClass,
@@ -187,11 +189,24 @@ export function buildAuditRecord(
       : typeof actor.subject === "string" && AUDIT_SUBJECT.test(actor.subject),
     "subject",
   );
-  check(AUDIT_PRINCIPAL.test(actor.principal), "principal");
+  check(
+    AUDIT_PRINCIPAL.test(actor.principal) &&
+      (!automatic || AUTOMATIC_PRINCIPAL[actor.path as AutomaticPath].test(actor.principal)),
+    "principal",
+  );
   check(
     (AUDIT_PRINCIPAL_KINDS as readonly string[]).includes(actor.principalKind) &&
       (actor.principalKind === "automatic") === automatic,
     "principal_kind",
+  );
+  // The Processor's own paths record what it did (an effect) or that a lane
+  // failed after writing; never a read, a refusal, a replay or a preparation,
+  // so nothing on them is capped or aggregated (ADR 0064, plan slice S7).
+  check(
+    !automatic ||
+      (["applied", "accepted", "failed"].includes(facts.result) &&
+        (facts.step ?? "call") === "call"),
+    "result",
   );
   check(AUDIT_CORRELATION_ID.test(actor.correlationId), "correlation_id");
   check(AUDIT_OPERATION.test(facts.operation), "operation");

@@ -4,6 +4,8 @@ import {
   nextNominal,
   type SchedulePattern,
 } from "../../../packages/collection/src/schedule-model";
+import { alarmClaimWrite } from "../../../packages/application/src/index.ts";
+import { isLeaseAbortCode } from "../../../packages/collection/src/schedule-result";
 import { collectorBindingName } from "./collector-binding";
 import { jobFor, readSchedule, maintenanceForSchedule, bootstrapSchedules } from "./schedule-store";
 interface DispatchResult {
@@ -90,11 +92,29 @@ export class ScheduleAlarm extends DurableObject<Env> {
       // Reserve the next occurrence BEFORE claiming or contacting the provider.
       await this.ctx.storage.setAlarm(nextDue);
       const occurrenceId = `scheduled:${id}:${nominal}`;
+      const job = jobFor(id);
+      const claimedAt = new Date(now).toISOString();
+      // A collection occurrence's claim carries its audit record as the last
+      // statement of the claim batch, joined to the occurrence row it wrote
+      // (ADR 0064, plan slice S7). The processor tick and keepalive record none.
+      const audit =
+        job.kind === "collection"
+          ? alarmClaimWrite(
+              {
+                jobId: id,
+                source: job.source,
+                occurrenceId,
+                scheduleRevision: row.revision,
+                claimedAt,
+              },
+              crypto.randomUUID(),
+            )
+          : null;
       const results = await this.env.DB.batch([
         this.env.DB.prepare(`INSERT OR IGNORE INTO collection_schedule_occurrences(id,schedule_id,nominal_at,started_at,status)
           SELECT ?,id,next_nominal_at,?,'started' FROM collection_schedules WHERE id=? AND revision=? AND enabled=1 AND next_nominal_at=?`).bind(
           occurrenceId,
-          new Date(now).toISOString(),
+          claimedAt,
           id,
           row.revision,
           row.next_nominal_at,
@@ -108,6 +128,7 @@ export class ScheduleAlarm extends DurableObject<Env> {
           row.revision,
           row.next_nominal_at,
         ),
+        ...(audit ? [this.env.DB.prepare(audit.sql).bind(...audit.binds)] : []),
       ]);
       if (results[0]?.meta.changes !== 1) {
         await this.env.DB.prepare(
@@ -143,7 +164,11 @@ export class ScheduleAlarm extends DurableObject<Env> {
       "UPDATE collection_schedule_occurrences SET status=?,run_ids_json=?,failure_code=?,finished_at=? WHERE id=? AND status='started'",
     )
       .bind(
-        result.failureCode === "dispatch_uncertain" ? "uncertain" : result.status,
+        // A lost dispatch answer, or a holder that stopped itself after it may
+        // have contacted the provider (ADR 0085): uncertain, never replayed.
+        result.failureCode === "dispatch_uncertain" || isLeaseAbortCode(result.failureCode)
+          ? "uncertain"
+          : result.status,
         JSON.stringify(result.runIds),
         result.failureCode,
         new Date().toISOString(),

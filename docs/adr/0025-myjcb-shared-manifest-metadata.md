@@ -1,6 +1,6 @@
 # ADR 0025: The MyJCB metadata extractor reads both manifest shapes
 
-- Status: proposed
+- Status: accepted (merged 2026-09-27 in #270)
 - Date: 2026-09-26
 - Carried by:
   `services/processor/src/metadata-extractors/myjcb.ts`,

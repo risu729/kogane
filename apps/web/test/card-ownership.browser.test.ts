@@ -248,6 +248,19 @@ describe.if(runnable)("explicit card ownership review", () => {
     );
     await page.close();
   });
+  test("the default declaration date is today in Asia/Tokyo, not in UTC", async () => {
+    const page = await browser.newPage({ viewport: { width: 1100, height: 1000 } });
+    // 23:30 UTC on 10/10 is 08:30 on 10/11 in Tokyo.
+    await page.clock.setFixedTime(new Date("2026-10-10T23:30:00Z"));
+    await page.goto(origin + `/reconciliation/${review.proposalId}/ownership`);
+    await page.getByRole("heading", { name: "口座の保有者を確認", exact: true }).waitFor();
+    const form = page.getByRole("region", { name: "カード請求の支払義務を負う人", exact: true });
+    await form.getByLabel("根拠の種類", { exact: true }).selectOption("self-declared");
+    expect(await form.getByLabel("本人申告の日付", { exact: true }).inputValue()).toBe(
+      "2026-10-11",
+    );
+    await page.close();
+  });
   for (const blocker of ["contrary_evidence_recorded", "single_account_scope_unconfirmed"]) {
     test(`${blocker} blocks self-declaration without disabling explicit evidence review`, async () => {
       review.sides[0]!.selfDeclarationBlockers = [blocker];

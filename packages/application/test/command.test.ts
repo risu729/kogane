@@ -131,6 +131,31 @@ describe("payloads", () => {
     expect(validPayload("relation.accept", { ...relation, relationKind: "same_as" })).toBe(false);
     expect(validPayload("relation.accept", { ...relation, evidenceRefs: ["a", "a"] })).toBe(false);
   });
+
+  test("a relation's validity bounds are calendar days in order", () => {
+    const relation = {
+      relationKind: "liable_party",
+      fromRef: "source_account:sa_1",
+      toRef: "party:self",
+      validFrom: null,
+      validTo: null,
+      evidenceRefs: ["fetch_artifact:1"],
+      reason: "synthetic ownership",
+    };
+    const bounded = (validFrom: string | null, validTo: string | null) =>
+      validPayload("relation.accept", { ...relation, validFrom, validTo });
+    expect(bounded("2024-02-29", null)).toBe(true);
+    expect(bounded(null, "2026-12-31")).toBe(true);
+    expect(bounded("2026-01-01", "2026-01-01")).toBe(true);
+    expect(bounded("2026-01-01", "2026-12-31")).toBe(true);
+    // Shaped like a day, not one.
+    for (const day of ["2026-02-29", "2026-02-30", "2026-04-31", "2026-13-01", "2026-00-10"]) {
+      expect(bounded(day, null)).toBe(false);
+      expect(bounded(null, day)).toBe(false);
+    }
+    // A validity that ends before it starts covers no day.
+    expect(bounded("2026-12-31", "2026-01-01")).toBe(false);
+  });
 });
 
 describe("economic-event payloads (ADR 0054, G2)", () => {

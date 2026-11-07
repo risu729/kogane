@@ -17,7 +17,7 @@ export interface SafeEconomicRowReadiness extends EconomicRowEvaluation {
   keyDigest: string | null;
   aliasDigest: string | null;
 }
-/** Internal only. A future service MUST authorize row scope BEFORE calling. */
+/** Internal query. External reads use readEconomicRowReadinessForGrant before this read. */
 export async function queryEconomicRowReadiness(sql: SqlExecutor, input: unknown) {
   if (!validEconomicRowReadinessRequest(input))
     return { status: "refused", reason: "invalid_request" } as const;

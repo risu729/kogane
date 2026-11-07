@@ -1,6 +1,8 @@
 import { delegatedMaintenanceRoute } from "./delegated-maintenance";
 import { delegatedScheduleRoute } from "./delegated-schedules";
+import { delegatedSurveyRoute } from "./delegated-survey";
 import { retireReplacedJobsSql } from "./job-retirement-sql.ts";
+import { REPLAY_STEP_PROGRESS_SQL, WORK_ITEM_PROGRESS_SQL } from "./lane-progress-sql.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { PersistedObservation } from "../../../packages/parsers/src/scheduled-payment.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
@@ -21,8 +23,10 @@ import {
 import { IDENTITY_POLICY_VERSION, identitySweep } from "./identity-store.ts";
 import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
+import { boundedText } from "./bounded-body.ts";
 import { auditOverflowStage } from "./audit-overflow.ts";
 import { scheduleRoute } from "./schedule-store";
+import { collectionQualityAlarmRoute } from "./collection-quality-alarms";
 import { maintenanceSurveyLane } from "./maintenance-survey/lane.ts";
 import { maintenanceSurveyEnabled } from "./maintenance-survey/config.ts";
 import { internalHealthRoute } from "./internal-health.ts";
@@ -33,6 +37,7 @@ import { cardDebitAccountSweep } from "./card-debit-account-job.ts";
 import { reconciliationEnabled, reconciliationSweep } from "./reconciliation-job.ts";
 import { cardPurchaseSweep, purchaseRecognitionEnabled } from "./card-purchase-job.ts";
 import { laneTickSummary, recordTick, type LaneTickResult } from "./lane-ticks.ts";
+import { markLaneAudit, recordLaneAudit } from "./lane-audit.ts";
 import {
   publicationConsistency,
   publishBatch,
@@ -861,15 +866,16 @@ async function consumeWorkItems(env: Env, limit: number) {
   const summary = { processed: 0, created: 0, examined: 0, cursor: 0 };
   const active = await activeParserVersions(env);
   const items = await env.DB.prepare(
-    "SELECT id,fetch_run_id,cursor_artifact_id,jobs_created FROM observation_work_items WHERE processed_at_ms IS NULL ORDER BY id LIMIT ?",
+    "SELECT id,fetch_run_id,cursor_artifact_id FROM observation_work_items WHERE processed_at_ms IS NULL ORDER BY id LIMIT ?",
   )
     .bind(limit)
-    .all<{ id: number; fetch_run_id: number; cursor_artifact_id: number; jobs_created: number }>();
+    .all<{ id: number; fetch_run_id: number; cursor_artifact_id: number }>();
   let pages = 0;
   for (const item of items.results) {
     let cursor = item.cursor_artifact_id;
     let created = 0;
     let complete = false;
+    const examined: number[] = [];
     while (pages < WORK_ITEM_PAGES_PER_SWEEP) {
       pages++;
       const page = await env.DB.prepare(
@@ -880,6 +886,7 @@ async function consumeWorkItems(env: Env, limit: number) {
       summary.examined += page.results.length;
       const now = Date.now();
       const inserts: D1PreparedStatement[] = [];
+      for (const row of page.results) examined.push(row.id);
       for (const row of page.results)
         for (const parser of laneParsers(row, active))
           inserts.push(jobInsert(env, row.id, parser, "incremental", now));
@@ -891,15 +898,25 @@ async function consumeWorkItems(env: Env, limit: number) {
         break;
       }
     }
-    const total = item.jobs_created + created;
-    const outcome = total > 0 ? "jobs_created" : cursor > 0 ? "no_new_jobs" : "not_eligible";
-    await env.DB.prepare(
-      "UPDATE observation_work_items SET cursor_artifact_id=?,jobs_created=?,processed_at_ms=CASE WHEN ? THEN ? ELSE NULL END,outcome=CASE WHEN ? THEN ? ELSE NULL END WHERE id=? AND processed_at_ms IS NULL",
-    )
-      .bind(cursor, total, complete ? 1 : 0, Date.now(), complete ? 1 : 0, outcome, item.id)
+    // The item's jobs are counted from the table, not from this sweep's
+    // inserts: a sweep stopped between its inserts and this update leaves the
+    // jobs and the old cursor, the next sweep re-reads the same pages, and its
+    // re-issued inserts change nothing. An incremental job of an artifact of
+    // this run is this item's (one item per run; only repair jobs ever change
+    // lane). Fenced on the cursor it read, so a concurrent sweep never counts
+    // the same pages twice.
+    const progress = await env.DB.prepare(WORK_ITEM_PROGRESS_SQL)
+      .bind(
+        item.id,
+        item.cursor_artifact_id,
+        cursor,
+        JSON.stringify(examined),
+        complete ? 1 : 0,
+        Date.now(),
+      )
       .run();
     summary.created += created;
-    if (complete) {
+    if (complete && progress.meta.changes === 1) {
       summary.processed++;
       summary.cursor = item.id;
     }
@@ -991,10 +1008,21 @@ async function replayStep(env: Env, plan: PlanRow) {
   const created = await insertJobs(env, inserts);
   const complete = rows.results.length < REPLAY_STEP;
   const cursor = complete ? plan.artifact_id_high_water : rows.results.at(-1)!.id;
-  await env.DB.prepare(
-    "UPDATE observation_replay_plans SET creation_cursor=?,creation_complete=?,jobs_created=jobs_created+?,updated_at_ms=? WHERE id=? AND status='running'",
-  )
-    .bind(cursor, complete ? 1 : 0, created, now, plan.id)
+  // `jobs_created` counts the plan's jobs among the artifacts this step read,
+  // from the table: a step stopped (or paused) between its inserts and this
+  // update reads the same artifacts again, its re-issued inserts change
+  // nothing, and the jobs are still the plan's. A job carries the plan id
+  // only when this plan inserted or attached it. Fenced on the cursor the
+  // step read, so a concurrent step never counts a range twice.
+  await env.DB.prepare(REPLAY_STEP_PROGRESS_SQL)
+    .bind(
+      cursor,
+      complete ? 1 : 0,
+      now,
+      JSON.stringify(rows.results.map((row) => row.id)),
+      plan.id,
+      plan.creation_cursor,
+    )
     .run();
   return { created, examined: rows.results.length, complete };
 }
@@ -1122,9 +1150,18 @@ async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummar
       .bind(lane, MAX_ATTEMPTS, null, deployed)
       .first<number>("n")) ?? 0;
   await env.DB.prepare(
-    "UPDATE observation_lane_state SET cursor=?,last_sweep_at_ms=?,last_created=?,last_executed=? WHERE lane=?",
+    "UPDATE observation_lane_state SET cursor=coalesce(?,cursor),last_sweep_at_ms=?,last_created=?,last_executed=? WHERE lane=?",
   )
-    .bind(cursor, Date.now(), summary.created, summary.executed, lane)
+    // The repair cursor mirrors the scan, 0 included when it wraps. The
+    // incremental and replay cursors name the last item processed and the last
+    // plan stepped, so a sweep that did neither keeps them.
+    .bind(
+      lane !== "repair" && cursor === 0 ? null : cursor,
+      Date.now(),
+      summary.created,
+      summary.executed,
+      lane,
+    )
     .run();
   return summary;
 }
@@ -1156,36 +1193,12 @@ export async function sweep(env: Env, options: SweepOptions = {}) {
   return { ...totals, lanes };
 }
 
-async function bounded(request: Request, limit: number): Promise<string | null> {
-  if (!request.body) return null;
-  const reader = request.body.getReader();
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  let size = 0,
-    text = "";
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      size += value.byteLength;
-      if (size > limit) {
-        await reader.cancel();
-        return null;
-      }
-      text += decoder.decode(value, { stream: true });
-    }
-    return text + decoder.decode();
-  } catch {
-    return null;
-  } finally {
-    reader.releaseLock();
-  }
-}
-
 async function command(request: Request): Promise<Record<string, unknown> | null> {
-  const body = await bounded(request, 4096);
-  if (body === null) return null;
   let value: unknown;
   try {
+    // Malformed UTF-8 and a failing stream refuse the command like bad JSON.
+    const body = await boundedText(request, 4096, { fatal: true });
+    if (body === null) return null;
     value = JSON.parse(body);
   } catch {
     return null;
@@ -1832,11 +1845,14 @@ const defaultStages: ScheduledStages = {
     }),
   // ADR 0048: a collector request reaches the same named RPC binding the
   // alarm calls, and only for connections OPS_COLLECTOR_DISPATCH_CONNECTIONS
-  // names.
+  // names. An import whose registration threw is logged by its error class
+  // only; the lane goes on and the request is looked at again later.
   operations: (env, context) =>
     dispatchOperations(collectionEnv(env), {
       budget: context.registration,
       collectors: (connection) => collectorBinding<CollectorRpc>(env, connection.workspace),
+      onFailure: (code) =>
+        console.log(JSON.stringify({ event: "operation_dispatch_registration_failed", code })),
     }),
   maintenanceSurvey: (env) =>
     maintenanceSurveyLane(env, { transport: (url, init) => fetch(url, init) }),
@@ -1940,6 +1956,8 @@ export async function runScheduled(
     // past a day's cap, aggregated once that day has ended.
     ["audit_overflow", stages.auditOverflow, true],
   ];
+  // One correlation id for the lane audit records of this invocation.
+  const correlationId = crypto.randomUUID();
   for (const [event, stage, enabled] of lanes) {
     if (!stage) continue;
     const startedAtMs = Date.now();
@@ -1949,6 +1967,10 @@ export async function runScheduled(
       await recordTick(env.DB, event, startedAtMs, { outcome: "skipped-by-flag" }, log);
       continue;
     }
+    // The lanes that write decisions, proposals or settings get one audit
+    // record per tick that wrote any (ADR 0064, src/lane-audit.ts). The mark
+    // and the record are read and written outside the lane's metered scope.
+    const mark = await markLaneAudit(env.DB, event, log);
     let tick: LaneTickResult;
     try {
       const result = await stage(observation.env, context);
@@ -1971,6 +1993,7 @@ export async function runScheduled(
       tick = { outcome: "failed", code };
     }
     await recordTick(env.DB, event, startedAtMs, tick, log);
+    await recordLaneAudit(env.DB, event, mark, tick, correlationId, log);
   }
 }
 
@@ -2073,9 +2096,12 @@ export default {
     // that did not arrive that way is refused, not answered. Read-only.
     const delegatedScheduling =
       (await delegatedMaintenanceRoute(request, env, url)) ??
-      (await delegatedScheduleRoute(request, env, url));
+      (await delegatedScheduleRoute(request, env, url)) ??
+      (await delegatedSurveyRoute(request, env, url));
     if (delegatedScheduling) return delegatedScheduling;
     const scheduling = await scheduleRoute(request, env, url);
+    const qualityAlarms = await collectionQualityAlarmRoute(request, env, url);
+    if (qualityAlarms) return qualityAlarms;
     if (scheduling) return scheduling;
     const health = await internalHealthRoute(request, env, path);
     if (health) return health;
