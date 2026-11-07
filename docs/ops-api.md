@@ -54,8 +54,8 @@ in protected GitHub workflows (02 §6).
 
 ## Routes
 
-All six are authenticated, and all six are refused unless `OPS_API_ENABLED` is
-`"true"`. The route set is closed: any other path under `/api/ops/v1` is
+All seven are authenticated, and all seven are refused unless `OPS_API_ENABLED`
+is `"true"`. The route set is closed: any other path under `/api/ops/v1` is
 `404 not_found`, and any verb other than `POST` (accept) and `GET` (read) is
 `405 method_not_allowed`, exactly as everywhere else on this Worker.
 
@@ -67,6 +67,7 @@ All six are authenticated, and all six are refused unless `OPS_API_ENABLED` is
 | `POST /api/ops/v1/projections`               | `{reason, idempotencyKey?}`                                | `202 {operationId, status}` | The request is stored. Publication is complete when `projected` is.        |
 | `POST /api/ops/v1/sessions/{source}/refresh` | `{idempotencyKey?}`                                        | `202 {operationId, status}` | The request is stored; `waiting_for_human` when a person must act.         |
 | `GET /api/ops/v1/operations/{id}`            | –                                                          | `200` operation record      | Reads the stored record; it never asks a downstream system "are you done". |
+| `GET /api/ops/v1/operations`                 | query `kind`, `status`, `cursor`, `limit`                  | `200` one page of summaries | Reads the caller's stored requests, newest first ([list](#the-list)).      |
 
 `status` is the stored operation status, not a promise: `accepted` or
 `waiting_for_human` on acceptance, and later `running`, `completed`, `failed`
@@ -78,7 +79,7 @@ completion (`contracts/stages.json`, 05 §6).
 
 ### `GET /api/ops/v1/health` — the release postcheck's route
 
-One more route lives under the same prefix and is **not** one of the six. It is
+One more route lives under the same prefix and is **not** one of the seven. It is
 authenticated like everything else here, but it is _outside_ `OPS_API_ENABLED`:
 a postcheck that only works once an unrelated flag is on is not a postcheck
 (plan 11 §6, `services/app/src/health.ts`, [ci-cd.md](ci-cd.md#postcheck)).
@@ -102,7 +103,7 @@ of any kind in the answer.
 
 Who may read it (`services/app/src/health.ts`):
 
-- **the operator**, graded by the same loader the six routes use, so an
+- **the operator**, graded by the same loader the seven routes use, so an
   `AGENT_GRANTS` subject is refused with `403 approval_required` here too;
 - **an Access service token** whose common name (its Client ID) is listed in
   the deployment variable `HEALTH_PROBE_TOKENS`. This is how CD calls the
@@ -114,7 +115,7 @@ Who may read it (`services/app/src/health.ts`):
 An empty `HEALTH_PROBE_TOKENS` means _no_ service token, which fails the
 release rather than opening the route. A `HEALTH_PROBE_TOKENS` that is present
 but cannot be read closes the route to everyone with `503 grants_misconfigured`,
-as an unreadable grant list does on the six routes. Empty subject lists are a
+as an unreadable grant list does on the seven routes. Empty subject lists are a
 _usable_ configuration (deny-all when no subjects are configured): `grants.usable` is
 false only for a list that is present but unreadable, or a subject named in
 both lists, and then the deployment is `degraded` — a release does not certify
@@ -184,6 +185,52 @@ operation turns `completed` only when every stage of its kind has a
 `projected` yet, so a published collection keeps `status: running`
 ([limits](#collector-execution-adr-0048)).
 
+### The list
+
+`GET /api/ops/v1/operations` answers one page of the caller's own requests
+([ADR 0086](adr/0086-operator-operations-list.md),
+`packages/application/src/operations/list.ts`):
+
+```jsonc
+{
+  "schemaVersion": "kogane-operation-list-v1",
+  "operations": [
+    {
+      "operationId": "op_<64 hex>",
+      "kind": "collection",
+      "status": "running",
+      "source": "sony-bank",
+      "dispatch": { "state": "dispatched", "attempts": 1 },
+      "failureCode": null,
+      "acceptedAt": "2026-09-11T00:00:00Z",
+      "updatedAt": "2026-09-11T00:05:00Z",
+    },
+  ],
+  "nextCursor": null, // or the operationId to pass as `cursor` for the next page
+}
+```
+
+- **Order.** Newest first by acceptance time, then by operation id, both
+  descending. Neither column changes after insert, so the order is stable,
+  and a cursor taken from one page continues after it under any filter.
+- **Query.** `kind` (one of the five kinds), `status` (one of the six
+  statuses), `cursor` (the `nextCursor` of the previous page) and `limit`
+  (1–50, default 20). Each key at most once. An unknown key is
+  `400 invalid_query` without a ref; a repeated key or a value outside its
+  list is `400 invalid_query` naming the key. A cursor that names no
+  operation of the caller is `404 receipt_not_found` with ref `cursor`.
+- **Content.** A summary has no stages, no `execution` block and no target;
+  read one operation for those. The stored request is not read, so a
+  rebuild's `reason` never appears.
+- **Cost.** Without a filter, one range of the index `ops_requests_principal`.
+  With a kind or a status, one range of `ops_requests_open` per allowed
+  (status, kind) pair, each limited to the page, merged newest first. Rows
+  sharing the boundary timestamp are sorted, and rows of other principals
+  with the same status and kind are read and skipped. No migration was added.
+- **Audit.** Each request is recorded once as `ops.operation.list`, with the
+  number of rows shown and whether a next page exists
+  ([audit log](audit-log.md)).
+
 ## Idempotency
 
 `operationId = "op_" + sha256(canonical-json{kind, principal, idempotencyKey})`
@@ -226,7 +273,7 @@ already does:
    `AGENT_GRANTS`, resolved by the one resolver described in
    [change-lifecycle.md](change-lifecycle.md), "Grants"). Both are allow-lists:
 
-   | Verified subject                    | All six routes and tools                     |
+   | Verified subject                    | All seven routes and six tools               |
    | ----------------------------------- | -------------------------------------------- |
    | listed in `OPERATOR_SUBJECTS`       | served                                       |
    | listed in `AGENT_GRANTS`            | `403 approval_required`                      |
@@ -260,19 +307,19 @@ log or a queue (G3-08) — not even a source or release id that failed the
 registry lookup — and Zod's own messages are never returned. The request log
 carries the route label, the status and the code, never a ref.
 
-| Code                   | HTTP | Means                                                           |
-| ---------------------- | ---- | --------------------------------------------------------------- |
-| `invalid_request`      | 400  | The body failed the published schema; `refs` names the fields   |
-| `invalid_query`        | 400  | These routes take no query string                               |
-| `target_missing`       | 400  | The source or parser release is not declared in the registry    |
-| `approval_required`    | 403  | An agent asked for work only an operator may request            |
-| `subject_not_granted`  | 403  | The verified subject is in neither grant list                   |
-| `actor_not_supported`  | 403  | The verified subject is not a shape the decision log can record |
-| `not_found`            | 404  | No such operations route                                        |
-| `receipt_not_found`    | 404  | No such operation for this principal                            |
-| `idempotency_conflict` | 409  | The same key was reused for a different payload                 |
-| `request_too_large`    | 413  | The body exceeds 16 KiB                                         |
-| `grants_misconfigured` | 503  | This deployment's grant lists cannot be read; nobody is graded  |
+| Code                   | HTTP | Means                                                                                  |
+| ---------------------- | ---- | -------------------------------------------------------------------------------------- |
+| `invalid_request`      | 400  | The body failed the published schema; `refs` names the fields                          |
+| `invalid_query`        | 400  | A query string where none is taken, or a list query outside its closed keys and values |
+| `target_missing`       | 400  | The source or parser release is not declared in the registry                           |
+| `approval_required`    | 403  | An agent asked for work only an operator may request                                   |
+| `subject_not_granted`  | 403  | The verified subject is in neither grant list                                          |
+| `actor_not_supported`  | 403  | The verified subject is not a shape the decision log can record                        |
+| `not_found`            | 404  | No such operations route                                                               |
+| `receipt_not_found`    | 404  | No such operation for this principal, as an id or a list cursor                        |
+| `idempotency_conflict` | 409  | The same key was reused for a different payload                                        |
+| `request_too_large`    | 413  | The body exceeds 16 KiB                                                                |
+| `grants_misconfigured` | 503  | This deployment's grant lists cannot be read; nobody is graded                         |
 
 Neither authorization code carries a subject, a list or a configured value. A
 misconfiguration is logged once as
@@ -309,6 +356,9 @@ same services; a collection request or session refresh needs a prepare and an
 exact confirmation. The committed `MCP_DELEGATIONS` is empty, so an operation
 is requested over the routes above, with the browser application's identity,
 where the operator is graded as before.
+
+The list route has no MCP tool ([ADR 0086](adr/0086-operator-operations-list.md)):
+adding one changes the tool catalogue, which needs the owner's approval.
 
 `kogane.ops.operation.get` is defined over the same service as the read
 route; only a delegation holding `operations.read` reaches it on `/mcp`, so
@@ -431,7 +481,7 @@ per Processor invocation, inside the tick; the web UI has no operations view.
 
 ## Storage
 
-Every request to the six routes, and every operations MCP tool call, is
+Every request to the seven routes, and every operations MCP tool call, is
 recorded in the common audit log ([audit log](audit-log.md), ADR 0064): an
 accepted request's `accepted` record is the last statement of the acceptance
 batch (so a request exists exactly when its record does), and a re-send, a read
@@ -486,6 +536,7 @@ writing their own SQL against the tables above:
 | -------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
 | `requestCollection` / `requestImport` / `requestReplay` / `requestProjectionRebuild` / `requestSessionRefresh` | the six accept paths                                        |
 | `readOperation`                                                                                                | the operation record, scoped to a principal                 |
+| `listOperations` (`operations/list.ts`)                                                                        | one page of a principal's requests, newest first (ADR 0086) |
 | `pendingDispatches({store, nowMs, limit})`                                                                     | the Processor alarm tick's queue of undispatched requests   |
 | `recordDispatch({operationId, outcome, targetRef?})`                                                           | one dispatch; binds `target_ref` once, answers who holds it |
 | `recordOperationStage({operationId, stage, state})`                                                            | stage evidence; completes the operation when all stages are |
@@ -536,7 +587,13 @@ Synthetic data only.
   for an accepted and for a collected request, and that `/mcp` publishes none
   of the operations and refuses each of them without writing a row, even to
   the operator's own MCP client, while HTTP still serves the operator (G3-05,
-  ADR 0047).
+  ADR 0047). Its list checks (ADR 0086) cover scoping, cursor paging, the
+  filters, every refusal, the audit record and the list's query plans on D1
+  without table statistics.
+- `packages/application/test/operations-list.test.ts`: the list paged to its
+  end for every filter shape on random synthetic stores against an in-memory
+  reference, the summary shape, foreign cursors, and the query plans without
+  table statistics.
 - `packages/application/test/operations.test.ts` (10 checks; the SQL half
   runs against the real migrations in `bun:sqlite`): request identity,
   principal binding, the stage table per kind, the session policy's safe
@@ -589,12 +646,12 @@ Acceptance ids and the test that carries each:
 
 Flag defaults when absent (not the current committed settings):
 
-| Variable                             | Worker    | Default | Effect                                                                                    |
-| ------------------------------------ | --------- | ------- | ----------------------------------------------------------------------------------------- |
-| `OPS_API_ENABLED`                    | app       | `""`    | `"true"` serves the six routes; their tools are published to no `/mcp` caller (ADR 0047)  |
-| `SESSION_REFRESH_POLICY`             | app       | `""`    | Sources a collector may refresh unattended; absent = a person                             |
-| `OPS_DISPATCH_ENABLED`               | processor | `""`    | `"1"`/`"true"` runs the `operation_dispatch` lane                                         |
-| `OPS_COLLECTOR_DISPATCH_CONNECTIONS` | processor | `""`    | JSON array of connection ids whose collector the lane may call; empty or malformed = none |
+| Variable                             | Worker    | Default | Effect                                                                                     |
+| ------------------------------------ | --------- | ------- | ------------------------------------------------------------------------------------------ |
+| `OPS_API_ENABLED`                    | app       | `""`    | `"true"` serves the seven routes; their tools are published to no `/mcp` caller (ADR 0047) |
+| `SESSION_REFRESH_POLICY`             | app       | `""`    | Sources a collector may refresh unattended; absent = a person                              |
+| `OPS_DISPATCH_ENABLED`               | processor | `""`    | `"1"`/`"true"` runs the `operation_dispatch` lane                                          |
+| `OPS_COLLECTOR_DISPATCH_CONNECTIONS` | processor | `""`    | JSON array of connection ids whose collector the lane may call; empty or malformed = none  |
 
 Historical initial activation procedure for migration 0040; current releases
 follow [rollout controls](rollout.md#4-deployment-order). Do not send a real

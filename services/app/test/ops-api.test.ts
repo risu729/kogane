@@ -32,6 +32,8 @@ import { OPS_TOOL_NAMES } from "../src/ops-tools";
 import {
   claimCollectorStart,
   d1CommandStore,
+  operationListArms,
+  operationListSql,
   recordCollectorOutcome,
   recordOperationStage,
 } from "../../../packages/application/src/index";
@@ -886,5 +888,208 @@ describe("operations are HTTP only: /mcp is agent-only (G3-05, ADR 0047)", () =>
     expect(read.result.isError).toBe(true);
     expect(read.result.structuredContent).toEqual({ error: "delegation_not_configured" });
     expect(read.result.structuredContent).not.toEqual(receipt);
+  });
+});
+
+describe("the operator lists its own operations (ADR 0086)", () => {
+  /** Operators of their own, so no other test's requests reach these lists. */
+  const LISTER = "ops-list-operator";
+  const LISTER_PEER = "ops-list-peer";
+  const LISTING = {
+    ...ENABLED,
+    OPERATOR_SUBJECTS: JSON.stringify([LISTER, LISTER_PEER]),
+  };
+  /** Free text an operator may store with a rebuild; the list never shows it. */
+  const REASON = "synthetic rebuild reason";
+
+  async function request(path: string, body: unknown, subject = LISTER) {
+    const response = await call(`${OPS}${path}`, { body, subject, environment: LISTING });
+    expect(response.status).toBe(202);
+    return ((await response.json()) as { operationId: string }).operationId;
+  }
+
+  async function list(query = "", subject = LISTER, environment: Record<string, unknown> = {}) {
+    const response = await call(`${OPS}/operations${query}`, {
+      subject,
+      environment: { ...LISTING, ...environment },
+    });
+    return { status: response.status, json: (await response.json()) as Record<string, any> };
+  }
+
+  async function seed() {
+    return {
+      collection: await request("/collections", { ...COLLECTION, idempotencyKey: "list-1" }),
+      imported: await request("/imports", { source: "sony-bank", runId: "run-list-import" }),
+      projection: await request("/projections", { reason: REASON, idempotencyKey: "list-2" }),
+      peer: await request("/projections", { reason: REASON }, LISTER_PEER),
+    };
+  }
+
+  const idsOf = (page: Record<string, any>): string[] =>
+    page["operations"].map((entry: { operationId: string }) => entry.operationId);
+
+  it("answers the caller's own requests newest first, as summaries without payload text", async () => {
+    const ids = await seed();
+    const own = await list();
+    expect(own.status).toBe(200);
+    expect(own.json["schemaVersion"]).toBe("kogane-operation-list-v1");
+    expect(own.json["nextCursor"]).toBeNull();
+    const stored = (
+      await env.DB.prepare(
+        "SELECT operation_id FROM ops_requests WHERE principal=? ORDER BY created_at DESC,operation_id DESC",
+      )
+        .bind(LISTER)
+        .all<{ operation_id: string }>()
+    ).results.map((entry) => entry.operation_id);
+    expect(idsOf(own.json)).toEqual(stored);
+    expect(new Set(stored)).toEqual(new Set([ids.collection, ids.imported, ids.projection]));
+    const projection = own.json["operations"].find(
+      (entry: { operationId: string }) => entry.operationId === ids.projection,
+    );
+    expect(Object.keys(projection).sort()).toEqual([
+      "acceptedAt",
+      "dispatch",
+      "failureCode",
+      "kind",
+      "operationId",
+      "source",
+      "status",
+      "updatedAt",
+    ]);
+    expect(projection).toMatchObject({ kind: "projection", status: "accepted", source: null });
+    // The stored request is not read: a rebuild's reason is the operator's text.
+    expect(JSON.stringify(own.json)).not.toContain(REASON);
+    // The peer holds its own list, and neither sees the other's request.
+    expect(idsOf((await list("", LISTER_PEER)).json)).toEqual([ids.peer]);
+  });
+
+  it("pages by cursor and filters by kind and status, each a closed value", async () => {
+    await seed();
+    const all = idsOf((await list()).json);
+    expect(all).toHaveLength(3);
+    const first = await list("?limit=2");
+    expect(idsOf(first.json)).toEqual(all.slice(0, 2));
+    expect(first.json["nextCursor"]).toBe(all[1]);
+    const second = await list(`?limit=2&cursor=${first.json["nextCursor"]}`);
+    expect(idsOf(second.json)).toEqual(all.slice(2));
+    expect(second.json["nextCursor"]).toBeNull();
+    const imports = await list("?kind=import");
+    expect(imports.json["operations"].map((entry: { kind: string }) => entry.kind)).toEqual([
+      "import",
+    ]);
+    const projections = await list("?status=accepted&kind=projection");
+    expect(projections.json["operations"].map((entry: { kind: string }) => entry.kind)).toEqual([
+      "projection",
+    ]);
+    expect((await list("?status=completed")).json).toEqual({
+      schemaVersion: "kogane-operation-list-v1",
+      operations: [],
+      nextCursor: null,
+    });
+  });
+
+  it("refuses a query outside its closed keys and values, naming the key and never the value", async () => {
+    const cases: [string, string[] | undefined][] = [
+      ["?purge=1", undefined],
+      ["?kind=import&kind=replay", ["kind"]],
+      ["?kind=DROP%20TABLE", ["kind"]],
+      ["?kind=", ["kind"]],
+      ["?status=done", ["status"]],
+      ["?limit=0", ["limit"]],
+      ["?limit=51", ["limit"]],
+      ["?limit=05", ["limit"]],
+      ["?cursor=not-an-operation", ["cursor"]],
+    ];
+    for (const [query, refs] of cases) {
+      const refused = await list(query);
+      expect(refused.status, query).toBe(400);
+      expect(refused.json["error"], query).toBe("invalid_query");
+      expect(refused.json["refs"], query).toEqual(refs);
+      expect(JSON.stringify(refused.json), query).not.toMatch(/purge|DROP|done|not-an-operation/u);
+    }
+    // A cursor of another principal answers like one that does not exist.
+    const peer = await request("/projections", { reason: REASON }, LISTER_PEER);
+    for (const cursor of [peer, `op_${"0".repeat(64)}`]) {
+      const refused = await list(`?cursor=${cursor}`);
+      expect(refused.status).toBe(404);
+      expect(refused.json).toMatchObject({ error: "receipt_not_found", refs: ["cursor"] });
+    }
+  });
+
+  it("is the operator's alone, and absent while the flag is off", async () => {
+    const agent = await list("", AGENT, { AGENT_GRANTS: JSON.stringify([AGENT]) });
+    expect(agent.status).toBe(403);
+    expect(agent.json["error"]).toBe("approval_required");
+    const stranger = await list("", STRANGER);
+    expect(stranger.status).toBe(403);
+    expect(stranger.json["error"]).toBe("subject_not_granted");
+    const off = await list("", LISTER, { OPS_API_ENABLED: "" });
+    expect(off.status).toBe(404);
+    expect(off.json["error"]).toBe("not_found");
+    const post = await call(`${OPS}/operations`, {
+      body: {},
+      subject: LISTER,
+      environment: LISTING,
+    });
+    expect(post.status).toBe(404);
+  });
+
+  it("records each read as a count in the audit log, never an operation of the page", async () => {
+    await seed();
+    const recorded = async () =>
+      (
+        await env.DB.prepare(
+          "SELECT result,target_ref,diff_json FROM audit_records WHERE operation='ops.operation.list' AND principal=? ORDER BY recorded_at,audit_id",
+        )
+          .bind(LISTER)
+          .all<Record<string, unknown>>()
+      ).results;
+    const before = (await recorded()).length;
+    expect((await list("?limit=1")).status).toBe(200);
+    const records = (await recorded()).slice(before);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ result: "read", target_ref: null });
+    expect(JSON.parse(records[0]!["diff_json"] as string)).toEqual({
+      kind: "read",
+      rows: 1,
+      truncated: true,
+    });
+  });
+
+  it("reads ops_requests through an index of 0040 without table statistics", async () => {
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM sqlite_master WHERE name='sqlite_stat1'",
+      ).first("n"),
+    ).toBe(0);
+    const shapes = [
+      { kind: null, status: null },
+      { kind: "collection", status: null },
+      { kind: null, status: "running" },
+      { kind: "replay", status: "failed" },
+    ] as const;
+    for (const shape of shapes)
+      for (const after of [false, true]) {
+        const arms = operationListArms(shape);
+        const binds: unknown[] = [LISTER, 21];
+        for (const [status, kind] of arms ?? []) binds.push(status, kind);
+        if (after) binds.push("2026-09-11T00:00:00Z", `op_${"0".repeat(64)}`);
+        const plan = (
+          await env.DB.prepare(
+            `EXPLAIN QUERY PLAN ${operationListSql(arms?.length ?? null, after)}`,
+          )
+            .bind(...binds)
+            .all<{ detail: string }>()
+        ).results.map((entry) => entry.detail);
+        const reads = plan.filter((line) => /\bops_requests\b/u.test(line));
+        expect(reads).toHaveLength(arms?.length ?? 1);
+        const range = after ? " AND created_at<?)" : ")";
+        for (const line of reads)
+          expect(line).toBe(
+            arms === null
+              ? `SEARCH ops_requests USING INDEX ops_requests_principal (principal=?${range}`
+              : `SEARCH ops_requests USING INDEX ops_requests_open (status=? AND kind=?${range}`,
+          );
+      }
   });
 });
