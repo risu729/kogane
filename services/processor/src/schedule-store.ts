@@ -302,11 +302,11 @@ export const MAINTENANCE_WRITE_CODES = {
 } as const;
 export type MaintenanceWriteCode = keyof typeof MAINTENANCE_WRITE_CODES;
 
-/** The actors a revision may name: the operator, or a principal the owner delegated. */
+/** The actors a revision may name: the operator, or an MCP client acting as itself. */
 export type MaintenanceActor =
   /** A subject the App graded as the operator; never an `mcp-client:` name. */
   | { kind: "operator"; id: string }
-  /** `mcp-client:<sub>` resolved under MCP_DELEGATIONS (ADR 0063). */
+  /** `mcp-client:<sub>` the MCP Access application admitted (ADR 0084); stored as `delegated`. */
   | { kind: "delegated"; id: string };
 
 /** One requested revision. Values are validated, never trusted, whoever calls. */

@@ -99,10 +99,8 @@ describe("kogane.identity.read", () => {
           ).toBe(capabilities.includes("records.read") && sources === "*" && accounts === "*");
         }
     }
+    // Every MCP client holds the whole-store grant (ADR 0084).
     expect(await page.listed()).toContain(TOOL);
-    expect(await page.listed({ ...RECORDS_GRANT, capabilities: ["summary.read"] })).not.toContain(
-      TOOL,
-    );
   });
 
   it("answers each collection exactly as its route, and writes nothing", async () => {
@@ -196,14 +194,13 @@ describe("kogane.identity.read", () => {
         { code: "evidence_restricted", refs: ["scope:account"] },
       ],
     ] as const) {
-      // The grant is graded first: even a malformed argument gets the grant's refusal.
+      // The grant is graded first: even a malformed argument gets the grant's
+      // refusal. No deployment configures such a grant (ADR 0084), so it is
+      // given to the shared service both transports call.
       for (const args of [{ collection: "accounts" }, { collection: "missing" }]) {
-        const overHttp = await page.http(TOOL, args, grant);
-        expect(overHttp.status, JSON.stringify(grant)).toBe(403);
-        expect(overHttp.body).toMatchObject(expected);
-        const overMcp = await page.mcp(TOOL, args, grant);
-        expect(overMcp.isError).toBe(true);
-        expect(overMcp.body).toEqual(overHttp.body);
+        const answer = await page.direct(TOOL, args, grant);
+        expect(answer.status, JSON.stringify(grant)).toBe(403);
+        expect(answer.body).toMatchObject(expected);
       }
     }
   });

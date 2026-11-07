@@ -6,6 +6,8 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import worker from "../src/worker";
+import { callTool, toolContext } from "../src/agent-service";
+import type { Grant } from "../../../packages/application/src/index";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
 /** The UI's authority over these pages: records over the whole store. */
@@ -48,14 +50,18 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
       .setIssuedAt()
       .setExpirationTime("5m")
       .sign(keys.privateKey);
-  const environment = (grants: Record<string, unknown>) =>
+  // No table configures a grant any more (ADR 0084): an MCP client and the
+  // browser operator hold the whole-store grant, a browser subject in
+  // `AGENT_GRANTS` the reader grant. A narrower grant goes to the shared
+  // service directly (`direct`), which is where it is graded.
+  const environment = () =>
     ({
       ...env,
       ...extraEnv,
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: AUDIENCE,
       ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
-      AGENT_API_GRANTS: JSON.stringify(grants),
+      OPERATOR_SUBJECTS: '["synthetic-agent"]',
     }) as Env;
 
   /** The UI route as the signed-in browser reads it. */
@@ -64,35 +70,44 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
       new Request(`https://fixture.test${pathAndQuery}`, {
         headers: { "cf-access-jwt-assertion": await token("synthetic-reader", AUDIENCE) },
       }),
-      environment({}),
+      environment(),
     );
     return { status: response.status, body: await response.json() };
   }
 
-  const both = (grant: unknown) => ({
-    "synthetic-agent": grant,
-    "mcp-client:synthetic-agent": grant,
-  });
-
-  /** The tool on `/api/agent/v1/*`. */
-  async function http(
+  /** The tool's service answer under a grant no deployment configures. */
+  async function direct(
     tool: string,
     args: unknown,
-    grant: unknown = RECORDS_GRANT,
+    grant: unknown,
   ): Promise<{ status: number; body: any }> {
+    const answer = await callTool(
+      tool as never,
+      args,
+      toolContext(
+        environment(),
+        { principal: "mcp-client:synthetic-agent", ...(grant as object) } as Grant,
+        new Date().toISOString().replace(/\.\d{3}Z$/u, "Z"),
+      ),
+    );
+    return { status: answer.status, body: answer.body };
+  }
+
+  /** The tool on `/api/agent/v1/*`. */
+  async function http(tool: string, args: unknown): Promise<{ status: number; body: any }> {
     const response = await worker.fetch(
       new Request(`https://fixture.test/api/agent/v1/${tool.slice("kogane.".length)}`, {
         method: "POST",
         headers: { "cf-access-jwt-assertion": await token("synthetic-agent", AUDIENCE) },
         body: JSON.stringify(args),
       }),
-      environment(both(grant)),
+      environment(),
     );
     return { status: response.status, body: await response.json() };
   }
 
   /** One `/mcp` JSON-RPC message as `mcp-client:synthetic-agent`. */
-  async function mcpMessage(message: Record<string, unknown>, grant: unknown = RECORDS_GRANT) {
+  async function mcpMessage(message: Record<string, unknown>) {
     const response = await worker.fetch(
       new Request("https://fixture.test/mcp", {
         method: "POST",
@@ -102,28 +117,24 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
         },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, ...message }),
       }),
-      environment(both(grant)),
+      environment(),
     );
     expect(response.status).toBe(200);
     return (await response.json()) as Record<string, any>;
   }
 
   /** The tool on `/mcp`: its structured content and whether it is an error. */
-  async function mcp(
-    tool: string,
-    args: unknown,
-    grant: unknown = RECORDS_GRANT,
-  ): Promise<{ isError: boolean; body: any }> {
-    const message = await mcpMessage(
-      { method: "tools/call", params: { name: tool, arguments: args } },
-      grant,
-    );
+  async function mcp(tool: string, args: unknown): Promise<{ isError: boolean; body: any }> {
+    const message = await mcpMessage({
+      method: "tools/call",
+      params: { name: tool, arguments: args },
+    });
     return { isError: message["result"].isError, body: message["result"].structuredContent };
   }
 
-  /** The tool names `/mcp` lists under `grant`. */
-  async function listed(grant: unknown = RECORDS_GRANT): Promise<string[]> {
-    const message = await mcpMessage({ method: "tools/list" }, grant);
+  /** The tool names `/mcp` lists to an MCP client. */
+  async function listed(): Promise<string[]> {
+    const message = await mcpMessage({ method: "tools/list" });
     return message["result"].tools.map((entry: { name: string }) => entry.name);
   }
 
@@ -152,7 +163,7 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
     return page;
   }
 
-  return { route, http, mcp, listed, expectSameAnswer };
+  return { route, http, mcp, direct, listed, expectSameAnswer };
 }
 
 /**

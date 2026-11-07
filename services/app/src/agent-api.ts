@@ -12,16 +12,16 @@ import {
 // `/mcp`, a seventh path (`purchases.explain`) only while the deployment
 // serves card purchase recognition and an eighth (`reconstructed-state.read`)
 // only while it serves the reconstructed state, each with a bounded JSON body, each behind
-// the same Access gate as every read route, and each behind a grant looked up
-// by the verified principal. `AGENT_API_GRANTS` absent means no principal has
-// a grant, so every agent route answers 403 — that is the deployed default,
-// and the test snapshot adapter never serves these paths at all.
+// the same Access gate as every read route. No table grants these routes any
+// more (ADR 0084, 2026-11-07): an MCP client gets the whole-store grant
+// (`fullGrant`), a browser session what the UI gives its subject
+// (`agentGrant`), and the test snapshot adapter never serves
+// these paths at all. Control over which tools an MCP client uses lives in
+// the MCP client's own settings.
 //
 // `GET /api/v2/query` is the same query service under the reader authority
-// the browser already has over every other GET route: a signed-in human sees
-// what those routes already show, so the UI does not depend on
-// `AGENT_API_GRANTS`
-// and an agent grant is never widened to serve a page.
+// the browser already has over every other GET route (`readerGrant`), with no
+// proposal capability.
 //
 // The principal of the shared query route is the subject `authenticate`
 // returned. An agent path receives an `AgentCaller` decided at the boundary
@@ -33,12 +33,12 @@ import {
 // header (review rule 9, addendum 10 section 5).
 import {
   DEFAULT_QUERY_LIMIT,
+  fullGrant,
   type Grant,
-  grantFor,
   type OperationCall,
   type OperationName,
-  parseGrants,
   parseQueryRequest,
+  resolvePrincipal,
   subjectOfPrincipal,
   toolOperation,
 } from "../../../packages/application/src/index";
@@ -146,27 +146,9 @@ async function boundedJson(request: Request): Promise<unknown> {
 }
 
 /**
- * The grant of the caller, or `null`. Absent configuration grants nothing:
- * this table is an allow-list, and a principal it does not name reads nothing
- * here (`403 agent_api_not_configured`).
- *
- * `AGENT_API_GRANTS` is this API's table (principal -> grant). It is a
- * different variable from the command path's `AGENT_GRANTS`, which is a JSON
- * *array* of subjects that path treats as agents, and from `OPERATOR_SUBJECTS`,
- * which is the array of subjects it treats as the human operator. Keeping them
- * apart is not tidiness: the parsers reject each other's shape, and since the
- * command path is now an allow-list on both sides, a value in the wrong
- * variable refuses rather than promoting anyone
- * (docs/agent-api.md, "Relationship to the change lifecycle").
- */
-export function agentGrant(env: Env, principal: string): Grant | null {
-  return grantFor(parseGrants(env.AGENT_API_GRANTS), principal);
-}
-
-/**
  * The authority a signed-in browser reader already has: everything the
- * existing GET routes serve, and no proposal capability. It is not read from
- * `AGENT_API_GRANTS`, and it can never propose or accept.
+ * existing GET routes serve, and no proposal capability. It can never
+ * propose or accept.
  */
 export function readerGrant(principal: string): Grant {
   return {
@@ -174,6 +156,30 @@ export function readerGrant(principal: string): Grant {
     scopes: { sources: "*", accounts: "*" },
     capabilities: ["summary.read", "records.read", "evidence.read"],
     budget: { maxRows: 1000, maxProposalTargets: 1, maxExplainDepth: 6 },
+  };
+}
+
+/**
+ * ADR 0084: an MCP client the MCP Access application admitted reads and
+ * proposes over the whole store. A browser session on the HTTP agent routes
+ * holds what the UI gives the same subject, by the UI's own lists: the
+ * operator (`OPERATOR_SUBJECTS`) the whole store; a subject in `AGENT_GRANTS`,
+ * which may propose through the command routes, the reader grant plus that
+ * proposal; anyone else the GET routes' reader grant, which reaches no audit
+ * log, maintenance window or proposal. No table decides any of it, and
+ * unreadable lists fall back to the reader grant.
+ */
+function agentGrant(env: Env, caller: AgentCaller): Grant {
+  const full = fullGrant(caller.principal);
+  if (caller.kind === "mcp-client") return full;
+  const resolved = resolvePrincipal(env, caller.principal);
+  if (!resolved.ok) return readerGrant(caller.principal);
+  if (resolved.principal.kind === "human") return full;
+  const reader = readerGrant(caller.principal);
+  return {
+    ...reader,
+    capabilities: [...reader.capabilities, "interpretation.propose"],
+    budget: full.budget,
   };
 }
 
@@ -194,10 +200,9 @@ export async function agentApi(
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
   if (url.search) throw new HttpError(400, "invalid_query");
   assertAgentTransport(request, url);
-  const grant = agentGrant(env, caller.principal);
-  if (grant === null) throw new HttpError(403, "agent_api_not_configured");
-  // Query/proposal clocks keep their existing whole-second contract. Authority
-  // validity must not round backwards across a subsecond issuedAt/notAfter.
+  const grant = agentGrant(env, caller);
+  // Query/proposal clocks keep their existing whole-second contract; the
+  // operation envelope keeps the millisecond instant.
   const delegationNow = new Date().toISOString();
   const now = delegationNow.replace(/\.\d{3}Z$/u, "Z");
   const context = toolContext(env, grant, now);
@@ -209,10 +214,10 @@ export async function agentApi(
     // inside `callOpsTool`, exactly as their HTTP routes are. With
     // `OPS_API_ENABLED` off they are neither listed nor callable, so the MCP
     // surface matches the routes this deployment actually serves. An MCP
-    // client is never an operator (ADR 0047): it is shown and served only the
-    // tools its delegation holds (ADR 0063, `delegatedOpsTools` and
-    // `callDelegatedOpsTool`), and `callOpsTool` refuses its caller object
-    // before any grader runs.
+    // client is never an operator (ADR 0047): `callOpsTool` refuses its caller
+    // object before any grader runs. Every MCP client is published the
+    // delegated operations tools instead, acting as itself under the
+    // authority ADR 0084 gives it.
     const ops = opsApiEnabled(env);
     // A deployment whose command grant lists cannot be read grades nobody, so
     // it can authorize none of the operations tools; publishing them would
@@ -228,7 +233,7 @@ export async function agentApi(
     // that depends on it: `initialize`, `ping` and notifications touch no table.
     let served: Promise<boolean> | undefined;
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
-    // Reads require schedules.read; the write is separately listed to a resolved delegation.
+    // Reads require schedules.read; the write is separately listed to a resolved MCP principal.
     const schedules = schedulesServed(env);
     // The reconstructed state likewise exists exactly while its GET route does,
     // and so does the dated reported state: both are served where
@@ -247,8 +252,8 @@ export async function agentApi(
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (name === REPORTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (CARD_SETTLEMENT_TOOL_NAMES.has(name) && !(await settlements())) return null;
-        // An MCP client's capabilities also carry its delegation declaration
-        // (#628, inert: nothing executes under it); recorded like any call.
+        // An MCP client's capabilities also carry the operation authority
+        // derived for it (ADR 0084), as a safe status; recorded like any call.
         if (name === "kogane.capabilities" && caller.kind === "mcp-client")
           return toolCall(request, env, caller, name, async (audit) => {
             const result = await callTool(name, body, { ...context, audit });

@@ -31,7 +31,6 @@ import {
 } from "../purchase-display.tsx";
 import { useCardSettlement } from "../reconciliation-api.ts";
 import { CardSettlementDetails } from "../reconciliation-display.tsx";
-import { DelegationStatusNotice } from "../delegation-status.tsx";
 import { Link } from "../router.tsx";
 import { Badge, EmptyState, Kv, KvRow, Notice, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import {
@@ -308,7 +307,6 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
           サーバーが試算した対象と差分を確認し、承認してから確定します。確定するまで判断は保存されません。
         </p>
       </div>
-      <DelegationStatusNotice />
       <QueryBoundary query={report} label="確認内容">
         {(data) => (
           <>

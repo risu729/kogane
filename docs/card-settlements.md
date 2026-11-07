@@ -566,9 +566,10 @@ above it) is `413 budget_exceeded` (`budget:maxRows=<n>`); a page's
 request is `400 invalid_query`, and a `proposalId` that names no candidate is
 `404 not_found`. None of these refusals reads a store row; the only statement
 before them is the `sqlite_master` check the route also runs. Deciding a review or recording ownership stays a plan through the change
-lifecycle, graded there; on MCP that needs a delegation
-([ADR 0063](adr/0063-delegated-ai-operation-path.md)), and
-`MCP_DELEGATIONS` is empty. This is the read half of the owner's UI-parity
+lifecycle, graded there; on MCP any client the MCP Access application admits
+plans and decides as itself
+([ADR 0063](adr/0063-delegated-ai-operation-path.md),
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). This is the read half of the owner's UI-parity
 decision of 2026-11-07 ([ADR 0081](adr/0081-ui-parity-through-mcp.md)).
 
 ## Financial meaning and limits
