@@ -263,6 +263,9 @@ route を広告することはない。未知の reward path は 404 であり�
 `offerCoverage`, refusing with `offer_set_too_large` beyond it (§4).
 `offset` はbucket行を歩く。読み取りは公開済みparse runに結び付いたclaimだけを見るため、
 publication pointerの巻き戻しはreward側の表示からも同時に消える。
+The holdings and expiry pages are also the MCP page read `kogane.rewards.read`,
+answered by the routes' own reader `readRewardRoute`
+([agent API](agent-api.md#ui-read-pages)); no agent tool runs `/offers/simulate`.
 
 ## 9. UI
 
