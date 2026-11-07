@@ -117,7 +117,7 @@ function Summary({ record }: { record: OperationRecordWire }): ReactNode {
               tone={STATUS_TONES[record.status]}
             />
           </KvRow>
-          <KvRow label="停止の理由">
+          <KvRow label="待機・停止の理由">
             <Reason value={record.failureCode} />
           </KvRow>
           <KvRow label="取得元">
@@ -418,7 +418,10 @@ export function OperationPage({ operationId }: { operationId: string }): ReactNo
               {record.execution === null ? null : (
                 <>
                   <Execution execution={record.execution} />
-                  <Runs execution={record.execution} />
+                  {/* A session refresh reports runs only if its collector did. */}
+                  {record.execution.action === "collect" || record.execution.runs.length > 0 ? (
+                    <Runs execution={record.execution} />
+                  ) : null}
                 </>
               )}
               <div className="panel-body">

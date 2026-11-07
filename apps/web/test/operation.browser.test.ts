@@ -35,6 +35,7 @@ const PUBLISHED = id("1");
 const WAITING = id("2");
 const REBUILD = id("3");
 const MISSING = id("4");
+const REFRESH = id("5");
 
 const pending = (kind: OperationRecordKind) =>
   OPERATION_RECORD_STAGES_BY_KIND[kind].map((stage) => ({
@@ -167,8 +168,37 @@ const rebuild: OperationRecordWire = {
   execution: null,
 };
 
+/** A session refresh the source policy hands to a person: nothing is dispatched. */
+const refresh: OperationRecordWire = {
+  schemaVersion: "kogane-operation-v1",
+  operationId: REFRESH,
+  kind: "session-refresh",
+  status: "waiting_for_human",
+  source: "synthetic-bank",
+  targetRef: null,
+  dispatch: { state: "not_required", attempts: 0 },
+  stages: [],
+  failureCode: null,
+  acceptedAt: "2026-09-11T00:00:00Z",
+  updatedAt: "2026-09-11T00:00:00Z",
+  execution: {
+    action: "refresh-session",
+    state: "waiting_for_human",
+    connectionId: null,
+    reasonCode: null,
+    scope: null,
+    waits: 0,
+    expiresAt: null,
+    startedAt: null,
+    collectedAt: null,
+    publishedAt: null,
+    finishedAt: null,
+    runs: [],
+  },
+};
+
 const RECORDS = new Map(
-  [published, waiting, rebuild].map((record) => [record.operationId, record]),
+  [published, waiting, rebuild, refresh].map((record) => [record.operationId, record]),
 );
 
 describe.if(runnable)("the operator's 依頼の経過 page", () => {
@@ -323,6 +353,29 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
       expect(shown).toContain("snapshot_incomplete");
       expect(shown).toContain("指定なし");
       expect(await page.getByRole("heading", { level: 2, name: "収集の実行" }).count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 60_000);
+
+  test("a session refresh waiting for a person has no stages and no collection runs", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/operations/${REFRESH}`);
+      await page.getByRole("heading", { level: 2, name: "セッション更新の実行" }).waitFor();
+      const shown = await text(page);
+      for (const expected of [
+        "セッション更新",
+        "本人操作待ち",
+        "引き渡し不要",
+        "この種類の依頼には段階がありません。",
+        "期限なし（本人の操作を待つ依頼）",
+      ])
+        expect(shown).toContain(expected);
+      expect(shown).not.toContain("依頼で指定した期間は保存されるだけで");
+      expect(
+        await page.getByRole("heading", { level: 2, name: "報告された収集実行" }).count(),
+      ).toBe(0);
     } finally {
       await page.close();
     }
