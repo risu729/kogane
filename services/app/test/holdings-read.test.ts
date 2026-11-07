@@ -129,6 +129,26 @@ describe("holdings over the READ database", () => {
     ]);
   });
 
+  it("published evidence after a build marks holdings partial until the next build", async () => {
+    await seedDeposit();
+    const behind = await holdings();
+    expect(behind.completeness).toBe("partial");
+    expect(behind.quality["freshness"]!.state).toBe("partial");
+    expect(behind.quality["freshness"]!.reasonCodes).toEqual([
+      "snapshot:behind_published_evidence",
+    ]);
+    expect(behind.coverage.gaps.map((gap) => gap.reasonCode)).toContain(
+      "snapshot:behind_published_evidence",
+    );
+    expect(behind.data.units).toEqual([
+      { unitRef: "JPY", coefficient: "4321", scale: 0, adoptedCount: 1 },
+    ]);
+    expect(["complete", "unchanged"]).toContain((await build()).status);
+    const current = await holdings();
+    expect(current.completeness).toBe("complete");
+    expect(current.quality["freshness"]!.reasonCodes).toEqual(["snapshot_current"]);
+  });
+
   it("a use restriction recorded after the build refuses the snapshot until a build re-verifies it", async () => {
     // The restriction moves `visibility_revision` (migration 0038). Summing the
     // snapshot built before it would answer with the old figure.
