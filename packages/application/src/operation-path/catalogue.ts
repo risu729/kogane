@@ -249,6 +249,16 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // Card statements without a settlement candidate, with the ADR 0074
+  // planner's read-only answer (ADR 0074, 2026-11-07 amendment): the
+  // カード照合 page's service.
+  "card-settlements.unmatched": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   "economic-readiness.read": {
     risk: ["R0"],
     effect: null,

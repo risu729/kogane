@@ -205,3 +205,61 @@ sorted together by amount, fixed before this ADR. The independent review added t
 (the planner first let a refused duplicate or dateless debit drop out
 silently, so a statement could be `proposed` beside another possible payer)
 and the oracle's status check.
+
+## Amendment 2026-11-07: a read-only caller on the review page
+
+Phase 2 plan unit 2e (owner approval of the whole plan, 2026-11-07 03:58 UTC,
+"すべて推奨される手順でいいです") makes the planner's answer visible, and only
+visible. `reviewUnmatchedCardStatements`
+(`packages/application/src/query/card-statements-unmatched.ts`) is the one
+caller; the `カード照合` page
+(`GET /api/v2/reconciliation/card-statements-unmatched`) and the agent tool
+`kogane.card-settlements.unmatched` both call it
+([card settlements](../card-settlements.md#statements-without-a-candidate)).
+No lane, table, command or writer uses its answer, and the acceptance writer
+still claims exactly one debit, so nothing it lists can be accepted
+(`acceptable: false` on every item). "Nothing calls it" above is replaced by
+this.
+
+- **Policy** (the owner's values for plan question 3, 2026-11-07 03:58 UTC):
+  `card-statement-unmatched-display-v1`, the window the sweep uses (three days
+  either side of the due date) and at most three debits per allocation
+  (`CARD_STATEMENT_UNMATCHED_ALLOCATION_POLICY`,
+  `packages/domain/src/card-settlement-unmatched.ts`). It is a display
+  policy; no rule or writer is authorised by it.
+- **Who is asked.** Only a statement that no candidate cites and whose window
+  holds debits but none of an equal amount (`no_equal_amount_debit`), the one
+  case where the planner can say more than the sweep. A window with an equal
+  debit the matcher accepts is `equal_amount_debit_awaiting_sweep` instead:
+  the sweep writes its candidate on its next pass.
+- **Partition.** The statements so asked on one page (at most 50, by
+  statement id) are sorted by due date and grouped while consecutive due
+  dates are at most six days apart, so any two whose windows share a day are
+  in one run with the union of their windows' debits (each window read once,
+  with the sweep's own `CARD_SETTLEMENT_BANK_DEBITS_SQL`). A group past 16
+  statements or 32 debits, or whose window read reached its 1,000-row bound,
+  is answered `input_bound_exceeded` for every statement, never cut.
+- **What a run does not see.** Statements that already have a candidate, and
+  statements on another page, are not in the run, so a debit one of them
+  could use is not contested here. Held keys, alias classes and reserved
+  statement keys are read for the run's debits and statements (live
+  `economic_claims` rows and accepted settlements of live revisions in book
+  `cash-movement`), so a debit another holder consumed takes no part.
+- **Identity.** Each debit's alias class is `humanAdoptedRowIdentity` over its
+  row and resolved account, as the acceptance plan computes it; a debit
+  without a resolved account or an admitted identity is
+  `identity_not_admitted`.
+- **Rows the sweep does not compare.** A window row without an exact amount
+  or with a debit date that is not a civil date is passed to the planner as
+  it is (an absent amount, an unknown date), not dropped, so the planner
+  excludes it under its own code and a dateless one competes, as above.
+
+Verification: `services/processor/test/card-statements-unmatched.test.ts`
+on the complete CORE schema (two debits paying one statement exactly, a
+shortfall, overlapping windows contesting one pair, every closed code, a
+swept statement leaving the list, no write, keyed lookups without
+statistics); `services/app/test/card-statements-unmatched-api.test.ts` (the
+route and the agent tool answer the same page; grants; audit);
+`apps/web/test/card-settlement.browser.test.ts` (the page shows the reason
+and the answer and offers no action). The module test now pins this caller
+and its wire contract as the only files naming the module.
