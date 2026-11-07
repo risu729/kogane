@@ -56,6 +56,8 @@ it("lists reviewed connections even with no parsed observations and validates ro
   await expect(call("/api/identity/connections?source=moneyforward-me")).rejects.toThrow(
     "invalid_query",
   );
+  // Query text with no parameters is still query text.
+  await expect(call("/api/identity/connections?&")).rejects.toThrow("invalid_query");
   await expect(call("/api/identity/connections", "POST")).rejects.toThrow("method_not_allowed");
   expect(
     validAccountConnection({ ...(body as any).connections[0], leafBinding: "confirmed" }),

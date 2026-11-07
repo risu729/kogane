@@ -39,11 +39,10 @@ export interface CatalogueEntry {
 const UI: readonly SubjectPath[] = ["ui"];
 const UI_MCP: readonly SubjectPath[] = ["ui", "mcp"];
 const AGENT: readonly SubjectPath[] = ["agent-http", "mcp"];
-// The operations tools of docs/ops-api.md are never served on `/mcp` now: its
-// only caller is an MCP client, which is agent-only (ADR 0047), so the tools
-// are not published to it and every call is refused `actor_not_supported`
-// before any grader runs. That refusal is recorded under the tool's operation
-// on `mcp`, which is why the path stays listed.
+// The operations requests of docs/ops-api.md: the operator's HTTP routes, and
+// on `/mcp` a delegated caller only (ADR 0063, `services/app/src/ops-tools.ts`),
+// both over the same services. A call without a delegation is refused and
+// recorded under the tool's operation on `mcp`.
 const OPS: readonly SubjectPath[] = ["ui", "mcp"];
 
 export const OPERATION_CATALOGUE = {
@@ -154,13 +153,14 @@ export const OPERATION_CATALOGUE = {
     capability: "interpretation.accept",
     paths: UI,
   },
-  // Stopped-execution lease release: operator in the UI only (R3).
+  // Stopped-execution lease release: the operator in the UI (R3). Its MCP
+  // tool exists and refuses every call, recorded here (ADR 0081 point 3).
   "schedules.lease.release": {
     risk: ["R3"],
     effect: "applied",
     quiet: "replayed",
     capability: "interpretation.accept",
-    paths: UI,
+    paths: UI_MCP,
   },
   // ── agent API tools (docs/agent-api.md) ─────────────────────────────────
   capabilities: { risk: ["R0"], effect: null, quiet: "read", capability: "", paths: AGENT },
@@ -243,6 +243,41 @@ export const OPERATION_CATALOGUE = {
   },
   // Account correspondence candidates (ADR 0077): read-only, the page's service.
   "accounts.candidates": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  // The カード照合 page's reads (ADR 0081): its review list or one review, and
+  // one candidate's ownership review, through the page's own services.
+  "card-settlements.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  // Card statements without a settlement candidate, with the ADR 0074
+  // planner's read-only answer (ADR 0074, 2026-11-07 amendment): the
+  // カード照合 page's service.
+  "card-settlements.unmatched": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  "card-settlements.ownership": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
+  // The UI's read pages over MCP (ADR 0081): each the route's own reader,
+  // whole-store only (services/app/src/page-read-tools.ts).
+  "identity.read": {
     risk: ["R0"],
     effect: null,
     quiet: "read",

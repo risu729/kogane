@@ -131,3 +131,24 @@ writes the candidate and digest the sweep wrote before the map existed. Its
 tick row holds closed codes and integers only.
 `services/processor/test/lane-ticks.test.ts` checks that a code outside the
 closed set is dropped from the row and from `/status`.
+
+## Amendment 2026-11-07: refund and zero totals get their own code
+
+The settlement sweep's `unmatched` map gains a fourth closed code,
+`statement_total_refund_or_zero`, for a statement whose exact total is zero
+or below (a refund, or a month with nothing to pay). Before this, such a
+statement counted as `statement_not_comparable`, which read like a parse
+problem; refund allocation is in fact unsupported (ADR 0004, #548), and the
+code now says so. The codes are checked in order: refund or zero, then not
+comparable, then the two window codes. The classification moved to
+`unmatchedStatementCode` (`packages/domain/src/card-settlement-unmatched.ts`)
+so the review read of statements without a candidate
+([card settlements](../card-settlements.md#statements-without-a-candidate))
+names the same code the tick counts. Nothing else changes: no query is
+added, candidates and digests are the same, and the tick row still keeps
+only the closed codes and their counts (Phase 2 plan unit 2e, approved by
+the owner 2026-11-07 03:58 UTC).
+
+Verification: `services/processor/test/card-settlement-unmatched.test.ts`
+counts a zero total, a refund and a refund without a due date as
+`statement_total_refund_or_zero`, and the other shapes as before.

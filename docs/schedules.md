@@ -181,12 +181,6 @@ Not verified: no official page has been fetched; which pages to allow and at
 which cadence are the owner's to confirm, and pages that are PDFs, need a
 login or render with JavaScript cannot be read this way.
 
-The page also shows **AIへの委任**, the AI delegations the App reads from
-`MCP_DELEGATIONS` (none, a void configuration, or each entry's state, role,
-window, capabilities and scope), as a read-only notice; delegations are
-changed only in the deployment configuration
-([agent API](agent-api.md#the-operators-delegation-status-s8-2026-11-06)).
-
 ## Settings API
 
 - `GET /api/ops/v1/schedules`: settings, maintenance provenance, reservations
@@ -197,8 +191,6 @@ changed only in the deployment configuration
   execution lease after confirmation, without starting collection.
 - `POST /api/ops/v1/schedules/proposals/:id`: accept or reject one undecided
   re-survey proposal (`{"decision":"accept"}` or `"reject"`).
-- `GET /api/v2/delegations` (outside this prefix, operator only): the
-  delegation notice's read.
 
 Every write is recorded in the common audit log ([audit log](audit-log.md),
 ADR 0064) on the `ui` path: the Processor's writer ends its own batch with the
@@ -223,8 +215,9 @@ and answer `413 request_too_large`, with or without a content-length
 
 Maintenance changes are made from the management screen using this HTTP API.
 An agent can read maintenance windows through the tool below; revising one
-through MCP is an operation the owner may delegate, executed only under a
-delegation; the committed `MCP_DELEGATIONS` is empty, so none is configured.
+through MCP is an operation any MCP client the MCP Access application admits
+applies as itself, over every schedule
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 Automatic online research exists only as the proposal-only
 re-survey above, which fetches nothing until pages are confirmed. See
 [agent access](agent-api.md) and [current status](current-status.md).
@@ -234,7 +227,10 @@ re-survey above, which fetches nothing until pages are confirmed. See
 [ADR 0046](adr/0046-agent-maintenance-windows.md), as amended by
 [ADR 0063](adr/0063-delegated-ai-operation-path.md) item 8 (slice S4 of the
 [AI operation path plan](plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)).
-Lease release and bootstrap stay operator or deployment only; job times and
+Lease release and bootstrap stay operator or deployment only (the MCP tool
+`kogane.schedules.lease.release` exists and refuses every call with
+`operation_not_delegable`, [ADR 0081](adr/0081-ui-parity-through-mcp.md)
+point 3; [agent access](agent-api.md#maintenance-windows)); job times and
 enable/disable are otherwise reachable only through the delegated
 `kogane.schedules.job.update` tool ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)),
 and the routes above refuse every agent and every MCP-audience caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows).
@@ -253,10 +249,9 @@ and the routes above refuse every agent and every MCP-audience caller. The tools
   the operator header or a delegation reference; no write is reachable under
   `/internal/schedules/agent/`.
 - `kogane.schedules.maintenance.update` is a delegated operation: no agent-API
-  grant can name it, and it is published only to a principal whose resolved
-  delegation holds `schedules.maintenance.update`. Without one (the committed
-  `MCP_DELEGATIONS` is empty) every call on `/mcp` is refused before anything
-  reaches the Processor; with one, it applies or prepares and confirms
+  grant can name it, and it is published to every MCP client the MCP Access
+  application admits (ADR 0084). A browser caller is refused on `/mcp` before
+  anything reaches the Processor; otherwise it applies or prepares and confirms
   through the private delegated route
   ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)). Its arguments are one revision: omit `ruleId` with
   `revision: 0` to create a rule under an id the server chooses, or name a rule

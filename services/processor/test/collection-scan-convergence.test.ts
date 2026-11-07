@@ -512,7 +512,7 @@ test("a run CORE refuses to seal is blocked with the trigger's code, once, and t
   expect(fetchRunsOf(harness, "run-001")).toEqual([
     {
       id: left!.id,
-      source_run_key: "run-001:terminal-registration-v2",
+      source_run_key: "run-001:terminal-registration-v3",
       sealed: 0,
       artifacts: 1,
     },
@@ -617,7 +617,7 @@ test("under a later contract version a seal-refused run gets one fresh attempt a
   const left = fetchRunsOf(harness, "run-001");
   expect(left.map((run) => [run.source_run_key, run.sealed])).toEqual([
     ["run-001:terminal-registration-v1", 0],
-    ["run-001:terminal-registration-v2", 0],
+    ["run-001:terminal-registration-v3", 0],
   ]);
   // Each version's blocked stage names the fetch run that version left.
   expect(traceOf(harness, "run-001").map((row) => [row.blocked_code, row.stages])).toEqual([
