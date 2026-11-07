@@ -518,9 +518,11 @@ describe("holdings from the adopted projection", () => {
           ...(!behind && !stale ? ["snapshot_current"] : []),
         ];
         expect(outcome.result.quality.freshness.reasonCodes).toEqual(expected);
-        expect(outcome.result.coverage.gaps.some(
-          (gap) => gap.reasonCode === "snapshot:behind_published_evidence",
-        )).toBe(behind);
+        expect(
+          outcome.result.coverage.gaps.some(
+            (gap) => gap.reasonCode === "snapshot:behind_published_evidence",
+          ),
+        ).toBe(behind);
         if (outcome.result.data.intent !== "holdings") throw new Error("unreachable");
         expect(outcome.result.data.units).toEqual([
           { unitRef: "JPY", coefficient: "60000", scale: 0, adoptedCount: 1 },
