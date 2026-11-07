@@ -6,14 +6,21 @@
 // paged by keyset: the cursor is the operation id of the last row of the
 // previous page, resolved to its position with the same principal filter.
 //
-// Every page uses an index of migration 0040 and reads at most what its page
-// needs (ADR 0086, "Decision"):
+// Every page uses an index of migration 0040 (ADR 0086, "Decision"):
 //
 //   * no filter: one range on `ops_requests_principal (principal, created_at)`;
 //   * a kind, a status or both: one arm per (status, kind) pair the filters
 //     allow, each a range on `ops_requests_open (status, kind, created_at)`
 //     limited to the page, merged newest first. The principal is checked on
 //     the rows each arm reads (`+principal` keeps the planner on that index).
+//
+// What a page reads: the rows it returns plus one, the rows that share the
+// cursor's `created_at` ahead of it, and, on a filtered page, every row of
+// another principal in each arm's range until that arm has its page. An arm
+// in which this principal has fewer rows than the page reads to the end of
+// its (status, kind) range, so a filtered page costs up to every row of the
+// allowed pairs below the cursor, whoever holds them (ADR 0086,
+// "Consequences").
 //
 // A summary carries identifiers, closed codes, counts and timestamps only. The
 // stored request (`request_json`) is never read here: a rebuild's `reason` is

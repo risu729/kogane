@@ -53,8 +53,9 @@ compound SELECT"; seen in the `services/app` workerd tests).
    requests. It sits behind `OPS_API_ENABLED` and the same operator grading as
    the other operations routes (`opsContext`): an agent gets
    `403 approval_required`, and a subject in neither grant list gets
-   `403 subject_not_granted`. It is read-only and has no MCP tool. A tool needs
-   the owner's approval of a catalogue change (below).
+   `403 subject_not_granted`. It is read-only and has no MCP tool. Its
+   catalogue entry (point 6) and any later MCP tool are catalogue changes,
+   which need the owner's approval before merge.
 2. **Order and paging.** Newest first by `created_at` descending, then
    `operation_id` descending. `operation_id` is unique and neither column
    changes after insert, so this is a stable total order. The cursor is the
@@ -95,11 +96,19 @@ compound SELECT"; seen in the `services/app` workerd tests).
 - An operator can find a request again without the audit log, and then follow
   it with the single-operation read.
 - No migration and no new index.
-- A page reads at most `page+1` rows per arm, plus the rows that share the
-  boundary `created_at` (the index has no `operation_id`, so SQLite sorts the
-  last order term within one timestamp). An arm also reads rows of other
-  principals with the same status and kind and skips them. The committed
-  deployment names one operator, and an agent cannot create an operation.
+- A page reads `page+1` rows of the caller per arm, plus the rows that share
+  the boundary `created_at` (the index has no `operation_id`, so SQLite sorts
+  the last order term within one timestamp). On a filtered page an arm also
+  reads every row of another principal with its status and kind until it has
+  its page, and an arm in which the caller has fewer rows than the page reads
+  to the end of its range. The bound of a filtered page is therefore every
+  row of the allowed (status, kind) pairs below the cursor, of all
+  principals, not the page size. Today the committed deployment names one
+  operator and an agent cannot create an operation, so the caller's rows are
+  all the rows. A second principal that creates requests (for example an MCP
+  principal applying operations) makes this cost grow with that principal's
+  history; option 3's index, or a principal-first index per filter, is then
+  the fix, and it needs a migration.
 - The query and paging live in `packages/application`
   (`listOperations`), not in the route, so that a later MCP read can call the
   same service with the store it is given, without SQL of its own (ADR 0081,
@@ -111,7 +120,11 @@ compound SELECT"; seen in the `services/app` workerd tests).
   `kogane.ops.operation.list` over `listOperations`, with the authority the
   MCP path has then for `kogane.ops.operation.get` (today the `operations.read`
   delegation capability). ADR 0081's guard test does not exist yet, so nothing
-  fails today.
+  fails today. Until then the entry is a new known gap of ADR 0081, point 4.
+  Dropping it would leave the route without the audit record ADR 0064 asks of
+  every operations request, because an audit record may name only a catalogue
+  operation. A guard test that lists the known gaps must list this entry,
+  which needs the owner's agreement, as the entry itself does.
 - The audit catalogue gains one name, and the web audit page's label table
   gains one entry.
 
