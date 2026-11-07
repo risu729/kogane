@@ -12,6 +12,7 @@ import {
   Badge,
   EmptyState,
   LineageBadge,
+  Loading,
   Nullable,
   Panel,
   QueryBoundary,
@@ -125,17 +126,33 @@ function HandOff({ shared }: { shared: SharedQueryResponse<CoverageSummaryData> 
   );
 }
 
-function OverviewBody({ data }: { data: Overview }): ReactNode {
-  const [page, setPage] = useState(0);
+/**
+ * Where the shared service is advertised, its answer is the only source of the
+ * figures: while it loads or after it fails the page says so, and never falls
+ * back to counting the overview's own lists (the run list is the newest
+ * window, not the whole history).
+ */
+function Counts({ data }: { data: Overview }): ReactNode {
   const features = useFeatures();
   const shared = useCoverageSummary();
+  if (!features.known) return <Loading label="件数の集計" />;
+  if (!features.sharedQuery) return <SummaryCounts data={data} shared={undefined} />;
+  return (
+    <QueryBoundary query={shared} label="件数の集計">
+      {(value) => <SummaryCounts data={data} shared={value} />}
+    </QueryBoundary>
+  );
+}
+
+function OverviewBody({ data }: { data: Overview }): ReactNode {
+  const [page, setPage] = useState(0);
   const view = pageWindow(
     [...data.fetchRuns].sort((a, b) => b.id - a.id),
     page,
   );
   return (
     <>
-      <SummaryCounts data={data} shared={features.sharedQuery ? shared.data : undefined} />
+      <Counts data={data} />
       <Panel
         id="sources"
         title="取得元"

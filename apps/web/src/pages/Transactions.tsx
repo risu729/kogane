@@ -17,7 +17,7 @@ import {
   recordedDate,
 } from "../filters.ts";
 import { Pager, RecordControls } from "./ViewControls.tsx";
-import { useViewState } from "../view-state.tsx";
+import { useListPage, useViewState } from "../view-state.tsx";
 import {
   OrganizedInstrumentContext,
   OrganizedSourceAccount,
@@ -136,7 +136,7 @@ function TransactionsTable({ rows }: { rows: TransactionRow[] }): ReactNode {
   const { serverFilters, serverPaging } = useFeatures();
   const [filters, setFilters] = useViewState("transactions.filters");
   const [search, setSearch] = useViewState("transactions.search");
-  const [page, setPage] = useViewState("transactions.page");
+  const [page, setPage] = useListPage("transactions.page");
   const [sorting, setSorting] = useViewState("transactions.sorting");
   const matchingRecords = useMemo(
     () =>
