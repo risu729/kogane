@@ -8,14 +8,20 @@ import {
 } from "../../../packages/observation-shared/src/evidence-contract";
 import { cursor, HttpError, identifier } from "./http";
 import {
-  type ArtifactRow,
-  catalogue,
   detailDto,
-  getArtifact,
-  getRun,
-  listArtifacts,
-  listRuns,
-} from "./read";
+  evidenceArtifact,
+  evidenceRun,
+  listEvidenceArtifacts,
+  listEvidenceRuns,
+} from "../../../packages/application/src/query/evidence-catalogue.ts";
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
+import { type ArtifactRow, catalogue } from "./read";
+
+/** A run or artifact the catalogue does not hold is the route's 404. */
+function found<T>(row: T | null): T {
+  if (row === null) throw new HttpError(404, "not_found");
+  return row;
+}
 
 export const EVIDENCE_PREFIX = "/api/evidence/v1";
 const RUNS = /^\/api\/evidence\/v1\/sources\/([^/]+)\/runs$/;
@@ -62,7 +68,7 @@ export async function readEvidenceRoute(
         apiVersion: EVIDENCE_API_VERSION,
         sourceId: source,
         coverage: "sealed-only",
-        ...(await catalogue(() => listRuns(env.DB, source, before))),
+        ...(await catalogue(() => listEvidenceRuns(d1Executor(env.DB), source, before))),
       },
     };
   }
@@ -71,17 +77,21 @@ export async function readEvidenceRoute(
   const runId = identifier(match[1]!, "r");
   const before = match[2] ? undefined : cursor(url);
   if (match[2] && url.search) throw new HttpError(400, "invalid_query");
-  const run = await catalogue(() => getRun(env.DB, source, runId));
+  const run = found(await catalogue(() => evidenceRun(d1Executor(env.DB), source, runId)));
   if (!match[2])
     return {
       body: {
         apiVersion: EVIDENCE_API_VERSION,
         run,
-        ...(await catalogue(() => listArtifacts(env.DB, source, runId, before!))),
+        ...(await catalogue(() =>
+          listEvidenceArtifacts(d1Executor(env.DB), source, runId, before!),
+        )),
       },
     };
   const artifactId = identifier(match[2], "a");
-  const artifact = await catalogue(() => getArtifact(env.DB, source, runId, artifactId));
+  const artifact = found(
+    await catalogue(() => evidenceArtifact(d1Executor(env.DB), source, runId, artifactId)),
+  );
   if (match[3]) return { raw: artifact };
   return { body: { apiVersion: EVIDENCE_API_VERSION, run, artifact: detailDto(artifact) } };
 }
