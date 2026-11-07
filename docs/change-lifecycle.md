@@ -551,8 +551,9 @@ After a commit the receipt panel distinguishes `受理` (accepted) from
 replaces a later one. A refusal from any step (simulate, approve, commit or the
 re-check) is shown by a fixed message for its closed code, and every code in
 `COMMAND_ERROR_CODES` has its own (`apps/web/src/command-api.ts`); the
-server's text is never shown, and only an unknown code falls back to a message
-chosen by HTTP status. Above the plan, a read-only **AIへの委任** notice shows the
+server's text is never shown, and a code outside that list (such as the App's
+`invalid_request` or `internal_error`) falls back to a message chosen by HTTP
+status. Above the plan, a read-only **AIへの委任** notice shows the
 AI delegations in force, if any
 ([agent API](agent-api.md#the-operators-delegation-status-s8-2026-11-06));
 it does not change what the operator's buttons do.
