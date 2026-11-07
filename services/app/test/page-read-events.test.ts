@@ -19,12 +19,19 @@ const DATE = '{"kind":"local-date","value":"2026-03-01","zone":null,"basis":"pro
  * no leg; and an obligation with one settlement.
  */
 async function seedProjection() {
-  const decision = (id: string, subjectRef: string) =>
+  const decision = (id: string, subjectRef: string, kind = "accept") =>
     env.DB.prepare(
       `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
-       VALUES(?,'relation',?,1,'accept','rule','rule:test',NULL,'synthetic','[]',NULL,NULL,'2026-03-01T00:00:00Z')`,
-    ).bind(id, subjectRef);
-  const event = (id: string, revision: number, kind: string, state: string, basis: string) =>
+       VALUES(?,'relation',?,1,?,'rule','rule:test',NULL,'synthetic','[]',NULL,NULL,'2026-03-01T00:00:00Z')`,
+    ).bind(id, subjectRef, kind);
+  const event = (
+    id: string,
+    revision: number,
+    kind: string,
+    state: string,
+    basis: string,
+    decisionId = `dr_${id}`,
+  ) =>
     env.DB.prepare(
       `INSERT INTO economic_event_revisions(event_id,revision,kind,state,unknown_reason,effective_time_json,basis,evidence_support_json,decision_revision_id,superseded_by,created_at)
        VALUES(?,?,?,?,?,?,?,'[{"kind":"transaction","id":"transaction:1","revision":"parse_run:1"}]',?,NULL,'2026-03-01T00:00:00Z')`,
@@ -36,8 +43,28 @@ async function seedProjection() {
       state === "unknown" ? "conflicting_evidence" : null,
       DATE,
       basis,
-      `dr_${id}`,
+      decisionId,
     );
+  // What the card settlement command writes on acceptance
+  // (services/processor/src/card-settlement-commands.ts): the exact cash
+  // decrease, a principal-and-fees leg it cannot value, and the settlement
+  // allocation of the bank debit to the event.
+  const acceptedDebit = (id: string, amount: string) => [
+    decision(`dr_${id}`, `event:${id}`),
+    event(id, 1, "card_settlement", "debited", "cash-movement"),
+    env.DB.prepare(
+      `INSERT INTO economic_legs VALUES(?,1,0,'account:bank','JPY','exact',?,0,NULL,'decrease','cash-movement')`,
+    ).bind(id, amount),
+    env.DB.prepare(
+      `INSERT INTO economic_legs(event_id,revision,leg_index,subject_ref,unit_ref,value_status,value_reason_code,role,basis)
+       VALUES(?,1,1,'account:card','JPY','missing','statement_principal_and_fees_unknown','unresolved','obligation-change')`,
+    ).bind(id),
+    decision(`dr_al-${id}`, `allocation:al-${id}`),
+    env.DB.prepare(
+      `INSERT INTO allocations(id,source_component_ref,target_effect_ref,role,unit_ref,coefficient,scale,decision_revision_id,created_at)
+       VALUES(?,'transaction:1',?,'settlement','JPY',?,0,?,'2026-03-01T00:00:00Z')`,
+    ).bind(`al-${id}`, `event:${id}`, amount, `dr_al-${id}`),
+  ];
   await env.DB.batch([
     decision("dr_ev-buy", "event:ev-buy"),
     event("ev-buy", 1, "purchase", "captured", "purchase-recognition"),
@@ -47,18 +74,12 @@ async function seedProjection() {
     env.DB.prepare(
       "INSERT INTO economic_legs VALUES('ev-buy',1,1,'claim:cost','JPY','exact','3000',0,NULL,'increase','purchase-recognition')",
     ),
-    decision("dr_ev-debit", "event:ev-debit"),
-    event("ev-debit", 1, "card_settlement", "debited", "cash-movement"),
-    env.DB.prepare(
-      "INSERT INTO economic_legs VALUES('ev-debit',1,0,'account:bank','JPY','exact','12000',0,NULL,'decrease','cash-movement')",
-    ),
-    decision("dr_ev-withdrawn", "event:ev-withdrawn"),
-    event("ev-withdrawn", 1, "card_settlement", "debited", "cash-movement"),
-    env.DB.prepare(
-      "INSERT INTO economic_legs VALUES('ev-withdrawn',1,0,'account:bank','JPY','exact','8000',0,NULL,'decrease','cash-movement')",
-    ),
-    // The withdrawal: a later revision with no leg replaces the debit.
-    event("ev-withdrawn", 2, "card_settlement", "unknown", "cash-movement"),
+    ...acceptedDebit("ev-debit", "12000"),
+    ...acceptedDebit("ev-withdrawn", "8000"),
+    // The withdrawal: a later revision with no leg, under its own supersede
+    // decision, replaces the debit.
+    decision("dr_ev-withdrawn-2", "event:ev-withdrawn", "supersede"),
+    event("ev-withdrawn", 2, "card_settlement", "unknown", "cash-movement", "dr_ev-withdrawn-2"),
     env.DB.prepare(
       "UPDATE economic_event_revisions SET superseded_by='ev-withdrawn@2' WHERE event_id='ev-withdrawn' AND revision=1",
     ),
@@ -125,8 +146,16 @@ describe("the events page read", () => {
     expect(ids).toEqual(["ev-buy", "ev-debit"]);
     const debit = cash.body.data.items[1];
     expect(debit).toMatchObject({ kind: "card_settlement", state: "debited", revision: 1 });
+    expect(debit.legs.map((leg: { basis: string }) => leg.basis)).toEqual([
+      "cash-movement",
+      "obligation-change",
+    ]);
+    // Only the exact cash decrease is totalled; the unvalued leg is not.
     expect(debit.totals).toEqual([
       expect.objectContaining({ basis: "cash-movement", quantity: expect.anything() }),
+    ]);
+    expect(debit.allocations).toEqual([
+      expect.objectContaining({ allocationId: "al-ev-debit", role: "settlement" }),
     ]);
     // Cost recognised at purchase is a separate reading, never mixed in.
     const cost = await page.mcp(EVENTS, { collection: "activity", basis: "purchase-recognition" });
@@ -251,5 +280,58 @@ describe("where the store lacks the events projection", () => {
     expect(overHttp.status).toBe(404);
     expect(overHttp.body).toMatchObject({ error: "not_found" });
     expect(await audited()).toBe(before);
+  });
+});
+
+describe("a page with more rows than the route returns", () => {
+  beforeAll(async () => {
+    const statements: D1PreparedStatement[] = [];
+    for (let index = 0; index < 200; index++) {
+      const id = `ev-many-${String(index).padStart(3, "0")}`;
+      statements.push(
+        env.DB.prepare(
+          `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+           VALUES(?,'relation',?,1,'accept','rule','rule:test',NULL,'synthetic','[]',NULL,NULL,'2026-03-01T00:00:00Z')`,
+        ).bind(`dr_${id}`, `event:${id}`),
+        env.DB.prepare(
+          `INSERT INTO economic_event_revisions(event_id,revision,kind,state,unknown_reason,effective_time_json,basis,evidence_support_json,decision_revision_id,superseded_by,created_at)
+           VALUES(?,1,'card_settlement','debited',NULL,?,'cash-movement','[{"kind":"transaction","id":"transaction:1","revision":"parse_run:1"}]',?,NULL,'2026-03-01T00:00:00Z')`,
+        ).bind(id, DATE, `dr_${id}`),
+        env.DB.prepare(
+          "INSERT INTO economic_legs VALUES(?,1,0,'account:bank','JPY','exact','100',0,NULL,'decrease','cash-movement')",
+        ).bind(id),
+      );
+    }
+    await env.DB.batch(statements);
+  });
+
+  it("names the next offset and records the call as truncated on both agent paths", async () => {
+    const last = (await env.DB.prepare(
+      "SELECT coalesce(max(rowid),0) AS n FROM audit_records",
+    ).first<number>("n"))!;
+    const served = await page.expectSameAnswer("/api/v2/activity", EVENTS, {
+      collection: "activity",
+    });
+    const body = served.body as { items: unknown[]; nextCursor: string | null };
+    expect(body.items).toHaveLength(200);
+    expect(body.nextCursor).toBe("200");
+    const rest = await page.mcp(EVENTS, { collection: "activity", offset: 200 });
+    expect(rest.body.data.items).toHaveLength(2);
+    expect(rest.body.data.nextCursor).toBeNull();
+    const rows = (
+      await env.DB.prepare(
+        "SELECT path,diff_json FROM audit_records WHERE rowid>? AND operation='events.read' ORDER BY rowid",
+      )
+        .bind(last)
+        .all<{ path: string; diff_json: string }>()
+    ).results;
+    expect(rows).toEqual([
+      {
+        path: "agent-http",
+        diff_json: JSON.stringify({ kind: "read", rows: 200, truncated: true }),
+      },
+      { path: "mcp", diff_json: JSON.stringify({ kind: "read", rows: 200, truncated: true }) },
+      { path: "mcp", diff_json: JSON.stringify({ kind: "read", rows: 2, truncated: false }) },
+    ]);
   });
 });
