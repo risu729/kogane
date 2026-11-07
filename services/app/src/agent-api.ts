@@ -263,8 +263,11 @@ export async function agentApi(
     const settlements = (): Promise<boolean> =>
       (settlementsServed ??= cardSettlementsAvailable(env));
     // The page reads' tables and views, each asked at most once; the reported
-    // state's views are the probe above.
-    const pageStore = pageReadStore(env, { reportedState: reconstructed });
+    // state's views are the probe above, the schedule settings the flag.
+    const pageStore = pageReadStore(env, {
+      reportedState: reconstructed,
+      schedules: async () => schedules,
+    });
     const message = await handleMcp(
       request,
       async (name, body) => {

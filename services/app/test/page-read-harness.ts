@@ -66,11 +66,12 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
   const environment = () =>
     ({
       ...env,
+      OPERATOR_SUBJECTS: '["synthetic-agent"]',
+      // A page the operator alone reads names its browser subject here too.
       ...extraEnv,
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: AUDIENCE,
       ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
-      OPERATOR_SUBJECTS: '["synthetic-agent"]',
     }) as Env;
 
   /** The UI route as the signed-in browser reads it. */

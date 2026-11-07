@@ -365,6 +365,13 @@ export const OPERATION_CATALOGUE = {
     capability: "evidence.read",
     paths: AGENT,
   },
+  "schedules.read": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "schedules.read",
+    paths: AGENT,
+  },
   "economic-readiness.read": {
     risk: ["R0"],
     effect: null,

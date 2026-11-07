@@ -203,6 +203,7 @@ the other delegated MCP tools are described there too.
 | `kogane.reports.read`                  | `POST /api/agent/v1/reports.read`                  | `kogane.reports.read`                  | `records.read` on `"*"` sources and accounts, while `reportArtifacts` is served ([below](#ui-read-pages))                                                                                                                                                           |
 | `kogane.collection-quality.read`       | `POST /api/agent/v1/collection-quality.read`       | `kogane.collection-quality.read`       | `evidence.read` on `"*"` sources and accounts, while its tables exist ([below](#ui-read-pages))                                                                                                                                                                     |
 | `kogane.evidence.read`                 | `POST /api/agent/v1/evidence.read`                 | `kogane.evidence.read`                 | `evidence.read` on `"*"` sources and accounts ([below](#ui-read-pages))                                                                                                                                                                                             |
+| `kogane.schedules.read`                | `POST /api/agent/v1/schedules.read`                | `kogane.schedules.read`                | `schedules.read` with `"*"` schedule sources, while `SCHEDULES_ENABLED` is on ([below](#ui-read-pages))                                                                                                                                                             |
 
 `kogane.reports.read` lists and reads the fixed report artifacts (評価レポート)
 on the terms ADR 0072's amendment set for an agent read: list and detail
@@ -639,6 +640,7 @@ function, so they cannot disagree on a row, a page bound or a refusal code.
 | `kogane.collection-quality.read`       | `GET /api/collection-quality`, `/api/collection-quality/{source}`, while the scheduling and run tables exist                                                                     | `evidence.read` on `"*"` sources and accounts |
 | `kogane.events.read`                   | `GET /api/v2/activity`, `/api/v2/obligations`, while `eventsV2` is served (no screen reads them)                                                                                 | `records.read` on `"*"` sources and accounts  |
 | `kogane.evidence.read`                 | `GET /api/evidence/v1/meta`, `/api/evidence/v1/sources/{source}/runs`, `/api/evidence/v1/runs/{run}/artifacts`, `/api/evidence/v1/runs/{run}/artifacts/{artifact}`; never `/raw` | `evidence.read` on `"*"` sources and accounts |
+| `kogane.schedules.read`                | `GET /api/ops/v1/schedules` without its `survey` part, while `SCHEDULES_ENABLED` is on                                                                                           | `schedules.read` with `"*"` schedule sources  |
 
 Input is a closed object. Its keys are the route's query parameters with
 their bounds, plus the field that picks the route (`collection`, `page` or `kind`, or the
@@ -715,6 +717,18 @@ does (`400 invalid_query`). Like the browser, it shows only the configured
 source's sealed runs; while no source is configured every call that passes
 these argument checks is `503 source_not_configured`. It needs `evidence.read`, as the artifact
 detail names the provider's file, its media type and digest.
+
+`kogane.schedules.read` takes no argument and answers the schedules page:
+the Processor's snapshot that `GET /api/ops/v1/schedules` relays, read with no
+operator or agent header, less its `survey` part (the maintenance re-survey's
+freshness and proposals, `kogane.schedules.survey.read`'s). The page is the
+operator's, but its schedule settings are not financial records, so the tool
+needs `schedules.read`, the capability of `kogane.schedules.maintenance.read`,
+with `scopes.scheduleSources` `"*"` (else `403 evidence_restricted`,
+`scope:scheduleSource`); the grant's `sources` and `accounts` are not read. A
+refusal from the Processor is its status and code, as the route relays it; an
+unreachable Processor is `503 scheduling_unavailable`. While
+`SCHEDULES_ENABLED` is off the tool is neither listed nor callable.
 
 Every MCP client holds the whole-store grant
 ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), so each of these

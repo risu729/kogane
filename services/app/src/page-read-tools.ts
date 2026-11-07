@@ -39,6 +39,8 @@ import { readReportRoute, reportArtifactsAvailable } from "./reports-api";
 import { collectionQualityAvailable, readCollectionQuality } from "./collection-quality-api";
 import { catalogue } from "./read";
 import { mcpInputSchema } from "./mcp-input-schema";
+import { schedulesServed } from "./schedule-tools";
+import { relayScheduleSnapshot } from "./schedules-api";
 import { EVIDENCE_PREFIX, readEvidenceRoute } from "./evidence-browser-api";
 
 /** The result envelope of every page read: the route's answer, under `data`. */
@@ -65,6 +67,11 @@ interface PageReadTool<Schema extends z.ZodType> {
   schema: Schema;
   /** The agent capability that reaches this page, always over the whole store. */
   capability: AgentCapability;
+  /**
+   * The grant scope that must be whole: the store's sources and accounts
+   * (the default), or the schedule sources for the schedules page.
+   */
+  scope?: "store" | "schedules";
   /** The UI route paths this tool answers, for the parity inventory. */
   routes: readonly string[];
   /**
@@ -343,6 +350,39 @@ const TOOLS = {
       return answer.body;
     },
   }),
+  "kogane.schedules.read": tool({
+    title: "Collection schedules page",
+    description:
+      "The schedules page as the operator sees it: each configured collection job (enabled, times, next run, the actual alarm and its reservation, the source's maintenance status, the latest run), the maintenance windows, recent occurrences and held execution leases. The same answer as GET /api/ops/v1/schedules without its `survey` part (the maintenance re-survey's proposals, read by kogane.schedules.survey.read), under schedules.read over every schedule source. Served while schedule settings are on. Read-only: nothing is edited, released or relayed as an operator.",
+    schema: z.strictObject({}),
+    capability: "schedules.read",
+    scope: "schedules",
+    routes: ["/api/ops/v1/schedules"],
+    needs: "schedules",
+    read: async (env) => {
+      const upstream = await relayScheduleSnapshot(env);
+      let body: unknown;
+      try {
+        body = await upstream.json();
+      } catch {
+        throw new HttpError(503, "scheduling_unavailable");
+      }
+      const page =
+        body !== null && typeof body === "object" && !Array.isArray(body)
+          ? (body as Record<string, unknown>)
+          : {};
+      if (upstream.status !== 200 || page !== body) {
+        // The route relays the Processor's refusal as it is; so does the tool.
+        const error = page["error"];
+        throw new HttpError(
+          upstream.status === 200 ? 503 : upstream.status,
+          typeof error === "string" ? error : "scheduling_unavailable",
+        );
+      }
+      const { survey: _survey, ...withoutSurvey } = page;
+      return withoutSurvey;
+    },
+  }),
 } as const;
 
 /** The JSON answer of one observation route; a raw download is not a page read. */
@@ -379,8 +419,11 @@ const PAGE_READ_MCP_TOOLS = Object.entries(TOOLS).map(([name, definition]) => {
 });
 
 /** Why this grant may not read a whole-store page, as refs; empty when it may. */
-function refusedRefs(grant: Grant, capability: AgentCapability): string[] {
+function refusedRefs(grant: Grant, definition: PageReadTool<z.ZodType>): string[] {
+  const { capability } = definition;
   if (!grantAllows(grant, capability)) return [`capability:${capability}`];
+  if (definition.scope === "schedules")
+    return grant.scopes.scheduleSources === "*" ? [] : ["scope:scheduleSource"];
   return [
     ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
     ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
@@ -393,6 +436,7 @@ const STORE_FEATURES = {
   reportArtifacts: reportArtifactsAvailable,
   collectionQuality: collectionQualityAvailable,
   economicEvents: eventsV2Available,
+  schedules: async (env: Env) => schedulesServed(env),
 } as const satisfies Record<string, (env: Env) => Promise<boolean>>;
 export type PageReadStoreFeature = keyof typeof STORE_FEATURES;
 /** Whether this store has a feature, each probe asked at most once. */
@@ -436,7 +480,7 @@ export async function pageReadMcpTools(grant: Grant, store: PageReadStore) {
   const listed = [];
   for (const definition of PAGE_READ_MCP_TOOLS) {
     const name = definition.name as PageReadToolName;
-    if (refusedRefs(grant, TOOLS[name].capability).length > 0) continue;
+    if (refusedRefs(grant, TOOLS[name] as PageReadTool<z.ZodType>).length > 0) continue;
     if (await pageReadServed(name, store)) listed.push(definition);
   }
   return listed;
@@ -456,7 +500,7 @@ export async function callPageReadTool(
 ): Promise<ToolResult> {
   const definition = TOOLS[name] as PageReadTool<z.ZodType>;
   const operation = name.slice("kogane.".length);
-  const refused = refusedRefs(grant, definition.capability);
+  const refused = refusedRefs(grant, definition);
   if (refused.length > 0) {
     const code = refused[0]!.startsWith("capability:") ? "unauthorized" : "evidence_restricted";
     return { status: ERROR_STATUS[code], body: financialError(code, operation, refused) };
