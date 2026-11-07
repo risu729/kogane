@@ -1235,6 +1235,19 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   `tools/call` by name; a name the dispatcher returns `null` for is
   `unknown_tool`. A tool set that is off — for the deployment, or for this
   caller — is neither listed nor dispatched.
+- **Input schema.** Generate `inputSchema` from the tool's Zod argument schema
+  with `mcpInputSchema` (`src/mcp-input-schema.ts`), never with
+  `z.toJSONSchema` directly. MCP requires `type: "object"` at the root, and the
+  SDK client rejects the whole `tools/list` when one descriptor lacks it
+  ([#1078](https://github.com/risu729/kogane/issues/1078): Cloudflare's MCP
+  Portal could load no tool). Clients that pass a tool to a model also refuse
+  a root `oneOf`/`anyOf`/`allOf`, so a discriminated union of strict objects
+  is published as one closed object: every property, the discriminator as an
+  enum, only the properties every shape requires as required, and which
+  property belongs to which shape in the descriptions. The Zod schema still
+  validates each call against its exact shape. `test/mcp-sdk-client.test.ts`
+  lists the whole catalogue with every tool-adding flag on through the
+  official SDK client, in both negotiation modes.
 - **Identity.** The dispatcher has the `AgentCaller` the boundary proved
   (`caller`, `src/auth.ts`) and its resolved `Grant`. Pass the caller object
   on; never derive a role from `caller.principal`, and never read identity
