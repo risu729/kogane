@@ -715,6 +715,87 @@ test("an identical commit that loses the race spends no second use of a multi-us
   });
 });
 
+/** An identity assignment written by the direct `/identity-revise` route, which keeps no receipt. */
+async function directAssign(operationId: string, ref: string, targetId: string) {
+  const direct = await executeIdentityCommand(
+    db,
+    {
+      operationId,
+      actorId: operator.id,
+      actorVerification: "server",
+      action: "assign",
+      kind: "account",
+      referenceId: ref,
+      expectedRevision: 1,
+      targetId,
+      reason: "synthetic direct correction",
+    },
+    IDENTITY_POLICY_VERSION,
+  );
+  if (!direct.ok) throw new Error(`direct assign failed: ${direct.error}`);
+  return direct.receipt;
+}
+
+test("a relation commit refuses an operation id the direct identity route already used", async () => {
+  // Both routes derive the decision id from the operation id alone. The
+  // direct route writes a decision ledger row but no receipt, so the
+  // receipt guard alone let the relation commit reuse its decision and
+  // write a permanent relation citing the identity decision.
+  const direct = await seedParse(290, "smbc-bank:collide-direct");
+  const identity = await directAssign(
+    "op-collide-relation",
+    direct.ref,
+    await target("target-collide-relation"),
+  );
+  const ref = `source_account:${(await seedParse(291, "smbc-bank:collide-relation")).ref}`;
+  const { plan, approval } = await approvedRelation(ref);
+  const before = await counts();
+  expect(await commitWith("op-collide-relation", plan, approval.approvalId)).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+    refs: ["op-collide-relation"],
+  });
+  expect(await counts()).toEqual(before);
+  expect(await commitState(plan.planId, approval.approvalId, ref)).toEqual({
+    plan: "approved",
+    uses: 1,
+    relations: 0,
+  });
+  expect(
+    await db
+      .prepare("SELECT count(*) AS n FROM entity_relations WHERE decision_revision_id=?")
+      .bind(identity.decisionRevisionId)
+      .first<{ n: number }>(),
+  ).toEqual({ n: 0 });
+  // A fresh operation id commits the same plan.
+  expect(await commitWith("op-collide-relation-fresh", plan, approval.approvalId)).toMatchObject({
+    ok: true,
+    replayed: false,
+  });
+});
+
+test("an identity commit refuses an operation id the direct identity route already used", async () => {
+  // Without the refusal the commit found the direct route's ledger row,
+  // wrote no mapping and still returned an accepted receipt.
+  const direct = await seedParse(292, "smbc-bank:collide-direct-identity");
+  await directAssign(
+    "op-collide-identity",
+    direct.ref,
+    await target("target-collide-identity-direct"),
+  );
+  const mapping = await seedParse(293, "smbc-bank:collide-identity");
+  const plan = await planFor(mapping.ref, await target("target-collide-identity"));
+  const approval = await approveFor(plan);
+  const before = await counts();
+  expect(await commitWith("op-collide-identity", plan, approval.approvalId)).toEqual({
+    ok: false,
+    error: "idempotency_conflict",
+    refs: ["op-collide-identity"],
+  });
+  expect(await counts()).toEqual(before);
+  expect((await loadPlan(store, plan.planId))!.status).toBe("approved");
+});
+
 test("relations are accepted as typed claims with their own decision; rejecting appends a new revision", async () => {
   const mapping = await seedParse(207, "smbc-bank:relation");
   const payload = {
