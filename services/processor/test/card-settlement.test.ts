@@ -207,7 +207,12 @@ test("real SMBC parser shape yields a review but unknown ownership cannot be acc
   expect(await cardSettlementSweep(db)).toMatchObject({
     proposed: 1,
     written: 1,
-    unmatched: { statement_not_comparable: 0, no_debit_in_window: 0, no_equal_amount_debit: 0 },
+    unmatched: {
+      statement_total_refund_or_zero: 0,
+      statement_not_comparable: 0,
+      no_debit_in_window: 0,
+      no_equal_amount_debit: 0,
+    },
   });
   const row = await db
     .prepare("SELECT id,facts_json FROM card_settlement_reviews")

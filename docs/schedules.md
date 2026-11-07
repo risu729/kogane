@@ -19,7 +19,7 @@ the announcement, and the affected scope. `collection` defers daily collection; 
 `feature-only` records provenance but
 does not postpone collection. Sources marked `not-found` have no known window;
 that is not a claim that maintenance never happens. A rule changes only through
-an operator's edit or an operator's acceptance of a re-survey proposal
+an operator's edit or an operator's or delegated acceptance of a re-survey proposal
 ([below](#official-site-re-survey)). The page flags provenance older than
 thirty days.
 
@@ -176,16 +176,26 @@ changed into proposals. It never changes a rule, a schedule or an alarm.
   time and the proposal as its decision reference; it is refused if the rule
   changed after the proposal was read, and that proposal can then only be
   rejected. **却下** records the judgement and changes nothing.
+- **Over MCP** ([ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)).
+  `kogane.schedules.survey.read` (`schedules.read`, optionally one `source`)
+  returns this section, with `truncated` when more than 200 of those proposals
+  are undecided. `kogane.schedules.survey.decide`, which any MCP client applies
+  as itself ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), rejects in one call (R1, idempotency key) and
+  accepts by prepare and confirm against the proposal's `baseRevision` (R2),
+  through the same `decideSurveyProposal` and maintenance writer, under the
+  delegated 31-day ceiling and daily counts. The accepted revision's actor kind
+  is `delegated` and its decision reference is the prepare record
+  (`delegated-audit:aud_<uuid>`). A proposal carrying `rule_absent_from_page`,
+  `rule_disabled_by_operator`, `ambiguous_rule_match`, `cancellation_stated` or
+  `contradictory_windows` is accepted only here, by the operator: over MCP its
+  acceptance is `403 operation_not_delegable` (R3), and its rejection is allowed.
+  The same holds for an acceptance that, against the source's rules at prepare
+  or confirm, would disable a rule, re-enable a disabled one, or equal or
+  overlap another enabled rule. Another source's proposal is `404 proposal_not_found`, as a missing one is.
 
 Not verified: no official page has been fetched; which pages to allow and at
 which cadence are the owner's to confirm, and pages that are PDFs, need a
 login or render with JavaScript cannot be read this way.
-
-The page also shows **AIへの委任**, the AI delegations the App reads from
-`MCP_DELEGATIONS` (none, a void configuration, or each entry's state, role,
-window, capabilities and scope), as a read-only notice; delegations are
-changed only in the deployment configuration
-([agent API](agent-api.md#the-operators-delegation-status-s8-2026-11-06)).
 
 ## Settings API
 
@@ -197,8 +207,6 @@ changed only in the deployment configuration
   execution lease after confirmation, without starting collection.
 - `POST /api/ops/v1/schedules/proposals/:id`: accept or reject one undecided
   re-survey proposal (`{"decision":"accept"}` or `"reject"`).
-- `GET /api/v2/delegations` (outside this prefix, operator only): the
-  delegation notice's read.
 
 Every write is recorded in the common audit log ([audit log](audit-log.md),
 ADR 0064) on the `ui` path: the Processor's writer ends its own batch with the
@@ -223,8 +231,9 @@ and answer `413 request_too_large`, with or without a content-length
 
 Maintenance changes are made from the management screen using this HTTP API.
 An agent can read maintenance windows through the tool below; revising one
-through MCP is an operation the owner may delegate, executed only under a
-delegation; the committed `MCP_DELEGATIONS` is empty, so none is configured.
+through MCP is an operation any MCP client the MCP Access application admits
+applies as itself, over every schedule
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 Automatic online research exists only as the proposal-only
 re-survey above, which fetches nothing until pages are confirmed. See
 [agent access](agent-api.md) and [current status](current-status.md).
@@ -234,7 +243,10 @@ re-survey above, which fetches nothing until pages are confirmed. See
 [ADR 0046](adr/0046-agent-maintenance-windows.md), as amended by
 [ADR 0063](adr/0063-delegated-ai-operation-path.md) item 8 (slice S4 of the
 [AI operation path plan](plans/2026-10-ai-operation-path.md#8-implementation-slices-in-dependency-order)).
-Lease release and bootstrap stay operator or deployment only; job times and
+Lease release and bootstrap stay operator or deployment only (the MCP tool
+`kogane.schedules.lease.release` exists and refuses every call with
+`operation_not_delegable`, [ADR 0081](adr/0081-ui-parity-through-mcp.md)
+point 3; [agent access](agent-api.md#maintenance-windows)); job times and
 enable/disable are otherwise reachable only through the delegated
 `kogane.schedules.job.update` tool ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)),
 and the routes above refuse every agent and every MCP-audience caller. The tools' grading is in [agent access](agent-api.md#maintenance-windows).
@@ -253,10 +265,9 @@ and the routes above refuse every agent and every MCP-audience caller. The tools
   the operator header or a delegation reference; no write is reachable under
   `/internal/schedules/agent/`.
 - `kogane.schedules.maintenance.update` is a delegated operation: no agent-API
-  grant can name it, and it is published only to a principal whose resolved
-  delegation holds `schedules.maintenance.update`. Without one (the committed
-  `MCP_DELEGATIONS` is empty) every call on `/mcp` is refused before anything
-  reaches the Processor; with one, it applies or prepares and confirms
+  grant can name it, and it is published to every MCP client the MCP Access
+  application admits (ADR 0084). A browser caller is refused on `/mcp` before
+  anything reaches the Processor; otherwise it applies or prepares and confirms
   through the private delegated route
   ([below](#s3-maintenance-execution-and-confirmation-2026-10-10)). Its arguments are one revision: omit `ruleId` with
   `revision: 0` to create a rule under an id the server chooses, or name a rule
@@ -276,12 +287,13 @@ kind. Its reason is a closed code (`MAINTENANCE_CHANGE_REASONS` in
 `packages/collection/src/schedule-model.ts`), and its decision reference is
 closed per actor:
 
-| Actor     | Reason                                                                                                                                 | Decision reference                                                     | Otherwise                                                                                                                   |
-| --------- | -------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| operator  | `operator-edit` (the page's edit) or any other code except the survey's                                                                | none                                                                   | any other shape (a `delegated-audit:` one included) is `invalid_request`; a survey proposal's reference is `invalid_reason` |
-| operator  | `maintenance-survey-proposal-accepted`                                                                                                 | exactly `maintenance-survey:proposal:<id>`                             | none is `invalid_reason`; any other shape is `invalid_request`                                                              |
-| delegated | `official-notice-added`, `official-notice-changed`, `official-notice-withdrawn`, `outage-observed`, `owner-instructed` or `correction` | exactly `delegated-audit:aud_<uuid>` (ADR 0064's `audit_id`), required | none, a survey reference or any other shape is `invalid_request`                                                            |
-| delegated | `operator-edit` or `maintenance-survey-proposal-accepted`                                                                              | —                                                                      | `invalid_reason`, whatever the reference                                                                                    |
+| Actor     | Reason                                                                                                                                            | Decision reference                                                         | Otherwise                                                                                                                   |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| operator  | `operator-edit` (the page's edit) or any other code except the survey's                                                                           | none                                                                       | any other shape (a `delegated-audit:` one included) is `invalid_request`; a survey proposal's reference is `invalid_reason` |
+| operator  | `maintenance-survey-proposal-accepted`                                                                                                            | exactly `maintenance-survey:proposal:<id>`                                 | none is `invalid_reason`; any other shape is `invalid_request`                                                              |
+| delegated | `official-notice-added`, `official-notice-changed`, `official-notice-withdrawn`, `outage-observed`, `owner-instructed` or `correction`            | exactly `delegated-audit:aud_<uuid>` (ADR 0064's `audit_id`), required     | none, a survey reference or any other shape is `invalid_request`                                                            |
+| delegated | `maintenance-survey-proposal-accepted`, only under the private survey route's trusted `surveyProposal` option ([below](#official-site-re-survey)) | exactly `delegated-audit:aud_<uuid>`, the prepare record of the acceptance | without the option `invalid_reason`; with it, every other delegated reason is `invalid_reason`                              |
+| delegated | `operator-edit`                                                                                                                                   | —                                                                          | `invalid_reason`, whatever the reference                                                                                    |
 
 The reference is stored whole in `decision_ref`, so no delegated revision is
 ever written without the audit record behind it. The writer answers a closed
@@ -403,5 +415,6 @@ prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
 state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
 the committed MCP financial-reader grant receives no schedule authority.
-S6 survey acceptance remains unavailable pending the separate owner decision;
+S6 survey acceptance remained unavailable pending the separate owner decision
+(delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.

@@ -18,11 +18,6 @@ import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
 const PATH = "/api/identity/instrument-candidates";
 const AGENT_PATH = "/api/agent/v1/instruments.candidates";
-const FULL_GRANT = {
-  scopes: { sources: "*", accounts: "*" },
-  capabilities: ["summary.read", "records.read"],
-  budget: { maxRows: 500, maxProposalTargets: 5, maxExplainDepth: 3 },
-};
 /** The MCP Access application's audience (ADR 0047); `/mcp` accepts nothing else. */
 const MCP_AUDIENCE = "fixture-mcp-audience";
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
@@ -99,7 +94,6 @@ interface CallOptions {
   method?: string;
   body?: unknown;
   subject?: string | null;
-  grants?: Record<string, unknown>;
 }
 
 async function call(path: string, options: CallOptions = {}) {
@@ -131,14 +125,6 @@ async function call(path: string, options: CallOptions = {}) {
     ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
     OPERATOR_SUBJECTS: '["synthetic-operator"]',
     AGENT_GRANTS: '["synthetic-agent"]',
-    // Through `/mcp` the same subject is the agent-only `mcp-client:<sub>`
-    // (ADR 0047), so it has a grant under that name too.
-    AGENT_API_GRANTS: JSON.stringify(
-      options.grants ?? {
-        "synthetic-agent": FULL_GRANT,
-        "mcp-client:synthetic-agent": FULL_GRANT,
-      },
-    ),
   } as Env);
 }
 
@@ -270,93 +256,21 @@ describe("kogane.instruments.candidates", () => {
     expect(overMcp["result"].structuredContent).toEqual(overRoute);
   });
 
-  it("is graded by the agent's grant: records.read over the whole store", async () => {
+  it("is served to every proved caller, graded only by its strict input (ADR 0084)", async () => {
     const before = await tables();
-    const none = await call(AGENT_PATH, { subject: "synthetic-other", body: {} });
-    expect(none.status).toBe(403);
-    expect(await none.json()).toMatchObject({ error: "agent_api_not_configured" });
-    const summary = await call(AGENT_PATH, {
-      subject: "synthetic-agent",
-      body: {},
-      grants: { "synthetic-agent": { ...FULL_GRANT, capabilities: ["summary.read"] } },
+    for (const subject of ["synthetic-agent", "synthetic-other"])
+      expect((await call(AGENT_PATH, { subject, body: {} })).status, subject).toBe(200);
+    const overMcp = await mcp({
+      method: "tools/call",
+      params: { name: "kogane.instruments.candidates", arguments: {} },
     });
-    expect(summary.status).toBe(403);
-    expect(await summary.json()).toMatchObject({
-      code: "unauthorized",
-      refs: ["capability:records.read"],
-    });
-    const listed = await call(AGENT_PATH, {
-      subject: "synthetic-agent",
-      body: {},
-      grants: {
-        "synthetic-agent": {
-          ...FULL_GRANT,
-          scopes: { sources: ["sbi-securities"], accounts: "*" },
-        },
-      },
-    });
-    expect(listed.status).toBe(403);
-    expect(await listed.json()).toMatchObject({
-      code: "evidence_restricted",
-      refs: ["scope:source"],
-    });
+    expect(overMcp["result"].isError).toBe(false);
     const unknownKey = await call(AGENT_PATH, {
       subject: "synthetic-agent",
       body: { source: "x" },
     });
     expect(unknownKey.status).toBe(400);
     expect(await unknownKey.json()).toMatchObject({ code: "unsupported_semantics" });
-    expect(await tables()).toEqual(before);
-  });
-
-  it("is graded over /mcp by the agent-only mcp-client entry, never the bare subject's (ADR 0047)", async () => {
-    const before = await tables();
-    const candidates = (grants: Record<string, unknown>) =>
-      mcp(
-        {
-          method: "tools/call",
-          params: { name: "kogane.instruments.candidates", arguments: {} },
-        },
-        { grants },
-      );
-    // The tool list is per deployment: listed under a summary-only grant too,
-    // and refused when called, with the closed reason.
-    const summaryOnly = {
-      "mcp-client:synthetic-agent": { ...FULL_GRANT, capabilities: ["summary.read"] },
-    };
-    const listed = await mcp({ method: "tools/list" }, { grants: summaryOnly });
-    expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).toContain(
-      "kogane.instruments.candidates",
-    );
-    const summary = await candidates(summaryOnly);
-    expect(summary["result"].isError).toBe(true);
-    expect(summary["result"].structuredContent).toMatchObject({
-      code: "unauthorized",
-      refs: ["capability:records.read"],
-    });
-    const narrowed = await candidates({
-      "mcp-client:synthetic-agent": {
-        ...FULL_GRANT,
-        scopes: { sources: ["sbi-securities"], accounts: "*" },
-      },
-    });
-    expect(narrowed["result"].structuredContent).toMatchObject({
-      code: "evidence_restricted",
-      refs: ["scope:source"],
-    });
-    // A whole-store grant under the bare subject does not reach an MCP client.
-    const response = await call("/mcp", {
-      subject: "synthetic-agent",
-      grants: { "synthetic-agent": FULL_GRANT },
-      body: {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "tools/call",
-        params: { name: "kogane.instruments.candidates", arguments: {} },
-      },
-    });
-    expect(response.status).toBe(403);
-    expect(await response.json()).toMatchObject({ error: "agent_api_not_configured" });
     expect(await tables()).toEqual(before);
   });
 

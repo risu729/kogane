@@ -17,6 +17,7 @@ import {
 import { postCommand, type ChangePlanView } from "../command-api.ts";
 import { Link, navigate } from "../router.tsx";
 import { Badge, EmptyState, Loading, Notice, QueryBoundary } from "../ui.tsx";
+import { UnmatchedStatements } from "../unmatched-statements.tsx";
 
 function ReviewActions({ review }: { review: CardSettlementReview }): ReactNode {
   const features = useFeatures();
@@ -320,6 +321,7 @@ export function ReconciliationPage(): ReactNode {
           )}
         </QueryBoundary>
       )}
+      {features.cardSettlementReconciliation ? <UnmatchedStatements /> : null}
     </>
   );
 }

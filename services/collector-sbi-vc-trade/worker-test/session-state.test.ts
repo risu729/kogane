@@ -18,6 +18,7 @@ describe("SbiVcSessionState", () => {
       lastReauthAttemptAt: null,
       lastReauthSuccessAt: null,
       lastReauthErrorCode: null,
+      manualAgreementPendingSince: null,
     });
   });
 
