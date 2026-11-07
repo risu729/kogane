@@ -138,6 +138,11 @@ describe("the summary", () => {
       status: "uncertain",
       failureCode: "dispatch_uncertain",
     });
+    store.occurrence("sbi-vc-keepalive", {
+      nominalAt: "2099-01-02T21:15:00.000Z",
+      status: "failed",
+      failureCode: "manual_agreement_required",
+    });
   });
 
   test("names every job and source, and is the wire contract", async () => {
@@ -153,7 +158,7 @@ describe("the summary", () => {
     expect(summary.sources.map((source) => source.sourceId)).toEqual(visible.map((row) => row.id));
   });
 
-  test("a failed receipt, its runs where CORE has them, the lease and the withheld dataset", async () => {
+  test("a failed receipt, its runs where CORE has them and the lease; no dataset is withheld since ADR 0083", async () => {
     const summary = await queryCollectionQualitySummary(executor(store));
     const vpass = summary.sources.find((source) => source.sourceId === "vpass")!;
     expect(vpass.collectors).toEqual(["vpass"]);
@@ -209,7 +214,6 @@ describe("the summary", () => {
       "acquisition_partial",
       "coverage_partial",
       "unregistered_terminals",
-      "dataset_withheld",
     ]);
   });
 
@@ -242,6 +246,10 @@ describe("the summary", () => {
     expect(reasons("prestia")).toEqual(["schedule_disabled", "no_registered_run"]);
     expect(reasons("sony-bank")).toEqual(["schedule_never_ran", "no_registered_run"]);
     expect(reasons("myjcb")).toEqual(["occurrence_uncertain", "no_registered_run"]);
+    // A pending provider terms agreement waits for the owner, not for a retry.
+    expect(reasons("sbi-vc-trade")).toEqual(
+      expect.arrayContaining(["occurrence_failed", "user_action_required"]),
+    );
     expect(reasons("paypay")).toEqual(["no_collector", "no_registered_run"]);
     // The V Point Pay app job is unsupported; its e-mail path has no job.
     const pay = summary.sources.find((source) => source.sourceId === "v-point-pay")!;
@@ -459,6 +467,10 @@ describe("one reason per stored state", () => {
     [{ newest_run_succeeded: 0 }, ["run_not_successful"]],
     [
       { unit_failed: 1, unit_failure_code: "human_required_reauth" },
+      ["unit_failed", "user_action_required"],
+    ],
+    [
+      { unit_failed: 1, unit_failure_code: "manual_agreement_required" },
       ["unit_failed", "user_action_required"],
     ],
     [{ unit_failed: 1, unit_failure_code: "fetch_failed" }, ["unit_failed"]],

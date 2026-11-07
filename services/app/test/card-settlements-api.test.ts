@@ -183,6 +183,50 @@ describe("card settlement review boundary", () => {
     expect((await call(PATH + "?proposalId=missing")).status).toBe(404);
   });
 
+  it("groups the candidates by statement and lists one statement's candidates by its key", async () => {
+    const response = await call(PATH + "/statements");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      apiVersion: 2,
+      statements: [
+        {
+          statementKey: "statement-synthetic",
+          candidateCount: 1,
+          candidates: [{ proposalId: "card-settlement-synthetic" }],
+        },
+      ],
+      nextOffset: null,
+      coverage: { limit: 10, candidatesPerStatement: 5 },
+    });
+    expect((await call(PATH + "/statements?offset=10")).status).toBe(200);
+    const one = await call(PATH + "?statementKey=statement-synthetic");
+    expect(one.status).toBe(200);
+    expect(await one.json()).toMatchObject({
+      items: [{ proposalId: "card-settlement-synthetic" }],
+    });
+    expect(await (await call(PATH + "?statementKey=statement-other")).json()).toMatchObject({
+      items: [],
+    });
+    for (const query of [
+      "/statements?proposalId=card-settlement-synthetic",
+      "/statements?statementKey=statement-synthetic",
+      "/statements?offset=-1",
+      "?statementKey=statement-synthetic&proposalId=card-settlement-synthetic",
+      "?statementKey=a&statementKey=b",
+      `?statementKey=${"k".repeat(1025)}`,
+      "/ownership?proposalId=card-settlement-synthetic&statementKey=statement-synthetic",
+    ])
+      expect((await call(PATH + query)).status).toBe(400);
+    for (const [subject, status] of [
+      [null, 401],
+      ["ungranted", 403],
+      ["synthetic-agent", 403],
+    ] as const)
+      expect((await call(PATH + "/statements", { subject })).status).toBe(status);
+    expect((await call(PATH + "/statements", { schema: false, enabled: true })).status).toBe(404);
+    expect((await call(PATH + "/statements", { method: "POST" })).status).toBe(405);
+  });
+
   it("ownership context shows both current account reviews without inventing an owner", async () => {
     const response = await call(PATH + "/ownership?proposalId=card-settlement-synthetic");
     expect(response.status).toBe(200);

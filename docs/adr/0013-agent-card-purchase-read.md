@@ -63,9 +63,10 @@ that refusals read no store row and that the tool is absent with the flag off.
 
 ## Amendment: a delegated principal may receive the review affordances (2026-10-09, ADR 0063)
 
-Status: proposed until the ADR 0063 pull request merges; accepted upon merge.
-Not implemented: until its delegation slice ships, this ADR's decision holds
-for every caller.
+Status: accepted (ADR 0063 merged 2026-10-09 in #601).
+Not implemented: `kogane.purchases.explain` still strips `actions` and
+`relation` for every caller (`packages/application/src/query/purchases-explain.ts`),
+so this ADR's decision holds for every caller.
 
 [ADR 0063](0063-delegated-ai-operation-path.md) lets the owner delegate
 decisions to their own MCP principal (`mcp-client:<sub>`) through

@@ -1,6 +1,6 @@
 # ADR 0071: Let Renovate own dependency auto-merge
 
-- Status: proposed (takes effect when this PR merges)
+- Status: accepted (merged 2026-10-15 in #728)
 - Date: 2026-10-15
 - Related: [CI/CD](../ci-cd.md), [rollout](../rollout.md)
 

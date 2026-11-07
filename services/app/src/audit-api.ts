@@ -6,7 +6,8 @@
 // is in the SQL `WHERE` before the `LIMIT`, no total is computed, and the
 // cursor binds the filters it was issued under. Reading the log is itself a
 // page load and is not recorded. The agents' read (`audit.read`, scoped by
-// source) is a later slice; no agent route serves this.
+// source, `kogane.audit.search` / `kogane.audit.get`) is served separately by
+// `read-tools.ts`; no agent route serves this operator page.
 import {
   auditPageFilters,
   d1CommandStore,

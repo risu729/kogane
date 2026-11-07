@@ -5,7 +5,7 @@ not.** The next objective is to turn collected provider displays into connected
 transactions, explainable assets and liabilities, valuations, and eventually
 cost basis, P&L and tax outputs.
 
-The code status was reviewed on 2026-10-05 against main 6d04d71. It distinguishes implemented
+The code status was reviewed on 2026-11-06 against main `46246f3`. It distinguishes implemented
 contracts and calculation components from a feature that works with real inputs
 through its user interface. This is a repository assessment, not a new production
 acceptance run. Dated production observations in the linked history describe those observations,
@@ -65,6 +65,35 @@ the latest `main` and a fresh CI run.
 | 1i Older PRs                   | #436, #580, #639, #648, #714, #729, #887, #914, #915                    | Decide per PR: finish, supersede or close. #436 (Container runtime) needs owner approval for a hosted run; #887 has a failing `CI Check` |
 | 1j Status re-baseline          | #922, #955, then a fresh review of `current-status.md` and this roadmap | Runs last, after the other units                                                                                                         |
 
+**Outcome (2026-11-06, 23:10 UTC, main `46246f3`):** of the 45 PRs, 37 were
+merged after an independent review and a green `CI Check`, and 8 were closed with
+a comment giving the reason:
+
+- [#639](https://github.com/risu729/kogane/pull/639), [#729](https://github.com/risu729/kogane/pull/729),
+  [#856](https://github.com/risu729/kogane/pull/856) and [#914](https://github.com/risu729/kogane/pull/914)
+  were superseded by [#968](https://github.com/risu729/kogane/pull/968),
+  [#966](https://github.com/risu729/kogane/pull/966), [#976](https://github.com/risu729/kogane/pull/976)
+  and [#995](https://github.com/risu729/kogane/pull/995), which re-landed them on the current `main`.
+- [#580](https://github.com/risu729/kogane/pull/580), [#648](https://github.com/risu729/kogane/pull/648)
+  and [#887](https://github.com/risu729/kogane/pull/887) were stale snapshots. Most of their still-true content is in
+  [#922](https://github.com/risu729/kogane/pull/922). The three items still missing from `main`
+  landed after this outcome, on 2026-11-06 and 2026-11-07: the MCP recovery runbook from #887 in
+  [#998](https://github.com/risu729/kogane/pull/998); and, from #580, the synthetic
+  preview's empty state (表示対象の記録がありません) on financial routes in
+  [#999](https://github.com/risu729/kogane/pull/999) and the Docker daemon that Container
+  identity checks need as an AGENTS.md rule in
+  [#1000](https://github.com/risu729/kogane/pull/1000).
+- [#436](https://github.com/risu729/kogane/pull/436) (Container runtime) is closed at the
+  owner's request and tracked in [#988](https://github.com/risu729/kogane/issues/988); the
+  owner decides near 2026-12-31 whether to resume it.
+
+[Current status](current-status.md) was re-reviewed against `main` in #922 and in this
+re-baseline. Phase 1 is done except branch cleanup: cloud sessions cannot delete
+branches, so 28 branches without an open PR remain for the daily cleanup or the owner. The
+29th, `refactor/container-direct-api` (#436), is kept on purpose.
+PRs opened after 12:45 UTC, including the re-landed ones above, are ordinary work in the phase they belong
+to, not Phase 1.
+
 ### Phase 2 — Card usage → statement → bank debit (current milestone)
 
 Issues: [#543](https://github.com/risu729/kogane/issues/543),
@@ -89,6 +118,24 @@ cash-movement views count the case once. Installments, revolving, bonus
 payments, partial payments and refund allocation are either supported or shown
 as unsupported with a closed reason
 ([acceptance criteria, layers 6–7](#layers-67--reconciliation-and-economic-event-generation)).
+
+The [Phase 2 plan](plans/2026-11-phase2-card-flow.md) (accepted 2026-11-07, 03:58 UTC) holds
+the units and the production baseline of 2026-11-06: candidates exist for Vpass → SMBC,
+Vpass → SBI Shinsei and MyJCB → SMBC statements, none was ever decided, and recorded
+ownership was the only blocker. On 2026-11-07 the owner decided that an account with no
+recorded owner is assumed to be the owner's, and that settlement decisions are delegated
+to agents through MCP over the same API as the screens
+([plan, section 4](plans/2026-11-phase2-card-flow.md#4-owner-decisions-2026-11-07)).
+Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) no delegation entry or grant is needed: an MCP client the MCP Access
+application admits acts with the UI's authority, as itself. Both decisions were first exercised
+in production on 2026-11-07, 16:48 to 17:07 UTC: an MCP client recorded the owner default on the
+ten accounts the candidates name and accepted one MyJCB and one Vpass settlement (both SMBC
+debits), withdrawing one Vpass acceptance on the way; purchase totals did not change and only
+the accepted debits hold a cash-movement claim
+([verification](card-settlements.md#first-production-decisions-2026-11-07)). The done-when is
+not met yet: `/api/v2/activity?basis=cash-movement` has no MCP read, so the cash-movement view
+was not read.
 
 ### Phase 3 — Coverage, collection requests and cross-source identity
 
@@ -150,7 +197,14 @@ Issues: [#559](https://github.com/risu729/kogane/issues/559),
 [#560](https://github.com/risu729/kogane/issues/560),
 [#561](https://github.com/risu729/kogane/issues/561). Each phase's feature is
 done only when it also works from the UI and MCP (layer 16 criteria).
-Delegations and grants are owner decisions and never part of an agent PR.
+Grants (`AGENT_GRANTS`, `OPERATOR_SUBJECTS`), Access policies and secrets are owner
+decisions and never part of an agent PR; there is no delegation table and no agent read
+grant table since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md).
+Every screen operation also exists as an MCP operation over the same
+application service ([ADR 0081](adr/0081-ui-parity-through-mcp.md)). The
+inventory and its guard tests landed on 2026-11-07 with allow-lists of the
+known gaps ([agent API: parity guards](agent-api.md#ui-and-mcp-parity-guards-adr-0081-2026-11-07));
+each later unit of this track closes gaps and shrinks those lists.
 
 ### New sources
 
@@ -158,18 +212,18 @@ New collectors (#455–#510) start only when the owner asks, or after Phase 3.
 
 ## Current position
 
-| Original phases                         | Implemented foundation                                                                                                                                                                                                                                                                                                  | Work still needed for product completion                                                                                             |
-| --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| 0–3: collection, evidence, observations | Source collectors, shared raw evidence, versioned parsing and publication; operations-API collection requests executed through the named collector RPC and traced to publication                                                                                                                                        | Coverage by account and data type; enabling and verifying request dispatch in production, requested windows, READ projection tracing |
-| 4–5: accounts and instruments           | Provider-local identities, mappings and append-only corrections; cross-identifier instrument candidates on a review page and an agent read, decided only through the change lifecycle ([ADR 0055](adr/0055-instrument-candidates.md))                                                                                   | Evidence-backed resolution across direct providers, aggregators and brokers; review of unresolved identities                         |
-| 6–7: reconciliation and economic events | Candidate matching, decisions, event/leg/allocation/obligation/settlement contracts; own-transfer proposals and unregistered planners, nothing adopts ([ADR 0057](adr/0057-own-transfer-proposals.md))                                                                                                                  | More transaction families and continuous event production from adopted observations                                                  |
-| 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots; reported state on a date (positions, provider valuations, balances, card payables); reported holdings changes between two dates, served by a route and a panel of the `/state` page ([ADR 0075](adr/0075-reported-holdings-change-between-dates.md)) | Adoption across sources on a date, dated identity, liabilities beyond provider statements                                            |
-| 9 + 13: prices and valuation            | Price contracts, pure valuation functions, fixed report artifacts with a list route and a read-only page ([ADR 0072](adr/0072-report-artifact-pages.md)); as-of price/FX selection under explicit policies (values not yet decided)                                                                                     | Price/FX acquisition, owner-decided selection policy values and portfolio valuation from actual holdings                             |
-| 10: rewards                             | Bucket claims, expiry and conversion functions, READ projections with displayed and computed expiry apart and their basis                                                                                                                                                                                               | Classified activity history, verified applicable rules, membership and usable conversion offers                                      |
-| 11: derived balances and positions      | Difference contracts and reconciliation readers; a pure fold from a start snapshot and adopted events, a commit-log knowledge selector, a one-account query, its route, agent tool, page ([ADR 0052](adr/0052-reconstructed-state-fold.md), [ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md))      | Applying adopted events to a starting snapshot to reconstruct balances and quantities                                                |
-| 12 + 14: cost basis and P&L             | Input gates, some P&L decomposition functions, a pure lot/disposal-allocation engine over provisional inputs, and an adapter from selected revisions that answers unsupported until a securities writer exists ([ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md))                                            | A securities writer, transfers with carried cost, fee and FX evidence, persisted results, realized and unrealized P&L                |
-| 15: tax                                 | Refusal when required policy or inputs are missing                                                                                                                                                                                                                                                                      | Verified rules and tested outputs for a named jurisdiction, period and asset/account class                                           |
-| 16: AI / MCP                            | Shared query/explanation/proposal service and transports                                                                                                                                                                                                                                                                | Complete analysis and correction flows using the same services as the UI                                                             |
+| Original phases                         | Implemented foundation                                                                                                                                                                                                                                                                                                                                                                                                         | Work still needed for product completion                                                                                             |
+| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| 0–3: collection, evidence, observations | Source collectors, shared raw evidence, versioned parsing and publication; operations-API collection requests executed through the named collector RPC and traced to publication                                                                                                                                                                                                                                               | Coverage by account and data type; enabling and verifying request dispatch in production, requested windows, READ projection tracing |
+| 4–5: accounts and instruments           | Provider-local identities, mappings and append-only corrections; instrument candidates on a page and an agent read, decided only through the change lifecycle; per-source counts of their states ([ADR 0055](adr/0055-instrument-candidates.md), [0073](adr/0073-instrument-coverage-per-source.md)); aggregator-to-direct account containment candidates the same way ([ADR 0077](adr/0077-account-connection-candidates.md)) | Evidence-backed resolution across direct providers, aggregators and brokers; review of unresolved identities                         |
+| 6–7: reconciliation and economic events | Candidate matching, decisions, event/leg/allocation/obligation/settlement contracts; own-transfer proposals and unregistered planners, nothing adopts ([ADR 0057](adr/0057-own-transfer-proposals.md))                                                                                                                                                                                                                         | More transaction families and continuous event production from adopted observations                                                  |
+| 8: reported state snapshots             | Adopted balance measurements, overlap handling and READ snapshots; reported state on a date (positions, provider valuations, balances, card payables); reported holdings changes between two dates, served by a route and a panel of the `/state` page ([ADR 0075](adr/0075-reported-holdings-change-between-dates.md))                                                                                                        | Adoption across sources on a date, dated identity, liabilities beyond provider statements                                            |
+| 9 + 13: prices and valuation            | Price contracts, pure valuation functions, fixed report artifacts with a list route and a read-only page ([ADR 0072](adr/0072-report-artifact-pages.md)); as-of price/FX selection under explicit policies (values not yet decided)                                                                                                                                                                                            | Price/FX acquisition, owner-decided selection policy values and portfolio valuation from actual holdings                             |
+| 10: rewards                             | Bucket claims, expiry and conversion functions, READ projections with displayed and computed expiry apart and their basis                                                                                                                                                                                                                                                                                                      | Classified activity history, verified applicable rules, membership and usable conversion offers                                      |
+| 11: derived balances and positions      | Difference contracts and reconciliation readers; a pure fold from a start snapshot and adopted events, a commit-log knowledge selector, a one-account query, its route, agent tool, page ([ADR 0052](adr/0052-reconstructed-state-fold.md), [ADR 0058](adr/0058-knowledge-selector-and-reconstruction-adapter.md))                                                                                                             | Applying adopted events to a starting snapshot to reconstruct balances and quantities                                                |
+| 12 + 14: cost basis and P&L             | Input gates, some P&L decomposition functions, a pure lot/disposal-allocation engine over provisional inputs, and an adapter from selected revisions that answers unsupported until a securities writer exists ([ADR 0059](adr/0059-lot-adapter-from-selected-revisions.md))                                                                                                                                                   | A securities writer, transfers with carried cost, fee and FX evidence, persisted results, realized and unrealized P&L                |
+| 15: tax                                 | Refusal when required policy or inputs are missing                                                                                                                                                                                                                                                                                                                                                                             | Verified rules and tested outputs for a named jurisdiction, period and asset/account class                                           |
+| 16: AI / MCP                            | Shared query/explanation/proposal service and transports; scoped audit, instrument-history, instrument-coverage, account-candidate, economic-readiness and dated reported-state reads; MCP operations applied by any MCP client Access admits, as itself ([ADR 0063](adr/0063-delegated-ai-operation-path.md), [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md))                                              | Complete analysis and correction flows using the same services as the UI                                                             |
 
 Current implementation and limits are maintained in [current status](current-status.md).
 The detailed source-by-source fixes and dated rollout observations previously
@@ -200,8 +254,15 @@ slice is implemented, and so is the first purchase-event writer for supported
 single-payment card usage (on in production since 2026-09-24), and so is the
 pending-to-posted link review: the purchases page lists the open candidates
 and reviews each purchase's link (accept, reject, withdraw) through the change
-lifecycle. Source ownership, supported bank coverage, partial payments and
-refund handling still need completion.
+lifecycle. Statements without a settlement candidate are listed on
+`カード照合` (and to agents through `kogane.card-settlements.unmatched`) with
+a closed reason, refund and zero totals under their own code, and the ADR 0074
+planner's read-only answer for statements whose window holds no equal debit
+([card settlements](card-settlements.md#statements-without-a-candidate)); a
+multi-debit allocation is shown but cannot be accepted. Source ownership is
+recorded by the owner default (ADR 0082) for the accounts the candidates name;
+supported bank coverage, partial payments and refund handling still need
+completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
 The [2026-09 next-milestone plan](plans/2026-09-next-milestone.md) is a
@@ -249,6 +310,16 @@ flows first, then extend them under the same contracts.
 **Done when:** a user can request collection, follow it to published
 observations, and distinguish resolved accounts/instruments from unresolved
 ones for the selected scope. Missing data types remain visible.
+
+Today `/identities` shows, per source (or for the selected source), the
+account mapping status of eligible observations and how many security, crypto
+and product identifiers are resolved by a person's decision, wait on a
+candidate, share an instrument without a recorded decision, were kept apart
+or have no candidate
+([ADR 0073](adr/0073-instrument-coverage-per-source.md)). These are counts of
+identifiers, not a match rate; money and reward units have no resolution
+state, and a candidate across providers needs a second source whose identity
+rule records comparable identifiers.
 
 Contracts: [collection](collection.md), [observations](observations.md),
 [identity](identity.md), [source identities](identity-sources.md).

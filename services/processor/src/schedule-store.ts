@@ -31,11 +31,13 @@ import {
   changedFields,
   type OperationCall,
   type OperationName,
+  leaseExpiryWrite,
   parseAuditEnvelope,
   processorCall,
 } from "../../../packages/application/src/index.ts";
 import type { SqlWrite } from "../../../packages/storage-d1/src/core/operations.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
+import { boundedText, INTERNAL_BODY_LIMIT } from "./bounded-body.ts";
 export { jobs };
 export interface ScheduleRow {
   id: string;
@@ -142,10 +144,69 @@ export async function markAbandonedOccurrences(db: D1Database, before: string): 
     .bind(before)
     .run();
 }
+/**
+ * How long a held lease may go without a heartbeat before its execution is
+ * taken to have stopped (ADR 0085). A live holder stops itself after three
+ * minutes without one and at thirteen minutes after its claim
+ * (`LEASE_TIMING` in packages/collection/src/schedule-lease.ts).
+ */
+export const LEASE_STALE_MINUTES = 10;
+/**
+ * A lease claimed by a build that writes no heartbeat is judged by its age
+ * instead. Such a claim has no heartbeat, or one older than the claim: a
+ * release written by an older build leaves the previous holder's heartbeat
+ * behind, and an older claim does not overwrite it. `started_at` is the
+ * claiming isolate's clock and `heartbeat_at` D1's. For a claim that writes
+ * heartbeats, a skew between them can only move its lease to this longer
+ * rule; an older build's claim under a leftover heartbeat falls to the
+ * shorter rule only when its isolate lags D1 by more than the time between
+ * that heartbeat and the claim (ADR 0085).
+ */
+export const LEGACY_LEASE_STALE_MINUTES = 60;
+const OWN_HEARTBEAT =
+  "heartbeat_at IS NOT NULL AND (started_at IS NULL OR heartbeat_at >= started_at)";
+const STALE_LEASE = `lease_ref IS NOT NULL AND (
+  (${OWN_HEARTBEAT} AND heartbeat_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-${LEASE_STALE_MINUTES} minutes'))
+  OR (NOT (${OWN_HEARTBEAT}) AND started_at < strftime('%Y-%m-%dT%H:%M:%fZ','now','-${LEGACY_LEASE_STALE_MINUTES} minutes')))`;
+
+/**
+ * Frees every lease whose execution went silent (ADR 0085) and records each
+ * release. Times are compared on D1's clock, the clock the holders write. The
+ * release names the exact reference it read and re-checks staleness in the
+ * same statement, so a heartbeat or an operator release that lands in between
+ * wins and nothing is recorded. It starts no collection and replays nothing:
+ * the next nominal occurrence, or a new operations request, simply finds the
+ * source free.
+ */
+export async function expireStaleLeases(db: D1Database): Promise<number> {
+  const stale = await db
+    .prepare(
+      `SELECT source,lease_ref FROM collection_execution_leases WHERE ${STALE_LEASE} ORDER BY source`,
+    )
+    .all<{ source: string; lease_ref: string }>();
+  let freed = 0;
+  for (const row of stale.results) {
+    const record = leaseExpiryWrite(row.source, new Date().toISOString(), crypto.randomUUID());
+    const [released] = await db.batch([
+      db
+        .prepare(
+          `UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL,heartbeat_at=NULL WHERE source=? AND lease_ref=? AND ${STALE_LEASE}`,
+        )
+        .bind(row.source, row.lease_ref),
+      statement(db, record),
+    ]);
+    if (released?.meta.changes === 1) {
+      freed += 1;
+      console.log(JSON.stringify({ event: "collection_lease_expired", source: row.source }));
+    }
+  }
+  return freed;
+}
 export async function bootstrapSchedules(env: Env) {
   // A generous grace exceeds the platform alarm's 15-minute execution limit.
   // The exact finish time is unknown, so finished_at deliberately remains null.
   await markAbandonedOccurrences(env.DB, new Date(Date.now() - 60 * 60_000).toISOString());
+  await expireStaleLeases(env.DB);
   const reservations = [];
   for (const job of jobs) {
     const row = await initializeSchedule(env, job.id);
@@ -267,15 +328,15 @@ export async function updateSchedule(
 //
 // `writeMaintenanceRevision` is the one place a maintenance rule revision is
 // written (ADR 0046 as amended by ADR 0063, item 8). The operator route
-// (`updateMaintenance`) and an accepted re-survey proposal (ADR 0050) are its
-// adapters; a delegated principal reaches no route to it yet (ADR 0063 slice
-// S3 connects delegated execution). It never throws for a refusal: it answers
+// (`updateMaintenance`), an accepted re-survey proposal (ADR 0050) and the
+// private delegated route (`delegated-maintenance.ts`, ADR 0063 slice S3) are
+// its adapters. It never throws for a refusal: it answers
 // a closed `MaintenanceWriteCode`. What its caller appends (its audit record,
 // a survey decision) is sent in the revision's own batch, so the revision, its
 // provenance and what was appended exist together or not at all (ADR 0064).
 // `prepareMaintenanceRevision` runs the same validation chain and writes
 // nothing; `currentMaintenanceRevision` is the current-revision read both use.
-// They are the contract plan slice S3 builds its confirmation on.
+// They are the contract plan slice S3's confirmation is built on.
 
 /** Every refusal the writer can answer, with the HTTP status the routes use. */
 export const MAINTENANCE_WRITE_CODES = {
@@ -301,11 +362,11 @@ export const MAINTENANCE_WRITE_CODES = {
 } as const;
 export type MaintenanceWriteCode = keyof typeof MAINTENANCE_WRITE_CODES;
 
-/** The actors a revision may name: the operator, or a principal the owner delegated. */
+/** The actors a revision may name: the operator, or an MCP client acting as itself. */
 export type MaintenanceActor =
   /** A subject the App graded as the operator; never an `mcp-client:` name. */
   | { kind: "operator"; id: string }
-  /** `mcp-client:<sub>` resolved under MCP_DELEGATIONS (ADR 0063). */
+  /** `mcp-client:<sub>` the MCP Access application admitted (ADR 0084); stored as `delegated`. */
   | { kind: "delegated"; id: string };
 
 /** One requested revision. Values are validated, never trusted, whoever calls. */
@@ -369,12 +430,22 @@ export const CONFIRMED_MAX_DEFERRAL_MS = 31 * 86_400_000;
  * Which deferral bound the writer holds a delegated revision to. Trusted and
  * in-process only: no request field, header, tool argument or grant sets it.
  * The default is `"delegated-7d"`; only Processor-side code may pass
- * `"confirmed-31d"`, and today nothing does (plan slice S3's R2 confirm will,
- * after verifying the confirm). The operator is held to no bound under either.
+ * `"confirmed-31d"`: the private delegated route does so for an R2 prepare
+ * or confirm (`delegated-maintenance.ts`, plan slice S3), after verifying the
+ * confirm. The operator is held to no bound under either.
  */
 export type MaintenanceDeferralBound = "delegated-7d" | "confirmed-31d";
 export interface MaintenanceWriteOptions {
   deferralBound?: MaintenanceDeferralBound;
+  /**
+   * The re-survey proposal a delegated acceptance writes (ADR 0050 as amended
+   * 2026-11-07). Trusted and in-process only: only the private delegated
+   * survey route (`delegated-survey.ts`) passes it. With it, and only with it,
+   * a delegated principal gives the survey's own reason
+   * (`maintenance-survey-proposal-accepted`) and may create a rule under the
+   * proposal's derived id `<source>-survey-<id>` at expected revision 0.
+   */
+  surveyProposal?: { id: number; ruleId: string };
 }
 /**
  * How long a joined deferral the revision leaves that its source did not
@@ -408,8 +479,8 @@ const SURVEY_DECISION_REF = /^maintenance-survey:proposal:[1-9][0-9]{0,15}$/u;
 const SURVEY_REASON: MaintenanceChangeReason = "maintenance-survey-proposal-accepted";
 /**
  * A delegated revision's decision reference: the audit record that authorizes
- * it (`aud_` + UUID, ADR 0064's `audit_id`), which plan slice S3 reserves
- * before it calls the writer — the prepare record for an R2 confirm, the
+ * it (`aud_` + UUID, ADR 0064's `audit_id`), which the delegated execution
+ * (plan slice S3) reserves before it calls the writer — the prepare record for an R2 confirm, the
  * apply record for an R1 call.
  */
 const DELEGATED_AUDIT_REF =
@@ -535,9 +606,14 @@ function validProvenance(
   actor: MaintenanceActor,
   reason: unknown,
   decisionRef: unknown,
+  surveyAcceptance = false,
 ): { reason: MaintenanceChangeReason; decisionRef: string | null } {
   const allowed: readonly string[] =
-    actor.kind === "delegated" ? DELEGATED_MAINTENANCE_REASONS : MAINTENANCE_CHANGE_REASONS;
+    actor.kind !== "delegated"
+      ? MAINTENANCE_CHANGE_REASONS
+      : surveyAcceptance
+        ? [SURVEY_REASON]
+        : DELEGATED_MAINTENANCE_REASONS;
   if (
     typeof reason !== "string" ||
     !allowed.includes(reason) ||
@@ -683,6 +759,7 @@ async function validateRevision(
   write: MaintenanceWrite,
   bound: MaintenanceDeferralBound,
   classifyOperator: boolean,
+  survey: MaintenanceWriteOptions["surveyProposal"] = undefined,
 ): Promise<ValidatedRevision> {
   const raw: unknown = write;
   const w: Record<string, unknown> = isPlainObject(raw) ? raw : {};
@@ -693,7 +770,20 @@ async function validateRevision(
   const budgetUsed = delegated ? await delegatedWritesToday(env.DB, actor.id) : null;
   if (budgetUsed !== null && budgetUsed >= DELEGATED_MAINTENANCE_WRITES_PER_DAY)
     throw new ScheduleError("maintenance_write_budget_exceeded", 429);
-  const { reason, decisionRef } = validProvenance(actor, w.reason, provenance.decisionRef);
+  const surveyCreate =
+    delegated &&
+    survey !== undefined &&
+    w.ruleId === survey.ruleId &&
+    survey.ruleId === `${String(w.source)}-survey-${survey.id}` &&
+    w.expectedRevision === 0;
+  if (delegated && survey !== undefined && w.ruleId !== survey.ruleId)
+    throw new ScheduleError("invalid_request");
+  const { reason, decisionRef } = validProvenance(
+    actor,
+    w.reason,
+    provenance.decisionRef,
+    delegated && survey !== undefined,
+  );
   // A create is validated as the id it will get, `<source>-<12 hex>`, without
   // choosing one, so a create cannot probe which ids another source's rules use.
   const ruleId = w.ruleId;
@@ -716,9 +806,19 @@ async function validateRevision(
     verifiedAt: provenance.verifiedAt,
   });
   const previous = input.id === null ? null : await previousRevision(env.DB, input.id);
-  if (delegated && input.id !== null && (!previous || previous.source !== input.source))
+  if (
+    delegated &&
+    input.id !== null &&
+    !(surveyCreate && !previous) &&
+    (!previous || previous.source !== input.source)
+  )
     // Another source's rule answers exactly like a rule that does not exist.
-    throw new ScheduleError("maintenance_rule_not_found", 404);
+    // A survey acceptance's derived id held by another source's rule is the
+    // revision conflict below, as it is for the operator.
+    throw new ScheduleError(
+      surveyCreate ? "revision_conflict" : "maintenance_rule_not_found",
+      surveyCreate ? 409 : 404,
+    );
   if (
     (previous?.revision ?? 0) !== input.revision ||
     (previous && previous.source !== input.source)
@@ -771,7 +871,7 @@ function refusalOf(error: unknown): { ok: false; code: MaintenanceWriteCode; sta
  * same chain, the same closed codes — and writes nothing, chooses no id and
  * draws no random value. It answers the rule's current revision, the
  * revision's deferral class and a delegated principal's remaining budget:
- * the contract a confirmation step (plan slice S3) builds on. The write runs
+ * the contract the confirmation step (plan slice S3) is built on. The write runs
  * the same chain again, so a prepare is never an authorization by itself.
  */
 export async function prepareMaintenanceRevision(
@@ -782,7 +882,7 @@ export async function prepareMaintenanceRevision(
   const bound = deferralBoundOf(options);
   let checked: ValidatedRevision;
   try {
-    checked = await validateRevision(env, write, bound, true);
+    checked = await validateRevision(env, write, bound, true, options?.surveyProposal);
   } catch (error) {
     return refusalOf(error);
   }
@@ -805,9 +905,10 @@ async function writeRevision(
   write: MaintenanceWrite,
   append: (saved: SavedRevision) => RevisionAppend,
   bound: MaintenanceDeferralBound,
+  survey: MaintenanceWriteOptions["surveyProposal"],
 ): Promise<Extract<MaintenanceWriteResult, { ok: true }>> {
   const { actor, reason, decisionRef, input, previous, sourceRevisionCount } =
-    await validateRevision(env, write, bound, false);
+    await validateRevision(env, write, bound, false, survey);
   const delegated = actor.kind === "delegated";
   // A new rule's id is chosen only now, after the whole chain has passed.
   const id =
@@ -927,7 +1028,7 @@ export async function writeMaintenanceRevision(
 ): Promise<MaintenanceWriteResult> {
   const bound = deferralBoundOf(options);
   try {
-    return await writeRevision(env, write, append, bound);
+    return await writeRevision(env, write, append, bound, options?.surveyProposal);
   } catch (error) {
     return refusalOf(error);
   }
@@ -1291,7 +1392,7 @@ export async function releaseCollectionLease(
       // A repeated release is already satisfied while the source is unlocked.
       // Check this in the same statement as the write: a newly acquired lease
       // must never be cleared by a delayed retry of the previous reference.
-      "UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL WHERE source=? AND (lease_ref=? OR lease_ref IS NULL)",
+      "UPDATE collection_execution_leases SET lease_ref=NULL,started_at=NULL,heartbeat_at=NULL WHERE source=? AND (lease_ref=? OR lease_ref IS NULL)",
     ).bind(source, v.leaseRef),
     statement(env.DB, record),
   ]);
@@ -1391,24 +1492,57 @@ function recorded(response: Response, audit: OperationCall): Response {
  * The App has graded the reader's `schedules.read` grant and its schedule
  * scope; the reading principal arrives in its own header, never as an
  * operator, and no other settings function — no write of any kind — is
- * reachable from here. A delegated maintenance write has no route until ADR
- * 0063's delegated execution is connected (plan slice S3).
+ * reachable from here. A delegated maintenance write takes the private
+ * `/internal/delegated-maintenance` route (`delegated-maintenance.ts`), never
+ * this one.
  */
 async function agentRoute(request: Request, env: Env, path: string): Promise<unknown> {
   if (request.headers.has("x-kogane-operator") || request.headers.has(AUDIT_HEADERS.delegationRef))
     throw new ScheduleError("invalid_request");
   const agent = request.headers.get("x-kogane-agent");
   if (!agent || !ACTOR_PATTERN.test(agent)) throw new ScheduleError("agent_required", 403);
-  if (path !== "/agent/read") throw new ScheduleError("not_found", 404);
-  const text = await request.text();
-  if (text.length > 16 * 1024) throw new ScheduleError("request_too_large", 413);
+  if (path !== "/agent/read" && path !== "/agent/survey") throw new ScheduleError("not_found", 404);
+  const text = await boundedText(request, INTERNAL_BODY_LIMIT);
+  if (text === null) throw new ScheduleError("request_too_large", 413);
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch {
     throw new ScheduleError("invalid_request");
   }
-  return agentMaintenanceRead(env, value, agent);
+  return path === "/agent/survey"
+    ? agentSurveyRead(env, value)
+    : agentMaintenanceRead(env, value, agent);
+}
+/**
+ * The schedules page's re-survey section for the granted sources (ADR 0050):
+ * the same `maintenanceSurveyView`, with targets and undecided proposals of
+ * other sources left out in the query itself. `truncated` says more of these
+ * sources' proposals are undecided than the page's bound shows.
+ */
+async function agentSurveyRead(env: Env, value: unknown) {
+  const v = bodyObject(value);
+  exactKeys(v, ["sources"]);
+  let requested: string[] | undefined;
+  if (v.sources === "*") requested = undefined;
+  else if (
+    Array.isArray(v.sources) &&
+    v.sources.length <= 64 &&
+    v.sources.every((s) => typeof s === "string" && /^[a-z0-9-]{1,100}$/u.test(s))
+  )
+    requested = v.sources as string[];
+  else throw new ScheduleError("invalid_request");
+  // The sources narrow the query itself, so another source's backlog neither
+  // crowds the bound nor shows in `truncated`.
+  const view = await maintenanceSurveyView(env, Date.now(), undefined, requested);
+  return {
+    enabled: view.enabled,
+    targets: requested
+      ? view.targets.filter((target) => requested.includes(target.source))
+      : view.targets,
+    proposals: view.proposals,
+    truncated: view.proposals.length < view.attention,
+  };
 }
 export async function scheduleRoute(
   request: Request,
@@ -1452,8 +1586,8 @@ export async function scheduleRoute(
     const envelope = parseAuditEnvelope(request.headers);
     if (!envelope) throw new ScheduleError("operator_required", 403);
     const call = (operation: OperationName) => processorCall(envelope, operation, actor, "human");
-    const text = await request.text();
-    if (text.length > 16 * 1024) throw new ScheduleError("request_too_large", 413);
+    const text = await boundedText(request, INTERNAL_BODY_LIMIT);
+    if (text === null) throw new ScheduleError("request_too_large", 413);
     const value: unknown = JSON.parse(text);
     if (path === "/maintenance") {
       const audit = call("schedules.maintenance.update");

@@ -35,6 +35,19 @@ export function safeFailureCode(value: unknown): FailureCode {
   return FAILURE_CODES.includes(value as FailureCode) ? (value as FailureCode) : "container-failed";
 }
 
+/**
+ * The closed code of an error the lease-held collection threw. A holder that
+ * stopped itself (ADR 0085) keeps its reason instead of `container-failed`:
+ * its deadline is `deadline-exceeded`, a lost lease is `collection-interrupted`.
+ * Either is a failed run, so the coordinator blocks until the operator resumes.
+ */
+export function thrownFailureCode(error: unknown): FailureCode {
+  const message = error instanceof Error ? error.message : null;
+  if (message === "collection_deadline_exceeded") return "deadline-exceeded";
+  if (message === "collection_lease_lost") return "collection-interrupted";
+  return safeFailureCode(message);
+}
+
 /** The alarm must not collapse a durable block, R2 outage and provider refusal into one code. */
 export function stGeorgeScheduledResult(value: unknown): ScheduledResult {
   const base = scheduledResult(value);
@@ -42,7 +55,10 @@ export function stGeorgeScheduledResult(value: unknown): ScheduledResult {
   const result = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   let failureCode = "collection_failed";
   if (result.status === "busy") failureCode = "collection_busy";
-  else if (result.reason === "persistence-incomplete") failureCode = "terminal_persistence_failed";
+  else if (result.reason === "persistence-incomplete")
+    // The run stays pending under its id with no terminal; a later trigger
+    // reports it once it is stored. It is not a persisted run of this alarm.
+    return { ...base, runIds: [], failureCode: "terminal_persistence_failed" };
   else if (result.reason === "persistence-pending") failureCode = "terminal_persistence_pending";
   else if (result.reason === "state-unavailable") failureCode = "collector_state_unavailable";
   else if (FAILURE_CODES.includes(result.reason as FailureCode))
