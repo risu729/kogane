@@ -1,6 +1,6 @@
 # ADR 0080: A change planned again after its plan expired is a renewal with its own id
 
-- Status: proposed
+- Status: accepted (owner approved 2026-11-07 13:39 UTC)
 - Date: 2026-11-06
 - Carried by:
   `packages/application/src/command/plan.ts` (`planIdAt`, `planDigestOf`'s
