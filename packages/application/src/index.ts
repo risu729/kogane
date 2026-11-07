@@ -445,6 +445,7 @@ export {
   replayDelegatedConfirmation,
   delegatedBatchFailure,
   delegatedCommandFamilyAllowed,
+  delegatedWritesRemaining,
 } from "./delegation/execution.ts";
 
 export { assertDelegatedReversal } from "./delegation/reversal.ts";
@@ -468,6 +469,7 @@ export {
   delegatedSurveyPayloadSchema,
   delegatedSurveySchema,
   delegatedSurveyResultSchema,
+  OPERATOR_ONLY_HEADER,
   type DelegatedSurveyPayload,
 } from "./delegation/survey.ts";
 

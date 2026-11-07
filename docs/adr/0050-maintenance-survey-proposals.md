@@ -329,7 +329,8 @@ proposal; (C) `proposed` only. The owner chose A.
    payload, including the proposal's `baseRevision`. Prepare runs the writer's
    validation chain and writes nothing; its preview carries the proposal's
    kind, status, closed reasons, rule, base and current revision, the change,
-   the deferral class and the writer's remaining daily count. Confirm writes the
+   the deferral class and the remaining daily count (the tighter of the
+   writer's count and the delegation's budget). Confirm writes the
    revision through `writeMaintenanceRevision` with actor kind `delegated`,
    reason `maintenance-survey-proposal-accepted` and decision reference
    `delegated-audit:<prepare audit id>`. The proposal link is the decision row
@@ -348,7 +349,12 @@ proposal; (C) `proposed` only. The owner chose A.
    (the page itself is in doubt) is R3: refused `403 operation_not_delegable`
    at prepare and confirm, recorded at R3. A delegated rejection of it is
    allowed. These reasons are `OPERATOR_ONLY_PROPOSAL_REASONS`
-   (`packages/collection/src/maintenance-survey-model.ts`).
+   (`packages/collection/src/maintenance-survey-model.ts`). The reasons were
+   set against the rules when the page was read, so prepare and confirm also
+   judge the change against the source's rules as they stand then
+   (`operatorOnlyAcceptance`): a change that disables a rule, re-enables a
+   disabled one, or equals or overlaps another enabled rule (one accepted or
+   edited since the reading) is refused the same way.
 6. _The writer._ One trusted option, `surveyProposal: { id, ruleId }`, which only
    the private survey route passes. With it a delegated actor may give the
    survey's reason, and may create a rule under a named id only when it is
@@ -359,6 +365,8 @@ proposal; (C) `proposed` only. The owner chose A.
    `scopes.scheduleSources`, MCP only) returns the page's re-survey section for
    those sources: lane state, page freshness and undecided proposals, with
    closed codes and the page URL, fetch time and SHA-256, never page text.
+   The sources narrow the query before the page's bound on shown proposals,
+   so another source's backlog neither hides these nor shows in `truncated`.
 8. _Conflicts._ An operator and an agent deciding one proposal: the first
    write wins on the decision's primary key, and the other gets
    `409 proposal_already_decided` with nothing written. A rule that moved since

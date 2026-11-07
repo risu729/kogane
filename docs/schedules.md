@@ -155,7 +155,7 @@ changed into proposals. It never changes a rule, a schedule or an alarm.
 - **Over MCP** ([ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)).
   `kogane.schedules.survey.read` (`schedules.read`, scoped by
   `scopes.scheduleSources`) returns this section for the granted sources, with
-  `truncated` when the page's bound of 200 shown proposals was reached.
+  `truncated` when more than 200 of their proposals are undecided.
   `kogane.schedules.survey.decide`, for a delegation holding
   `schedules.survey.decide`, rejects in one call (R1, idempotency key) and
   accepts by prepare and confirm against the proposal's `baseRevision` (R2),
@@ -166,7 +166,9 @@ changed into proposals. It never changes a rule, a schedule or an alarm.
   `rule_disabled_by_operator`, `ambiguous_rule_match`, `cancellation_stated` or
   `contradictory_windows` is accepted only here, by the operator: over MCP its
   acceptance is `403 operation_not_delegable` (R3), and its rejection is allowed.
-  Another source's proposal is `404 proposal_not_found`, as a missing one is.
+  The same holds for an acceptance that, against the source's rules at prepare
+  or confirm, would disable a rule, re-enable a disabled one, or equal or
+  overlap another enabled rule. Another source's proposal is `404 proposal_not_found`, as a missing one is.
 
 Not verified: no official page has been fetched; which pages to allow and at
 which cadence are the owner's to confirm, and pages that are PDFs, need a

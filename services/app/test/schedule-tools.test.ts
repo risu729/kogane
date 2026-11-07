@@ -824,4 +824,36 @@ describe("the re-survey read and decision tools on /mcp (ADR 0050, amendment 202
       { path: "/internal/schedules/agent/survey", agent: `mcp-client:${READER}`, operator: null },
     ]);
   });
+
+  it("narrows by source before the page's bound: another source's backlog neither hides nor shows", async () => {
+    // More undecided proposals of another source than the page shows, all older.
+    const first = await seed("sony-bank");
+    const [row] = (
+      await env.DB.prepare("SELECT * FROM maintenance_survey_proposals WHERE id=?")
+        .bind(first)
+        .all<Record<string, unknown>>()
+    ).results;
+    await env.DB.batch(
+      Array.from({ length: 200 }, () =>
+        env.DB.prepare(
+          `INSERT INTO maintenance_survey_proposals(fetch_id,target_id,source,kind,rule_id,base_revision,timezone,pattern_json,enabled,scope,status,reasons_json,proposal_key,created_at)
+           VALUES(?,?,?,'new',NULL,0,'Asia/Tokyo',?,1,'collection','proposed','[]',?,?)`,
+        ).bind(
+          row!["fetch_id"],
+          "sony-bank",
+          "sony-bank",
+          row!["pattern_json"],
+          crypto.randomUUID().replaceAll("-", "").padEnd(64, "c"),
+          iso(Date.now()),
+        ),
+      ),
+    );
+    const mine = await seed("vpass");
+    const read = await tool(READER, SURVEY_READ, {});
+    expect(read.isError).toBe(false);
+    const shown = read.structuredContent.proposals as { id: number; source: string }[];
+    expect(shown.map((entry) => entry.id)).toContain(mine);
+    expect(shown.every((entry) => entry.source === "vpass")).toBe(true);
+    expect(read.structuredContent).toMatchObject({ truncated: false });
+  });
 });

@@ -744,7 +744,8 @@ The decision is listed only to a resolved delegation holding
 `step: "apply"`. An acceptance adds `baseRevision` and takes `step: "prepare"`,
 then `"confirm"` with `confirmationDigest`. The prepare preview carries the
 proposal's kind, status, reasons, rule, base and current revision, the change,
-the deferral class, the writer's remaining daily count and
+the deferral class, the remaining daily count (the tighter of the writer's
+30-per-day count and the delegation's budget) and
 `revert: "maintenance-revision"`. Undoing an acceptance is a further maintenance
 revision, by the operator or `kogane.schedules.maintenance.update`. An exact
 retry answers `replayed: true`.
@@ -756,7 +757,11 @@ Refusals are closed codes:
 - `proposal_already_decided`: the proposal was decided already, by the operator or anyone else.
 - `revision_conflict`: a stale `baseRevision`, or a rule that moved.
 - `maintenance_deferral_too_long`: the deferral exceeds the 31-day ceiling.
-- `operation_not_delegable`: an acceptance of a proposal with `rule_absent_from_page`, `rule_disabled_by_operator`, `ambiguous_rule_match`, `cancellation_stated` or `contradictory_windows`. It is recorded at R3 and stays with the operator on the schedules page; rejecting such a proposal is allowed.
+- `maintenance_write_budget_exceeded` (429): the 30-per-day count of delegated revisions is spent.
+- `delegation_budget_exceeded` (429): the delegation's daily budget is spent; nothing is written.
+- `confirmation_required`, `confirmation_invalid`, `confirmation_expired`: a confirm without its digest, with one prepared for another payload, or after ten minutes.
+- `idempotency_conflict`: the key was used for another payload.
+- `operation_not_delegable`: an acceptance of a proposal with `rule_absent_from_page`, `rule_disabled_by_operator`, `ambiguous_rule_match`, `cancellation_stated` or `contradictory_windows`, or one that, against the source's rules at prepare or confirm, would disable a rule, re-enable a disabled one, or equal or overlap another enabled rule. It is recorded at R3 and stays with the operator on the schedules page; rejecting such a proposal is allowed.
 
 ## Contexts, cursors and hand-off
 

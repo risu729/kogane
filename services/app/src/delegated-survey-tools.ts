@@ -16,6 +16,8 @@ import {
   confirmDelegatedOperation,
   replayDelegatedConfirmation,
   DelegatedOperationError,
+  delegatedWritesRemaining,
+  OPERATOR_ONLY_HEADER,
   type DelegatedSurveyPayload,
   type DelegationResolution,
   type OperationCall,
@@ -178,9 +180,11 @@ export async function callDelegatedSurveyTool(
     } catch {
       throw new UpstreamLost(503, "scheduling_unavailable");
     }
-    // An acceptance the owner kept with the operator is recorded at R3.
+    // An acceptance the owner kept with the operator is recorded at R3; the
+    // Processor marks that refusal apart from any other `operation_not_delegable`.
     if (
       response.status === 403 &&
+      response.headers.get(OPERATOR_ONLY_HEADER) === "1" &&
       (result as { error?: unknown } | null)?.error === "operation_not_delegable"
     )
       audit.setRisk("R3");
@@ -198,7 +202,7 @@ export async function callDelegatedSurveyTool(
           currentRevision: z.int(),
           change: z.record(z.string(), z.unknown()),
           deferralClass: z.enum(["within-7d", "within-31d"]),
-          budgetRemaining: z.int().nullable(),
+          budgetRemaining: z.int(),
         })
         .safeParse(result);
       if (
@@ -224,6 +228,11 @@ export async function callDelegatedSurveyTool(
           preview: {
             ...prepared.preview,
             ...preview.data,
+            // The tighter of the writer's daily cap and the delegation's own budget.
+            budgetRemaining: Math.min(
+              preview.data.budgetRemaining,
+              await delegatedWritesRemaining(store, principal),
+            ),
             // Undoing an acceptance is a further maintenance revision: the
             // operator's, or kogane.schedules.maintenance.update within its bounds.
             revert: "maintenance-revision",
@@ -236,7 +245,11 @@ export async function callDelegatedSurveyTool(
       if (
         !saved.success ||
         saved.data.replayed ||
-        saved.data.decided !== (payload.decision === "accept" ? "accepted" : "rejected")
+        saved.data.decided !== (payload.decision === "accept" ? "accepted" : "rejected") ||
+        // An acceptance wrote the revision after the one it was prepared against.
+        (saved.data.decided === "accepted" &&
+          payload.decision === "accept" &&
+          saved.data.revision !== payload.baseRevision + 1)
       )
         throw new UpstreamLost(503, "scheduling_unavailable");
       result = saved.data;

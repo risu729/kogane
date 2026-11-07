@@ -1457,27 +1457,30 @@ async function agentRoute(request: Request, env: Env, path: string): Promise<unk
 /**
  * The schedules page's re-survey section for the granted sources (ADR 0050):
  * the same `maintenanceSurveyView`, with targets and undecided proposals of
- * other sources left out. `truncated` says the page's own bound on shown
- * proposals was reached, so more undecided proposals may exist.
+ * other sources left out in the query itself. `truncated` says more of these
+ * sources' proposals are undecided than the page's bound shows.
  */
 async function agentSurveyRead(env: Env, value: unknown) {
   const v = bodyObject(value);
   exactKeys(v, ["sources"]);
-  let allowed: (source: string) => boolean;
-  if (v.sources === "*") allowed = () => true;
+  let requested: string[] | undefined;
+  if (v.sources === "*") requested = undefined;
   else if (
     Array.isArray(v.sources) &&
     v.sources.length <= 64 &&
     v.sources.every((s) => typeof s === "string" && /^[a-z0-9-]{1,100}$/u.test(s))
-  ) {
-    const requested = v.sources as string[];
-    allowed = (source) => requested.includes(source);
-  } else throw new ScheduleError("invalid_request");
-  const view = await maintenanceSurveyView(env, Date.now());
+  )
+    requested = v.sources as string[];
+  else throw new ScheduleError("invalid_request");
+  // The sources narrow the query itself, so another source's backlog neither
+  // crowds the bound nor shows in `truncated`.
+  const view = await maintenanceSurveyView(env, Date.now(), undefined, requested);
   return {
     enabled: view.enabled,
-    targets: view.targets.filter((target) => allowed(target.source)),
-    proposals: view.proposals.filter((proposal) => allowed(proposal.source)),
+    targets: requested
+      ? view.targets.filter((target) => requested.includes(target.source))
+      : view.targets,
+    proposals: view.proposals,
     truncated: view.proposals.length < view.attention,
   };
 }

@@ -469,12 +469,8 @@ export async function delegatedBatchFailure(
     if (prepared.confirm_expires_at! <= now.toISOString())
       return new DelegatedOperationError("confirmation_expired");
   }
-  const count = await store.first<{ n: number }>(
-    `SELECT count(*) n FROM audit_records WHERE principal=? AND principal_kind='delegated' AND result IN ('applied','accepted') AND recorded_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')`,
-    [call.actor.principal],
-  );
-  if (count && count.n >= auth.writesPerDay)
-    return new DelegatedOperationError("delegation_budget_exceeded");
+  const count = await delegatedWritesUsed(store, call.actor.principal);
+  if (count >= auth.writesPerDay) return new DelegatedOperationError("delegation_budget_exceeded");
   if (auth.idempotencyKey && auth.payloadDigest) {
     const row = await store.first<AuditRow>(EFFECT, [
       call.actor.principal,
@@ -553,4 +549,24 @@ export async function replayDelegatedConfirmation(
   });
   call.setStep("confirm");
   return row;
+}
+
+/** Delegated effects `principal` recorded in the rolling day: what its daily budget counts. */
+export async function delegatedWritesUsed(store: CommandStore, principal: string): Promise<number> {
+  const count = await store.first<{ n: number }>(
+    `SELECT count(*) n FROM audit_records WHERE principal=? AND principal_kind='delegated' AND result IN ('applied','accepted') AND recorded_at>=strftime('%Y-%m-%dT%H:%M:%fZ','now','-24 hours')`,
+    [principal],
+  );
+  return count?.n ?? 0;
+}
+
+/** What a preview shows of the delegation's own daily budget. */
+export async function delegatedWritesRemaining(
+  store: CommandStore,
+  principal: DelegatedPrincipal,
+): Promise<number> {
+  return Math.max(
+    0,
+    principal.budget.writesPerDay - (await delegatedWritesUsed(store, principal.id)),
+  );
 }

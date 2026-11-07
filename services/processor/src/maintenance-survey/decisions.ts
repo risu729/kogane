@@ -24,7 +24,12 @@ import {
   maintenanceSurveyEnabled,
   type SurveyConfig,
 } from "./config.ts";
-import type { OperationCall, RevisionField } from "../../../../packages/application/src/index.ts";
+import {
+  OPERATOR_ONLY_HEADER,
+  type OperationCall,
+  type RevisionField,
+} from "../../../../packages/application/src/index.ts";
+import { operatorOnlyAcceptance } from "./diff.ts";
 import type { SqlWrite } from "../../../../packages/storage-d1/src/core/operations.ts";
 
 /**
@@ -132,6 +137,8 @@ export interface DelegatedSurveyDecision<O> {
   prepare?: MaintenanceRevisionPreparer<O>;
   /** A batch that raised: the delegation's closed refusal it stands for, if any. */
   batchFailure?: () => Promise<Response | null>;
+  /** Accept: the source's current rules (latest revision of each), read at each step. */
+  rules?: (source: string) => Promise<readonly MaintenanceRule[]>;
 }
 
 /**
@@ -174,6 +181,13 @@ interface ProposalRow {
 
 function refuse(code: string, status: number): Response {
   return Response.json({ error: code }, { status });
+}
+/** An acceptance the owner kept with the operator (R3), marked so the App records it so. */
+function operatorOnly(): Response {
+  return Response.json(
+    { error: "operation_not_delegable" },
+    { status: 403, headers: { [OPERATOR_ONLY_HEADER]: "1" } },
+  );
 }
 
 /**
@@ -257,7 +271,7 @@ export async function decideSurveyProposal<O = never>(
     // prepare and at confirm, whatever else holds.
     const reasons = closedReasons(row.reasons_json);
     if (reasons.some((r) => (OPERATOR_ONLY_PROPOSAL_REASONS as readonly string[]).includes(r)))
-      return refuse("operation_not_delegable", 403);
+      return operatorOnly();
   }
   const ruleId = row.rule_id ?? proposedRuleId(row.source, row.id);
   const write: RevisionWrite = {
@@ -279,7 +293,16 @@ export async function decideSurveyProposal<O = never>(
     reason: ACCEPTED_REASON,
   };
   const options = delegated?.writerOptions?.({ id: row.id, ruleId });
-  if (delegated && options === undefined) return refuse("scheduling_unavailable", 503);
+  if (delegated && (options === undefined || !delegated.rules))
+    return refuse("scheduling_unavailable", 503);
+  // The same reservation against the rules as they stand now: a disable, a
+  // re-enable, or a rule beside another one it overlaps, whatever the reasons
+  // recorded when the page was read.
+  if (
+    delegated?.rules &&
+    operatorOnlyAcceptance(write.change, ruleId, await delegated.rules(row.source))
+  )
+    return operatorOnly();
   if (delegated?.step === "prepare") {
     if (!delegated.prepare) return refuse("scheduling_unavailable", 503);
     const checked = await delegated.prepare(env, write, options);
@@ -381,13 +404,20 @@ function closedReasons(json: string): ProposalReason[] {
   return PROPOSAL_REASONS.filter((r) => values.includes(r));
 }
 
-/** Read-only: each allowlisted page's freshness and the undecided proposals. */
+/**
+ * Read-only: each allowlisted page's freshness and the undecided proposals.
+ * `sources` narrows the proposals and their count to those sources before the
+ * bound on shown proposals applies (the agent read); omitted, every source.
+ */
 export async function maintenanceSurveyView(
   env: Env,
   now: number,
   config: SurveyConfig = loadSurveyConfig(),
+  sources?: readonly string[],
 ): Promise<MaintenanceSurveyView> {
   const db = env.DB;
+  const only = sources ? ` AND p.source IN (SELECT value FROM json_each(?))` : "";
+  const onlyBinds = sources ? [JSON.stringify(sources)] : [];
   const laneEnabled = maintenanceSurveyEnabled(env);
   const [cursorRows, proposalRows, countRows] = await db.batch<unknown>([
     db.prepare("SELECT * FROM maintenance_survey_cursors"),
@@ -397,14 +427,16 @@ export async function maintenanceSurveyView(
           (SELECT MAX(r.revision) FROM provider_maintenance_rules r
             WHERE r.id=COALESCE(p.rule_id,p.source||'-survey-'||p.id)) AS current_revision
          FROM maintenance_survey_proposals p JOIN maintenance_survey_fetches f ON f.id=p.fetch_id
-         WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions d WHERE d.proposal_id=p.id)
+         WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions d WHERE d.proposal_id=p.id)${only}
          ORDER BY p.id LIMIT ?`,
       )
-      .bind(PROPOSALS_SHOWN),
-    db.prepare(
-      `SELECT count(*) AS n FROM maintenance_survey_proposals p
-       WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions d WHERE d.proposal_id=p.id)`,
-    ),
+      .bind(...onlyBinds, PROPOSALS_SHOWN),
+    db
+      .prepare(
+        `SELECT count(*) AS n FROM maintenance_survey_proposals p
+       WHERE NOT EXISTS(SELECT 1 FROM maintenance_survey_decisions d WHERE d.proposal_id=p.id)${only}`,
+      )
+      .bind(...onlyBinds),
   ]);
   const cursors = (cursorRows?.results ?? []) as CursorRow[];
   const proposals = (proposalRows?.results ?? []) as (ProposalRow & {

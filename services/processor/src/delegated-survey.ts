@@ -15,6 +15,7 @@ import {
 } from "../../../packages/application/src/index";
 import { canonicalDigest } from "../../../packages/domain/src/context";
 import {
+  maintenanceRules,
   prepareMaintenanceRevision,
   writeMaintenanceRevision,
   ScheduleError,
@@ -130,6 +131,7 @@ export async function delegatedSurveyRoute(
           surveyProposal: proposal,
         }),
         prepare: prepareMaintenanceRevision,
+        rules: (source) => maintenanceRules(env.DB, source),
         batchFailure: async () => {
           const error = await delegatedBatchFailure(store, call);
           return error ? refusal(error) : null;

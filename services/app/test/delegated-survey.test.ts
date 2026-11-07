@@ -68,13 +68,16 @@ async function proposal(
     baseRevision?: number;
     reasons?: string[];
     duration?: number;
+    offset?: number;
     enabled?: boolean;
   } = {},
 ): Promise<number> {
   const source = options.source ?? "vpass";
   const kind = options.kind ?? "new";
   const reasons = options.reasons ?? [];
-  const from = Date.now() + DAY + ++sequence * 60_000;
+  // Windows three hours apart: a rule one test accepts never overlaps the next
+  // test's proposal (a delegated acceptance beside an overlapping rule is the operator's).
+  const from = Date.now() + DAY + ++sequence * 3 * 3_600_000 + (options.offset ?? 0);
   const pattern = {
     kind: "once",
     from: new Date(from).toISOString(),
@@ -328,6 +331,109 @@ test("the owner kept five reasons with the operator: refused at R3, rejection st
   });
 });
 
+const confirm = (accepted: Awaited<ReturnType<typeof accept>>) =>
+  invoke({
+    ...accepted.args,
+    step: "confirm",
+    idempotencyKey: accepted.key,
+    confirmationDigest: accepted.prepared.body.confirmation!.digest,
+  });
+const ruleRows = (id: string) => rows("SELECT * FROM provider_maintenance_rules WHERE id=?", id);
+
+test("the same reservation holds against the rules now: a rule overlapping one accepted since, or a disable", async () => {
+  const before = (await records()).length;
+  // Two readings of one window, neither with a reason: the second would sit
+  // beside the rule the first became.
+  const firstReading = await proposal();
+  const secondReading = await proposal({ offset: -3 * 3_600_000 + 30 * 60_000 });
+  expect((await confirm(await accept(firstReading))).body).toMatchObject({ decided: "accepted" });
+  expect((await accept(secondReading)).prepared).toMatchObject({
+    status: 403,
+    body: { error: "operation_not_delegable" },
+  });
+  // Checked again at confirm: an overlapping rule accepted between the steps.
+  const prepared = await accept(await proposal());
+  expect(prepared.prepared.status).toBe(200);
+  const overlapping = await proposal({ offset: -3 * 3_600_000 + 30 * 60_000 });
+  expect((await confirm(await accept(overlapping))).body).toMatchObject({ decided: "accepted" });
+  expect(await confirm(prepared)).toMatchObject({
+    status: 403,
+    body: { error: "operation_not_delegable" },
+  });
+  expect(await ruleRows(`vpass-survey-${prepared.args.proposalId}`)).toEqual([]);
+  expect(await decision(prepared.args.proposalId)).toEqual([]);
+  // A disable is the operator's even when no reason says so.
+  const rule = `vpass-survey-${firstReading}`;
+  const disable = await proposal({ kind: "absent", ruleId: rule, baseRevision: 1 });
+  expect((await accept(disable, 1)).prepared).toMatchObject({
+    status: 403,
+    body: { error: "operation_not_delegable" },
+  });
+  expect(await ruleRows(rule)).toHaveLength(1);
+  const refused = (await records()).slice(before).filter((row) => row["result"] === "refused");
+  expect(refused.map((row) => [row["risk_class"], row["result_code"]])).toEqual(
+    Array(3).fill(["R3", "operation_not_delegable"]),
+  );
+});
+
+test("between prepare and confirm: an operator's decision or a moved rule wins, and nothing is written", async () => {
+  // The operator decided first.
+  const decided = await accept(await proposal());
+  await native.DB.prepare(
+    "INSERT INTO maintenance_survey_decisions(proposal_id,decision,actor,decided_at) VALUES(?,'rejected','operator:synthetic',?)",
+  )
+    .bind(decided.args.proposalId, new Date().toISOString())
+    .run();
+  expect(await confirm(decided)).toMatchObject({
+    status: 409,
+    body: { error: "proposal_already_decided" },
+  });
+  expect(await ruleRows(`vpass-survey-${decided.args.proposalId}`)).toEqual([]);
+  // Two readings revising one rule: the one confirmed first moves it.
+  const created = await proposal();
+  await confirm(await accept(created));
+  const ruleId = `vpass-survey-${created}`;
+  const late = await accept(await proposal({ kind: "changed", ruleId, baseRevision: 1 }), 1);
+  const early = await accept(await proposal({ kind: "changed", ruleId, baseRevision: 1 }), 1);
+  expect((await confirm(early)).body).toMatchObject({ decided: "accepted", revision: 2 });
+  expect(await confirm(late)).toMatchObject({ status: 409, body: { error: "revision_conflict" } });
+  expect(await decision(late.args.proposalId)).toEqual([]);
+  expect(await ruleRows(ruleId)).toHaveLength(2);
+  // A confirmation prepared for one proposal does not confirm another.
+  const one = await accept(await proposal());
+  const other = await accept(await proposal());
+  const crossed = await invoke({
+    ...other.args,
+    step: "confirm",
+    idempotencyKey: other.key,
+    confirmationDigest: one.prepared.body.confirmation!.digest,
+  });
+  expect(crossed).toMatchObject({ status: 403, body: { error: "confirmation_invalid" } });
+  expect(await decision(other.args.proposalId)).toEqual([]);
+});
+
+test("the delegation's own budget: the preview shows the tighter figure, and a spent budget at confirm writes nothing", async () => {
+  p = { ...p, budget: { writesPerDay: 2 } };
+  const reject = (id: number) =>
+    invoke({
+      decision: "reject",
+      source: "vpass",
+      proposalId: id,
+      step: "apply",
+      idempotencyKey: crypto.randomUUID(),
+    });
+  expect((await reject(await proposal())).body).toMatchObject({ decided: "rejected" });
+  const prepared = await accept(await proposal());
+  expect(prepared.prepared.body.preview).toMatchObject({ budgetRemaining: 1 });
+  expect((await reject(await proposal())).body).toMatchObject({ decided: "rejected" });
+  expect(await confirm(prepared)).toMatchObject({
+    status: 429,
+    body: { error: "delegation_budget_exceeded" },
+  });
+  expect(await ruleRows(`vpass-survey-${prepared.args.proposalId}`)).toEqual([]);
+  expect(await decision(prepared.args.proposalId)).toEqual([]);
+});
+
 test("scope: another source's proposal is not found, a source outside the delegation is refused", async () => {
   const theirs = await proposal({ source: "myjcb" });
   const probe = await invoke({
@@ -346,6 +452,11 @@ test("scope: another source's proposal is not found, a source outside the delega
   });
   expect(probe).toMatchObject({ status: 404, body: { error: "proposal_not_found" } });
   expect(missing).toMatchObject({ status: 404, body: { error: "proposal_not_found" } });
+  // The same at prepare: an acceptance of another source's proposal is not found.
+  expect((await accept(theirs)).prepared).toMatchObject({
+    status: 404,
+    body: { error: "proposal_not_found" },
+  });
   const outside = await invoke({
     decision: "reject",
     source: "myjcb",

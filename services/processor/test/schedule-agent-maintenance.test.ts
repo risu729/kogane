@@ -886,6 +886,51 @@ describe("the reason and decision reference are closed per actor", () => {
     ]);
   });
 
+  test("only with the survey's trusted option may a delegated write give its reason or create its derived id", async () => {
+    const count = await ruleCount();
+    const survey = (id: number, ruleId: string | null, reason: string = ACCEPTED_REASON) => ({
+      ...provenanceWrite("delegated", reason, delegatedRef()),
+      ruleId,
+    });
+    // What the public maintenance tool can send: no option, so neither the
+    // reason nor the derived id, whichever comes with a good audit reference.
+    for (const [write, code] of [
+      [survey(7, null), "invalid_reason"],
+      [survey(7, "vpass-survey-7"), "invalid_reason"],
+      [survey(7, "vpass-survey-7", "correction"), "maintenance_rule_not_found"],
+    ] as const)
+      expect(await writeMaintenanceRevision(processorEnv, write, NO_RECORD)).toEqual({
+        ok: false,
+        code,
+        status: MAINTENANCE_WRITE_CODES[code],
+      });
+    // With the option: exactly the derived id of that proposal, at revision 0,
+    // and only the survey's reason.
+    const option = (id: number, ruleId: string) => ({ surveyProposal: { id, ruleId } });
+    for (const [write, options, code] of [
+      [survey(7, "vpass-survey-8"), option(7, "vpass-survey-7"), "invalid_request"],
+      [survey(7, "myjcb-survey-7"), option(7, "myjcb-survey-7"), "maintenance_rule_not_found"],
+      [survey(7, "vpass-survey-7", "correction"), option(7, "vpass-survey-7"), "invalid_reason"],
+      [
+        { ...survey(7, "vpass-survey-7"), expectedRevision: 1 },
+        option(7, "vpass-survey-7"),
+        "maintenance_rule_not_found",
+      ],
+    ] as const)
+      expect([
+        write.ruleId,
+        await writeMaintenanceRevision(processorEnv, write, NO_RECORD, options),
+      ]).toEqual([write.ruleId, { ok: false, code, status: MAINTENANCE_WRITE_CODES[code] }]);
+    expect(await ruleCount()).toBe(count);
+    const created = await writeMaintenanceRevision(
+      processorEnv,
+      survey(7, "vpass-survey-7"),
+      NO_RECORD,
+      option(7, "vpass-survey-7"),
+    );
+    expect(created).toMatchObject({ ok: true, ruleId: "vpass-survey-7", revision: 1 });
+  });
+
   test("the operator's rules are unchanged: no audit reference, and the survey's reason only with its proposal", async () => {
     const count = await ruleCount();
     const cases: [string, unknown, keyof typeof MAINTENANCE_WRITE_CODES][] = [

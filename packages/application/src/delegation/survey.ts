@@ -52,3 +52,11 @@ export const delegatedSurveyResultSchema = z.discriminatedUnion("decided", [
     replayed: z.boolean(),
   }),
 ]);
+
+/**
+ * Set to `1` on the Processor's `403 operation_not_delegable` answer when the
+ * refusal is the owner's reservation (ADR 0050 amendment, option A), so the
+ * App records that call at R3. Any other `operation_not_delegable` (a scope or
+ * step the delegation does not cover) keeps the call's own risk.
+ */
+export const OPERATOR_ONLY_HEADER = "x-kogane-operator-only";
