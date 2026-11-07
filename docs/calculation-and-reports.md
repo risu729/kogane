@@ -470,12 +470,12 @@ An agent therefore cannot rewrite a submission through one ambiguous
 [ADR 0072](adr/0072-report-artifact-pages.md) adds the catalogue and the
 operator's pages.
 
-| Layer      | Where                                                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| HTTP       | `GET /api/v2/reports?offset=N` (`REPORT_LIST_SQL` in `services/app/src/reports-api.ts`), beside the routes above      |
-| Capability | `reportArtifacts` on `/api/meta`, true where the store has `report_artifacts`                                         |
-| Contract   | `validReportResponse` in `packages/observation-shared/src/report-artifact-contract.ts` (list, detail and explanation) |
-| Pages      | 評価レポート at `/reports` and `/reports/{id}` (`apps/web/src/pages/Reports.tsx`)                                     |
+| Layer      | Where                                                                                                                               |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| HTTP       | `GET /api/v2/reports?offset=N` (`REPORT_LIST_SQL` in `packages/application/src/query/report-artifacts.ts`), beside the routes above |
+| Capability | `reportArtifacts` on `/api/meta`, true where the store has `report_artifacts`                                                       |
+| Contract   | `validReportResponse` in `packages/observation-shared/src/report-artifact-contract.ts` (list, detail and explanation)               |
+| Pages      | 評価レポート at `/reports` and `/reports/{id}` (`apps/web/src/pages/Reports.tsx`)                                                   |
 
 The list returns catalogue columns only (id, context, purpose, schema,
 digest, creator, creation time), newest first by `created_at` then id, 50 per

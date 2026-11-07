@@ -129,12 +129,13 @@ What the code does today (main `02a915a`):
   keeps only its query-parameter checks. The observation pages' helpers
   (organization, filter-option labels, normalized decimals, activity facts)
   are in `packages/application/src/query/` too, since the page reads call
-  them.
+  them, and so are the report catalogue's reads (`report-artifacts.ts`) and
+  the collection-quality page's table check (`storeHasFeature`).
   `tests/mcp-tools-no-sql.test.ts` follows the relative imports from
   `services/app/src/mcp.ts` and fails when a module it reaches calls a store
   or the D1 binding directly or holds a SQL statement. It exempts, by name and
   with the reason, the modules whose remaining SQL only screen routes call
-  (the evidence and report routes). No SQL an MCP
+  (the evidence routes). No SQL an MCP
   tool runs is left in `services/app`. An exemption fails once its module
   holds no SQL.
 - The six `ops.*` tools: `services/app/test/delegated-ops-parity.test.ts`

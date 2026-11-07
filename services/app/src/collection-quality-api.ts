@@ -18,6 +18,7 @@ import {
   type CollectionQualitySummary,
 } from "../../../packages/observation-shared/src/collection-quality-contract.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
+import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
 import { readerGrant } from "./agent-api";
 import { HttpError, json } from "./http";
 
@@ -26,12 +27,7 @@ const OFFSET = /^(?:0|[1-9][0-9]{0,6})$/u;
 
 /** Served only where the store has what the read joins: the scheduling and collection tables. */
 export async function collectionQualityAvailable(env: Env): Promise<boolean> {
-  const row = await env.DB.prepare(
-    `SELECT count(*) AS present FROM sqlite_master
-     WHERE type='table' AND name IN ('collection_schedules','collection_schedule_occurrences',
-       'collection_execution_leases','collection_runs','collection_run_stages')`,
-  ).first<{ present: number }>();
-  return row?.present === 5;
+  return storeHasFeature(d1Executor(env.DB), "collectionQuality");
 }
 
 export async function collectionQualityApi(
