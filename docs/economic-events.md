@@ -1397,9 +1397,9 @@ while `cardPurchaseRecognition` is, calls the same `queryCardPurchases`, and
 returns its page as `data`, figures, coverage, chain and `explanationRefs`
 unchanged, with each candidate's `actions` and `relation` removed: an agent
 sees which links are proposed and why, and every review stays with the
-operator. It needs an `AGENT_API_GRANTS` grant with `records.read` over
-`"*"` sources and accounts (the page cannot yet be recomputed inside a
-narrower scope, so a listed grant is refused rather than answered), the
+operator. It needs `records.read` over `"*"` sources and accounts, which
+every proved caller holds since ADR 0084 (the page cannot yet be recomputed
+inside a narrower scope, so a narrower grant would be refused), the
 10,000-event bound is `413 budget_exceeded` there, and it writes nothing
 either.
 

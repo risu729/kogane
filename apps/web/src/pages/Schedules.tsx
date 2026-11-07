@@ -14,7 +14,6 @@ import type {
   SurveyFailureCode,
 } from "../../../../packages/collection/src/maintenance-survey-model";
 import { ApiError } from "../api";
-import { DelegationStatusNotice } from "../delegation-status";
 import { Link } from "../router";
 import "../styles/schedules.css";
 const PATH = "/api/ops/v1/schedules";
@@ -731,7 +730,6 @@ export function SchedulesPage(): ReactNode {
         </p>
         <Link to="/evidence">取得履歴を見る</Link>
       </div>
-      <DelegationStatusNotice />
       <p className="query-notice">
         メンテナンスに重なった収集は、終了後に1回実行します。時刻の変更は次回から反映されます。
       </p>

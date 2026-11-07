@@ -195,6 +195,14 @@ subtotal computed before it is wrong, so the affected snapshot is refused whole
 — aggregates included — until a build re-verifies it at the new visibility
 revision. Filtering rows out of a published snapshot is never the answer.
 
+The agent query's `holdings` intent reads the same snapshot under the same
+rules: it takes it from `servableSnapshot` (`services/app/src/balances-v2.ts`),
+which applies the routes' contract, epoch and visibility checks, and answers
+`completeness: "unavailable"` with `read_model_unavailable`,
+`read_model_context_changed` or `read_model_restriction_changed` as its gap
+reason and blocking warning instead of summing a refused snapshot
+([Agent API](agent-api.md#intents), `test/holdings-read.test.ts`).
+
 The cursor is `{ snapshotId, readInstanceId, filterDigest, position }`
 (`packages/storage-d1/src/read/cursor.ts`), base64url of the same JSON shape the
 CORE path uses. Nothing in it is trusted: every field is compared with what the
@@ -208,7 +216,9 @@ stopped working. Two details of its semantics:
   **now**: while nothing is published in READ they are `false` and `none`. The
   v2 routes nevertheless exist as soon as the app reads READ, so a request in
   that state is `503 read_model_unavailable`, not a `404` that would read as
-  "this deployment has no such route";
+  "this deployment has no such route". A published snapshot the routes refuse
+  for a new CORE epoch or a changed restriction leaves them `true` and
+  `read-d1`: the routes exist and answer 503 with that code;
 - a READ database whose `read_instance.contract_version` is not this code's
   `READ_CONTRACT_VERSION` (`packages/storage-d1/src/read/identity.ts`) is
   another baseline (06 §2). The app advertises `balancesV2: false` and answers

@@ -51,6 +51,7 @@ test("unknown ownership exposes current accounts and exact evidence without a de
     claims: [],
     blockers: [],
     selfDeclarationBlockers: [],
+    ownerDefaultBlockers: [],
     evidenceRefs: [
       "card-settlement:one",
       "balance:11",

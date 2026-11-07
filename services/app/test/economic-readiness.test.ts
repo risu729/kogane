@@ -9,15 +9,9 @@ import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
 const OWNER = "synthetic-readiness-owner";
-const PRINCIPAL = `mcp-client:${OWNER}`;
 const APP_AUD = "synthetic-readiness-browser";
 const MCP_AUD = "synthetic-readiness-mcp";
 const TOOL = "kogane.economic-readiness.read";
-const GRANT = {
-  capabilities: ["records.read"],
-  scopes: { sources: "*", accounts: "*" },
-  budget: { maxRows: 64, maxProposalTargets: 1, maxExplainDepth: 1 },
-};
 const PRIVATE = "synthetic-private-readiness-marker";
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let jwks: { keys: unknown[] };
@@ -60,7 +54,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => vi.restoreAllMocks());
-async function send(mcp: boolean, body: unknown, grant: unknown = GRANT, authenticated = true) {
+async function send(mcp: boolean, body: unknown, authenticated = true) {
   const headers: Record<string, string> = mcp
     ? { ...MCP_CLIENT_HEADERS, "mcp-protocol-version": "2025-11-25" }
     : { "content-type": "application/json" };
@@ -84,19 +78,18 @@ async function send(mcp: boolean, body: unknown, grant: unknown = GRANT, authent
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: APP_AUD,
       ACCESS_MCP_AUDIENCE: MCP_AUD,
-      AGENT_API_GRANTS: JSON.stringify({ [OWNER]: grant, [PRINCIPAL]: grant }),
-      MCP_DELEGATIONS: "",
       AGENT_GRANTS: "[]",
       OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
     } as Env,
   );
 }
-async function call(body: unknown, grant: unknown = GRANT) {
-  const response = await send(
-    true,
-    { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: TOOL, arguments: body } },
-    grant,
-  );
+async function call(body: unknown) {
+  const response = await send(true, {
+    jsonrpc: "2.0",
+    id: 1,
+    method: "tools/call",
+    params: { name: TOOL, arguments: body },
+  });
   expect(response.status).toBe(200);
   return (
     (await response.json()) as {
@@ -104,8 +97,8 @@ async function call(body: unknown, grant: unknown = GRANT) {
     }
   ).result;
 }
-async function listed(grant: unknown = GRANT) {
-  const response = await send(true, { jsonrpc: "2.0", id: 1, method: "tools/list" }, grant);
+async function listed() {
+  const response = await send(true, { jsonrpc: "2.0", id: 1, method: "tools/list" });
   expect(response.status).toBe(200);
   return (
     (await response.json()) as {
@@ -157,50 +150,29 @@ it("real D1 matches the shared S0 query over HTTP/MCP, retains missing reasons a
   expect(JSON.stringify(audit.results)).not.toContain(PRIVATE);
   expect(await financialSnapshot()).toEqual(before);
 });
-it("listing and both transports enforce capability, each whole-store axis, strict input and row budget", async () => {
+it("is listed to every MCP client, and both transports refuse a strict-input violation alike", async () => {
   expect((await listed()).some((tool) => tool.name === TOOL)).toBe(true);
-  for (const [grant, code] of [
-    [{ ...GRANT, capabilities: ["summary.read"] }, "unauthorized"],
-    [{ ...GRANT, scopes: { sources: ["sony-bank"], accounts: "*" } }, "evidence_restricted"],
-    [{ ...GRANT, scopes: { sources: "*", accounts: [PRIVATE] } }, "evidence_restricted"],
+  for (const [body, code, status] of [
+    [{ ...request(), owner: PRIVATE }, "invalid_query", 400],
+    [{ ...request(), rows: [row, row] }, "invalid_query", 400],
+    [{ ...request(), knowledge: "past" }, "invalid_query", 400],
   ] as const) {
-    expect((await listed(grant)).some((tool) => tool.name === TOOL)).toBe(false);
-    const http = await send(false, request(), grant);
-    const mcp = await call(request(), grant);
-    expect(http.status).toBe(403);
-    expect(mcp.isError).toBe(true);
-    expect(await http.json()).toEqual(mcp.structuredContent);
-    expect(mcp.structuredContent).toMatchObject({ code });
-  }
-  for (const [body, grant, code, status] of [
-    [{ ...request(), owner: PRIVATE }, GRANT, "invalid_query", 400],
-    [{ ...request(), rows: [row, row] }, GRANT, "invalid_query", 400],
-    [{ ...request(), knowledge: "past" }, GRANT, "invalid_query", 400],
-    [request(), { ...GRANT, budget: { ...GRANT.budget, maxRows: 1 } }, "budget_exceeded", 413],
-  ] as const) {
-    const http = await send(false, body, grant);
-    const mcp = await call(body, grant);
+    const http = await send(false, body);
+    const mcp = await call(body);
     expect(http.status).toBe(status);
     expect(mcp.isError).toBe(true);
     expect(await http.json()).toEqual(mcp.structuredContent);
     expect(mcp.structuredContent).toMatchObject({ code });
     expect(JSON.stringify(mcp.structuredContent)).not.toContain(PRIVATE);
   }
-  expect((await send(false, request(), GRANT, false)).status).toBe(401);
+  expect((await send(false, request(), false)).status).toBe(401);
 });
-it("missing schema is a closed 503, while unauthorized/narrowed callers get the same refusal before and after", async () => {
-  const deniedGrants = [
-    { ...GRANT, capabilities: ["summary.read"] },
-    { ...GRANT, scopes: { sources: ["sony-bank"], accounts: "*" } },
-  ];
-  const before = await Promise.all(deniedGrants.map((grant) => call(request(), grant)));
+it("missing schema is a closed 503 on both transports", async () => {
   const trigger = await env.DB.prepare(
     "SELECT sql FROM sqlite_schema WHERE name='economic_claims_guard'",
   ).first<{ sql: string }>();
   await env.DB.prepare("DROP TRIGGER economic_claims_guard").run();
   try {
-    for (const [index, grant] of deniedGrants.entries())
-      expect(await call(request(), grant)).toEqual(before[index]);
     const http = await send(false, request());
     const mcp = await call(request());
     expect(http.status).toBe(503);
