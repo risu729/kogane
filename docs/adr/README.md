@@ -14,7 +14,7 @@ for current behavior.
 - [ADR 0001: Keep A/B/C/D as provenance, add independent domain axes](0001-domain-axes.md)
 - [ADR 0002: Recognise card purchases per provider row, one live holder per key](0002-card-purchase-recognition.md)
 - [ADR 0003: Relative period labels are evidence; the month is derived afterwards](0003-relative-period-labels.md)
-- [ADR 0004: Accept only the payment-type shapes production evidence shows](0004-payment-type-shapes-from-evidence.md)
+- [ADR 0004: Accept only the payment-type shapes production evidence shows](0004-payment-type-shapes-from-evidence.md) — accepted; amendment 2026-11-07 (proposed): closed reasons for unrecognised rows and `refundsAllocated: false` on the purchases read and `kogane.purchases.explain`
 - [ADR 0005: Decide the MyJCB statement state from the page, not export links](0005-myjcb-statement-state-from-page.md)
 - [ADR 0006: Keep the reconciliation lane to provider identifiers and the matching window](0006-reconciliation-lane-scope.md)
 - [ADR 0007: Key MyJCB confirmed statements by the payment month the page names](0007-myjcb-statement-identity.md)

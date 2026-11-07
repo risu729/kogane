@@ -1339,9 +1339,13 @@ answer for a set too large to return complete ([read model](read-model.md)),
 rather than partly summed; a statement period narrows it. The provider
 statement totals are listed beside the figures and are never subtracted from
 or compared with them, and `settlementAddsPurchaseExpense` is `false`.
-`coverage` says the list is not a complete transaction history, names the
-excluded shapes, and counts the current provider rows no live event holds,
-across every statement month whatever the filter. `unrecognizedReasons` splits
+`coverage` says the list is not a complete transaction history, says no
+refund is allocated to a purchase (`refundsAllocated: false`: nothing plans or
+writes `card-refund.allocate`, [above](#review-commands-for-purchases-migration-0051),
+so a refund is summed apart and never subtracted from a purchase, as the page
+says beside each refund), names the excluded shapes, and counts the current
+provider rows no live event holds, across every statement month whatever the
+filter. `unrecognizedReasons` splits
 that count per source and closed reason: each such row is classified when the
 page is read by `classifyCardUsage`, the writer's own rule, through the same
 row-to-fact mapping (`packages/application/src/card-usage-fact.ts`), so the
@@ -1377,7 +1381,15 @@ on `bun:sqlite`); production had 298 current rows, 6 of them unrecognised
 synthetic store of about 34,000 usage
 observations (180 days of daily captures) and 8,200 live events, the
 unfiltered first page took about 0.4 s in `bun:sqlite`, of which the usage
-pass was about 0.3 s and the selection about 0.04 s. The candidates add two
+pass was about 0.3 s and the selection about 0.04 s. The pass is proven
+equal to the one shipped before #1020 (frozen in
+`packages/application/test/card-purchase-current-legacy-sql.ts`) for the
+page's current keys and the unrecognised count: on the random stores of
+`packages/read-model/test/card-usage-random-store.ts`
+(`card-purchase-current.test.ts`, which also checks the returned unrecognised
+rows are exactly the first ones by observation id up to each bound) and on the
+scaled store without table statistics (`card-purchase-scale.test.ts`, with
+the plan check). The candidates add two
 queries: one pass over the stage-B `pending_to_posted` proposals, re-deriving
 each target's recognition key by primary-key lookups
 (`packages/application/src/query/card-purchase-candidates.ts`), and one lookup
