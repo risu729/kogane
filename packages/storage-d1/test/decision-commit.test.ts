@@ -15,6 +15,7 @@ import {
   outboxWrite,
   planCommittedWrite,
   planStaleWrite,
+  receiptExistsGuard,
   receiptReservationWrite,
 } from "../src/atomic/decision-commit.ts";
 import { expectedRevisionsSql, type SqlWrite } from "../src/core/operations.ts";
@@ -51,20 +52,24 @@ INSERT INTO approvals(approval_id,plan_id,plan_digest,approver_actor,approver_ve
 /** The mutation a planner contributes: the mapping revision and the decision
  * that explains it, each guarded on the receipt the first statement reserves,
  * exactly as the identity command writes them. */
-function mutationWrites(): SqlWrite[] {
-  const guard = "EXISTS(SELECT 1 FROM operation_receipts WHERE operation_id=?1 AND principal=?2)";
+function mutationWrites(payloadDigest: string): SqlWrite[] {
+  const guard = receiptExistsGuard({
+    operationId: OPERATION_ID,
+    principal: PRINCIPAL,
+    payloadDigest,
+  });
   return [
     {
       sql: `INSERT INTO account_mappings(id,source_account_id,revision,account_id,method,reason,policy_version,created_at,label,status)
-      SELECT 'am-1','synthetic-account',1,'acct-1','manual','synthetic',1,?3,'Synthetic','identified'
-      WHERE ${guard} AND NOT EXISTS(SELECT 1 FROM account_mappings WHERE id='am-1')`,
-      binds: [OPERATION_ID, PRINCIPAL, NOW],
+      SELECT 'am-1','synthetic-account',1,'acct-1','manual','synthetic',1,?,'Synthetic','identified'
+      WHERE ${guard.sql} AND NOT EXISTS(SELECT 1 FROM account_mappings WHERE id='am-1')`,
+      binds: [NOW, ...guard.binds],
     },
     {
       sql: `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,reason,evidence_refs_json,created_at)
-      SELECT ?3,'account_mapping','synthetic-account',1,'assign','manual',?2,'synthetic','[]',?4
-      WHERE ${guard} AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?3)`,
-      binds: [OPERATION_ID, PRINCIPAL, DECISION_ID, NOW],
+      SELECT ?,'account_mapping','synthetic-account',1,'assign','manual',?,'synthetic','[]',?
+      WHERE ${guard.sql} AND NOT EXISTS(SELECT 1 FROM decision_revisions WHERE id=?)`,
+      binds: [DECISION_ID, PRINCIPAL, NOW, ...guard.binds, DECISION_ID],
     },
   ];
 }
@@ -72,13 +77,15 @@ function mutationWrites(): SqlWrite[] {
 function commitWrites(
   expectedRevisions: Record<string, number>,
   precondition?: SqlWrite,
+  payloadDigest = PAYLOAD_DIGEST,
 ): SqlWrite[] {
+  const receipt = { operationId: OPERATION_ID, principal: PRINCIPAL, payloadDigest };
   return [
     receiptReservationWrite({
       operationId: OPERATION_ID,
       principal: PRINCIPAL,
       operationKind: "identity.assign",
-      payloadDigest: PAYLOAD_DIGEST,
+      payloadDigest,
       planId: PLAN_ID,
       receiptJson: JSON.stringify({ operationId: OPERATION_ID }),
       now: NOW,
@@ -86,10 +93,10 @@ function commitWrites(
       expectedRevisionsJson: JSON.stringify(expectedRevisions),
       ...(precondition ? { precondition } : {}),
     }),
-    ...mutationWrites(),
-    approvalConsumptionWrite(APPROVAL_ID, OPERATION_ID, PRINCIPAL),
-    planCommittedWrite(PLAN_ID, OPERATION_ID, PRINCIPAL),
-    outboxWrite(DECISION_ID, PRINCIPAL, OPERATION_ID, "identity-projection", NOW),
+    ...mutationWrites(payloadDigest),
+    approvalConsumptionWrite(APPROVAL_ID, receipt),
+    planCommittedWrite(PLAN_ID, receipt),
+    outboxWrite(DECISION_ID, receipt, "identity-projection", NOW),
   ];
 }
 
@@ -195,6 +202,26 @@ INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kin
 
     expect(replay.map((result) => result.changes)).toEqual([0, 0, 0, 0, 0, 0]);
     expect(counts()).toEqual(after);
+  });
+
+  test("another payload's receipt under the same key and principal admits no statement", async () => {
+    // A command of the same principal took this key between this command's
+    // reads and its batch: its receipt names another payload (and plan).
+    seed({ [SUBJECT]: 0 });
+    const otherPlan = "d".repeat(64);
+    db.exec(`INSERT INTO change_plans(plan_id,kind,payload_json,base_context_id,expected_revisions_json,simulation_json,created_by,created_at,expires_at,status)
+    VALUES('${otherPlan}','relation.accept','{}','ctx-1','{}','{}','${PRINCIPAL}','${NOW}','2999-01-01T00:00:00Z','committed');
+INSERT INTO operation_receipts(operation_id,principal,operation_kind,payload_digest,plan_id,status,result_json,created_at)
+    VALUES('${OPERATION_ID}','${PRINCIPAL}','relation.accept','${"c".repeat(64)}','${otherPlan}','accepted','{}','${NOW}');`);
+    const before = counts();
+
+    const results = await d1CommandStore(sqliteD1(db)).batch(commitWrites({ [SUBJECT]: 0 }));
+
+    // The reservation finds the key taken; every later statement finds no
+    // receipt of this payload. The plan stays open and the approval unspent.
+    expect(results.map((result) => result.changes)).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(counts()).toEqual(before);
+    expect(before).toMatchObject({ approvalUses: 1, committedPlans: 1, decisions: 0 });
   });
 
   test("the revision expression answers 0 for a subject with no history", async () => {

@@ -166,6 +166,8 @@ export async function prepareInstrumentTemporalAppend(
     request: InstrumentTemporalRequest;
     operationId: string;
     principal: string;
+    /** The digest the commit's receipt records; the guard requires that receipt. */
+    payloadDigest: string;
     decisionRevisionId: string;
     /** Trusted server clock, never a temporal command payload field. */
     now: string;
@@ -265,7 +267,11 @@ export async function prepareInstrumentTemporalAppend(
      AND coalesce((SELECT max(commit_seq) FROM instrument_temporal_acceptances WHERE core_epoch=?),0)=?`,
     binds: [head.coreEpoch, head.sourceRevision, head.coreEpoch, head.commitSeq],
   };
-  const receipt = receiptExistsGuard(input.operationId, input.principal);
+  const receipt = receiptExistsGuard({
+    operationId: input.operationId,
+    principal: input.principal,
+    payloadDigest: input.payloadDigest,
+  });
   const guard = `${receipt.sql} AND NOT EXISTS(SELECT 1 FROM instrument_temporal_acceptances WHERE operation_id=?)`;
   const guards = [...receipt.binds, input.operationId];
   const writes: SqlWrite[] = encoded.map(({ version: v, json, series }) => ({
