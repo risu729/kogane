@@ -55,10 +55,13 @@ disagree, the document is right and this file is corrected.
   rewrite files.
 - State in the PR body which commands ran and their result, and say what was not
   run.
-- Container image identity checks (`cf-container-release.mjs validate` and the
-  container collectors' `cf-build` tasks) need a Docker daemon
-  ([ADR 0043](docs/adr/0043-cf-container-deployment.md)). Without one, list them
-  as not run locally and rely on hosted CI on the PR's exact head.
+- Container image checks need a Docker daemon
+  ([ADR 0043](docs/adr/0043-cf-container-deployment.md)): the container
+  collectors' `cf-build` tasks (which run `cf-container-release.mjs validate`)
+  and the Docker-building `dry-run` tasks, including
+  `//experiments/cloudflare-runtime-probe:dry-run`, so also `mise run dry-run`
+  and `hk check --all`. Without a daemon, list those as not run locally and rely
+  on hosted CI on the PR's exact head.
 
 ## CI
 

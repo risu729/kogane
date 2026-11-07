@@ -77,7 +77,7 @@ a comment giving the reason:
 - [#580](https://github.com/risu729/kogane/pull/580), [#648](https://github.com/risu729/kogane/pull/648)
   and [#887](https://github.com/risu729/kogane/pull/887) were stale snapshots. Most of their still-true content is in
   [#922](https://github.com/risu729/kogane/pull/922). The three items still missing from `main`
-  landed afterwards: the MCP recovery runbook from #887 in
+  landed after this outcome, on 2026-11-06 and 2026-11-07: the MCP recovery runbook from #887 in
   [#998](https://github.com/risu729/kogane/pull/998); and, from #580, the synthetic
   preview's empty state (表示対象の記録がありません) on financial routes in
   [#999](https://github.com/risu729/kogane/pull/999) and the Docker daemon that Container
