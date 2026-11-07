@@ -57,16 +57,13 @@ const GRANTS = {
     budget: BUDGET,
   },
 };
-/** The owner's maintainer delegation to its own MCP identity (ADR 0063), valid now. */
+/**
+ * The operator's MCP identity with a read grant narrowed to vpass: its
+ * operation scope is that grant's (ADR 0084), so sony-bank is outside it.
+ */
 const MAINTAINER = {
-  delegatedBy: OWNER,
-  role: "maintainer",
-  scopes: { sources: [], accounts: [], scheduleSources: ["vpass"] },
-  issuedAt: iso(Date.now() - DAY),
-  notAfter: iso(Date.now() + 30 * DAY),
-  budget: { writesPerDay: 30 },
+  AGENT_API_GRANTS: JSON.stringify({ ...GRANTS, [OWNER_MCP]: scheduleGrant(["vpass"]) }),
 };
-const delegations = (entries: Record<string, unknown>) => JSON.stringify(entries);
 
 let keys: Awaited<ReturnType<typeof generateKeyPair>>;
 let jwks: { keys: unknown[] };
@@ -182,7 +179,6 @@ async function request(
       SCHEDULES_ENABLED: "true",
       AGENT_API_GRANTS: JSON.stringify(GRANTS),
       OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
-      MCP_DELEGATIONS: "",
       RELEASE_SHA: "a".repeat(40),
       PIPELINE,
       ...options.environment,
@@ -267,7 +263,7 @@ async function records(operation: string): Promise<Record<string, unknown>[]> {
 }
 
 describe("the maintenance read: one function on both agent paths", () => {
-  it("lists reads by grant and revisions only by valid delegation", async () => {
+  it("lists reads by grant and revisions only to the operator's MCP principal", async () => {
     const names = async (subject: string, environment?: Record<string, unknown>) =>
       ((await mcp(subject, "tools/list", {}, environment)).result.tools as { name: string }[]).map(
         (entry) => entry.name,
@@ -278,14 +274,11 @@ describe("the maintenance read: one function on both agent paths", () => {
     // without the capability reaches nothing.
     expect(await names(FINANCIAL)).not.toContain(READ);
     expect(await names(REVIEWER)).not.toContain(READ);
-    // Only the named owner delegation publishes the installed writer.
-    expect(
-      await names(OWNER, { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) }),
-    ).toContain(UPDATE);
-    for (const subject of [READER, FINANCIAL])
-      expect(
-        await names(subject, { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) }),
-      ).not.toContain(UPDATE);
+    // Only the operator's own MCP principal is published the installed writer.
+    expect(await names(OWNER)).toContain(UPDATE);
+    expect(await names(OWNER, MAINTAINER)).toContain(UPDATE);
+    expect(await names(OWNER, { OPERATOR_SUBJECTS: "[]" })).not.toContain(UPDATE);
+    for (const subject of [READER, FINANCIAL]) expect(await names(subject)).not.toContain(UPDATE);
     // Off with the settings routes: neither listed nor callable.
     expect(await names(OWNER, { SCHEDULES_ENABLED: "false" })).not.toContain(READ);
     for (const name of [READ, UPDATE]) {
@@ -381,11 +374,16 @@ describe("the maintenance revision: delegated authority and closed request bound
     return { status: result.structuredContent.error as string, record: written[0]! };
   }
 
-  it("refuses an MCP client without a delegation, the operator's own included", async () => {
-    // The owner is the configured operator, yet on `/mcp` it is only
-    // `mcp-client:<sub>`: no bare-subject fallback to the operator.
-    for (const subject of [OWNER, READER, FINANCIAL]) {
-      const { status, record } = await refusedUpdate(subject, window("vpass"));
+  it("refuses an MCP client whose subject is not the UI operator", async () => {
+    // A read grant is not operation authority: only the operator's own
+    // `mcp-client:<sub>` may revise, and never as the operator.
+    for (const [subject, environment] of [
+      [READER, undefined],
+      [FINANCIAL, undefined],
+      [OWNER, { OPERATOR_SUBJECTS: "[]" }],
+      [OWNER, { OPERATOR_SUBJECTS: JSON.stringify([READER]) }],
+    ] as const) {
+      const { status, record } = await refusedUpdate(subject, window("vpass"), environment);
       expect(status).toBe("delegation_not_configured");
       expect(record).toMatchObject({
         path: "mcp",
@@ -400,78 +398,26 @@ describe("the maintenance revision: delegated authority and closed request bound
         target_ref: null,
       });
     }
-    // Another owner's delegation is not this client's.
-    const other = await refusedUpdate(READER, window("vpass"), {
-      MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }),
-    });
-    expect(other.status).toBe("delegation_not_configured");
   });
 
-  it("refuses under every invalid, early or late delegation table", async () => {
-    const cases: [string, string][] = [
-      ["{", "delegation_misconfigured"],
-      // Keyed by the bare subject: never a delegation, and the table is unreadable.
-      [delegations({ [OWNER]: MAINTAINER }), "delegation_misconfigured"],
-      // A delegator who is not the operator.
-      [
-        delegations({ [`mcp-client:${READER}`]: { ...MAINTAINER, delegatedBy: READER } }),
-        "delegation_misconfigured",
-      ],
-      // A schedule scope wider than the client's read grant.
-      [
-        delegations({
-          [OWNER_MCP]: {
-            ...MAINTAINER,
-            scopes: { ...MAINTAINER.scopes, scheduleSources: ["vpass", "myjcb"] },
-          },
-        }),
-        "delegation_misconfigured",
-      ],
-      [
-        delegations({ [OWNER_MCP]: { ...MAINTAINER, issuedAt: iso(Date.now() + DAY) } }),
-        "delegation_not_yet_valid",
-      ],
-      [
-        delegations({
-          [OWNER_MCP]: {
-            ...MAINTAINER,
-            issuedAt: iso(Date.now() - 2 * DAY),
-            notAfter: iso(Date.now() - DAY),
-          },
-        }),
-        "delegation_expired",
-      ],
-    ];
-    for (const [configured, code] of cases) {
-      const { status, record } = await refusedUpdate(OWNER, window("vpass"), {
-        MCP_DELEGATIONS: configured,
-      });
-      expect([configured, status]).toEqual([configured, code]);
+  it("refuses while the operator lists cannot be read, as the UI does", async () => {
+    for (const environment of [
+      { OPERATOR_SUBJECTS: "{" },
+      { AGENT_GRANTS: JSON.stringify([OWNER]) },
+    ]) {
+      const { status, record } = await refusedUpdate(OWNER, window("vpass"), environment);
+      expect(status).toBe("delegation_misconfigured");
       expect(record).toMatchObject({
-        result: code === "delegation_misconfigured" ? "failed" : "refused",
-        result_code: code,
+        result: "failed",
+        result_code: "delegation_misconfigured",
         delegation_ref: null,
       });
     }
   });
 
-  it("refuses a delegation without the capability", async () => {
-    const reviewer = {
-      ...MAINTAINER,
-      delegatedBy: REVIEWER,
-      role: "reviewer",
-      scopes: { sources: "*", accounts: "*", scheduleSources: "*" },
-    };
-    const { status } = await refusedUpdate(REVIEWER, window("vpass"), {
-      OPERATOR_SUBJECTS: JSON.stringify([OWNER, REVIEWER]),
-      MCP_DELEGATIONS: delegations({ [`mcp-client:${REVIEWER}`]: reviewer }),
-    });
-    expect(status).toBe("delegation_capability_denied");
-  });
-
-  it("checks arguments and scope under a valid delegation before relaying", async () => {
-    const environment = { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) };
-    // Out of the delegation's scope, existing or not: one answer.
+  it("checks arguments and scope before relaying", async () => {
+    const environment = MAINTAINER;
+    // Out of the read grant's schedule scope, existing or not: one answer.
     const outside = await refusedUpdate(OWNER, window("sony-bank"), environment);
     const missing = await refusedUpdate(OWNER, window("no-such-source"), environment);
     expect(outside.status).toBe("source_not_granted");
@@ -538,7 +484,7 @@ describe("the maintenance revision: delegated authority and closed request bound
   });
 
   it("records codes and counts only: refused argument values reach no record or revision", async () => {
-    const environment = { MCP_DELEGATIONS: delegations({ [OWNER_MCP]: MAINTAINER }) };
+    const environment = MAINTAINER;
     await refusedUpdate(
       OWNER,
       window("vpass", {

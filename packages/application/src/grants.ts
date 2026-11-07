@@ -9,9 +9,9 @@
 // `report.export`, the admin capabilities, every settings write (a maintenance
 // revision, a job edit, enable/disable, lease release) and every external
 // money action are deliberately absent from this type, so no configuration can
-// name them. A maintenance revision is an operation the owner may delegate
-// (`schedules.maintenance.update` in MCP_DELEGATIONS, ADR 0063), never a grant
-// here.
+// name them. A maintenance revision is an operation the operator's MCP
+// principal may apply (`schedules.maintenance.update`, ADR 0063, ADR 0084),
+// never a grant here; this grant's scope only bounds where it may apply it.
 //
 // A grant is not an authentication decision. The transport authenticates the
 // principal (Cloudflare Access) and then looks its grant up here; a valid

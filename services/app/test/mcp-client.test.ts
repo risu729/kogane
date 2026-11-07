@@ -607,15 +607,29 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
     }
   });
 
-  it("never offers an operations tool on /mcp, and refuses one from the caller object", async () => {
-    expect(await listTools({ environment: HOSTILE })).toEqual(PUBLISHED);
+  // ADR 0084: the operator's MCP principal is offered the operations tools as
+  // itself, never as the operator; a subject that is not the operator is not.
+  const OPS_TOOLS = [
+    "kogane.ops.collection.request",
+    "kogane.ops.import.request",
+    "kogane.ops.replay.request",
+    "kogane.ops.projection.request",
+    "kogane.ops.session.refresh",
+    "kogane.ops.operation.get",
+  ];
+  it("offers the operations tools only while the subject is the UI operator", async () => {
+    const listed = await listTools({ environment: HOSTILE });
+    expect(listed.filter((name) => name.startsWith("kogane.ops."))).toEqual(OPS_TOOLS);
+    expect(listed.filter((name) => !name.startsWith("kogane.ops."))).toEqual(PUBLISHED);
+    const stranger = { ...HOSTILE, OPERATOR_SUBJECTS: "[]" };
+    expect(await listTools({ environment: stranger })).toEqual(PUBLISHED);
     const before = await opsRowCount();
     for (const [name, args] of [
       ["kogane.ops.collection.request", COLLECTION],
       ["kogane.ops.projection.request", { reason: "attempt over mcp" }],
       ["kogane.ops.operation.get", { operationId: "op_synthetic" }],
     ] as const) {
-      const called = await callTool(name, args, { environment: HOSTILE });
+      const called = await callTool(name, args, { environment: stranger });
       expect(called.isError, name).toBe(true);
       expect(called.structuredContent, name).toEqual({ error: "delegation_not_configured" });
     }

@@ -16,18 +16,11 @@ const grant = {
   capabilities: ["summary.read"],
   budget: { maxRows: 50, maxProposalTargets: 2, maxExplainDepth: 2 },
 };
-const interval = {
-  issuedAt: new Date(Date.now() - 60000).toISOString(),
-  notAfter: new Date(Date.now() + 3600000).toISOString(),
+const withoutScheduleScope = {
+  AGENT_API_GRANTS: JSON.stringify({
+    [`mcp-client:${OWNER}`]: { ...grant, scopes: { ...scopes, scheduleSources: [] } },
+  }),
 };
-const entry = (subject = OWNER) => ({
-  delegatedBy: subject,
-  role: "maintainer",
-  capabilities: ["schedules.maintenance.update", "schedules.survey.decide"],
-  scopes,
-  ...interval,
-  budget: { writesPerDay: 100 },
-});
 let signing: Awaited<ReturnType<typeof generateKeyPair>>, jwks: { keys: unknown[] };
 let calls = 0,
   alarms = 0;
@@ -73,7 +66,6 @@ function config(subject = OWNER): Record<string, unknown> {
     ACCESS_MCP_AUDIENCE: "maintenance-cross-mcp",
     OPERATOR_SUBJECTS: JSON.stringify([OWNER, OTHER]),
     AGENT_API_GRANTS: JSON.stringify({ [principal(subject)]: grant }),
-    MCP_DELEGATIONS: JSON.stringify({ [principal(subject)]: entry(subject) }),
     PIPELINE: {
       fetch: async (request: Request) => {
         calls++;
@@ -164,47 +156,11 @@ test("signed MCP uses schedule scope; current auth is mandatory before reading a
     reconciliation: null,
   });
   expect({ calls, alarms }).toEqual(after);
-  const expired = {
-    ...entry(),
-    issuedAt: new Date(Date.now() - 7200000).toISOString(),
-    notAfter: new Date(Date.now() - 3600000).toISOString(),
-  };
   for (const [change, error] of [
-    [{ MCP_DELEGATIONS: "" }, "delegation_not_configured"],
-    [{ MCP_DELEGATIONS: JSON.stringify({ [principal()]: expired }) }, "delegation_expired"],
-    [{ OPERATOR_SUBJECTS: "[]" }, "delegation_misconfigured"],
-    [
-      {
-        MCP_DELEGATIONS: JSON.stringify({
-          [principal()]: {
-            ...entry(),
-            role: "reviewer",
-            capabilities: [],
-            scopes: { ...scopes, sources: "*" },
-          },
-        }),
-        AGENT_API_GRANTS: JSON.stringify({
-          [principal()]: { ...grant, scopes: { ...scopes, sources: "*" } },
-        }),
-      },
-      "delegation_capability_denied",
-    ],
-    [
-      {
-        MCP_DELEGATIONS: JSON.stringify({
-          [principal()]: { ...entry(), scopes: { ...scopes, scheduleSources: [] } },
-        }),
-      },
-      "source_not_granted",
-    ],
-    [
-      {
-        AGENT_API_GRANTS: JSON.stringify({
-          [principal()]: { ...grant, scopes: { ...scopes, scheduleSources: [] } },
-        }),
-      },
-      "delegation_misconfigured",
-    ],
+    [{ OPERATOR_SUBJECTS: JSON.stringify([OTHER]) }, "delegation_not_configured"],
+    [{ OPERATOR_SUBJECTS: "[]" }, "delegation_not_configured"],
+    [{ OPERATOR_SUBJECTS: "{" }, "delegation_misconfigured"],
+    [withoutScheduleScope, "source_not_granted"],
   ] as const) {
     const denied = await invoke(TOOL, input, { ...cfg, ...change });
     expect([denied.isError, denied.structuredContent.error]).toEqual([true, error]);
@@ -217,10 +173,12 @@ test("signed MCP uses schedule scope; current auth is mandatory before reading a
     input,
     {
       ...cfg,
+      OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
       AGENT_API_GRANTS: JSON.stringify({ [principal()]: grant, [principal(OTHER)]: grant }),
     },
     OTHER,
   );
+  // A read grant alone is not operation authority: OTHER is not an operator here.
   expect(other.structuredContent.error).toBe("delegation_not_configured");
   expect({ calls, alarms }).toEqual(after);
 });
@@ -242,12 +200,7 @@ test("signed R2 retry checks scope before receipt and never permits delegated su
     replayed: true,
     reconciliation: null,
   });
-  const narrowed = {
-    ...cfg,
-    MCP_DELEGATIONS: JSON.stringify({
-      [principal()]: { ...entry(), scopes: { ...scopes, scheduleSources: [] } },
-    }),
-  };
+  const narrowed = { ...cfg, ...withoutScheduleScope };
   expect((await invoke(TOOL, confirm, narrowed)).structuredContent.error).toBe(
     "source_not_granted",
   );

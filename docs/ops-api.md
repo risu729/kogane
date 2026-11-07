@@ -4,8 +4,8 @@ The committed App configuration enables `OPS_API_ENABLED` and names a human
 operator; agent grants remain empty. The operations are not served over MCP
 to an agent grant: `/mcp` accepts only agent-only MCP clients
 ([ADR 0047](adr/0047-mcp-client-connection.md)), and such a client requests an
-operation only under an owner's MCP delegation ([MCP](#mcp)); the committed
-`MCP_DELEGATIONS` is empty. These
+operation only when it is the operator's own MCP principal ([MCP](#mcp),
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). These
 six operation-request kinds are distinct from the newer operator-only
 [schedule settings API](schedules.md#settings-api). A collection or unattended
 session-refresh request reaches a collector only through the named collector RPC
@@ -292,28 +292,31 @@ generated from the Zod schema its route validates with:
 | `kogane.ops.session.refresh`    | `POST /api/ops/v1/sessions/{source}/refresh` |
 | `kogane.ops.operation.get`      | `GET /api/ops/v1/operations/{id}`            |
 
-**Only a delegated `/mcp` caller can use them.** Since
+**Only the operator's own `/mcp` principal can use them.** Since
 [ADR 0047](adr/0047-mcp-client-connection.md), `/mcp` accepts only an identity
 that came through the MCP Access application, and that identity is the
 agent-only caller `mcp-client:<sub>` — the operator's own identity included.
-Without a resolved delegation the tools are not published to it, and a call
-is answered by `callDelegatedOpsTool` with the resolution's closed code
-(`403 delegation_not_configured` while `MCP_DELEGATIONS` names no entry for
-it, `503 delegation_misconfigured` for an unreadable one) before
-`opsContext` runs; only the refusal's audit record is written. `callOpsTool`
-itself refuses an `mcp-client` caller object the same way
-(`403 delegation_not_configured`). Since #660 (ADR 0063, slice S3), `delegatedOpsTools` publishes each
-tool to a principal whose resolved `MCP_DELEGATIONS` entry holds its
-`operations.*` capability, and `callDelegatedOpsTool` runs it through the
-same services; a collection request or session refresh needs a prepare and an
-exact confirmation. The committed `MCP_DELEGATIONS` is empty, so an operation
-is requested over the routes above, with the browser application's identity,
-where the operator is graded as before.
+Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) that caller resolves an operation authority exactly when the UI
+grades `<sub>` as the operator; it acts as itself (`principal_kind:
+delegated`, actor `mcp-client:<sub>`), never as the operator, inside its
+`AGENT_API_GRANTS` scope. Otherwise the tools are not published to it, and a
+call is answered by `callDelegatedOpsTool` with the resolution's closed code
+(`403 delegation_not_configured` for a subject that is not the operator,
+`503 delegation_misconfigured` for unreadable lists) before `opsContext`
+runs; only the refusal's audit record is written. `callOpsTool` itself
+refuses an `mcp-client` caller object the same way
+(`403 delegation_not_configured`). `delegatedOpsTools` (#660, ADR 0063 slice
+S3) publishes each tool to a resolved principal holding its `operations.*`
+capability, and `callDelegatedOpsTool` runs it through the same services; a
+collection request or session refresh needs a prepare and an exact
+confirmation. With the committed configuration the owner's MCP principal
+holds all six.
 
 `kogane.ops.operation.get` is defined over the same service as the read
-route; only a delegation holding `operations.read` reaches it on `/mcp`, so
-without one the HTTP read route is the only surface for following an
-operation, `execution` block included. No agent-API grant capability reads
+route; on `/mcp` only the operator's MCP principal reaches it, and it reads
+only that principal's own operations, so an operation the operator requested
+in the browser is followed on the HTTP read route, `execution` block included. No agent-API grant capability reads
 an operation.
 
 ## Session refresh and human-required states
@@ -569,9 +572,9 @@ Synthetic data only.
 
 Not verified: no deployed instance, no live Access policy, no real provider or
 session, and no deployed collector has served `runOperation`; no connection is
-enabled in the committed configuration. `MCP_DELEGATIONS` is empty, so no
-operations tool can run for an MCP client; dated client connection evidence is
-in the [recovery runbook](mcp-recovery.md).
+enabled in the committed configuration. No operations tool has run for a
+real MCP client; dated client connection evidence is in the
+[recovery runbook](mcp-recovery.md).
 
 Acceptance ids and the test that carries each:
 

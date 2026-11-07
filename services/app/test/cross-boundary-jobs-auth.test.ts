@@ -18,17 +18,9 @@ const grant = {
   capabilities: ["summary.read"],
   budget: { maxRows: 50, maxProposalTargets: 2, maxExplainDepth: 2 },
 };
-const interval = {
-  issuedAt: new Date(Date.now() - 60000).toISOString(),
-  notAfter: new Date(Date.now() + 3600000).toISOString(),
-};
-const entry = (subject = OWNER) => ({
-  delegatedBy: subject,
-  role: "maintainer",
-  capabilities: ["schedules.job.update", "operations.collection.request"],
-  scopes,
-  ...interval,
-  budget: { writesPerDay: 100 },
+const grantWith = (scheduleSources: "*" | string[]) => ({
+  ...grant,
+  scopes: { ...scopes, scheduleSources },
 });
 let signing: Awaited<ReturnType<typeof generateKeyPair>>, jwks: { keys: unknown[] };
 let calls = 0,
@@ -67,7 +59,6 @@ function config(subject = OWNER): Record<string, unknown> {
     ACCESS_MCP_AUDIENCE: "jobs-cross-mcp",
     OPERATOR_SUBJECTS: JSON.stringify([OWNER, OTHER]),
     AGENT_API_GRANTS: JSON.stringify({ [principal(subject)]: grant }),
-    MCP_DELEGATIONS: JSON.stringify({ [principal(subject)]: entry(subject) }),
     PIPELINE: {
       fetch: async (request: Request) => {
         calls++;
@@ -214,36 +205,21 @@ test("source-less global job replay keeps its original receipt after native chan
   expect(alarms).toBe(alarmCount);
   const another = await jobCall(confirm, config(OTHER), OTHER);
   expect(another.structuredContent).toEqual({ error: "confirmation_invalid" });
-  const removed = await jobCall(confirm, { ...cfg, MCP_DELEGATIONS: "" });
+  const removed = await jobCall(confirm, { ...cfg, OPERATOR_SUBJECTS: JSON.stringify([OTHER]) });
   expect(removed.structuredContent).toEqual({ error: "delegation_not_configured" });
-  const noCapability = await jobCall(confirm, {
-    ...cfg,
-    MCP_DELEGATIONS: JSON.stringify({ [principal()]: { ...entry(), capabilities: [] } }),
-  });
-  expect(noCapability.structuredContent).toEqual({ error: "capability_not_delegated" });
+  // A listed schedule scope never reaches a source-less global job.
   const listed = await jobCall(confirm, {
     ...cfg,
-    MCP_DELEGATIONS: JSON.stringify({
-      [principal()]: { ...entry(), scopes: { ...scopes, scheduleSources: ["vpass"] } },
-    }),
+    AGENT_API_GRANTS: JSON.stringify({ [principal()]: grantWith(["vpass"]) }),
   });
   expect(listed.structuredContent).toEqual({ error: "capability_not_delegated" });
-  const narrowedRead = await jobCall(confirm, {
-    ...cfg,
-    AGENT_API_GRANTS: JSON.stringify({
-      [principal()]: { ...grant, scopes: { ...scopes, scheduleSources: ["vpass"] } },
-    }),
-  });
-  expect(narrowedRead.structuredContent).toEqual({ error: "delegation_misconfigured" });
   expect(await row(body.jobId)).toEqual(current);
   expect(calls).toBe(relayCount);
 });
 
 test("source-bound job attenuation is independent from financial source scope; changed source and other principal cannot consume its prepare", async () => {
   const cfg = config();
-  cfg.MCP_DELEGATIONS = JSON.stringify({
-    [principal()]: { ...entry(), scopes: { ...scopes, scheduleSources: ["vpass"] } },
-  });
+  cfg.AGENT_API_GRANTS = JSON.stringify({ [principal()]: grantWith(["vpass"]) });
   const body = await payload("vpass", "jobs-cross-separated-scopes"),
     prepared = await jobCall({ ...body, step: "prepare" }, cfg);
   const confirm = { ...body, step: "confirm", confirmationDigest: digest(prepared) };
@@ -252,16 +228,12 @@ test("source-bound job attenuation is independent from financial source scope; c
   const sourceLie = await jobCall({ ...confirm, source: "sony-bank" }, cfg);
   expect(sourceLie.structuredContent).toEqual({ error: "capability_not_delegated" });
   const otherCfg = config(OTHER);
-  otherCfg.MCP_DELEGATIONS = JSON.stringify({
-    [principal(OTHER)]: { ...entry(OTHER), scopes: { ...scopes, scheduleSources: ["vpass"] } },
-  });
+  otherCfg.AGENT_API_GRANTS = JSON.stringify({ [principal(OTHER)]: grantWith(["vpass"]) });
   const other = await jobCall(confirm, otherCfg, OTHER);
   expect(other.structuredContent).toEqual({ error: "confirmation_invalid" });
   const attenuated = await jobCall(confirm, {
     ...cfg,
-    MCP_DELEGATIONS: JSON.stringify({
-      [principal()]: { ...entry(), scopes: { ...scopes, scheduleSources: [] } },
-    }),
+    AGENT_API_GRANTS: JSON.stringify({ [principal()]: grantWith([]) }),
   });
   expect(attenuated.structuredContent).toEqual({ error: "capability_not_delegated" });
   expect(await row("vpass")).toEqual(before);

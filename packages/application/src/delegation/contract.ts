@@ -1,6 +1,6 @@
-// ADR 0063's declarations, not an execution grant. A declaration alone
-// executes nothing: execution goes through `execution.ts` and the adapters
-// each transport installs (`readiness.ts`).
+// ADR 0063's operation vocabulary and the MCP principal ADR 0084 derives.
+// Resolving a principal executes nothing: execution goes through
+// `execution.ts` and the adapters each transport installs (`readiness.ts`).
 import type { ScopeSet } from "../grants.ts";
 
 export const DELEGATION_CAPABILITIES = [
@@ -19,45 +19,30 @@ export const DELEGATION_CAPABILITIES = [
   "operations.read",
 ] as const;
 export type DelegationCapability = (typeof DELEGATION_CAPABILITIES)[number];
-export const DELEGATION_ROLES = ["maintainer", "reviewer", "operator-delegate"] as const;
-export type DelegationRole = (typeof DELEGATION_ROLES)[number];
-export const DELEGATION_ROLE_CAPABILITIES: Readonly<
-  Record<DelegationRole, readonly DelegationCapability[]>
-> = {
-  maintainer: [
-    "schedules.maintenance.update",
-    "schedules.survey.decide",
-    "operations.import.request",
-    "operations.replay.request",
-    "operations.read",
-  ],
-  reviewer: ["commands.plan", "commands.decide.card-settlement", "commands.decide.relation"],
-  "operator-delegate": DELEGATION_CAPABILITIES,
-};
-export const DELEGATION_LIMITS = {
-  entries: 8,
-  lifetimeMs: 90 * 86_400_000,
+/**
+ * ADR 0084: no declaration exists. The MCP principal of an operator subject
+ * holds the operation capabilities its read grant's scope allows, under this
+ * fixed rolling-day write budget; its App→Processor envelope is valid for one
+ * request's lifetime.
+ */
+export const MCP_AUTHORITY = {
   writesPerDay: 200,
+  envelopeMs: 600_000,
 } as const;
+
+/** Operations whose targets span sources and accounts: whole-store reads only. */
+export const WHOLE_STORE_CAPABILITIES: readonly DelegationCapability[] = [
+  "commands.plan",
+  "commands.decide.card-settlement",
+  "commands.decide.relation",
+  "commands.decide.identity",
+  "operations.projection.request",
+];
 
 export interface DelegationScopes {
   sources: ScopeSet;
   accounts: ScopeSet;
   scheduleSources: ScopeSet;
-}
-/** Existing read authority; a missing schedule axis means no schedule scope. */
-export interface DelegationReadGrant {
-  principal: string;
-  scopes: { sources: ScopeSet; accounts: ScopeSet; scheduleSources?: ScopeSet };
-}
-export interface DelegationEntry {
-  delegatedBy: string;
-  role: DelegationRole;
-  capabilities?: readonly DelegationCapability[];
-  scopes: DelegationScopes;
-  issuedAt: string;
-  notAfter: string;
-  budget: { writesPerDay: number };
 }
 export interface DelegatedPrincipal {
   kind: "delegated";
@@ -74,23 +59,10 @@ export type DelegationCaller =
   | { readonly kind: "browser"; readonly principal: string };
 export type DelegationRefusal =
   | "delegation_not_mcp_client"
+  /** The subject is not the UI operator, or this principal has no read grant. */
   | "delegation_not_configured"
-  | "delegation_misconfigured"
-  | "delegation_not_yet_valid"
-  | "delegation_expired";
+  /** The operator lists cannot be read (`grants_misconfigured` in the UI): 503. */
+  | "delegation_misconfigured";
 export type DelegationResolution =
   | { ok: true; principal: DelegatedPrincipal }
   | { ok: false; code: DelegationRefusal };
-export type DelegationTable =
-  | { ok: true; entries: ReadonlyMap<string, DelegationEntry> }
-  | { ok: false; code: "delegation_misconfigured" };
-
-export function effectiveDelegationCapabilities(
-  entry: DelegationEntry,
-): readonly DelegationCapability[] {
-  const effective = new Set([
-    ...DELEGATION_ROLE_CAPABILITIES[entry.role],
-    ...(entry.capabilities ?? []),
-  ]);
-  return DELEGATION_CAPABILITIES.filter((capability) => effective.has(capability));
-}

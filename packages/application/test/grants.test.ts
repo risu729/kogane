@@ -54,8 +54,8 @@ describe("grants are deny-by-default", () => {
       "policy.admin",
       "retention.admin",
       "external-money-action",
-      // Maintenance windows are read only: a revision is delegated in
-      // MCP_DELEGATIONS (ADR 0063), never granted here, and there is no job
+      // Maintenance windows are read only: a revision is an operation of the
+      // operator's MCP principal (ADR 0084), never granted here, and there is no job
       // edit, toggle, lease release or run.
       "schedules.maintenance.update",
       "schedules.update",

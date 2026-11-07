@@ -28,15 +28,6 @@ const grant = {
   capabilities: ["summary.read"],
   budget: { maxRows: 50, maxProposalTargets: 2, maxExplainDepth: 2 },
 };
-const entry = (owner = OWNER) => ({
-  delegatedBy: owner,
-  role: "maintainer",
-  capabilities: ["operations.collection.request", "operations.session.refresh"],
-  scopes,
-  issuedAt: new Date(Date.now() - 60000).toISOString(),
-  notAfter: new Date(Date.now() + 3600000).toISOString(),
-  budget: { writesPerDay: 100 },
-});
 function config(owner = OWNER) {
   return {
     ...env,
@@ -44,7 +35,6 @@ function config(owner = OWNER) {
     SESSION_REFRESH_POLICY: "",
     OPERATOR_SUBJECTS: JSON.stringify([OWNER, OTHER]),
     AGENT_API_GRANTS: JSON.stringify({ [key(owner)]: grant }),
-    MCP_DELEGATIONS: JSON.stringify({ [key(owner)]: entry(owner) }),
   } as Env;
 }
 async function invoke(name: OpsToolName, body: unknown, configuration: Env, owner = OWNER) {
@@ -70,7 +60,7 @@ const count = async () =>
 beforeAll(seedRegistry);
 afterEach(() => vi.unstubAllGlobals());
 
-it("scope shrink after provider prepare and read-grant shrink on exact replay both deny before another effect", async () => {
+it("read-grant scope shrink after provider prepare and operator removal on exact replay both deny before another effect", async () => {
   const configuration = config();
   const request = {
     source: "sony-bank",
@@ -84,11 +74,10 @@ it("scope shrink after provider prepare and read-grant shrink on exact replay bo
   );
   expect(preparation.status).toBe(200);
   const digest = content(preparation).confirmation.digest;
-  const declaration = JSON.parse(configuration.MCP_DELEGATIONS);
   const narrowed = {
     ...configuration,
-    MCP_DELEGATIONS: JSON.stringify({
-      [key()]: { ...declaration[key()], scopes: { ...scopes, sources: ["other-test"] } },
+    AGENT_API_GRANTS: JSON.stringify({
+      [key()]: { ...grant, scopes: { ...scopes, sources: ["other-test"] } },
     }),
   } as Env;
   const before = await count();
@@ -105,22 +94,18 @@ it("scope shrink after provider prepare and read-grant shrink on exact replay bo
     configuration,
   );
   expect(accepted.status).toBe(202);
-  const smallerRead = {
-    ...configuration,
-    AGENT_API_GRANTS: JSON.stringify({
-      [key()]: { ...grant, scopes: { ...scopes, sources: ["other-test"] } },
-    }),
-  } as Env;
+  // Removing the subject from the operator list revokes the MCP authority too.
+  const notOperator = { ...configuration, OPERATOR_SUBJECTS: JSON.stringify([OTHER]) } as Env;
   const revoked = await invoke(
     "kogane.ops.collection.request",
     { ...request, step: "confirm", confirmationDigest: digest },
-    smallerRead,
+    notOperator,
   );
-  expect(content(revoked)).toEqual({ error: "delegation_misconfigured" });
+  expect(content(revoked)).toEqual({ error: "delegation_not_configured" });
   expect(await count()).toBe(before! + 1);
 });
 
-it("changing only the declaration budget invalidates an old prepare and completed confirmation replay", async () => {
+it("changing only the derived authority invalidates an old prepare and completed confirmation replay", async () => {
   const configuration = config();
   const request = { source: "sony-bank", idempotencyKey: "cross-auth-declaration" };
   const preparation = await invoke(
@@ -129,11 +114,12 @@ it("changing only the declaration budget invalidates an old prepare and complete
     configuration,
   );
   const digest = content(preparation).confirmation.digest;
-  const declaration = JSON.parse(configuration.MCP_DELEGATIONS);
+  // A schedule axis the session refresh never uses still changes the
+  // authority's reference, so the old prepare no longer binds.
   const changed = {
     ...configuration,
-    MCP_DELEGATIONS: JSON.stringify({
-      [key()]: { ...declaration[key()], budget: { writesPerDay: 99 } },
+    AGENT_API_GRANTS: JSON.stringify({
+      [key()]: { ...grant, scopes: { ...scopes, scheduleSources: ["sony-bank"] } },
     }),
   } as Env;
   const before = await count();
@@ -216,11 +202,10 @@ it("R1 exact import replay does not return a denied-source receipt after scope s
   };
   const accepted = await invoke("kogane.ops.import.request", request, configuration);
   expect(accepted.status).toBe(202);
-  const declaration = JSON.parse(configuration.MCP_DELEGATIONS);
   const narrowed = {
     ...configuration,
-    MCP_DELEGATIONS: JSON.stringify({
-      [key()]: { ...declaration[key()], scopes: { ...scopes, sources: ["other-test"] } },
+    AGENT_API_GRANTS: JSON.stringify({
+      [key()]: { ...grant, scopes: { ...scopes, sources: ["other-test"] } },
     }),
   } as Env;
   const before = await count();
@@ -257,14 +242,6 @@ it("a real delegated identity assignment and audit-linked reversal retain immuta
     ),
   ]);
   const configuration = config();
-  const declarations = JSON.parse(configuration.MCP_DELEGATIONS);
-  configuration.MCP_DELEGATIONS = JSON.stringify({
-    [key()]: {
-      ...declarations[key()],
-      role: "operator-delegate",
-      scopes: { sources: "*", accounts: "*", scheduleSources: [] },
-    },
-  });
   configuration.AGENT_API_GRANTS = JSON.stringify({
     [key()]: {
       ...grant,
@@ -529,7 +506,7 @@ it("a real delegated identity assignment and audit-linked reversal retain immuta
   ).toBe("delegated");
 });
 
-it("real MCP provider confirmation after declaration scope shrink is refused and audited without a native request", async () => {
+it("real MCP provider confirmation after read-grant scope shrink is refused and audited without a native request", async () => {
   const configuration = config();
   const issuer = "https://cross-auth-provider.cloudflareaccess.com";
   configuration.ACCESS_ISSUER = issuer;
@@ -587,14 +564,10 @@ it("real MCP provider confirmation after declaration scope shrink is refused and
   };
   const prepared = await send({ ...request, step: "prepare" });
   expect(prepared.isError).not.toBe(true);
-  const declarations = JSON.parse(configuration.MCP_DELEGATIONS);
   const narrowed = {
     ...configuration,
-    MCP_DELEGATIONS: JSON.stringify({
-      [key()]: {
-        ...declarations[key()],
-        scopes: { ...scopes, sources: ["other-test"] },
-      },
+    AGENT_API_GRANTS: JSON.stringify({
+      [key()]: { ...grant, scopes: { ...scopes, sources: ["other-test"] } },
     }),
   } as Env;
   const before = await count();

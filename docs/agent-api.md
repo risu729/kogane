@@ -25,8 +25,11 @@ below reaches.
 The owner's dedicated `mcp-client:<sub>` entry grants `summary.read` and
 `records.read` across sources and accounts, with a 100-row read budget
 including cursor offset and pagination lookahead.
-`AGENT_GRANTS` and `MCP_DELEGATIONS` remain empty: this configuration grants
-no proposals, raw evidence or delegated operations. The MCP audience is
+`AGENT_GRANTS` remains empty: this configuration grants no proposals or raw
+evidence. Because the owner's subject is the operator (`OPERATOR_SUBJECTS`),
+its MCP principal also applies the operations of ADR 0063 inside that
+whole-store scope, as itself
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). The MCP audience is
 separate from the browser audience. The dedicated `kogane-mcp.takuk.me`
 hostname must be attached to the App Worker independently, because the
 current version deployment does not synchronize App triggers. Configuration
@@ -34,9 +37,9 @@ and deployment are not evidence that a client connected; the ordered live
 checks in [Connecting an MCP client](#connecting-an-mcp-client) still apply.
 That entry names no schedule capability, so it reads no maintenance window.
 Maintenance windows can be read under their own capability (`schedules.read`);
-revising one, like a job setting, is an operation the owner may delegate
-(ADR 0063), executed only under a delegation, and none is configured
-([below](#maintenance-windows)). Lease release stays operator-only
+revising one, like a job setting, is an operation of the operator's MCP
+principal inside its grant's `scheduleSources`; the committed entry has none,
+so it revises nothing ([below](#maintenance-windows)). Lease release stays operator-only
 ([schedules](schedules.md#settings-api)).
 
 ## Why the application service exists
@@ -191,31 +194,31 @@ would answer ([below](#instrument-coverage),
 [shared history reads](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)). The two
 maintenance tools (`src/schedule-tools.ts`) exist while `SCHEDULES_ENABLED` is
 on: the read is reachable both ways, the revision on `/mcp` only and listed
-only to a principal whose resolved delegation holds it, and none is configured
+only to the operator's MCP principal
 ([below](#maintenance-windows)). The instrument-history and audit reads
 (`src/read-tools.ts`) are reachable both ways
 ([below](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10));
 the other delegated MCP tools are described there too.
 
-| Tool                                  | HTTP                                            | MCP `tools/call`                      | Requires                                                                                                                                               |
-| ------------------------------------- | ----------------------------------------------- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `kogane.capabilities`                 | `POST /api/agent/v1/capabilities`               | `kogane.capabilities`                 | any grant                                                                                                                                              |
-| `kogane.context.open`                 | `POST /api/agent/v1/context.open`               | `kogane.context.open`                 | any grant                                                                                                                                              |
-| `kogane.financial.query`              | `POST /api/agent/v1/financial.query`            | `kogane.financial.query`              | per intent (table below)                                                                                                                               |
-| `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                                         |
-| `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                                               |
-| `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                                         |
-| `kogane.instruments.coverage`         | `POST /api/agent/v1/instruments.coverage`       | `kogane.instruments.coverage`         | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                              |
-| `kogane.accounts.candidates`          | `POST /api/agent/v1/accounts.candidates`        | `kogane.accounts.candidates`          | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                                               |
-| `kogane.economic-readiness.read`      | `POST /api/agent/v1/economic-readiness.read`    | `kogane.economic-readiness.read`      | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))                             |
-| `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                          |
-| `kogane.reported-state.read`          | `POST /api/agent/v1/reported-state.read`        | `kogane.reported-state.read`          | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#reported-state-on-a-date))                               |
-| `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))                               |
-| `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                      |
-| `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | a delegation (`MCP_DELEGATIONS`) holding `schedules.maintenance.update`; none is configured, so it is listed to nobody ([below](#maintenance-windows)) |
-| `kogane.instruments.history`          | `POST /api/agent/v1/instruments.history`        | `kogane.instruments.history`          | `records.read` on `"*"` sources and accounts                                                                                                           |
-| `kogane.audit.search`                 | `POST /api/agent/v1/audit.search`               | `kogane.audit.search`                 | `audit.read` with `"*"` accounts                                                                                                                       |
-| `kogane.audit.get`                    | `POST /api/agent/v1/audit.get`                  | `kogane.audit.get`                    | `audit.read` with `"*"` accounts                                                                                                                       |
+| Tool                                  | HTTP                                            | MCP `tools/call`                      | Requires                                                                                                                      |
+| ------------------------------------- | ----------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.capabilities`                 | `POST /api/agent/v1/capabilities`               | `kogane.capabilities`                 | any grant                                                                                                                     |
+| `kogane.context.open`                 | `POST /api/agent/v1/context.open`               | `kogane.context.open`                 | any grant                                                                                                                     |
+| `kogane.financial.query`              | `POST /api/agent/v1/financial.query`            | `kogane.financial.query`              | per intent (table below)                                                                                                      |
+| `kogane.explain`                      | `POST /api/agent/v1/explain`                    | `kogane.explain`                      | `summary.read`                                                                                                                |
+| `kogane.reconcile.propose`            | `POST /api/agent/v1/reconcile.propose`          | `kogane.reconcile.propose`            | `interpretation.propose`                                                                                                      |
+| `kogane.instruments.candidates`       | `POST /api/agent/v1/instruments.candidates`     | `kogane.instruments.candidates`       | `records.read` on `"*"` sources and accounts ([below](#instrument-candidates))                                                |
+| `kogane.instruments.coverage`         | `POST /api/agent/v1/instruments.coverage`       | `kogane.instruments.coverage`         | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                     |
+| `kogane.accounts.candidates`          | `POST /api/agent/v1/accounts.candidates`        | `kogane.accounts.candidates`          | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                      |
+| `kogane.economic-readiness.read`      | `POST /api/agent/v1/economic-readiness.read`    | `kogane.economic-readiness.read`      | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))    |
+| `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`          | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation)) |
+| `kogane.reported-state.read`          | `POST /api/agent/v1/reported-state.read`        | `kogane.reported-state.read`          | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#reported-state-on-a-date))      |
+| `kogane.reconstructed-state.read`     | `POST /api/agent/v1/reconstructed-state.read`   | `kogane.reconstructed-state.read`     | `records.read` on `"*"` sources and accounts, while `reconstructedStateOnDate` is served ([below](#reconstructed-state))      |
+| `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                             |
+| `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | the operator's MCP principal (ADR 0084), inside its grant's `scheduleSources` ([below](#maintenance-windows))                 |
+| `kogane.instruments.history`          | `POST /api/agent/v1/instruments.history`        | `kogane.instruments.history`          | `records.read` on `"*"` sources and accounts                                                                                  |
+| `kogane.audit.search`                 | `POST /api/agent/v1/audit.search`               | `kogane.audit.search`                 | `audit.read` with `"*"` accounts                                                                                              |
+| `kogane.audit.get`                    | `POST /api/agent/v1/audit.get`                  | `kogane.audit.get`                    | `audit.read` with `"*"` accounts                                                                                              |
 
 No tool lists or reads the fixed report artifacts (評価レポート): they are
 served to the operator by `GET /api/v2/reports` and
@@ -253,10 +256,10 @@ condition (`reportedStateOnDate`, the same views); it is listed after
 `kogane.instruments.history`, and only to a grant that holds `records.read`
 over every source and account. The six
 `kogane.ops.*` tools of [ops-api.md](ops-api.md) are published on `/mcp`,
-whose callers are all agent-only, only to a principal whose resolved
-delegation holds their capability ([ops-api](ops-api.md#mcp)): with
+whose callers are all agent-only, only to the operator's own MCP principal
+([ops-api](ops-api.md#mcp), ADR 0084): with
 `OPS_API_ENABLED` off an operations tool name is `unknown_tool`, and with it on
-and no delegation `callDelegatedOpsTool` refuses the call
+any other caller is refused by `callDelegatedOpsTool`
 (`delegation_not_configured`) before any service runs.
 
 ### Intents
@@ -675,19 +678,19 @@ reports `scopes.scheduleSources`.
 **Revising** (`kogane.schedules.maintenance.update`, operation
 `schedules.maintenance.update`). Not an agent-API capability: a grant table
 naming `schedules.maintenance.update` is refused whole, so `/mcp` answers
-`403 agent_api_not_configured`. It is an operation the owner may delegate to
-their own MCP identity in `MCP_DELEGATIONS` (ADR 0063; the `maintainer` role
-holds it), with the source in the delegation's `scopes.scheduleSources`, which
-must lie inside the read grant's. It has no `/api/agent/v1` route: a browser
-session yields no delegation. On `/mcp` it is advertised only when the
-current resolved delegation permits the operation. Checked-in delegations are
-empty, so the existing financial-reader client gains no maintenance authority.
+`403 agent_api_not_configured`. It is an operation of the operator's own MCP
+principal (ADR 0063, [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)),
+with the source in that principal's read grant's `scopes.scheduleSources`. It
+has no `/api/agent/v1` route: a browser session never resolves an MCP
+principal. On `/mcp` it is advertised only while the caller resolves. The
+committed grant has no `scheduleSources`, so the owner's client is listed the
+tool and every revision is `source_not_granted`.
 
-The App checks the current delegation, capability, closed arguments and source
-scope before looking up a completed receipt. Missing/invalid/early/expired
-delegations retain the resolver's closed codes; a missing capability is
-`delegation_capability_denied`, invalid arguments are `invalid_request`, and
-an out-of-scope source is `source_not_granted` whether or not it exists.
+The App resolves the caller, then checks closed arguments and source scope
+before looking up a completed receipt. A subject that is not the operator is
+`delegation_not_configured`, unreadable operator lists are
+`delegation_misconfigured`, invalid arguments are `invalid_request`, and an
+out-of-scope source is `source_not_granted` whether or not it exists.
 
 Arguments include `step` (`apply`, `prepare`, `confirm`) and `idempotencyKey`;
 confirmation also requires `confirmationDigest`. Reasons remain the closed
@@ -699,8 +702,8 @@ R1 applies within the seven-day joined-window envelope. R2 prepares and
 confirms within the 31-day envelope. Existing longer operator windows may
 remain unchanged or shorten, but new/moved/extended over-bound unions are
 refused. Both reuse the Processor's single writer, expected revision, source
-and provenance validation and 30/day native cap. The actual delegation's
-shared daily budget and effect audit append are guarded in the same batch.
+and provenance validation and 30/day native cap. The principal's fixed shared
+daily budget (200 writes) and effect audit append are guarded in the same batch.
 
 Exact retries return the saved rule id/revision without another write or
 alarm reconciliation. A fresh result reports reconciliation `completed` or
@@ -905,8 +908,8 @@ not the subject it came from — is what every grader and tool receives.
 nothing else: the bare `<sub>`'s entry is not a fallback. `callOpsTool`
 refuses an `mcp-client` caller with `403 delegation_not_configured` before
 `opsContext` or `principalFor` runs, and on `/mcp` the operations tools are
-published and run only under a resolved delegation (`callDelegatedOpsTool`,
-[ops-api](ops-api.md#mcp)); `principalFor` also refuses the `mcp-client:` name as a
+published and run only for the operator's own MCP principal, as itself
+(`callDelegatedOpsTool`, [ops-api](ops-api.md#mcp), ADR 0084); `principalFor` also refuses the `mcp-client:` name as a
 string, even when `<sub>` is the operator. It reaches no other route. It can
 record an inert proposal (actor `mcp-client:<sub>`) under
 `interpretation.propose`, and nothing approves or commits. The same person
@@ -944,7 +947,7 @@ over MCP.
 | `GET` / `DELETE`; a query string                                                                                                                                  | Worker                                      | `405 method_not_allowed` / `400 invalid_query`                                                                            |
 | media type, `Accept`, protocol version header, malformed JSON, body bound                                                                                         | SDK                                         | `415` / `406` / `400` / `400` / `413`                                                                                     |
 | unknown method; unknown or unpublished tool                                                                                                                       | SDK / dispatcher                            | JSON-RPC `-32601`; `-32602 unknown_tool`                                                                                  |
-| an operations tool without a resolved delegation, while the operations API is on                                                                                  | `callDelegatedOpsTool`, from the resolution | `isError: true`, `{"error":"delegation_not_configured"}` (or the resolution's other closed code); only the refusal record |
+| an operations tool from a non-operator MCP principal, while the operations API is on                                                                              | `callDelegatedOpsTool`, from the resolution | `isError: true`, `{"error":"delegation_not_configured"}` (or the resolution's other closed code); only the refusal record |
 | capability not granted                                                                                                                                            | tool                                        | `isError: true`, `code: unauthorized`, `refs: ["capability:<name>"]`                                                      |
 | source, account or row outside the scope                                                                                                                          | tool                                        | `isError: true`, `code: evidence_restricted` (proposal targets: `incomplete_evidence`)                                    |
 | raw evidence without `evidence.read`                                                                                                                              | tool                                        | not an error: `explain` has no raw-locator node, `restricted: ["evidence.read"]`                                          |
@@ -1001,7 +1004,7 @@ values. These steps do not assert that production or any client has passed.
    distinct from `ACCESS_AUDIENCE`; exactly `mcp-client:<owner-sub>` has
    `summary.read` and `records.read`, sources/accounts `"*"`, and budgets
    `maxRows: 100`, `maxProposalTargets: 3`, `maxExplainDepth: 3`.
-   `AGENT_GRANTS` and `MCP_DELEGATIONS` stay empty. The App's version
+   `AGENT_GRANTS` stays empty. The App's version
    publication does not synchronize triggers: attach the approved custom
    domain once through the Cloudflare API and verify its destination is
    `kogane-evidence-browser`. A domain declaration is not that attachment.
@@ -1252,6 +1255,11 @@ does not need to remove them.
 
 ## Delegated execution integration and shared history reads (S3, 2026-10-10)
 
+Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
+(2026-11-07) the "delegation" below is the operator's MCP principal, derived
+from `OPERATOR_SUBJECTS` and its read grant; the mentions of `MCP_DELEGATIONS`
+describe the state before it ([below](#the-operators-mcp-principal-adr-0084-2026-11-07)).
+
 The deployment configuration remains empty: this code change creates no grant,
 MCP delegation or authentication resource. An explicitly configured owner MCP
 delegation can use only the adapters reported ready by `kogane.capabilities`.
@@ -1339,41 +1347,38 @@ the committed MCP financial-reader grant receives no schedule authority.
 S6 survey acceptance remains unavailable pending the separate owner decision;
 no survey grammar, grants, Access, authentication or deployment is changed.
 
-## The operator's delegation status (S8, 2026-11-06)
+## The operator's MCP principal (ADR 0084, 2026-11-07)
 
 Status: proposed until its pull request merges
-([ADR 0063's amendment](adr/0063-delegated-ai-operation-path.md#operator-delegation-status-amendment--2026-11-06-proposed)).
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 
-`GET /api/v2/delegations` shows the operator what `MCP_DELEGATIONS` declares,
-read through the resolver's own parser at the server's clock. It is served on
-the browser Access application only, to the operator only
-(`403 operator_required` for an agent, any other subject or an
-`mcp-client:` name; an MCP-audience assertion is refused before it), and
-takes no query string. It is not an agent route or an MCP tool and is not
-recorded in the audit log.
+There is no delegation declaration. `resolveDelegation`
+(`packages/application/src/delegation/resolve.ts`) resolves a verified
+`mcp-client:<sub>` caller, and nothing else, when the UI's own resolver grades
+`<sub>` as the operator (`OPERATOR_SUBJECTS`, `AGENT_GRANTS`) and the principal
+has its own `AGENT_API_GRANTS` entry. For the committed configuration:
 
-The answer (`kogane-delegation-status-v1`) has a `configuration` of `none`,
-`misconfigured` or `valid`. A misconfigured table — the one every delegated
-call refuses with `503 delegation_misconfigured` — is shown with no entry and
-no reason. A valid table lists each entry, ordered by principal, with its
-delegator, role, effective capabilities, the `sources`, `accounts` and
-`scheduleSources` axes, `issuedAt`, `notAfter`, `writesPerDay`, a `state` of
-`in_force`, `not_yet_valid` or `expired` (the resolver's `[issuedAt,
-notAfter)` window `/mcp` enforces, at `evaluatedAt`), and the
-`delegationRef` audit records carry. The delegated writers additionally floor
-a sub-millisecond `notAfter` to its millisecond, so in the last fraction of a
-millisecond before such a bound an `in_force` entry's write is already
-refused as `delegation_expired`. No secret, token, Access setting, read-grant
-budget or raw configuration is in it; the shared contract refuses any key it
-does not name.
+```json
+{
+  "kind": "delegated",
+  "id": "mcp-client:2c440753-9011-502c-a22d-bb013593c11a",
+  "delegator": "2c440753-9011-502c-a22d-bb013593c11a",
+  "capabilities": ["commands.plan", "…", "operations.read"],
+  "scopes": { "sources": "*", "accounts": "*", "scheduleSources": [] },
+  "budget": { "writesPerDay": 200 },
+  "notAfter": "<request time + 10 minutes>",
+  "delegationRef": "dlg_<digest of the fields above except notAfter>"
+}
+```
 
-The schedules page (`/schedules`) and the confirm page (`/confirm/:planId`)
-show this as a compact, read-only notice **AIへの委任**: no delegation, a
-void configuration, or each entry's principal, state, role, Japan-time window
-and daily write cap, with capabilities, scope and reference behind a
-disclosure, and the Japan time of `evaluatedAt` the states were read at.
-Nothing on it edits, grants or revokes a delegation, and the operator's own
-approval and settings do not depend on it. A failed read, including a failed
-re-read after an earlier answer, says the state cannot be confirmed and shows
-no entry. With the committed empty `MCP_DELEGATIONS` both pages say that no
-delegation exists.
+The scope is the read grant's (an absent `scheduleSources` is none);
+`commands.*` and `operations.projection.request` are held only on `"*"`
+sources and accounts. A subject in neither or only the agent list is
+`403 delegation_not_configured`; a subject in both lists, or unreadable lists,
+is `503 delegation_misconfigured`, as the UI answers `grants_misconfigured`.
+`kogane.capabilities` keeps its safe `delegation` status, which names no
+subject, scope, budget, expiry or reference.
+
+The operator's delegation-status read of 2026-11-06 (`GET /api/v2/delegations`,
+`kogane-delegation-status-v1`, and the **AIへの委任** notices on the schedules
+and confirm pages) is removed with the table it showed.

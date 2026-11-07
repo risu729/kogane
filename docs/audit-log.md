@@ -114,9 +114,9 @@ carries its closed reason as `reason_code`: `operator-edit` for the operator's
 edit, `maintenance-survey-proposal-accepted` for an accepted proposal.
 `schedules.maintenance.read` (R0) is one `read` record on whichever agent path
 served it. `schedules.maintenance.update` exists on `mcp` as well as on `ui`;
-there it is graded by the caller's delegation, not its grant. A caller with
-no resolved delegation (the committed `MCP_DELEGATIONS` is empty, so every
-caller today) gets one `refused` record (`failed` for
+there it is graded by the caller's resolved MCP authority (the operator's own
+MCP principal, [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)), not its grant. A caller that does not
+resolve one gets one `refused` record (`failed` for
 `503 delegation_misconfigured`) with the delegation's or the schema's code,
 `principal_kind` `agent` and no `delegation_ref`, and nothing is relayed to
 the Processor. Under a delegation (#660) the call is a `delegated` record

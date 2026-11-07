@@ -11,11 +11,9 @@
 // Both are allow-lists: `resolvePrincipal` refuses a subject the deployment
 // does not name, and `grantFor` answers `null` for one it has no grant for.
 
-// ── delegation declarations and readiness (ADR 0063, S3) ───────────────
-export { parseDelegations } from "./delegation/parse.ts";
+// ── MCP operation authority and readiness (ADR 0063, ADR 0084) ─────────
 export { resolveDelegation } from "./delegation/resolve.ts";
 export { delegationCapabilities, delegationExecutionReadiness } from "./delegation/readiness.ts";
-export { delegationStatus } from "./delegation/status.ts";
 export * from "./delegation/contract.ts";
 
 // ── command services (A09) ───────────────────────────────────────────

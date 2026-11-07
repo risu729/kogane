@@ -204,8 +204,10 @@ export async function agentApi(
     // inside `callOpsTool`, exactly as their HTTP routes are. With
     // `OPS_API_ENABLED` off they are neither listed nor callable, so the MCP
     // surface matches the routes this deployment actually serves. An MCP
-    // client is never an operator (ADR 0047): they are not published to one,
-    // and `callOpsTool` refuses its caller object before any grader runs.
+    // client is never an operator (ADR 0047): `callOpsTool` refuses its caller
+    // object before any grader runs. The operator's own MCP principal is
+    // published the delegated operations tools instead, acting as itself
+    // under the authority ADR 0084 derives for it.
     const ops = opsApiEnabled(env);
     // A deployment whose command grant lists cannot be read grades nobody, so
     // it can authorize none of the operations tools; publishing them would
@@ -221,7 +223,7 @@ export async function agentApi(
     // that depends on it: `initialize`, `ping` and notifications touch no table.
     let served: Promise<boolean> | undefined;
     const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
-    // Reads require schedules.read; the write is separately listed to a resolved delegation.
+    // Reads require schedules.read; the write is separately listed to a resolved MCP principal.
     const schedules = schedulesServed(env);
     // The reconstructed state likewise exists exactly while its GET route does,
     // and so does the dated reported state: both are served where
@@ -235,8 +237,8 @@ export async function agentApi(
         if (name === PURCHASES_TOOL_NAME && !(await purchases())) return null;
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (name === REPORTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
-        // An MCP client's capabilities also carry its delegation declaration
-        // (#628, inert: nothing executes under it); recorded like any call.
+        // An MCP client's capabilities also carry the operation authority
+        // derived for it (ADR 0084), as a safe status; recorded like any call.
         if (name === "kogane.capabilities" && caller.kind === "mcp-client")
           return toolCall(request, env, caller, name, async (audit) => {
             const result = await callTool(name, body, { ...context, audit });

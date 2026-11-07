@@ -85,7 +85,6 @@ async function send(mcp: boolean, body: unknown, grant: unknown = GRANT, authent
       ACCESS_AUDIENCE: APP_AUD,
       ACCESS_MCP_AUDIENCE: MCP_AUD,
       AGENT_API_GRANTS: JSON.stringify({ [OWNER]: grant, [PRINCIPAL]: grant }),
-      MCP_DELEGATIONS: "",
       AGENT_GRANTS: "[]",
       OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
     } as Env,

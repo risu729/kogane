@@ -72,8 +72,11 @@ What the code does today (main `02a915a`):
    shared service, as most existing tools already do. Results, refusals and error codes
    are the service's, so the UI and MCP give the same answer for the same input.
 3. **Authority is unchanged.** Parity is about what exists, not who may use it.
-   A write over MCP still needs the owner's delegation under ADR 0063, with its
-   confirmation class and audit record. Where ADR 0063 makes an R3 operation not
+   A write over MCP is applied by the operator's own MCP principal under ADR
+   0063's confirmation classes and audit record; since
+   [ADR 0084](0084-mcp-operator-authority-without-delegation.md) (2026-11-07)
+   that authority is derived from `OPERATOR_SUBJECTS` and the principal's read
+   grant, with no `MCP_DELEGATIONS` declaration. Where ADR 0063 makes an R3 operation not
    delegable now, its MCP tool exists and refuses every call with a recorded
    refusal until that changes: `schedules.lease.release`, until the server can
    verify that an execution stopped. R4 is outside this rule: ADR 0063 gives it

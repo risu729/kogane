@@ -239,7 +239,6 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
     expect(grant.budget.maxRows).toBe(100);
     expect(old.vars.ACCESS_MCP_AUDIENCE).not.toBe(old.vars.ACCESS_AUDIENCE);
     expect(old.vars.AGENT_GRANTS).toBe("");
-    expect(old.vars.MCP_DELEGATIONS).toBe("");
   });
   test("legacy lifecycle stays canonical and is checked around publication", () => {
     const history: Record<string, unknown[]> = {

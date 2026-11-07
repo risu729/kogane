@@ -59,7 +59,8 @@ decisions stay, and a fix appends revisions, never a DELETE.
 ## Current release boundary — 2026-11-06
 
 The committed configs enable existing boolean App/Processor features and name
-a human operator. `AGENT_GRANTS` and `MCP_DELEGATIONS` are empty;
+a human operator. `AGENT_GRANTS` is empty (`MCP_DELEGATIONS` was removed by
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md));
 `AGENT_API_GRANTS` holds one MCP reader entry with `summary.read` and
 `records.read` only. CORE reaches 0080; READ reaches 0005. This is repository
 state, not a live readback.
