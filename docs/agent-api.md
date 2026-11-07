@@ -1080,6 +1080,14 @@ mapping, the grant shape and the local checks are the same for all of them.
 If an existing connection reports that it needs reauthentication, follow that
 runbook.
 
+**Route (owner, 2026-11-07, [ADR 0047 amendment](adr/0047-mcp-client-connection.md#amendment-clients-connect-through-the-mcp-portal-2026-11-07)):**
+claude.ai, ChatGPT and Grok register the Cloudflare MCP Portal
+`https://mcp.takuk.me/mcp`, not the origin URL. Their redirect URIs are
+allowed on the Portal's Access application ("MCP Portal"); the origin
+application allows only the Portal's own callbacks. The table below describes
+each client's OAuth flow; read "the same application" as the Portal's.
+Codex and Claude Code rows need loopback on the Portal application before use.
+
 | Client                                          | Flow it presents ([Claude][claude-auth], [ChatGPT][openai-auth], [Codex][codex-mcp])                                                                                                                                                                      | Owner creates in Cloudflare                                                                  | Worker mapping           | Grants                                                            | Client-side registration                                                                                       |
 | ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
 | claude.ai (also Claude Desktop and mobile)      | OAuth 2.0 code + PKCE `S256`; discovery from the `401`; CIMD if advertised, else DCR; redirect `https://claude.ai/api/mcp/auth_callback`; calls from `160.79.104.0/21`                                                                                    | the MCP Access application with Managed OAuth, an identity policy, that redirect URI allowed | `mcp-client:<owner-sub>` | none (ADR 0084); nothing in `AGENT_GRANTS` or `OPERATOR_SUBJECTS` | Customize → Connectors → Add custom connector → URL, sign in, OAuth client "Register automatically"            |
@@ -1112,6 +1120,14 @@ values. These steps do not assert that production or any client has passed.
    `https://chatgpt.com/connector/oauth/*`; allow localhost and loopback only
    for approved Codex/Claude Code clients. Read back the configured access
    token and grant-session lifetimes; do not infer them from defaults.
+   Readback 2026-11-07 16:40 UTC: the origin application allows only
+   `https://mcp.takuk.me/servers-callback` and the dashboard's Kogane server
+   callback (the Portal is its only client, per the route above); client
+   URIs are on the Portal application. Access token 5 minutes, grant session
+   24 hours. The one policy, "Owner access", includes only the owner email
+   (one-time PIN) with no require or exclude: its Gateway requirement was
+   emptied at 07:10 UTC (audit log), and the Gateway posture rule is no
+   longer referenced.
 4. _Normal deployment and domain attachment_ — deploy the reviewed commit
    through the ordinary pipeline and verify the live App bindings agree
    with both production configs: the dedicated `ACCESS_MCP_AUDIENCE` is
@@ -1131,7 +1147,8 @@ values. These steps do not assert that production or any client has passed.
    `authorization_response_iss_parameter_supported` in authorization-server
    metadata. Discovery must belong to the dedicated MCP application.
 6. _Client registration_ — add the intended connector/app/server using the
-   table above and `https://kogane-mcp.takuk.me/mcp`, signing in as the owner.
+   table above and the Portal URL `https://mcp.takuk.me/mcp`, signing in as
+   the owner.
    Registration and an OAuth login alone do not prove a tool works.
 7. _Fresh-session calls_ — in each intended client, start a new conversation
    with only this connector enabled and perform these existing tool calls:
@@ -1202,8 +1219,10 @@ later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
 
 - **Protected-resource `resource`.** claude.ai requires the metadata's
   `resource` to equal the URL entered, path included ([Claude][claude-auth]);
-  the Managed OAuth page does not say what Access publishes. _Question:_
-  what does step 5 show?
+  the Managed OAuth page does not say what Access publishes. Observed
+  2026-11-07: the origin's protected-resource `resource` is
+  `https://kogane-mcp.takuk.me` (no `/mcp`). claude.ai connected to it
+  directly regardless; through the Portal only the Portal's metadata matters.
 - **Dedicated hostname.** The approved configuration selects a dedicated
   hostname. Its attachment to the Worker and its actual discovery/resource
   metadata still require steps 4–5; the declaration alone proves neither.

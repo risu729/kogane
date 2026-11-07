@@ -7,6 +7,9 @@
   `AGENT_API_GRANTS` is removed. The MCP principal `mcp-client:<sub>`, its
   separate Access application and audience, and its refusal on every non-agent
   route stand; it now reads and operates over the whole store with no table.
+- Amended 2026-11-07 ([below](#amendment-clients-connect-through-the-mcp-portal-2026-11-07)):
+  clients connect through the Cloudflare MCP Portal `https://mcp.takuk.me/mcp`,
+  which reaches this application as its one upstream OAuth client.
 
 ## Context
 
@@ -439,3 +442,34 @@ the particular client's upstream OAuth and refresh behavior is unverified.
 
 [cf-custom-domain]: https://developers.cloudflare.com/workers/configuration/routing/custom-domains/
 [cf-portal-policy]: https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/mcp-portals/#policy-limitations
+
+## Amendment: clients connect through the MCP Portal (2026-11-07)
+
+Owner decision, 2026-11-07 16:34 UTC: every MCP client (claude.ai, ChatGPT,
+Grok) registers the Cloudflare MCP Portal `https://mcp.takuk.me/mcp`, never
+the origin `https://kogane-mcp.takuk.me/mcp` directly. This replaces option 2's
+rejection for the client route; the rest of the decision stands.
+
+- The Portal is the only OAuth client of the origin application "Kogane MCP
+  origin". Its Managed OAuth DCR allow-list is exactly the Portal's
+  `https://mcp.takuk.me/servers-callback` and the dashboard's Kogane
+  server callback; localhost and loopback are off (readback 16:40 UTC).
+- Client redirect URIs live on the Portal's own Access application
+  ("MCP Portal"): ChatGPT's two, `https://claude.ai/api/mcp/auth_callback`,
+  Grok's `https://grok.com/connectors-oauth-exchange-code/` and
+  `https://console.x.ai/connectors-oauth-exchange-code/`, and Cursor's two
+  (Grok Bot), taken from each vendor's CIMD document (16:36 UTC).
+- Option 2's concern that the Worker could not grade the caller did not
+  hold in practice: through the Portal, `kogane.capabilities` answers
+  `principal: mcp-client:<owner-sub>`, so the upstream assertion still names
+  the owner and ADR 0084's authority applies unchanged.
+- One refused tool descriptor makes a client import none of the server's
+  tools, so descriptors must pass every client's validator
+  ([#1081](https://github.com/risu729/kogane/pull/1081),
+  [#1087](https://github.com/risu729/kogane/pull/1087); see the
+  [Input schema rule](../agent-api.md#contract-for-tools-on-mcp)).
+
+Verified 2026-11-07: the Portal lists Kogane `ready` with 42 tools after
+[ce1aa27](https://github.com/risu729/kogane/commit/ce1aa27); claude.ai's
+"Cloudflare Portal" connector called `kogane.capabilities` (read-only) at
+about 16:40 UTC.
