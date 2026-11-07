@@ -544,6 +544,33 @@ retracts the interpretation, never the bank movement or original evidence.
 Rejected and withdrawn candidates remain in history; a different correspondence
 is reviewed as a different candidate. Historical citations keep resolving.
 
+### Agent reads
+
+An agent holding `records.read` on a whole-store grant reads the same two
+answers as the page, over MCP or the agent HTTP route
+([agent API](agent-api.md)): `kogane.card-settlements.read` (`{}` or
+`{"offset": n}` for a page, `{"proposalId": id}` for one review) is
+`GET /api/v2/reconciliation/card-settlements`, and
+`kogane.card-settlements.ownership` (`{"proposalId": id}`) is its
+`/ownership` read. Both call the page's services
+(`packages/application/src/query/card-settlements-read.ts`), answer exactly
+the route's body and write only the R0 audit record of the call. They exist
+exactly while the route does: where its views are absent they are not listed,
+the HTTP path is `404` and the MCP name `unknown_tool`. They are refused
+`unauthorized` without `records.read` and `evidence_restricted` on a narrowed
+source or account scope, before the request is validated: a review joins a
+card account to a bank account, so a narrowed grant could see an account
+outside it. A list read deeper than the grant's `maxRows` (`offset + 50`
+above it) is `413 budget_exceeded` (`budget:maxRows=<n>`); a page's
+`nextOffset` is the route's, so the next page may be refused. A malformed
+request is `400 invalid_query`, and a `proposalId` that names no candidate is
+`404 not_found`. None of these refusals reads a store row; the only statement
+before them is the `sqlite_master` check the route also runs. Deciding a review or recording ownership stays a plan through the change
+lifecycle, graded there; on MCP that needs a delegation
+([ADR 0063](adr/0063-delegated-ai-operation-path.md)), and
+`MCP_DELEGATIONS` is empty. This is the read half of the owner's UI-parity
+decision of 2026-11-07 ([ADR 0081](adr/0081-ui-parity-through-mcp.md)).
+
 ## Financial meaning and limits
 
 Acceptance allocates the observed payment to a statement. It adds no new cash

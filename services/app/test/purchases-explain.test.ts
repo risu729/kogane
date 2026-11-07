@@ -525,13 +525,19 @@ describe("served only while card purchase recognition is", () => {
       expect(statements, method).toEqual([]);
     }
     // A tool list asks once for each tool that depends on the store's schema:
-    // this one, and the reported state's views, which decide both the
-    // reported and the reconstructed state's reads (asked once for both).
+    // this one, the reported state's views, which decide both the reported
+    // and the reconstructed state's reads (asked once for both), and the card
+    // settlement views, which decide both card settlement reads.
     const statements: string[] = [];
     await mcp({ method: "tools/list" }, { statements });
-    expect(statements).toHaveLength(2);
+    expect(statements).toHaveLength(3);
     expect(statements.filter((sql) => isSchemaProbe(sql))).toHaveLength(1);
     expect(statements.filter((sql) => sql.includes("card_statement_facts"))).toHaveLength(1);
+    expect(
+      statements.filter((sql) =>
+        sql.includes("'card_settlement_reviews','card_settlement_readiness'"),
+      ),
+    ).toHaveLength(1);
   });
 });
 

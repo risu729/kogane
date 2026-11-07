@@ -11,6 +11,10 @@ import {
   auditPageFilters,
   financialError,
   readEconomicRowReadinessForGrant,
+  readCardSettlementsForGrant,
+  readCardOwnershipForGrant,
+  CARD_SETTLEMENT_PROPOSAL_ID,
+  CARD_SETTLEMENTS_MAX_OFFSET,
 } from "../../../packages/application/src/index";
 import {
   readAuditForGrant,
@@ -47,6 +51,15 @@ import {
  * path is 404 and the MCP name `unknown_tool`.
  */
 export const REPORTED_STATE_TOOL_NAME = "kogane.reported-state.read";
+/**
+ * The カード照合 reads: served exactly while
+ * `GET /api/v2/reconciliation/card-settlements` is (its views exist); otherwise
+ * the path is 404 and the MCP name `unknown_tool`.
+ */
+export const CARD_SETTLEMENT_TOOL_NAMES: ReadonlySet<string> = new Set([
+  "kogane.card-settlements.read",
+  "kogane.card-settlements.ownership",
+]);
 
 const schemas = {
   "kogane.instruments.history": z.strictObject({
@@ -91,6 +104,14 @@ const schemas = {
       .max(64),
     knowledge: z.literal("current"),
   }),
+  // The route's query parameters, as a body; the patterns are the route's own.
+  "kogane.card-settlements.read": z.strictObject({
+    offset: z.number().int().min(0).max(CARD_SETTLEMENTS_MAX_OFFSET).optional(),
+    proposalId: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID).optional(),
+  }),
+  "kogane.card-settlements.ownership": z.strictObject({
+    proposalId: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID),
+  }),
   "kogane.audit.search": z.strictObject({
     filters: z.record(z.string(), z.string()).optional(),
     cursor: z.string().min(1).max(400).nullable().optional(),
@@ -118,6 +139,10 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit.",
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
+  "kogane.card-settlements.read":
+    "The card statement to bank debit reviews of the カード照合 page: one page (offset) or one review (proposalId), with the source facts, evidence references, acceptance blockers and decision history, the same answer as GET /api/v2/reconciliation/card-settlements, under records.read and a whole-store read grant. Read-only; deciding a review is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
+  "kogane.card-settlements.ownership":
+    "The ownership review of one card settlement candidate: both accounts' current mappings, recorded ownership claims and self-declaration blockers, the same answer as GET /api/v2/reconciliation/card-settlements/ownership, under records.read and a whole-store read grant. Read-only; recording ownership is a relation plan through the change lifecycle, graded there.",
   "kogane.audit.search":
     "Read permitted audit records, scoped before paging, with other subjects pseudonymized.",
   "kogane.audit.get":
@@ -140,9 +165,13 @@ const wholeStore = (grant: Grant) => grant.scopes.sources === "*" && grant.scope
  * The read tools listed to this grant: each only to a grant its service would
  * answer. A call by any other grant is refused by the service itself, with the
  * same closed code on both transports. `reportedState`: whether this deployment
- * serves `GET /api/v2/reported-state`.
+ * serves `GET /api/v2/reported-state`; `cardSettlements`: whether it serves
+ * `GET /api/v2/reconciliation/card-settlements` (`cardSettlementsAvailable`).
  */
-export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
+export function readMcpTools(
+  grant: Grant,
+  served: { reportedState: boolean; cardSettlements: boolean },
+) {
   return READ_MCP_TOOLS.filter((tool) => {
     switch (tool.name as ReadToolName) {
       case "kogane.instruments.history":
@@ -155,6 +184,9 @@ export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
       case "kogane.card-settlements.unmatched":
       case "kogane.economic-readiness.read":
         return grantAllows(grant, "records.read") && wholeStore(grant);
+      case "kogane.card-settlements.read":
+      case "kogane.card-settlements.ownership":
+        return served.cardSettlements && grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.audit.search":
       case "kogane.audit.get":
         return grantAllows(grant, "audit.read") && grant.scopes.accounts === "*";
@@ -235,6 +267,28 @@ export async function callReadTool(
         return outcome.ok
           ? { status: 200, body: outcome.review }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
+      case "kogane.card-settlements.read":
+      case "kogane.card-settlements.ownership": {
+        // The page's own services; capability and perimeter are graded there,
+        // before validation or database access, for both transports.
+        const sql = d1Executor(env.DB);
+        const outcome =
+          name === "kogane.card-settlements.read"
+            ? await readCardSettlementsForGrant({
+                grant,
+                sql,
+                request: body,
+              })
+            : await readCardOwnershipForGrant({
+                grant,
+                sql,
+                request: body,
+              });
+        if (outcome.status === "refused")
+          return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+        if (outcome.status === "not_found") throw new HttpError(404, "not_found");
+        return { status: 200, body: { apiVersion: 2, ...outcome.answer } };
       }
       case "kogane.card-settlements.unmatched": {
         // The page's own service: capability, perimeter and bounds are
