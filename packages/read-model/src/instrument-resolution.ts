@@ -15,8 +15,9 @@
 //   provider row with no currency), makes the use's currency unconfirmed,
 //   never dropped and never replaced by the other unit. A use in another
 //   role states none.
-// - `LISTED_AS_SQL`: the newest `listed_as` relation per (instrument,
-//   identifier), ordered as the change lifecycle orders a relation's history.
+// - `LISTED_AS_SQL`: the current `listed_as` relation per (instrument,
+//   identifier): its newest decision, ordered as the change lifecycle orders
+//   a relation's history, or its newest proposal when it has no decision.
 // - `INSTRUMENT_HISTORY_SQL`: the mapping revisions, mapping decisions and
 //   `listed_as` relations of up to `INSTRUMENT_HISTORY_BOUND` identifiers, in
 //   the order they were written. The bound is on identifiers, not rows: every
@@ -114,12 +115,17 @@ export interface InstrumentFactsRow {
 }
 
 /**
- * The newest `listed_as` row per (instrument, identifier). Read through
- * `entity_relations_to` by a range on the `identifier:` prefix.
+ * The current `listed_as` row per (instrument, identifier): the newest
+ * decision (`accepted`, `rejected` or `released`) by `created_at` and then
+ * `id`, or the newest proposal when the pair has no decision. A proposal
+ * recorded after a rejection changes nothing (INV07), so it must not re-open a
+ * candidate a person kept apart (ADR 0017's amendment of 2026-11-06). Read
+ * through an `entity_relations` index on the kind and a ref prefix range.
  */
 export const LISTED_AS_SQL = `SELECT fromRef,toRef,status FROM (
  SELECT r.from_ref AS fromRef,r.to_ref AS toRef,r.status,
-  row_number() OVER (PARTITION BY r.from_ref,r.to_ref ORDER BY r.created_at DESC,r.id DESC) AS rank
+  row_number() OVER (PARTITION BY r.from_ref,r.to_ref
+   ORDER BY r.status<>'proposed' DESC,r.created_at DESC,r.id DESC) AS rank
  FROM entity_relations r
  WHERE r.kind='listed_as' AND r.to_ref>='identifier:' AND r.to_ref<'identifier;'
   AND r.from_ref>='instrument:' AND r.from_ref<'instrument;'

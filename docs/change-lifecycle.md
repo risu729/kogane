@@ -187,8 +187,12 @@ receipt's `result` adds `proposalId`, `proposalDecisionRevisionId`, `review`
 (`accept`, `reject` or `withdraw`) and `eventRevisions`.
 
 A withdrawn link cannot be accepted again, a known limit: the proposal row
-stays `accepted` (0032 resolves a proposal once) and the triple's latest
-relation is `rejected`, so the candidate is closed. The two rows can be linked
+stays `accepted` (0032 resolves a proposal once) and the triple's newest
+decision is `rejected`, so the candidate is closed. A link's status is its
+triple's newest decision (by creation time, then insertion order), never a
+proposal recorded after it, in the candidates read and in the purchase lane's
+merge guard alike
+([ADR 0017's amendment](adr/0017-card-purchase-review-commands.md#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision)). The two rows can be linked
 again only through a new proposal, which the purchase lane writes when either
 row's event moves to a new observation
 ([economic-events.md](economic-events.md#pending-to-posted-links)).

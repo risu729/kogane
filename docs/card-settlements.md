@@ -458,6 +458,19 @@ Acceptance also requires explicit ownership evidence: the card account's
 party through current accepted decisions. A login, matching account labels,
 amounts or dates do not establish ownership.
 
+A claim is current while no later decision (`accepted`, `rejected` or
+`released`, in insertion order) names the same owner through either alias of
+the account (`<account>` or `account:<account>`). A proposal recorded after it
+changes nothing: it neither retires an accepted owner nor lifts the veto of a
+dated claim
+([ADR 0017's amendment](adr/0017-card-purchase-review-commands.md#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision)).
+Every reader applies this through the keyed ownership CTEs
+(`packages/read-model/src/card-settlement-ownership.ts`). The migration 0044
+view `card_settlement_fact_ownership` (and `card_settlement_readiness` over it)
+keeps the older rule, under which any later row retires a claim; no reader
+queries either view, and they agree with the CTEs on every store where no
+proposal follows a decision of the same owner.
+
 From a proposed candidate, `口座の保有者と根拠を確認` opens an operator-only
 review of both current account mappings and recorded ownership claims. Each
 side starts without a selected owner. The operator supplies a stable identifier
@@ -798,8 +811,10 @@ statements, and for the sweep once per tick for the statements plus once per
 statement for the debits, over every transaction identity of the store (up to
 100 bank reads a tick: about six minutes of reading at this size). The reads
 now name their statements or debits first and resolve owners through
-`packages/read-model/src/card-settlement-ownership.ts`, the same view text
-applied to the parses of those observations only; the view is unchanged. They
+`packages/read-model/src/card-settlement-ownership.ts`, the view's text
+applied to the parses of those observations only, except that a proposal
+recorded after a decision retires no claim (see
+[candidate and decision lifecycle](#candidate-and-decision-lifecycle)); the view is unchanged. They
 reach identities through `identity_observation_lookup (kind, observation_id)`
 and the identity runs' keys, and the rest through the primary keys and
 `published_parse_runs_run`. The settlement read matched each statement's
