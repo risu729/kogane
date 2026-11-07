@@ -1,6 +1,6 @@
 # ADR 0079: Index pending parse runs so the sweep's maintenance reads only them
 
-- Status: proposed until this PR merges; accepted upon merge
+- Status: accepted (owner approved 2026-11-07 13:39 UTC)
 - Date: 2026-11-06
 
 ## Context
