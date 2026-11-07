@@ -1506,20 +1506,21 @@ owner's agreement.
    `kogane.schedules.maintenance.read`), so a new read tool is mapped to its
    route and that route leaves the gaps.
 
-   | UI read route                                      | MCP read                                        |
-   | -------------------------------------------------- | ----------------------------------------------- |
-   | `/api/v2/query`                                    | `kogane.financial.query`, `kogane.context.open` |
-   | `/api/identity/instrument-candidates`              | `kogane.instruments.candidates`                 |
-   | `/api/identity/account-candidates`                 | `kogane.accounts.candidates`                    |
-   | `/api/identity/instrument-history`                 | `kogane.instruments.history`                    |
-   | `/api/identity/instrument-coverage`                | `kogane.instruments.coverage`                   |
-   | `/api/v2/card-purchases`                           | `kogane.purchases.explain`                      |
-   | `/api/v2/reported-state`                           | `kogane.reported-state.read`                    |
-   | `/api/v2/reconstructed-state`                      | `kogane.reconstructed-state.read`               |
-   | `/api/v2/audit`                                    | `kogane.audit.search`                           |
-   | `/api/v2/reconciliation/card-statements-unmatched` | `kogane.card-settlements.unmatched`             |
+   | UI read route                                                                                                | MCP read                                                 |
+   | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------- |
+   | `/api/v2/query`                                                                                              | `kogane.financial.query`, `kogane.context.open`          |
+   | `/api/identity/instrument-candidates`                                                                        | `kogane.instruments.candidates`                          |
+   | `/api/identity/account-candidates`                                                                           | `kogane.accounts.candidates`                             |
+   | `/api/identity/instrument-history`                                                                           | `kogane.instruments.history`                             |
+   | `/api/identity/instrument-coverage`                                                                          | `kogane.instruments.coverage`                            |
+   | `/api/v2/card-purchases`                                                                                     | `kogane.purchases.explain`                               |
+   | `/api/v2/reported-state`                                                                                     | `kogane.reported-state.read`                             |
+   | `/api/v2/reconstructed-state`                                                                                | `kogane.reconstructed-state.read`                        |
+   | `/api/v2/audit`                                                                                              | `kogane.audit.search`                                    |
+   | `/api/v2/reconciliation/card-statements-unmatched`                                                           | `kogane.card-settlements.unmatched`                      |
+   | `/api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage` | `kogane.identity.read` ([UI read pages](#ui-read-pages)) |
 
-   The 35 gaps, by group:
+   The 31 gaps, by group:
 
    | Group                    | Routes with no MCP read                                                                                                                                          |
    | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1527,7 +1528,6 @@ owner's agreement.
    | v1 observations          | `/api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`, `/api/artifacts/:id`, `/api/observations/:kind/:id`, `/api/raw/:sha256`                |
    | Evidence browser         | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact`, `…/runs/:run/artifacts/:artifact/raw`             |
    | Balances and rewards     | `/api/v2/balances/latest`, `/api/v2/balances/history`, `/api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                      |
-   | Identity pages           | `/api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage`                                                     |
    | Reconciliation and state | `/api/v2/reconciliation/card-settlements`, `…/card-settlements/statements`, `…/card-settlements/ownership` (Phase 2 unit 2g), `/api/v2/reported-holdings-change` |
    | Reports and quality      | `/api/v2/reports`, `/api/v2/reports/:id`, `…/:id/explanation`, `…/:id/export`, `/api/collection-quality`, `/api/collection-quality/:source`                      |
    | Operator pages           | `/api/ops/v1/schedules` (`kogane.schedules.maintenance.read` covers the maintenance part only), `/api/v2/delegations`                                            |
