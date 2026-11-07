@@ -423,7 +423,7 @@ before them is the `sqlite_master` check the route also runs. Deciding a review 
 lifecycle, graded there; on MCP that needs a delegation
 ([ADR 0063](adr/0063-delegated-ai-operation-path.md)), and
 `MCP_DELEGATIONS` is empty. This is the read half of the owner's UI-parity
-decision of 2026-11-07 (ADR 0081).
+decision of 2026-11-07 ([ADR 0081](adr/0081-ui-parity-through-mcp.md)).
 
 ## Financial meaning and limits
 
