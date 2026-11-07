@@ -9,13 +9,19 @@ const SEQUENCE_PROBLEM = "コミット番号は1以上の整数で入力して�
 const pad = (value: number) => String(value).padStart(2, "0");
 
 function instantProblem(instant: string): string | null {
-  return formProblem({ ...BASE, cut: { kind: "instant", coreEpoch: "synthetic-epoch", instant } }, TODAY);
+  return formProblem(
+    { ...BASE, cut: { kind: "instant", coreEpoch: "synthetic-epoch", instant } },
+    TODAY,
+  );
 }
 
 /** Independent oracle: the platform's UTC calendar must round-trip without normalization. */
 function roundTrips(instant: string): boolean {
   const milliseconds = Date.parse(instant);
-  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === instant.replace("Z", ".000Z");
+  return (
+    Number.isFinite(milliseconds) &&
+    new Date(milliseconds).toISOString() === instant.replace("Z", ".000Z")
+  );
 }
 
 describe("reconstruction form knowledge cuts", () => {
@@ -30,7 +36,12 @@ describe("reconstruction form knowledge cuts", () => {
     ])
       expect([instant, instantProblem(instant)]).toEqual([instant, INSTANT_PROBLEM]);
     for (const commitSeq of ["9007199254740992", "9007199254740993", "9999999999999999"])
-      expect(formProblem({ ...BASE, cut: { kind: "sequence", coreEpoch: "epoch", commitSeq } }, TODAY)).toBe(SEQUENCE_PROBLEM);
+      expect(
+        formProblem(
+          { ...BASE, cut: { kind: "sequence", coreEpoch: "epoch", commitSeq } },
+          TODAY,
+        ),
+      ).toBe(SEQUENCE_PROBLEM);
   });
 
   test("every month/day slot over a Gregorian 400-year cycle agrees with the UTC calendar", () => {
@@ -43,7 +54,8 @@ describe("reconstruction form knowledge cuts", () => {
           const instant = `${year}-${pad(month)}-${pad(day)}T00:00:00Z`;
           const expected = roundTrips(instant);
           const actual = instantProblem(instant) === null;
-          if (actual !== expected) expect({ instant, actual }).toEqual({ instant, actual: expected });
+          if (actual !== expected)
+            expect({ instant, actual }).toEqual({ instant, actual: expected });
           checked++;
         }
     expect(checked).toBe(184800);
@@ -57,7 +69,8 @@ describe("reconstruction form knowledge cuts", () => {
           const instant = `2026-03-01T${pad(hour)}:${pad(minute)}:${pad(second)}Z`;
           const expected = roundTrips(instant);
           const actual = instantProblem(instant) === null;
-          if (actual !== expected) expect({ instant, actual }).toEqual({ instant, actual: expected });
+          if (actual !== expected)
+            expect({ instant, actual }).toEqual({ instant, actual: expected });
           checked++;
         }
     expect(checked).toBe(93025);
@@ -76,14 +89,32 @@ describe("reconstruction form knowledge cuts", () => {
     ])
       expect(instantProblem(instant)).toBe(INSTANT_PROBLEM);
     const sequences: [string, boolean][] = [
-      ["1", true], ["9", true], ["10", true], ["9007199254740990", true],
-      ["9007199254740991", true], ["9007199254740992", false],
-      ["9007199254740993", false], ["9999999999999999", false],
-      ["10000000000000000", false], ["0", false], ["-1", false], ["01", false],
-      ["1.0", false], ["1e3", false], [" 1", false], ["1 ", false], ["", false],
+      ["1", true],
+      ["9", true],
+      ["10", true],
+      ["9007199254740990", true],
+      ["9007199254740991", true],
+      ["9007199254740992", false],
+      ["9007199254740993", false],
+      ["9999999999999999", false],
+      ["10000000000000000", false],
+      ["0", false],
+      ["-1", false],
+      ["01", false],
+      ["1.0", false],
+      ["1e3", false],
+      [" 1", false],
+      ["1 ", false],
+      ["", false],
     ];
     for (const [commitSeq, valid] of sequences)
-      expect([commitSeq, formProblem({ ...BASE, cut: { kind: "sequence", coreEpoch: "epoch", commitSeq } }, TODAY)]).toEqual([commitSeq, valid ? null : SEQUENCE_PROBLEM]);
+      expect([
+        commitSeq,
+        formProblem(
+          { ...BASE, cut: { kind: "sequence", coreEpoch: "epoch", commitSeq } },
+          TODAY,
+        ),
+      ]).toEqual([commitSeq, valid ? null : SEQUENCE_PROBLEM]);
   });
 
   test("the other form checks keep their messages and the three cut modes", () => {
@@ -96,9 +127,15 @@ describe("reconstruction form knowledge cuts", () => {
       [{ to: "2400-01-02" }, "終了日は今日（日本時間）以前にしてください。"],
       [{ from: "2024-03-01", to: "2025-03-02" }, null],
       [{ from: "2024-03-01", to: "2025-03-03" }, "期間は366日以内にしてください。"],
-      [{ cut: { kind: "sequence", coreEpoch: "", commitSeq: "1" } }, "コミット記録の世代を入力してください。"],
+      [
+        { cut: { kind: "sequence", coreEpoch: "", commitSeq: "1" } },
+        "コミット記録の世代を入力してください。",
+      ],
       [{ cut: { kind: "sequence", coreEpoch: "epoch", commitSeq: "1" } }, null],
-      [{ cut: { kind: "instant", coreEpoch: "epoch", instant: "2024-02-29T00:00:00Z" } }, null],
+      [
+        { cut: { kind: "instant", coreEpoch: "epoch", instant: "2024-02-29T00:00:00Z" } },
+        null,
+      ],
     ];
     for (const [change, expected] of cases)
       expect(formProblem({ ...BASE, cut: latest, ...change }, TODAY)).toBe(expected);
