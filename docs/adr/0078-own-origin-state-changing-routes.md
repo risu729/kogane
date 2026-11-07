@@ -1,7 +1,7 @@
 # ADR 0078: Refuse another site's Origin on the command and operations routes
 
 - Status: proposed (accepted when its pull request merges)
-- Date: 2026-11-06
+- Date: 2026-11-06 (rebased onto main 2026-11-07)
 - Related: [ADR 0047](0047-mcp-client-connection.md) (the own-origin rule on
   every agent path), [ADR 0039](0039-alarm-schedule-management.md) (same-origin
   JSON and `x-kogane-settings` on the schedule settings writes),
@@ -73,6 +73,14 @@ routes are reads and are not changed.
 - Limit: a browser that sent no `Origin` on a cross-site POST would not be
   stopped by this rule. No current browser does; the media type is still not
   required on these routes.
+- The rule protects a browser session only. An MCP client, which since
+  [ADR 0084](0084-mcp-operator-authority-without-delegation.md) applies
+  operations on `/mcp` as itself, already met the agent paths' rule there
+  and sends no `Origin`; nothing about it changes.
+- The bodies these routes read stay bounded in bytes before parsing
+  (`boundedText`, `services/app/src/http.ts`); the origin check runs before
+  that read on the command routes, and before the operations app reads its
+  body.
 
 ## Verification
 
