@@ -31,19 +31,19 @@ function legacyScopedParseRuns(db: Database, sources: readonly string[]): unknow
     .all(...(sources as string[]));
 }
 
-function recording(db: Database): SqlExecutor & { statements: number } {
-  const executor = {
-    statements: 0,
+function recording(db: Database): SqlExecutor & { binds: (readonly unknown[])[] } {
+  const binds: (readonly unknown[])[] = [];
+  return {
+    binds,
     all: async <T>(text: string, args: readonly unknown[]) => {
-      executor.statements += 1;
+      binds.push(args);
       return db.query(text).all(...(args as never[])) as T[];
     },
     first: async <T>(text: string, args: readonly unknown[]) => {
-      executor.statements += 1;
+      binds.push(args);
       return (db.query(text).get(...(args as never[])) as T | null) ?? null;
     },
   };
-  return executor;
 }
 
 describe("the scoped parse-run window", () => {
@@ -65,8 +65,25 @@ describe("the scoped parse-run window", () => {
     const executor = recording(store.db);
     const reader = createObservationReader(executor);
     expect(await reader.sourceParseRuns([])).toEqual([]);
-    expect(executor.statements).toBe(0);
-    expect(await reader.sourceParseRuns(["vpass", "vpass"])).toEqual(
+    expect(executor.binds).toEqual([]);
+    expect(await reader.sourceParseRuns(["vpass", "myjcb", "vpass"])).toEqual(
+      legacyScopedParseRuns(store.db, ["myjcb", "vpass"]) as never,
+    );
+    expect(executor.binds).toEqual([['["myjcb","vpass"]']]);
+  });
+
+  test("filters by source before the window, so newer runs of an unlisted source never crowd it out", async () => {
+    const { store } = baseWorld();
+    const reader = createObservationReader(recording(store.db));
+    const vpass = await reader.sourceParseRuns(["vpass"]);
+    expect(vpass.length).toBeGreaterThan(0);
+    const run = store.run("smbc-bank");
+    for (let index = 0; index <= PAGE_LIMIT; index += 1)
+      store.bankRow(run, `2026-08-${String((index % 28) + 1).padStart(2, "0")}T00:00:00.000Z`);
+    const overview = await reader.overview();
+    expect(overview.parseRuns.some((row) => vpass.some((own) => own.id === row.id))).toBe(false);
+    expect(await reader.sourceParseRuns(["vpass"])).toEqual(vpass);
+    expect(await reader.sourceParseRuns(["vpass"])).toEqual(
       legacyScopedParseRuns(store.db, ["vpass"]) as never,
     );
   });

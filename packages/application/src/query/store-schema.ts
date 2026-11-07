@@ -33,14 +33,16 @@ export type StoreFeature = keyof typeof STORE_FEATURES;
 /** True only when the store holds every table and view the feature names. */
 export async function storeHasFeature(sql: SqlExecutor, feature: StoreFeature): Promise<boolean> {
   const { tables, views } = STORE_FEATURES[feature];
-  const marks = (names: readonly string[]) => names.map(() => "?").join(",");
+  // The names are this module's constants, written into the statement so the
+  // probe reads as the feature it checks (and a test can recognise it).
+  const names = (list: readonly string[]) => list.map((name) => `'${name}'`).join(",");
   const clauses = [
-    ...(tables.length ? [`(type='table' AND name IN (${marks(tables)}))`] : []),
-    ...(views.length ? [`(type='view' AND name IN (${marks(views)}))`] : []),
+    ...(tables.length ? [`(type='table' AND name IN (${names(tables)}))`] : []),
+    ...(views.length ? [`(type='view' AND name IN (${names(views)}))`] : []),
   ];
   const row = await sql.first<{ present: number }>(
     `SELECT count(*) AS present FROM sqlite_master WHERE ${clauses.join(" OR ")}`,
-    [...tables, ...views],
+    [],
   );
   return row?.present === tables.length + views.length;
 }

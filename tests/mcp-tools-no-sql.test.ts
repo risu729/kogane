@@ -10,7 +10,9 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 
 const source = resolve(import.meta.dir, "../services/app/src");
-const IMPORT = /(?:import|export)\s[^;]*?\sfrom\s*["'](\.{1,2}\/[^"']+)["']/gsu;
+// `import … from`, `export … from`, `import "./x"` and `import("./x")`.
+const IMPORT =
+  /(?:(?:import|export)\s[^;]*?\sfrom\s*|\bimport\s*\(?\s*)["'](\.{1,2}\/[^"']+)["']/gsu;
 
 /** Every module of services/app/src reachable from `entry` by relative imports. */
 function reachable(entry: string): string[] {
@@ -42,6 +44,17 @@ const SCREEN_ONLY_SQL: Record<string, string> = {
   "reports-api.ts": "the report routes; capabilities imports only reportArtifactsAvailable",
 };
 
+/**
+ * What the graph may import from a module whose other exports run SQL a
+ * screen route needs: the functions here issue none, or only through
+ * packages/application. Importing anything else from it fails the guard, so
+ * an exemption above cannot quietly start covering an MCP call.
+ */
+const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
+  "balances-v2.ts": ["balanceProjectionReader", "balanceReadConfigured", "readTarget"],
+  "reports-api.ts": ["reportArtifactsAvailable"],
+};
+
 const modules = reachable("mcp.ts");
 const adapters = modules.filter((name) => !(name in SCREEN_ONLY_SQL));
 // A CommandStore, SqlExecutor or D1 call: `store.first<…>(`, `db\n  .prepare(`, …
@@ -71,6 +84,32 @@ describe("MCP tools issue no SQL of their own (ADR 0081)", () => {
       expect(modules).toContain(name);
     for (const name of ["agent-api.ts", "agent-service.ts", "capabilities.ts"])
       expect(modules).toContain(name);
+  });
+  test("the graph imports only the SQL-free functions of the screen-only modules", () => {
+    for (const [target, allowed] of Object.entries(ALLOWED_IMPORTS)) {
+      const specifier = target.replace(/\.ts$/u, "");
+      const named = new RegExp(
+        String.raw`import\s*(?:type\s*)?\{([^}]*)\}\s*from\s*["']\./${specifier}(?:\.ts)?["']`,
+        "gu",
+      );
+      const names = new Set<string>();
+      for (const name of adapters) {
+        const text = readFileSync(resolve(source, name), "utf8");
+        // A namespace or side-effect import would bring in everything.
+        expect(text).not.toMatch(
+          new RegExp(String.raw`import\s*(?:\*|["'])[^;]*\./${specifier}(?:\.ts)?["']`, "u"),
+        );
+        for (const match of text.matchAll(named))
+          for (const part of match[1]!.split(",")) {
+            const id = part
+              .trim()
+              .replace(/^type\s+/u, "")
+              .split(/\s+as\s+/u)[0];
+            if (id) names.add(id);
+          }
+      }
+      expect([...names].filter((id) => !allowed.includes(id))).toEqual([]);
+    }
   });
   test("every screen-only exemption is on the graph and still holds SQL", () => {
     for (const name of Object.keys(SCREEN_ONLY_SQL)) {

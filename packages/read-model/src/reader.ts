@@ -92,7 +92,6 @@ export interface ParsingHealth {
   failed: number;
 }
 
-/** One source's visible fetch runs, counted over its whole history. */
 /** One row of `sourceParseRuns`: the run and the parser build it ran. */
 export interface SourceParseRun {
   id: number;
@@ -100,6 +99,7 @@ export interface SourceParseRun {
   parser_version: string;
 }
 
+/** One source's visible fetch runs, counted over its whole history. */
 export interface SourceFetchRunCount {
   source_id: string;
   run_count: number;
