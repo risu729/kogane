@@ -93,7 +93,11 @@ what the UI can, the owner answered 「仕組みをなくす」 (remove the mech
 its UI rights), remove or narrow the principal's `AGENT_API_GRANTS` entry,
 remove the person from the MCP Access application's policy, or unset
 `ACCESS_MCP_AUDIENCE`. Each takes effect on the next request; nothing applied
-is deleted. There is no switch that stops MCP writes while keeping MCP reads.
+is deleted. There is no switch that stops MCP writes while keeping MCP reads:
+the owner controls which tools an agent may call in the MCP client's own tool
+settings instead (owner, 2026-11-07 06:32 UTC: "i'll control them in the mcp
+settings in the mcp client, so fine"). The fixed budget of item 5 stays as the
+server-side runaway guard.
 
 ## Consequences
 
