@@ -37,8 +37,10 @@ The operator HTTP API can edit schedules and maintenance. Research is not
 automatically refreshed. MCP query/explanation/proposal tools,
 maintenance-window, instrument-history and audit reads, and delegated
 operations exist; the committed configuration grants one MCP reader summary
-and record reads and no schedule capability, and `MCP_DELEGATIONS` is empty,
-so no delegated write executes. Accepted collection and session-refresh
+and record reads and no schedule capability; as the operator's own MCP
+principal it may also plan, decide and request operations over MCP
+([ADR 0084](docs/adr/0084-mcp-operator-authority-without-delegation.md)), but
+writes no schedule. Accepted collection and session-refresh
 requests run through the alarm's private named collector RPC
 ([ADR 0048](docs/adr/0048-operation-collector-dispatch.md)), but no connection
 is enabled for that dispatch.

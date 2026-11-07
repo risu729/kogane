@@ -468,9 +468,10 @@ The six operations MCP tools would too, but `/mcp` refuses them from its
 agent-only caller before they get that far
 ([ADR 0047](adr/0047-mcp-client-connection.md)); the delegated command,
 decision and operations tools (`services/app/src/delegated-command-tools.ts`,
-`delegated-decision-tools.ts`, `ops-tools.ts`) are graded by an MCP delegation
-instead ([ADR 0063](adr/0063-delegated-ai-operation-path.md)), and the
-committed `MCP_DELEGATIONS` is empty.
+`delegated-decision-tools.ts`, `ops-tools.ts`) are graded instead by the
+authority ADR 0084 gives every MCP client the MCP Access application admits
+([ADR 0063](adr/0063-delegated-ai-operation-path.md),
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 
 - A subject in `OPERATOR_SUBJECTS` is the human operator.
 - A subject in `AGENT_GRANTS` is an agent. Its `approve`/`commit` is
@@ -568,10 +569,7 @@ stale, and Approve / Commit buttons. The buttons act only when the API
 advertises `commands: true`; without it the screen is read-only and says so.
 After a commit the receipt panel distinguishes `受理` (accepted) from
 `反映済み` (published) and offers a re-check rather than claiming completion
-(addendum 11 §5). Above the plan, a read-only **AIへの委任** notice shows the
-AI delegations in force, if any
-([agent API](agent-api.md#the-operators-delegation-status-s8-2026-11-06));
-it does not change what the operator's buttons do.
+(addendum 11 §5).
 
 A plan that reviews something shown elsewhere adds a panel that reads the
 reviewed item back from the server. The panel compares the plan's pins with that
