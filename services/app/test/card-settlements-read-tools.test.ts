@@ -8,6 +8,9 @@ import { settlementFacts } from "../../../packages/application/test/card-settlem
 import { seedRegistry, seedRun, publishParse } from "./fixtures";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import worker from "../src/worker";
+import { callTool, toolContext } from "../src/agent-service";
+import { readMcpTools } from "../src/read-tools";
+import type { Grant } from "../../../packages/application/src/index";
 
 const OWNER = "synthetic-settlement-owner";
 const PRINCIPAL = `mcp-client:${OWNER}`;
@@ -112,15 +115,16 @@ let schemaAhead = false;
 afterEach(() => {
   schemaAhead = false;
 });
-const environment = (grant: unknown) =>
+// No table configures a grant any more (ADR 0084): every MCP client, and the
+// browser operator, holds the whole-store grant. A narrower grant is given to
+// the shared service directly, which is where scope and capability are graded.
+const environment = (_grant?: unknown) =>
   ({
     ...env,
     DB: schemaAhead ? withoutSettlementViews(env.DB) : env.DB,
     ACCESS_ISSUER: issuer,
     ACCESS_AUDIENCE: APP_AUD,
     ACCESS_MCP_AUDIENCE: MCP_AUD,
-    AGENT_API_GRANTS: JSON.stringify({ [OWNER]: grant, [PRINCIPAL]: grant }),
-    MCP_DELEGATIONS: "",
     AGENT_GRANTS: "[]",
     OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
   }) as Env;
@@ -187,6 +191,19 @@ const call = async (name: string, args: unknown, grant: unknown = GRANT) =>
       grant,
     )
   ).result;
+/** The service's answer and listing under a grant no deployment configures. */
+const NOW = "2026-11-07T00:00:00Z";
+const direct = (name: string, args: unknown, grant: typeof GRANT) =>
+  callTool(
+    name as never,
+    args,
+    toolContext(environment(), { principal: PRINCIPAL, ...grant } as Grant, NOW),
+  );
+const listedUnder = (grant: typeof GRANT) =>
+  readMcpTools({ principal: PRINCIPAL, ...grant } as Grant, {
+    reportedState: true,
+    cardSettlements: true,
+  }).map((tool) => tool.name);
 const listed = async (grant: unknown = GRANT) =>
   (await mcp({ jsonrpc: "2.0", id: 1, method: "tools/list" }, grant)).result.tools.map(
     (tool) => tool.name,
@@ -237,45 +254,52 @@ describe("card settlement reads for agents", () => {
   });
 
   it("are listed and answered only to records.read over the whole store", async () => {
+    // Every MCP client holds that grant, so both are listed to it.
     expect(await listed()).toEqual(expect.arrayContaining([LIST, OWNERSHIP]));
+    expect(listedUnder(GRANT)).toEqual(expect.arrayContaining([LIST, OWNERSHIP]));
     for (const [grant, code] of [
       [{ ...GRANT, capabilities: ["summary.read"] }, "unauthorized"],
       [{ ...GRANT, scopes: { sources: ["myjcb"], accounts: "*" } }, "evidence_restricted"],
       [{ ...GRANT, scopes: { sources: "*", accounts: ["synthetic-card"] } }, "evidence_restricted"],
     ] as const) {
-      const names = await listed(grant);
+      const names = listedUnder(grant);
       expect(names).not.toContain(LIST);
       expect(names).not.toContain(OWNERSHIP);
       for (const [tool, args] of [
         [LIST, {}],
         [OWNERSHIP, { proposalId: ID }],
       ] as const) {
-        const viaHttp = await http(tool, args, grant);
-        const viaMcp = await call(tool, args, grant);
-        expect(viaHttp.status).toBe(403);
-        expect(viaMcp.isError).toBe(true);
-        expect(await viaHttp.json()).toEqual(viaMcp.structuredContent);
-        expect(viaMcp.structuredContent).toMatchObject({ code });
+        const answer = await direct(tool, args, grant);
+        expect(answer.status).toBe(403);
+        expect(answer.body).toMatchObject({ code });
       }
     }
   });
 
   it("page only as deep as the grant's maxRows, before any read", async () => {
     const shallow = { ...GRANT, budget: { ...GRANT.budget, maxRows: 50 } };
-    expect((await http(LIST, { offset: 0 }, shallow)).status).toBe(200);
+    expect((await direct(LIST, { offset: 0 }, shallow)).status).toBe(200);
     expect(
-      (await http(LIST, { proposalId: ID }, { ...GRANT, budget: { ...GRANT.budget, maxRows: 1 } }))
-        .status,
+      (
+        await direct(
+          LIST,
+          { proposalId: ID },
+          { ...GRANT, budget: { ...GRANT.budget, maxRows: 1 } },
+        )
+      ).status,
     ).toBe(200);
-    const viaHttp = await http(LIST, { offset: 1 }, shallow);
-    const viaMcp = await call(LIST, { offset: 1 }, shallow);
-    expect(viaHttp.status).toBe(413);
-    expect(viaMcp.isError).toBe(true);
-    expect(await viaHttp.json()).toEqual(viaMcp.structuredContent);
-    expect(viaMcp.structuredContent).toMatchObject({
+    const answer = await direct(LIST, { offset: 1 }, shallow);
+    expect(answer.status).toBe(413);
+    expect(answer.body).toMatchObject({
       code: "budget_exceeded",
       refs: ["budget:maxRows=50"],
     });
+    // Past the published bound, the whole-store grant refuses alike on both transports.
+    const viaHttp = await http(LIST, { offset: 1000 });
+    const viaMcp = await call(LIST, { offset: 1000 });
+    expect(viaHttp.status).toBe(413);
+    expect(viaMcp.isError).toBe(true);
+    expect(await viaHttp.json()).toEqual(viaMcp.structuredContent);
   });
 
   it("are absent, not refused, while the route is not served", async () => {

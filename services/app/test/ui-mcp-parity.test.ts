@@ -14,10 +14,10 @@
 // a gap fails here too, so the lists only shrink. Adding an entry is a
 // regression of ADR 0081 and needs the owner's agreement in the PR.
 //
-// "Published" means published to the widest caller this Worker serves: an
-// MCP client whose grant holds every agent capability over the whole store
-// and whose delegation holds every delegation capability, on a deployment
-// with every flag on. A tool missing from that list exists for nobody.
+// "Published" means published to an MCP client, which since ADR 0084 holds
+// every agent capability and every operation over the whole store, on a
+// deployment with every flag on. A tool missing from that list exists for
+// nobody.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,7 +26,6 @@ import {
   OPERATION_CATALOGUE,
   type OperationName,
 } from "../../../packages/application/src/operation-path/catalogue.ts";
-import { AGENT_CAPABILITIES } from "../../../packages/application/src/grants.ts";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { routeServes, uiApiPatterns } from "./ui-routes";
 
@@ -100,7 +99,7 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
   "/api/v2/reconciliation/card-settlements/statements":
     "card settlement review grouped by statement; kogane.card-settlements.read returns the same candidates ungrouped",
   "/api/v2/reported-holdings-change": "reported holdings between two dates (ADR 0075)",
-  // Reports, quality, schedules, delegations.
+  // Reports, quality and schedules.
   "/api/v2/reports": "stored report list",
   "/api/v2/reports/:id": "one stored report",
   "/api/v2/reports/:id/explanation": "a report's explanation",
@@ -109,7 +108,6 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
   "/api/collection-quality/:source": "collection quality cells of one source",
   "/api/ops/v1/schedules":
     "schedule page snapshot (jobs, leases, survey proposals, maintenance); kogane.schedules.maintenance.read covers maintenance only",
-  "/api/v2/delegations": "the operator's delegation status page",
 };
 
 /**
@@ -139,7 +137,6 @@ const NOT_READ_ROUTES: Readonly<Record<string, string>> = {
 // ── the widest published tool list ───────────────────────────────────────
 
 const OWNER = "owner-parity-synthetic";
-const PRINCIPAL = `mcp-client:${OWNER}`;
 const APP_AUD = "fixture-browser-audience";
 const MCP_AUD = "fixture-mcp-audience";
 const ISSUER = "https://parity-test.cloudflareaccess.com";
@@ -167,29 +164,13 @@ afterEach(() => {
 });
 
 function widestConfiguration(): Record<string, unknown> {
-  const all = { sources: "*", accounts: "*", scheduleSources: "*" };
+  // Since ADR 0084 every MCP client holds every agent capability and every
+  // operation over the whole store; nothing configures it.
   return {
     ACCESS_ISSUER: ISSUER,
     ACCESS_AUDIENCE: APP_AUD,
     ACCESS_MCP_AUDIENCE: MCP_AUD,
     OPERATOR_SUBJECTS: JSON.stringify([OWNER]),
-    AGENT_API_GRANTS: JSON.stringify({
-      [PRINCIPAL]: {
-        scopes: all,
-        capabilities: AGENT_CAPABILITIES,
-        budget: { maxRows: 1000, maxProposalTargets: 5, maxExplainDepth: 6 },
-      },
-    }),
-    MCP_DELEGATIONS: JSON.stringify({
-      [PRINCIPAL]: {
-        delegatedBy: OWNER,
-        role: "operator-delegate",
-        scopes: all,
-        issuedAt: new Date(Date.now() - 60_000).toISOString(),
-        notAfter: new Date(Date.now() + 3_600_000).toISOString(),
-        budget: { writesPerDay: 30 },
-      },
-    }),
     COMMANDS_ENABLED: "true",
     OPS_API_ENABLED: "true",
     SCHEDULES_ENABLED: "true",

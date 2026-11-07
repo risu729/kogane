@@ -12,7 +12,8 @@
   `packages/observation-shared/src/card-ownership-contract.ts`,
   `apps/web/src/pages/Confirm.tsx`, `apps/web/src/card-ownership-display.tsx`
 - Related: [ADR 0063](0063-delegated-ai-operation-path.md) (delegated
-  operations), [card settlements: ownership](../card-settlements.md#candidate-and-decision-lifecycle),
+  operations), [ADR 0084](0084-mcp-operator-authority-without-delegation.md)
+  (MCP clients act with the UI's authority), [card settlements: ownership](../card-settlements.md#candidate-and-decision-lifecycle),
   [change lifecycle](../change-lifecycle.md)
 
 ## Context
@@ -48,8 +49,8 @@ directly ([ADR 0081](0081-ui-parity-through-mcp.md)).
    existing ownership review command (`relation.accept`), one account and
    role at a time, under a new closed marker. Each application is a plan,
    an approval and a commit, with its decision row and audit record, and is
-   withdrawn by `relation.reject` like any claim. A delegated agent applies it
-   through MCP's `kogane.command.*` tools, the same command the page uses.
+   withdrawn by `relation.reject` like any claim. An agent applies it through
+   MCP's `kogane.command.*` tools, the same command the page uses.
 
 Option 1 changes adopted state without a decision (INV07) and is invisible
 in the history; option 2 needs one plan per account, a few in practice.
@@ -77,10 +78,10 @@ in the history; option 2 needs one plan per account, a few in practice.
    (`single_account_scope_unconfirmed`). The commit repeats these checks in
    its receipt guard, as for the self-declaration.
 4. **Who applies it.** Whoever may plan and approve a `relation.accept`: the
-   operator through the command API, or an MCP client that the delegated
-   `kogane.command.*` tools admit (ADR 0063; the owner decided on 2026-11-07
-   to admit every authenticated MCP client, recorded separately). This ADR
-   adds no delegation. The confirmation page shows and
+   operator through the command API, or any MCP client through the
+   `kogane.command.*` tools, which act with the UI's authority
+   ([ADR 0084](0084-mcp-operator-authority-without-delegation.md)). This ADR
+   adds no authority of its own. The confirmation page shows and
    approves an owner-default plan; the card-ownership page does not yet offer
    to plan one (it plans only the sole-personal self-declaration).
 5. **What it is not.** Not provider-name verification, KYC or a statement of

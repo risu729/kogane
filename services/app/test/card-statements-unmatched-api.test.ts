@@ -11,6 +11,9 @@ import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { validUnmatchedCardStatementsReview } from "../../../packages/observation-shared/src/card-statements-unmatched-contract";
 import worker from "../src/worker";
+import { callTool, toolContext } from "../src/agent-service";
+import { readMcpTools } from "../src/read-tools";
+import type { Grant } from "../../../packages/application/src/index";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 
@@ -77,7 +80,6 @@ interface CallOptions {
   method?: string;
   body?: unknown;
   subject?: string | null;
-  grants?: Record<string, unknown>;
 }
 
 async function call(path: string, options: CallOptions = {}) {
@@ -108,12 +110,6 @@ async function call(path: string, options: CallOptions = {}) {
     ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
     OPERATOR_SUBJECTS: '["synthetic-operator"]',
     AGENT_GRANTS: '["synthetic-agent"]',
-    AGENT_API_GRANTS: JSON.stringify(
-      options.grants ?? {
-        "synthetic-agent": FULL_GRANT,
-        "mcp-client:synthetic-agent": FULL_GRANT,
-      },
-    ),
   } as Env);
 }
 
@@ -183,19 +179,22 @@ describe("GET /api/v2/reconciliation/card-statements-unmatched", () => {
   });
 });
 
+// No table configures a grant any more (ADR 0084). A narrower grant is given
+// to the shared service directly, which is where it is graded.
+const narrow = (grant: Record<string, unknown>) =>
+  ({ principal: "mcp-client:synthetic-agent", ...FULL_GRANT, ...grant }) as Grant;
+const direct = (body: unknown, grant: Record<string, unknown>) =>
+  callTool(TOOL, body, toolContext(env as Env, narrow(grant), "2026-11-07T00:00:00Z"));
+
 describe("kogane.card-settlements.unmatched", () => {
   it("answers the same page over HTTP and MCP, and is listed to a whole-store records.read grant only", async () => {
     const listed = await mcp({ method: "tools/list" });
     expect(listed["result"].tools.map((tool: { name: string }) => tool.name)).toContain(TOOL);
-    const summaryOnly = await mcp(
-      { method: "tools/list" },
-      {
-        grants: { "mcp-client:synthetic-agent": { ...FULL_GRANT, capabilities: ["summary.read"] } },
-      },
-    );
-    expect(summaryOnly["result"].tools.map((tool: { name: string }) => tool.name)).not.toContain(
-      TOOL,
-    );
+    const summaryOnly = readMcpTools(narrow({ capabilities: ["summary.read"] }), {
+      reportedState: true,
+      cardSettlements: true,
+    });
+    expect(summaryOnly.map((tool) => tool.name)).not.toContain(TOOL);
     const overRoute = await (await call(PATH)).json();
     const overAgent = await call(AGENT_PATH, { subject: "synthetic-agent", body: {} });
     expect(overAgent.status).toBe(200);
@@ -210,34 +209,27 @@ describe("kogane.card-settlements.unmatched", () => {
 
   it("is graded by the agent's grant and its strict input, and writes nothing", async () => {
     const before = await tables();
-    const summary = await call(AGENT_PATH, {
-      subject: "synthetic-agent",
-      body: {},
-      grants: { "synthetic-agent": { ...FULL_GRANT, capabilities: ["summary.read"] } },
-    });
+    const summary = await direct({}, { capabilities: ["summary.read"] });
     expect(summary.status).toBe(403);
-    expect(await summary.json()).toMatchObject({
+    expect(summary.body).toMatchObject({
       code: "unauthorized",
       refs: ["capability:records.read"],
     });
-    const narrowed = await call(AGENT_PATH, {
-      subject: "synthetic-agent",
-      body: {},
-      grants: {
-        "synthetic-agent": { ...FULL_GRANT, scopes: { sources: ["myjcb"], accounts: "*" } },
-      },
-    });
+    const narrowed = await direct({}, { scopes: { sources: ["myjcb"], accounts: "*" } });
     expect(narrowed.status).toBe(403);
-    expect(await narrowed.json()).toMatchObject({
+    expect(narrowed.body).toMatchObject({
       code: "evidence_restricted",
       refs: ["scope:source"],
     });
-    const deep = await call(AGENT_PATH, { subject: "synthetic-agent", body: { offset: 500 } });
+    const deep = await direct({ offset: 500 }, {});
     expect(deep.status).toBe(413);
-    expect(await deep.json()).toMatchObject({
+    expect(deep.body).toMatchObject({
       code: "budget_exceeded",
       refs: ["budget:maxRows=500"],
     });
+    // The whole-store grant's own bound, over the route.
+    const past = await call(AGENT_PATH, { subject: "synthetic-agent", body: { offset: 1000 } });
+    expect(past.status).toBe(413);
     const unknownKey = await call(AGENT_PATH, {
       subject: "synthetic-agent",
       body: { source: "x" },
