@@ -2,7 +2,7 @@
 
 - Status: accepted (implementation step A01); the
   [2026-11-06 amendment](#amendment-2026-11-06-a-relation-triples-status-is-its-newest-decision)
-  is proposed until the PR that carries it merges, then accepted
+  is accepted (owner approved 2026-11-07 13:39 UTC)
 - Date: 2026-09-09; amended 2026-11-06
 - Review basis: whole-architecture addendum 00, 04 (AR01–AR18), 05, 06, 13 §1–§3
   of the design review of commit `130912af`

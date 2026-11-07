@@ -2,7 +2,7 @@
 
 - Status: accepted (merged 2026-09-27 in #261); the
   [2026-11-06 amendment](#amendment-2026-11-06-a-later-proposal-never-replaces-a-relation-decision)
-  is proposed until the PR that carries it merges, then accepted
+  is accepted (owner approved 2026-11-07 13:39 UTC)
 - Date: 2026-09-26; amended 2026-11-06
 - Decision owner: the owner accepted decision 1.1 of the
   [next-milestone plan](../plans/2026-09-next-milestone.md#11-add-real-command-kinds-with-one-rebuild-not-more-relation-markers)

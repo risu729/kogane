@@ -2,7 +2,7 @@
 
 - Status: accepted; the review list follows in an in-flight PR. The
   [2026-11-06 amendment](#amendment-2026-11-06-the-ctes-depart-from-the-views-in-one-rule)
-  is proposed until the PR that carries it merges, then accepted
+  is accepted (owner approved 2026-11-07 13:39 UTC)
 - Date: 2026-09-25; amended 2026-11-06
 - Implemented by: #251; the `card_settlement_readiness` reads in #256 (open at
   the time of writing, branch `claude/settlement-readiness-cost-wr8pj4`)
