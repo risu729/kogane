@@ -115,6 +115,30 @@ describe("kogane.evidence.raw.read", () => {
     expect(refused).toEqual({ status: 413, body: { error: "raw_too_large" } });
   });
 
+  it("encodes every byte at the 1 MiB bound and across chunk boundaries", async () => {
+    // Printable bytes that never repeat with the 0x8000-byte encoding chunk, so
+    // a chunk dropped, repeated or cut short changes the decoded bytes.
+    const text = (length: number, seed: number) =>
+      Array.from({ length }, (_, i) =>
+        String.fromCharCode(33 + ((i * 7 + seed + (i >> 15)) % 94)),
+      ).join("");
+    for (const length of [RAW_READ_MAX_BYTES, 3 * 0x8000 + 5, 1]) {
+      const seeded = await seedRun({ count: 1, body: text(length, length % 89) });
+      const item = seeded.artifacts[0]!;
+      const path = `/api/evidence/v1/runs/r_${seeded.id}/artifacts/a_${item.id}/raw`;
+      const download = new Uint8Array(await (await page.routeResponse(path)).arrayBuffer());
+      expect(download.length).toBe(length);
+      const overHttp = await page.http(
+        TOOL,
+        { runId: `r_${seeded.id}`, artifactId: `a_${item.id}` },
+        EVIDENCE_GRANT,
+      );
+      expect(overHttp.status, String(length)).toBe(200);
+      expect(overHttp.body.data.byteSize).toBe(length);
+      expect(decode(overHttp.body.data.content)).toEqual(download);
+    }
+  });
+
   it("refuses tampered bytes as the download does", async () => {
     const tampered = await seedRun({ count: 1, body: "unique raw-read integrity fixture" });
     const item = tampered.artifacts[0]!;

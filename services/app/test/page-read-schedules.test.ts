@@ -10,9 +10,11 @@ import { PAGE_READ_ROUTES, pageReadMcpTools, pageReadStore } from "../src/page-r
 import { pageReadHarness, RECORDS_GRANT, tableCounts } from "./page-read-harness";
 
 const TOOL = "kogane.schedules.read";
+// The page's occurrences carry run and evidence ids, which `schedules.read`
+// alone never reaches (ADR 0046): the page also needs whole-store `evidence.read`.
 const SCHEDULES_GRANT = {
-  scopes: { sources: ["vpass"], accounts: ["synthetic-account"], scheduleSources: "*" },
-  capabilities: ["schedules.read"],
+  scopes: { sources: "*", accounts: "*", scheduleSources: "*" },
+  capabilities: ["schedules.read", "evidence.read"],
   budget: { maxRows: 100, maxProposalTargets: 3, maxExplainDepth: 3 },
 } as const;
 const LEASE_REF = "0b6f1c3e-8d2a-4f5b-9c7e-1a2b3c4d5e6f";
@@ -83,7 +85,7 @@ describe("kogane.schedules.read", () => {
     expect(PAGE_READ_ROUTES[TOOL]).toEqual(["/api/ops/v1/schedules"]);
   });
 
-  it("is listed only to schedules.read over every schedule source, while settings are on", async () => {
+  it("is listed only to schedules.read over every schedule source with whole-store evidence.read, while settings are on", async () => {
     const names = async (grant: unknown, on = true) =>
       (
         await pageReadMcpTools(
@@ -102,6 +104,19 @@ describe("kogane.schedules.read", () => {
     ).not.toContain(TOOL);
     expect(
       await names({ ...SCHEDULES_GRANT, scopes: { sources: "*", accounts: "*" } }),
+    ).not.toContain(TOOL);
+    // `schedules.read` alone, as `kogane.schedules.maintenance.read` needs it, is not enough.
+    expect(await names({ ...SCHEDULES_GRANT, capabilities: ["schedules.read"] })).not.toContain(
+      TOOL,
+    );
+    expect(await names({ ...SCHEDULES_GRANT, capabilities: ["evidence.read"] })).not.toContain(
+      TOOL,
+    );
+    expect(
+      await names({
+        ...SCHEDULES_GRANT,
+        scopes: { ...SCHEDULES_GRANT.scopes, sources: ["vpass"] },
+      }),
     ).not.toContain(TOOL);
     expect(await page.listed()).toContain(TOOL);
     expect(await off.listed()).not.toContain(TOOL);
@@ -148,10 +163,24 @@ describe("kogane.schedules.read", () => {
       expect((await page.mcp(TOOL, args)).body).toEqual(overHttp.body);
     }
     for (const [grant, expected] of [
-      [RECORDS_GRANT, { code: "unauthorized", refs: ["capability:schedules.read"] }],
+      [
+        RECORDS_GRANT,
+        { code: "unauthorized", refs: ["capability:schedules.read", "capability:evidence.read"] },
+      ],
+      [
+        { ...SCHEDULES_GRANT, capabilities: ["schedules.read"] },
+        { code: "unauthorized", refs: ["capability:evidence.read"] },
+      ],
       [
         { ...SCHEDULES_GRANT, scopes: { ...SCHEDULES_GRANT.scopes, scheduleSources: ["vpass"] } },
         { code: "evidence_restricted", refs: ["scope:scheduleSource"] },
+      ],
+      [
+        {
+          ...SCHEDULES_GRANT,
+          scopes: { sources: ["vpass"], accounts: ["synthetic-account"], scheduleSources: "*" },
+        },
+        { code: "evidence_restricted", refs: ["scope:source", "scope:account"] },
       ],
     ] as const) {
       // No deployment configures such a grant (ADR 0084), so it is given to

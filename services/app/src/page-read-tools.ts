@@ -67,11 +67,10 @@ interface PageReadTool<Schema extends z.ZodType> {
   schema: Schema;
   /** The agent capability that reaches this page, always over the whole store. */
   capability: AgentCapability;
-  /**
-   * The grant scope that must be whole: the store's sources and accounts
-   * (the default), or the schedule sources for the schedules page.
-   */
-  scope?: "store" | "schedules";
+  /** A second capability the page also needs, over the whole store as well. */
+  also?: AgentCapability;
+  /** Whether the grant's schedule sources must be whole too, as well as its sources and accounts. */
+  scheduleScope?: true;
   /** The UI route paths this tool answers, for the parity inventory. */
   routes: readonly string[];
   /**
@@ -408,10 +407,15 @@ const TOOLS = {
   "kogane.schedules.read": tool({
     title: "Collection schedules page",
     description:
-      "The schedules page as the operator sees it: each configured collection job (enabled, times, next run, the actual alarm and its reservation, the source's maintenance status, the latest run), the maintenance windows, recent occurrences and held execution leases. The same answer as GET /api/ops/v1/schedules without its `survey` part (the maintenance re-survey's proposals, read by kogane.schedules.survey.read), under schedules.read over every schedule source. Served while schedule settings are on. Read-only: nothing is edited, released or relayed as an operator.",
+      "The schedules page as the operator sees it: each configured collection job (enabled, times, next run, the actual alarm and its reservation, the source's maintenance status, the latest run), the maintenance windows, recent occurrences and held execution leases. The same answer as GET /api/ops/v1/schedules without its `survey` part (the maintenance re-survey's proposals, read by kogane.schedules.survey.read), under schedules.read over every schedule source and evidence.read over the whole store (its occurrences carry run and evidence ids). Served while schedule settings are on. Read-only: nothing is edited, released or relayed as an operator.",
     schema: z.strictObject({}),
+    // The jobs are `schedules.read`'s, over every schedule source; the
+    // occurrences' run and evidence ids (`runIds`, `runLinks`) and the held
+    // leases are what `schedules.read` alone never reaches (ADR 0046), so the
+    // page also needs `evidence.read` over the whole store.
     capability: "schedules.read",
-    scope: "schedules",
+    also: "evidence.read",
+    scheduleScope: true,
     routes: ["/api/ops/v1/schedules"],
     needs: "schedules",
     read: async (env) => {
@@ -483,11 +487,14 @@ const PAGE_READ_MCP_TOOLS = Object.entries(TOOLS).map(([name, definition]) => {
 
 /** Why this grant may not read a whole-store page, as refs; empty when it may. */
 function refusedRefs(grant: Grant, definition: PageReadTool<z.ZodType>): string[] {
-  const { capability } = definition;
-  if (!grantAllows(grant, capability)) return [`capability:${capability}`];
-  if (definition.scope === "schedules")
-    return grant.scopes.scheduleSources === "*" ? [] : ["scope:scheduleSource"];
+  const missing = [definition.capability, ...(definition.also ? [definition.also] : [])].filter(
+    (capability) => !grantAllows(grant, capability),
+  );
+  if (missing.length > 0) return missing.map((capability) => `capability:${capability}`);
   return [
+    ...(definition.scheduleScope && grant.scopes.scheduleSources !== "*"
+      ? ["scope:scheduleSource"]
+      : []),
     ...(grant.scopes.sources === "*" ? [] : ["scope:source"]),
     ...(grant.scopes.accounts === "*" ? [] : ["scope:account"]),
   ];
