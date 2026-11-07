@@ -361,10 +361,10 @@ still on the first page; with four such terminals the walk completes.
 
 - In the listing, a registration that threw (counted in `failed`) does not
   count against the tick's `maxRegistrations`, exactly like a terminal
-  answered from its row. Nothing else about it changes: nothing is recorded,
-  only the `failed` count reaches the lane's log line and tick record (the
-  error class goes to the scan's `onFailure` hook, which the deployed cron
-  does not pass), and the next walk attempts it again
+  answered from its row. Nothing else about it changes: nothing is recorded
+  but the `failed` count in the lane's log line and tick record, the error
+  class is logged once per throw as `collection_scan_registration_failed`
+  (the deployed stage's `onFailure`, #1008), and the next walk attempts it again
   (G1-13). Every terminal on the page is still attempted in listing order.
 - The continuations before the listing are unchanged (their own bound of
   five). A registration that yields at the operation budget (`pending`,
