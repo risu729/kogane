@@ -132,8 +132,10 @@ statement are not handled.
 
 ### Provider-stated debit accounts
 
-Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md) and its
-2026-09-27 amendment (proposed). What the code does today:
+Design: [ADR 0032](adr/0032-provider-stated-debit-accounts.md), its
+2026-09-27 amendment and its
+[2026-11-07 amendment](adr/0032-provider-stated-debit-accounts.md#amendment-2026-11-07-the-review-shows-the-evidence-under-the-current-reader)
+(proposed). What the code does today:
 
 **The page.** Every MyJCB credit detail page observed in round 4 (the
 confirmed statement and the ショッピングスキップ払い page, live and in the
@@ -205,9 +207,20 @@ grouped `/statements` list) carries `debitAccount`, read with the decision
 history for every review a read returns
 (`packages/application/src/query/card-settlements.ts`,
 `CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL`): the candidate's latest
-`card_settlement_debit_account_evidence` row under the current policy, found
-through `card_settlement_debit_account_evidence_candidate` for the page's
-candidates only (the grouped list's judged candidates, in one read). For example:
+`card_settlement_debit_account_evidence` row under the current policy whose
+cited `card_debit_account_statement` reading was made under the current reader
+version (`CARD_INFORMATION_READER_VERSION`,
+`packages/domain/src/myjcb-card-information.ts`, the constant the lane and the
+settlement sweep also use). The version is part of choosing the newest row, so
+after a reader-version bump a later row citing the earlier reader's reading
+neither shows nor hides an earlier row citing a current reading. The read
+also takes the refusal code of the current reader's reading of the
+candidate's own statement page (the raw object its statement parse run read,
+for its card). Both are found by key for the page's candidates only (the
+grouped list's judged candidates, in one read): the evidence through
+`card_settlement_debit_account_evidence_candidate` and the cited reading's
+primary key, the page's reading through the parse run's and artifact's keys
+and `card_debit_account_statement_object`. For example:
 
 ```json
 {
@@ -227,22 +240,36 @@ candidates only (the grouped list's judged candidates, in one read). For example
 ```
 
 `not_proposed` carries the rule's closed reason and no bank account. A
-candidate without a row is `absent` with a closed reason, never blank:
-`source_has_no_debit_account_statement` (Vpass, which has no reader) or
-`evidence_not_recorded` (a MyJCB candidate the sweep has recorded nothing for
-under the current policy: its page has no `read` row under the current reader
-version yet or was `refused`, its bank has more known accounts than the rule
-is given, or the sweep has not revisited it since the policy changed). A
-malformed row fails the read (`card_settlement_debit_account_evidence_invalid`).
+candidate without such a row is `absent` with a closed reason, never blank,
+and no statement reference, bank account or time:
+
+- `source_has_no_debit_account_statement`: Vpass, which has no reader;
+- the lane's refusal code, when the current reader's reading of the
+  candidate's own page is `refused` (`card_information_absent`,
+  `card_information_ambiguous`, `card_information_table_missing`,
+  `card_information_table_invalid`, `card_information_name_invalid`,
+  `card_information_account_invalid`, `page_not_utf8`,
+  `raw_object_unreadable`; the sweep cites only `read` readings, so such a
+  page never has a row). A refusal under an earlier reader version, of
+  another page or of another card's reading of the page does not count;
+- `evidence_not_recorded`: a MyJCB candidate the sweep has recorded nothing for
+  under the current policy and reader version, with no refusal of its page:
+  the page has no reading under the current reader version yet, its bank has
+  more known accounts than the rule is given, or the sweep has not revisited
+  it since the policy or reader version changed.
+
+A malformed row or a refusal code outside that set fails the read
+(`card_settlement_debit_account_evidence_invalid`).
 The page shows it as `カード会社が示す引落口座`. It is evidence for the
 reviewer only: it adds no acceptance blocker, removes none, and the plan and
 acceptance never read it.
 
 Limits:
 
-- **Only the latest row under the current policy is shown.** The review
-  page shows no earlier outcomes and no row of a superseded policy; they stay
-  in the table.
+- **Only the latest row under the current policy and reader version is
+  shown.** The review page shows no earlier outcomes, no row of a superseded
+  policy and no row citing an earlier reader's reading; they stay in the
+  table.
 - **The review page does not show the displayed bank name, branch or
   digits** of the reading, only the outcome, the bank account the proposal
   names and how many leading digits were compared.
@@ -952,6 +979,22 @@ second row on a re-run or for the same bytes of another run, refusals stored
 without values, append-only guards), and the settlement sweep (evidence
 attached, a changed outcome appended, the candidate's facts and eligibility
 unchanged).
+`packages/application/test/card-settlement-query.test.ts` covers the review's
+`debitAccount` on synthetic rows: the latest row under the current policy, a
+later row citing an earlier reader's reading neither shown nor hiding an
+earlier current one, a page refused under the current reader shown as
+`absent` with its code while a refusal under another reader, of another page
+or of another card is not, a current row winning over a refusal, and a
+malformed row or unknown refusal code failing the read.
+`card-settlement-review-scale.test.ts` checks that its plan reaches the
+evidence, the cited reading and the page's reading by key on the scaled store
+without statistics. Wherever every cited reading is current the read returns
+the rows #1019's text did
+(`packages/application/test/card-settlement-debit-account-legacy-sql.ts`):
+`services/processor/test/card-settlement-scale.test.ts` compares the two
+after the sweep, on random stores and the scaled store, and
+`card-debit-account.test.ts` pins the accepted refusal codes to migration
+0060's CHECK.
 `services/processor/test/card-settlement-unmatched.test.ts` runs the sweep on
 synthetic rows for each [unmatched code](#unmatched-statements): two debits
 summing to the total and a partial debit, an equal debit four days late and no
