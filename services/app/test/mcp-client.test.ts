@@ -953,8 +953,10 @@ describe("the UI, HTTP and MCP return one result (AT72)", () => {
       ["explain", { ref: "observation:transaction:999999" }],
       ["reconcile.propose", { ...proposal(), evidenceRefs: ["observation:transaction:999999"] }],
     ] as const) {
+      // The browser session as the operator holds the MCP client's grant.
       const http = await send(`/api/agent/v1/${tool}`, args, {
         identity: { via: "app", subject: OTHER },
+        environment: { OPERATOR_SUBJECTS: JSON.stringify([OTHER]) },
       });
       const viaMcp = await callTool(`kogane.${tool}`, args);
       expect(http.status, tool).toBeGreaterThanOrEqual(400);

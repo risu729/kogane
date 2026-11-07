@@ -62,12 +62,18 @@ answers byte for byte (AT72).
 ## Grants
 
 Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
-(2026-11-07) no table configures a grant. Every caller the Cloudflare Access
-check proved (`browserCaller` or `mcpCaller`, `src/auth.ts`) gets the
-whole-store grant (`fullGrant`): a browser session's subject, exactly as
-`authenticate` returns it, or — on `/mcp`, for an identity that came through
-the MCP Access application — the agent-only `mcp-client:<sub>`
-([ADR 0047](adr/0047-mcp-client-connection.md)). Nothing here parses the
+(2026-11-07) no table configures a grant. The caller is the one the
+Cloudflare Access check proved (`browserCaller` or `mcpCaller`,
+`src/auth.ts`): a browser session's subject, exactly as `authenticate`
+returns it, or — on `/mcp`, for an identity that came through the MCP Access
+application — the agent-only `mcp-client:<sub>`
+([ADR 0047](adr/0047-mcp-client-connection.md)). An MCP client gets the
+whole-store grant (`fullGrant`). A browser session gets what the UI gives its
+subject (`agentGrant`, `src/agent-api.ts`): the operator the whole-store
+grant; a subject in `AGENT_GRANTS` the GET routes' reader grant
+(`summary.read`, `records.read`, `evidence.read`) plus
+`interpretation.propose`; anyone else, or a deployment whose lists cannot be
+read, the reader grant alone. Nothing here parses the
 token a second time and nothing reads an actor from a request body or header,
 which is the same rule the change lifecycle follows. Who can be proved is
 decided by the Access policies; which tools an agent uses is set in the MCP

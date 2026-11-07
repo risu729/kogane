@@ -70,8 +70,8 @@ describe("the grant vocabulary", () => {
       "policy.admin",
       "retention.admin",
       "external-money-action",
-      // Maintenance windows are read only: a revision is an operation of the
-      // operator's MCP principal (ADR 0084), never granted here, and there is no job
+      // Maintenance windows are read only here: a revision is an operation of
+      // an MCP client (ADR 0084), never a read grant, and there is no job
       // edit, toggle, lease release or run.
       "schedules.maintenance.update",
       "schedules.update",

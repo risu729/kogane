@@ -185,6 +185,9 @@ async function http(subject: string, name: string, body: unknown) {
     audience: APP_AUD,
     body,
     headers: { "content-type": "application/json" },
+    // The HTTP agent route gives a browser session what the UI gives it; the
+    // maintenance windows are the operator's in the UI (ADR 0084).
+    environment: { OPERATOR_SUBJECTS: JSON.stringify([...new Set([OWNER, subject])]) },
   });
   return { status: response.status, body: (await response.json()) as any };
 }

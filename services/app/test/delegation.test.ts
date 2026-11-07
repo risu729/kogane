@@ -198,7 +198,16 @@ describe("ADR 0084: every MCP client activates only installed operations", () =>
       const http = await send("/api/agent/v1/capabilities", {}, configuration, OWNER, APP_AUD);
       expect(http.status).toBe(200);
       const { delegation: _status, ...reads } = report;
-      expect(await http.json()).toEqual({ ...reads, principal: OWNER });
+      // The browser session holds what the UI gives its subject: the whole
+      // store as the operator, the reader grant when the list is unusable.
+      if (configured === JSON.stringify([OWNER]))
+        expect(await http.json()).toEqual({ ...reads, principal: OWNER });
+      else
+        expect(((await http.json()) as { capabilities: string[] }).capabilities).toEqual([
+          "summary.read",
+          "records.read",
+          "evidence.read",
+        ]);
       const query = await send(
         "/mcp",
         rpcBody("tools/call", {

@@ -13,8 +13,9 @@ import {
 // serves card purchase recognition and an eighth (`reconstructed-state.read`)
 // only while it serves the reconstructed state, each with a bounded JSON body, each behind
 // the same Access gate as every read route. No table grants these routes any
-// more (ADR 0084, 2026-11-07): every caller the Access gate proved gets the
-// whole-store grant (`fullGrant`), and the test snapshot adapter never serves
+// more (ADR 0084, 2026-11-07): an MCP client gets the whole-store grant
+// (`fullGrant`), a browser session what the UI gives its subject
+// (`agentGrant`), and the test snapshot adapter never serves
 // these paths at all. Control over which tools an MCP client uses lives in
 // the MCP client's own settings.
 //
@@ -37,6 +38,7 @@ import {
   type OperationCall,
   type OperationName,
   parseQueryRequest,
+  resolvePrincipal,
   subjectOfPrincipal,
   toolOperation,
 } from "../../../packages/application/src/index";
@@ -153,6 +155,30 @@ export function readerGrant(principal: string): Grant {
 }
 
 /**
+ * ADR 0084: an MCP client the MCP Access application admitted reads and
+ * proposes over the whole store. A browser session on the HTTP agent routes
+ * holds what the UI gives the same subject, by the UI's own lists: the
+ * operator (`OPERATOR_SUBJECTS`) the whole store; a subject in `AGENT_GRANTS`,
+ * which may propose through the command routes, the reader grant plus that
+ * proposal; anyone else the GET routes' reader grant, which reaches no audit
+ * log, maintenance window or proposal. No table decides any of it, and
+ * unreadable lists fall back to the reader grant.
+ */
+function agentGrant(env: Env, caller: AgentCaller): Grant {
+  const full = fullGrant(caller.principal);
+  if (caller.kind === "mcp-client") return full;
+  const resolved = resolvePrincipal(env, caller.principal);
+  if (!resolved.ok) return readerGrant(caller.principal);
+  if (resolved.principal.kind === "human") return full;
+  const reader = readerGrant(caller.principal);
+  return {
+    ...reader,
+    capabilities: [...reader.capabilities, "interpretation.propose"],
+    budget: full.budget,
+  };
+}
+
+/**
  * POST routes. Returns `null` when the path is not an agent path. The caller
  * is the one the Access gate proved (`mcpCaller` or `browserCaller`); nothing
  * here reads the token a second time.
@@ -169,8 +195,7 @@ export async function agentApi(
   if (request.method !== "POST") throw new HttpError(405, "method_not_allowed");
   if (url.search) throw new HttpError(400, "invalid_query");
   assertAgentTransport(request, url);
-  // Every proved caller reads and proposes over the whole store (ADR 0084).
-  const grant = fullGrant(caller.principal);
+  const grant = agentGrant(env, caller);
   // Query/proposal clocks keep their existing whole-second contract; the
   // operation envelope keeps the millisecond instant.
   const delegationNow = new Date().toISOString();
@@ -185,9 +210,9 @@ export async function agentApi(
     // `OPS_API_ENABLED` off they are neither listed nor callable, so the MCP
     // surface matches the routes this deployment actually serves. An MCP
     // client is never an operator (ADR 0047): `callOpsTool` refuses its caller
-    // object before any grader runs. The operator's own MCP principal is
-    // published the delegated operations tools instead, acting as itself
-    // under the authority ADR 0084 derives for it.
+    // object before any grader runs. Every MCP client is published the
+    // delegated operations tools instead, acting as itself under the
+    // authority ADR 0084 gives it.
     const ops = opsApiEnabled(env);
     // A deployment whose command grant lists cannot be read grades nobody, so
     // it can authorize none of the operations tools; publishing them would

@@ -71,15 +71,23 @@ The owner decided, on 2026-11-07:
    identity from the MCP Access application (ADR 0047's separate audience; a
    browser token or a service token is refused), as `mcp-client:<sub>`. On
    `/api/agent/v1/*` it is the browser session's subject. The operator lists
-   (`OPERATOR_SUBJECTS`, `AGENT_GRANTS`) grade the UI's command and operations
-   routes only; they neither add nor remove MCP authority, and an MCP
-   principal is still never graded as the operator (ADR 0047).
-3. **Reads.** Every proved caller holds the whole-store grant (`fullGrant`):
+   (`OPERATOR_SUBJECTS`, `AGENT_GRANTS`) grade the UI's routes, including the
+   browser's HTTP agent routes (item 3); they neither add nor remove MCP
+   authority, and an MCP principal is still never graded as the operator
+   (ADR 0047).
+3. **Reads.** Every MCP client holds the whole-store grant (`fullGrant`):
    `sources`, `accounts` and `scheduleSources` are `"*"`, every capability of
    the read vocabulary (`summary.read`, `records.read`, `audit.read`,
    `evidence.read`, `interpretation.propose`, `schedules.read`), and the
    published bounds (`GRANT_LIMITS`: 1000 rows, 50 proposal targets, explain
-   depth 8). The browser's GET routes keep their own reader grant.
+   depth 8). A browser session on `/api/agent/v1/*` holds what the UI gives
+   its subject (`agentGrant`): the operator the same whole-store grant; a
+   subject in `AGENT_GRANTS` the GET routes' reader grant (`summary.read`,
+   `records.read`, `evidence.read` over `"*"`) plus `interpretation.propose`,
+   as on the command routes; anyone else, or a deployment whose lists cannot
+   be read, the reader grant alone. So the HTTP agent routes reach the audit
+   log and maintenance windows only for the operator, as the UI does. The
+   browser's GET routes keep their own reader grant.
 4. **Operations.** `resolveDelegation` takes only the verified caller and the
    clock. Any `mcp-client:<sub>` whose subject has the actor shape resolves,
    with every operation capability of ADR 0063 item 4 over the whole store.
@@ -125,6 +133,12 @@ writes while keeping MCP reads.
   every operation the UI offers (except R3 and R4) over MCP, as soon as this
   ships. Today that policy admits only the owner. Adding a person to it is
   now an authority change, not only a sign-in change.
+- A browser session on `/api/agent/v1/*` no longer needs a table entry: the
+  operator gets the whole-store grant there, and any other signed-in subject
+  the reader grant the GET routes already gave it. That includes
+  `purchases.explain`, which needs only `records.read` over `"*"`, although
+  the UI's card-purchases page is the operator's; the same rows are already
+  readable to that subject on the GET routes.
 - The owner's MCP identity gains schedule writes and the audit, evidence and
   schedule reads it did not have under the committed grant, and its read
   bound grows from 100 to 1000 rows.
