@@ -598,6 +598,10 @@ either.
 
 ### Balances and positions
 
+Unexpected store failures use the UI routes' `503 catalogue_read_failed`
+answer on both agent transports; explicit read-model and validation refusals
+keep their existing codes.
+
 `kogane.balances.read` is `GET /api/v2/balances/latest` and
 `GET /api/v2/balances/history` for an agent, and `kogane.positions.read` is
 `GET /api/positions` (plan D3 and D4,

@@ -521,7 +521,44 @@ describe("kogane.positions.read", () => {
   });
 });
 
+/** Fail capability reads while leaving the audit sink's tables usable. */
+function failingCatalogue(db: D1Database): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) => {
+          if (sql.includes("sqlite_master")) throw new Error("synthetic catalogue failure");
+          return target.prepare(sql);
+        };
+      const value = Reflect.get(target, property) as unknown;
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
+
 describe("both reads", () => {
+  it("keeps the route's closed 503 for failed catalogue reads on both agent paths", async () => {
+    const environment = { ...granted, DB: failingCatalogue(env.DB) };
+    const cases = [
+      ["/api/v2/balances/latest", BALANCES_PATH, BALANCES_TOOL_NAME, { list: "latest" }],
+      ["/api/v2/balances/history", BALANCES_PATH, BALANCES_TOOL_NAME, { list: "history" }],
+      ["/api/positions", POSITIONS_PATH, POSITIONS_TOOL_NAME, {}],
+    ] as const;
+    for (const [routePath, toolPath, name, args] of cases) {
+      const route = await call(routePath, { environment });
+      expect(route.status, routePath).toBe(503);
+      expect(await route.json()).toMatchObject({ error: "catalogue_read_failed" });
+      const response = await http(toolPath, args, { environment });
+      expect(response.status, routePath).toBe(503);
+      expect(await response.json()).toEqual({ error: "catalogue_read_failed" });
+      const viaMcp = await mcpCall(name, args, { environment });
+      expect(viaMcp.result?.isError, routePath).toBe(true);
+      expect(viaMcp.result?.structuredContent, routePath).toEqual({
+        error: "catalogue_read_failed",
+      });
+    }
+  });
+
   it("need records.read over the whole store, checked before the body is validated", async () => {
     const refusals: [unknown, Record<string, unknown>][] = [
       [
