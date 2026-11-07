@@ -135,15 +135,18 @@ What a released page would do, read from the code:
   bound run captures it. Nothing is counted twice. Every collector token seen
   on 2026-11-07 was derived, so no such run is known, but run-scope
   eligibility does not prevent one.
-- **Card ordinals are assumed to match.** The current snapshot of a
+- **Card ordinals match.** The current snapshot of a
   card-month is chosen per (source, card unit key `card-NNN`, month)
   (`VPASS_STATEMENT_SNAPSHOT_CTES`); only the purchase ranking after it is
   per resolved account. A collector card whose ordinal is one the importer
   used for another card would make that other card's importer-era month no
   longer current (its event retires with nothing to replace it), while the
   card's own importer-era month under its old ordinal is outranked per
-  account, not counted twice. The counts above showed tokens, not that each
-  card kept its importer ordinal; that is not verified.
+  account, not counted twice. Checked read-only on 2026-11-07 (counts only):
+  each of the 6 matched tokens has the same `card-NNN` under both producers,
+  and the seventh card's ordinal is none the importer used, so no card-month
+  is displaced this way today. A later change of the provider's card order
+  could break it; nothing guards against that.
 - **The seventh card** (no importer token) becomes a new account entity with
   no owner and no label, and the months its successful runs captured appear as
   new purchases on it. Its ownership is the owner's decision.
