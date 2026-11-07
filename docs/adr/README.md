@@ -49,7 +49,7 @@ for current behavior.
 - [ADR 0036: Observe covered D1 costs and failures per Processor lane](0036-lane-cost-observability.md)
 - [ADR 0037: Admit reconciliation pages by evidence and reuse clean purchase retirement checks](0037-reconciliation-purchase-cost.md)
 - [ADR 0038: Isolate complete hosted verification while sharing preparation](0038-shared-verification-preparation.md)
-- [ADR 0039: Alarm scheduling and public maintenance rules](0039-alarm-schedule-management.md) — accepted; amended by ADR 0063
+- [ADR 0039: Alarm scheduling and public maintenance rules](0039-alarm-schedule-management.md) — accepted; amended by ADR 0063 and ADR 0085
 - [ADR 0040: Deploy compatible Workers through prebuilt cf versions](0040-compatible-cf-version-deployment.md)
 - [ADR 0041: Separate maintained documentation from historical records](0041-documentation-scope.md)
 - [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — accepted; production verification pending
@@ -86,3 +86,4 @@ for current behavior.
 - [ADR 0076: Classify SBI Shinsei's FX board and stage references as non-account statements under identity policy version 2](0076-sbi-shinsei-non-account-identity.md) — accepted; the sweep re-identifies SBI Shinsei parses append-only after deployment
 - [ADR 0077: Propose aggregator-to-direct account containment from confirmed connection reviews; never propose the same account without leaf evidence](0077-account-connection-candidates.md) — accepted; read, route, agent tool and page; decisions through `relation.accept` / `relation.reject`
 - [ADR 0081: Every operation the web UI offers is also an MCP operation, served by the same application service](0081-ui-parity-through-mcp.md) — accepted; screen-only operations (two `ui` entries, six `ops.*`) and some read pages still lack MCP tools, three tools run their own SQL; no guard test yet
+- [ADR 0085: A collection execution lease proves its holder alive; the Processor frees a lease whose holder went silent](0085-collection-lease-heartbeat.md) — proposed; heartbeat (CORE 0082), 13-minute self-stop, `alarm.lease.expire` on every `processor-tick`
