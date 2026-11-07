@@ -183,6 +183,16 @@ export {
   type StageReport,
   type StageState,
 } from "./operations/requests.ts";
+export {
+  listOperations,
+  OPERATION_LIST_DEFAULT_LIMIT,
+  OPERATION_LIST_MAX_LIMIT,
+  operationListArms,
+  operationListSql,
+  type OperationListPage,
+  type OperationListQuery,
+  type OperationSummary,
+} from "./operations/list.ts";
 
 // ── collector execution of operations (issue #544, ADR 0048) ─────────
 export {

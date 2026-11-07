@@ -345,8 +345,9 @@ target index, one more for each claimed occurrence of that job.
   without its rowid renumbers it, and earlier lane references would name
   other rows or none. A migration that rebuilds one of them copies the rowid.
 - Page loads and reads of the operator's GET routes (the schedules page, the
-  read pages, `/api/v2/query`, this log), except `GET /api/ops/v1/operations/{id}`,
-  which is an operations read and is recorded.
+  read pages, `/api/v2/query`, this log), except `GET /api/ops/v1/operations/{id}`
+  and the list `GET /api/ops/v1/operations`, which are operations reads and are
+  recorded.
 - A request refused before authentication (401), the deployment's
   service-token bootstrap (no subject), a path or tool this deployment does
   not serve (`404 not_found`, MCP `unknown_tool`), and the MCP protocol's own
