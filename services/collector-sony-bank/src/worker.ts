@@ -127,11 +127,16 @@ export async function runSharedCollection(
     };
   });
 }
-function defaultWindow(now: Date): {
+/**
+ * The current JST month up to today's JST date. The bank's dates are Japanese
+ * calendar dates, so the UTC date would end the window a day early before
+ * 09:00 JST and, on the first of a month, request the whole previous month.
+ */
+export function defaultWindow(now: Date): {
   from: string;
   to: string;
 } {
-  const to = now.toISOString().slice(0, 10);
+  const to = new Date(now.getTime() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
   return { from: `${to.slice(0, 8)}01`, to };
 }
 function requiredSecret(value: string | undefined, name: string): string {

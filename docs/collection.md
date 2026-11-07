@@ -322,8 +322,9 @@ Terminal fields: `producer: collector-sony-bank`; one unit `account`
 (`unitKind: account`) whose `artifactCount` counts every artifact but
 `manifest.json`, which belongs to the run and names no unit (ADR 0021; until
 then the manifest named the unit and was counted in it); ranges
-`request-window` (the requested `from`/`to`) and, when wallet statements were
-collected, `wallet-months`; one `terminal` report carrying the outcome;
+`request-window` (the requested `from`/`to`; a scheduled run requests the
+current JST month through today's JST date, `defaultWindow`) and, when wallet
+statements were collected, `wallet-months`; one `terminal` report carrying the outcome;
 `requestedScope.scopeKind = date_range` over the same window;
 `coverageStatus` `complete` for a successful window, `partial` for a partial
 run, `unknown` for a failure. `manifest.json` is the collector manifest with
