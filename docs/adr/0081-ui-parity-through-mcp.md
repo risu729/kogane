@@ -97,8 +97,8 @@ What the code does today (main `02a915a`):
 
 - Before the guard tests pass: `schedules.survey.decide` and
   `schedules.lease.release` need MCP tools (the second refusing as point 3
-  says); read pages such as card settlements and the evidence browser need MCP reads;
-  and the three tools that run their own SQL move it into `packages/application`.
+  says); read pages such as card settlements and the evidence browser need MCP
+  reads. (The three tools that ran their own SQL now call `packages/application`.)
   An inventory of screen operations and read pages against MCP tools is the first
   slice. It goes on the roadmap's parallel track A.
 - Phase 2's card settlement accept and withdraw, and the ownership review, are
@@ -111,8 +111,16 @@ What the code does today (main `02a915a`):
 
 ## Verification
 
-- Today: most MCP tools call shared services; three run their own SQL (above);
-  no guard test exists yet.
+- Today: most MCP tools call shared services. The three that ran their own SQL
+  (above) call `delegatedWritesRemaining` and `ownOperationSource` in
+  `packages/application` instead, and `tests/mcp-tools-no-sql.test.ts` fails
+  when `services/app/src/mcp.ts` or a `*-tools.ts` adapter calls a store
+  directly or holds a SQL statement. SQL still runs on the MCP path in helpers
+  of `services/app/src` that the screens share, outside that guard:
+  `scopedParseRuns` in `agent-service.ts`, the proposal store in
+  `proposals.ts`, and the schema probe in `reported-state-api.ts`. They move
+  into `packages/application` next, and join the guard when they do. No
+  catalogue or read-route guard test exists yet.
 - The six `ops.*` tools: `services/app/test/delegated-ops-parity.test.ts`
   checks that a delegation holding every `operations.*` capability is shown
   all six and a narrower one only those it holds, and that each request gives
