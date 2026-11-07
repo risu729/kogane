@@ -33,8 +33,10 @@ import {
   reportedHoldingsChangeAvailable,
 } from "./reported-holdings-change-api";
 import { readRewardRoute } from "./rewards-api";
-import { readEventsRoute } from "./events-api";
+import { eventsV2Available, readEventsRoute } from "./events-api";
 import { ACTIVITY_BASES } from "../../../packages/read-model/src/index";
+import { readReportRoute, reportArtifactsAvailable } from "./reports-api";
+import { collectionQualityAvailable, readCollectionQuality } from "./collection-quality-api";
 import { catalogue } from "./read";
 import { mcpInputSchema } from "./mcp-input-schema";
 
@@ -56,12 +58,6 @@ const IDENTITY_READ = z.enum(["latest", "as-recorded"]);
 const MEASURE_VIEW = z.enum(["balances", "summaries"]);
 const OFFSET = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 
-/** Which store-dependent routes this deployment serves. */
-export interface PageReadServed {
-  reportedState: boolean;
-  economicEvents: boolean;
-}
-
 interface PageReadTool<Schema extends z.ZodType> {
   title: string;
   description: string;
@@ -71,12 +67,11 @@ interface PageReadTool<Schema extends z.ZodType> {
   /** The UI route paths this tool answers, for the parity inventory. */
   routes: readonly string[];
   /**
-   * Served only where its route is: `reportedState` where
-   * `GET /api/v2/reported-state` is (the store has its views),
-   * `economicEvents` where `GET /api/v2/activity` is (migration 0032's
-   * projection). Otherwise neither listed nor callable.
+   * The part of the store a route needs, for a route that exists only where
+   * the store has its tables or views: without it the tool is neither listed
+   * nor callable, as the route answers 404.
    */
-  servedWhere?: keyof PageReadServed;
+  needs?: PageReadStoreFeature;
   /** The shared reader, called with the request the route would build. */
   read(env: Env, input: z.infer<Schema>): Promise<unknown>;
 }
@@ -213,10 +208,42 @@ const TOOLS = {
     }),
     capability: "records.read",
     routes: ["/api/v2/reported-holdings-change"],
-    servedWhere: "reportedState",
-    read: async (env, params) => {
-      if (!(await reportedHoldingsChangeAvailable(env))) throw new HttpError(404, "not_found");
-      return readHoldingsChange(env, query(params));
+    needs: "reportedState",
+    read: (env, params) => readHoldingsChange(env, query(params)),
+  }),
+  "kogane.reports.read": tool({
+    title: "Fixed report artifacts (評価レポート): list, body and explanation",
+    description:
+      "The stored report artifacts: without `reportId`, one page of the catalogue, newest first (`offset` pages by 50); with `reportId`, that report's stored body (`view: body`, the default) or its cached explanation (`view: explanation`), with its calculation run, replayability and events. The same answer as GET /api/v2/reports and /api/v2/reports/{id}[/explanation], under records.read and a whole-store read grant, except that a restricted or unavailable report is refused here on every view, with the codes the export answers (403 evidence_restricted where its explanation is refused, 404 not_found where only its body is gone), where the operator page still re-displays it (ADR 0072). Re-display only: nothing is recomputed, and the export view is not offered. Served while the store has report artifacts.",
+    schema: z.strictObject({
+      reportId: z
+        .string()
+        .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/u)
+        .optional(),
+      view: z.enum(["body", "explanation"]).optional(),
+      offset: OFFSET.optional(),
+      decimalPolicy: ROUTE_TEXT.optional(),
+    }),
+    capability: "records.read",
+    routes: ["/api/v2/reports", "/api/v2/reports/:id", "/api/v2/reports/:id/explanation"],
+    needs: "reportArtifacts",
+    read: (env, { reportId, view, ...params }) => {
+      // A view or a policy names one report; the list takes neither.
+      if (reportId === undefined && (view !== undefined || params.decimalPolicy !== undefined))
+        throw new HttpError(400, "invalid_request", [
+          view === undefined ? "decimalPolicy" : "view",
+        ]);
+      return readReportRoute(
+        env,
+        {
+          pathname:
+            reportId === undefined
+              ? "/api/v2/reports"
+              : `/api/v2/reports/${encodeURIComponent(reportId)}${view === "explanation" ? "/explanation" : ""}`,
+          searchParams: query(params),
+        },
+        { refuseRestricted: true },
+      );
     },
   }),
   "kogane.events.read": tool({
@@ -230,9 +257,30 @@ const TOOLS = {
     }),
     capability: "records.read",
     routes: ["/api/v2/activity", "/api/v2/obligations"],
-    servedWhere: "economicEvents",
+    needs: "economicEvents",
     read: (env, { collection, ...params }) =>
       readEventsRoute(env, { pathname: `/api/v2/${collection}`, searchParams: query(params) }),
+  }),
+  "kogane.collection-quality.read": tool({
+    title: "Collection quality per job, source and dataset",
+    description:
+      "What each collection stage last did, in closed codes: without `source`, the summary per configured job and per source (schedules, the actual alarm where known, latest runs and stage outcomes); with `source`, that source's cells per unit, dataset and period (`offset` pages them). Identifiers, capture times, counts and codes only, no amount. The same answer as GET /api/collection-quality and /api/collection-quality/{source}, under evidence.read and a whole-store read grant, as on the route. Served while the store has the scheduling tables. Read-only.",
+    schema: z.strictObject({
+      source: z
+        .string()
+        .regex(/^[a-z0-9][a-z0-9-]{0,99}$/u)
+        .optional(),
+      offset: OFFSET.optional(),
+    }),
+    capability: "evidence.read",
+    routes: ["/api/collection-quality", "/api/collection-quality/:source"],
+    needs: "collectionQuality",
+    read: (env, { source, ...params }) =>
+      readCollectionQuality(env, {
+        pathname:
+          source === undefined ? "/api/collection-quality" : `/api/collection-quality/${source}`,
+        searchParams: query(params),
+      }),
   }),
 } as const;
 
@@ -278,23 +326,59 @@ function refusedRefs(grant: Grant, capability: AgentCapability): string[] {
   ];
 }
 
-/** The store-dependent route this page read exists only beside, if any. */
-export function pageReadServedWhere(name: PageReadToolName): keyof PageReadServed | null {
-  return (TOOLS[name] as PageReadTool<z.ZodType>).servedWhere ?? null;
+/** The tables or views a page read's route exists by, and each one's probe. */
+const STORE_FEATURES = {
+  reportedState: reportedHoldingsChangeAvailable,
+  reportArtifacts: reportArtifactsAvailable,
+  collectionQuality: collectionQualityAvailable,
+  economicEvents: eventsV2Available,
+} as const satisfies Record<string, (env: Env) => Promise<boolean>>;
+export type PageReadStoreFeature = keyof typeof STORE_FEATURES;
+/** Whether this store has a feature, each probe asked at most once. */
+export type PageReadStore = (feature: PageReadStoreFeature) => Promise<boolean>;
+
+/**
+ * This store's features for one request, each probed at most once. `known`
+ * supplies an answer the caller already asks for (the reported state's views,
+ * which the reported and reconstructed state's reads share), so one tool list
+ * asks the schema once per feature.
+ */
+export function pageReadStore(
+  env: Env,
+  known: Partial<Record<PageReadStoreFeature, () => Promise<boolean>>> = {},
+): PageReadStore {
+  const asked = new Map<PageReadStoreFeature, Promise<boolean>>();
+  return (feature) => {
+    let answer = asked.get(feature);
+    if (!answer) {
+      answer = known[feature]?.() ?? STORE_FEATURES[feature](env);
+      asked.set(feature, answer);
+    }
+    return answer;
+  };
+}
+
+/** Whether this deployment serves the page read: exactly where it serves its route. */
+export async function pageReadServed(
+  name: PageReadToolName,
+  store: PageReadStore,
+): Promise<boolean> {
+  const needs = (TOOLS[name] as PageReadTool<z.ZodType>).needs;
+  return needs === undefined || (await store(needs));
 }
 
 /**
  * The page reads listed to this grant: exactly those it may call, and of
- * those served only beside a store-dependent route, only where it is.
+ * those whose route exists only with some tables or views, only where it does.
  */
-export function pageReadMcpTools(grant: Grant, served: PageReadServed) {
-  return PAGE_READ_MCP_TOOLS.filter((definition) => {
+export async function pageReadMcpTools(grant: Grant, store: PageReadStore) {
+  const listed = [];
+  for (const definition of PAGE_READ_MCP_TOOLS) {
     const name = definition.name as PageReadToolName;
-    const where = pageReadServedWhere(name);
-    return (
-      (where === null || served[where]) && refusedRefs(grant, TOOLS[name].capability).length === 0
-    );
-  });
+    if (refusedRefs(grant, TOOLS[name].capability).length > 0) continue;
+    if (await pageReadServed(name, store)) listed.push(definition);
+  }
+  return listed;
 }
 
 /**

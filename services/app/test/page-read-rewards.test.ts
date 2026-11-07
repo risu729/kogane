@@ -6,7 +6,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import { runRewardReadProjection } from "../../processor/src/reward-read-projection";
-import { PAGE_READ_ROUTES, pageReadMcpTools } from "../src/page-read-tools";
+import { PAGE_READ_ROUTES, pageReadMcpTools, pageReadStore } from "../src/page-read-tools";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { pageReadHarness, RECORDS_GRANT, tableCounts } from "./page-read-harness";
 import { seedRewardCapture } from "./reward-capture-fixture";
@@ -139,19 +139,26 @@ describe("reward and holdings-change page reads", () => {
       "/api/v2/rewards/expiry",
     ]);
     expect(PAGE_READ_ROUTES[CHANGE]).toEqual(["/api/v2/reported-holdings-change"]);
-    const names = (grant: unknown, reportedState: boolean) =>
-      pageReadMcpTools(grant as never, { reportedState, economicEvents: true }).map(
-        (tool) => tool.name,
-      );
-    expect(names(RECORDS_GRANT, true)).toEqual(expect.arrayContaining([REWARDS, CHANGE]));
+    const names = async (grant: unknown, reportedState: boolean) =>
+      (
+        await pageReadMcpTools(
+          grant as never,
+          pageReadStore(env as Env, {
+            reportedState: async () => reportedState,
+          }),
+        )
+      ).map((tool) => tool.name);
+    expect(await names(RECORDS_GRANT, true)).toEqual(expect.arrayContaining([REWARDS, CHANGE]));
     // The holdings change exists only where the reported state's views do.
-    expect(names(RECORDS_GRANT, false)).toContain(REWARDS);
-    expect(names(RECORDS_GRANT, false)).not.toContain(CHANGE);
+    expect(await names(RECORDS_GRANT, false)).toContain(REWARDS);
+    expect(await names(RECORDS_GRANT, false)).not.toContain(CHANGE);
     for (const grant of [
       { ...RECORDS_GRANT, capabilities: ["summary.read"] },
       { ...RECORDS_GRANT, scopes: { sources: ["sbi-securities"], accounts: "*" } },
     ])
-      expect(names(grant, true).filter((name) => name === REWARDS || name === CHANGE)).toEqual([]);
+      expect(
+        (await names(grant, true)).filter((name) => name === REWARDS || name === CHANGE),
+      ).toEqual([]);
     const listed = await page.listed();
     expect(listed).toContain(REWARDS);
     expect(listed).toContain(CHANGE);

@@ -66,7 +66,7 @@ export async function reportArtifactsAvailable(env: Env): Promise<boolean> {
   return storeHasFeature(d1Executor(env.DB), "reportArtifacts");
 }
 
-function listOffset(url: URL): number {
+function listOffset(url: Pick<URL, "searchParams">): number {
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
     if (key !== "offset" || url.searchParams.getAll(key).length !== 1 || value.length > 16)
@@ -84,14 +84,14 @@ function listOffset(url: URL): number {
  * page at a time. There is no total: a count would be a second read the page
  * could not keep consistent with the rows, and the caller does not need one.
  */
-async function listReports(env: Env, url: URL): Promise<Response> {
+async function listReports(env: Env, url: Pick<URL, "searchParams">): Promise<unknown> {
   const offset = listOffset(url);
   if (!(await reportArtifactsAvailable(env))) throw new HttpError(404, "not_found");
   const rows = await env.DB.prepare(REPORT_LIST_SQL)
     .bind(REPORTS_PAGE_SIZE + 1, offset)
     .all<Omit<ArtifactRow, "storage_ref">>();
   const page = rows.results.slice(0, REPORTS_PAGE_SIZE);
-  return json({
+  return {
     apiVersion: 2,
     items: page.map((row) => ({
       reportId: row.report_id,
@@ -103,7 +103,7 @@ async function listReports(env: Env, url: URL): Promise<Response> {
       createdAt: row.created_at,
     })),
     nextCursor: rows.results.length > REPORTS_PAGE_SIZE ? String(offset + REPORTS_PAGE_SIZE) : null,
-  });
+  };
 }
 
 interface ArtifactRow {
@@ -177,6 +177,26 @@ async function restrictionsFor(
 export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
   if (path !== PREFIX && !path.startsWith(`${PREFIX}/`)) return null;
+  return json(await readReportRoute(env, url));
+}
+
+/**
+ * One report route's answer for this path and query: the reader of
+ * `GET /api/v2/reports[/{id}[/explanation|/export]]` and of
+ * `kogane.reports.read` (ADR 0081), with the route's refusals as
+ * `HttpError`s. `refuseRestricted` is the agent read's rule (ADR 0072,
+ * amendment of 2026-11-06): a restricted or unavailable report is refused on
+ * every view, before its body is read, instead of re-displayed as the
+ * operator page does it (`403 evidence_restricted` where explanation is
+ * refused, `404 not_found` where only the body is gone, the codes `/export`
+ * answers).
+ */
+export async function readReportRoute(
+  env: Env,
+  url: { pathname: string; searchParams: URLSearchParams },
+  options: { refuseRestricted?: boolean } = {},
+): Promise<unknown> {
+  const path = url.pathname;
   if (path === PREFIX) return listReports(env, url);
   const route = reportsRoute(path);
   if (!route) throw new HttpError(404, "not_found");
@@ -224,6 +244,12 @@ export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
     restrictions,
   });
   const capabilities = replayCapabilities(replayability);
+  if (options.refuseRestricted && !capabilities.explain)
+    throw new HttpError(403, "evidence_restricted");
+  // A complete run keeps a report replayable after its body is gone; the
+  // operator page shows it as `unavailable`, the agent read refuses it as
+  // `/export` does.
+  if (options.refuseRestricted && stored === null) throw new HttpError(404, "not_found");
 
   if (route.view !== "body") {
     const allowed = route.view === "export" ? capabilities.export : capabilities.explain;
@@ -237,13 +263,13 @@ export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
     const cached = await env.EVIDENCE.get(`${artifact.storage_ref}.explanation`);
     if (!cached) throw new HttpError(404, "not_found");
     if (cached.size > MAX_BODY_BYTES) throw new HttpError(503, "report_body_too_large");
-    return json({
+    return {
       reportId: artifact.report_id,
       contextId: artifact.context_id,
       replayability,
       interpretationContext: interpretation,
       explanation: JSON.parse(await cached.text()) as unknown,
-    });
+    };
   }
 
   const object = await env.EVIDENCE.get(artifact.storage_ref);
@@ -251,11 +277,11 @@ export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
     if (route.view === "export") throw new HttpError(404, "not_found");
     // The catalogue row survives even when the body is gone; say so instead of
     // rebuilding a different report under the same id.
-    return json({
+    return {
       report: reportDto(artifact, run, "unavailable", replayCapabilities("unavailable")),
       interpretationContext: interpretation,
       body: null,
-    });
+    };
   }
   if (object.size > MAX_BODY_BYTES) throw new HttpError(503, "report_body_too_large");
   const bytes = new Uint8Array(await object.arrayBuffer());
@@ -283,13 +309,13 @@ export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
       occurred_at: string;
     }>();
 
-  return json({
+  return {
     report: reportDto(artifact, run, replayability, capabilities),
     interpretationContext: interpretation,
     events: events.results,
     view: route.view,
     body,
-  });
+  };
 }
 
 function reportDto(

@@ -630,6 +630,20 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
+        name: "kogane.reports.read",
+        required: [],
+        closed: false,
+        properties: ["decimalPolicy", "offset", "reportId", "view"],
+        annotations: readOnly,
+      },
+      {
+        name: "kogane.collection-quality.read",
+        required: [],
+        closed: false,
+        properties: ["offset", "source"],
+        annotations: readOnly,
+      },
+      {
         name: "kogane.purchases.explain",
         required: [],
         closed: false,
@@ -695,6 +709,8 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.rewards.read",
       "kogane.reported-holdings-change.read",
       "kogane.events.read",
+      "kogane.reports.read",
+      "kogane.collection-quality.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -785,6 +801,8 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.rewards.read",
       "kogane.reported-holdings-change.read",
       "kogane.events.read",
+      "kogane.reports.read",
+      "kogane.collection-quality.read",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);

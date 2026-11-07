@@ -322,3 +322,18 @@ publication, identity policy revisions, restricted authority before enumeration,
 Alarm failures/configuration races, read-only browser refresh and existing
 currentness. Production acceptance still follows the scoped read-only checklist
 in [the completion plan](../plans/2026-10-collection-quality-completion.md).
+
+## Amendment 2026-11-07: an agent read of the same page
+
+- Status: accepted (risu's decision of 2026-11-07, recorded as
+  [ADR 0081](0081-ui-parity-through-mcp.md))
+
+This ADR added no MCP tool. ADR 0081 requires one for every UI read, so
+`kogane.collection-quality.read` answers `GET /api/collection-quality` and
+`/api/collection-quality/{source}` through the route's own reader. Because the
+cells carry the provider fetch-unit keys described above, it requires
+`evidence.read` on `"*"` sources and accounts, the capability of the evidence
+routes, and is published only while the five scheduling and run tables exist.
+The committed MCP grant holds no `evidence.read`, so by configuration it is
+listed to no client. The answer travels under `data`, as untrusted provider
+content, and each call is an R0 read in the audit log.

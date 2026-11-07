@@ -252,7 +252,9 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     operation === "balances.read" ||
     operation === "rewards.read" ||
     operation === "reported-holdings-change.read" ||
-    operation === "events.read"
+    operation === "events.read" ||
+    operation === "reports.read" ||
+    operation === "collection-quality.read"
   ) {
     const data = (value["data"] ?? {}) as Record<string, unknown>;
     const coverage = (data["coverage"] ?? {}) as Record<string, unknown>;

@@ -52,12 +52,28 @@ export async function collectionQualityApi(
   if (grant.scopes.sources !== "*" || grant.scopes.accounts !== "*")
     throw new HttpError(403, "scope_restricted");
   if (!(await collectionQualityAvailable(env))) throw new HttpError(404, "not_found");
+  // The summary takes no query at all, not even an empty one (`?`).
+  if (path === COLLECTION_QUALITY_PATH && url.search) throw new HttpError(400, "invalid_query");
+  return json(await readCollectionQuality(env, url));
+}
+
+/**
+ * The collection quality summary or one source's cells for this path and
+ * query: the answer of the route and of `kogane.collection-quality.read`
+ * (ADR 0081), once the caller's authority and the store's tables are known.
+ * Its refusals are `HttpError`s with the route's closed codes.
+ */
+export async function readCollectionQuality(
+  env: Env,
+  url: { pathname: string; searchParams: URLSearchParams },
+): Promise<unknown> {
+  const path = url.pathname;
   try {
     if (path === COLLECTION_QUALITY_PATH) {
-      if (url.search) throw new HttpError(400, "invalid_query");
+      if ([...url.searchParams.keys()].length > 0) throw new HttpError(400, "invalid_query");
       const summary = await queryCollectionQualitySummary(d1Executor(env.DB));
       await readAlarms(env, summary);
-      return json(summary);
+      return summary;
     }
     const sourceId = path.slice(COLLECTION_QUALITY_PATH.length + 1);
     if (!SOURCE.test(sourceId)) throw new HttpError(404, "not_found");
@@ -71,7 +87,7 @@ export async function collectionQualityApi(
       offset: Number(offsetText),
     });
     if (cells === null) throw new HttpError(404, "not_found");
-    return json(cells);
+    return cells;
   } catch (error) {
     // More jobs or sources than the bound are refused, never cut into a partial answer.
     if (error instanceof CollectionQualityLimitError)
