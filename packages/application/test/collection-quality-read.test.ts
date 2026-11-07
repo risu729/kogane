@@ -254,7 +254,10 @@ describe("the cells", () => {
       }),
     ).toEqual({
       ok: true,
-      value: (await queryCollectionQualityCells(counted(store), { sourceId: "vpass", offset: 500 }))!,
+      value: (await queryCollectionQualityCells(counted(store), {
+        sourceId: "vpass",
+        offset: 500,
+      }))!,
     });
     // [request, refusal, code, refs, statements run: the table check, then the source's row]
     for (const [request, refusal, code, refs, statements] of [
