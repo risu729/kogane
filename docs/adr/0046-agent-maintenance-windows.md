@@ -244,7 +244,10 @@ AI, and not anonymous-agent power
   `owner-instructed` or `correction`; the operator's edit records
   `operator-edit`; an accepted survey proposal records
   `maintenance-survey-proposal-accepted` with its proposal as the decision
-  reference (the only decision reference the writer accepts). The writer
+  reference (the only decision reference the writer accepts from the operator;
+  a delegated acceptance gives the same reason with its
+  `delegated-audit:` reference under the private survey route's trusted
+  option, [ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). The writer
   answers `invalid_reason` for anything else, in place of `reason_required`.
 - **One writer, one batch, one record.** `writeMaintenanceRevision(env,
   write, append)` stays the only code that writes a maintenance revision; it
@@ -410,5 +413,6 @@ prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
 state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
 the committed MCP financial-reader grant receives no schedule authority.
-S6 survey acceptance remains unavailable pending the separate owner decision;
+S6 survey acceptance remained unavailable pending the separate owner decision
+(delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.

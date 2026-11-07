@@ -8,12 +8,15 @@ import {
   interpretationContext,
   organizationSql,
 } from "../../../packages/read-model/src/index";
-import { readAccountConnections } from "./account-connections";
-import { connectionAccountLabel } from "./account-connection-display";
+import {
+  connectionAccountLabel,
+  readAccountConnections,
+} from "../../../packages/application/src/query/account-connections.ts";
 import {
   preferredInstrumentNames,
   type PreferredInstrumentName,
-} from "./preferred-instrument-names";
+} from "../../../packages/application/src/query/preferred-instrument-names.ts";
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import type {
   ObservationOrganization,
   OrganizedAccount,
@@ -181,17 +184,18 @@ export async function observationOrganizations(
       ),
     ),
   ];
+  const reads = d1Executor(db);
   const names = new Map<string, PreferredInstrumentName>();
   for (let start = 0; start < identifiers.length; start += 500) {
     for (const [id, name] of await preferredInstrumentNames(
-      db,
+      reads,
       identifiers.slice(start, start + 500),
     )) {
       names.set(id, name);
     }
   }
   const connections = accountRefs.size
-    ? await readAccountConnections(db, [...accountRefs.values()])
+    ? await readAccountConnections(reads, [...accountRefs.values()])
     : new Map();
   for (const organization of output.values()) {
     if (organization.account) {

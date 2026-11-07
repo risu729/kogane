@@ -7,6 +7,7 @@ import {
 } from "../../../domain/src/ownership-review.ts";
 import { commandError, type CommandResult } from "../command/errors.ts";
 import {
+  OWNER_DEFAULT_PARTY,
   readOwnershipDeclaration,
   type OwnershipSelfDeclaration,
 } from "../../../domain/src/ownership-declaration.ts";
@@ -79,7 +80,11 @@ export async function prepareOwnershipReview(
     relation.validTo !== null ||
     declaration.kind === "invalid" ||
     (declaration.kind === "self-declared" &&
-      (declaration.role !== relation.relationKind || kind !== "relation.accept"))
+      (declaration.role !== relation.relationKind ||
+        kind !== "relation.accept" ||
+        // The owner default names the owner, one party for every account
+        // (ADR 0082), so a card and its debit account resolve to the same owner.
+        (declaration.scope === "owner-default" && relation.toRef !== OWNER_DEFAULT_PARTY)))
   )
     return commandError("invalid_command");
   const marker = markers[0]!,
@@ -134,6 +139,7 @@ export async function prepareOwnershipReview(
     mapping.source_account_id,
     expectedEvidence,
     relation.relationKind,
+    declaration.kind === "self-declared" ? declaration.scope : "sole-personal",
   );
   if (declaration.kind === "self-declared") {
     const context = await store.first<OwnershipDeclarationContext>(

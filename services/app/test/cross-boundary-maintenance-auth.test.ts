@@ -158,7 +158,7 @@ test("signed MCP replays a completed receipt whatever the operator lists say, an
   expect(other.structuredContent.replayed).not.toBe(true);
   expect(calls).toBe(after.calls + 1);
 });
-test("signed R2 retry replays its receipt and never permits delegated survey acceptance", async () => {
+test("signed R2 retry replays its receipt; survey decisions are installed beside it", async () => {
   const cfg = config(),
     input = payload();
   const prepared = await invoke(TOOL, { ...input, step: "prepare" }, cfg);
@@ -183,8 +183,10 @@ test("signed R2 retry replays its receipt and never permits delegated survey acc
   expect(
     delegation.capabilities.find((x) => x.capability === "schedules.maintenance.update")?.available,
   ).toBe(true);
+  // The owner allowed delegated survey decisions on 2026-11-07 (ADR 0050
+  // amendment); their adapter is installed, so the capability is available.
   expect(
     delegation.capabilities.find((x) => x.capability === "schedules.survey.decide")?.available,
-  ).toBe(false);
+  ).toBe(true);
   expect({ calls, alarms }).toEqual(after);
 });
