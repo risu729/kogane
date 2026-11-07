@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
+  AGREEMENT_RETRY_COOLDOWN_MS,
+  AGREEMENT_RETRY_WINDOW_MS,
   blockedScheduleResult,
+  manualAgreementPendingSince,
+  REAUTH_COOLDOWN_MS,
+  reauthCooldownMs,
   sessionFailureCode,
   shouldReauthenticate,
 } from "../src/session-policy";
@@ -18,6 +23,7 @@ const health: HealthState = {
   lastReauthAttemptAt: null,
   lastReauthSuccessAt: null,
   lastReauthErrorCode: "manual_agreement_required",
+  manualAgreementPendingSince: null,
 };
 const summary: SharedRunSummary = {
   runId: "00000000-0000-4000-8000-000000000000",
@@ -31,10 +37,67 @@ const summary: SharedRunSummary = {
 };
 
 describe("SBI VC session refusal diagnostics", () => {
-  test("manual agreement stops unattended reauthentication and is an explicit reason", () => {
-    expect(shouldReauthenticate(health)).toBe(false);
+  test("a pending agreement keeps an explicit reason and no longer stops the login", () => {
+    expect(shouldReauthenticate(health)).toBe(true);
     expect(sessionFailureCode(health)).toBe("manual_agreement_required");
     expect(shouldReauthenticate({ ...health, lastReauthErrorCode: null })).toBe(true);
+    // A healthy keepalive keeps the old code; it is not a reason to log in.
+    expect(shouldReauthenticate({ ...health, lastHttpStatus: 200, lastErrorCode: null })).toBe(
+      false,
+    );
+  });
+  test("the gateway's redirect of a stale session triggers a login only while an agreement is pending", () => {
+    const redirected = { ...health, lastHttpStatus: 302, lastErrorCode: "http_rejected" };
+    expect(shouldReauthenticate(redirected)).toBe(true);
+    expect(shouldReauthenticate({ ...redirected, lastReauthErrorCode: null })).toBe(false);
+    expect(shouldReauthenticate({ ...redirected, lastHttpStatus: 503 })).toBe(false);
+    expect(shouldReauthenticate({ ...redirected, lastHttpStatus: null })).toBe(false);
+  });
+  test("logins are hourly for 72 hours after the first agreement refusal, then six-hourly", () => {
+    const now = Date.parse("2026-11-07T06:00:00.000Z");
+    const since = (hours: number) => ({
+      ...health,
+      manualAgreementPendingSince: new Date(now - hours * 3_600_000).toISOString(),
+    });
+    expect(AGREEMENT_RETRY_COOLDOWN_MS).toBe(3_600_000);
+    expect(AGREEMENT_RETRY_WINDOW_MS).toBe(72 * 3_600_000);
+    expect(reauthCooldownMs(since(0), now)).toBe(AGREEMENT_RETRY_COOLDOWN_MS);
+    expect(reauthCooldownMs(since(71.9), now)).toBe(AGREEMENT_RETRY_COOLDOWN_MS);
+    expect(reauthCooldownMs(since(72), now)).toBe(REAUTH_COOLDOWN_MS);
+    // A record from before the window was tracked: the next refusal opens it.
+    expect(reauthCooldownMs(health, now)).toBe(AGREEMENT_RETRY_COOLDOWN_MS);
+    expect(reauthCooldownMs({ ...since(1), lastReauthErrorCode: null }, now)).toBe(
+      REAUTH_COOLDOWN_MS,
+    );
+    expect(
+      reauthCooldownMs({ ...since(1), lastReauthErrorCode: "passkey_login_rejected" }, now),
+    ).toBe(REAUTH_COOLDOWN_MS);
+  });
+  test("the window opens at the first refusal and closes on any other outcome", () => {
+    const first = "2026-11-07T04:30:00.000Z";
+    const later = "2026-11-07T05:30:00.000Z";
+    const fresh = { ...health, lastReauthErrorCode: null };
+    expect(manualAgreementPendingSince(fresh, "manual_agreement_required", first)).toBe(first);
+    const pending = { ...health, manualAgreementPendingSince: first };
+    expect(manualAgreementPendingSince(pending, "manual_agreement_required", later)).toBe(first);
+    expect(manualAgreementPendingSince(health, "manual_agreement_required", later)).toBe(later);
+    expect(
+      manualAgreementPendingSince(
+        { ...pending, manualAgreementPendingSince: "not-a-time" },
+        "manual_agreement_required",
+        later,
+      ),
+    ).toBe(later);
+    expect(manualAgreementPendingSince(pending, null, later)).toBeNull();
+    expect(manualAgreementPendingSince(pending, "passkey_login_rejected", later)).toBeNull();
+    // A different refusal in between restarts the window at the next agreement refusal.
+    expect(
+      manualAgreementPendingSince(
+        { ...pending, lastReauthErrorCode: "passkey_login_rejected" },
+        "manual_agreement_required",
+        later,
+      ),
+    ).toBe(later);
   });
   test("a persisted blocked attempt remains linked to the scheduled occurrence", () => {
     expect(blockedScheduleResult(health, summary)).toEqual({

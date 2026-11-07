@@ -32,6 +32,11 @@ export interface HealthState {
   lastReauthAttemptAt: string | null;
   lastReauthSuccessAt: string | null;
   lastReauthErrorCode: string | null;
+  /**
+   * The first login of the current run of `manual_agreement_required`
+   * refusals; it bounds the hourly retries. Null otherwise.
+   */
+  manualAgreementPendingSince: string | null;
 }
 
 export interface GatewayMeta {

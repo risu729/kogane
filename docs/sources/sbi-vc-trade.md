@@ -379,7 +379,7 @@ password login requestにはTurnstile tokenの`response`があるが、公開sou
 
 second authの`authType`は`0`がemail、`1`がauthenticator/TOTP、`2`がSMSである。password loginが失敗した場合、clientはTurnstile tokenを再利用せずwidgetをresetする。Turnstile tokenはCloudflare仕様上5分・single-useであり、保存・再利用するsession credentialではない。passkey completion後はsecond-auth endpointを通らずlogin成功処理へ進む。
 
-login resultの`isAgreed`がfalseの場合、現行UIは`setAgreement` write eventへ進む。collectorは規約同意を自動実行せず、即停止して本人操作へhandoffする。
+login resultの`isAgreed`がfalseの場合、現行UIは`setAgreement` write eventへ進む。collectorは規約同意を自動実行せず、そのloginを停止して本人の同意を待つ。Since 2026-11-07 the collector retries the passkey login hourly while it waits, so collection resumes on its own once the owner has agreed ([§16](#16-resuming-after-a-terms-agreement-2026-11-07)).
 
 ### 認証済みlive検証
 
@@ -532,8 +532,8 @@ login responseの属性では、`vct_bff_sid`と`__cf_bm`の`Expires`が約30分
 - `Set-Cookie`は8 Cookieだけを追従し、`__cf_bm`は無視する。`meta.secureKey`が変化した場合も暗号化状態へ反映する。
 - 平文healthはlast attempt/success、HTTP status、gateway statusの閉じた区分（`OK`か`rejected`。gatewayが返した`OK`以外の文字列は保存もlogもしない）、Cookie更新数、連続失敗数、固定error codeだけで、残高・履歴・Cookie値・response bodyを含まない。
 - 手動`/run`、`/reauth`、`/health`はrandom bearer tokenのWorker Secretで保護する。
-- keepaliveがHTTP 401/403、gateway拒否、seed欠落になった場合だけ再認証する。6時間cooldownで反復loginを抑止し、同種の同時実行を単一Promiseへ畳み込み、keepaliveと再認証のsession変更はDurable Object内で直列化する。
-- passkey完了responseの`body.accountId`は直後のread APIの`secureKey`と一致したため、新規sessionの`secureKey`として使う。`isAgreed !== true`なら`setAgreement`を送らず停止する。
+- keepaliveがHTTP 401/403、gateway拒否、seed欠落になった場合だけ再認証する（while a terms agreement is pending, also on the gateway's 3xx `http_rejected`; [§16](#16-resuming-after-a-terms-agreement-2026-11-07)）。6時間cooldown（1 hour for up to 72 hours while an agreement is pending）で反復loginを抑止し、同種の同時実行を単一Promiseへ畳み込み、keepaliveと再認証のsession変更はDurable Object内で直列化する。
+- passkey完了responseの`body.accountId`は直後のread APIの`secureKey`と一致したため、新規sessionの`secureKey`として使う。`isAgreed !== true`なら`setAgreement`を送らずそのloginを`manual_agreement_required`で終える。
 
 ### live結果
 
@@ -622,7 +622,64 @@ cannot lose the previous generation. The terminal carries that opaque id as
 ever written to `DATA`.
 
 A collection blocked on re-authentication is recorded as a `failed` run with
-`human_required_reauth` and a `waitingForHuman` signal, never as a retry.
+`human_required_reauth` (or `manual_agreement_required` while the provider's
+terms wait for the owner) and a `waitingForHuman` signal; the blocked
+collection itself is never retried. The login behind it is retried on its
+cooldown ([§16](#16-resuming-after-a-terms-agreement-2026-11-07)).
 
 The artifact/role table is in
 [`docs/collection.md`](../collection.md#sbi-vc-trade-kogane-sbi-vc-session-poc).
+
+## 16. Resuming after a terms agreement (2026-11-07)
+
+Owner decision, 2026-11-07 06:28 UTC (options A and D of the reviewed
+proposal; recorded in the
+[ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-sbi-vc-retries-the-login-while-a-terms-agreement-is-pending-2026-11-07)):
+collection resumes by itself once the owner has agreed to the provider's
+terms. No `ADMIN_TOKEN`, `/reauth` call or other manual step is needed.
+
+What happened before: a passkey login whose result has `isAgreed !== true`
+stored `lastReauthErrorCode: "manual_agreement_required"`, and from then on
+`shouldReauthenticate` returned `false` for good. Only a successful forced
+`POST /reauth` cleared it, and the bearer token for it is a write-only Worker
+secret, so every agreement meant rotating that secret by hand. In production
+the keepalive failed this way from 2026-10-23 18:00 UTC and again from
+2026-11-07 04:30 UTC; the health record then held
+`lastErrorCode: "http_rejected"` (the gateway answers the stale session with a
+3xx, which `redirect: "manual"` surfaces), `lastReauthErrorCode:
+"manual_agreement_required"` and 1,604 consecutive failures.
+
+What the collector does now
+(`services/collector-sbi-vc-trade/src/session-policy.ts`):
+
+- The usual re-authentication triggers apply while an agreement is pending
+  (HTTP 401/403, `gateway_rejected`, a missing session seed). A healthy
+  keepalive that still carries the old code does not log in.
+- While `manual_agreement_required` is stored, `http_rejected` with a 3xx status
+  is also a trigger, because that is how the gateway refuses the stale
+  session. Outside that state a 3xx stays a plain failure, as before.
+- An unforced login waits 1 hour after the previous attempt while the stored
+  code is `manual_agreement_required`, for 72 hours after the first refused
+  login of the run (`manualAgreementPendingSince` in the health record), and
+  then the usual 6 hours. A record written before this field existed opens the
+  72-hour window at its next refused login. Any other outcome clears the field.
+- The collector still never sends `setAgreement`: agreeing is the owner's act
+  (§8 denylist).
+
+What the owner does: agree once at simple.sbivc.co.jp. The login uses the
+`SIMPLE_MODE` channel; whether agreeing in another SBI VC app clears it has not
+been observed. The keepalive runs every 15 minutes, so the next login comes at
+the first tick an hour after the previous one, and recovery takes up to about
+1 h 15 min after the agreement. The keepalive then refreshes the new session
+and the next daily collection (`5 21 * * *`) runs.
+
+Collection quality flags `manual_agreement_required` as `user_action_required`
+(`packages/application/src/query/collection-quality.ts`), on the job's newest
+receipt and on a blocked unit, so the pending agreement shows the same day.
+
+Risks the owner accepted with this decision, which also approves these
+unattended production logins: repeated failed logins can lock the account
+(§4) and the provider's rate limit is unconfirmed (§13). Whether a login that
+stops at `isAgreed` counts as a failed login, and whether each one e-mails the
+owner, is unknown. The 72-hour window bounds the hourly logins to about 60;
+after it, one login every 6 hours.
