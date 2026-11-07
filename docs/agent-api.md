@@ -506,7 +506,10 @@ for `no_equal_amount_debit`, the ADR 0074 planner's read-only answer
 ([card settlements](card-settlements.md#statements-without-a-candidate)). It
 is the `カード照合` page's own service (`reviewUnmatchedCardStatements`), so an
 agent and the page read one answer. It is listed on `/mcp` only to a grant
-holding `records.read` over the whole store.
+holding `records.read` over the whole store, and it exists exactly while the
+route does: where the settlement views are absent the route and the tool's
+HTTP path are `404` and its MCP name is `unknown_tool`, as for
+`kogane.card-settlements.read`.
 
 Input, a closed object: `offset` (optional, 0 to 100,000). Output:
 `kogane-card-statements-unmatched-v1` with the manifest (the closed codes,
