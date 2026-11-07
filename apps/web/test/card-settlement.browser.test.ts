@@ -5,6 +5,7 @@ import { chromium, type Browser } from "playwright";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { settlementReview } from "../../../packages/application/test/card-settlement-fixture.ts";
 import { cardSettlementImpact } from "../../../packages/domain/src/card-settlement.ts";
+import type { CardSettlementReview } from "../../../packages/domain/src/card-settlement-review.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -22,6 +23,9 @@ describe.if(runnable)("card settlement review", () => {
   let detailRevision = 0;
   let planRevision = 0;
   let action = "accept";
+  /** The candidates a `relatedTo` read returns, and the reads of them. */
+  let related: CardSettlementReview[] = [];
+  const relatedReads: URLSearchParams[] = [];
   const posted: { operation: string; body: Record<string, unknown> }[] = [];
   beforeEach(() => {
     review = settlementReview();
@@ -29,6 +33,8 @@ describe.if(runnable)("card settlement review", () => {
     detailRevision = 0;
     planRevision = 0;
     action = "accept";
+    related = [];
+    relatedReads.length = 0;
     posted.length = 0;
   });
   beforeAll(async () => {
@@ -47,6 +53,22 @@ describe.if(runnable)("card settlement review", () => {
               cardSettlementReconciliation: advertised,
             },
           });
+        if (
+          url.pathname === "/api/v2/reconciliation/card-settlements" &&
+          url.searchParams.has("relatedTo")
+        ) {
+          relatedReads.push(url.searchParams);
+          return Response.json({
+            items: related,
+            nextOffset: null,
+            coverage: {
+              scope: "card-statement-bank-debit-candidates",
+              completeTransactionHistory: false,
+              netAssets: "unknown",
+              limit: 50,
+            },
+          });
+        }
         if (url.pathname === "/api/v2/reconciliation/card-settlements")
           return Response.json({
             items: [
@@ -151,7 +173,11 @@ describe.if(runnable)("card settlement review", () => {
     await page.goto(origin + path);
     await page
       .getByRole("heading", {
-        name: path.startsWith("/confirm/") ? "変更の確認" : "カード請求と引落の照合",
+        name: path.startsWith("/confirm/")
+          ? "変更の確認"
+          : path === "/reconciliation"
+            ? "カード請求と引落の照合"
+            : "請求と引落の照合候補",
         exact: true,
       })
       .waitFor();
@@ -343,6 +369,90 @@ describe.if(runnable)("card settlement review", () => {
     await page.setViewportSize({ width: 390, height: 844 });
     expect(await page.getByLabel("判断の理由", { exact: true }).count()).toBe(0);
     expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(0);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
+    ).toBe(true);
+    await page.close();
+  });
+
+  test("the list links each candidate to its own page", async () => {
+    const page = await open();
+    expect(
+      await page
+        .getByRole("link", { name: "同じ請求・出金の他の候補を確認", exact: true })
+        .getAttribute("href"),
+    ).toBe(`/reconciliation/${review.proposalId}`);
+    // The list itself reads no competitors.
+    expect(relatedReads).toHaveLength(0);
+    await page.close();
+  });
+
+  test("a wrong acceptance is corrected from its page: withdrawn there, the competitor opened from it", async () => {
+    review = {
+      ...review,
+      revision: 1,
+      status: "accepted",
+      impact: cardSettlementImpact(review.facts, "accepted"),
+      history: [
+        {
+          revision: 1,
+          status: "accepted",
+          decisionRevisionId: "decision-1",
+          createdAt: "2026-09-11T00:00:00Z",
+        },
+      ],
+    };
+    detailRevision = 1;
+    planRevision = 1;
+    const other = settlementReview();
+    other.proposalId = "cs-other-debit";
+    other.facts.bankDebit.sourceAccount = "synthetic-bank-other";
+    other.acceptanceBlockers = ["allocation_already_used"];
+    related = [other];
+    const page = await open(`/reconciliation/${review.proposalId}`);
+    await page.getByRole("list", { name: "他の候補" }).waitFor();
+    expect(relatedReads.map((params) => params.toString())).toEqual([
+      `relatedTo=${review.proposalId}`,
+    ]);
+    const competitors = page.getByRole("list", { name: "他の候補" });
+    const text = await competitors.innerText();
+    expect(text).toContain("確認待ち");
+    expect(text).toContain("synthetic-bank-other");
+    expect(text).toContain("同じ請求・出金を別の決済へ配賦済みの場合は採用不可");
+    expect(await competitors.getByRole("link").first().getAttribute("href")).toBe(
+      "/reconciliation/cs-other-debit",
+    );
+    // The candidate's own review starts open, with its withdrawal and history.
+    expect(await page.locator("main").innerText()).toContain(
+      "解除しても、この判断と原本は履歴に残ります",
+    );
+    expect(
+      await page
+        .getByRole("link", { name: "照合候補の一覧に戻る", exact: true })
+        .getAttribute("href"),
+    ).toBe("/reconciliation");
+    await page.getByLabel("判断の理由", { exact: true }).fill("別の銀行明細が支払に対応していた");
+    await page.getByRole("button", { name: "採用を解除する内容を確認" }).click();
+    await page.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    expect(posted.find((row) => row.operation === "plan")?.body).toMatchObject({
+      kind: "card-settlement.withdraw",
+      payload: { proposalId: review.proposalId },
+    });
+    // The confirmation returns to the candidate's page, not the list.
+    expect(
+      await page.getByRole("link", { name: "照合候補に戻る", exact: true }).getAttribute("href"),
+    ).toBe(`/reconciliation/${review.proposalId}`);
+    expect(posted.some((row) => row.operation === "approve" || row.operation === "commit")).toBe(
+      false,
+    );
+    await page.close();
+  });
+
+  test("a candidate with no competitor says so, and fits a narrow screen", async () => {
+    const page = await open(`/reconciliation/${review.proposalId}`);
+    await page.getByText("同じ請求・出金を対象とする他の候補はありません。").waitFor();
+    await page.setViewportSize({ width: 390, height: 844 });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),
     ).toBe(true);

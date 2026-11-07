@@ -229,7 +229,11 @@ slice is implemented, and so is the first purchase-event writer for supported
 single-payment card usage (on in production since 2026-09-24), and so is the
 pending-to-posted link review: the purchases page lists the open candidates
 and reviews each purchase's link (accept, reject, withdraw) through the change
-lifecycle. Source ownership, supported bank coverage, partial payments and
+lifecycle. Each statement/debit candidate has its own page listing the
+candidates it competes with, which the purchase chain links, so a wrong match
+is corrected there by a withdrawal and another candidate's acceptance
+([correcting a match](card-settlements.md#correcting-a-match)).
+Source ownership, supported bank coverage, partial payments and
 refund handling still need completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
