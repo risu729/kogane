@@ -49,6 +49,8 @@ import {
   type BalanceProjectionReader,
   type BalanceSnapshotRow,
   type ProjectionPageRow,
+  type ServableSnapshot,
+  type SnapshotRefusal,
 } from "../../../packages/read-model/src/index";
 import {
   checkReadCursor,
@@ -103,7 +105,10 @@ export interface ReadTarget {
 }
 
 export async function readTarget(env: Env): Promise<ReadTarget> {
-  const reader = balanceProjectionReader(env);
+  return await targetOf(balanceProjectionReader(env));
+}
+
+async function targetOf(reader: BalanceProjectionReader): Promise<ReadTarget> {
   const read = reader as ReadProjectionReader;
   const [instance, pointer] = await Promise.all([read.readInstance(), read.readPointer()]);
   // A READ database nobody has built into yet has no identity and no
@@ -133,7 +138,7 @@ export async function readTarget(env: Env): Promise<ReadTarget> {
 async function snapshotRefusal(
   target: ReadTarget,
   snapshot: BalanceSnapshotRow,
-): Promise<string | null> {
+): Promise<SnapshotRefusal | null> {
   const revision = await target.reader.coreRevision();
   // The published snapshot is vouched for by the pointer: a build whose
   // content did not change still re-captured it at the current revision and
@@ -149,6 +154,23 @@ async function snapshotRefusal(
   if (vouched.visibility !== null && vouched.visibility !== revision.visibility_revision)
     return "read_model_restriction_changed";
   return null;
+}
+
+/**
+ * The published snapshot under the routes' own rules, for a reader that is
+ * not a route: another READ contract, another CORE epoch and a changed use
+ * restriction are each refused with the code the routes answer 503 with, and
+ * no published snapshot is `null`. The agent query's `holdings` takes its
+ * snapshot from here, never from `currentSnapshot()` directly, so it cannot
+ * sum a snapshot the routes refuse (05 §7).
+ */
+export async function servableSnapshot(reader: BalanceProjectionReader): Promise<ServableSnapshot> {
+  const target = await targetOf(reader);
+  if (target.contractMismatch) return { refusal: "read_model_unavailable" };
+  const snapshot = await reader.currentSnapshot();
+  if (!snapshot) return null;
+  const refusal = await snapshotRefusal(target, snapshot);
+  return refusal === null ? { snapshot } : { refusal };
 }
 
 /** The scope the routes accept; the same allow-listed keys the v1 list uses. */

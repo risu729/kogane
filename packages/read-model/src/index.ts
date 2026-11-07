@@ -156,6 +156,9 @@ export {
   type BalanceProjectionReader,
   type BalanceSnapshotRow,
   type ProjectionCoverageRow,
+  type ServableSnapshot,
+  SNAPSHOT_REFUSALS,
+  type SnapshotRefusal,
   type SubtotalRow,
   createCoreProjectionSource,
 } from "./balance-projection-reader";
