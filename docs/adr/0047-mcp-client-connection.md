@@ -445,10 +445,15 @@ the particular client's upstream OAuth and refresh behavior is unverified.
 
 ## Amendment: clients connect through the MCP Portal (2026-11-07)
 
+- Status: proposed
+- Date: 2026-11-07
+
 Owner decision, 2026-11-07 16:34 UTC: every MCP client (claude.ai, ChatGPT,
 Grok) registers the Cloudflare MCP Portal `https://mcp.takuk.me/mcp`, never
 the origin `https://kogane-mcp.takuk.me/mcp` directly. This replaces option 2's
-rejection for the client route; the rest of the decision stands.
+rejection for the client route, and decision 1's "DCR redirect URIs for the
+clients" on the MCP application now means the Portal's callbacks; the rest of
+the decision stands.
 
 - The Portal is the only OAuth client of the origin application "Kogane MCP
   origin". Its Managed OAuth DCR allow-list is exactly the Portal's
@@ -457,8 +462,16 @@ rejection for the client route; the rest of the decision stands.
 - Client redirect URIs live on the Portal's own Access application
   ("MCP Portal"): ChatGPT's two, `https://claude.ai/api/mcp/auth_callback`,
   Grok's `https://grok.com/connectors-oauth-exchange-code/` and
-  `https://console.x.ai/connectors-oauth-exchange-code/`, and Cursor's two
-  (Grok Bot), taken from each vendor's CIMD document (16:36 UTC).
+  `https://console.x.ai/connectors-oauth-exchange-code/`, and Cursor's
+  `https://www.cursor.com/bot/mcp/oauth/callback` and
+  `https://www.cursor.com/agents/mcp/oauth/callback` (Grok Bot uses
+  Cursor's client), taken from each
+  vendor's CIMD document (readback 16:36 UTC).
+- Two of the gaps under Consequences are answered. The origin's
+  protected-resource `resource` is `https://kogane-mcp.takuk.me`, without
+  `/mcp`; a client checks the Portal's metadata, not the origin's. The one
+  policy, "Owner access", includes only the owner email and has no require
+  or exclude rule since 07:10 UTC, so no posture check applies.
 - Option 2's concern that the Worker could not grade the caller did not
   hold in practice: through the Portal, `kogane.capabilities` answers
   `principal: mcp-client:<owner-sub>`, so the upstream assertion still names
