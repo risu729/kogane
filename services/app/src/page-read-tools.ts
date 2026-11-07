@@ -22,7 +22,12 @@ import {
   type Grant,
   grantAllows,
 } from "../../../packages/application/src/index";
+import {
+  COLLECTION_QUALITY_MAX_OFFSET,
+  COLLECTION_QUALITY_SOURCE,
+} from "../../../packages/application/src/query/collection-quality.ts";
 import type { ToolResult } from "./agent-service";
+import { readCollectionQuality } from "./collection-quality-api";
 import { HttpError } from "./http";
 import { IDENTITY_COLLECTIONS, readIdentityCollection } from "./identity-api";
 import { parseRequest } from "./ops-api";
@@ -38,6 +43,8 @@ const ROUTE_TEXT = z
   .max(128)
   .regex(/^[^\u0000-\u001f]+$/u);
 const OFFSET = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
+/** A collection quality route's source segment, in the service's own grammar. */
+const QUALITY_SOURCE = z.string().regex(COLLECTION_QUALITY_SOURCE);
 
 interface PageReadTool<Schema extends z.ZodType> {
   title: string;
@@ -47,8 +54,11 @@ interface PageReadTool<Schema extends z.ZodType> {
   capability: AgentCapability;
   /** The UI route paths this tool answers, for the parity inventory. */
   routes: readonly string[];
-  /** The shared reader, called with the request the route would build. */
-  read(env: Env, input: z.infer<Schema>): Promise<unknown>;
+  /**
+   * The shared reader, called with the request the route would build, for the
+   * caller's grant (already graded here: the capability over the whole store).
+   */
+  read(env: Env, input: z.infer<Schema>, grant: Grant): Promise<unknown>;
 }
 
 /** Query parameters from a tool argument: absent values stay absent, numbers are decimal text. */
@@ -78,6 +88,38 @@ const TOOLS = {
     routes: IDENTITY_COLLECTIONS.map((collection) => `/api/identity/${collection}`),
     read: (env, { collection, ...params }) =>
       readIdentityCollection(env, collection, query(params)),
+  }),
+  // Collection quality (ADR 0045; the account view ADR 0088): each tool is one
+  // route, and calls its service with the request the route builds.
+  "kogane.collection-quality.summary": tool({
+    title: "Collection quality: jobs and sources",
+    description:
+      "Collection quality across the store (ADR 0045): every configured collection job with its enabled and supported settings, held lease, newest receipt and the runs it names as CORE has them, and the actual Alarm reservation where the relay answers; and every visible CORE source with its collectors, newest fetch run, never-registered terminals and closed reasons. The same answer as GET /api/collection-quality, under evidence.read and a whole-store read grant. Identifiers, times, counts and closed codes only; no amount. A missing stage is a reason, never a zero or a success. Takes no argument. Read-only.",
+    schema: z.strictObject({}),
+    capability: "evidence.read",
+    routes: ["/api/collection-quality"],
+    read: (env, input, grant) => readCollectionQuality(env, grant, "summary", input),
+  }),
+  "kogane.collection-quality.cells": tool({
+    title: "Collection quality: one source's cells",
+    description:
+      "One page (500) of one source's collection quality cells (ADR 0045): per dataset, parser, fetch unit and period, the newest capture's run, unit, artifact, raw, parse and coverage facts, the current capture, the state (current, older-current, no-current) and closed reasons; `offset` pages on (coverage.nextOffset). The same answer as GET /api/collection-quality/<source>?offset=N, under evidence.read and a whole-store read grant. A fetch unit key is not an account; no amount; a period no capture has is not listed. Read-only.",
+    schema: z.strictObject({
+      source: QUALITY_SOURCE,
+      offset: z.number().int().min(0).max(COLLECTION_QUALITY_MAX_OFFSET).optional(),
+    }),
+    capability: "evidence.read",
+    routes: ["/api/collection-quality/:source"],
+    read: (env, input, grant) => readCollectionQuality(env, grant, "cells", input),
+  }),
+  "kogane.collection-quality.accounts": tool({
+    title: "Collection quality: one source's cells per account",
+    description:
+      "One source's collection quality cells regrouped by the accounts their newest or current capture's observations name (ADR 0088): per account its label, mapping statuses and data types (dataset, parser, observation kind), each with its periods, closed standing and reasons, and apart the cells no observation attributes to an account. The same answer as GET /api/collection-quality/<source>/accounts, under evidence.read and a whole-store read grant. A period no capture has is not listed and not claimed missing; nothing is inferred from a fetch unit key. Read-only.",
+    schema: z.strictObject({ source: QUALITY_SOURCE }),
+    capability: "evidence.read",
+    routes: ["/api/collection-quality/:source/accounts"],
+    read: (env, input, grant) => readCollectionQuality(env, grant, "accounts", input),
   }),
 } as const;
 
@@ -142,7 +184,7 @@ export async function callPageReadTool(
   }
   try {
     const input = parseRequest(definition.schema, body ?? {});
-    const data = await catalogue(() => definition.read(env, input));
+    const data = await catalogue(() => definition.read(env, input, grant));
     return { status: 200, body: { schemaVersion: PAGE_READ_SCHEMA_VERSION, data } };
   } catch (error) {
     if (error instanceof HttpError)

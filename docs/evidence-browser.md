@@ -830,7 +830,12 @@ state, in closed codes, what each collection stage last did
 behind the same Access gate and reader authority as the other evidence routes,
 write nothing, and answer 404 where the store has no CORE 0065 scheduling
 tables. Every answer is checked by `validApiResponse` against
-`packages/observation-shared/src/collection-quality-contract.ts`.
+`packages/observation-shared/src/collection-quality-contract.ts`. Each route
+is a thin adapter over one service of
+`packages/application/src/query/collection-quality.ts`, which an agent reads
+through the matching MCP tool (`kogane.collection-quality.summary`, `.cells`,
+`.accounts`), which answers the same body under `data` and the same refusal codes
+([agent API](agent-api.md#collection-quality), ADR 0081).
 
 - **Summary** (`/api/collection-quality`, no parameters): every configured job
   (`collection_schedules`) under the CORE sources its collectors register
@@ -843,6 +848,7 @@ tables. Every answer is checked by `validApiResponse` against
   `user_action_required`, `lease_held`, `dataset_withheld`, ...). Jobs whose
   source registers under no CORE source (the Processor tick) are listed apart.
   More than 200 jobs or sources is `413 result_limit_exceeded`, never cut.
+  An agent reads the same answer through `kogane.collection-quality.summary`.
 - **Cells** (`/api/collection-quality/<sourceId>?offset=N`): per dataset,
   parser, fetch unit and period, the newest capture (run success, unit outcome,
   artifacts, raw objects stored, parse states, failure codes, incomplete
@@ -851,7 +857,24 @@ tables. Every answer is checked by `validApiResponse` against
   (`parse_pending`, `parser_rejected`, `not_parse_eligible`,
   `coverage_incomplete`, `newer_capture_not_current`, `period_unplaced`,
   `query_rule_not_composed`, `not_in_latest_run`, ...). 500 cells a page with
-  `coverage.nextOffset`; an unknown or invisible source is 404.
+  `coverage.nextOffset`; an unknown or invisible source is 404. An agent
+  reads the same page through `kogane.collection-quality.cells`
+  (`{ source, offset }`).
+- **Accounts** (`/api/collection-quality/<sourceId>/accounts`, no parameters;
+  [ADR 0088](adr/0088-collection-quality-per-account.md)): every cell of the
+  source, unpaged, regrouped by the accounts the observations of its newest
+  or current capture name (through the sealed identity runs and current
+  account mappings, never through a unit key): per account its label, mapping
+  statuses and data types (dataset, parser, observation kind), each with its
+  periods, the cell's state and reasons, the capture that names the account,
+  its observation count and a standing (`current`, `older-current`,
+  `newest-not-current`). Cells no capture's observation attributes to an
+  account are listed as `unattributed` with their reasons. More than 2,000
+  cells or 10,000 account periods is `413 result_limit_exceeded`. A period no
+  capture has is not listed, so nothing here claims a gap or a complete run
+  of periods. An agent reads the same answer through
+  `kogane.collection-quality.accounts`
+  ([agent API](agent-api.md#collection-quality)).
 
 A missing stage is a reason, never a zero or an empty success: a source with
 no capture has no cells and `latestFetchRun: null` with `no_registered_run`. A
@@ -865,6 +888,9 @@ maintenance-adjusted due times are shown separately from the actual reservation
 and the last attempt's actual start. Reservation reads never reconcile settings.
 A unit with no original file still appears with `unit_without_artifacts`; the
 absence of a stored unit/period is not inferred as complete acquisition.
+`口座ごと` (`?view=accounts`) switches the source to the account view
+(`口座 × データ種別 × 期間`): one panel per account and the records no account
+is named in (`口座に対応付けられない保存記録`), each with its reasons.
 
 Published observation counts distinguish no rows from a missing acquisition.
 No rows never prove zero transactions. Missing sealed identity runs and

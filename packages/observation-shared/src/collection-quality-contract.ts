@@ -1,5 +1,6 @@
-// The wire shape of `GET /api/collection-quality` and
-// `GET /api/collection-quality/<sourceId>` (docs/evidence-browser.md, ADR 0045).
+// The wire shape of `GET /api/collection-quality`,
+// `GET /api/collection-quality/<sourceId>` (docs/evidence-browser.md, ADR 0045)
+// and `GET /api/collection-quality/<sourceId>/accounts` (ADR 0088).
 //
 // What each collection stage of a source, and of each source × unit × dataset
 // × period, last did, in codes. Nothing here is an amount or a merchant: every
@@ -381,6 +382,111 @@ const cells = z.strictObject({
     .check(z.refine((value) => (value.nextOffset === null) === !value.truncated)),
 });
 
+/** `GET /api/collection-quality/<sourceId>/accounts` (ADR 0088). */
+export const ACCOUNT_COVERAGE_API_VERSION = 1;
+export const ACCOUNT_COVERAGE_SUFFIX = "/accounts";
+/** More cells than this in one source is refused (413), never cut. */
+export const ACCOUNT_COVERAGE_CELL_BOUND = 2_000;
+/** More account period entries than this in one answer is refused (413), never cut. */
+export const ACCOUNT_COVERAGE_ENTRY_BOUND = 10_000;
+/** `account_mappings.status` (CORE 0018), the current mapping of each source account. */
+export const MAPPING_STATUSES = [
+  "identified",
+  "provider-local",
+  "aggregate",
+  "unresolved",
+] as const;
+/** `identity_observations.kind` (CORE 0018). */
+export const OBSERVATION_KINDS = ["transaction", "balance", "position", "valuation"] as const;
+/**
+ * Which of a cell's captures names the account: `current` (the current
+ * capture, which is the newest), `older-current` (the current capture, while
+ * a newer one is not current) or `newest-not-current` (only the newest
+ * capture, which is not, or not wholly, current).
+ */
+export const ACCOUNT_STANDINGS = ["current", "older-current", "newest-not-current"] as const;
+export type MappingStatus = (typeof MAPPING_STATUSES)[number];
+export type ObservationKind = (typeof OBSERVATION_KINDS)[number];
+export type AccountStanding = (typeof ACCOUNT_STANDINGS)[number];
+
+/** One cell the account's observations are in, under one observation kind. */
+const accountPeriod = z
+  .strictObject({
+    unitKey: z.nullable(text),
+    period,
+    currentRule: z.enum(CURRENT_RULES),
+    cellState: z.enum(CELL_STATES),
+    standing: z.enum(ACCOUNT_STANDINGS),
+    /** The capture that names the account: the current one, else the newest. */
+    capture,
+    /** The account's observations of this kind in that capture; never zero. */
+    observations: id,
+    /** The cell's own reasons, as the cell page states them. */
+    reasons: distinct(z.enum(CELL_REASONS)),
+  })
+  .check(
+    z.refine((value) =>
+      value.standing === "newest-not-current" ? true : value.standing === value.cellState,
+    ),
+  );
+
+const accountDataType = z.strictObject({
+  dataset: z.nullable(text),
+  parser: text,
+  kind: z.enum(OBSERVATION_KINDS),
+  periods: z.array(accountPeriod).check(z.minLength(1), z.maxLength(ACCOUNT_COVERAGE_ENTRY_BOUND)),
+});
+
+const coveredAccount = z.strictObject({
+  accountId: text,
+  /** The account's own label (`accounts.label`), as the identities page shows it. */
+  label: z.string().check(z.maxLength(512)),
+  /** The current mapping statuses of the source accounts that name it here. */
+  statuses: distinct(z.enum(MAPPING_STATUSES)).check(z.minLength(1)),
+  dataTypes: z.array(accountDataType).check(z.minLength(1), z.maxLength(1_000)),
+});
+
+/** A cell neither of whose captures names an account, with the cell's own reasons. */
+const unattributed = z.strictObject({
+  dataset: z.nullable(text),
+  parser: z.nullable(text),
+  unitKey: z.nullable(text),
+  period,
+  currentRule: z.enum(CURRENT_RULES),
+  state: z.enum(CELL_STATES),
+  reasons: distinct(z.enum(CELL_REASONS)),
+});
+
+const accountCoverage = z
+  .strictObject({
+    apiVersion: z.literal(ACCOUNT_COVERAGE_API_VERSION),
+    sourceId,
+    latestFetchRun: fetchRun,
+    /** Every cell of the source was read: no page, no cut. */
+    cells: count,
+    accounts: z.array(coveredAccount).check(
+      z.maxLength(ACCOUNT_COVERAGE_ENTRY_BOUND),
+      z.refine((values) =>
+        values.every(
+          (value, index) => index === 0 || values[index - 1]!.accountId < value.accountId,
+        ),
+      ),
+    ),
+    unattributed: z.array(unattributed).check(z.maxLength(ACCOUNT_COVERAGE_CELL_BOUND)),
+  })
+  .check(
+    z.refine((value) => value.cells <= ACCOUNT_COVERAGE_CELL_BOUND),
+    z.refine((value) => value.unattributed.length <= value.cells),
+    z.refine(
+      (value) =>
+        value.accounts.reduce(
+          (sum, account) =>
+            sum + account.dataTypes.reduce((inner, type) => inner + type.periods.length, 0),
+          0,
+        ) <= ACCOUNT_COVERAGE_ENTRY_BOUND,
+    ),
+  );
+
 export type CollectionQualityTerminal = z.output<typeof terminal>;
 export type CollectionQualityOccurrence = z.output<typeof occurrence>;
 export type CollectionQualitySchedule = z.output<typeof schedule>;
@@ -419,6 +525,11 @@ export type CollectionQualityCapture = z.output<typeof capture>;
 export type CollectionQualityNewest = z.output<typeof newest>;
 export type CollectionQualityCell = z.output<typeof cell>;
 export type CollectionQualityCells = z.output<typeof cells>;
+export type AccountCoveragePeriod = z.output<typeof accountPeriod>;
+export type AccountCoverageDataType = z.output<typeof accountDataType>;
+export type AccountCoverageAccount = z.output<typeof coveredAccount>;
+export type AccountCoverageUnattributed = z.output<typeof unattributed>;
+export type AccountCoverage = z.output<typeof accountCoverage>;
 
 /** `GET /api/collection-quality`. */
 export function validCollectionQualitySummary(value: unknown): value is CollectionQualitySummary {
@@ -430,9 +541,16 @@ export function validCollectionQualityCells(value: unknown): value is Collection
   return cells.safeParse(value).success;
 }
 
-/** Both routes, by path; any other path under the prefix is not this contract. */
+/** `GET /api/collection-quality/<sourceId>/accounts`. */
+export function validAccountCoverage(value: unknown): value is AccountCoverage {
+  return accountCoverage.safeParse(value).success;
+}
+
+/** The three routes, by path; any other path under the prefix is not this contract. */
 export function validCollectionQualityResponse(path: string, value: unknown): boolean {
   if (path === COLLECTION_QUALITY_PATH) return validCollectionQualitySummary(value);
+  const accounts = /^\/api\/collection-quality\/([^/]+)\/accounts$/u.exec(path);
+  if (accounts !== null) return validAccountCoverage(value) && value.sourceId === accounts[1];
   const match = /^\/api\/collection-quality\/([^/]+)$/u.exec(path);
   return match !== null && validCollectionQualityCells(value) && value.sourceId === match[1];
 }

@@ -1,37 +1,56 @@
 // `GET /api/collection-quality` and `GET /api/collection-quality/<sourceId>`:
 // per configured job, per source and per source × unit × dataset × period,
-// what each collection stage last did, in closed codes
+// what each collection stage last did, in closed codes; and
+// `GET /api/collection-quality/<sourceId>/accounts`, the same cells regrouped
+// by the accounts their captures' observations name (ADR 0088)
 // (packages/application/src/query/collection-quality.ts, ADR 0045,
 // docs/evidence-browser.md). Read-only, GET-only, and served under the reader
 // authority every signed-in subject already has over the evidence routes: it
 // shows identifiers, capture times, counts and codes the evidence pages and
 // the schedule page already hold, and no amount. A store without the
 // scheduling tables (CORE 0065) does not serve it.
+//
+// A thin adapter (ADR 0081): each path and its page read
+// (`kogane.collection-quality.summary`, `.cells`, `.accounts`,
+// src/page-read-tools.ts) call `readCollectionQuality`, which calls the
+// application service that grades the grant, the store, the request and the
+// bounds, and answers a refusal with the HTTP error this route has always
+// answered. This file only turns the URL into the service's request.
 import {
-  CollectionQualityLimitError,
-  queryCollectionQualityCells,
-  queryCollectionQualitySummary,
+  collectionQualityServed,
+  readAccountCoverageForGrant,
+  readCollectionQualityCellsForGrant,
+  readCollectionQualitySummaryForGrant,
+  type CollectionQualityOutcome,
+  type CollectionQualityRefusal,
 } from "../../../packages/application/src/query/collection-quality.ts";
 import {
+  ACCOUNT_COVERAGE_SUFFIX,
   COLLECTION_QUALITY_PATH,
-  validCollectionQualityAlarms,
-  type CollectionQualitySummary,
 } from "../../../packages/observation-shared/src/collection-quality-contract.ts";
+import type { Grant } from "../../../packages/application/src/grants.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { readerGrant } from "./agent-api";
+import { collectionQualityAlarms } from "./collection-quality-alarms";
 import { HttpError, json } from "./http";
 
-const SOURCE = /^[a-z0-9][a-z0-9-]{0,99}$/u;
+/** The offset's wire syntax in the query string: a decimal without a leading zero, seven digits at most. */
 const OFFSET = /^(?:0|[1-9][0-9]{0,6})$/u;
+
+/** The HTTP error each refusal has always answered on this route, and answers to an agent. */
+const HTTP_ERRORS: Record<CollectionQualityRefusal, [number, string]> = {
+  unauthorized: [403, "forbidden"],
+  scope_restricted: [403, "scope_restricted"],
+  unavailable: [404, "not_found"],
+  unknown_source: [404, "not_found"],
+  invalid_query: [400, "invalid_query"],
+  invalid_offset: [400, "invalid_offset"],
+  limit_exceeded: [413, "result_limit_exceeded"],
+};
 
 /** Served only where the store has what the read joins: the scheduling and collection tables. */
 export async function collectionQualityAvailable(env: Env): Promise<boolean> {
-  const row = await env.DB.prepare(
-    `SELECT count(*) AS present FROM sqlite_master
-     WHERE type='table' AND name IN ('collection_schedules','collection_schedule_occurrences',
-       'collection_execution_leases','collection_runs','collection_run_stages')`,
-  ).first<{ present: number }>();
-  return row?.present === 5;
+  return collectionQualityServed(d1Executor(env.DB));
 }
 
 export async function collectionQualityApi(
@@ -45,85 +64,72 @@ export async function collectionQualityApi(
     return null;
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
-  // Resolve authority before schema/source enumeration. This aggregation
-  // cannot safely answer an account-filtered grant, even for a known source.
   const grant = readerGrant(subject);
-  if (!grant.capabilities.includes("evidence.read")) throw new HttpError(403, "forbidden");
-  if (grant.scopes.sources !== "*" || grant.scopes.accounts !== "*")
-    throw new HttpError(403, "scope_restricted");
-  if (!(await collectionQualityAvailable(env))) throw new HttpError(404, "not_found");
-  try {
-    if (path === COLLECTION_QUALITY_PATH) {
-      if (url.search) throw new HttpError(400, "invalid_query");
-      const summary = await queryCollectionQualitySummary(d1Executor(env.DB));
-      await readAlarms(env, summary);
-      return json(summary);
-    }
-    const sourceId = path.slice(COLLECTION_QUALITY_PATH.length + 1);
-    if (!SOURCE.test(sourceId)) throw new HttpError(404, "not_found");
-    for (const [key, value] of url.searchParams)
-      if (key !== "offset" || url.searchParams.getAll(key).length !== 1 || !value)
-        throw new HttpError(400, "invalid_query");
-    const offsetText = url.searchParams.get("offset") ?? "0";
-    if (!OFFSET.test(offsetText)) throw new HttpError(400, "invalid_offset");
-    const cells = await queryCollectionQualityCells(d1Executor(env.DB), {
-      sourceId,
-      offset: Number(offsetText),
-    });
-    if (cells === null) throw new HttpError(404, "not_found");
-    return json(cells);
-  } catch (error) {
-    // More jobs or sources than the bound are refused, never cut into a partial answer.
-    if (error instanceof CollectionQualityLimitError)
-      throw new HttpError(413, "result_limit_exceeded");
-    throw error;
+  // A query string where the read takes none is a key the service does not take.
+  const extra = url.search ? { query: true } : {};
+  if (path === COLLECTION_QUALITY_PATH)
+    return json(await readCollectionQuality(env, grant, "summary", extra));
+  const rest = path.slice(COLLECTION_QUALITY_PATH.length + 1);
+  if (rest.endsWith(ACCOUNT_COVERAGE_SUFFIX))
+    // Every cell of one source, regrouped by account (ADR 0088): no page and no parameter.
+    return json(
+      await readCollectionQuality(env, grant, "accounts", {
+        source: rest.slice(0, -ACCOUNT_COVERAGE_SUFFIX.length),
+        ...extra,
+      }),
+    );
+  return json(await readCollectionQuality(env, grant, "cells", cellsRequest(rest, url)));
+}
+
+/** The three collection quality reads: the summary, one source's cell page, and its cells per account. */
+type CollectionQualityRead = "summary" | "cells" | "accounts";
+
+/**
+ * One collection quality read for `grant`: the body of its route for this
+ * request, and the `data` of its page read (ADR 0081), so the page and an
+ * agent read one function. A refusal is an `HttpError` with the route's
+ * status and closed code, the same on every transport.
+ */
+export async function readCollectionQuality(
+  env: Env,
+  grant: Grant,
+  read: CollectionQualityRead,
+  request: unknown,
+): Promise<unknown> {
+  const sql = d1Executor(env.DB);
+  switch (read) {
+    case "summary":
+      return value(
+        await readCollectionQualitySummaryForGrant({
+          grant,
+          sql,
+          request,
+          alarms: collectionQualityAlarms(env),
+        }),
+      );
+    case "cells":
+      return value(await readCollectionQualityCellsForGrant({ grant, sql, request }));
+    case "accounts":
+      return value(await readAccountCoverageForGrant({ grant, sql, request }));
   }
 }
 
-/** Enrich only matching stored configurations; a relay failure stays unknown. */
-async function readAlarms(env: Env, summary: CollectionQualitySummary): Promise<void> {
-  if (env.SCHEDULES_ENABLED !== "true") return;
-  const controller = new AbortController();
-  let timer: ReturnType<typeof setTimeout>;
-  const deadline = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => {
-      controller.abort();
-      reject(new Error("alarm_read_unavailable"));
-    }, 5000);
-  });
-  try {
-    // The deadline covers both headers and JSON, even for a relay that does
-    // not honor cancellation. The core summary remains available.
-    const value: unknown = await Promise.race([
-      (async () => {
-        const response = await env.PIPELINE.fetch(
-          new Request("https://observation-pipeline.internal/internal/collection-quality/alarms", {
-            headers: { "x-kogane-internal-caller": "kogane-evidence-browser" },
-            signal: controller.signal,
-          }),
-        );
-        return response.ok ? response.json() : null;
-      })(),
-      deadline,
-    ]);
-    if (!validCollectionQualityAlarms(value)) return;
-    for (const schedule of [
-      ...summary.sources.flatMap((source) => source.schedules),
-      ...summary.otherSchedules,
-    ]) {
-      const found = value.alarms.find((alarm) => alarm.id === schedule.id);
-      if (
-        found &&
-        found.enabled === schedule.enabled &&
-        found.nextRunAt === schedule.nextRunAt &&
-        found.nextNominalAt === schedule.nextNominalAt
-      )
-        schedule.alarm = found.alarm;
-    }
-  } catch {
-    // No actual reservation claim is inferred from the stored settings.
-  } finally {
-    clearTimeout(timer!);
-    controller.abort();
-  }
+/**
+ * The cell read's request from the URL: `offset` given once and non-empty is
+ * the only query key; its text becomes a number only in its wire syntax, and
+ * any other text is passed on for the service to refuse.
+ */
+function cellsRequest(source: string, url: URL): Record<string, unknown> {
+  for (const [key, value] of url.searchParams)
+    if (key !== "offset" || url.searchParams.getAll(key).length !== 1 || !value)
+      return { source, query: true };
+  const text = url.searchParams.get("offset");
+  if (text === null) return { source };
+  return { source, offset: OFFSET.test(text) ? Number(text) : text };
+}
+
+function value<T>(outcome: CollectionQualityOutcome<T>): T {
+  if (outcome.ok) return outcome.value;
+  const [status, code] = HTTP_ERRORS[outcome.refusal];
+  throw new HttpError(status, code);
 }

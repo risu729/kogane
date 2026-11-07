@@ -203,6 +203,25 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       truncated: value["nextOffset"] !== null && value["nextOffset"] !== undefined,
     };
   if (operation === "card-settlements.ownership") return { rows: 1, truncated: false };
+  // One collection quality page read (`{ schemaVersion, data }`): the
+  // summary's sources, the cells on a page (truncated when more follow), or
+  // the cells the account read covered. Never a source, an account or a code.
+  if (operation === "collection-quality.summary") {
+    const data = (value["data"] ?? {}) as Record<string, unknown>;
+    return { rows: Array.isArray(data["sources"]) ? data["sources"].length : 0, truncated: false };
+  }
+  if (operation === "collection-quality.cells") {
+    const data = (value["data"] ?? {}) as Record<string, unknown>;
+    const coverage = (data["coverage"] ?? {}) as Record<string, unknown>;
+    return {
+      rows: Array.isArray(data["cells"]) ? data["cells"].length : 0,
+      truncated: coverage["truncated"] === true,
+    };
+  }
+  if (operation === "collection-quality.accounts") {
+    const data = (value["data"] ?? {}) as Record<string, unknown>;
+    return { rows: typeof data["cells"] === "number" ? data["cells"] : 0, truncated: false };
+  }
   if (operation === "economic-readiness.read") {
     const manifest = value["manifest"] as { rows?: unknown } | undefined;
     return { rows: Array.isArray(manifest?.rows) ? manifest.rows.length : 0, truncated: false };

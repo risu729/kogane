@@ -557,6 +557,27 @@ describe("untrusted provider content (AT71)", () => {
         annotations: readOnly,
       },
       {
+        name: "kogane.collection-quality.summary",
+        required: [],
+        closed: false,
+        properties: [],
+        annotations: readOnly,
+      },
+      {
+        name: "kogane.collection-quality.cells",
+        required: ["source"],
+        closed: false,
+        properties: ["offset", "source"],
+        annotations: readOnly,
+      },
+      {
+        name: "kogane.collection-quality.accounts",
+        required: ["source"],
+        closed: false,
+        properties: ["source"],
+        annotations: readOnly,
+      },
+      {
         name: "kogane.purchases.explain",
         required: [],
         closed: false,
@@ -615,6 +636,9 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.audit.search",
       "kogane.audit.get",
       "kogane.identity.read",
+      "kogane.collection-quality.summary",
+      "kogane.collection-quality.cells",
+      "kogane.collection-quality.accounts",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);
@@ -698,6 +722,9 @@ describe("untrusted provider content (AT71)", () => {
       "kogane.audit.search",
       "kogane.audit.get",
       "kogane.identity.read",
+      "kogane.collection-quality.summary",
+      "kogane.collection-quality.cells",
+      "kogane.collection-quality.accounts",
       PURCHASES_TOOL_NAME,
       RECONSTRUCTED_STATE_TOOL_NAME,
     ]);

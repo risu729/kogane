@@ -68,6 +68,24 @@ import {
 /** More configured jobs or sources than this in one read is refused, never cut. */
 export const COLLECTION_QUALITY_ROW_BOUND = 200;
 
+/**
+ * The scheduling and collection tables the collection quality reads join
+ * (CORE 0065 and CORE 0039), as names. A store that lacks any of them does
+ * not serve collection quality.
+ */
+export const COLLECTION_QUALITY_TABLES = [
+  "collection_schedules",
+  "collection_schedule_occurrences",
+  "collection_execution_leases",
+  "collection_runs",
+  "collection_run_stages",
+] as const;
+
+/** How many of `COLLECTION_QUALITY_TABLES` the store has, as `present`. */
+export const COLLECTION_QUALITY_TABLES_SQL = `SELECT count(*) AS present FROM sqlite_master
+     WHERE type='table' AND name IN ('collection_schedules','collection_schedule_occurrences',
+       'collection_execution_leases','collection_runs','collection_run_stages')`;
+
 // Kept as an explicit future-rule guard: every narrowed parser must be
 // composed or named by the test which inspects the shipped read texts.
 export const UNCOMPOSED_QUERY_RULE_PARSERS: readonly string[] = [];
@@ -350,8 +368,14 @@ const SAME_SLOT = (a: string, b: string): string =>
  * time; its current capture is the newest fetch run with a member of the
  * current set. A capture no parser names is its own cell, shown only while it
  * is newer than every parsed capture of its slot.
+ *
+ * `CELL_RESULT_CTES` is the read up to and including `cq_result`, the whole
+ * source's cells unpaged; the cell page and the account coverage read
+ * (`ACCOUNT_COVERAGE_SQL`, ADR 0088) both select from it, so the two cannot
+ * disagree about a cell. Splitting it out left the cell page's text
+ * byte-identical (pinned by its digest in the test).
  */
-export const CELL_QUALITY_SQL = `WITH ${completeSnapshotCandidates.ctes},
+const CELL_RESULT_CTES = `WITH ${completeSnapshotCandidates.ctes},
 ${GLOBAL_PASS_ACTIVITY_SNAPSHOT_CTES},
 ${VPASS_STATEMENT_SNAPSHOT_CTES},
 ${MYJCB_LEDGER_SNAPSHOT_CTES},
@@ -599,8 +623,79 @@ SELECT c.dataset, c.parser_name, c.fetch_unit_key, c.period_kind, c.period, c.pe
         failure_code, 0, '[]', 0, NULL, NULL, 0, 0, 0,
         CASE WHEN outcome IS NULL OR outcome = 'unknown' THEN 1 ELSE 0 END
    FROM cq_empty_units WHERE choice = 1
-)
+)`;
+
+/** The cells' order, shared by the cell page and the account coverage read. */
+const CELL_ORDER = ` ORDER BY dataset, fetch_unit_key, period_kind, period DESC, period_state,
+          parser_name, current_rule`;
+
+/** One page of the source's cells (`?1` the source, `?2` the offset), in `CELL_ORDER`. */
+export const CELL_QUALITY_SQL = `${CELL_RESULT_CTES}
 SELECT * FROM cq_result
- ORDER BY dataset, fetch_unit_key, period_kind, period DESC, period_state,
-          parser_name, current_rule
+${CELL_ORDER}
  LIMIT ${PAGE_LIMIT} OFFSET ?2`;
+
+// ── accounts (ADR 0088) ───────────────────────────────────────────────────
+
+/** More cells than this in one source's account coverage is refused, never cut. */
+export const ACCOUNT_COVERAGE_CELL_BOUND = 2_000;
+
+export interface AccountCoverageRow extends CellQualityRow {
+  /**
+   * JSON array of `[capture, account_id, account_label, mapping_status, kind,
+   * observations]`, one per account mapping status and observation kind that
+   * the cell's `newest` or `current` capture names; `[]` when neither names
+   * any account.
+   */
+  accounts_json: string;
+}
+
+/**
+ * Every cell of source `?1`, unpaged and in the cell page's order (the
+ * caller refuses more than `ACCOUNT_COVERAGE_CELL_BOUND`), each with the
+ * accounts its captures name. A capture's accounts are read the way the
+ * cell's `unresolved_identities` count reads them: the published parses of
+ * the capture's artifacts, the newest sealed eligible identity run of each,
+ * its identity observations, and each observation's current account
+ * mapping. The newest capture is the cell's `cq_newest` artifacts; the
+ * current capture is its `cq_members` artifacts of the run `cq_current`
+ * chose. Nothing is inferred from a unit key: a cell neither capture's
+ * observations name carries no account.
+ */
+export const ACCOUNT_COVERAGE_SQL = `${CELL_RESULT_CTES}, ca_captures AS MATERIALIZED (
+  SELECT ${cellColumns("n")}, 'newest' AS capture, n.id AS artifact_id
+    FROM cq_newest n
+   WHERE n.parser_name IS NOT NULL
+  UNION ALL
+  SELECT ${cellColumns("m")}, 'current', m.id
+    FROM cq_current cur
+    CROSS JOIN cq_members m ON m.fetch_run_id = cur.fetch_run_id AND ${SAME_CELL("m", "cur")}
+), ca_named AS MATERIALIZED (
+  SELECT ${cellColumns("c")}, c.capture, mapping.account_id, account.label AS account_label,
+         mapping.status AS mapping_status, o.kind, COUNT(*) AS observations
+    FROM ca_captures c
+    CROSS JOIN published_parse_runs pub
+      ON pub.fetch_artifact_id = c.artifact_id AND pub.parser_name = c.parser_name
+    CROSS JOIN eligible_identity_runs r ON r.parse_run_id = pub.parse_run_id
+    CROSS JOIN identity_run_seals seal ON seal.identity_run_id = r.id
+    CROSS JOIN identity_observations o ON o.identity_run_id = r.id
+    CROSS JOIN current_account_mappings mapping ON mapping.source_account_id = o.source_account_id
+    CROSS JOIN accounts account ON account.id = mapping.account_id
+   WHERE r.policy_version = (SELECT MAX(newest.policy_version) FROM eligible_identity_runs newest
+           JOIN identity_run_seals newest_seal ON newest_seal.identity_run_id = newest.id
+           WHERE newest.parse_run_id = pub.parse_run_id)
+   GROUP BY ${cellColumns("c")}, c.capture, mapping.account_id, account.label, mapping.status, o.kind
+), ca_cells AS MATERIALIZED (
+  SELECT ${cellColumns()},
+         json_group_array(json_array(capture, account_id, account_label, mapping_status, kind,
+                                     observations)) AS accounts_json
+    FROM ca_named
+   GROUP BY ${cellColumns()}
+)
+SELECT * FROM (
+  SELECT cell_result.*, coalesce(named.accounts_json, '[]') AS accounts_json
+    FROM cq_result cell_result
+    LEFT JOIN ca_cells named ON ${SAME_CELL("named", "cell_result")}
+)
+${CELL_ORDER}
+ LIMIT ${ACCOUNT_COVERAGE_CELL_BOUND + 1}`;
