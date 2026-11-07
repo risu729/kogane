@@ -211,6 +211,21 @@ const TOOLS = {
     needs: "reportedState",
     read: (env, params) => readHoldingsChange(env, query(params)),
   }),
+  "kogane.events.read": tool({
+    title: "Economic activity by basis, and obligations",
+    description:
+      "One page of the economic event projection: `activity` (the current event revisions with a leg on the requested `basis`: `cash-movement` (default; money that left or entered an account, e.g. an accepted card settlement debit) or `purchase-recognition` (cost recognised at purchase); each event with its legs, allocations, per-basis totals, evidence and explanation refs) or `obligations` (current obligations with their principal, settlements and remaining amount; takes no `basis`). The two bases are never mixed in one list. The same answer as GET /api/v2/activity or /api/v2/obligations, under records.read and a whole-store read grant. `offset` pages 200 rows; `nextCursor` is the next offset. Served where the projection exists. Read-only.",
+    schema: z.strictObject({
+      collection: z.enum(["activity", "obligations"]),
+      basis: z.enum(ACTIVITY_BASES).optional(),
+      offset: OFFSET.optional(),
+    }),
+    capability: "records.read",
+    routes: ["/api/v2/activity", "/api/v2/obligations"],
+    needs: "economicEvents",
+    read: (env, { collection, ...params }) =>
+      readEventsRoute(env, { pathname: `/api/v2/${collection}`, searchParams: query(params) }),
+  }),
   "kogane.reports.read": tool({
     title: "Fixed report artifacts (評価レポート): list, body and explanation",
     description:
@@ -245,21 +260,6 @@ const TOOLS = {
         { refuseRestricted: true },
       );
     },
-  }),
-  "kogane.events.read": tool({
-    title: "Economic activity by basis, and obligations",
-    description:
-      "One page of the economic event projection: `activity` (the current event revisions with a leg on the requested `basis`: `cash-movement` (default; money that left or entered an account, e.g. an accepted card settlement debit) or `purchase-recognition` (cost recognised at purchase); each event with its legs, allocations, per-basis totals, evidence and explanation refs) or `obligations` (current obligations with their principal, settlements and remaining amount; takes no `basis`). The two bases are never mixed in one list. The same answer as GET /api/v2/activity or /api/v2/obligations, under records.read and a whole-store read grant. `offset` pages 200 rows; `nextCursor` is the next offset. Served where the projection exists. Read-only.",
-    schema: z.strictObject({
-      collection: z.enum(["activity", "obligations"]),
-      basis: z.enum(ACTIVITY_BASES).optional(),
-      offset: OFFSET.optional(),
-    }),
-    capability: "records.read",
-    routes: ["/api/v2/activity", "/api/v2/obligations"],
-    needs: "economicEvents",
-    read: (env, { collection, ...params }) =>
-      readEventsRoute(env, { pathname: `/api/v2/${collection}`, searchParams: query(params) }),
   }),
   "kogane.collection-quality.read": tool({
     title: "Collection quality per job, source and dataset",
