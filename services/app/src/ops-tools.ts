@@ -42,6 +42,7 @@ import {
   importSchema,
   operationIdSchema,
   opsContext,
+  opsReadStore,
   opsServices,
   parseRequest,
   projectionSchema,
@@ -259,6 +260,7 @@ function delegatedContext(
 ): OpsContext {
   return {
     store: d1CommandStore(env.DB),
+    readStore: opsReadStore(env),
     principal: {
       id: principal.id,
       kind: "delegated",

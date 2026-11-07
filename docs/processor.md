@@ -725,7 +725,8 @@ The start is one guarded batch (one per operation); the collector's answer is
 recorded as `collected`/`refreshed`, `failed` or `uncertain` and never retried.
 Each tick then marks starts older than an hour `uncertain` and reads the trail
 of up to five collected executions until they are `published` or
-`unpublished` with a closed reason. The collector call is awaited inside the
+`unpublished` with a closed reason; the `published` batch also stores the CORE
+revision the `projected` stage needs. The collector call is awaited inside the
 tick, as the alarm awaits its own.
 
 A failed dispatch never deletes the request. An import whose terminal is not
@@ -903,8 +904,12 @@ not turn the answer into a 503, and before migration 0049 the list is empty.
   and a new alarm job also needs its `OPERATION_CONNECTIONS` entry
   (`packages/collection/test/operation-rpc.test.ts` compares the two) and its
   collector's `runOperation` (`tests/collector-operation-rpc.test.ts`), ADR 0048.
-- **U11** (READ projection): the `projected` stage of `collection_runs` and of
-  `ops_request_stages` is unwritten; the projection publisher completes it.
+- **U11** (READ projection): the `projected` stage of `collection_runs` is
+  unwritten. For an operation, the collector tracker stores `projected` as
+  `pending` with the CORE revision READ has to reach when it records an
+  execution `published`, and the operation record derives its completion from
+  the READ pointer when it is read
+  ([ops-api.md](ops-api.md#projected-read)); nothing writes it `completed`.
 - **U15** completed the legacy resource and source retirement; historical
   originals remain recoverable through the central archive mapping.
 

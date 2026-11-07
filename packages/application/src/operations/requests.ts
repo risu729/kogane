@@ -34,6 +34,8 @@ import { canonicalDigest } from "../../../domain/src/context.ts";
 import type { CommandStore, PreparedWrite, Principal } from "../command/contract.ts";
 import { commandError, type CommandResult } from "../command/errors.ts";
 import { collectorExecution, type CollectorExecutionReport } from "./collector-trail.ts";
+import { projectionCoverage, projectionRequirement } from "./projection-trace.ts";
+import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import type { OperationCall } from "../audit/call.ts";
 
 export const OPERATION_KINDS = [
@@ -303,12 +305,17 @@ function receiptOf(row: OpsRow, stages: readonly StageRow[]): OperationReceipt {
 
 async function loadReceipt(
   store: CommandStore,
+  readStore: SqlExecutor | null | undefined,
   operationId: string,
   principal: string,
 ): Promise<OperationReceipt | null> {
   const row = await store.first<OpsRow>(SELECT_ROW, [operationId, principal]);
   if (!row) return null;
-  const receipt = receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId]));
+  const receipt = await withProjection(
+    store,
+    readStore,
+    receiptOf(row, await store.all<StageRow>(SELECT_STAGES, [operationId])),
+  );
   return {
     ...receipt,
     execution: await collectorExecution(store, {
@@ -320,12 +327,54 @@ async function loadReceipt(
   };
 }
 
+/**
+ * The `projected` stage, derived at read time once adoption is complete
+ * (ADR 0048, amended): `completed` when the published READ snapshot covers the
+ * CORE revision stored when the execution was recorded published, otherwise
+ * `pending` with the closed reason as its `failureCode` and no evidence. A
+ * `projected` row some executor completed is reported as stored. The request
+ * reads `completed` when this makes every stage of its kind complete; the
+ * stored row is not changed, so a reader that loses sight of READ (lost,
+ * rebuilt, another CORE epoch) reports `running` again with that reason.
+ */
+async function withProjection(
+  store: CommandStore,
+  readStore: SqlExecutor | null | undefined,
+  receipt: OperationReceipt,
+): Promise<OperationReceipt> {
+  const adopted = receipt.stages.find((stage) => stage.stage === "adopted");
+  const projected = receipt.stages.find((stage) => stage.stage === "projected");
+  if (adopted?.state !== "completed" || !projected || projected.state === "completed")
+    return receipt;
+  const verdict = await projectionCoverage(
+    store,
+    readStore,
+    projectionRequirement(projected.evidenceRef),
+  );
+  const derived: OperationStageReport =
+    verdict.state === "completed"
+      ? { ...projected, state: "completed", evidenceRef: verdict.evidenceRef, failureCode: null }
+      : { ...projected, state: "pending", evidenceRef: null, failureCode: verdict.reasonCode };
+  const stages = receipt.stages.map((stage) => (stage.stage === "projected" ? derived : stage));
+  const status =
+    receipt.status === "running" && stages.every((stage) => stage.state === "completed")
+      ? "completed"
+      : receipt.status;
+  return { ...receipt, stages, status };
+}
+
 export interface OperationContext {
   store: CommandStore;
   /** The verified caller; `principal.id` is the only actor that is stored. */
   principal: Principal;
   /** ISO-8601 second precision, supplied by the adapter. */
   now: string;
+  /**
+   * The READ database (U11), read only, for the `projected` stage of an
+   * operation record; null or absent when this deployment binds none, which
+   * the record reports as `read_model_unavailable`.
+   */
+  readStore?: SqlExecutor | null;
   /**
    * The route's or tool's audit call (ADR 0064). An accepted request's
    * `accepted` record is the last statement of the acceptance batch, joined
@@ -590,12 +639,19 @@ export async function requestSessionRefresh(
 /**
  * `GET /api/ops/v1/operations/{id}`: the stored record of one accepted
  * request, scoped to the principal that accepted it. An operation belonging to
- * someone else answers exactly like one that does not exist.
+ * someone else answers exactly like one that does not exist. The `projected`
+ * stage of an adopted operation is derived from `readStore` at read time
+ * (`withProjection`); nothing is written.
  */
 export async function readOperation(
   input: OperationContext & { operationId: string },
 ): Promise<CommandResult<{ receipt: OperationReceipt }>> {
-  const receipt = await loadReceipt(input.store, input.operationId, input.principal.id);
+  const receipt = await loadReceipt(
+    input.store,
+    input.readStore,
+    input.operationId,
+    input.principal.id,
+  );
   if (!receipt) return commandError("receipt_not_found", [input.operationId]);
   return { ok: true, receipt };
 }
