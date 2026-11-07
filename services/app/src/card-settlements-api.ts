@@ -1,11 +1,16 @@
 import { queryCardOwnership } from "../../../packages/application/src/query/card-ownership.ts";
-import { queryCardSettlements } from "../../../packages/application/src/query/card-settlements.ts";
+import {
+  queryCardSettlementStatements,
+  queryCardSettlements,
+} from "../../../packages/application/src/query/card-settlements.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { principalFor } from "./grants";
 import { HttpError, json } from "./http";
 
 export const CARD_SETTLEMENT_PATH = "/api/v2/reconciliation/card-settlements";
 export const CARD_OWNERSHIP_PATH = `${CARD_SETTLEMENT_PATH}/ownership`;
+/** The list grouped by statement (docs/card-settlements.md, Candidate and decision lifecycle). */
+export const CARD_SETTLEMENT_STATEMENTS_PATH = `${CARD_SETTLEMENT_PATH}/statements`;
 
 /** A schema-ahead deployment does not advertise a route it cannot serve. */
 export async function cardSettlementsAvailable(env: Env): Promise<boolean> {
@@ -23,7 +28,8 @@ export async function cardSettlementsApi(
   subject: string,
 ): Promise<Response | null> {
   const ownership = url.pathname === CARD_OWNERSHIP_PATH;
-  if (url.pathname !== CARD_SETTLEMENT_PATH && !ownership) return null;
+  const grouped = url.pathname === CARD_SETTLEMENT_STATEMENTS_PATH;
+  if (url.pathname !== CARD_SETTLEMENT_PATH && !ownership && !grouped) return null;
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
   if (!(await cardSettlementsAvailable(env))) throw new HttpError(404, "not_found");
@@ -32,7 +38,7 @@ export async function cardSettlementsApi(
     throw new HttpError(403, "operator_required");
   for (const [key, value] of url.searchParams) {
     if (
-      !["offset", "proposalId"].includes(key) ||
+      !["offset", "proposalId", "statementKey"].includes(key) ||
       url.searchParams.getAll(key).length !== 1 ||
       !value
     )
@@ -48,6 +54,19 @@ export async function cardSettlementsApi(
     (!/^[A-Za-z0-9_-]{1,128}$/u.test(proposalId) || url.searchParams.has("offset"))
   )
     throw new HttpError(400, "invalid_query");
+  const statementKey = url.searchParams.get("statementKey");
+  if (
+    statementKey !== null &&
+    (statementKey.length > 1024 || proposalId !== null || ownership || grouped)
+  )
+    throw new HttpError(400, "invalid_query");
+  if (grouped) {
+    if (proposalId !== null) throw new HttpError(400, "invalid_query");
+    return json({
+      apiVersion: 2,
+      ...(await queryCardSettlementStatements(d1Executor(env.DB), { offset })),
+    });
+  }
   if (ownership) {
     if (proposalId === null || url.searchParams.has("offset"))
       throw new HttpError(400, "invalid_query");
@@ -58,6 +77,7 @@ export async function cardSettlementsApi(
   const page = await queryCardSettlements(d1Executor(env.DB), {
     offset,
     ...(proposalId === null ? {} : { proposalId }),
+    ...(statementKey === null ? {} : { statementKey }),
   });
   if (proposalId !== null && page.items.length === 0) throw new HttpError(404, "not_found");
   return json({ apiVersion: 2, ...page });
