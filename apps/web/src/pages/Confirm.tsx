@@ -274,20 +274,29 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
     },
   });
 
+  // One re-check at a time: the button is disabled while one is outstanding,
+  // so a slower earlier answer can never replace a newer receipt on screen.
+  const [checkingReceipt, setCheckingReceipt] = useState(false);
   const refreshReceipt = useCallback(() => {
     if (operationId === null) return;
     setReceiptError(null);
+    setCheckingReceipt(true);
     void postCommand<{ receipt: ReceiptView }>(
       "operation",
       { operationId },
       new AbortController().signal,
     )
       .then((value) => setReceipt(value.receipt))
-      .catch(() =>
+      .catch((error: unknown) =>
+        // A refusal is named by its fixed message (receipt_not_found, ...);
+        // either way the accepted decision is never sent again from here.
         setReceiptError(
-          "反映状況を確認できませんでした。受理済みの判断を再送せず、状況確認をやり直してください。",
+          `${
+            error instanceof CommandError ? error.message : "反映状況を確認できませんでした。"
+          }受理済みの判断を再送せず、状況確認をやり直してください。`,
         ),
-      );
+      )
+      .finally(() => setCheckingReceipt(false));
   }, [operationId]);
 
   const stale = report.data?.stale === true;
@@ -695,8 +704,13 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                   ) : null}
                   {receipt.status === "accepted" ? (
                     <div className="button-row">
-                      <button className="button" type="button" onClick={refreshReceipt}>
-                        反映状況を再確認
+                      <button
+                        className="button"
+                        type="button"
+                        disabled={checkingReceipt}
+                        onClick={refreshReceipt}
+                      >
+                        {checkingReceipt ? "反映状況を確認中…" : "反映状況を再確認"}
                       </button>
                     </div>
                   ) : null}
