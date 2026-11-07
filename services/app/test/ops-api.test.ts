@@ -29,6 +29,8 @@ import { seedRegistry } from "./fixtures";
 import { PURCHASES_TOOL_NAME } from "../src/agent-service";
 import { MCP_TOOLS, RECONSTRUCTED_STATE_MCP_TOOLS } from "../src/mcp";
 import { OPS_TOOL_NAMES } from "../src/ops-tools";
+import { importSchema } from "../src/ops-api";
+import { CollectionKeyError, terminalKey } from "../../../packages/collection/src/keys";
 import {
   claimCollectorStart,
   d1CommandStore,
@@ -423,6 +425,64 @@ describe("the schema is the boundary (G3-08, G3-13)", () => {
     });
     expect(outcome.json).toMatchObject({ error: "target_missing", refs: ["parserRelease"] });
     expect(JSON.stringify(outcome.json)).not.toContain("never-registered");
+  });
+
+  // An import names a run by the segment its terminal key carries
+  // (`runs/<source>/<runId>/terminal.json`). A run id that grammar refuses can
+  // never register, so accepting it would answer 202 for work that cannot
+  // happen: it is refused here, with the same closed code as any other bad
+  // field, and nothing is stored.
+  it("refuses an import run id the bucket key grammar cannot address", async () => {
+    const imports = () =>
+      env.DB.prepare("SELECT count(*) AS n FROM ops_requests WHERE kind='import'").first<number>(
+        "n",
+      );
+    const before = await imports();
+    for (const runId of ["synthetic:run", "synthetic-run:2", "a/b", "run id", "-lead"]) {
+      const outcome = await ops("/imports", { source: "sony-bank", runId });
+      expect(outcome.status, runId).toBe(400);
+      expect(outcome.json, runId).toMatchObject({ error: "invalid_request", refs: ["runId"] });
+      expect(JSON.stringify(outcome.json)).not.toContain(runId);
+    }
+    expect(await imports()).toBe(before);
+  });
+
+  it("accepts exactly the run ids the terminal key accepts", () => {
+    const samples = [
+      "a",
+      "A",
+      "0",
+      "run-1",
+      "run.2026_01-a",
+      "synthetic:run",
+      "a:b",
+      "a/b",
+      ".",
+      "..",
+      ".hidden",
+      "-lead",
+      "_lead",
+      "run id",
+      "run\u0000",
+      "ラン",
+      "",
+      "a".repeat(128),
+      "a".repeat(129),
+      "a".repeat(200),
+      "a".repeat(201),
+    ];
+    for (const runId of samples) {
+      let keyAccepts = true;
+      try {
+        terminalKey("sony-bank", runId);
+      } catch (error) {
+        expect(error).toBeInstanceOf(CollectionKeyError);
+        keyAccepts = false;
+      }
+      expect(importSchema.safeParse({ source: "sony-bank", runId }).success, runId).toBe(
+        keyAccepts,
+      );
+    }
   });
 
   it("refuses a body larger than the bound before it reaches a schema", async () => {

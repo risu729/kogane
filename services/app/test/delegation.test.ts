@@ -353,6 +353,24 @@ describe("MCP S3 declarations activate only installed delegated operations", () 
       runId: "synthetic-delegated-import",
       idempotencyKey: "delegated-real-1",
     };
+    // A run id no terminal key can carry is refused before the delegated
+    // write is bound: no request row, and the one write of the day is unspent.
+    const unaddressable = await invoke("kogane.ops.import.request", {
+      ...arguments_,
+      runId: "synthetic:delegated-import",
+    });
+    expect(unaddressable.result.structuredContent).toMatchObject({
+      error: "invalid_request",
+      refs: ["runId"],
+    });
+    expect(JSON.stringify(unaddressable)).not.toContain("synthetic:delegated-import");
+    expect(
+      await env.DB.prepare(
+        "SELECT count(*) AS n FROM ops_requests WHERE principal=? AND idempotency_key=?",
+      )
+        .bind(PRINCIPAL, arguments_.idempotencyKey)
+        .first<number>("n"),
+    ).toBe(0);
     const accepted = await invoke("kogane.ops.import.request", arguments_);
     expect(accepted.result.structuredContent).not.toHaveProperty("error");
     expect(accepted.result.isError).not.toBe(true);
