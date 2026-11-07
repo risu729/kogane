@@ -162,6 +162,8 @@ describe.if(runnable)("change confirmation refusals", () => {
       expect(text).toContain("計画が見つかりません。一覧から選び直してください。");
       expect(text).toContain("HTTP 404");
       expect(text).not.toContain("接続先の API が利用できるか確認し");
+      // Asking again for a plan that does not exist meets the same refusal.
+      expect(await alert.getByRole("button", { name: "再試行" }).count()).toBe(0);
       // Nothing can be approved for a plan the server could not show.
       expect(await page.getByRole("button", { name: "承認する" }).count()).toBe(0);
     } finally {
