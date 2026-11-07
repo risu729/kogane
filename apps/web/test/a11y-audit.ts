@@ -266,7 +266,9 @@ function auditInPage({ mobile }: { mobile: boolean }): string[] {
   //    generic element posing as a control.
   for (const anchor of Array.from(document.querySelectorAll("a"))) {
     const href = anchor.getAttribute("href");
-    if (href === null || href === "#" || href.startsWith("javascript:"))
+    // A script URL (javascript:, vbscript:, data:) runs or renders in place
+    // of navigating, so it is no destination either.
+    if (href === null || href === "#" || /^\s*(?:javascript|vbscript|data):/iu.test(href))
       findings.push(`semantics: ${describe(anchor)} is a link without a destination`);
   }
   for (const element of Array.from(
