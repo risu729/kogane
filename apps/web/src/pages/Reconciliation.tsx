@@ -233,23 +233,23 @@ function OlderCandidates({
 
 /**
  * One statement: the candidate to look at first (its accepted one, else the
- * newest one ready to accept, else the newest), and the earlier candidates of
+ * newest one ready to accept, else the newest), and the other candidates of
  * the same statement collapsed under it. Nothing is hidden for good: every
  * candidate stays reachable and keeps its own decision history.
  */
 function StatementGroup({ group }: { group: CardSettlementStatementGroup }): ReactNode {
   const [lead, ...others] = group.candidates;
   if (!lead) return null;
-  const earlier = group.candidateCount - 1;
+  const otherCount = group.candidateCount - 1;
   const shown = new Set(group.candidates.map((review) => review.proposalId));
   return (
     <div className="settlement-statement">
       <SettlementCard review={lead} />
-      {earlier > 0 ? (
+      {otherCount > 0 ? (
         <details className="settlement-older">
-          <summary>この請求の以前の候補（{earlier} 件）</summary>
+          <summary>この請求のほかの候補（{otherCount} 件）</summary>
           <p className="footnote">
-            同じ請求を再取得するたびに新しい候補ができます。以前の候補は記録として残り、採用できるのは最新の請求・引落を指す候補だけです。
+            同じ請求を再取得するたびに新しい候補ができます。ほかの候補も記録として残り、採用できるのは最新の請求・引落を指す候補だけです。
           </p>
           {others.map((review) => (
             <SettlementCard key={review.proposalId} review={review} />

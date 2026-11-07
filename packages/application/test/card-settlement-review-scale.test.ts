@@ -343,6 +343,20 @@ describe("card settlement readiness reads on a scaled store without statistics",
                 queryCardSettlements(executor(false), { offset: 3_750 }),
               ),
               review: await timed(() => queryCardSettlements(executor(false), { proposalId: id })),
+              statementsFirstPage: await timed(() =>
+                queryCardSettlementStatements(executor(false)),
+              ),
+              oneStatementFirstPage: await timed(() =>
+                queryCardSettlements(executor(false), {
+                  statementKey: (
+                    db
+                      .query(
+                        "SELECT statement_key FROM card_settlement_candidates GROUP BY statement_key ORDER BY count(*) DESC LIMIT 1",
+                      )
+                      .get() as { statement_key: string }
+                  ).statement_key,
+                }),
+              ),
               ownershipCandidate: await timed(() => rows(CARD_OWNERSHIP_CANDIDATE_SQL, [id])),
               settlementPlan: await timed(() => rows(CARD_SETTLEMENT_PLAN_SQL, [id])),
               ownershipGuard: await timed(() =>

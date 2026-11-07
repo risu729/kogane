@@ -462,7 +462,7 @@ describe.if(runnable)("card settlement review", () => {
     const page = await open();
     // One statement, so one candidate is open for a decision.
     expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(1);
-    const summary = page.getByText("この請求の以前の候補（2 件）", {
+    const summary = page.getByText("この請求のほかの候補（2 件）", {
       exact: true,
     });
     await summary.waitFor();
