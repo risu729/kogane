@@ -55,7 +55,7 @@ for current behavior.
 - [ADR 0042: PRESTIA bank snapshots and non-additive provider measures](0042-prestia-bank-worker.md) — accepted; production verification pending
 - [ADR 0043: Deploy the remaining Container Workers through cf](0043-cf-container-deployment.md) — accepted
 - [ADR 0044: SMBC backfill continuation publication](0044-smbc-resume-publication.md) — accepted
-- [ADR 0045: Collection quality is a per-request read of stored stage states, in closed codes](0045-collection-quality-read.md) — accepted
+- [ADR 0045: Collection quality is a per-request read of stored stage states, in closed codes](0045-collection-quality-read.md) — accepted; amended 2026-11-07: `kogane.collection-quality.read` under `evidence.read`
 - [ADR 0046: Maintenance windows as a separately granted agent capability](0046-agent-maintenance-windows.md) — accepted; amended 2026-10-09 by ADR 0063 (the revision is a delegated operation, executable since #660; since ADR 0084 by any MCP client Access admits, over every schedule)
 - [ADR 0047: Connect MCP clients through Cloudflare Access Managed OAuth, as an agent-only principal](0047-mcp-client-connection.md) — accepted; the grant table removed by ADR 0084 (any MCP client the MCP Access application admits reads the whole store); a client connection is not asserted
 - [ADR 0048: Run an accepted collection or session refresh once through the named collector RPC](0048-operation-collector-dispatch.md) — accepted; production dispatch unverified
@@ -79,7 +79,7 @@ for current behavior.
 - [ADR 0069: Retire collector-local public admin bearer entrypoints in bounded slices](0069-collector-admin-retirement.md) — accepted
 - [ADR 0070: Validate observed SBI Shinsei history offline before enabling acquisition](0070-sbi-shinsei-observed-history-boundary.md) — accepted; offline-only request and capture inspection, no history acquisition or publication
 - [ADR 0071: Let Renovate own dependency auto-merge](0071-remove-custom-automerge.md) — accepted; the custom merge workflow is removed
-- [ADR 0072: List and re-display fixed report artifacts in the web UI](0072-report-artifact-pages.md) — accepted; catalogue route, `reportArtifacts` capability and read-only 評価レポート pages; amended 2026-11-06 (#942): export link, no agent report read yet
+- [ADR 0072: List and re-display fixed report artifacts in the web UI](0072-report-artifact-pages.md) — accepted; catalogue route, `reportArtifacts` capability and read-only 評価レポート pages; amended 2026-11-06 (#942): export link, no agent report read yet; amended 2026-11-07: `kogane.reports.read` (list, detail, explanation; restricted and unavailable reports refused; no export)
 - [ADR 0073: Count each source's instrument identifiers by their candidate state, in a read beside the account coverage](0073-instrument-coverage-per-source.md) — accepted; `GET /api/identity/instrument-coverage`, the `銘柄の整理状況` panel and (amendment 2026-11-06) the agent read `kogane.instruments.coverage`
 - [ADR 0074: A pure planner states multi-debit allocations of a card statement and answers unsupported for partial payments and excesses](0074-card-statement-allocation-planner.md) — accepted; nothing calls it, no policy, no writer
 - [ADR 0075: Reported holdings change between two dates, per provider holding key, never totalled](0075-reported-holdings-change-between-dates.md) — accepted; an application query, served by a route, a wire contract and a panel of the `/state` page (2026-11-06 amendment), no agent tool

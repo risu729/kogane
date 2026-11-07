@@ -4,7 +4,7 @@
 // routes' own reader. Every event, account and amount is invented.
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
-import { PAGE_READ_ROUTES, pageReadMcpTools } from "../src/page-read-tools";
+import { PAGE_READ_ROUTES, pageReadMcpTools, pageReadStore } from "../src/page-read-tools";
 import { seedRegistry } from "./fixtures";
 import { pageReadHarness, RECORDS_GRANT, tableCounts } from "./page-read-harness";
 
@@ -104,18 +104,21 @@ beforeAll(async () => {
 describe("the events page read", () => {
   it("answers the routes it names, listed only to records.read over the whole store", async () => {
     expect(PAGE_READ_ROUTES[EVENTS]).toEqual(["/api/v2/activity", "/api/v2/obligations"]);
-    const names = (grant: unknown, economicEvents: boolean) =>
-      pageReadMcpTools(grant as never, { reportedState: true, economicEvents }).map(
-        (tool) => tool.name,
-      );
-    expect(names(RECORDS_GRANT, true)).toContain(EVENTS);
+    const names = async (grant: unknown, economicEvents: boolean) =>
+      (
+        await pageReadMcpTools(
+          grant as never,
+          pageReadStore(env as Env, { economicEvents: async () => economicEvents }),
+        )
+      ).map((tool) => tool.name);
+    expect(await names(RECORDS_GRANT, true)).toContain(EVENTS);
     // It exists only where the projection does.
-    expect(names(RECORDS_GRANT, false)).not.toContain(EVENTS);
+    expect(await names(RECORDS_GRANT, false)).not.toContain(EVENTS);
     for (const grant of [
       { ...RECORDS_GRANT, capabilities: ["summary.read"] },
       { ...RECORDS_GRANT, scopes: { sources: ["jcb"], accounts: "*" } },
     ])
-      expect(names(grant, true)).not.toContain(EVENTS);
+      expect(await names(grant, true)).not.toContain(EVENTS);
     expect(await page.listed()).toContain(EVENTS);
   });
 

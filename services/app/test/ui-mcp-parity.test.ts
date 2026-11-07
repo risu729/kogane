@@ -77,6 +77,11 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/rewards/holdings": ["kogane.rewards.read"],
   "/api/v2/rewards/expiry": ["kogane.rewards.read"],
   "/api/v2/reported-holdings-change": ["kogane.reported-holdings-change.read"],
+  "/api/v2/reports": ["kogane.reports.read"],
+  "/api/v2/reports/:id": ["kogane.reports.read"],
+  "/api/v2/reports/:id/explanation": ["kogane.reports.read"],
+  "/api/collection-quality": ["kogane.collection-quality.read"],
+  "/api/collection-quality/:source": ["kogane.collection-quality.read"],
 };
 
 /** UI read routes with no MCP read yet, and what the UI reads there. */
@@ -92,13 +97,9 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
   // Card settlements grouped by statement.
   "/api/v2/reconciliation/card-settlements/statements":
     "card settlement review grouped by statement; kogane.card-settlements.read returns the same candidates ungrouped",
-  // Reports, quality and schedules.
-  "/api/v2/reports": "stored report list",
-  "/api/v2/reports/:id": "one stored report",
-  "/api/v2/reports/:id/explanation": "a report's explanation",
-  "/api/v2/reports/:id/export": "a report's export download",
-  "/api/collection-quality": "collection quality summary",
-  "/api/collection-quality/:source": "collection quality cells of one source",
+  // Report export and schedules.
+  "/api/v2/reports/:id/export":
+    "a report's export download; not served over MCP (ADR 0072 amendment 2026-11-07: kogane.reports.read returns the report itself)",
   "/api/ops/v1/schedules":
     "schedule page snapshot (jobs, leases, survey proposals, maintenance); kogane.schedules.maintenance.read covers maintenance and kogane.schedules.survey.read the re-survey section only",
 };

@@ -200,13 +200,13 @@ the other delegated MCP tools are described there too.
 | `kogane.rewards.read`                  | `POST /api/agent/v1/rewards.read`                  | `kogane.rewards.read`                  | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                                                                                                                                 |
 | `kogane.reported-holdings-change.read` | `POST /api/agent/v1/reported-holdings-change.read` | `kogane.reported-holdings-change.read` | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#ui-read-pages))                                                                                                                                                       |
 | `kogane.events.read`                   | `POST /api/agent/v1/events.read`                   | `kogane.events.read`                   | `records.read` on `"*"` sources and accounts, while `eventsV2` is served ([below](#ui-read-pages))                                                                                                                                                                  |
+| `kogane.reports.read`                  | `POST /api/agent/v1/reports.read`                  | `kogane.reports.read`                  | `records.read` on `"*"` sources and accounts, while `reportArtifacts` is served ([below](#ui-read-pages))                                                                                                                                                           |
+| `kogane.collection-quality.read`       | `POST /api/agent/v1/collection-quality.read`       | `kogane.collection-quality.read`       | `evidence.read` on `"*"` sources and accounts, while its tables exist ([below](#ui-read-pages))                                                                                                                                                                     |
 
-No tool lists or reads the fixed report artifacts (評価レポート): they are
-served to the operator by `GET /api/v2/reports` and
-`/api/v2/reports/{id}` only. A later agent read adds a list and a detail
-together under `records.read` on `"*"` sources and accounts and refuses a
-restricted report outright
-([ADR 0072, amendment](adr/0072-report-artifact-pages.md#amendment-the-export-link-and-no-agent-report-read-yet-2026-11-06)).
+`kogane.reports.read` lists and reads the fixed report artifacts (評価レポート)
+on the terms ADR 0072's amendment set for an agent read: list and detail
+together, a restricted or unavailable report refused outright, `/export`
+never offered ([below](#ui-read-pages)).
 
 `kogane.capabilities` reports the `ApiCapabilities` object this deployment
 _actually serves_ — the contract's defaults with the server-computed facts
@@ -625,16 +625,18 @@ calling the reader those routes call, with the request the route would build
 from the same parameters. The route and the tool are two adapters over one
 function, so they cannot disagree on a row, a page bound or a refusal code.
 
-| Tool                                   | UI routes                                                                                                        | Requires                                     |
-| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| `kogane.identity.read`                 | `GET /api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage` | `records.read` on `"*"` sources and accounts |
-| `kogane.store.read`                    | `GET /api/meta`, `/api/overview`, `/api/filter-options`                                                          | `records.read` on `"*"` sources and accounts |
-| `kogane.observations.list`             | `GET /api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`                                     | `records.read` on `"*"` sources and accounts |
-| `kogane.observations.get`              | `GET /api/observations/{kind}/{id}`, `/api/artifacts/{id}`                                                       | `records.read` on `"*"` sources and accounts |
-| `kogane.balances.read`                 | `GET /api/v2/balances/latest`, `/api/v2/balances/history`                                                        | `records.read` on `"*"` sources and accounts |
-| `kogane.rewards.read`                  | `GET /api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                         | `records.read` on `"*"` sources and accounts |
-| `kogane.reported-holdings-change.read` | `GET /api/v2/reported-holdings-change`, while `reportedStateOnDate` is served                                    | `records.read` on `"*"` sources and accounts |
-| `kogane.events.read`                   | `GET /api/v2/activity`, `/api/v2/obligations`, while `eventsV2` is served (no screen reads them)                 | `records.read` on `"*"` sources and accounts |
+| Tool                                   | UI routes                                                                                                                             | Requires                                      |
+| -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| `kogane.identity.read`                 | `GET /api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage`                      | `records.read` on `"*"` sources and accounts  |
+| `kogane.store.read`                    | `GET /api/meta`, `/api/overview`, `/api/filter-options`                                                                               | `records.read` on `"*"` sources and accounts  |
+| `kogane.observations.list`             | `GET /api/transactions`, `/api/balances`, `/api/positions`, `/api/artifacts`                                                          | `records.read` on `"*"` sources and accounts  |
+| `kogane.observations.get`              | `GET /api/observations/{kind}/{id}`, `/api/artifacts/{id}`                                                                            | `records.read` on `"*"` sources and accounts  |
+| `kogane.balances.read`                 | `GET /api/v2/balances/latest`, `/api/v2/balances/history`                                                                             | `records.read` on `"*"` sources and accounts  |
+| `kogane.rewards.read`                  | `GET /api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                                              | `records.read` on `"*"` sources and accounts  |
+| `kogane.reported-holdings-change.read` | `GET /api/v2/reported-holdings-change`, while `reportedStateOnDate` is served                                                         | `records.read` on `"*"` sources and accounts  |
+| `kogane.reports.read`                  | `GET /api/v2/reports`, `/api/v2/reports/{id}`, `/api/v2/reports/{id}/explanation`, while `reportArtifacts` is served; never `/export` | `records.read` on `"*"` sources and accounts  |
+| `kogane.collection-quality.read`       | `GET /api/collection-quality`, `/api/collection-quality/{source}`, while the scheduling and run tables exist                          | `evidence.read` on `"*"` sources and accounts |
+| `kogane.events.read`                   | `GET /api/v2/activity`, `/api/v2/obligations`, while `eventsV2` is served (no screen reads them)                                      | `records.read` on `"*"` sources and accounts  |
 
 Input is a closed object. Its keys are the route's query parameters with
 their bounds, plus the field that picks the route (`collection`, `page` or `kind`, or the
@@ -663,10 +665,29 @@ before. The grant's `budget.maxRows` does not bound these reads: each
 answers the route's own page with the route's own page bound. A raw download
 (`/api/raw/{sha256}`) is not one of these reads:
 `kogane.observations.get` returns an artifact's detail, never its bytes.
-`kogane.reported-holdings-change.read` exists where its route does: while the
-store lacks the reported state's views it is neither listed nor callable
-(`unknown_tool` on `/mcp`, `404 not_found` on its HTTP path), like
-`kogane.reported-state.read`.
+`kogane.reported-holdings-change.read`, `kogane.reports.read` and
+`kogane.collection-quality.read` exist where their routes do: while the store
+lacks the reported state's views, `report_artifacts`, or the five scheduling
+and run tables, the tool is neither listed nor callable (`unknown_tool` on
+`/mcp`, `404 not_found` on its HTTP path), like `kogane.reported-state.read`.
+
+`kogane.reports.read` takes `{ reportId?, view?, offset?, decimalPolicy? }`:
+without `reportId` it is the list (`offset` only), with it the detail
+(`view: "body"`, the default) or the explanation (`view: "explanation"`);
+`view` or `decimalPolicy` without `reportId` is `400 invalid_request`. The
+list is the operator's list, so it names restricted reports too. The detail
+and explanation are the operator route's answer with one difference, ADR
+0072's rule for an agent read: a restricted report, or one without a complete
+run and without its body, is `403 evidence_restricted` on both views, and a
+report whose body has left R2 is `404 not_found`, the codes `/export`
+answers; the operator page re-displays the first and shows the second as
+`unavailable`. No argument reaches `/export`.
+
+`kogane.collection-quality.read` takes `{ source?, offset? }`: without
+`source` the summary (which takes no `offset`), with it that source's cells.
+Its cells carry provider fetch-unit keys (card tokens, account digests,
+connection ids, a branch and account number; ADR 0045), so it needs
+`evidence.read`, the capability of the evidence routes, not `records.read`.
 
 `kogane.events.read` is plan D19 (`docs/plans/2026-10-ai-operation-path.md`):
 `collection` is `activity` or `obligations`, `basis` (`cash-movement`, the
@@ -1603,16 +1624,18 @@ owner's agreement.
    | `/api/v2/balances/latest`, `/api/v2/balances/history`                                                        | `kogane.balances.read` ([UI read pages](#ui-read-pages))                 |
    | `/api/v2/rewards/holdings`, `/api/v2/rewards/expiry`                                                         | `kogane.rewards.read` ([UI read pages](#ui-read-pages))                  |
    | `/api/v2/reported-holdings-change`                                                                           | `kogane.reported-holdings-change.read` ([UI read pages](#ui-read-pages)) |
+   | `/api/v2/reports`, `/api/v2/reports/:id`, `/api/v2/reports/:id/explanation`                                  | `kogane.reports.read` ([UI read pages](#ui-read-pages))                  |
+   | `/api/collection-quality`, `/api/collection-quality/:source`                                                 | `kogane.collection-quality.read` ([UI read pages](#ui-read-pages))       |
 
-   The 14 gaps, by group:
+   The 9 gaps, by group:
 
-   | Group               | Routes with no MCP read                                                                                                                              |
-   | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-   | v1 raw download     | `/api/raw/:sha256`                                                                                                                                   |
-   | Evidence browser    | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact`, `…/runs/:run/artifacts/:artifact/raw` |
-   | Card settlements    | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped)                         |
-   | Reports and quality | `/api/v2/reports`, `/api/v2/reports/:id`, `…/:id/explanation`, `…/:id/export`, `/api/collection-quality`, `/api/collection-quality/:source`          |
-   | Operator pages      | `/api/ops/v1/schedules` (`kogane.schedules.maintenance.read` covers the maintenance part and `kogane.schedules.survey.read` the re-survey section)   |
+   | Group            | Routes with no MCP read                                                                                                                              |
+   | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+   | v1 raw download  | `/api/raw/:sha256`                                                                                                                                   |
+   | Evidence browser | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact`, `…/runs/:run/artifacts/:artifact/raw` |
+   | Card settlements | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped)                         |
+   | Report export    | `/api/v2/reports/:id/export` (not served over MCP, [ADR 0072](adr/0072-report-artifact-pages.md) amendment)                                          |
+   | Operator pages   | `/api/ops/v1/schedules` (`kogane.schedules.maintenance.read` covers the maintenance part and `kogane.schedules.survey.read` the re-survey section)   |
 
 ADR 0081 point 2 (no SQL in an MCP adapter) has its own guard,
 [`tests/mcp-tools-no-sql.test.ts`](../tests/mcp-tools-no-sql.test.ts).

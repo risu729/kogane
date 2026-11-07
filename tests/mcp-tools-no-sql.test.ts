@@ -39,7 +39,6 @@ function reachable(entry: string): string[] {
 const SCREEN_ONLY_SQL: Record<string, string> = {
   "read.ts":
     "the evidence routes' run and artifact queries; the MCP path imports only catalogue and raw, which reads R2, not D1",
-  "reports-api.ts": "the report routes; capabilities imports only reportArtifactsAvailable",
 };
 
 /**
@@ -50,7 +49,6 @@ const SCREEN_ONLY_SQL: Record<string, string> = {
  */
 const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   "read.ts": ["catalogue", "raw"],
-  "reports-api.ts": ["reportArtifactsAvailable"],
 };
 
 const modules = reachable("mcp.ts");

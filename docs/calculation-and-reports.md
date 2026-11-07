@@ -470,12 +470,12 @@ An agent therefore cannot rewrite a submission through one ambiguous
 [ADR 0072](adr/0072-report-artifact-pages.md) adds the catalogue and the
 operator's pages.
 
-| Layer      | Where                                                                                                                 |
-| ---------- | --------------------------------------------------------------------------------------------------------------------- |
-| HTTP       | `GET /api/v2/reports?offset=N` (`REPORT_LIST_SQL` in `services/app/src/reports-api.ts`), beside the routes above      |
-| Capability | `reportArtifacts` on `/api/meta`, true where the store has `report_artifacts`                                         |
-| Contract   | `validReportResponse` in `packages/observation-shared/src/report-artifact-contract.ts` (list, detail and explanation) |
-| Pages      | 評価レポート at `/reports` and `/reports/{id}` (`apps/web/src/pages/Reports.tsx`)                                     |
+| Layer      | Where                                                                                                                               |
+| ---------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| HTTP       | `GET /api/v2/reports?offset=N` (`REPORT_LIST_SQL` in `packages/application/src/query/report-artifacts.ts`), beside the routes above |
+| Capability | `reportArtifacts` on `/api/meta`, true where the store has `report_artifacts`                                                       |
+| Contract   | `validReportResponse` in `packages/observation-shared/src/report-artifact-contract.ts` (list, detail and explanation)               |
+| Pages      | 評価レポート at `/reports` and `/reports/{id}` (`apps/web/src/pages/Reports.tsx`)                                                   |
 
 The list returns catalogue columns only (id, context, purpose, schema,
 digest, creator, creation time), newest first by `created_at` then id, 50 per
@@ -505,8 +505,12 @@ gets no link and a sentence saying why ([ADR 0072, amendment](adr/0072-report-ar
 Limits: the list has no index on `created_at` and sorts the table per page;
 paging is by offset, so a report stored between two page loads shifts the
 older rows by one and the next page can repeat a row (rows are never
-updated or deleted, so none is skipped); no agent or MCP tool lists or
-reads reports; activity and obligations have no page.
+updated or deleted, so none is skipped); activity and obligations have no
+page. `kogane.reports.read` lists reports and reads one report's body or
+explanation for an agent, refusing a restricted or unavailable report on every
+view and never offering `/export`
+([ADR 0072, amendment of 2026-11-07](adr/0072-report-artifact-pages.md#amendment-the-agent-report-read-2026-11-07),
+[agent API](agent-api.md#ui-read-pages)).
 
 ## 5. The context is the input set, not a timestamp
 

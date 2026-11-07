@@ -18,6 +18,11 @@ export const RECORDS_GRANT = {
 } as const;
 
 const MCP_AUDIENCE = "fixture-mcp-audience";
+/**
+ * Each harness's certificate URL, so two harnesses in one file share the one
+ * `fetch` mock rather than the later replacing the earlier.
+ */
+const CERTS = new Map<string, unknown>();
 const AUDIENCE = "fixture-audience";
 
 export function pageReadHarness(label: string, extraEnv: Record<string, unknown> = {}) {
@@ -33,13 +38,17 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
   });
   beforeEach(() => {
     issuer = `https://${label}-${++sequence}.cloudflareaccess.com`;
+    CERTS.set(`${issuer}/cdn-cgi/access/certs`, jwks);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      if (String(input) !== `${issuer}/cdn-cgi/access/certs`)
-        throw new Error("Unexpected synthetic test request");
-      return Response.json(jwks);
+      const certs = CERTS.get(String(input));
+      if (!certs) throw new Error("Unexpected synthetic test request");
+      return Response.json(certs);
     });
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    CERTS.clear();
+    vi.restoreAllMocks();
+  });
 
   const token = (subject: string, audience: string) =>
     new SignJWT({ type: "app" })
@@ -164,6 +173,22 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
   }
 
   return { route, http, mcp, mcpMessage, direct, listed, expectSameAnswer };
+}
+
+/**
+ * A store whose schema answers "absent" to every `sqlite_master` probe, as
+ * before the migrations a served-only page read depends on.
+ */
+export function withoutTables(db: D1Database): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) =>
+          target.prepare(sql.includes("sqlite_master") ? "SELECT 0 AS present" : sql);
+      const value = Reflect.get(target, property);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 /**
