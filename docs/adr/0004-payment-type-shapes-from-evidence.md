@@ -64,7 +64,7 @@ rows.
 
 ## Amendment: the purchases read names each unrecognised row's reason (2026-11-07)
 
-- Status: proposed (takes effect when the PR that adds it merges)
+- Status: accepted (owner approved 2026-11-07 13:39 UTC)
 - Date: 2026-11-07
 - Records: [#1020](https://github.com/risu729/kogane/pull/1020) (merged
   2026-11-07), and `coverage.refundsAllocated` added with this amendment
