@@ -53,13 +53,13 @@ const STATEMENT_TOTAL_LABEL = "お支払い金額合計";
  * - `usage_header_total_mismatch`: a row amount that does not read as an
  *   exact JPY amount, or row amounts whose exact sum is not the total.
  */
-const USAGE_HEADER_REFUSALS = [
+export const USAGE_HEADER_REFUSALS = [
   "usage_header_rows_outside_first_ledger",
   "usage_header_payment_type_unproven",
   "usage_header_total_missing",
   "usage_header_total_mismatch",
 ] as const;
-type UsageHeaderRefusal = (typeof USAGE_HEADER_REFUSALS)[number];
+export type UsageHeaderRefusal = (typeof USAGE_HEADER_REFUSALS)[number];
 
 /** The provider's empty-ledger wording, as the collector has always detected it. */
 const EMPTY_LEDGER_MARKER = /(?:ご利用|明細)[^<>]{0,80}(?:ありません|ございません)/u;

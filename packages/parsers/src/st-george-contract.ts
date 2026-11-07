@@ -1,5 +1,5 @@
 /** Minimized provider DOM projection; no credentials, tokens, URLs or raw HTML. */
-interface StGeorgeTransaction {
+export interface StGeorgeTransaction {
   dateText: string;
   description: string;
   category: string;
@@ -8,7 +8,7 @@ interface StGeorgeTransaction {
   balanceText: string;
 }
 
-interface StGeorgeAccount {
+export interface StGeorgeAccount {
   /** SHA-256 of source namespace, normalized BSB and account number; never index. */
   accountKey: string;
   label: string;

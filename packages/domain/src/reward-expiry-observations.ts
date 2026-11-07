@@ -2,7 +2,7 @@
 import { hasExactKeys, isRecord, isText, isRefList } from "./guards.ts";
 import { validQuantity, type Quantity } from "./values.ts";
 import { validTemporalValue, type TemporalValue } from "./time.ts";
-interface RewardProviderExpiryDisplay {
+export interface RewardProviderExpiryDisplay {
   displayRef: string;
   scope: "holding-subset";
   quantity: Quantity;
@@ -22,7 +22,9 @@ export interface RewardProviderExpirySection extends RewardProviderExpiryDisplay
   observedAt: TemporalValue;
   sourceFactRefs: string[];
 }
-function validRewardProviderExpiryDisplay(value: unknown): value is RewardProviderExpiryDisplay {
+export function validRewardProviderExpiryDisplay(
+  value: unknown,
+): value is RewardProviderExpiryDisplay {
   return (
     isRecord(value) &&
     hasExactKeys(value, ["displayRef", "scope", "quantity", "expires", "rawLocator"]) &&

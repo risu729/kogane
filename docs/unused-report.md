@@ -60,14 +60,19 @@ the retired GLOBAL PASS `browser-probe.ts`, and V Point's
 or deleted the unused exports outside files that open pull requests were
 changing at the time.
 
-Unused exports and types remain in files those pull requests change, plus two
-kept on purpose:
+Unused exports and types remain in files those pull requests change, and in
+these, kept on purpose:
 
+- `packages/parsers/src/` and the `packages/domain/src/` modules a parser
+  imports. Their bytes are code-digested (`src/parsers/digests.ts`), and
+  registering a parser name and version with a different digest is refused
+  ([release adoption](release-adoption.md)), so even removing an `export`
+  keyword needs a parser version bump.
 - `collectInBankPage` in `services/collector-sbi-shinsei/src/browser-page.ts`
   has no caller, but ADR 0029 and the next-milestone plan cite the file as the
   in-page collection logic; removing it needs those documents revised.
-- `SCHEDULES_PATH` in `services/app/src/schedules-api.ts` is about to be
-  imported by an open pull request.
+- `SCHEDULES_PATH` in `services/app/src/schedules-api.ts`, which an open pull
+  request imports.
 
 An unused finding alone is still not a deletion decision; the review below
 applies to every removal.

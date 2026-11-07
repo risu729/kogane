@@ -52,9 +52,9 @@ const DATASET = "balance-summary-and-stage";
 export const SBI_SHINSEI_CUSTOMER_ACCOUNT = "sbi-shinsei:customer";
 /** The closed metric of the stage category observation. */
 export const SBI_SHINSEI_STAGE_METRIC = "provider_customer_category";
-const SBI_SHINSEI_STAGE_SUBJECT = "customerCategory";
+export const SBI_SHINSEI_STAGE_SUBJECT = "customerCategory";
 /** ISO 4217 "no currency": the observation states an attribute, not an amount. */
-const SBI_SHINSEI_STAGE_CURRENCY = "XXX";
+export const SBI_SHINSEI_STAGE_CURRENCY = "XXX";
 const LOCATOR = "json:$.responseParam.category.responseParam.customerCategory";
 
 const SUMMARY_FIELDS = [

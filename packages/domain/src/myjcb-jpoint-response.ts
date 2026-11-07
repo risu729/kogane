@@ -1,6 +1,6 @@
 // Observed response schema; failures never include provider text.
 export const MYJCB_POINT_RPC_ID = "200100101";
-interface MyJcbJPointDisplay {
+export interface MyJcbJPointDisplay {
   point: string;
   pointDispFlag: boolean;
   expirePoint: string;

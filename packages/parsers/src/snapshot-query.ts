@@ -59,7 +59,7 @@ export const FOREIGN_POSITION_SNAPSHOT_VERSION = "0.3.0";
  * kept only as a migration adapter; `coverage-v1` reads the parse's stored
  * coverage claim and nothing else.
  */
-const SNAPSHOT_POLICY_IDS = ["legacy-warning-compat-v1", "coverage-v1"] as const;
+export const SNAPSHOT_POLICY_IDS = ["legacy-warning-compat-v1", "coverage-v1"] as const;
 export type SnapshotPolicyId = (typeof SNAPSHOT_POLICY_IDS)[number];
 export const LEGACY_SNAPSHOT_POLICY: SnapshotPolicyId = "legacy-warning-compat-v1";
 export const COVERAGE_SNAPSHOT_POLICY: SnapshotPolicyId = "coverage-v1";
@@ -90,7 +90,7 @@ export const LOCAL_SNAPSHOT_RELATIONS: SnapshotRelations = {
   publishedParseRuns: "published_parse_runs",
 };
 
-const COVERAGE_CLAIMS_TABLE = "parse_coverage_claims";
+export const COVERAGE_CLAIMS_TABLE = "parse_coverage_claims";
 export const SNAPSHOT_POLICIES_TABLE = "dataset_snapshot_policies";
 export const ARTIFACT_UNITS_RELATION = "observation_fetch_artifact_units";
 
@@ -101,8 +101,7 @@ export const ARTIFACT_UNITS_RELATION = "observation_fetch_artifact_units";
  * artifact's own fetch unit succeeded, even when a sibling unit of the same
  * run failed and the run therefore projects as `partial`.
  */
-const UNIT_SCOPES = ["run", "unit"] as const;
-/** @public The `unit_scope` vocabulary above; no module imports it. */
+export const UNIT_SCOPES = ["run", "unit"] as const;
 export type UnitScope = (typeof UNIT_SCOPES)[number];
 export const UNIT_INDEPENDENT_POLICY = "unit-independent-v1";
 
@@ -142,7 +141,7 @@ export function unitScopePolicySql(
 }
 
 /** The pre-PR-14 rule and the default: the whole parent fetch run succeeded. */
-function runScopeSuccessSql(fetchRun: string): string {
+export function runScopeSuccessSql(fetchRun: string): string {
   return `${fetchRun}.status = 'success' AND ${fetchRun}.failure_count = 0`;
 }
 
@@ -172,7 +171,7 @@ export function unitScopedEligibilitySql(
  * contract); it stays byte-for-byte until every dataset has moved to
  * coverage-v1, and it must not gain new clauses.
  */
-function legacyWarningCompatMembership(parse: string, policy: string): string {
+export function legacyWarningCompatMembership(parse: string, policy: string): string {
   return `(${policy}.parser_name NOT IN (
         'sbi-foreign-cash-positions', 'sbi-foreign-cash-balances'
       ) OR NOT EXISTS (
@@ -202,7 +201,7 @@ export function containerScopeKeySql(artifact: string): string {
  * parses without a claim (legacy parsers), never participate. Warning text
  * and issue messages are not read.
  */
-function coverageV1Membership(
+export function coverageV1Membership(
   parse: string,
   artifact: string,
   policy: string,

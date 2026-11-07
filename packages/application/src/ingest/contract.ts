@@ -38,7 +38,7 @@ interface PutObjectOptions {
   httpMetadata?: { contentType?: string };
 }
 
-export interface EvidenceBucketLike {
+interface EvidenceBucketLike {
   head(key: string): Promise<StoredObjectLike | null>;
   put(
     key: string,

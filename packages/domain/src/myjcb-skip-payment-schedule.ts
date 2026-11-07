@@ -58,7 +58,7 @@ const AS_OF_HEADING =
 const HEAD_CELLS = ["ご利用日", "ご利用先などお支払日", "今後のお支払い金額"] as const;
 
 /** More rows than this on one page is refused, not truncated. */
-const SKIP_PAYMENT_SCHEDULE_ROW_LIMIT = 1_000;
+export const SKIP_PAYMENT_SCHEDULE_ROW_LIMIT = 1_000;
 
 /**
  * Why a schedule page is not read. Closed codes, safe to log; the checks run
@@ -99,10 +99,10 @@ export const SKIP_PAYMENT_SCHEDULE_REFUSALS = [
   "schedule_date_invalid",
   "schedule_amount_invalid",
 ] as const;
-type SkipPaymentScheduleRefusal = (typeof SKIP_PAYMENT_SCHEDULE_REFUSALS)[number];
+export type SkipPaymentScheduleRefusal = (typeof SKIP_PAYMENT_SCHEDULE_REFUSALS)[number];
 
 /** One row as the page shows it. Text stays text; the amount is an exact decimal. */
-interface SkipPaymentScheduleRow {
+export interface SkipPaymentScheduleRow {
   /** 0-based position among the ledger's `content` rows. */
   readonly index: number;
   /** The three cells, whitespace collapsed, as displayed. */
@@ -117,7 +117,7 @@ interface SkipPaymentScheduleRow {
   readonly amountText: string;
 }
 
-interface SkipPaymentSchedule {
+export interface SkipPaymentSchedule {
   /** The "as of" date the page names, `YYYY-MM-DD`; null only for a page with no rows and no heading. */
   readonly asOf: string | null;
   /** The first payment month the page names (「YYYY年M月以降のお支払い分」), `YYYY-MM`. */

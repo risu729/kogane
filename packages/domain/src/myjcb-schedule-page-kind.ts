@@ -23,7 +23,7 @@ import { myjcbSchedulePageKind, type SchedulePageNode } from "./myjcb-skip-payme
  * accepted there; every other character, the ASCII parentheses included, must
  * match exactly.
  */
-const BONUS_SCHEDULE_HEADING = /^ボーナス[0-9０-９]+回払いご利用代金明細\(未確定分\)$/u;
+export const BONUS_SCHEDULE_HEADING = /^ボーナス[0-9０-９]+回払いご利用代金明細\(未確定分\)$/u;
 
 /**
  * - `skip-payment`: exactly one h1 is the observed ショッピングスキップ払い
