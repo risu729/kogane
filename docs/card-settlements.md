@@ -105,7 +105,9 @@ combine, 1 to 3; no defaults), it answers per statement:
   `debit_in_other_statement_allocation` when a debit could pay two
   statements, and `excluded_debit_competes` when a debit refused as an
   unresolved duplicate or for a missing date could complete an exact sum):
-  every candidate listed, none chosen;
+  every candidate counted (`allocationCount`), the first 50 listed (fewest
+  debits first, then by member ref ids) with `allocationsTruncated: true`
+  when more exist, none chosen;
 - `unsupported`: `no_debit_in_window`, or `no_exact_allocation` with
   `in_window_debits_below_total` (a shortfall) and/or `debit_above_total`
   (an excess). No remainder is computed and no debit is called a partial
@@ -383,7 +385,10 @@ owner, 2026-11-07 03:58 UTC):
   sum is the total (shown as `複数の出金の合計が一致`);
 - `needs_review` (`candidate_not_unique`, and
   `debit_in_other_statement_allocation` or `excluded_debit_competes`): every
-  combination listed, none chosen;
+  combination counted, at most the first 50 listed, none chosen. Each answer
+  carries `allocationCount` and `allocationsTruncated`; above a truncated list
+  the page says `一致する組み合わせ N件のうち、出金の件数が少ない順に先頭の50件を表示しています。`
+  ([amendment 2026-11-07, a bounded list](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-07-a-bounded-list-of-allocations));
 - `unsupported` (`no_exact_allocation` with `in_window_debits_below_total`
   and/or `debit_above_total`): no remainder is computed, and the page says it
   does not judge whether that is a partial payment or an overpayment;
@@ -984,7 +989,11 @@ planner on synthetic inputs: today's matcher on a two-debit and a partial case,
 every refusal, exclusion and outcome code, refused debits competing, and 300
 seeded random runs compared with a brute-force subset oracle (exact sums,
 whole and distinct members, no held or dateless debit, each status and code,
-no debit proposed for two statements, order independence).
+the count and truncation marker, no debit proposed for two statements, order
+independence); the bounded list (a window of 32 equal debits, a run at both
+bounds, exactly 50 and 51) and 200 seeded runs of up to 32 debits compared
+with the planner as shipped before the bound
+(`packages/domain/test/card-settlement-allocation-legacy.ts`).
 `packages/domain/test/card-debit-account.test.ts` covers the provider-stated
 debit-account rule on synthetic inputs: bank names resolve only through the
 table, a unique account starting with the leading digits is proposed, an

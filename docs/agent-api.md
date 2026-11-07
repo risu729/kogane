@@ -527,7 +527,9 @@ the planner release, the display policy, the partition and bounds, and
 `nextOffset`. Each item has the statement's ref, source, source account,
 resolved account, total (null when not exact), due date (null when absent),
 period, `code`, `debitsInWindow`, `planner` (null unless asked) and
-`acceptable: false`.
+`acceptable: false`. A planner answer lists at most the first 50 allocations
+(`manifest.planner.bounds.allocations`), with `allocationCount` (all of them)
+and `allocationsTruncated` (true when more exist than are listed).
 
 Authorization: `records.read`, else `403 unauthorized`; sources and accounts
 both `"*"`, else `403 evidence_restricted`; `offset + 50` within `maxRows`,

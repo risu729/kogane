@@ -113,7 +113,8 @@ Outcome per statement:
   member debit in another statement's candidate (also
   `debit_in_other_statement_allocation`; ADR 0034's two-sided uniqueness),
   or a refused debit that competes (also `excluded_debit_competes`). Every
-  candidate is listed and none is chosen.
+  candidate is counted, the first 50 are listed (amendment "a bounded list
+  of allocations" below) and none is chosen.
 - `unsupported`: no candidate. `no_debit_in_window`, or
   `no_exact_allocation` with `in_window_debits_below_total` when the
   in-window debits together are below the total (the shortfall shape a partial
@@ -135,8 +136,8 @@ Ownership is carried as today's matcher carries it: `established-same`,
 `unknown` or `different` over the statement's and every member's owner, with
 `owner_not_established` or `owner_differs` as a rejection condition, never a
 refusal and never a decision. The manifest pins the planner release
-(`card-statement-allocation-v1`), the policy version and the arithmetic
-version.
+(`card-statement-allocation-v1`; `-v2` since the amendment "a bounded list of
+allocations"), the policy version and the arithmetic version.
 
 ### Nothing calls it
 
@@ -263,3 +264,98 @@ route and the agent tool answer the same page; grants; audit);
 `apps/web/test/card-settlement.browser.test.ts` (the page shows the reason
 and the answer and offers no action). The module test now pins this caller
 and its wire contract as the only files naming the module.
+
+## Amendment 2026-11-07: a bounded list of allocations
+
+- Status: proposed
+- Date: 2026-11-07
+
+### Context
+
+`needs_review` listed every candidate. Under the display policy (at most
+three debits) and the run bound of 32 debits, one statement can have
+C(32,1) + C(32,2) + C(32,3) = 5,488 debit sets, and a window of 32 equal
+debits, each a third of the total, has 4,960 exact three-debit sums. The
+planner built every one as an allocation object, and the review read sent
+them all: a run at both bounds (16 such statements) serialized to about
+112 MB (measured with the shipped planner, the same synthetic input as the
+verification below), and a 50-statement page can hold several such runs,
+against the 128 MB one Worker isolate has. The page rendered every one, and
+the browser's wire contract refused a list above 1,000, so such a statement
+broke the whole page. PR #1099 proposes widening that contract bound to
+5,488 to match the uncapped planner; this amendment bounds the list instead.
+
+### Options considered
+
+1. **Cut in the review read** (`reviewUnmatchedCardStatements`): the planner
+   still builds every allocation, so the memory is spent before the cut.
+2. **Stop the search at the bound**: bounded time and memory, but the
+   status and codes need every candidate (whether a debit is in a candidate
+   of another statement decides `debit_in_other_statement_allocation`), and
+   the count of what is not shown would be lost.
+3. **Count every candidate, keep only the first ones** (chosen): the search
+   visits each exact combination once (at most 5,488 per statement, which the
+   run bounds already cap), records which debits any candidate uses, and
+   keeps at most twice the bound, sorting and cutting back when it fills.
+
+### Decision
+
+- `CARD_STATEMENT_ALLOCATION_LISTED_MAX = 50`
+  (`packages/domain/src/card-settlement-allocation.ts`). Fifty matches the
+  review read's page of 50 statements, keeps a worst page at 2,500 listed
+  allocations, and is more than an operator can compare by eye; the page
+  accepts none of them anyway (`acceptable: false`), so past a few the list
+  only shows that the statement is ambiguous, which the status and count
+  already say.
+- Every outcome carries `allocationCount` (every exact allocation: 1 for
+  `proposed`, 0 for `unsupported`) and `allocationsTruncated`, true exactly
+  when the count is above the allocations listed. The list is the first 50 in
+  the order it always had (fewest debits first, then by the members' ref
+  ids), so it is deterministic and, at or below 50, unchanged. Status, codes,
+  pair and debit exclusions are decided from every candidate, as before.
+- The competition check stops at the first exact combination a refused debit
+  completes; it only ever asked whether one exists.
+- The planner release becomes `card-statement-allocation-v2`: the listed
+  output changed.
+- The review read passes both fields through and states the bound in
+  `manifest.planner.bounds.allocations`. Its wire contract
+  (`packages/observation-shared/src/card-statements-unmatched-contract.ts`)
+  refuses a list above 50, a list shorter than its count without the marker,
+  a marker with nothing left out, and members above
+  `CARD_STATEMENT_ALLOCATION_SIZE_MAX`. The `カード照合` page says
+  `一致する組み合わせ N件のうち、出金の件数が少ない順に先頭の50件を表示しています。`
+  above a truncated list. `kogane.card-settlements.unmatched` is the same
+  service and returns the same fields.
+- The wire `schemaVersion` stays `kogane-card-statements-unmatched-v1`: the
+  fields are added, and an answer at or below the bound lists what it listed
+  before.
+
+### Consequences
+
+- A statement with more than 50 exact allocations shows the first 50 and the
+  count; the rest are not reachable through the page or the tool. They are
+  not decisions either way, and no allocation is acceptable.
+- Memory per statement is the kept list (at most 100 debit sets) and the set
+  of debits any candidate uses (at most 32); the run at both bounds
+  serializes to about 1.1 MB instead of 112 MB, and its time is unchanged
+  (about 0.1 s here, the same search).
+
+### Verification
+
+`packages/domain/test/card-settlement-allocation.test.ts`, "a bounded list of
+allocations": a window of 32 equal debits counted whole (4,960) with the
+first 50 of the shipped planner's list, marked truncated; a run at both
+bounds listing 800 allocations in under 2 MB; exactly 50 listed whole and 51
+truncated, singles first; and a differential test on 200 seeded runs of up to
+32 debits against the planner as shipped
+(`packages/domain/test/card-settlement-allocation-legacy.ts`, frozen): equal
+at or below the bound, the shipped list's first 50 above it, with the same
+status, codes and exclusions, both sides drawn. The oracle property test now
+checks the count and the marker. `packages/observation-shared/test/card-statements-unmatched-contract.test.ts`
+covers the contract;
+`services/processor/test/card-statements-unmatched.test.ts` adds the worst
+window on the complete CORE schema;
+`services/app/test/card-statements-unmatched-bound-api.test.ts` shows the
+operator's route, the agent route and the MCP tool answer the same bounded
+page; `apps/web/test/card-settlement.browser.test.ts` shows the note and the
+50 listed combinations.

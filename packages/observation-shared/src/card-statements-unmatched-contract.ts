@@ -6,6 +6,8 @@
 import {
   ALLOCATION_OUTCOME_CODES,
   ALLOCATION_STATEMENT_REFUSALS,
+  CARD_STATEMENT_ALLOCATION_LISTED_MAX,
+  CARD_STATEMENT_ALLOCATION_SIZE_MAX,
 } from "../../domain/src/card-settlement-allocation.ts";
 import { UNMATCHED_STATEMENT_CODES } from "../../domain/src/card-settlement-unmatched.ts";
 import { validSourceFactRef } from "../../domain/src/events.ts";
@@ -25,6 +27,25 @@ const count = (value: unknown): value is number =>
 const oneOf = (values: readonly string[], value: unknown): boolean =>
   text(value) && values.includes(value);
 
+/**
+ * The list against its count (ADR 0074, amendment 2026-11-07): the server
+ * lists the first `CARD_STATEMENT_ALLOCATION_LISTED_MAX` allocations and
+ * counts all of them, so a list shorter than its count is marked truncated
+ * and nothing is hidden silently. A proposal is exactly one allocation, an
+ * unsupported answer none.
+ */
+function validListing(value: Record<string, any>): boolean {
+  const listed = value.allocations.length;
+  return (
+    count(value.allocationCount) &&
+    typeof value.allocationsTruncated === "boolean" &&
+    listed === Math.min(value.allocationCount, CARD_STATEMENT_ALLOCATION_LISTED_MAX) &&
+    value.allocationsTruncated === value.allocationCount > listed &&
+    (value.status !== "proposed" || value.allocationCount === 1) &&
+    (value.status !== "unsupported" || value.allocationCount === 0)
+  );
+}
+
 function validPlanner(value: unknown): boolean {
   if (value === null) return true;
   if (!record(value)) return false;
@@ -35,7 +56,8 @@ function validPlanner(value: unknown): boolean {
     Array.isArray(value.codes) &&
     value.codes.every((code: unknown) => oneOf(ALLOCATION_OUTCOME_CODES, code)) &&
     Array.isArray(value.allocations) &&
-    value.allocations.length <= 1_000 &&
+    value.allocations.length <= CARD_STATEMENT_ALLOCATION_LISTED_MAX &&
+    validListing(value) &&
     value.allocations.every(
       (allocation: unknown) =>
         record(allocation) &&
@@ -45,7 +67,7 @@ function validPlanner(value: unknown): boolean {
         allocation.rejectionConditions.every(text) &&
         Array.isArray(allocation.members) &&
         allocation.members.length >= 1 &&
-        allocation.members.length <= 3 &&
+        allocation.members.length <= CARD_STATEMENT_ALLOCATION_SIZE_MAX &&
         allocation.members.every(
           (member: unknown) =>
             record(member) &&
