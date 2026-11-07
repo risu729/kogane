@@ -291,6 +291,11 @@ provider text or body.
   is shown to the operator only, and no record is shown; a deployment
   without the route (`404`) says the log is not provided.
 
+A record whose target is an operations request (`op_<id>`) links to that
+request's read-only 依頼の経過 page (`/operations/op_<id>`,
+[operations API](ops-api.md#collector-execution-adr-0048)); there is no list of
+operations, so this log is where the operator finds an operation id.
+
 The page reads no capability from `/api/meta`: like the schedule settings
 page it is always listed, and the server's operator check is the only gate.
 It does not show which delegations are in force: no route serves them to the
