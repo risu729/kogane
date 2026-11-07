@@ -637,13 +637,9 @@
         "current_balance_projection_sealed_no_delete",
         "current_balance_projection_sealed_no_update"
       ],
-      "noUpdateTriggers": [
-        "current_balance_projection_sealed_no_update"
-      ],
-      "noDeleteTriggers": [
-        "current_balance_projection_sealed_no_delete"
-      ],
-      "appendOnly": true,
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
       "sqlSha256": "93b9ff93d4fefa70"
     },
     {
@@ -996,13 +992,9 @@
         "reward_conversion_simulations_sealed_no_delete",
         "reward_conversion_simulations_sealed_no_update"
       ],
-      "noUpdateTriggers": [
-        "reward_conversion_simulations_sealed_no_update"
-      ],
-      "noDeleteTriggers": [
-        "reward_conversion_simulations_sealed_no_delete"
-      ],
-      "appendOnly": true,
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
       "sqlSha256": "76ba3cfbd10df3f8"
     },
     {
@@ -1225,13 +1217,9 @@
         "reward_expiry_estimates_sealed_no_delete",
         "reward_expiry_estimates_sealed_no_update"
       ],
-      "noUpdateTriggers": [
-        "reward_expiry_estimates_sealed_no_update"
-      ],
-      "noDeleteTriggers": [
-        "reward_expiry_estimates_sealed_no_delete"
-      ],
-      "appendOnly": true,
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
       "sqlSha256": "ce6f6c40b61c3a6b"
     },
     {
@@ -1454,13 +1442,9 @@
         "reward_expiry_estimates_v2_sealed_no_delete",
         "reward_expiry_estimates_v2_sealed_no_update"
       ],
-      "noUpdateTriggers": [
-        "reward_expiry_estimates_v2_sealed_no_update"
-      ],
-      "noDeleteTriggers": [
-        "reward_expiry_estimates_v2_sealed_no_delete"
-      ],
-      "appendOnly": true,
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
       "sqlSha256": "6be3c431e70dce58"
     },
     {
@@ -1864,10 +1848,8 @@
       "noUpdateTriggers": [
         "reward_provider_sections_no_update"
       ],
-      "noDeleteTriggers": [
-        "reward_provider_sections_sealed_no_delete"
-      ],
-      "appendOnly": true,
+      "noDeleteTriggers": [],
+      "appendOnly": false,
       "sqlSha256": "50a9b530bbec7bb2"
     },
     {
@@ -1952,10 +1934,8 @@
       "noUpdateTriggers": [
         "reward_snapshot_input_refs_no_update"
       ],
-      "noDeleteTriggers": [
-        "reward_snapshot_input_refs_no_delete"
-      ],
-      "appendOnly": true,
+      "noDeleteTriggers": [],
+      "appendOnly": false,
       "sqlSha256": "000a8eab4b22fbfd"
     },
     {
@@ -2147,13 +2127,9 @@
         "scope_relations_sealed_no_delete",
         "scope_relations_sealed_no_update"
       ],
-      "noUpdateTriggers": [
-        "scope_relations_sealed_no_update"
-      ],
-      "noDeleteTriggers": [
-        "scope_relations_sealed_no_delete"
-      ],
-      "appendOnly": true,
+      "noUpdateTriggers": [],
+      "noDeleteTriggers": [],
+      "appendOnly": false,
       "sqlSha256": "1fc27f1b49fdcff3"
     },
     {
@@ -2238,10 +2214,8 @@
       "noUpdateTriggers": [
         "snapshot_input_refs_no_update"
       ],
-      "noDeleteTriggers": [
-        "snapshot_input_refs_no_delete"
-      ],
-      "appendOnly": true,
+      "noDeleteTriggers": [],
+      "appendOnly": false,
       "sqlSha256": "31af6e7111e87f96"
     }
   ],
@@ -2751,12 +2725,20 @@
     "tablesWithoutAppendOnlyGuards": [
       "balance_read_snapshots",
       "balance_snapshot_pointer",
+      "current_balance_projection",
       "read_build_checkpoints",
       "read_instance",
       "reward_build_checkpoints",
+      "reward_conversion_simulations",
+      "reward_expiry_estimates",
+      "reward_expiry_estimates_v2",
       "reward_expiry_snapshots",
       "reward_provider_display_checkpoints",
-      "reward_snapshot_pointer"
+      "reward_provider_expiry_sections",
+      "reward_snapshot_input_refs",
+      "reward_snapshot_pointer",
+      "scope_relations",
+      "snapshot_input_refs"
     ],
     "nonStrictTables": [],
     "withoutRowidTables": [],
