@@ -65,7 +65,7 @@ export const LANE_AUDIT_SQL = {
       WHERE rowid>?1 AND method='rule' GROUP BY +kind ORDER BY +kind`,
   settlementCandidates: `SELECT 'candidate' AS kind,count(*) AS n,min(rowid) AS lo,max(rowid) AS hi
       FROM card_settlement_candidates WHERE rowid>?1 HAVING count(*)>0`,
-  surveyProposals: `SELECT kind,count(*) AS n,min(id) AS lo,max(id) AS hi FROM maintenance_survey_proposals
+  maintenanceSurveyProposals: `SELECT kind,count(*) AS n,min(id) AS lo,max(id) AS hi FROM maintenance_survey_proposals
       WHERE id>?1 GROUP BY kind`,
   decisionsRef: `SELECT id FROM decision_revisions WHERE rowid>=?1 AND rowid<=?2 AND actor_id=?3 AND method='rule' ORDER BY rowid`,
   commitsRef: `SELECT commit_seq FROM economic_commit_log WHERE core_epoch=?1 AND commit_seq>=?2 AND commit_seq<=?3 AND principal=?4 ORDER BY commit_seq`,
@@ -92,7 +92,7 @@ const PROPOSAL_TABLES = {
   },
   // Written by the maintenance re-survey only.
   "maintenance-survey": {
-    sql: LANE_AUDIT_SQL.surveyProposals,
+    sql: LANE_AUDIT_SQL.maintenanceSurveyProposals,
     kind: (raw: string) => `maintenance-survey-${raw}`,
   },
 } as const;

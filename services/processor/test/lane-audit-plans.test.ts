@@ -175,7 +175,7 @@ const PLANS: Record<keyof typeof LANE_AUDIT_SQL, RegExp[]> = {
   settlementCandidates: [
     /^SEARCH card_settlement_candidates USING INTEGER PRIMARY KEY \(rowid>\?\)$/u,
   ],
-  surveyProposals: [
+  maintenanceSurveyProposals: [
     /^SEARCH maintenance_survey_proposals USING INTEGER PRIMARY KEY \(rowid>\?\)$/u,
     /^USE TEMP B-TREE FOR GROUP BY$/u,
   ],
