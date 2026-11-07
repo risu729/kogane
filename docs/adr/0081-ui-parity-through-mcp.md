@@ -1,6 +1,6 @@
 # ADR 0081: Every operation the web UI offers is also an MCP operation, served by the same application service
 
-- Status: proposed
+- Status: accepted (merged 2026-11-07 in #1017)
 - Date: 2026-11-07
 - Decided by: the owner, 2026-11-07 03:59:50 UTC and 04:00:14 UTC
 - Builds on: [ADR 0063](0063-delegated-ai-operation-path.md) (the delegated
