@@ -393,7 +393,8 @@ export function ErrorState({
 }): ReactNode {
   // Both carry a fixed message chosen from the status or the closed refusal
   // code, never the server's text; a command refusal (plan_not_found,
-  // plan_expired, ...) is named as such rather than as an unreachable API.
+  // plan_expired, ...) is named as such rather than as an unreachable API,
+  // and one the same request would meet again offers no retry.
   const known = error instanceof ApiError || error instanceof CommandError;
   const status = known && error.status >= 400 ? ` (HTTP ${String(error.status)})` : "";
   return (
@@ -402,7 +403,7 @@ export function ErrorState({
         {label}を読み込めませんでした{status}
       </span>
       <p>{known ? error.message : "接続先の API が利用できるか確認し、もう一度お試しください。"}</p>
-      {onRetry ? (
+      {onRetry && !(error instanceof CommandError && error.final) ? (
         <button className="button" onClick={onRetry} disabled={retrying}>
           {retrying ? "再試行中…" : "再試行"}
         </button>

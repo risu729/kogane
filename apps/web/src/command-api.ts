@@ -99,6 +99,22 @@ export class CommandError extends Error {
     this.status = status;
     this.code = code;
   }
+
+  /**
+   * Whether the same request would be refused again, so offering a retry would
+   * only repeat the refusal: a client error other than an expired sign-in, a
+   * timeout or a rate limit, and the store-wide `budget_exceeded` bound.
+   */
+  get final(): boolean {
+    return refusalIsFinal(this.status, this.code);
+  }
+}
+
+function refusalIsFinal(status: number, code: string): boolean {
+  return (
+    code === "budget_exceeded" ||
+    (status >= 400 && status < 500 && status !== 401 && status !== 408 && status !== 429)
+  );
 }
 
 /**
@@ -116,8 +132,9 @@ const MESSAGES: Record<string, string> = {
     "この変更は、まだ対応していない内容を含むため受け付けられません。再試行しても結果は変わりません。",
   needs_rule_verification:
     "適用するルールの確認が済んでいないため受け付けられません。ルールを確認してから計画し直してください。",
-  // The command path's only bound is the whole store's identity observations
-  // (instrument-candidate-context.ts), which no narrower plan avoids.
+  // Every command-path source is a store-wide instrument-resolution bound
+  // (identity observations, fact rows, listed_as rows, candidate count;
+  // instrument-candidate-context.ts), which no narrower plan avoids.
   budget_exceeded:
     "処理できる件数の上限を超えているため、この変更は受け付けられません。再試行しても結果は変わりません。",
   evidence_restricted: "この根拠を使う権限がないため、この操作は受け付けられません。",
@@ -152,7 +169,9 @@ function messageFor(status: number, code: string): string {
       ? "認証が必要です。ログイン状態を確認して、再読み込みしてください。"
       : status === 403
         ? "この操作を行う権限がありません。"
-        : "操作を完了できませんでした。時間をおいて再試行してください。")
+        : refusalIsFinal(status, code)
+          ? "操作を受け付けられませんでした。再試行しても結果は変わりません。表示を更新して、内容を確認し直してください。"
+          : "操作を完了できませんでした。時間をおいて再試行してください。")
   );
 }
 
