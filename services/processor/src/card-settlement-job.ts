@@ -5,11 +5,6 @@ import {
 import { createSettlementBankReader } from "./card-settlement-bank-cache.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import {
-  exactQuantity,
-  normalizeDecimal,
-  type Quantity,
-} from "../../../packages/domain/src/values.ts";
-import {
   cardSettlementCandidate,
   CARD_SETTLEMENT_POLICY,
 } from "../../../packages/domain/src/card-settlement.ts";
@@ -22,28 +17,28 @@ import {
 } from "../../../packages/domain/src/card-debit-account.ts";
 import { debitAccountStatementForParse, knownBankAccounts } from "./card-debit-account-job.ts";
 import { cardSettlementOwnershipCtes } from "../../../packages/read-model/src/card-settlement-ownership.ts";
+import {
+  bankDebitFactOf,
+  CARD_SETTLEMENT_BANK_DEBITS_LIMIT,
+  CARD_SETTLEMENT_BANK_DEBITS_SQL,
+  statementFactOf,
+  sweepRowAmount,
+  sweepRowEvidence,
+  type CardSettlementSweepRow,
+} from "../../../packages/read-model/src/card-settlement-bank-debits.ts";
+import {
+  CARD_SETTLEMENT_UNMATCHED_CODES,
+  unmatchedStatementCode,
+  type CardSettlementUnmatchedCode,
+} from "../../../packages/domain/src/card-settlement-unmatched.ts";
 
-interface Row {
-  id: number;
-  parse_run_id: number;
-  source_account: string;
-  unit_ref: string;
-  source_id: string;
-  value_status: string;
-  coefficient: string | null;
-  scale: number | null;
+type Row = CardSettlementSweepRow & {
   payment_date: string | null;
-  as_of: string | null;
-  /** The bank adapter's civil debit date (`card_bank_debit_facts`, 0052). */
-  debit_date?: string | null;
   period: string | null;
   statement_key: string;
   bank_key: string;
-  account_id: string | null;
-  owner_ref: string | null;
-  evidence_refs_json: string | null;
-}
-const LIMIT = 1000;
+};
+const LIMIT = CARD_SETTLEMENT_BANK_DEBITS_LIMIT;
 /**
  * The next page of current provider statements after the cursor, with their
  * owners. The page is chosen first and only its statements are owned, through
@@ -58,32 +53,8 @@ export const CARD_SETTLEMENT_STATEMENTS_SQL = `WITH page AS MATERIALIZED (
 ${cardSettlementOwnershipCtes("balance")}
 SELECT page.*,ownership.account_id,ownership.owner_ref,ownership.evidence_refs_json FROM page
  LEFT JOIN ownership ON ownership.observation_id=page.id ORDER BY page.id`;
-/**
- * The bank debits within three days of one due date (`?1`, `?2`), at most `?3`
- * by id, with their owners, resolved for those debits only: joined whole, the
- * ownership view grouped every transaction identity of the store, once per
- * statement of the page. The window is on each adapter's own `debit_date`
- * (migration 0052): SMBC's is the date of its midnight-JST `as_of`, the only
- * shape the sweep ever matched, and SBI Shinsei's is its posting date.
- */
-export const CARD_SETTLEMENT_BANK_DEBITS_SQL = `WITH debits AS MATERIALIZED (
- SELECT * FROM card_bank_debit_facts
- WHERE debit_date BETWEEN date(?1,'-3 days') AND date(?2,'+3 days') ORDER BY id LIMIT ?3
-), observed AS (SELECT id AS observation_id FROM debits),
-${cardSettlementOwnershipCtes("transaction")}
-SELECT debits.*,ownership.account_id,ownership.owner_ref,ownership.evidence_refs_json FROM debits
- LEFT JOIN ownership ON ownership.observation_id=debits.id ORDER BY debits.id`;
-function amount(row: Row, debit = false): Quantity | null {
-  if (row.value_status !== "exact" || row.coefficient === null || row.scale === null) return null;
-  const coefficient = debit ? row.coefficient.replace(/^-/, "") : row.coefficient;
-  return exactQuantity(row.unit_ref, normalizeDecimal(BigInt(coefficient), row.scale));
-}
-function evidence(row: Row): string[] {
-  const parsed: unknown = JSON.parse(row.evidence_refs_json ?? "[]");
-  return Array.isArray(parsed)
-    ? parsed.filter((ref): ref is string => typeof ref === "string")
-    : [];
-}
+const amount = sweepRowAmount;
+const evidence = sweepRowEvidence;
 /**
  * Appends what the card's own debit-account statement says about one
  * candidate (ADR 0032, `card_settlement_debit_account_evidence`, migration
@@ -121,12 +92,26 @@ async function recordDebitAccountEvidence(
   return result.meta.changes;
 }
 
+/**
+ * Why a statement the sweep examined this tick yielded no candidate, as a
+ * closed code (docs/card-settlements.md, Unmatched statements; ADR 0009):
+ * `unmatchedStatementCode` (packages/domain/src/card-settlement-unmatched.ts),
+ * the same function the review read of statements without a candidate uses.
+ * Only the rows the sweep already read decide the code. A statement paid by
+ * two debits, partly paid, or paid by a debit outside the window or the
+ * adapters is one of the last two; the codes never say which.
+ */
+export { CARD_SETTLEMENT_UNMATCHED_CODES };
+export { CARD_SETTLEMENT_BANK_DEBITS_SQL };
+
 export interface CardSettlementSweepResult {
   scanned: number;
   proposed: number;
   written: number;
   /** Debit-account evidence rows this tick newly appended. */
   debitAccountEvidence: number;
+  /** Statements examined this tick that yielded no candidate, per closed code. */
+  unmatched: Record<CardSettlementUnmatchedCode, number>;
 }
 
 /** Published source facts only; heuristic candidates always remain unaccepted. */
@@ -156,6 +141,12 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
     written = 0,
     debitAccountEvidence = 0,
     scanned = statements.results.length;
+  const unmatched: Record<CardSettlementUnmatchedCode, number> = {
+    statement_total_refund_or_zero: 0,
+    statement_not_comparable: 0,
+    no_debit_in_window: 0,
+    no_equal_amount_debit: 0,
+  };
   const readBanks = createSettlementBankReader<Row>(
     () => db.prepare(CORE_REVISION_SQL).first<CoreRevisionRow>(),
     async (date) =>
@@ -174,6 +165,7 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
       !parseLocalDate(statement.payment_date) ||
       !statement.period
     ) {
+      unmatched[unmatchedStatementCode(total, false, null)]++;
       await db
         .prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=? WHERE singleton=1")
         .bind(statement.id)
@@ -183,46 +175,17 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
     const banks = await readBanks(statement.payment_date);
     // Preserve the existing logical scan count, including shared rows.
     scanned += banks.length;
+    let matched = false;
     for (const bank of banks) {
-      const debit = amount(bank, true);
-      const bankDate = bank.debit_date ?? null;
-      if (!debit || !bankDate || !parseLocalDate(bankDate)) continue;
+      const bankDebit = bankDebitFactOf(bank);
+      if (!bankDebit) continue;
       const facts = cardSettlementCandidate(
-        {
-          ref: {
-            kind: "balance",
-            id: "balance:" + statement.id,
-            revision: "parse_run:" + statement.parse_run_id,
-          },
-          sourceId: statement.source_id as "vpass" | "myjcb",
-          sourceAccount: statement.source_account,
-          accountId: statement.account_id ?? null,
-          ownerRef: statement.owner_ref ?? null,
-          amount: total,
-          paymentDate: {
-            kind: "local-date",
-            value: statement.payment_date,
-            zone: "Asia/Tokyo",
-            basis: "provider",
-          },
-          period: statement.period,
-        },
-        {
-          ref: {
-            kind: "transaction",
-            id: "transaction:" + bank.id,
-            revision: "parse_run:" + bank.parse_run_id,
-          },
-          sourceId: bank.source_id,
-          sourceAccount: bank.source_account,
-          accountId: bank.account_id ?? null,
-          ownerRef: bank.owner_ref ?? null,
-          amount: debit,
-          occurred: { kind: "local-date", value: bankDate, zone: "Asia/Tokyo", basis: "provider" },
-        },
+        statementFactOf(statement, total, statement.payment_date),
+        bankDebit,
         [...new Set([...evidence(statement), ...evidence(bank)])],
       );
       if (!facts) continue;
+      matched = true;
       proposed++;
       const digest = await canonicalDigest({
         policy: CARD_SETTLEMENT_POLICY,
@@ -286,8 +249,12 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
             );
         }
       }
-      if (written >= 500) return { scanned, proposed, written, debitAccountEvidence };
+      if (written >= 500) return { scanned, proposed, written, debitAccountEvidence, unmatched };
     }
+    // Classified from the rows read above only: no further read. A total that
+    // is not a valid positive quantity never matches (`cardSettlementCandidate`),
+    // whatever the window holds.
+    if (!matched) unmatched[unmatchedStatementCode(total, true, banks.length)]++;
     await db
       .prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=? WHERE singleton=1")
       .bind(statement.id)
@@ -297,5 +264,5 @@ export async function cardSettlementSweep(db: D1Database): Promise<CardSettlemen
     await db
       .prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=0 WHERE singleton=1")
       .run();
-  return { scanned, proposed, written, debitAccountEvidence };
+  return { scanned, proposed, written, debitAccountEvidence, unmatched };
 }

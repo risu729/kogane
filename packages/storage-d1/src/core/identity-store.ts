@@ -388,6 +388,7 @@ export async function identifyParse(
           market: row.market,
           subject: row.subject,
           extra: record(extra),
+          policyVersion: version,
           ...(binding && row.source_account === `vpass:${binding.financial_unit_key}`
             ? {
                 trustedVpassBinding: {

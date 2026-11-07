@@ -125,6 +125,8 @@ export type Route =
   | { name: "identities" }
   /** The instrument candidate review (ADR 0055). */
   | { name: "instrumentCandidates" }
+  /** The account correspondence candidate review (ADR 0077). */
+  | { name: "accountCandidates" }
   | { name: "rewards" }
   | { name: "reconciliation" }
   | { name: "cardOwnership"; proposalId: string }
@@ -203,6 +205,8 @@ export function matchRoute(path: string): Route {
 
   if (first === "identities" && second === "instrument-candidates" && segments.length === 2)
     return { name: "instrumentCandidates" };
+  if (first === "identities" && second === "account-candidates" && segments.length === 2)
+    return { name: "accountCandidates" };
 
   if (first === "confirm" && segments.length === 2 && second !== undefined) {
     if (/^[0-9a-f]{64}$/u.test(second)) return { name: "confirm", planId: second };

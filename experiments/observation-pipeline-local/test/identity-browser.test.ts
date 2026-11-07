@@ -11,6 +11,9 @@ import type {
   IdentityInstrumentRow,
 } from "../../../packages/observation-shared/src/identity-contract.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+import { INSTRUMENT_COVERAGE_PATH } from "../../../packages/observation-shared/src/instrument-coverage-contract.ts";
+import type { InstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
+import { INSTRUMENT_CANDIDATE_POLICY } from "../../../packages/domain/src/instrument-candidates.ts";
 
 const client = join(import.meta.dir, "../../../apps/web/dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -23,6 +26,8 @@ const source = "synthetic-source-" + "long-reference-".repeat(9);
 const reference = "synthetic-account-" + "0123456789abcdef".repeat(15);
 const freshLabel = "IDENTITY_PRIVATE_SYNTHETIC";
 const pageTwo = "IDENTITY_SECOND_PAGE";
+// The coverage contract bounds a source at 128 characters.
+const instrumentSource = "synthetic-instrument-source";
 
 describe.if(runnable)("protected identity client on local synthetic server", () => {
   const fixture = buildFixture();
@@ -47,6 +52,30 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
             source: { kind: "central-store", classification: "financial" },
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
+        if (url.pathname === INSTRUMENT_COVERAGE_PATH) {
+          // The fourth identity read on the page (ADR 0073), answered in its
+          // own wire shape so the panel renders counts unless a test fails it.
+          const filtered = url.searchParams.get("source");
+          const body: InstrumentCoverage = {
+            schemaVersion: "kogane-instrument-coverage-v1",
+            policy: INSTRUMENT_CANDIDATE_POLICY,
+            query: { source: filtered },
+            rows: [
+              {
+                source: filtered || instrumentSource,
+                identifiers: 5,
+                states: {
+                  "unresolved-candidates": 1,
+                  "resolved-by-decision": 1,
+                  "shared-without-decision": 1,
+                  "kept-separate": 1,
+                  "no-candidate": 1,
+                },
+              },
+            ],
+          };
+          return Response.json(body);
+        }
         if (url.pathname.startsWith("/api/identity/")) {
           if (url.pathname.endsWith("/connections"))
             return Response.json({
@@ -186,6 +215,12 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         expect(await page.locator("main").innerText()).toContain(
           "金融商品の正式名称ではありません",
         );
+        const instruments = page.getByRole("region", {
+          name: "取得元ごとの銘柄の識別子",
+          exact: true,
+        });
+        expect(await instruments.innerText()).toContain(instrumentSource);
+        expect(await instruments.innerText()).toContain("未判断の候補あり");
         const region = page.getByRole("region", { name: "口座の整理状況", exact: true });
         await region.focus();
         expect(await region.evaluate((el) => document.activeElement === el)).toBe(true);
@@ -342,7 +377,12 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
     try {
       await page.goto(`${origin}/identities`, { waitUntil: "domcontentloaded" });
       await page.getByText("口座を読み込めませんでした").waitFor({ timeout: 10000 });
-      await page.getByText("整理状況を読み込めませんでした").waitFor({ timeout: 10000 });
+      await page
+        .getByText("整理状況を読み込めませんでした", { exact: true })
+        .waitFor({ timeout: 10000 });
+      await page
+        .getByText("銘柄の整理状況を読み込めませんでした", { exact: true })
+        .waitFor({ timeout: 10000 });
       expect(attempts).toBeGreaterThanOrEqual(4);
       expect(await page.locator("main").innerText()).not.toContain("読み込んでいます");
     } finally {
@@ -361,14 +401,16 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
       await (await metadataReady).finished();
       await page.getByText("口座を読み込んでいます…", { exact: true }).waitFor();
       await page.getByText("整理状況を読み込んでいます…", { exact: true }).waitFor();
+      await page.getByText("銘柄の整理状況を読み込んでいます…", { exact: true }).waitFor();
       // Start-up latency is unrelated to the request deadline under test.
       await page.clock.fastForward(30_001);
       await page.getByText(/口座を読み込めませんでした.*408/).waitFor();
-      await page.getByText(/整理状況を読み込めませんでした.*408/).waitFor();
+      await page.getByText(/^整理状況を読み込めませんでした.*408/).waitFor();
+      await page.getByText(/^銘柄の整理状況を読み込めませんでした.*408/).waitFor();
       await page.getByText(/取得経路の対応を読み込めませんでした.*408/).waitFor();
       expect(
         await page.locator("main").getByRole("button", { name: "再試行", exact: true }).count(),
-      ).toBe(3);
+      ).toBe(4);
       expect(await page.locator("main").innerText()).not.toContain("読み込んでいます");
     } finally {
       await page.close();
@@ -390,7 +432,7 @@ describe.if(runnable)("protected identity client on local synthetic server", () 
         .first()
         .waitFor({ timeout: 5000 });
       expect(attempts).toBeGreaterThanOrEqual(2);
-      expect(await page.locator("main").getByRole("alert").count()).toBe(3);
+      expect(await page.locator("main").getByRole("alert").count()).toBe(4);
       expect(await page.locator("main").innerText()).not.toContain("読み込んでいます");
     } finally {
       await page.close();

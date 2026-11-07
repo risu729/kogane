@@ -89,6 +89,15 @@ offers keeping apart only; moving that subject is a correction of the
 earlier decision, made as above. An agent reads the same list through
 `kogane.instruments.candidates` and plans through the same command API.
 
+On `/identities`, `銘柄の整理状況` counts per source how many of these
+identifiers (security, crypto and product) wait on a candidate
+(`未判断の候補あり`), were resolved by a person's decision, share an
+instrument without a recorded decision, were kept apart or have no
+candidate; a decision made on the candidate page moves the counts
+once it is committed ([ADR 0073](adr/0073-instrument-coverage-per-source.md)).
+If the store is past the candidate read's bounds, the panel shows the refusal
+instead of counts.
+
 Staleness: the page reads the candidate again before it plans, and plans
 nothing unless the same candidate, with the same commands and the same
 mapping revisions of both identifiers, is still listed. Candidate adoption
@@ -109,6 +118,21 @@ The read is refused with `budget:identityObservations=500000` once the
 store holds more current identity observations than that; raising the bound
 needs a remote D1 measurement first (ADR 0055 amendment, Cost).
 
+### Account candidates
+
+`/identities/account-candidates` lists which direct source accounts a
+reviewed MoneyForward connection may contain ([identity](identity.md#aggregator-to-direct-account-candidates),
+ADR 0077). Accepting is `relation.accept` of `connection_contains` from the
+connection to the direct source account; keeping apart, or withdrawing an
+acceptance, is `relation.reject` of the same triple. Both are planned with
+the reason you write, after the page reads the candidate again, and approved
+and committed on `/confirm/:planId`; a decision made in between makes the
+plan stale. A held candidate (evidence no longer eligible, or the direct
+account pinned by two connections) offers keeping apart only. Nothing is
+proposed as the same account. New confirmed reviews come from
+`review-account-connections.ts` ([account connections](account-connections.md));
+an agent reads the same list through `kogane.accounts.candidates`.
+
 ## Verification and rollback
 
 - `/api/identity/coverage` compares all eligible current B observations against
@@ -123,6 +147,14 @@ needs a remote D1 measurement first (ADR 0055 amendment, Cost).
   revisions, expose their evidence links, and paginate at 100 rows.
 - `/api/identity/instrument-candidates` reads the ADR 0055 candidate set and
   pages it at 50 items per view; it writes nothing.
+- `/api/identity/instrument-coverage` runs the same candidate read and counts,
+  per source, the security, crypto and product identifiers in each ADR 0055
+  state (`銘柄の整理状況` on `/identities`, [ADR 0073](adr/0073-instrument-coverage-per-source.md)).
+  It shares the candidate read's bounds and refusals; an identifier two
+  sources use counts under each, so there is no cross-source total. It writes
+  nothing.
+- `/api/identity/account-candidates` reads the ADR 0077 account candidate set
+  and pages it at 50 items per view; it writes nothing.
 - Preserve the original pinned decision IDs to audit what was recorded at the
   time, even after a manual correction.
 - Old B parses/failed acquisitions remain in their own history and never
@@ -253,10 +285,11 @@ WHERE r.source_id='vpass' AND u.unit_key GLOB 'vpass-card-v[12]-*'
 GROUP BY r.producer_id, version;
 ```
 
-The collector's statement pages are not parsed today: registration gives them
-no parser dataset, and the change that introduces parser datasets for
-shared-R2 artifacts (ADR 0022) withholds the Vpass one. Releasing it is a
-later change, made once the v1 and v2 entities of each card are decided.
+The collector's statement pages are parsed since
+[ADR 0083](adr/0083-release-vpass-collector-statement-pages.md)
+(`terminal-registration-v3`), from successful card runs only: a run whose
+card unit is `partial` is never parsed, so it never displaces the
+importer-era snapshot of a card-month.
 
 ## MoneyForward collector runs carry the account identity
 
@@ -509,3 +542,45 @@ continue only if the bounded run reports more candidates. Verify that the
 current Mizuho account mappings read `provider-local` at policy 2. No reimport
 or B reparse is needed. Rolling back the code leaves the policy-2 runs current:
 an older build cannot replace a newer sealed decision.
+
+## Policy 2: SBI Shinsei non-account references
+
+Policy 1 mapped every `sbi-shinsei:` reference as a provider-local `deposit`,
+including the parser's two references that name no account: the exchange-rate
+board `sbi-shinsei:fx-board` (one source account per board currency) and the
+stage category `sbi-shinsei:customer`. From policy 2 the resolver maps the board
+as `valuation-aggregate` / `aggregate`
+(`provider-fx-board-quotes-not-an-account`, label `SBI新生銀行 外貨為替レート`)
+and the stage as `qualification-aggregate` / `aggregate`
+(`provider-customer-stage-not-an-account`, label `SBI新生銀行 お客さまステージ`),
+and maps every other `sbi-shinsei:{accountNo}` reference exactly as policy 1
+did ([ADR 0076](adr/0076-sbi-shinsei-non-account-identity.md)).
+
+The rule reads the identity run's own version, so an explicit policy-1 run
+still records the policy-1 mapping. The `sbi-shinsei-bank` policy module
+(`identity-policies/sbi-shinsei.ts`) requires version 2 for every SBI Shinsei
+parse, with the same family, release (`identity-default-v2`) and empty
+dependency set as Mizuho. The bounded sweep therefore treats sealed policy-1
+SBI Shinsei parses as candidates again and appends a policy-2 run and, per
+source account, a policy-2 mapping revision; the current views select the newer
+sealed run. Every key is unchanged, so each observation keeps its source
+account: account references gain a revision equal to their policy-1 one except
+for its version, and the board and stage references gain a revision with the
+`aggregate` classification. Their account entities keep the `deposit` role they
+were first written with (shown as the role in the identity browser); the
+classification is on the policy-2 mapping revision, which projections and the
+ownership declaration's single-account check read. Policy-1 runs, their rows
+and revisions and Layer A/B stay as recorded, and a manual decision on an SBI
+Shinsei reference is not replaced. Price promotion selects board and stage rows
+by source account, not by identity, so prices are unaffected.
+
+Nothing is configured to enable it. After deployment the five-minute pipeline
+sweep picks the parses up on its own; every SBI Shinsei parse is re-identified
+once, so the backlog is the source's sealed history. To finish sooner run
+`node scripts/identity-ops.ts catchup 100 sbi-shinsei-bank` and continue only
+if the bounded run reports more candidates. Then run the read-only
+[identity audit](identity-audit.md): `pending_parses` for `sbi-shinsei-bank`
+reads zero, and its `account_status` counts the board and stage observations
+under `aggregate`. No reimport or B reparse is needed. Rolling back the code
+leaves the policy-2 runs current: an older build cannot replace a newer sealed
+decision.

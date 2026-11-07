@@ -24,6 +24,7 @@ import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
 import { commandsEnabled } from "./command-api";
 import { upstreamOutcome, UpstreamLost } from "./audit";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 const ID = z.string().regex(/^[0-9a-f]{64}$/u);
 const KEY = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
@@ -55,8 +56,7 @@ export function isDelegatedDecisionTool(name: string): name is DelegatedDecision
   return Object.hasOwn(schemas, name);
 }
 const descriptors = Object.entries(schemas).map(([name, schema]) => {
-  const inputSchema = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete inputSchema["$schema"];
+  const inputSchema = mcpInputSchema(schema);
   return {
     name,
     title: name.slice(7),

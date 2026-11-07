@@ -91,7 +91,7 @@ owners. This ADR records the earlier thirteen-Worker stage.
 
 ## Amendment: bounded authenticated App/Processor readiness
 
-- Status: proposed
+- Status: accepted (merged 2026-10-10 in #643)
 - Date: 2026-10-10
 
 An ordinary deployment's authenticated health request returned HTTP 200 and

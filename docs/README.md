@@ -66,6 +66,7 @@ with real data; do not infer product completion from a schema or a pure function
 - [Economic events, allocations, obligations and reconciliation](economic-events.md)
 - [Card statement settlement review](card-settlements.md)
 - [Reported state on a date](reported-state.md)
+- [Reconstructed state](reconstructed-state.md)
 - [ポイント・マイル・前払式残高（A11）](rewards.md)
 - [Prices, calculation policies and fixed report artifacts](calculation-and-reports.md)
 - [Vpass durable card binding](vpass-card-identity.md)
@@ -91,11 +92,13 @@ with real data; do not infer product completion from a schema or a pure function
 ## Development and operations
 
 - [Continuous integration](ci.md)
+- [Test coverage](coverage.md)
 - [CI/CD automation](ci-cd.md)
 - [Infrastructure ledgers](infra-ledgers.md)
 - [Operations: health signals, load budgets, retention and recovery drills](operations.md)
 - [Production rollout and feature controls](rollout.md)
 - [Runbook: rebuilding the READ database](read-rebuild-runbook.md)
+- [Runbook: recovering an MCP client connection](mcp-recovery.md)
 - [`packages/storage-d1`: CORE database access](storage-d1.md)
 - [Package layout and import boundaries](package-layout.md)
 - [Library decisions](libraries.md)

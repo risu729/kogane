@@ -1,6 +1,6 @@
 # ADR 0044: SMBC backfill continuation publication
 
-Status: proposed
+Status: accepted (merged 2026-10-09 in #562)
 Date: 2026-10-09
 
 ## Context

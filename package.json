@@ -9,14 +9,14 @@
   ],
   "type": "module",
   "devDependencies": {
-    "cf": "1.0.0-beta.27",
+    "cf": "1.0.0-beta.28",
     "dependency-cruiser": "18.7.2",
     "istanbul-lib-coverage": "3.2.2",
-    "knip": "6.44.1",
+    "knip": "6.44.2",
     "lcov-parse": "1.0.0",
     "typescript": "6.0.3",
     "vitest": "5.1.0",
-    "wrangler": "4.157.0"
+    "wrangler": "4.158.0"
   },
   "packageManager": "bun@1.4.4"
 }

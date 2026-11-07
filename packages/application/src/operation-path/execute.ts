@@ -18,8 +18,10 @@
 //     `audit_write_failed`), and the value or error the adapter produced is
 //     returned or rethrown unchanged.
 //
-// There is no delegation, prepare or confirm yet (ADR 0063, plan S3): the
-// authorization is the adapter's own, as it was before this function existed.
+// The authorization is the adapter's own, as it was before this function
+// existed. A delegated call (ADR 0063, plan S3) arrives already resolved by
+// `delegation/execution.ts`; its idempotency key, payload digest and
+// confirm/revert links are copied into the record here.
 import { OperationCall } from "../audit/call.ts";
 import { type AuditRow, type AuditScope, auditInstant, buildAuditRecord } from "../audit/record.ts";
 import type { AnswerAppend } from "../audit/store.ts";

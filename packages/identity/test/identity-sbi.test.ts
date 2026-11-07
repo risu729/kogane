@@ -217,6 +217,53 @@ describe("SBI identity", () => {
     expect(cash.account.key).toEqual(["sbi-securities:foreign", "accountKind", "SPECIFIC"]);
     expect(cash.instruments).toHaveLength(1);
   });
+  test("a missing or conflicting discriminator is an issue and an unresolved account, never a merge", () => {
+    // The row's deposit type disagrees with the account it was filed under:
+    // the conflict is part of the key, so it never joins either account.
+    const conflicting = sbiIdentity(input({ extra: { depositTypeCode: "1" } }));
+    expect(conflicting.issues).toContain("conflicting-depositTypeCode");
+    expect(conflicting.account.key).toEqual([
+      "sbi-securities:domestic:deposit-type=0",
+      "conflicting-depositTypeCode",
+      "1",
+    ]);
+    expect(conflicting.account.status).toBe("unresolved");
+    const agreeing = sbiIdentity(input({ extra: { depositTypeCode: "0" } }));
+    expect(agreeing.issues).not.toContain("conflicting-depositTypeCode");
+    expect(agreeing.account.key).toEqual(["sbi-securities:domestic:deposit-type=0"]);
+
+    const unlabelled = sbiIdentity(
+      input({ kind: "transaction", sourceAccount: "sbi-securities:domestic", extra: {} }),
+    );
+    expect(unlabelled.issues).toContain("missing-accountLabel");
+    expect(unlabelled.account.status).toBe("unresolved");
+    expect(unlabelled.account.label).toContain("未確定");
+
+    const foreign = sbiIdentity(
+      input({
+        kind: "transaction",
+        sourceAccount: "sbi-securities:foreign",
+        currency: "JPY",
+        extra: {
+          specificAccountCode: "SPECIFIC",
+          settlementCurrencyCode: "USD",
+          securities: { securitiesCode: "SYN", countryCode: "US", ric: "SYN.O" },
+        },
+      }),
+    );
+    expect(foreign.issues).toEqual(
+      expect.arrayContaining(["missing-trade-currency", "conflicting-settlement-currency"]),
+    );
+    expect(foreign.instruments.some((item) => item.role === "trade-unit")).toBe(false);
+    const noUnit = sbiIdentity(input({ currency: null }));
+    expect(noUnit.issues).toContain("missing-monetary-unit");
+    expect(noUnit.instruments.some((item) => item.role === "unit")).toBe(false);
+
+    const unknown = sbiIdentity(input({ sourceAccount: "sbi-securities:other" }));
+    expect(unknown.issues).toContain("unknown-sbi-account-scope");
+    expect(unknown.account).toMatchObject({ role: "unknown", status: "unresolved" });
+  });
+
   test("unknown identifiers stay unresolved without invented venue, RIC, or security", () => {
     const foreign = sbiIdentity(
       input({
@@ -243,5 +290,104 @@ describe("SBI identity", () => {
     expect(aggregate.account.status).toBe("aggregate");
     expect(aggregate.instruments.some((item) => item.role === "security")).toBe(false);
     expect(() => sbiIdentity(input({ sourceId: "other" }))).toThrow();
+  });
+
+  test("a provider market or custody code that names an inherited property is not in the table", () => {
+    // The trade parser carries the provider's market wording verbatim
+    // (`extra.marketLabel`); a table lookup must read only the table's own
+    // entries, never Object.prototype's, or a word such as `constructor`
+    // would become a MIC (and a function bound to D1, failing the run).
+    for (const word of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+      const trade = sbiIdentity(
+        input({
+          kind: "transaction",
+          sourceAccount: "sbi-securities:domestic",
+          securityCode: null,
+          market: null,
+          extra: { accountLabel: "SYN", issueCode: "1234", marketLabel: word },
+        }),
+      );
+      const security = trade.instruments.find((item) => item.role === "security")!;
+      expect(security).toMatchObject({
+        namespace: "sbi-security-code",
+        scope: "JP",
+        value: "1234",
+        reason: "provider-code-without-global-crosswalk",
+        details: { securityCode: "1234", countryCode: "JP", providerMarket: word },
+      });
+      expect(trade.issues).toContain("security-without-global-crosswalk");
+
+      const custody = sbiIdentity(
+        input({ sourceAccount: `sbi-securities:domestic:deposit-type=${word}` }),
+      );
+      expect(custody.account.label).toBe(`SBI証券 国内株式 預り区分未確定（区分コード: ${word}）`);
+    }
+  });
+
+  test("every market and custody entry maps exactly as the shipped object-literal tables did", () => {
+    // The tables as they shipped before they became Maps (plus the MICs the
+    // rule passes through). Reading them by own keys only leaves every mapped
+    // value's identity and label unchanged, so no identity policy version moves.
+    const markets: [string, string][] = [
+      ["TKY", "XTKS"],
+      ["NGY", "XNGO"],
+      ["FKO", "XFKA"],
+      ["SPR", "XSAP"],
+      ["東証", "XTKS"],
+      ["名証", "XNGO"],
+      ["福証", "XFKA"],
+      ["札証", "XSAP"],
+      ["XTKS", "XTKS"],
+      ["XNGO", "XNGO"],
+      ["XFKA", "XFKA"],
+      ["XSAP", "XSAP"],
+    ];
+    for (const [market, mic] of markets) {
+      const routes: { market: string | null; extra: Record<string, unknown> }[] = [
+        { market, extra: {} },
+        { market: null, extra: { _kogane: { marketCode: market } } },
+        { market: null, extra: { marketLabel: market } },
+      ];
+      for (const route of routes) {
+        const plan = sbiIdentity(
+          input({
+            kind: "transaction",
+            sourceAccount: "sbi-securities:domestic",
+            securityCode: null,
+            market: route.market,
+            extra: { accountLabel: "SYN", issueCode: "1234", ...route.extra },
+          }),
+        );
+        expect(plan.instruments.find((item) => item.role === "security")).toEqual({
+          role: "security",
+          kind: "security",
+          namespace: "mic-symbol",
+          scope: mic,
+          value: "1234",
+          label: "Synthetic",
+          status: "provider-local",
+          reason: "provider-reported-listing",
+          details: { securityCode: "1234", countryCode: "JP", providerMarket: market },
+        });
+        expect(plan.issues).not.toContain("security-without-global-crosswalk");
+      }
+    }
+    const custody: [string, string][] = [
+      ["0", "特定預り"],
+      ["1", "一般預り"],
+      ["-", "一般預り"],
+      ["H", "成長投資枠"],
+      ["4", "NISA預り"],
+      ["5", "ジュニアNISA預り"],
+      ["6", "ジュニアNISA預り"],
+      ["7", "ジュニアNISA預り"],
+      ["J", "ジュニアNISA預り"],
+      ["2", "預り区分未確定"],
+    ];
+    for (const [code, label] of custody)
+      expect(
+        sbiIdentity(input({ sourceAccount: `sbi-securities:domestic:deposit-type=${code}` }))
+          .account.label,
+      ).toBe(`SBI証券 国内株式 ${label}（区分コード: ${code}）`);
   });
 });
