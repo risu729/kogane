@@ -161,7 +161,7 @@ receipt, so a moved pin writes nothing anywhere, and a resend replays the
 receipt. Every id the batch writes is keyed by the operation (the event
 decisions' digest includes it), so a resend whose batch was built before the
 first commit landed finds its own rows and writes nothing more, and another
-operation of the same plan finds the plan committed and writes nothing. Agents cannot approve or commit it, like every other change. The
+operation of the same plan finds the plan committed and writes nothing. As for every other change, an agent on the browser's command routes cannot approve or commit it; an MCP client can, as itself, through `kogane.command.approve` and `kogane.command.commit` ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md), [agent API](agent-api.md#change-lifecycle-decisions)). The
 receipt's `result` adds `proposalId`, `proposalDecisionRevisionId`, `review`
 (`accept`, `reject` or `withdraw`) and `eventRevisions`.
 

@@ -828,6 +828,51 @@ Refusals are closed codes:
 - `idempotency_conflict`: the key was used for another payload.
 - `operation_not_delegable`: an acceptance of a proposal with `rule_absent_from_page`, `rule_disabled_by_operator`, `ambiguous_rule_match`, `cancellation_stated` or `contradictory_windows`, or one that, against the source's rules at prepare or confirm, would disable a rule, re-enable a disabled one, or equal or overlap another enabled rule. It is recorded at R3 and stays with the operator on the schedules page; rejecting such a proposal is allowed.
 
+### Change lifecycle decisions
+
+The confirmation page's operations (`POST /api/command/v1/{plan,simulate,approve,commit,operation}`,
+catalogue `command.*`) are on `/mcp` as five tools, listed to every MCP client
+while `COMMANDS_ENABLED` is on and a Processor binding exists
+(`src/delegated-command-tools.ts`, `src/delegated-decision-tools.ts`). Both
+paths forward to the Processor's one command route, which runs
+`createPlan`, `simulate`, `approve` and `commit` in `packages/application`; the
+App writes no plan, approval, receipt or decision itself.
+
+| Tool                           | Risk | Input                                                                                                                                                      |
+| ------------------------------ | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kogane.command.plan`          | R1   | `kind` (a `CHANGE_KINDS` value), `payload` (the page's payload for that kind), optional `baseContextId`, `idempotencyKey`                                  |
+| `kogane.command.simulate`      | R0   | `planId`                                                                                                                                                   |
+| `kogane.command.operation.get` | R0   | `operationId`: the caller's own receipt                                                                                                                    |
+| `kogane.command.approve`       | R2   | `planId`, `planDigest`, `scope`, `idempotencyKey`, `step` (`prepare`, then `confirm` with `confirmationDigest`)                                            |
+| `kogane.command.commit`        | R2   | `planId`, `approvalId` (the caller's own approval), `operationId`, optional `revertsAuditId`, `step` (`prepare`, then `confirm` with `confirmationDigest`) |
+
+An MCP client plans, approves and commits as itself (`mcp-client:<sub>`,
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)): the same
+principal must approve and commit, and the receipt names it. Approve and
+commit decide only the `identity`, `relation` and `card-settlement` kinds; any
+other kind is refused `operation_not_delegable`, and the Processor refuses to
+plan it for an MCP client with `unsupported_semantics`. Those are the kinds
+whose planners exist: the card purchase review and economic-event kinds are
+refused `unsupported_semantics` for every caller. A `prepare` checks the plan
+(open, not expired, digest unchanged, simulation not stale) and the approval,
+and returns a `cfm_` digest; it writes no approval and no decision. A
+`confirm` with that digest within ten minutes applies it, and a repeated
+confirm replays the result. A refusal from the lifecycle is the same code on
+both paths (`stale_context` with the candidate's ref, `plan_not_found`, …).
+
+This is how the カード照合 decisions work over MCP (Phase 2 unit 2g.2,
+[ADR 0081](adr/0081-ui-parity-through-mcp.md)): `card-settlement.accept`,
+`card-settlement.withdraw` and `card-settlement.reject` with
+`{"proposalId", "reason"}`, and the ownership review's `relation.accept` or
+`relation.reject` with the payload the card-ownership page builds from
+`kogane.card-settlements.ownership`
+([card settlements](card-settlements.md#candidate-and-decision-lifecycle)).
+[`services/app/test/card-settlement-decisions-parity.test.ts`](../services/app/test/card-settlement-decisions-parity.test.ts)
+runs each of them on both paths over the real App Worker and the Processor's
+command route, and compares the receipts and refusals. Guard 3 of the
+[parity guards](#ui-and-mcp-parity-guards-adr-0081-2026-11-07) fails when a
+kind becomes plannable that these tools do not decide.
+
 ## Contexts, cursors and hand-off
 
 `context.open` pins the identity release, the metric registry release, the
@@ -1521,8 +1566,8 @@ and confirm pages) is removed with the table it showed.
 It compares the UI against the tools `tools/list` publishes to an MCP client,
 which since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
 holds every agent capability and every operation over the whole store, with `COMMANDS_ENABLED`, `OPS_API_ENABLED`
-and `SCHEDULES_ENABLED` on and a Processor binding. It has two guards, each
-with an allow-list of the gaps known when it landed. The allow-lists in the
+and `SCHEDULES_ENABLED` on and a Processor binding. Guards 1 and 2 each have
+an allow-list of the gaps known when they landed. The allow-lists in the
 test are authoritative; the tables below are the state on 2026-11-07 at main `12a6f82`. A fixed
 gap must leave its list in the same PR (the test fails on a listed gap that is
 no longer one), and a new entry is a regression of ADR 0081 that needs the
@@ -1588,6 +1633,16 @@ owner's agreement.
    | Card settlements    | `…/card-settlements/statements` (grouped by statement; `kogane.card-settlements.read` returns the same candidates ungrouped)                         |
    | Reports and quality | `/api/v2/reports`, `/api/v2/reports/:id`, `…/:id/explanation`, `…/:id/export`, `/api/collection-quality`, `/api/collection-quality/:source`          |
    | Operator pages      | `/api/ops/v1/schedules` (`kogane.schedules.maintenance.read` covers the maintenance part and `kogane.schedules.survey.read` the re-survey section)   |
+
+3. **Change kinds.** Guard 1 sees the change lifecycle as five `command.*`
+   operations, whatever kind a page plans. So the test also takes every
+   `CHANGE_KINDS` value whose planner exists (all but the card purchase review
+   and economic-event kinds today). It fails when the published
+   `kogane.command.plan` schema does not accept one of them, or when
+   `kogane.command.approve` and `kogane.command.commit` do not decide its
+   family ([change lifecycle decisions](#change-lifecycle-decisions)).
+   Registering a card purchase review planner without an MCP decision path
+   therefore fails here.
 
 ADR 0081 point 2 (no SQL in an MCP adapter) has its own guard,
 [`tests/mcp-tools-no-sql.test.ts`](../tests/mcp-tools-no-sql.test.ts).

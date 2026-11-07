@@ -126,10 +126,15 @@ ownership was the only blocker. On 2026-11-07 the owner decided that an account 
 recorded owner is assumed to be the owner's, and that settlement decisions are delegated
 to agents through MCP over the same API as the screens
 ([plan, section 4](plans/2026-11-phase2-card-flow.md#4-owner-decisions-2026-11-07)).
-Neither is implemented yet: no ownership default exists and the operation catalogue has no
-settlement operation. Since [ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)
-(2026-11-07) no delegation entry or grant is needed: an MCP client the MCP Access
-application admits acts with the UI's authority, as itself.
+The ownership default is recorded per account as an ownership decision
+([ADR 0082](adr/0082-owner-default-ownership.md)). Settlement accept, withdraw and reject
+and the ownership review work over MCP through the change lifecycle's `kogane.command.*`
+tools, the catalogue's `command.*` operations the confirmation page also uses (plan unit 2g.2,
+[card settlements](card-settlements.md#candidate-and-decision-lifecycle)). Since
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md) (2026-11-07) no delegation
+entry or grant is needed: an MCP client the MCP Access application admits acts with the
+UI's authority, as itself. The agent-run verification on production candidates (unit 2g.3)
+has not been done.
 
 ### Phase 3 — Coverage, collection requests and cross-source identity
 
