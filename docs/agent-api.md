@@ -220,6 +220,7 @@ the other delegated MCP tools are described there too.
 | `kogane.instruments.history`          | `POST /api/agent/v1/instruments.history`        | `kogane.instruments.history`          | `records.read` on `"*"` sources and accounts                                                                                                                   |
 | `kogane.audit.search`                 | `POST /api/agent/v1/audit.search`               | `kogane.audit.search`                 | `audit.read` with `"*"` accounts                                                                                                                               |
 | `kogane.audit.get`                    | `POST /api/agent/v1/audit.get`                  | `kogane.audit.get`                    | `audit.read` with `"*"` accounts                                                                                                                               |
+| `kogane.identity.read`                | `POST /api/agent/v1/identity.read`              | `kogane.identity.read`                | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#ui-read-pages))                                                            |
 
 No tool lists or reads the fixed report artifacts (評価レポート): they are
 served to the operator by `GET /api/v2/reports` and
@@ -616,6 +617,43 @@ The committed `AGENT_API_GRANTS` entry for the owner's MCP client holds
 configuration this tool (and `kogane.instruments.history`) is listed to that
 client. That is configuration, not evidence that a client listed or called
 either.
+
+### UI read pages
+
+ADR 0081 point 1 requires an MCP read for every read page of the web UI. The
+tools of `src/page-read-tools.ts` each answer one family of UI read routes by
+calling the reader those routes call, with the request the route would build
+from the same parameters. The route and the tool are two adapters over one
+function, so they cannot disagree on a row, a page bound or a refusal code.
+
+| Tool                   | UI routes                                                                                                        | Requires                                     |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| `kogane.identity.read` | `GET /api/identity/connections`, `/api/identity/accounts`, `/api/identity/instruments`, `/api/identity/coverage` | `records.read` on `"*"` sources and accounts |
+
+Input is a closed object. Its keys are the route's query parameters with
+their bounds, plus the field that picks the route (`collection` for
+`kogane.identity.read`). The tool sets only the parameters the caller gives,
+so the reader applies the route's own defaults and refusals. Output is
+`{ "schemaVersion": "kogane-page-read-v1", "data": <the route's body> }`.
+The route's answer carries provider labels, so all of it travels under
+`data` ([untrusted content](#untrusted-content-and-leakage)). A refusal by
+the reader is the route's status with `{ error, refs? }`, as the Worker
+answers it, without the request id. A store read that fails is
+`503 catalogue_read_failed`, as on the route.
+
+Authorization, in order, after the Access check and the grant lookup: the
+tool's capability, else `403 unauthorized` (`capability:<name>`); then sources
+and accounts both `"*"`, else `403 evidence_restricted` (`scope:source`,
+`scope:account`). These readers take no grant scope, so a narrower grant is
+refused, never served a filtered page. Both checks run before the argument is
+validated. An argument outside the closed schema is `400 invalid_request` with
+the offending keys as refs. `tools/list` lists each tool only to a grant that
+passes both checks. Each call is recorded as an R0 `read` under the tool name
+without `kogane.` (`identity.read`); the browser route records nothing, as
+before.
+
+The committed owner MCP grant holds `records.read` over `"*"`, so by
+configuration `kogane.identity.read` is listed to that client.
 
 ### Reconstructed state
 

@@ -138,47 +138,60 @@ function origin(row: Record<string, unknown>): Record<string, unknown> {
   const [kind, id] = String(originKey).split(":");
   return { ...rest, origin: { kind, id: Number(id) } as IdentityOrigin };
 }
+/** The identity pages, each `GET /api/identity/<collection>`. */
+export const IDENTITY_COLLECTIONS = ["connections", "accounts", "instruments", "coverage"] as const;
+export type IdentityCollection = (typeof IDENTITY_COLLECTIONS)[number];
+
 /** Call only after the existing Access authentication gate. No mutations. */
 export async function identityApi(request: Request, env: Env, url: URL): Promise<Response | null> {
   if (!url.pathname.startsWith("/api/identity/")) return null;
   if (request.method !== "GET" && request.method !== "HEAD")
     throw new HttpError(405, "method_not_allowed");
-  if (url.pathname === "/api/identity/connections") {
-    if (url.search) throw new HttpError(400, "invalid_query");
-    return json({ connections: await listAccountConnections(env.DB) });
-  }
-  if (
-    !["/api/identity/accounts", "/api/identity/instruments", "/api/identity/coverage"].includes(
-      url.pathname,
-    )
-  )
+  const collection = url.pathname.slice("/api/identity/".length);
+  if (!(IDENTITY_COLLECTIONS as readonly string[]).includes(collection))
     throw new HttpError(404, "not_found");
-  for (const [key, value] of url.searchParams) {
+  return json(
+    await readIdentityCollection(env, collection as IdentityCollection, url.searchParams),
+  );
+}
+
+/**
+ * One identity page: the answer of `GET /api/identity/<collection>` for these
+ * query parameters, and of `kogane.identity.read` (ADR 0081), so the page and
+ * an agent read one function. Its refusals are `HttpError`s with the route's
+ * closed codes.
+ */
+export async function readIdentityCollection(
+  env: Env,
+  collection: IdentityCollection,
+  params: URLSearchParams,
+): Promise<Record<string, unknown>> {
+  if (collection === "connections") {
+    if ([...params.keys()].length > 0) throw new HttpError(400, "invalid_query");
+    return { connections: await listAccountConnections(env.DB) };
+  }
+  for (const [key, value] of params) {
     if (
       !["source", "offset", "identityRead"].includes(key) ||
-      url.searchParams.getAll(key).length !== 1 ||
+      params.getAll(key).length !== 1 ||
       !value ||
       value.length > 128 ||
       /[\u0000-\u001f]/u.test(value)
     )
       throw new HttpError(400, "invalid_query");
   }
-  const mode = identityReadMode(url);
-  const text = url.searchParams.get("offset") ?? "0";
+  const mode = identityReadMode({ searchParams: params });
+  const text = params.get("offset") ?? "0";
   const offset = Number(text);
   if (!/^(0|[1-9]\d*)$/u.test(text) || !Number.isSafeInteger(offset))
     throw new HttpError(400, "invalid_offset");
-  const source = url.searchParams.get("source");
+  const source = params.get("source");
   const bindings = source === null ? [offset] : [source, offset];
-  const collection = url.pathname.slice("/api/identity/".length) as
-    | "accounts"
-    | "instruments"
-    | "coverage";
   const sql = identityQuery(collection, source !== null, mode);
   const result = await env.DB.prepare(sql)
     .bind(...bindings)
     .all<Record<string, unknown>>();
-  if (url.pathname.endsWith("/instruments")) {
+  if (collection === "instruments") {
     const names = await preferredInstrumentNames(
       env.DB,
       result.results.map((row) => String(row.referenceId)),
@@ -186,7 +199,7 @@ export async function identityApi(request: Request, env: Env, url: URL): Promise
     for (const row of result.results)
       row.label = names.get(String(row.referenceId))?.label ?? row.label;
   }
-  if (url.pathname.endsWith("/accounts")) {
+  if (collection === "accounts") {
     const connections = await readAccountConnections(
       env.DB,
       result.results.map((row) => ({
@@ -218,8 +231,8 @@ export async function identityApi(request: Request, env: Env, url: URL): Promise
           await env.DB.prepare(RECORDED_RELEASES).bind(source).all<{ policy_release: string }>()
         ).results.map((row) => row.policy_release)
       : result.results.slice(0, LIMIT).map((row) => row.identityRelease as string | undefined);
-  return json({
+  return {
     ...page(collection === "coverage" ? result.results : result.results.map(origin), offset),
     interpretationContext: interpretationContext(mode, identityReleaseFor(mode, releases)),
-  });
+  };
 }

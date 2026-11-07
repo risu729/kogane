@@ -927,6 +927,7 @@ describe("tools under each grant shape", () => {
               "kogane.accounts.candidates",
               "kogane.card-settlements.unmatched",
               "kogane.economic-readiness.read",
+              "kogane.identity.read",
               PURCHASES_TOOL_NAME,
               RECONSTRUCTED_STATE_TOOL_NAME,
             ]
