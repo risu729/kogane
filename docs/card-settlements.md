@@ -320,6 +320,39 @@ current readiness blockers and decision history. An authenticated human operator
 can plan an acceptance or rejection; the confirmation page then simulates,
 approves and commits the pinned plan. Agents do not acquire acceptance rights.
 
+The page lists statements, not candidates
+(`GET /api/v2/reconciliation/card-settlements/statements`,
+`queryCardSettlementStatements`). The sweep proposes a new candidate whenever a
+fact in its digest changes (a recapture of the statement or the debit, a
+re-parse, an ownership record), so one statement accrues many candidates and
+only the ones citing its newest facts can be accepted. A statement is a
+candidate's stored `statement_key` (source, producer, acquisition namespace,
+card account and period, as `card_statement_facts` keys it), so the
+importer-era and collector-era captures of one month are separate statements.
+Statements are ordered by their newest candidate, ten to a page. Each judges
+its five newest candidates and any accepted one, however old, and leads with
+one of them:
+
+1. its accepted candidate, if any (an acceptance reserves the statement);
+2. otherwise the newest proposed candidate with no acceptance blocker;
+3. otherwise the newest candidate.
+
+The other judged candidates follow, newest first, collapsed under the lead
+(`この請求の以前の候補（N 件）`). `candidateCount` counts every candidate of the
+statement; when it exceeds the judged ones, `この請求の候補をすべて表示` reads
+the statement's whole list, 50 a page, newest first
+(`GET /api/v2/reconciliation/card-settlements?statementKey=…`). Nothing is
+deleted or hidden for good: candidates and decisions stay append-only and every
+candidate keeps its own history and actions. The flat list
+(`?offset=`) and one review (`?proposalId=`) are unchanged.
+
+A limit: a ready candidate older than the five newest of its statement is not
+the lead (the newest one leads instead, with its blockers); it is still in the
+statement's full list. The sweep proposes after each capture, so the newest
+candidates cite the newest facts; an older one can be ready only when the five
+newer ones all cite facts that are no longer current (for example another
+debit of the same amount).
+
 Acceptance also requires explicit ownership evidence: the card account's
 `liable_party` and bank account's `beneficial_owner` must identify the same
 party through current accepted decisions. A login, matching account labels,
