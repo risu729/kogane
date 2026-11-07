@@ -27,7 +27,9 @@ import {
   OWNERSHIP_REVIEW_CANDIDATE_SQL,
 } from "../src/operations/ownership-review.ts";
 import { CARD_OWNERSHIP_CANDIDATE_SQL } from "../src/query/card-ownership.ts";
+import { CARD_DEBIT_ACCOUNT_POLICY } from "../../domain/src/card-debit-account.ts";
 import {
+  CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL,
   CARD_SETTLEMENT_PAGE_SIZE,
   CARD_SETTLEMENT_PAGE_SQL,
   CARD_SETTLEMENT_REVIEW_SQL,
@@ -229,6 +231,21 @@ describe("card settlement readiness reads on a scaled store without statistics",
       // ranks every statement and debit and owns every identity of the store.
       expect(statementPlanProblems(explain(db, legacy, args))).not.toEqual([]);
     }
+  });
+
+  test("the debit-account evidence read probes only the page's candidates", () => {
+    const ids = JSON.stringify(
+      (
+        db
+          .query(
+            "SELECT id FROM card_settlement_candidates ORDER BY created_at DESC,id DESC LIMIT 50",
+          )
+          .values() as string[][]
+      ).map(([id]) => id!),
+    );
+    const plan = explain(db, CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL, [ids, CARD_DEBIT_ACCOUNT_POLICY]);
+    expect(statementPlanProblems(plan)).toEqual([]);
+    expect(JSON.stringify(plan)).toContain("card_settlement_debit_account_evidence_candidate");
   });
 
   test.if(FULL)(

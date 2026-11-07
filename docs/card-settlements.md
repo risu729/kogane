@@ -197,12 +197,54 @@ owner and no ownership evidence, and ownership and acceptance stay operator
 decisions (INV07). The sweep's log line adds `debitAccountEvidence`, the
 number of evidence rows appended.
 
+**On the review page.** Each review in the `カード照合` list and its API
+(`/api/v2/reconciliation/card-settlements`) carries `debitAccount`, read by
+`queryCardSettlements` (`packages/application/src/query/card-settlements.ts`,
+`CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL`): the candidate's latest
+`card_settlement_debit_account_evidence` row under the current policy, found
+through `card_settlement_debit_account_evidence_candidate` for the page's
+candidates only. For example:
+
+```json
+{
+  "outcome": "supports",
+  "reason": null,
+  "policy": "card-debit-account-statement-v3",
+  "statementRef": {
+    "kind": "typed-claim",
+    "id": "card_debit_account_statement:7",
+    "revision": "reader:myjcb-card-information-1.0.0"
+  },
+  "bankSourceId": "smbc-bank",
+  "bankSourceAccount": "smbc-bank:ordinary-yen",
+  "visibleDigitCount": 4,
+  "recordedAt": "2026-09-11T00:00:00Z"
+}
+```
+
+`not_proposed` carries the rule's closed reason and no bank account. A
+candidate without a row is `absent` with a closed reason, never blank:
+`source_has_no_debit_account_statement` (Vpass, which has no reader) or
+`evidence_not_recorded` (a MyJCB candidate the sweep has recorded nothing for
+under the current policy: its page has no `read` row under the current reader
+version yet or was `refused`, its bank has more known accounts than the rule
+is given, or the sweep has not revisited it since the policy changed). A
+malformed row fails the read (`card_settlement_debit_account_evidence_invalid`).
+The page shows it as `カード会社が示す引落口座`. It is evidence for the
+reviewer only: it adds no acceptance blocker, removes none, and the plan and
+acceptance never read it.
+
 Limits:
 
-- **Not on the review page.** The evidence rows are not read by the
-  `カード照合` review or its API: showing them needs a new field in the review
-  contract (`packages/observation-shared/src/card-settlement-contract.ts`) and
-  the web page, which this change does not make.
+- **Only the latest row under the current policy is shown.** The review
+  page shows no earlier outcomes and no row of a superseded policy; they stay
+  in the table.
+- **The review page does not show the displayed bank name, branch or
+  digits** of the reading, only the outcome, the bank account the proposal
+  names and how many leading digits were compared.
+- **Agents do not read it yet.** The review route is operator-only, and the
+  agent API has no card settlement review read; the evidence reaches agents
+  only when that read exists.
 - **Historical SMBC and SBI Shinsei references remain uncomparable.**
   SMBC's legacy reference carries no account digits. New captures retain the
   successful request's branch, ordinary account type and number in normalized
