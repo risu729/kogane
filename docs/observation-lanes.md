@@ -28,7 +28,7 @@ minute ago, and a slow history scan cannot delay either. Jobs are ordered by
 `priority DESC, available_at_ms, fetch_artifact_id` inside a lane.
 
 The interrupted-attempt repair (`UPDATE parse_runs ... WHERE status='pending'`)
-reads the partial index `parse_runs_pending` (migration 0081,
+reads the partial index `parse_runs_pending` (migration 0083,
 [ADR 0079](adr/0079-pending-parse-run-index.md)), which holds the pending
 parse runs only; before it, every sweep read every parse run. Every statement
 one scheduled tick prepares is explained without table statistics by

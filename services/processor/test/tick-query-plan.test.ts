@@ -56,7 +56,7 @@ const ACCEPTED: readonly { statement: string; step: RegExp; reason: string }[] =
   {
     statement: "UPDATE parse_runs SET status='error',error='parse_interrupted'",
     step: /^SCAN parse_runs USING COVERING INDEX parse_runs_pending$/u,
-    reason: "the partial index holds pending runs only (migration 0081, ADR 0079)",
+    reason: "the partial index holds pending runs only (migration 0083, ADR 0079)",
   },
   {
     statement: "WITH identity_page AS MATERIALIZED",

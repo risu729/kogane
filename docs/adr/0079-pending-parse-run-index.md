@@ -43,7 +43,7 @@ statement a tick prepares on the complete CORE schema without statistics.
 
 ## Decision
 
-Migration 0081 adds
+Migration 0083 adds
 `parse_runs_pending ON parse_runs(fetch_artifact_id, parser_name, parser_version) WHERE status='pending'`.
 The statement text is unchanged. Without statistics its plan becomes
 `SCAN parse_runs USING COVERING INDEX parse_runs_pending`, then the same
@@ -66,5 +66,5 @@ run.
   this one included, on every CORE migration without statistics.
 - `mise run ledger:schema` regenerated `infra/schema/core-ledger.*` (one more
   explicit index, no new table); `services/processor/test/lanes.test.ts` pins
-  the migration list through 0081.
+  the migration list through 0083.
 - Not measured on remote D1: the rows read per sweep before and after.

@@ -1164,16 +1164,16 @@
       "sha256": "f8ad258b0146a79780b706d7caef693120a575973e190f13f913a3fa27b40118"
     },
     {
-      "file": "0081_parse_runs_pending_index.sql",
-      "statementCount": 1,
-      "insertStatements": [],
-      "sha256": "1ef7ff27e5ec9192fc009f8715861c21a28943ff8c173bdfbe1aa45b6a79cc04"
-    },
-    {
       "file": "0082_collection_lease_heartbeat.sql",
       "statementCount": 1,
       "insertStatements": [],
       "sha256": "9fc317d86b9992daecbe21f9a5c728a31bca609bef4a98f1359755230bb13941"
+    },
+    {
+      "file": "0083_parse_runs_pending_index.sql",
+      "statementCount": 1,
+      "insertStatements": [],
+      "sha256": "1ef7ff27e5ec9192fc009f8715861c21a28943ff8c173bdfbe1aa45b6a79cc04"
     }
   ],
   "tables": [
