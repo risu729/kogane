@@ -165,12 +165,17 @@ Synthetic data only, no production access:
   account (`newest-not-current`); empty and identity-less publications
   unattributed with their reasons; a corrected mapping (a second revision)
   moving the periods to the reviewed account with both revisions stored;
-  nothing written; the cell bound refused whole (and, under a grant, as `budget_exceeded`); the capability, perimeter and source refusals of `readAccountCoverageForGrant` before any read; and, for every store, each
+  two source accounts reviewed onto one account, in a capture that is both
+  the newest and the current one, under an older sealed and a newer unsealed
+  policy run, listed as one period with the newest sealed run's observations
+  (INV06); nothing written; the cell bound refused whole (and, under a grant,
+  as `budget_exceeded`), and the account period bound refused whole; the capability, perimeter and source refusals of `readAccountCoverageForGrant` before any read; and, for every store, each
   cell of the paged cell read appears exactly once with the same state and
   reasons.
 - `packages/read-model/test/collection-quality.test.ts`: the cell page's
   digest is unchanged; on the scaled store without statistics the account
-  read reaches publications, identity observations, mappings and accounts by
+  read reaches publications, identity runs, seals, identity observations,
+  mappings and accounts by
   key, reads no observation table, and scans nothing whole outside the cell
   read's own relations; timings printed, not asserted.
 - `packages/observation-shared/test/account-coverage-contract.test.ts`: the

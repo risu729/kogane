@@ -920,9 +920,11 @@ describe("collection quality on the complete CORE schema without statistics", ()
         return !ownIndexes.has(name);
       }),
     ).toEqual([]);
-    // Every publication, identity, mapping and account row by key.
+    // Every publication, identity run, seal, identity, mapping and account row by key.
     for (const pattern of [
       /^SEARCH pub USING INDEX sqlite_autoindex_published_parse_runs_1 \(fetch_artifact_id=\? AND parser_name=\?\)$/u,
+      /^SEARCH r USING INDEX sqlite_autoindex_identity_runs_2 \(parse_run_id=\? AND policy_version=\?\)$/u,
+      /^SEARCH seal USING COVERING INDEX sqlite_autoindex_identity_run_seals_1 \(identity_run_id=\?\)$/u,
       /^SEARCH o USING INDEX sqlite_autoindex_identity_observations_2 \(identity_run_id=\?\)$/u,
       /^SEARCH m USING INDEX sqlite_autoindex_account_mappings_2 \(source_account_id=\?\)$/u,
       /^SEARCH account USING INDEX sqlite_autoindex_accounts_1 \(id=\?\)$/u,

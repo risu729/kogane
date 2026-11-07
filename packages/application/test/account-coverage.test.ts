@@ -17,6 +17,7 @@ import {
 } from "../src/query/collection-quality.ts";
 import {
   ACCOUNT_COVERAGE_CELL_BOUND,
+  ACCOUNT_COVERAGE_ENTRY_BOUND,
   validAccountCoverage,
   validCollectionQualityResponse,
   type AccountCoverage,
@@ -42,6 +43,7 @@ class Identities {
   private run = 0;
   private readonly revisions = new Map<string, number>();
   private readonly accounts = new Set<string>();
+  private readonly observed = new Map<number, { id: number; kind: "transaction" | "balance" }[]>();
 
   constructor(
     private readonly store: QualityStore,
@@ -79,26 +81,40 @@ class Identities {
     this.revisions.set(ref, revision);
   }
 
-  /** Observations of `parse` for each reference, then one sealed identity run naming them. */
-  identify(parse: number, rows: { ref: string; kind: "transaction" | "balance" }[]): void {
+  /**
+   * Observations of `parse` for each reference, then one identity run naming
+   * them under policy `policy` (default 1), sealed unless `sealed` is false.
+   * A later call for the same parse re-identifies the observations written
+   * first, in order, as a newer policy's sweep does.
+   */
+  identify(
+    parse: number,
+    rows: { ref: string; kind: "transaction" | "balance" }[],
+    { policy = 1, sealed = true }: { policy?: number; sealed?: boolean } = {},
+  ): void {
     const db = this.store.db;
-    const ids = rows.map(({ ref, kind }) => {
-      this.observation += 1;
-      if (kind === "transaction")
-        db.run(
-          "INSERT INTO transaction_observations(id,parse_run_id,source_account,raw_locator,extra_json) VALUES(?,?,?,'$[0]','{}')",
-          [this.observation, parse, ref],
-        );
-      else
-        db.run(
-          "INSERT INTO balance_observations(id,parse_run_id,source_account,metric,instrument,raw_locator,extra_json) VALUES(?,?,?,'synthetic-metric','JPY','$[0]','{}')",
-          [this.observation, parse, ref],
-        );
-      return { id: this.observation, ref, kind };
-    });
+    const written = this.observed.get(parse);
+    const ids =
+      written?.map((observation, index) => ({ ...observation, ref: rows[index]!.ref })) ??
+      rows.map(({ ref, kind }) => {
+        this.observation += 1;
+        if (kind === "transaction")
+          db.run(
+            "INSERT INTO transaction_observations(id,parse_run_id,source_account,raw_locator,extra_json) VALUES(?,?,?,'$[0]','{}')",
+            [this.observation, parse, ref],
+          );
+        else
+          db.run(
+            "INSERT INTO balance_observations(id,parse_run_id,source_account,metric,instrument,raw_locator,extra_json) VALUES(?,?,?,'synthetic-metric','JPY','$[0]','{}')",
+            [this.observation, parse, ref],
+          );
+        return { id: this.observation, ref, kind };
+      });
+    if (written === undefined) this.observed.set(parse, ids);
+    else expect(rows.length).toBe(written.length);
     this.run += 1;
     const run = `synthetic-identity-${this.source}-${this.run}`;
-    db.run("INSERT INTO identity_runs VALUES(?,?,1,'2099-01-01')", [run, parse]);
+    db.run("INSERT INTO identity_runs VALUES(?,?,?,'2099-01-01')", [run, parse, policy]);
     for (const { id, ref, kind } of ids)
       db.run("INSERT INTO identity_observations VALUES(?,?,?,?,?,?,'[]')", [
         `${run}-${id}`,
@@ -108,7 +124,8 @@ class Identities {
         ref,
         `${ref}-r1`,
       ]);
-    db.run("INSERT INTO identity_run_seals VALUES(?,?,'2099-01-01')", [run, ids.length]);
+    if (sealed)
+      db.run("INSERT INTO identity_run_seals VALUES(?,?,'2099-01-01')", [run, ids.length]);
   }
 }
 
@@ -409,6 +426,53 @@ describe("account coverage", () => {
     }
   });
 
+  test("an account is one period per cell and kind: two source accounts, both captures and only the newest sealed policy count (INV06)", async () => {
+    const store = new QualityStore();
+    const ids = new Identities(store, "global-pass");
+    try {
+      // Two source references reviewed onto one account, with different statuses.
+      ids.map("synthetic-ref-x", "synthetic-account-shared", "identified");
+      ids.map("synthetic-ref-y", "synthetic-account-shared", "provider-local");
+      ids.map("synthetic-ref-z", "synthetic-account-stale", "identified");
+      const run = store.run({
+        source: "global-pass",
+        at: "2099-02-01T00:00:00Z",
+        artifacts: [{ key: "activity-2099-01.html", dataset: "globalpass-activity" }],
+      });
+      const parse = store.parse(run.artifacts[0]!, "global-pass-activity", {
+        kind: "published",
+      })!;
+      const as = (ref: string) => ({ ref, kind: "transaction" as const });
+      // An older sealed policy named another account; a newer policy is not sealed yet.
+      ids.identify(parse, [as("synthetic-ref-z"), as("synthetic-ref-z"), as("synthetic-ref-z")]);
+      ids.identify(parse, [as("synthetic-ref-x"), as("synthetic-ref-x"), as("synthetic-ref-y")], {
+        policy: 2,
+      });
+      ids.identify(parse, [as("synthetic-ref-z"), as("synthetic-ref-z"), as("synthetic-ref-z")], {
+        policy: 3,
+        sealed: false,
+      });
+      const answer = await read(store, "global-pass");
+      // The capture is both the cell's newest and its current one: listed once.
+      expect(answer.accounts.map((account) => [account.accountId, account.statuses])).toEqual([
+        ["synthetic-account-shared", ["identified", "provider-local"]],
+      ]);
+      expect(answer.accounts[0]!.dataTypes).toHaveLength(1);
+      expect(
+        answer.accounts[0]!.dataTypes[0]!.periods.map((entry) => [
+          entry.period.value,
+          entry.standing,
+          entry.capture.fetchRunId,
+          entry.observations,
+        ]),
+      ).toEqual([["2099-01", "current", run.run, 3]]);
+      expect(answer.unattributed).toEqual([]);
+      await expectSameCells(store, "global-pass", answer);
+    } finally {
+      store.db.close();
+    }
+  });
+
   test("the read writes nothing", async () => {
     const store = new QualityStore();
     try {
@@ -484,6 +548,69 @@ describe("account coverage", () => {
     });
     expect(refused.ok).toBe(false);
     expect(!refused.ok && refused.error.code).toBe("budget_exceeded");
+  });
+
+  test("more account periods than the bound is refused whole, never cut", async () => {
+    const named = (accounts: number) =>
+      JSON.stringify(
+        Array.from({ length: accounts }, (_, index) => [
+          "current",
+          `synthetic-account-${String(index)}`,
+          `Synthetic ${String(index)}`,
+          "identified",
+          "transaction",
+          1,
+        ]),
+      );
+    const rows = (accounts: number) =>
+      Array.from({ length: ACCOUNT_COVERAGE_CELL_BOUND }, (_, index) => ({
+        dataset: "synthetic-dataset",
+        parser_name: "synthetic-parser",
+        fetch_unit_key: `synthetic-unit-${String(index)}`,
+        period_kind: "latest",
+        period: null,
+        period_state: null,
+        current_rule: "published-eligible",
+        newest_run_id: 1,
+        newest_captured_at: "2099-01-01T00:00:00.000Z",
+        newest_run_succeeded: 1,
+        latest_producer_run_id: 1,
+        artifacts: 1,
+        observations: accounts,
+        unresolved_identities: 0,
+        identity_missing: 0,
+        unit_outcome_unknown: 0,
+        raw_stored: 1,
+        not_queued: 0,
+        not_eligible: 0,
+        published: 1,
+        pending: 0,
+        failed: 0,
+        unpublished: 0,
+        failure_codes_json: "[]",
+        unit_failed: 0,
+        unit_failure_code: null,
+        incomplete_coverage: 0,
+        coverage_causes_json: "[]",
+        unreported_coverage: 0,
+        current_run_id: 1,
+        current_captured_at: "2099-01-01T00:00:00.000Z",
+        accounts_json: named(accounts),
+      }));
+    const executorOf = (accounts: number): SqlExecutor => ({
+      all: async <T>() => rows(accounts) as T[],
+      first: async <T>() =>
+        ({ source_id: "vpass", fetch_run_id: 1, succeeded: 1, completed_at: null }) as T,
+    });
+    // 2,000 cells × 5 accounts is exactly the bound of 10,000 entries.
+    const full = await queryAccountCoverage(executorOf(5), { sourceId: "vpass" });
+    expect(
+      full!.accounts.reduce((sum, account) => sum + account.dataTypes[0]!.periods.length, 0),
+    ).toBe(ACCOUNT_COVERAGE_ENTRY_BOUND);
+    expect(validAccountCoverage(full)).toBe(true);
+    await expect(queryAccountCoverage(executorOf(6), { sourceId: "vpass" })).rejects.toBeInstanceOf(
+      CollectionQualityLimitError,
+    );
   });
 
   test("under a grant: capability, perimeter and source are refused before anything is read", async () => {
