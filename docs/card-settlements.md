@@ -195,8 +195,9 @@ proposal names the candidate's card and bank account), `names_other_account`,
 or `not_proposed` with the reason. A row is appended only when the outcome
 differs from the candidate's latest row for that statement and policy. The
 candidate's facts, digest and eligibility are unchanged: the evidence sets no
-owner and no ownership evidence, and ownership and acceptance stay operator
-decisions (INV07). The sweep's log line adds `debitAccountEvidence`, the
+owner and no ownership evidence (owners come from recorded claims or the
+owner's default, [below](#ownership-default-adr-0087)), and acceptance stays a
+decision (INV07). The sweep's log line adds `debitAccountEvidence`, the
 number of evidence rows appended.
 
 **On the review page.** Each review in the `カード照合` list and its API
@@ -424,10 +425,58 @@ candidates cite the newest facts; this happens only when the five newer ones
 are all blocked or decided (for example they cite another debit of the same
 amount that is no longer current, or the operator rejected them).
 
-Acceptance also requires explicit ownership evidence: the card account's
+Acceptance also requires ownership evidence: the card account's
 `liable_party` and bank account's `beneficial_owner` must identify the same
-party through current accepted decisions. A login, matching account labels,
+party, through current accepted decisions or, for an account with nothing
+recorded, the owner's default below. A login, matching account labels,
 amounts or dates do not establish ownership.
+
+### Ownership default (ADR 0087)
+
+The owner decided on 2026-11-07 (03:59 UTC) that an account whose owner is not
+recorded may be assumed to be the owner's
+([ADR 0087](adr/0087-card-settlement-ownership-default.md)). The settlement
+reads apply it: the sweep's statement and bank reads, the read of statements
+without a candidate (which shares the bank read), and the keyed readiness
+CTEs behind the review list, a review, the settlement plan, the ownership
+review, the shadow count and the commit guard. A statement or debit whose
+account is resolved (one current mapping) and has no recorded owner gets the
+party `party:owner` and cites its account mapping and the closed reference
+`ownership-default:owner-v1`, unless any identity of the row has:
+
+- a `liable_party` or `beneficial_owner` relation from the account (`<id>` or
+  `account:<id>`) of any status, dated or not, the other role included;
+- a `contradicts` relation naming the account or the identity's source account
+  (`source_account:<id>`), at either end;
+- an `unresolved` current mapping or an `unresolved` account.
+
+So a recorded claim, a rejection, a dated claim or a contradiction always takes
+precedence, and correcting ownership is the review below. A MyJCB root
+(`card-statement-aggregate`) and the importer- and collector-era identities are
+each an account under the default; it merges nothing and crosses no
+`same_account` or parent/child link. `party:owner` is an ordinary party
+reference: the review's label `owner` names the same party, and a side recorded
+as another party makes the candidate `different`.
+
+A candidate cites the evidence its owners had when it was proposed. Recording
+a blocker changes it, so a candidate citing the default stops being
+`ownership_current`, its planned acceptance is refused in the receipt guard,
+and the next sweep proposes the pair again with the recorded owner or none.
+Candidates proposed before the default shipped have no owner and stay blocked;
+the sweep proposes their statements again with the default when its cursor
+reaches them. The default accepts nothing: a candidate still needs the accept
+command, whose decision cites `ownership-default:owner-v1`. The review page
+shows the reference and says that the account is treated as the owner's and
+that the name is not verified.
+
+Limits: the ownership review page lists recorded claims only and does not say
+whether the default applies to a side. The purchase, dated-state and
+economic-row readiness reads do not apply the default (economic-row readiness
+still reports `ownership_unresolved`), and neither do the migration 0044 views
+`card_settlement_fact_ownership` and `card_settlement_readiness`, which no
+shipped read uses.
+
+### Recording ownership
 
 From a proposed candidate, `口座の保有者と根拠を確認` opens an operator-only
 review of both current account mappings and recorded ownership claims. Each
@@ -758,7 +807,15 @@ now name their statements or debits first and resolve owners through
 applied to the parses of those observations only; the view is unchanged. They
 reach identities through `identity_observation_lookup (kind, observation_id)`
 and the identity runs' keys, and the rest through the primary keys and
-`published_parse_runs_run`. The settlement read matched each statement's
+`published_parse_runs_run`. The settlement reads (the sweep's and readiness)
+add the owner's default ([above](#ownership-default-adr-0087)) inside the same
+aggregate: its checks are correlated lookups per joined identity row through the
+`entity_relations` indexes (`kind,from_ref` and `kind,to_ref`) and the
+accounts' key, so they read nothing the rows do not name, and without the
+default the text is byte for byte the keyed view text
+(`card-settlement-owner-default.test.ts` checks the plan without table
+statistics; `card-settlement-bank-cache-schema.test.ts` pins the sweep's bank
+read as the frozen pre-cache text with only that swap). The settlement read matched each statement's
 reviews by three `json_extract` terms over every candidate, for every
 statement asked for; migration `0050_statement_fact_indexes.sql` indexes
 exactly those expressions (`card_settlement_candidates_statement_period`), so
@@ -901,8 +958,9 @@ The SBI Shinsei adapter is tested through the processor's parse lane and the
 deployed parser on the synthetic parser-boundary fixture and variants of it
 (`services/processor/test/card-settlement-sbi-shinsei.test.ts`): an
 equal-amount statement yields a candidate; credit, zero and foreign-currency
-rows do not; a re-observed `txnReferenceNo` is one payment; unknown ownership
-blocks acceptance; an owned SBI Shinsei candidate's debit, parsed by 0.1.3, is
+rows do not; a re-observed `txnReferenceNo` is one payment; with no claim recorded
+the candidate is the owner's by default, and recorded claims replace the
+default; an owned SBI Shinsei candidate's debit, parsed by 0.1.3, is
 admitted under its declared alias class, and an accepted SMBC debit reserves
 the statement against it until it is withdrawn.
 `services/processor/test/card-settlement-sbi-shinsei-origin.test.ts` walks a

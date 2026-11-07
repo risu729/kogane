@@ -230,7 +230,8 @@ test("explicit Unicode party and evidence pass human lifecycle without accepting
   await cardSettlementSweep(db);
   const refreshed = await db
     .prepare(
-      "SELECT id FROM card_settlement_reviews WHERE statement_parse_run_id=? AND json_extract(facts_json,'$.ownership')='established-same' AND status='proposed'",
+      `SELECT id FROM card_settlement_reviews WHERE statement_parse_run_id=? AND json_extract(facts_json,'$.ownership')='established-same' AND status='proposed'
+       AND NOT EXISTS(SELECT 1 FROM json_each(facts_json,'$.ownershipEvidenceRefs') WHERE value='ownership-default:owner-v1')`,
     )
     .bind(c.statement)
     .first<{ id: string }>();

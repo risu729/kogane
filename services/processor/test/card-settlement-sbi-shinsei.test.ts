@@ -24,6 +24,7 @@ import {
 import { cardSettlementDebitIdentity } from "../../../packages/application/src/operations/card-settlement-target.ts";
 import type { CardSettlementFacts } from "../../../packages/domain/src/card-settlement.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
+import { OWNERSHIP_DEFAULT_REF } from "../../../packages/domain/src/ownership-default.ts";
 
 const FIXTURE = new URL(
   "../../../tests/fixtures/observation-pipeline/sbi-shinsei-parser-boundaries/top-accounts-balance-and-activity.json",
@@ -271,13 +272,22 @@ const candidates = async (where = "1=1"): Promise<Candidate[]> =>
 const bankSource = (candidate: Candidate): string =>
   (JSON.parse(candidate.facts_json) as { bankDebit: { sourceId: string } }).bankDebit.sourceId;
 
+/**
+ * Readiness as the shipped reads and the commit guard judge it: the keyed
+ * CTEs, which apply the owner's default (ADR 0087); the migration 0044 view
+ * does not, and no shipped read uses it.
+ */
 const readiness = async (id: string) =>
   db
     .prepare(
-      "SELECT statement_current,bank_current,ownership_current,allocation_available FROM card_settlement_readiness WHERE id=?",
+      `WITH chosen AS (SELECT ?1 AS id), ${cardSettlementReadinessCtes()}
+       SELECT statement_current,bank_current,ownership_current,allocation_available FROM readiness`,
     )
     .bind(id)
     .first<Record<string, number>>();
+/** Established through recorded claims, not the owner's default. */
+const RECORDED_OWNERSHIP = `json_extract(facts_json,'$.ownership')='established-same'
+ AND NOT EXISTS(SELECT 1 FROM json_each(facts_json,'$.ownershipEvidenceRefs') WHERE value='${OWNERSHIP_DEFAULT_REF}')`;
 
 const STATEMENT_PARSE = 1103;
 let jpyParse = 0;
@@ -313,7 +323,7 @@ test("only the provider's own JPY debit is an adapter row; credits, zero and for
   ]);
 }, 60000);
 
-test("an equal-amount statement within three days produces a candidate, which unknown ownership cannot accept", async () => {
+test("an equal-amount statement within three days produces a candidate, owned by the owner's default", async () => {
   await statement(STATEMENT_PARSE, 1200, "2026-09-07");
   expect(await cardSettlementSweep(db)).toMatchObject({ proposed: 1, written: 1 });
   const [candidate] = await candidates();
@@ -327,11 +337,11 @@ test("an equal-amount statement within three days produces a candidate, which un
     },
     occurred: { kind: "local-date", value: "2026-09-06", zone: "Asia/Tokyo", basis: "provider" },
   });
-  expect(facts.ownership).toBe("unknown");
-  expect(await readiness(candidate!.id)).toMatchObject({ bank_current: 1, ownership_current: 0 });
-  await expect(
-    command("card-settlement.accept", { proposalId: candidate!.id, reason: "test" }),
-  ).rejects.toThrow();
+  // No claim is recorded on either account: both sides name the default
+  // party (ADR 0087). It is not accepted here; the next tests record claims.
+  expect(facts.ownership).toBe("established-same");
+  expect(facts.ownershipEvidenceRefs).toContain(OWNERSHIP_DEFAULT_REF);
+  expect(await readiness(candidate!.id)).toMatchObject({ bank_current: 1, ownership_current: 1 });
   expect(await count("SELECT count(*) AS n FROM current_allocations")).toBe(0);
 }, 60000);
 
@@ -358,7 +368,7 @@ test("re-observing the same txnReferenceNo is one payment, not a second one", as
   );
 }, 60000);
 
-test("ownership is still required; the SBI Shinsei debit's identity is admitted (0.1.3), and an accepted SMBC debit reserves the statement", async () => {
+test("recorded claims replace the default; the SBI Shinsei debit's identity is admitted (0.1.3), and an accepted SMBC debit reserves the statement", async () => {
   await ownership(STATEMENT_PARSE, "liable_party");
   await ownership(jpyParse, "beneficial_owner");
   // An SMBC debit of the same bill, as the SMBC parser stores it: its
@@ -397,7 +407,7 @@ test("ownership is still required; the SBI Shinsei debit's identity is admitted 
   );
   await ownership(1105, "beneficial_owner");
   await cardSettlementSweep(db);
-  const owned = await candidates("json_extract(facts_json,'$.ownership')='established-same'");
+  const owned = await candidates(RECORDED_OWNERSHIP);
   const sbi = owned.filter((row) => bankSource(row) === "sbi-shinsei-bank");
   const smbc = owned.filter((row) => bankSource(row) === "smbc-bank");
   expect(sbi).toHaveLength(1);
@@ -450,9 +460,9 @@ test("ownership is still required; the SBI Shinsei debit's identity is admitted 
 }, 60000);
 
 test("an SBI Shinsei acceptance made before G1b still reserves every candidate of its provider id; the G1b withdrawal releases it", async () => {
-  const [sbi] = (
-    await candidates("json_extract(facts_json,'$.ownership')='established-same'")
-  ).filter((row) => bankSource(row) === "sbi-shinsei-bank");
+  const [sbi] = (await candidates(RECORDED_OWNERSHIP)).filter(
+    (row) => bankSource(row) === "sbi-shinsei-bank",
+  );
   const others = (await candidates()).filter(
     (row) => row.id !== sbi!.id && bankSource(row) === "sbi-shinsei-bank",
   );
@@ -530,9 +540,9 @@ test("an SBI Shinsei acceptance made before G1b still reserves every candidate o
 }, 60000);
 
 test("another allocation of the SBI Shinsei provider id blocks its review", async () => {
-  const [sbi] = (
-    await candidates("json_extract(facts_json,'$.ownership')='established-same'")
-  ).filter((row) => bankSource(row) === "sbi-shinsei-bank");
+  const [sbi] = (await candidates(RECORDED_OWNERSHIP)).filter(
+    (row) => bankSource(row) === "sbi-shinsei-bank",
+  );
   expect(await readiness(sbi!.id)).toMatchObject({ allocation_available: 1 });
   await db
     .prepare(`INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,reason,evidence_refs_json,created_at)

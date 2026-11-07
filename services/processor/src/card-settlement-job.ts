@@ -50,7 +50,7 @@ const LIMIT = CARD_SETTLEMENT_BANK_DEBITS_LIMIT;
 export const CARD_SETTLEMENT_STATEMENTS_SQL = `WITH page AS MATERIALIZED (
  SELECT * FROM card_statement_facts WHERE id>?1 ORDER BY id LIMIT ?2
 ), observed AS (SELECT id AS observation_id FROM page),
-${cardSettlementOwnershipCtes("balance")}
+${cardSettlementOwnershipCtes("balance", { ownerDefault: true })}
 SELECT page.*,ownership.account_id,ownership.owner_ref,ownership.evidence_refs_json FROM page
  LEFT JOIN ownership ON ownership.observation_id=page.id ORDER BY page.id`;
 const amount = sweepRowAmount;

@@ -337,8 +337,10 @@ describe("claim_available on random stores (ADR 0054, G1b)", () => {
       LEGACY_CARD_SETTLEMENT_READINESS_CTES_SHA256,
     );
     expect(LEGACY_CARD_SETTLEMENT_READINESS_CTES).not.toContain("claim_available");
-    // The current text is the frozen text with one column added at its end.
-    const current = cardSettlementReadinessCtes();
+    // The current text without the owner's default (ADR 0087, tested in
+    // card-settlement-owner-default.test.ts) is the frozen text with one
+    // column added at its end.
+    const current = cardSettlementReadinessCtes({ ownerDefault: false });
     const head = LEGACY_CARD_SETTLEMENT_READINESS_CTES.slice(
       0,
       LEGACY_CARD_SETTLEMENT_READINESS_CTES.lastIndexOf(" AS allocation_available"),

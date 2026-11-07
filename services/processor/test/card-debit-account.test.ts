@@ -399,11 +399,15 @@ test("the sweep attaches the statement's debit account as evidence and changes n
     bankSourceAccount: "mizuho-bank:ordinary:001:1234567",
     visibleDigitCount: 4,
   });
-  // The candidate is exactly what it would be without the evidence, and
-  // still not eligible: ownership is the operator's decision.
+  // The candidate is exactly what it would be without the evidence: its
+  // owners are the owner's default (ADR 0087, no claim is recorded here),
+  // never the provider's statement of the debit account.
   const facts = JSON.parse(candidate.facts_json);
-  expect(facts.ownership).toBe("unknown");
-  expect(cardSettlementEligible(facts)).toBe(false);
+  expect(facts.ownership).toBe("established-same");
+  expect(
+    facts.ownershipEvidenceRefs.filter((ref: string) => !ref.startsWith("account_mapping:")),
+  ).toEqual(["ownership-default:owner-v1"]);
+  expect(cardSettlementEligible(facts)).toBe(true);
   expect(JSON.stringify(facts)).not.toContain("mizuho-bank");
   expect(JSON.stringify(facts)).not.toContain("card_debit_account_statement");
 

@@ -13,6 +13,8 @@ import {
   type Principal,
 } from "../../../packages/application/src/index.ts";
 import { changeMutationPlanners } from "../src/change-commands.ts";
+import { OWNERSHIP_DEFAULT_REF } from "../../../packages/domain/src/ownership-default.ts";
+import { cardSettlementReadinessCtes } from "../../../packages/read-model/src/card-settlement-readiness.ts";
 
 let mf: Miniflare, env: Env, db: D1Database;
 const actor: Principal = {
@@ -102,6 +104,24 @@ async function ownership(parse: number, kind: "liable_party" | "beneficial_owner
   });
   if (!result.ok) throw new Error(JSON.stringify(result));
   expect(result.ok).toBe(true);
+}
+/** Established through recorded claims, not the owner's default (ADR 0087). */
+const RECORDED_OWNERSHIP = `json_extract(facts_json,'$.ownership')='established-same'
+ AND NOT EXISTS(SELECT 1 FROM json_each(facts_json,'$.ownershipEvidenceRefs') WHERE value='${OWNERSHIP_DEFAULT_REF}')`;
+/**
+ * A candidate's `ownership_current` as the shipped reads and the commit guard
+ * judge it: the keyed readiness CTEs, which apply the owner's default. The
+ * migration 0044 view does not, and no shipped read uses it.
+ */
+async function ownershipCurrent(id: string): Promise<number | undefined> {
+  return (
+    await db
+      .prepare(
+        `WITH chosen AS (SELECT ?1 AS id), ${cardSettlementReadinessCtes()} SELECT ownership_current FROM readiness`,
+      )
+      .bind(id)
+      .first<{ ownership_current: number }>()
+  )?.ownership_current;
 }
 async function seed() {
   for (const [id, source] of [
@@ -202,7 +222,7 @@ async function seed() {
     );
   }
 }
-test("real SMBC parser shape yields a review but unknown ownership cannot be accepted", async () => {
+test("real SMBC parser shape yields a review, owned by the owner's default while no claim is recorded", async () => {
   await seed();
   expect(await cardSettlementSweep(db)).toMatchObject({
     proposed: 1,
@@ -217,10 +237,16 @@ test("real SMBC parser shape yields a review but unknown ownership cannot be acc
   const row = await db
     .prepare("SELECT id,facts_json FROM card_settlement_reviews")
     .first<{ id: string; facts_json: string }>();
-  expect(JSON.parse(row!.facts_json).bankDebit.occurred.value).toBe("2026-09-10");
-  await expect(
-    command("card-settlement.accept", { proposalId: row!.id, reason: "test" }),
-  ).rejects.toThrow();
+  const facts = JSON.parse(row!.facts_json);
+  expect(facts.bankDebit.occurred.value).toBe("2026-09-10");
+  // Neither account has a recorded claim, so both sides name the default
+  // party and cite the default (ADR 0087); acceptance under it is tested in
+  // card-settlement-owner-default.test.ts, so this store stays unallocated.
+  expect(facts.ownership).toBe("established-same");
+  expect(facts.statement.ownerRef).toBe("party:owner");
+  expect(facts.bankDebit.ownerRef).toBe("party:owner");
+  expect(facts.ownershipEvidenceRefs).toContain(OWNERSHIP_DEFAULT_REF);
+  expect(await ownershipCurrent(row!.id)).toBe(1);
   expect(
     (await db.prepare("SELECT count(*) AS n FROM economic_event_revisions").first<{ n: number }>())!
       .n,
@@ -229,11 +255,14 @@ test("real SMBC parser shape yields a review but unknown ownership cannot be acc
 test("explicit approval allocates existing cash once; withdrawal preserves facts and historical decisions", async () => {
   await ownership(701, "liable_party");
   await ownership(702, "beneficial_owner");
+  // A recorded claim takes precedence: the default's candidate is no longer current.
+  const [defaulted] = (
+    await db.prepare("SELECT id FROM card_settlement_candidates").all<{ id: string }>()
+  ).results;
+  expect(await ownershipCurrent(defaulted!.id)).toBe(0);
   expect(await cardSettlementSweep(db)).toMatchObject({ written: 1 });
   const row = await db
-    .prepare(
-      "SELECT id FROM card_settlement_candidates WHERE json_extract(facts_json,'$.ownership')='established-same'",
-    )
+    .prepare(`SELECT id FROM card_settlement_candidates WHERE ${RECORDED_OWNERSHIP}`)
     .first<{ id: string }>();
   const accepted = await command("card-settlement.accept", {
     proposalId: row!.id,
@@ -284,7 +313,7 @@ async function cloneCandidate(label: string): Promise<string> {
     .prepare(`INSERT INTO card_settlement_candidates
  (id,statement_key,bank_key,statement_observation_id,statement_parse_run_id,bank_observation_id,bank_parse_run_id,policy_release,facts_json,proposal_digest,created_at)
  SELECT ?,statement_key,bank_key,statement_observation_id,statement_parse_run_id,bank_observation_id,bank_parse_run_id,policy_release,facts_json,?,created_at
- FROM card_settlement_candidates WHERE json_extract(facts_json,'$.ownership')='established-same' ORDER BY id LIMIT 1`)
+ FROM card_settlement_candidates WHERE ${RECORDED_OWNERSHIP} ORDER BY id LIMIT 1`)
     .bind(id, digest)
     .run();
   return id;

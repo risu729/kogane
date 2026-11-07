@@ -3,6 +3,7 @@ import type { Quantity } from "../../../packages/domain/src/values.ts";
 import { decimalToString } from "../../../packages/domain/src/values.ts";
 import type { TemporalValue } from "../../../packages/domain/src/time.ts";
 import type { SourceFactRef } from "../../../packages/domain/src/events.ts";
+import { ownershipDefaulted } from "../../../packages/domain/src/ownership-default.ts";
 import type { CardSettlementReview } from "./reconciliation-api.ts";
 import { Link } from "./router.tsx";
 import { Badge, Kv, KvRow, Notice, Nullable } from "./ui.tsx";
@@ -259,6 +260,11 @@ export function CardSettlementDetails({ review }: { review: CardSettlementReview
         <p>採用時には原本の公開状態、口座の保有者、重複配賦をサーバーで再確認します。</p>
         {facts.ownershipEvidenceRefs.length > 0 ? (
           <p>保有者の根拠: {facts.ownershipEvidenceRefs.join("、")}</p>
+        ) : null}
+        {ownershipDefaulted(facts.ownershipEvidenceRefs) ? (
+          <p>
+            保有者が記録されていない口座を本人の口座とみなしています（既定の扱い。名義は確認していません）。保有者を記録すると、この候補は再確認が必要になります。
+          </p>
         ) : null}
         {review.history.length === 0 ? (
           <p>まだ判断は保存されていません。</p>

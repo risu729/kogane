@@ -26,19 +26,61 @@
 // publication, run status, mappings and ownership claims are still read
 // through the same views and tables. card-settlement-ownership.test.ts compares
 // these CTEs with the view on random stores, and every caller's differential
-// test compares its read with the shipped text.
+// test compares its read with the shipped text. The settlement reads add the
+// owner's default (`ownerDefault` below, ADR 0087), which only fills owners the
+// view leaves null.
+import {
+  OWNERSHIP_DEFAULT_PARTY,
+  OWNERSHIP_DEFAULT_REF,
+} from "../../domain/src/ownership-default.ts";
+
 export type OwnershipKind = "balance" | "transaction";
 
 /**
  * Names for another set of these CTEs in the same statement (the readiness
  * CTEs own statements and debits together): `prefix` goes before every CTE
  * name (`owned_runs` ... `ownership`), and `observed` names the caller's CTE
- * of observation ids. Without them the text is the one above.
+ * of observation ids. Without them, and without `ownerDefault`, the text is
+ * the one above.
+ *
+ * `ownerDefault` applies the owner's default (ADR 0087). Every row and every
+ * account is the view's; only a row whose account the view resolves and whose
+ * owner it leaves null can change, and it gets `OWNERSHIP_DEFAULT_PARTY`,
+ * citing its mapping and `OWNERSHIP_DEFAULT_REF` (`[mapping, ref]` in place of
+ * the view's `[mapping, null, null]`), when none of the row's identities
+ * meets any of these:
+ *
+ * - a `liable_party` or `beneficial_owner` relation from the account (either
+ *   spelling), of any status, dated or not, the other role included: a
+ *   recorded, rejected, released or dated claim takes precedence, and
+ *   resolving it is the ownership review's, never the default's;
+ * - a `contradicts` relation naming the account (either spelling) or the
+ *   identity's source account (`source_account:<id>`), from either end;
+ * - an `unresolved` current mapping, or an `unresolved` account.
+ *
+ * These are the self-declaration fallback's history and contradiction checks
+ * (ownership-declaration.ts) without its single-account scope: the owner
+ * decided that a MyJCB root (`card-statement-aggregate`) is an account under
+ * this rule, and nothing here merges two accounts. The checks run per joined
+ * row inside the view's own aggregate, by the `entity_relations` indexes and
+ * the accounts' key, so the default reads nothing the view's rows do not name.
  */
 export interface OwnershipCteNames {
   prefix?: string;
   observed?: string;
+  ownerDefault?: boolean;
 }
+
+/** 1 when this joined row forbids the default (see `ownerDefault` above), else 0. */
+const DEFAULT_BLOCKED = `(m.status='unresolved'
+  OR EXISTS(SELECT 1 FROM accounts held WHERE held.id=m.account_id AND held.status='unresolved')
+  OR EXISTS(SELECT 1 FROM entity_relations claim WHERE claim.kind IN ('liable_party','beneficial_owner')
+   AND claim.from_ref IN(m.account_id,'account:'||m.account_id))
+  OR EXISTS(SELECT 1 FROM entity_relations contrary WHERE contrary.kind='contradicts'
+   AND contrary.from_ref IN(m.account_id,'account:'||m.account_id,'source_account:'||owned.source_account_id))
+  OR EXISTS(SELECT 1 FROM entity_relations contrary WHERE contrary.kind='contradicts'
+   AND contrary.to_ref IN(m.account_id,'account:'||m.account_id,'source_account:'||owned.source_account_id)))`;
+const DEFAULT_APPLIES = `count(DISTINCT m.account_id)=1 AND max(${DEFAULT_BLOCKED})=0`;
 
 export function cardSettlementOwnershipCtes(
   kind: OwnershipKind,
@@ -46,6 +88,16 @@ export function cardSettlementOwnershipCtes(
 ): string {
   const at = names.prefix ?? "";
   const observed = names.observed ?? "observed";
+  const owner =
+    "CASE WHEN count(DISTINCT m.account_id)=1 AND count(DISTINCT r.to_ref)=1 THEN min(r.to_ref)";
+  const evidence =
+    "json_array('account_mapping:'||min(m.id),'relation:'||min(r.id),'decision:'||min(d.id))";
+  const ownerColumn = names.ownerDefault
+    ? `${owner}\n  WHEN ${DEFAULT_APPLIES} THEN '${OWNERSHIP_DEFAULT_PARTY}' END AS owner_ref`
+    : `${owner} END AS owner_ref`;
+  const evidenceColumn = names.ownerDefault
+    ? `CASE WHEN ${DEFAULT_APPLIES}\n  THEN json_array('account_mapping:'||min(m.id),'${OWNERSHIP_DEFAULT_REF}')\n  ELSE ${evidence} END AS evidence_refs_json`
+    : `${evidence} AS evidence_refs_json`;
   return `${at}owned_runs AS MATERIALIZED (
  SELECT DISTINCT r.parse_run_id FROM ${observed}
  CROSS JOIN identity_observations o ON o.kind='${kind}' AND o.observation_id=${observed}.observation_id
@@ -71,8 +123,8 @@ export function cardSettlementOwnershipCtes(
 ), ${at}ownership AS (
 SELECT owned.kind,owned.observation_id,
  CASE WHEN count(DISTINCT m.account_id)=1 THEN min(m.account_id) END AS account_id,
- CASE WHEN count(DISTINCT m.account_id)=1 AND count(DISTINCT r.to_ref)=1 THEN min(r.to_ref) END AS owner_ref,
- json_array('account_mapping:'||min(m.id),'relation:'||min(r.id),'decision:'||min(d.id)) AS evidence_refs_json
+ ${ownerColumn},
+ ${evidenceColumn}
 FROM ${at}owned_identity owned
 CROSS JOIN current_account_mappings m ON m.source_account_id=owned.source_account_id
 LEFT JOIN entity_relations r ON r.from_ref IN(m.account_id,'account:'||m.account_id)

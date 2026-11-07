@@ -178,7 +178,7 @@ export const UNMATCHED_STATEMENTS_SQL = `WITH page AS MATERIALIZED (
   WHERE c.statement_key=f.statement_key AND c.statement_observation_id=f.id AND c.statement_parse_run_id=f.parse_run_id)
  ORDER BY f.id LIMIT ?1 OFFSET ?2
 ), observed AS (SELECT id AS observation_id FROM page),
-${cardSettlementOwnershipCtes("balance")}
+${cardSettlementOwnershipCtes("balance", { ownerDefault: true })}
 SELECT page.*,ownership.account_id,ownership.owner_ref,ownership.evidence_refs_json FROM page
  LEFT JOIN ownership ON ownership.observation_id=page.id ORDER BY page.id`;
 

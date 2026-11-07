@@ -7,6 +7,7 @@ import {
 } from "../../../packages/read-model/src/source-revision.ts";
 import { CARD_SETTLEMENT_BANK_DEBITS_SQL } from "../src/card-settlement-job.ts";
 import { createSettlementBankReader } from "../src/card-settlement-bank-cache.ts";
+import { cardSettlementOwnershipCtes } from "../../../packages/read-model/src/card-settlement-ownership.ts";
 
 interface BankRow {
   id: number;
@@ -110,11 +111,19 @@ test("real source revisions invalidate bank rows, ownership, mappings and visibi
   }
 }, 60000);
 
-test("the shared bank read is byte-identical to the query before caching", () => {
+test("the shared bank read is the query before caching, with only the owner's default added", () => {
+  const before = readFileSync(
+    new URL("./fixtures/card-bank-debits-before-sharing.sql", import.meta.url),
+    "utf8",
+  );
+  // The owner's default (ADR 0087) is the one change since: the ownership
+  // CTEs without it appear in the frozen text exactly once, and swapping in
+  // the CTEs with it gives the shipped read byte for byte.
+  const without = cardSettlementOwnershipCtes("transaction");
+  expect(before.split(without)).toHaveLength(2);
   expect(CARD_SETTLEMENT_BANK_DEBITS_SQL).toBe(
-    readFileSync(
-      new URL("./fixtures/card-bank-debits-before-sharing.sql", import.meta.url),
-      "utf8",
+    before.replace(without, () =>
+      cardSettlementOwnershipCtes("transaction", { ownerDefault: true }),
     ),
   );
 });

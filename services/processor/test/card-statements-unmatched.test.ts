@@ -216,8 +216,10 @@ test("each statement without a candidate carries its closed code and, where aske
   ]);
   const first = items.get("2098-01")!.planner as { allocations: UnmatchedAllocation[] };
   const [allocation] = first.allocations;
-  expect(allocation).toMatchObject({ kind: "multiple-debits", ownership: "unknown" });
-  expect(allocation?.rejectionConditions).toContain("owner_not_established");
+  // No claim is recorded, so both sides are the owner's by default (ADR 0087);
+  // the allocation is still not acceptable (every item's `acceptable` below).
+  expect(allocation).toMatchObject({ kind: "multiple-debits", ownership: "established-same" });
+  expect(allocation?.rejectionConditions).not.toContain("owner_not_established");
   // A shortfall names its shape and computes no remainder.
   expect(items.get("2098-02")?.planner).toEqual({
     status: "unsupported",

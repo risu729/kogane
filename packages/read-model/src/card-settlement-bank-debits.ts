@@ -105,6 +105,6 @@ export const CARD_SETTLEMENT_BANK_DEBITS_SQL = `WITH debits AS MATERIALIZED (
  SELECT * FROM card_bank_debit_facts
  WHERE debit_date BETWEEN date(?1,'-3 days') AND date(?2,'+3 days') ORDER BY id LIMIT ?3
 ), observed AS (SELECT id AS observation_id FROM debits),
-${cardSettlementOwnershipCtes("transaction")}
+${cardSettlementOwnershipCtes("transaction", { ownerDefault: true })}
 SELECT debits.*,ownership.account_id,ownership.owner_ref,ownership.evidence_refs_json FROM debits
  LEFT JOIN ownership ON ownership.observation_id=debits.id ORDER BY debits.id`;

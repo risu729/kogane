@@ -63,6 +63,14 @@
 // The other four columns are the text they were before it (frozen in
 // test/card-settlement-readiness-ctes-legacy-sql.ts and compared on the random
 // stores).
+//
+// Both ownership CTE sets apply the owner's default (ADR 0087,
+// card-settlement-ownership.ts `ownerDefault`), so a candidate whose facts cite
+// `ownership-default:owner-v1` on both sides is `ownership_current` while
+// neither account has a recorded claim or contradiction, and stops being it
+// when one is recorded. That is the one column, and the only candidates, on
+// which these CTEs and the view differ; `{ ownerDefault: false }` gives the
+// text the frozen copy and the view are compared with.
 import { PROVIDER_IDENTITY_FUNCTIONS } from "../../domain/src/event-families.ts";
 import { cardSettlementOwnershipCtes } from "./card-settlement-ownership.ts";
 
@@ -167,7 +175,8 @@ function debitBranch(admits: string): string {
  WHERE ${admits} AND t.external_id IS NOT NULL AND t.external_id<>''`;
 }
 
-export function cardSettlementReadinessCtes(): string {
+/** `ownerDefault` (on unless turned off) is card-settlement-ownership.ts's, for both sides. */
+export function cardSettlementReadinessCtes({ ownerDefault = true } = {}): string {
   return `ready_candidates AS MATERIALIZED (
  SELECT c.* FROM (SELECT DISTINCT id FROM chosen) chosen_ids
  CROSS JOIN card_settlement_candidates c ON c.id=chosen_ids.id
@@ -219,9 +228,17 @@ export function cardSettlementReadinessCtes(): string {
 ), statement_observed AS (
  SELECT id AS observation_id FROM ready_statements
  UNION ALL SELECT statement_observation_id FROM ready_candidates
-), ${cardSettlementOwnershipCtes("balance", { prefix: "statement_", observed: "statement_observed" })},
+), ${cardSettlementOwnershipCtes("balance", {
+    prefix: "statement_",
+    observed: "statement_observed",
+    ownerDefault,
+  })},
 debit_observed AS (SELECT bank_observation_id AS observation_id FROM ready_candidates),
-${cardSettlementOwnershipCtes("transaction", { prefix: "debit_", observed: "debit_observed" })},
+${cardSettlementOwnershipCtes("transaction", {
+  prefix: "debit_",
+  observed: "debit_observed",
+  ownerDefault,
+})},
 readiness AS (
 SELECT ready_candidate.id,
  EXISTS(SELECT 1 FROM ready_statements current_statement

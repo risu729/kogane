@@ -550,6 +550,32 @@ describe.if(runnable)("card settlement review", () => {
     if (prefix) await page.screenshot({ path: `${prefix}-confirm-mobile.png`, fullPage: true });
     await page.close();
   });
+  test("ownership resting on the owner's default says so beside its evidence", async () => {
+    review = {
+      ...review,
+      facts: {
+        ...review.facts,
+        ownershipEvidenceRefs: ["account_mapping:synthetic", "ownership-default:owner-v1"],
+      },
+    };
+    const page = await open();
+    await page.getByText("再確認する条件と判断の履歴", { exact: true }).click();
+    await page
+      .getByText("保有者が記録されていない口座を本人の口座とみなしています", { exact: false })
+      .waitFor();
+    review = {
+      ...review,
+      facts: { ...review.facts, ownershipEvidenceRefs: ["account_mapping:synthetic"] },
+    };
+    const recorded = await open();
+    await recorded.getByText("再確認する条件と判断の履歴", { exact: true }).click();
+    await recorded.getByText("保有者の根拠: account_mapping:synthetic", { exact: true }).waitFor();
+    expect(
+      await recorded.getByText("保有者が記録されていない口座を本人の口座とみなしています").count(),
+    ).toBe(0);
+    await page.close();
+    await recorded.close();
+  });
   test("terminal candidates have no mutable action and review fits a narrow screen", async () => {
     review = {
       ...review,
