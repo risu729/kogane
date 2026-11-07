@@ -2689,14 +2689,15 @@ No statement consumer reads this `as_of`. The view `card_statement_facts`
 and readiness ([card settlements](card-settlements.md)), reported-state
 payables and the card purchase statement links. The due date and both sides of
 the debit window are civil dates in `Asia/Tokyo`, so no instant conversion or
-month boundary is involved. Only the generic balance views read `as_of`: the
-latest-balance query ranks a card's statement totals by it (its fetch unit is
-the card), so the newest statement month is the one listed, and the balance
-projection types `YYYY-MM-01` as a provider local date. The balance pages
-therefore show the statement month's first day as the 基準日, with local-date
-precision, which is a day the provider did not state; the due date is not
-shown there. This is a limit of the parser today. Moving `as_of` to
-`shiharaiDate` would be a parser release: like
+month boundary is involved. Only the generic balance and observation views
+read `as_of`: the latest-balance query ranks a card's statement totals by it
+(its fetch unit is the card), so the newest statement month is the one listed,
+the balance projection types `YYYY-MM-01` as a provider local date, and the
+balance history and observation detail pages print the stored value. Those
+pages therefore show the statement month's first day as the 基準日 (on the
+latest-balance page with local-date precision), which is a day the provider
+did not state; the due date is not shown there. This is a limit of the parser
+today. Moving `as_of` to `shiharaiDate` would be a parser release: like
 [1.2.0](#vpass-page-qualified-external-ids-statement-parser-120), its re-parse
 would give every Vpass statement row a new observation under a new parse run
 and rewrite nothing stored.
