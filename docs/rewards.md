@@ -430,6 +430,9 @@ fieldそのものがない応答（このfieldより前のApp）は受け付け�
 `reward_read_model_context_changed` / `reward_read_model_restriction_changed`）を返す。cursorは
 U11と同じ `{snapshotId, readInstanceId, filterDigest, position}` で、別queryのcursorは400
 `cursor_mismatch`、別instance・退役snapshotのcursorは410 `context_expired`。異なるcursorをoffsetとして読み替えることはない。
+A cursor that still names an older, retained snapshot is refused with the same 503 code as the
+published one when the CORE epoch or visibility revision that snapshot was captured under has
+moved since (a use restriction invalidates the rows computed before it); it is never continued.
 
 capability `rewardsV2ReadModel`（`none` / `read-d1`）を `/api/meta` が広告する。`core-d1` は無い。
 COREはreward snapshotを公開したことがなく、都度算定の答えはsnapshotではないからである。
