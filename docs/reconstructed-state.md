@@ -154,8 +154,10 @@ Refusals, one closed code each (the same codes the agent tool carries as
 
 The page `残高の再構成` (`/reconstruction`, shown while the capability is)
 asks for one account (the accounts reported on the end date are offered), a
-range and a cut (latest, a sequence or an instant). Per currency it shows the
-start's and end's reported figures as the fold compares them (asset-positive;
+range and a cut (latest, a sequence or an instant). The form validates dates and
+UTC instants with the domain calendar parser and refuses commit sequences
+above the largest safe integer before sending; the service validates them again.
+Per currency it shows the start's and end's reported figures as the fold compares them (asset-positive;
 a liability-positive figure is negated and the provider's figure shown beside
 it with a sign note), the reconstructed balance and the difference
 `reported − reconstructed` with the fold's

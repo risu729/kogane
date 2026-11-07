@@ -1,6 +1,14 @@
-import { test, expect } from "bun:test";
+import { beforeAll, test, expect } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readdirSync, readFileSync } from "node:fs";
+import { fullCoreDatabase } from "../../../packages/storage-d1/test/sqlite.ts";
+
+// The first build of the migrated CORE image runs every migration; pay it
+// here under its own budget, not inside whichever test first asks for a copy
+// (see packages/storage-d1/test/sqlite.ts).
+beforeAll(() => {
+  fullCoreDatabase().close();
+}, 60_000);
 
 test("trusted binding lookup flattens to artifact primary key with the complete production schema", () => {
   const db = new Database(":memory:");
@@ -113,14 +121,10 @@ test("trusted binding lookup flattens to artifact primary key with the complete 
     // Migration 0057 widens the token prefix to v1 and v2 and rebuilds the
     // identity pin table with the same columns and key (ADR 0029). Every read
     // keeps 0055's plan exactly, step for step, without table statistics. It
-    // is applied to a fresh database in migration order, because this one
+    // is read from a fresh copy of CORE migrated in order, because this one
     // still holds prepared statements on the table 0057 rebuilds.
-    const migrated = new Database(":memory:");
+    const migrated = fullCoreDatabase();
     try {
-      for (const file of readdirSync(dir)
-        .filter((f) => f.endsWith(".sql"))
-        .sort())
-        migrated.exec(readFileSync(new URL(file, dir), "utf8"));
       const with0057 = reads.map((sql) => {
         const statement = migrated.prepare<{ detail: string }, []>(sql);
         try {
@@ -136,4 +140,9 @@ test("trusted binding lookup flattens to artifact primary key with the complete 
   } finally {
     db.close();
   }
-});
+  // The replay with 0021, 0055 and 0057 held back is this test's own and
+  // cannot be shared. Several migrations rebuild tables under the whole
+  // schema, so it takes over a second alone and several times that under the
+  // full verification load, where this test ran past Bun's five-second
+  // default while it also replayed CORE in migration order.
+}, 30_000);

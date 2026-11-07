@@ -43,8 +43,8 @@ import { prepareIdentityCommand } from "./identity-commands.ts";
 import { cardSettlementMutation } from "./card-settlement-commands.ts";
 
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
+import { boundedText, INTERNAL_BODY_LIMIT } from "./bounded-body.ts";
 
-const BODY_LIMIT = 16 * 1024;
 const ACTOR = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,127}$/u;
 const COMMAND_PATH = /^\/command\/v1\/(plan|simulate|approve|commit|operation)$/u;
 
@@ -162,9 +162,9 @@ interface CommandBody {
 
 async function body(request: Request): Promise<CommandBody | null> {
   const length = Number(request.headers.get("content-length") ?? "0");
-  if (!Number.isSafeInteger(length) || length > BODY_LIMIT) return null;
-  const text = await request.text();
-  if (text.length > BODY_LIMIT) return null;
+  if (!Number.isSafeInteger(length) || length > INTERNAL_BODY_LIMIT) return null;
+  const text = await boundedText(request, INTERNAL_BODY_LIMIT);
+  if (text === null) return null;
   try {
     const value: unknown = JSON.parse(text);
     return value !== null && typeof value === "object" && !Array.isArray(value)

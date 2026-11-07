@@ -10,6 +10,7 @@ import { ApiError } from "../api.ts";
 import {
   AUDIT_DECISION_COUNT_LABELS,
   AUDIT_FILTER_CHOICES,
+  AUDIT_LANE_PROPOSAL_KIND_LABELS,
   AUDIT_OPERATION_LABELS,
   AUDIT_PATH_LABELS,
   AUDIT_PRINCIPAL_KIND_LABELS,
@@ -178,6 +179,21 @@ function DiffSummary({ diff }: { diff: AuditDiffView }): ReactNode {
         <>
           1日の上限（{diff.cap}件）を超えた{displayLabel(AUDIT_RESULT_LABELS, diff.of)}
           {diff.count}件を集計
+        </>
+      );
+    case "lane":
+      return (
+        <>
+          判断の改訂 {diff.decisionRevisions}件 · 確定の記録 {diff.commits}件
+          {diff.proposals.length ? (
+            <ul className="plain-list audit-diff-fields">
+              {diff.proposals.map((proposal) => (
+                <li key={proposal.kind}>
+                  {displayLabel(AUDIT_LANE_PROPOSAL_KIND_LABELS, proposal.kind)}: {proposal.count}件
+                </li>
+              ))}
+            </ul>
+          ) : null}
         </>
       );
     case "none":
@@ -421,10 +437,10 @@ export function AuditPage(): ReactNode {
       <div className="page-head">
         <h1>監査ログ</h1>
         <p className="lede">
-          管理画面、エージェントAPI、MCPからの操作を、だれがどの経路で行い、どうなったかの記録です。拒否や失敗も記録されます。
+          管理画面、エージェントAPI、MCPからの操作を、だれがどの経路で行い、どうなったかの記録です。拒否や失敗も記録されます。定期実行が受け付けた収集と、処理レーンが書き込んだ判断・確定・提案も、自動処理として記録されます。
         </p>
         <p className="footnote">
-          記録は追加のみで、変更・削除されません。記録には金額、取得元の文言、入力内容を含めず、閉じた区分のコードと識別子・件数だけを保存します。定期実行と処理レーンの操作はまだ記録していません。この画面を開いたことは記録されません。
+          記録は追加のみで、変更・削除されません。記録には金額、取得元の文言、入力内容を含めず、閉じた区分のコードと識別子・件数だけを保存します。処理レーンの実行は、何も書き込まなかった回は記録しません。この画面を開いたことは記録されません。
         </p>
       </div>
       {filters === null ? (

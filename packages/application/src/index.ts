@@ -8,14 +8,13 @@
 // `HUMAN_CAPABILITIES`, `CommandCapability`); the query path grades a *grant*
 // looked up per principal (`QUERY_GRANT_CAPABILITIES`, `AgentCapability`).
 // They answer different questions, so a caller must name the one it means.
-// Both are allow-lists: `resolvePrincipal` refuses a subject the deployment
-// does not name, and `grantFor` answers `null` for one it has no grant for.
+// The command path is an allow-list: `resolvePrincipal` refuses a subject the
+// deployment does not name. The query path is not: every authenticated
+// agent-API caller holds `fullGrant` (ADR 0084).
 
-// ── delegation declarations (ADR 0063, S3 core only) ───────────────────
-export { parseDelegations } from "./delegation/parse.ts";
+// ── MCP operation authority and readiness (ADR 0063, ADR 0084) ─────────
 export { resolveDelegation } from "./delegation/resolve.ts";
 export { delegationCapabilities, delegationExecutionReadiness } from "./delegation/readiness.ts";
-export { delegationStatus } from "./delegation/status.ts";
 export * from "./delegation/contract.ts";
 
 // ── command services (A09) ───────────────────────────────────────────
@@ -162,6 +161,7 @@ export {
   type OperationStage,
   type OperationStageReport,
   type OperationStatus,
+  ownOperationSource,
   pendingDispatches,
   type ProjectionRequest,
   readOperation,
@@ -237,8 +237,7 @@ export {
   grantAllowsScheduleSource,
   grantAllowsSource,
   grantedSources,
-  grantFor,
-  parseGrants,
+  fullGrant,
   perimeterRefFor,
   type ScopeSet,
   validGrant,
@@ -278,6 +277,7 @@ export {
   type CoverageScope,
   type CoverageSummary,
   executeQuery,
+  type HoldingsProjection,
   type QueryData,
   type QueryExecution,
   type QueryOutcome,
@@ -336,6 +336,8 @@ export {
   type ResolvedRef,
   type StoredProposal,
 } from "./propose.ts";
+export { commandProposalStore } from "./propose-store.ts";
+export { STORE_FEATURES, type StoreFeature, storeHasFeature } from "./query/store-schema.ts";
 
 // ── the common audit record and the operation chokepoint (ADR 0064) ─────
 export {
@@ -361,6 +363,7 @@ export {
   AUDIT_COLUMNS,
   type AuditActor,
   type AuditFacts,
+  auditInsertWrite,
   auditInstant,
   AuditRecordError,
   type AuditRow,
@@ -390,13 +393,29 @@ export {
   AUDIT_WRITE_FAILED,
   type AuditPath,
   type AuditResult,
+  AUTOMATIC_PATHS,
+  type AutomaticPath,
   isAuditRef,
+  LANE_PROPOSAL_KINDS,
+  type LaneProposalKind,
   RISK_CLASSES,
   type RiskClass,
   SUBJECT_PATHS,
   type SubjectPath,
   type SubjectPrincipalKind,
 } from "./audit/vocabulary.ts";
+export {
+  type AlarmClaim,
+  alarmClaimWrite,
+  type LaneRange,
+  lanePrincipal,
+  laneTickRecord,
+  laneWroteAny,
+  type LaneWrites,
+  LEASE_EXPIRY_JOB,
+  leaseExpiryWrite,
+  occurrenceRef,
+} from "./audit/automatic.ts";
 export {
   type CatalogueEntry,
   catalogueEntry,
@@ -421,6 +440,7 @@ export {
   executionFor,
   delegatedCan,
   delegatedReplay,
+  delegatedWritesRemaining,
   bindDelegatedWrite,
   type ConfirmationInput,
   prepareDelegatedOperation,
@@ -446,3 +466,24 @@ export {
   delegatedMaintenanceSchema,
   delegatedMaintenanceResultSchema,
 } from "./delegation/maintenance.ts";
+
+export {
+  delegatedSurveyPayloadSchema,
+  delegatedSurveySchema,
+  delegatedSurveyResultSchema,
+  OPERATOR_ONLY_HEADER,
+  type DelegatedSurveyPayload,
+} from "./delegation/survey.ts";
+
+export {
+  readEconomicRowReadinessForGrant,
+  type EconomicRowReadinessReadOutcome,
+} from "./query/economic-row-readiness-read.ts";
+
+export {
+  readCardSettlementsForGrant,
+  readCardOwnershipForGrant,
+  CARD_SETTLEMENT_PROPOSAL_ID,
+  CARD_SETTLEMENTS_MAX_OFFSET,
+  type CardSettlementsReadOutcome,
+} from "./query/card-settlements-read.ts";

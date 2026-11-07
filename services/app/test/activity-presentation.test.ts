@@ -1,7 +1,8 @@
+import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { env } from "cloudflare:test";
 import { beforeAll, expect, it } from "vitest";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
-import { describeActivities } from "../src/activity-presentation";
+import { describeActivities } from "../../../packages/application/src/query/activity-presentation.ts";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import type { TransactionRow } from "../../../packages/observation-shared/src/api-contract";
 beforeAll(seedRegistry);
@@ -42,12 +43,12 @@ it("projects only bounded same-row facts and preserves the positive withdrawal a
     });
   }
   const before = JSON.stringify(rows);
-  const result = await describeActivities(env.DB, rows);
+  const result = await describeActivities(d1Executor(env.DB), rows);
   expect(result.map((row) => row.interpretation?.direction)).toEqual(["debit", "credit"]);
   expect(result[0]!.amount_minor).toBe("300");
   expect(result[0]!.interpretation?.period).toBeNull();
   const myjcb = await describeActivities(
-    env.DB,
+    d1Executor(env.DB),
     rows.map((row) => ({ ...row, source_id: "myjcb", parser: "myjcb-credit-ledger@1" })),
   );
   expect(myjcb.every((row) => row.interpretation?.period === null)).toBe(true);
@@ -56,7 +57,7 @@ it("projects only bounded same-row facts and preserves the positive withdrawal a
   expect(validApiResponse("/api/transactions", { transactions: result })).toBe(true);
   await expect(
     describeActivities(
-      env.DB,
+      d1Executor(env.DB),
       Array.from({ length: 502 }, () => rows[0]!),
     ),
   ).rejects.toThrow("activity_presentation_budget");

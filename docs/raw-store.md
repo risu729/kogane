@@ -252,9 +252,10 @@ Authentication is `Authorization: Bearer <client-id>.<secret>`. The JSON map of
 client IDs to high-entropy secrets is the Worker secret
 `INGEST_CLIENT_KEYS`; secrets are never stored in D1 or Git.
 
-For the current local bootstrap, `scripts/sync-ingest-key.sh --rotate` creates a
-random key, encrypts it with the WSL systemd host credential key at
-`~/.config/kogane/ingest-client-keys.cred`, and publishes the complete local
+For the local bootstrap of that Worker (retired; `services/raw-evidence/scripts/`
+was removed with it on 2026-09-13), `scripts/sync-ingest-key.sh --rotate` created a
+random key, encrypted it with the WSL systemd host credential key at
+`~/.config/kogane/ingest-client-keys.cred`, and published the complete local
 authoritative client-key map to the Worker secret. Rotation merges only the
 selected client into that map, verifies the new remote credential before the
 encrypted local blob is atomically replaced, and rolls the remote map back on
@@ -431,7 +432,7 @@ Do not deploy the new Worker before the migration because it reads the new
 inventory digest-version column and synthetic route.
 
 The sanitized `source-usecases.v1.json` acceptance fixture and its independent
-Worker integration suite retain coverage
+Worker integration suite, both removed with the Worker on 2026-09-13, retained coverage
 for Vpass multi-card bundles, SBI Securities partial/failure, SBI Shinsei
 raw-to-normalized artifacts, SBI VC pagination, MyJCB multi-connection
 redaction/re-encoding, Mobile Suica Shift-JIS pages, V Point empty pages, V Point
