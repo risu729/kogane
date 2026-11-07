@@ -224,8 +224,10 @@ describe.if(runnable)("card settlement review", () => {
     return text;
   }
 
-  test("a MyJCB review the lanes have not reached says so", async () => {
-    expect(await mainText()).toContain("未記録（明細の読み取りまたは照合がまだ行われていません）");
+  test("a MyJCB review with no recorded evidence says why it may have none", async () => {
+    expect(await mainText()).toContain(
+      "未記録（現在の版の読み取りと照合がまだ済んでいないか、その銀行の既知の口座が100件を超えるため照合していません）",
+    );
   });
 
   test("a statement naming another debit account is a warning, never a blocker", async () => {

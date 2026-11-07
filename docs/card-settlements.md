@@ -215,7 +215,11 @@ shows it as 「明細が示す引落口座」 beside the evidence links:
 
 The first three also carry the policy and the time the row was appended,
 and only the first two name an account; the last three carry no policy,
-account or time. A row of an
+account or time. The review cannot tell the causes of `not_recorded` apart
+(including the window after a reader version or policy change, before the
+lanes reach the candidate again), so the page names both: the reading and
+matching under the current version are not done yet, or the bank has more
+than 100 known accounts and no match is judged. A row of an
 earlier policy, a row citing a reading of an earlier reader version, or a
 reading of an earlier reader version is not shown. The
 review reads `CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL`

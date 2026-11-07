@@ -108,7 +108,11 @@ function DebitAccountEvidence({ review }: { review: CardSettlementReview }): Rea
     case "statement_refused":
       return <span>明細から読み取れません（{debitAccountReason(value.reason)}）</span>;
     case "not_recorded":
-      return <span>未記録（明細の読み取りまたは照合がまだ行われていません）</span>;
+      return (
+        <span>
+          未記録（現在の版の読み取りと照合がまだ済んでいないか、その銀行の既知の口座が100件を超えるため照合していません）
+        </span>
+      );
     case "not_stated_by_source":
       return <span>{debitAccountReason(value.reason)}</span>;
   }
