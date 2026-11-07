@@ -241,6 +241,21 @@ export const OPERATION_CATALOGUE = {
     capability: "summary.read",
     paths: AGENT,
   },
+  // Collection quality (ADR 0045): the summary and one source's cells, the page's services.
+  "collection-quality.summary": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "evidence.read",
+    paths: AGENT,
+  },
+  "collection-quality.cells": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "evidence.read",
+    paths: AGENT,
+  },
   // One source's collection quality cells per account (ADR 0082): the page's service.
   "collection-quality.accounts": {
     risk: ["R0"],

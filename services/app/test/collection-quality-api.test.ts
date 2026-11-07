@@ -1,6 +1,8 @@
 // `GET /api/collection-quality` and `GET /api/collection-quality/<sourceId>`:
 // behind Access, served to any signed-in reader, GET-only, absent where the
-// store lacks the scheduling tables, bounded, and writing nothing. One
+// store lacks the scheduling tables, bounded, and writing nothing; and their
+// agent reads (`kogane.collection-quality.summary`, `.cells`, `.accounts`),
+// answering the routes' bodies over both agent transports (ADR 0081). One
 // synthetic Sony Bank capture is seeded through the ingest Worker; every value
 // is invented.
 import { env } from "cloudflare:test";
@@ -18,6 +20,18 @@ import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 const PATH = "/api/collection-quality";
 const AGENT_PATH = "/api/agent/v1/collection-quality.accounts";
 const TOOL = "kogane.collection-quality.accounts";
+/** The three collection quality reads (ADR 0081): tool, agent HTTP path, and the route each reads. */
+const READS = {
+  summary: {
+    tool: "kogane.collection-quality.summary",
+    path: "/api/agent/v1/collection-quality.summary",
+  },
+  cells: {
+    tool: "kogane.collection-quality.cells",
+    path: "/api/agent/v1/collection-quality.cells",
+  },
+  accounts: { tool: TOOL, path: AGENT_PATH },
+} as const;
 /** The account read's authority (ADR 0082): `evidence.read` over the whole store. */
 const EVIDENCE_GRANT = {
   scopes: { sources: "*", accounts: "*" },
@@ -114,6 +128,174 @@ async function counts() {
       (SELECT count(*) FROM observation_parse_jobs) AS jobs`,
   ).first();
 }
+
+describe("kogane.collection-quality.summary and .cells (ADR 0081 parity)", () => {
+  it("are listed, with the account read, only to evidence.read over the whole store", async () => {
+    const listed = async (grant: unknown) =>
+      (
+        (await mcpMessage({ method: "tools/list" }, { "mcp-client:synthetic-agent": grant }))[
+          "result"
+        ].tools as { name: string }[]
+      ).map((tool) => tool.name);
+    const tools = Object.values(READS).map((read) => read.tool);
+    expect(await listed(EVIDENCE_GRANT)).toEqual(expect.arrayContaining(tools));
+    for (const grant of [
+      { ...EVIDENCE_GRANT, capabilities: ["summary.read", "records.read"] },
+      { ...EVIDENCE_GRANT, scopes: { sources: ["sony-bank"], accounts: "*" } },
+      { ...EVIDENCE_GRANT, scopes: { sources: "*", accounts: ["synthetic-account"] } },
+    ]) {
+      const names = await listed(grant);
+      for (const tool of tools) expect(names, JSON.stringify(grant)).not.toContain(tool);
+    }
+  });
+
+  it("answer the browser routes' bodies over HTTP and MCP, and write only their audit records", async () => {
+    const before = await counts();
+    for (const [read, body, route] of [
+      ["summary", {}, PATH],
+      ["cells", { source: "sony-bank" }, `${PATH}/sony-bank`],
+      ["cells", { source: "sony-bank", offset: 0 }, `${PATH}/sony-bank?offset=0`],
+      ["cells", { source: "sony-bank", offset: 500 }, `${PATH}/sony-bank?offset=500`],
+      ["cells", { source: "vpass" }, `${PATH}/vpass`],
+    ] as const) {
+      const expected = await (await call(route)).json();
+      const http = await agentCall(READS[read].path, body);
+      expect(http.status, route).toBe(200);
+      expect(await http.json(), route).toEqual(expected);
+      const overMcp = await mcpTool(READS[read].tool, body);
+      expect(overMcp.isError, route).toBe(false);
+      expect(overMcp.structuredContent, route).toEqual(expected);
+      // The web client's own wire check accepts the agent's answer.
+      expect(validApiResponse(route.split("?")[0]!, overMcp.structuredContent), route).toBe(true);
+    }
+    // An empty body is the summary's no-key request on the HTTP transport.
+    expect((await agentCall(READS.summary.path, undefined)).status).toBe(200);
+    expect(await counts()).toEqual(before);
+    const sources = ((await (await call(PATH)).json()) as { sources: unknown[] }).sources.length;
+    const recorded = await env.DB.prepare(
+      `SELECT operation,path,risk_class,result,diff_json FROM audit_records
+        WHERE operation IN ('collection-quality.summary','collection-quality.cells')
+        ORDER BY rowid DESC LIMIT 3`,
+    ).all<Record<string, unknown>>();
+    const read = (rows: number) => JSON.stringify({ kind: "read", rows, truncated: false });
+    expect(recorded.results).toEqual([
+      {
+        operation: "collection-quality.summary",
+        path: "agent-http",
+        risk_class: "R0",
+        result: "read",
+        diff_json: read(sources),
+      },
+      // The vpass page: no capture, no cell.
+      {
+        operation: "collection-quality.cells",
+        path: "mcp",
+        risk_class: "R0",
+        result: "read",
+        diff_json: read(0),
+      },
+      {
+        operation: "collection-quality.cells",
+        path: "agent-http",
+        risk_class: "R0",
+        result: "read",
+        diff_json: read(0),
+      },
+    ]);
+    const all = await env.DB.prepare(
+      `SELECT diff_json FROM audit_records
+        WHERE operation IN ('collection-quality.summary','collection-quality.cells')`,
+    ).all<{ diff_json: string }>();
+    expect(all.results.map((row) => row.diff_json)).toContain(read(1));
+    // Counts and closed codes only: never a source, a job or a reason.
+    const text = JSON.stringify(all.results);
+    for (const value of ["sony-bank", "vpass", "schedule_never_ran", "yen-history"])
+      expect(text).not.toContain(value);
+  });
+
+  it("refuse with the service's closed answer, the same on both transports", async () => {
+    for (const [read, grant, body, status, expected, schema] of [
+      ...(["summary", "cells", "accounts"] as const).flatMap((read) => {
+        const body = read === "summary" ? {} : { source: "sony-bank" };
+        return [
+          [
+            read,
+            { ...EVIDENCE_GRANT, capabilities: ["summary.read"] },
+            body,
+            403,
+            { code: "unauthorized", refs: ["capability:evidence.read"] },
+            true,
+          ],
+          [
+            read,
+            { ...EVIDENCE_GRANT, scopes: { sources: "*", accounts: ["synthetic-account"] } },
+            body,
+            403,
+            { code: "evidence_restricted", refs: ["scope:account"] },
+            true,
+          ],
+          // A store before CORE 0065: refused by the service on every read.
+          [
+            read,
+            EVIDENCE_GRANT,
+            body,
+            400,
+            { code: "unsupported_semantics", refs: ["store:collection-scheduling"] },
+            false,
+          ],
+        ] as const;
+      }),
+      [
+        "cells",
+        EVIDENCE_GRANT,
+        { source: "no-such-source" },
+        400,
+        { code: "invalid_query", refs: ["source"] },
+        true,
+      ],
+      [
+        "cells",
+        EVIDENCE_GRANT,
+        { source: "kogane-synthetic", offset: 500 },
+        400,
+        { code: "invalid_query", refs: ["source"] },
+        true,
+      ],
+    ] as const) {
+      const label = `${read} ${JSON.stringify(grant)} schema=${String(schema)}`;
+      const http = await agentCall(READS[read].path, body, both(grant), { schema });
+      expect(http.status, label).toBe(status);
+      const overHttp = await http.json();
+      expect(overHttp, label).toMatchObject({
+        ...expected,
+        requestId: `collection-quality.${read}`,
+      });
+      const overMcp = await mcpTool(READS[read].tool, body, both(grant), { schema });
+      expect(overMcp.isError, label).toBe(true);
+      expect(overMcp.structuredContent, label).toEqual(overHttp);
+    }
+    for (const [read, body] of [
+      ["summary", { source: "sony-bank" }],
+      ["summary", { offset: 0 }],
+      ["cells", {}],
+      ["cells", { source: "Sony_Bank" }],
+      ["cells", { source: "sony-bank", offset: -1 }],
+      ["cells", { source: "sony-bank", offset: 1.5 }],
+      ["cells", { source: "sony-bank", offset: "500" }],
+      ["cells", { source: "sony-bank", offset: 10_000_000 }],
+      ["cells", { source: "sony-bank", limit: 5 }],
+    ] as const) {
+      const label = `${read} ${JSON.stringify(body)}`;
+      const http = await agentCall(READS[read].path, body);
+      expect(http.status, label).toBe(400);
+      const overHttp = await http.json();
+      expect(overHttp, label).toMatchObject({ error: "invalid_request" });
+      const overMcp = await mcpTool(READS[read].tool, body);
+      expect(overMcp.isError, label).toBe(true);
+      expect(overMcp.structuredContent, label).toEqual(overHttp);
+    }
+  });
+});
 
 describe("collection quality", () => {
   it("rejects restricted or incapable authority before any schema, source or Alarm enumeration", async () => {
@@ -330,6 +512,7 @@ async function agentCall(
     "synthetic-agent": EVIDENCE_GRANT,
     "mcp-client:synthetic-agent": EVIDENCE_GRANT,
   },
+  options: { schema?: boolean } = {},
 ) {
   const token = await new SignJWT({ type: "app" })
     .setProtectedHeader({ alg: "RS256", kid: "fixture" })
@@ -350,6 +533,7 @@ async function agentCall(
     }),
     {
       ...env,
+      DB: options.schema === false ? withoutTables(env.DB) : env.DB,
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: "fixture-audience",
       ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
@@ -358,19 +542,39 @@ async function agentCall(
   );
 }
 
-async function mcpMessage(message: Record<string, unknown>, table?: Record<string, unknown>) {
-  const response = await agentCall("/mcp", { jsonrpc: "2.0", id: 1, ...message }, table);
+async function mcpMessage(
+  message: Record<string, unknown>,
+  table?: Record<string, unknown>,
+  options?: { schema?: boolean },
+) {
+  const response = await agentCall("/mcp", { jsonrpc: "2.0", id: 1, ...message }, table, options);
   expect(response.status).toBe(200);
   return (await response.json()) as Record<string, any>;
 }
 
 async function mcpAccounts(arguments_: unknown, table?: Record<string, unknown>) {
+  return mcpTool(TOOL, arguments_, table);
+}
+
+async function mcpTool(
+  name: string,
+  arguments_: unknown,
+  table?: Record<string, unknown>,
+  options?: { schema?: boolean },
+) {
   const message = await mcpMessage(
-    { method: "tools/call", params: { name: TOOL, arguments: arguments_ } },
+    { method: "tools/call", params: { name, arguments: arguments_ } },
     table,
+    options,
   );
   return message["result"] as { structuredContent: unknown; isError: boolean };
 }
+
+/** Both transports' grant tables, holding one grant. */
+const both = (grant: unknown) => ({
+  "synthetic-agent": grant,
+  "mcp-client:synthetic-agent": grant,
+});
 
 describe("kogane.collection-quality.accounts (ADR 0081 parity)", () => {
   it("is listed only to evidence.read over the whole store", async () => {
@@ -423,10 +627,6 @@ describe("kogane.collection-quality.accounts (ADR 0081 parity)", () => {
   });
 
   it("refuses with the service's closed answer, the same on both transports", async () => {
-    const both = (grant: unknown) => ({
-      "synthetic-agent": grant,
-      "mcp-client:synthetic-agent": grant,
-    });
     for (const [grant, body, status, expected] of [
       [
         { ...EVIDENCE_GRANT, capabilities: ["summary.read"] },
@@ -464,5 +664,26 @@ describe("kogane.collection-quality.accounts (ADR 0081 parity)", () => {
       expect(overMcp.isError).toBe(true);
       expect(overMcp.structuredContent).toEqual(overHttp);
     }
+  });
+});
+
+// Last of all: the first describe's final test added configured jobs past the bound.
+describe("collection quality past the row bound (ADR 0081 parity)", () => {
+  it("the summary is refused whole: 413 on the route, budget_exceeded on both agent transports", async () => {
+    const route = await call(PATH);
+    expect(route.status).toBe(413);
+    const http = await agentCall(READS.summary.path, {});
+    expect(http.status).toBe(413);
+    const overHttp = await http.json();
+    expect(overHttp).toMatchObject({
+      code: "budget_exceeded",
+      requestId: "collection-quality.summary",
+      refs: ["budget:jobs=200", "budget:sources=200"],
+    });
+    const overMcp = await mcpTool(READS.summary.tool, {});
+    expect(overMcp.isError).toBe(true);
+    expect(overMcp.structuredContent).toEqual(overHttp);
+    // One source's cells do not read the jobs and are still answered.
+    expect((await agentCall(READS.cells.path, { source: "sony-bank" })).status).toBe(200);
   });
 });

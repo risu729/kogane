@@ -830,7 +830,12 @@ state, in closed codes, what each collection stage last did
 behind the same Access gate and reader authority as the other evidence routes,
 write nothing, and answer 404 where the store has no CORE 0065 scheduling
 tables. Every answer is checked by `validApiResponse` against
-`packages/observation-shared/src/collection-quality-contract.ts`.
+`packages/observation-shared/src/collection-quality-contract.ts`. Each route
+is a thin adapter over one service of
+`packages/application/src/query/collection-quality.ts`, which an agent reads
+through the matching MCP tool (`kogane.collection-quality.summary`, `.cells`,
+`.accounts`) with the same body
+([agent API](agent-api.md#collection-quality), ADR 0081).
 
 - **Summary** (`/api/collection-quality`, no parameters): every configured job
   (`collection_schedules`) under the CORE sources its collectors register
@@ -843,6 +848,7 @@ tables. Every answer is checked by `validApiResponse` against
   `user_action_required`, `lease_held`, `dataset_withheld`, ...). Jobs whose
   source registers under no CORE source (the Processor tick) are listed apart.
   More than 200 jobs or sources is `413 result_limit_exceeded`, never cut.
+  An agent reads the same answer through `kogane.collection-quality.summary`.
 - **Cells** (`/api/collection-quality/<sourceId>?offset=N`): per dataset,
   parser, fetch unit and period, the newest capture (run success, unit outcome,
   artifacts, raw objects stored, parse states, failure codes, incomplete
@@ -851,7 +857,9 @@ tables. Every answer is checked by `validApiResponse` against
   (`parse_pending`, `parser_rejected`, `not_parse_eligible`,
   `coverage_incomplete`, `newer_capture_not_current`, `period_unplaced`,
   `query_rule_not_composed`, `not_in_latest_run`, ...). 500 cells a page with
-  `coverage.nextOffset`; an unknown or invisible source is 404.
+  `coverage.nextOffset`; an unknown or invisible source is 404. An agent
+  reads the same page through `kogane.collection-quality.cells`
+  (`{ source, offset }`).
 - **Accounts** (`/api/collection-quality/<sourceId>/accounts`, no parameters;
   [ADR 0082](adr/0082-collection-quality-per-account.md)): every cell of the
   source, unpaged, regrouped by the accounts the observations of its newest

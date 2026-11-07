@@ -935,6 +935,8 @@ describe("tools under each grant shape", () => {
               ? // The account view of collection quality (ADR 0082), whole store.
                 [
                   ...AGENT_TOOL_NAMES,
+                  "kogane.collection-quality.summary",
+                  "kogane.collection-quality.cells",
                   "kogane.collection-quality.accounts",
                   PURCHASES_TOOL_NAME,
                   RECONSTRUCTED_STATE_TOOL_NAME,

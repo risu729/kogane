@@ -71,7 +71,7 @@ token with no grant is still refused.
 | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | `summary.read`           | `coverage`, `holdings`, and the shell of `explain`                                                                                                                                                         | The first capability an agent should get                |
 | `records.read`           | `reported-state`, `activity`, `purchases.explain`, `instruments.candidates`, `accounts.candidates`, `economic-readiness.read`, `reported-state.read` and `reconstructed-state.read` on a whole-store scope | Never implies `evidence.read`                           |
-| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`); `collection-quality.accounts` on a whole-store scope                                                                                          | A separate grant; raw bytes are still a different route |
+| `evidence.read`          | Raw locator levels of `explain` (`fetch_artifact:`, `raw:`); `collection-quality.summary`, `collection-quality.cells` and `collection-quality.accounts` on a whole-store scope                             | A separate grant; raw bytes are still a different route |
 | `interpretation.propose` | `reconcile.propose`                                                                                                                                                                                        | Proposals only; never adoption                          |
 | `schedules.read`         | `schedules.maintenance.read` for `scopes.scheduleSources`                                                                                                                                                  | Not a financial read; implied by no other capability    |
 
@@ -185,7 +185,7 @@ recognition and an eighth while it serves the reconstructed state, one
 implementation each (`src/agent-service.ts`), reachable two ways. The read
 tools of `src/read-tools.ts` (`kogane.instruments.history`,
 `kogane.instruments.coverage`, `kogane.accounts.candidates`,
-`kogane.economic-readiness.read`, `kogane.collection-quality.accounts`, `kogane.audit.search`, `kogane.audit.get`) are reachable both ways too; the dated reported state's read
+`kogane.economic-readiness.read`, `kogane.collection-quality.summary`, `kogane.collection-quality.cells`, `kogane.collection-quality.accounts`, `kogane.audit.search`, `kogane.audit.get`) are reachable both ways too; the dated reported state's read
 (`kogane.reported-state.read`) is served on the same condition as the eighth, and each is listed only to a grant its service
 would answer ([below](#instrument-coverage),
 [shared history reads](#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)). The two
@@ -208,6 +208,8 @@ the other delegated MCP tools are described there too.
 | `kogane.instruments.coverage`         | `POST /api/agent/v1/instruments.coverage`        | `kogane.instruments.coverage`         | `summary.read` on `"*"` sources and accounts; listed only to such a grant ([below](#instrument-coverage))                                              |
 | `kogane.accounts.candidates`          | `POST /api/agent/v1/accounts.candidates`         | `kogane.accounts.candidates`          | `records.read` on `"*"` sources and accounts; listed only to such a grant ([below](#account-candidates))                                               |
 | `kogane.economic-readiness.read`      | `POST /api/agent/v1/economic-readiness.read`     | `kogane.economic-readiness.read`      | `records.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0067](adr/0067-economic-row-readiness.md))                             |
+| `kogane.collection-quality.summary`   | `POST /api/agent/v1/collection-quality.summary`  | `kogane.collection-quality.summary`   | `evidence.read` on `"*"` sources and accounts; listed only to such a grant ([below](#collection-quality))                                              |
+| `kogane.collection-quality.cells`     | `POST /api/agent/v1/collection-quality.cells`    | `kogane.collection-quality.cells`     | `evidence.read` on `"*"` sources and accounts; listed only to such a grant ([below](#collection-quality))                                              |
 | `kogane.collection-quality.accounts`  | `POST /api/agent/v1/collection-quality.accounts` | `kogane.collection-quality.accounts`  | `evidence.read` on `"*"` sources and accounts; listed only to such a grant ([ADR 0082](adr/0082-collection-quality-per-account.md))                    |
 | `kogane.purchases.explain`            | `POST /api/agent/v1/purchases.explain`           | `kogane.purchases.explain`            | `records.read` on `"*"` sources and accounts, while `cardPurchaseRecognition` is served ([below](#card-purchase-explanation))                          |
 | `kogane.reported-state.read`          | `POST /api/agent/v1/reported-state.read`         | `kogane.reported-state.read`          | `records.read` on `"*"` sources and accounts, while `reportedStateOnDate` is served ([below](#reported-state-on-a-date))                               |
@@ -589,31 +591,66 @@ configuration this tool (and `kogane.instruments.history`) is listed to that
 client. That is configuration, not evidence that a client listed or called
 either.
 
-### Collection quality per account
+### Collection quality
+
+The three reads of `/collection-quality` for an agent
+([ADR 0045](adr/0045-collection-quality-read.md),
+[evidence browser](evidence-browser.md#collection-quality-apicollection-quality)).
+Each route and its tool are thin adapters over one service in
+`packages/application/src/query/collection-quality.ts`, the route under the
+reader grant and the tool under the caller's, so they answer equal bodies for
+the same request ([ADR 0081](adr/0081-ui-parity-through-mcp.md)):
+
+| Tool                                 | Route                                           | Service                                | Input                                                   | Rows in the audit record                               |
+| ------------------------------------ | ----------------------------------------------- | -------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------ |
+| `kogane.collection-quality.summary`  | `GET /api/collection-quality`                   | `readCollectionQualitySummaryForGrant` | `{}`                                                    | sources listed, never truncated                        |
+| `kogane.collection-quality.cells`    | `GET /api/collection-quality/<source>?offset=N` | `readCollectionQualityCellsForGrant`   | `{ source, offset? }`, offset an integer 0 to 9,999,999 | cells on the page, truncated when `coverage.truncated` |
+| `kogane.collection-quality.accounts` | `GET /api/collection-quality/<source>/accounts` | `readAccountCoverageForGrant`          | `{ source }`                                            | cells read, never truncated                            |
+
+Input is a closed object; a `source` is a CORE source id (lowercase letters,
+digits and `-`, at most 100 characters). Any other key or a malformed value is
+`400 invalid_request` on both agent transports. The service then decides, in
+this order, the same on every read and every transport:
+
+1. `evidence.read`, else `403 unauthorized` (`capability:evidence.read`);
+2. sources and accounts both `"*"`, else `403 evidence_restricted`
+   (`scope:source`, `scope:account`); both before the store is read;
+3. the store's scheduling and collection tables (CORE 0065, CORE 0039), else
+   `400 unsupported_semantics` (`store:collection-scheduling`);
+4. the request: a source that is not a visible CORE source is
+   `400 invalid_query` (`source`);
+5. the bound: more than 200 jobs or sources in the summary
+   (`budget:jobs=200`, `budget:sources=200`), or more than 2,000 cells or
+   10,000 account periods in the account read, is `413 budget_exceeded`,
+   never a cut answer. The cell read is paged (500 cells, `coverage.nextOffset`)
+   and has no such refusal.
+
+The page's route maps the same refusals to the errors it has always answered
+(`403 forbidden`, `403 scope_restricted`, `404 not_found`, `400 invalid_query`,
+`400 invalid_offset`, `413 result_limit_exceeded`);
+`services/app/test/collection-quality-parity.test.ts` checks every route
+answer byte for byte against the route as it was before the services moved.
+
+The summary's actual Alarm reservations come from the Observation Pipeline's
+relay while `SCHEDULES_ENABLED` is on (`src/collection-quality-alarms.ts`);
+the route and the tool pass the same relay to the service, which overlays a
+reservation only onto a job whose stored settings match it, and leaves every
+job `unavailable` when the relay fails. `tools/list` lists the three tools only
+to a grant holding `evidence.read` over the whole store. The committed
+`AGENT_API_GRANTS` grants no MCP client `evidence.read`, so by configuration
+they are listed to nobody. They read and never write; each call's audit record
+(R0 `read`) carries a row count only, never a source, job, account, period or
+reason.
+
+#### Collection quality per account
 
 `kogane.collection-quality.accounts` is the `口座ごと` view of
 `/collection-quality` for an agent
 ([ADR 0082](adr/0082-collection-quality-per-account.md)): one source's
 collection quality cells regrouped by the accounts their newest or current
 capture's observations name, per data type and period, and the cells no
-observation attributes to an account. The route
-`GET /api/collection-quality/<source>/accounts` and this tool both call
-`readAccountCoverageForGrant`, the route under the reader grant and the tool
-under the caller's, so they answer equal bodies for the same source.
-
-Input, a closed object with one required key, `source` (a CORE source id:
-lowercase letters, digits and `-`, at most 100 characters); anything else is
-`400 invalid_request` on both transports. Authorization, in order:
-`evidence.read`, else `403 unauthorized` (`capability:evidence.read`); sources
-and accounts both `"*"`, else `403 evidence_restricted` (`scope:source`,
-`scope:account`), decided before the store is read. A source that is not a
-visible CORE source is `400 invalid_query` (`source`); more than 2,000 cells or
-10,000 account periods is `413 budget_exceeded`, never a cut answer.
-`tools/list` lists it only to a grant holding `evidence.read` over the whole
-store. The committed `AGENT_API_GRANTS` grants no MCP client `evidence.read`,
-so by configuration it is listed to nobody. It reads and never writes; its
-audit record (operation `collection-quality.accounts`, R0 `read`) carries the
-number of cells read only.
+observation attributes to an account, within the authorization and bounds
+above.
 
 ### Reconstructed state
 

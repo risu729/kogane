@@ -1,7 +1,7 @@
 // Additional read adapters over the existing history, instrument coverage
 // (ADR 0073), dated reported state, account correspondence candidates
-// (ADR 0077), collection quality per account (ADR 0082) and common audit
-// readers.
+// (ADR 0077), collection quality (ADR 0045: the summary and one source's
+// cells; ADR 0082: the cells per account) and common audit readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -23,8 +23,12 @@ import {
   reviewAccountCandidates,
 } from "../../../packages/application/src/query/account-candidates.ts";
 import {
+  COLLECTION_QUALITY_MAX_OFFSET,
   COLLECTION_QUALITY_SOURCE,
   readAccountCoverageForGrant,
+  readCollectionQualityCellsForGrant,
+  readCollectionQualitySummaryForGrant,
+  type CollectionQualityOutcome,
 } from "../../../packages/application/src/query/collection-quality.ts";
 import { readInstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
@@ -32,6 +36,7 @@ import { ECONOMIC_ROW_READINESS_SCHEMA } from "../../../packages/domain/src/econ
 import { INSTRUMENT_IDENTIFIER_ID } from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import type { ToolResult } from "./agent-service";
+import { collectionQualityAlarms } from "./collection-quality-alarms";
 import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
 import {
@@ -87,6 +92,12 @@ const schemas = {
       .max(64),
     knowledge: z.literal("current"),
   }),
+  // The routes' path segment and query (ADR 0045), with the service's own limits.
+  "kogane.collection-quality.summary": z.strictObject({}),
+  "kogane.collection-quality.cells": z.strictObject({
+    source: z.string().regex(COLLECTION_QUALITY_SOURCE),
+    offset: z.number().int().min(0).max(COLLECTION_QUALITY_MAX_OFFSET).optional(),
+  }),
   // The route's one path segment (ADR 0082): the source whose cells are regrouped.
   "kogane.collection-quality.accounts": z.strictObject({
     source: z.string().regex(COLLECTION_QUALITY_SOURCE),
@@ -116,6 +127,10 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "One page of the ADR 0077 account correspondence candidates: which direct provider source accounts a reviewed aggregator connection contains, on which evidence, with closed status, hold and same-account reasons, under records.read and a whole-store read grant. Read-only; never proposes same_account. A candidate names the relation.accept or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
+  "kogane.collection-quality.summary":
+    "Collection quality across the store (ADR 0045): every configured collection job with its enabled and supported settings, held lease, newest receipt and the runs it names as CORE has them, and the actual Alarm reservation where the relay answers; and every visible CORE source with its collectors, newest fetch run, never-registered terminals and closed reasons. The same answer as GET /api/collection-quality, under evidence.read and a whole-store read grant. Identifiers, times, counts and closed codes only; no amount. A missing stage is a reason, never a zero or a success.",
+  "kogane.collection-quality.cells":
+    "One page (500) of one source's collection quality cells (ADR 0045): per dataset, parser, fetch unit and period, the newest capture's run, unit, artifact, raw, parse and coverage facts, the current capture, the state (current, older-current, no-current) and closed reasons; offset pages on (coverage.nextOffset). The same answer as GET /api/collection-quality/<source>?offset=N, under evidence.read and a whole-store read grant. A fetch unit key is not an account; no amount; a period no capture has is not listed.",
   "kogane.collection-quality.accounts":
     "One source's collection quality cells regrouped by the accounts their newest or current capture's observations name (ADR 0082): per account its mapping statuses and data types (dataset, parser, observation kind), each with its periods, closed standing and reasons, and apart the cells no observation attributes to an account. The same answer as GET /api/collection-quality/<source>/accounts, under evidence.read and a whole-store read grant. A period no capture has is not listed and not claimed missing; nothing is inferred from a unit key.",
   "kogane.audit.search":
@@ -154,6 +169,8 @@ export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
       case "kogane.accounts.candidates":
       case "kogane.economic-readiness.read":
         return grantAllows(grant, "records.read") && wholeStore(grant);
+      case "kogane.collection-quality.summary":
+      case "kogane.collection-quality.cells":
       case "kogane.collection-quality.accounts":
         return grantAllows(grant, "evidence.read") && wholeStore(grant);
       case "kogane.audit.search":
@@ -162,6 +179,13 @@ export function readMcpTools(grant: Grant, served: { reportedState: boolean }) {
     }
   });
 }
+/** A collection quality service's answer: its value, or its `FinancialError` at that code's status. */
+function collectionQualityResult<T>(outcome: CollectionQualityOutcome<T>): ToolResult {
+  return outcome.ok
+    ? { status: 200, body: outcome.value }
+    : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+}
+
 export async function callReadTool(
   name: ReadToolName,
   body: unknown,
@@ -254,18 +278,34 @@ export async function callReadTool(
           };
         return { status: 200, body: outcome };
       }
-      case "kogane.collection-quality.accounts": {
-        // The page's own service (ADR 0081): grant, perimeter, source and
-        // bounds are decided there, once for both transports.
+      // The page's own services (ADR 0081): grant, perimeter, store, source,
+      // offset and bounds are decided there, once for both transports.
+      case "kogane.collection-quality.summary": {
         const input = parseRequest(schemas[name], body ?? {});
-        const outcome = await readAccountCoverageForGrant({
-          grant,
-          sql: d1Executor(env.DB),
-          sourceId: input.source,
-        });
-        return outcome.ok
-          ? { status: 200, body: outcome.coverage }
-          : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+        return collectionQualityResult(
+          await readCollectionQualitySummaryForGrant({
+            grant,
+            sql: d1Executor(env.DB),
+            request: input,
+            alarms: collectionQualityAlarms(env),
+          }),
+        );
+      }
+      case "kogane.collection-quality.cells": {
+        const input = parseRequest(schemas[name], body ?? {});
+        return collectionQualityResult(
+          await readCollectionQualityCellsForGrant({
+            grant,
+            sql: d1Executor(env.DB),
+            request: input,
+          }),
+        );
+      }
+      case "kogane.collection-quality.accounts": {
+        const input = parseRequest(schemas[name], body ?? {});
+        return collectionQualityResult(
+          await readAccountCoverageForGrant({ grant, sql: d1Executor(env.DB), request: input }),
+        );
       }
       case "kogane.audit.search": {
         const input = parseRequest(schemas[name], body ?? {});
