@@ -50,7 +50,12 @@ const SCREEN_ONLY_SQL: Record<string, string> = {
  * a screen-only exemption cannot quietly start covering an MCP call.
  */
 const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
-  "balances-v2.ts": ["balanceProjectionReader", "balanceReadConfigured", "readTarget"],
+  "balances-v2.ts": [
+    "balanceProjectionReader",
+    "balanceReadConfigured",
+    "readTarget",
+    "servableSnapshot",
+  ],
   "read.ts": ["catalogue"],
   "reports-api.ts": ["reportArtifactsAvailable"],
 };
