@@ -224,7 +224,7 @@ test("signed MCP uses schedule scope; current auth is mandatory before reading a
   expect(other.structuredContent.error).toBe("delegation_not_configured");
   expect({ calls, alarms }).toEqual(after);
 });
-test("signed R2 retry checks scope before receipt and never permits delegated survey acceptance", async () => {
+test("signed R2 retry checks scope before receipt; survey decisions are installed beside it", async () => {
   const cfg = config(),
     input = payload();
   const prepared = await invoke(TOOL, { ...input, step: "prepare" }, cfg);
@@ -258,8 +258,10 @@ test("signed R2 retry checks scope before receipt and never permits delegated su
   expect(
     delegation.capabilities.find((x) => x.capability === "schedules.maintenance.update")?.available,
   ).toBe(true);
+  // The owner allowed delegated survey decisions on 2026-11-07 (ADR 0050
+  // amendment); their adapter is installed, so the capability is available.
   expect(
     delegation.capabilities.find((x) => x.capability === "schedules.survey.decide")?.available,
-  ).toBe(false);
+  ).toBe(true);
   expect({ calls, alarms }).toEqual(after);
 });

@@ -377,6 +377,15 @@ export const CONFIRMED_MAX_DEFERRAL_MS = 31 * 86_400_000;
 export type MaintenanceDeferralBound = "delegated-7d" | "confirmed-31d";
 export interface MaintenanceWriteOptions {
   deferralBound?: MaintenanceDeferralBound;
+  /**
+   * The re-survey proposal a delegated acceptance writes (ADR 0050 as amended
+   * 2026-11-07). Trusted and in-process only: only the private delegated
+   * survey route (`delegated-survey.ts`) passes it. With it, and only with it,
+   * a delegated principal gives the survey's own reason
+   * (`maintenance-survey-proposal-accepted`) and may create a rule under the
+   * proposal's derived id `<source>-survey-<id>` at expected revision 0.
+   */
+  surveyProposal?: { id: number; ruleId: string };
 }
 /**
  * How long a joined deferral the revision leaves that its source did not
@@ -537,9 +546,14 @@ function validProvenance(
   actor: MaintenanceActor,
   reason: unknown,
   decisionRef: unknown,
+  surveyAcceptance = false,
 ): { reason: MaintenanceChangeReason; decisionRef: string | null } {
   const allowed: readonly string[] =
-    actor.kind === "delegated" ? DELEGATED_MAINTENANCE_REASONS : MAINTENANCE_CHANGE_REASONS;
+    actor.kind !== "delegated"
+      ? MAINTENANCE_CHANGE_REASONS
+      : surveyAcceptance
+        ? [SURVEY_REASON]
+        : DELEGATED_MAINTENANCE_REASONS;
   if (
     typeof reason !== "string" ||
     !allowed.includes(reason) ||
@@ -685,6 +699,7 @@ async function validateRevision(
   write: MaintenanceWrite,
   bound: MaintenanceDeferralBound,
   classifyOperator: boolean,
+  survey: MaintenanceWriteOptions["surveyProposal"] = undefined,
 ): Promise<ValidatedRevision> {
   const raw: unknown = write;
   const w: Record<string, unknown> = isPlainObject(raw) ? raw : {};
@@ -695,7 +710,20 @@ async function validateRevision(
   const budgetUsed = delegated ? await delegatedWritesToday(env.DB, actor.id) : null;
   if (budgetUsed !== null && budgetUsed >= DELEGATED_MAINTENANCE_WRITES_PER_DAY)
     throw new ScheduleError("maintenance_write_budget_exceeded", 429);
-  const { reason, decisionRef } = validProvenance(actor, w.reason, provenance.decisionRef);
+  const surveyCreate =
+    delegated &&
+    survey !== undefined &&
+    w.ruleId === survey.ruleId &&
+    survey.ruleId === `${String(w.source)}-survey-${survey.id}` &&
+    w.expectedRevision === 0;
+  if (delegated && survey !== undefined && w.ruleId !== survey.ruleId)
+    throw new ScheduleError("invalid_request");
+  const { reason, decisionRef } = validProvenance(
+    actor,
+    w.reason,
+    provenance.decisionRef,
+    delegated && survey !== undefined,
+  );
   // A create is validated as the id it will get, `<source>-<12 hex>`, without
   // choosing one, so a create cannot probe which ids another source's rules use.
   const ruleId = w.ruleId;
@@ -718,9 +746,19 @@ async function validateRevision(
     verifiedAt: provenance.verifiedAt,
   });
   const previous = input.id === null ? null : await previousRevision(env.DB, input.id);
-  if (delegated && input.id !== null && (!previous || previous.source !== input.source))
+  if (
+    delegated &&
+    input.id !== null &&
+    !(surveyCreate && !previous) &&
+    (!previous || previous.source !== input.source)
+  )
     // Another source's rule answers exactly like a rule that does not exist.
-    throw new ScheduleError("maintenance_rule_not_found", 404);
+    // A survey acceptance's derived id held by another source's rule is the
+    // revision conflict below, as it is for the operator.
+    throw new ScheduleError(
+      surveyCreate ? "revision_conflict" : "maintenance_rule_not_found",
+      surveyCreate ? 409 : 404,
+    );
   if (
     (previous?.revision ?? 0) !== input.revision ||
     (previous && previous.source !== input.source)
@@ -784,7 +822,7 @@ export async function prepareMaintenanceRevision(
   const bound = deferralBoundOf(options);
   let checked: ValidatedRevision;
   try {
-    checked = await validateRevision(env, write, bound, true);
+    checked = await validateRevision(env, write, bound, true, options?.surveyProposal);
   } catch (error) {
     return refusalOf(error);
   }
@@ -807,9 +845,10 @@ async function writeRevision(
   write: MaintenanceWrite,
   append: (saved: SavedRevision) => RevisionAppend,
   bound: MaintenanceDeferralBound,
+  survey: MaintenanceWriteOptions["surveyProposal"],
 ): Promise<Extract<MaintenanceWriteResult, { ok: true }>> {
   const { actor, reason, decisionRef, input, previous, sourceRevisionCount } =
-    await validateRevision(env, write, bound, false);
+    await validateRevision(env, write, bound, false, survey);
   const delegated = actor.kind === "delegated";
   // A new rule's id is chosen only now, after the whole chain has passed.
   const id =
@@ -929,7 +968,7 @@ export async function writeMaintenanceRevision(
 ): Promise<MaintenanceWriteResult> {
   const bound = deferralBoundOf(options);
   try {
-    return await writeRevision(env, write, append, bound);
+    return await writeRevision(env, write, append, bound, options?.surveyProposal);
   } catch (error) {
     return refusalOf(error);
   }
@@ -1402,7 +1441,7 @@ async function agentRoute(request: Request, env: Env, path: string): Promise<unk
     throw new ScheduleError("invalid_request");
   const agent = request.headers.get("x-kogane-agent");
   if (!agent || !ACTOR_PATTERN.test(agent)) throw new ScheduleError("agent_required", 403);
-  if (path !== "/agent/read") throw new ScheduleError("not_found", 404);
+  if (path !== "/agent/read" && path !== "/agent/survey") throw new ScheduleError("not_found", 404);
   const text = await boundedText(request, INTERNAL_BODY_LIMIT);
   if (text === null) throw new ScheduleError("request_too_large", 413);
   let value: unknown;
@@ -1411,7 +1450,36 @@ async function agentRoute(request: Request, env: Env, path: string): Promise<unk
   } catch {
     throw new ScheduleError("invalid_request");
   }
-  return agentMaintenanceRead(env, value, agent);
+  return path === "/agent/survey"
+    ? agentSurveyRead(env, value)
+    : agentMaintenanceRead(env, value, agent);
+}
+/**
+ * The schedules page's re-survey section for the granted sources (ADR 0050):
+ * the same `maintenanceSurveyView`, with targets and undecided proposals of
+ * other sources left out. `truncated` says the page's own bound on shown
+ * proposals was reached, so more undecided proposals may exist.
+ */
+async function agentSurveyRead(env: Env, value: unknown) {
+  const v = bodyObject(value);
+  exactKeys(v, ["sources"]);
+  let allowed: (source: string) => boolean;
+  if (v.sources === "*") allowed = () => true;
+  else if (
+    Array.isArray(v.sources) &&
+    v.sources.length <= 64 &&
+    v.sources.every((s) => typeof s === "string" && /^[a-z0-9-]{1,100}$/u.test(s))
+  ) {
+    const requested = v.sources as string[];
+    allowed = (source) => requested.includes(source);
+  } else throw new ScheduleError("invalid_request");
+  const view = await maintenanceSurveyView(env, Date.now());
+  return {
+    enabled: view.enabled,
+    targets: view.targets.filter((target) => allowed(target.source)),
+    proposals: view.proposals.filter((proposal) => allowed(proposal.source)),
+    truncated: view.proposals.length < view.attention,
+  };
 }
 export async function scheduleRoute(
   request: Request,

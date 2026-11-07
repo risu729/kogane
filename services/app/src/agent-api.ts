@@ -73,6 +73,7 @@ import {
   readScheduleTool,
   SCHEDULE_READ_TOOL,
   SCHEDULE_UPDATE_TOOL,
+  SURVEY_READ_TOOL,
   scheduleToolsFor,
   schedulesServed,
 } from "./schedule-tools";
@@ -100,6 +101,12 @@ import {
 } from "./delegated-command-tools";
 
 import { readMcpTools, REPORTED_STATE_TOOL_NAME } from "./read-tools";
+import {
+  callDelegatedSurveyTool,
+  delegatedSurveyTools,
+  EXECUTABLE_SURVEY_CAPABILITIES,
+  isDelegatedSurveyTool,
+} from "./delegated-survey-tools";
 import {
   callDelegatedDecisionTool,
   delegatedDecisionTools,
@@ -253,7 +260,11 @@ export async function agentApi(
                 delegation: await mcpDelegationCapabilities(env, caller, delegationNow, [
                   ...(ops ? EXECUTABLE_OPS_CAPABILITIES : []),
                   ...(delegatedSchedulesServed(env)
-                    ? [...EXECUTABLE_SCHEDULE_CAPABILITIES, "schedules.maintenance.update" as const]
+                    ? [
+                        ...EXECUTABLE_SCHEDULE_CAPABILITIES,
+                        "schedules.maintenance.update" as const,
+                        ...EXECUTABLE_SURVEY_CAPABILITIES,
+                      ]
                     : []),
                   ...(commandsEnabled(env) && env.PIPELINE
                     ? [...EXECUTABLE_COMMAND_CAPABILITIES, ...EXECUTABLE_DECISION_CAPABILITIES]
@@ -271,6 +282,11 @@ export async function agentApi(
         // (ADR 0081 point 3): the release stays the operator's in the UI.
         if (schedules && name === LEASE_RELEASE_TOOL && caller.kind === "mcp-client")
           return toolCall(request, env, caller, name, async () => leaseReleaseTool());
+        if (isDelegatedSurveyTool(name) && caller.kind === "mcp-client")
+          return toolCall(request, env, caller, name, async (audit) => {
+            if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
+            return callDelegatedSurveyTool(body, env, await delegation(), audit);
+          });
         if (isDelegatedScheduleTool(name) && caller.kind === "mcp-client")
           return toolCall(request, env, caller, name, async (audit) => {
             if (!audit) throw new HttpError(503, "delegation_execution_unavailable");
@@ -299,6 +315,10 @@ export async function agentApi(
         // The maintenance read is graded by this API's grant, as on its HTTP route.
         if (schedules && name === SCHEDULE_READ_TOOL)
           return toolCall(request, env, caller, name, () => readScheduleTool(body, env, grant));
+        if (schedules && name === SURVEY_READ_TOOL)
+          return toolCall(request, env, caller, name, () =>
+            readScheduleTool(body, env, grant, "survey"),
+          );
         return null;
       },
       async () => [
@@ -311,6 +331,7 @@ export async function agentApi(
               ...delegatedScheduleTools(env, await delegation()),
               ...delegatedMaintenanceTools(env, await delegation()),
               ...(schedules ? LEASE_RELEASE_MCP_TOOLS : []),
+              ...delegatedSurveyTools(env, await delegation()),
             ]
           : []),
         ...((await purchases()) ? PURCHASES_MCP_TOOLS : []),

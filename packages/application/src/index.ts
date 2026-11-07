@@ -465,6 +465,13 @@ export {
 } from "./delegation/maintenance.ts";
 
 export {
+  delegatedSurveyPayloadSchema,
+  delegatedSurveySchema,
+  delegatedSurveyResultSchema,
+  type DelegatedSurveyPayload,
+} from "./delegation/survey.ts";
+
+export {
   readEconomicRowReadinessForGrant,
   type EconomicRowReadinessReadOutcome,
 } from "./query/economic-row-readiness-read.ts";

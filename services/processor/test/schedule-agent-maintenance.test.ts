@@ -1555,8 +1555,9 @@ describe("prepare and write share one validation (the contract plan slice S3 bui
       await prepareMaintenanceRevision(env, make("delegated", { pattern: span(7 * DAY + 1) })),
     ).toEqual({ ok: false, code: "maintenance_deferral_too_long", status: 422 });
     sqlite.close();
-    // The writer and the private delegated adapter are the only code allowed
-    // to name the trusted option; no public schema/route/grant forwards it.
+    // The writer and the private delegated adapters (maintenance, and survey
+    // acceptance) are the only code allowed to name the trusted option; no
+    // public schema/route/grant forwards it.
     const writerFile = new URL("../src/schedule-store.ts", import.meta.url).pathname;
     const roots = ["../src/", "../../app/src/"].map(
       (dir) => new URL(dir, import.meta.url).pathname,
@@ -1568,12 +1569,30 @@ describe("prepare and write share one validation (the contract plan slice S3 bui
         const text = readFileSync(file, "utf8");
         if (
           file === writerFile ||
-          file === new URL("../src/delegated-maintenance.ts", import.meta.url).pathname
+          file === new URL("../src/delegated-maintenance.ts", import.meta.url).pathname ||
+          file === new URL("../src/delegated-survey.ts", import.meta.url).pathname
         )
           continue;
         expect([name, text.includes("confirmed-31d"), text.includes("deferralBound")]).toEqual([
           name,
           false,
+          false,
+        ]);
+      }
+    // The survey option (a delegated actor's survey reason and derived rule id)
+    // is named by the writer and the private survey adapter alone: not by the
+    // delegated maintenance adapter, nor by any App code.
+    for (const root of roots)
+      for (const name of readdirSync(root, { recursive: true }) as string[]) {
+        if (!/\.tsx?$/u.test(name)) continue;
+        const file = `${root}${name}`;
+        if (
+          file === writerFile ||
+          file === new URL("../src/delegated-survey.ts", import.meta.url).pathname
+        )
+          continue;
+        expect([name, readFileSync(file, "utf8").includes("surveyProposal")]).toEqual([
+          name,
           false,
         ]);
       }

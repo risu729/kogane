@@ -8,8 +8,10 @@
   reversal, and maintenance R1/R2 execution, which deliver parts of S5 and
   S6. Slice S7 (the `alarm` and `lane` audit writers, #925) and slice S8 (the
   `監査ログ` page, #923, and the delegation status on the schedules and
-  confirm pages, #926) are implemented on main. Survey acceptance (S6) and
-  real-client activation remain open. See the
+  confirm pages, #926) are implemented on main. Survey decisions (S6) follow
+  the owner's 2026-11-07 conditions
+  ([ADR 0050 amendment](../adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
+  real-client activation remains open. See the
   [current resume plan](2026-10-mcp-maintenance-followups.md).
   The decisions it rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and

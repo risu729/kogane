@@ -216,6 +216,8 @@ the other delegated MCP tools are described there too.
 | `kogane.schedules.maintenance.read`   | `POST /api/agent/v1/schedules.maintenance.read` | `kogane.schedules.maintenance.read`   | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                              |
 | `kogane.schedules.maintenance.update` | none                                            | `kogane.schedules.maintenance.update` | a delegation (`MCP_DELEGATIONS`) holding `schedules.maintenance.update`; none is configured, so it is listed to nobody ([below](#maintenance-windows))         |
 | `kogane.schedules.lease.release`      | none                                            | `kogane.schedules.lease.release`      | nothing grants it: listed to every MCP client while `SCHEDULES_ENABLED` is on, and every call is `403 operation_not_delegable` ([below](#maintenance-windows)) |
+| `kogane.schedules.survey.read`        | none                                            | `kogane.schedules.survey.read`        | `schedules.read`, while `SCHEDULES_ENABLED` is on ([below](#maintenance-windows))                                                                              |
+| `kogane.schedules.survey.decide`      | none                                            | `kogane.schedules.survey.decide`      | a delegation holding `schedules.survey.decide`; none is configured, so it is listed to nobody ([below](#maintenance-windows))                                  |
 | `kogane.instruments.history`          | `POST /api/agent/v1/instruments.history`        | `kogane.instruments.history`          | `records.read` on `"*"` sources and accounts                                                                                                                   |
 | `kogane.audit.search`                 | `POST /api/agent/v1/audit.search`               | `kogane.audit.search`                 | `audit.read` with `"*"` accounts                                                                                                                               |
 | `kogane.audit.get`                    | `POST /api/agent/v1/audit.get`                  | `kogane.audit.get`                    | `audit.read` with `"*"` accounts                                                                                                                               |
@@ -725,6 +727,36 @@ not relayed to the Processor; it is recorded once as `refused` on `mcp` at R3.
 It has no `/api/agent/v1` route, and a browser session on `/mcp` is not offered
 it. A lease that will not clear is released by the operator on the schedules
 page ([schedules](schedules.md#settings-api)).
+
+**Re-survey proposals** (`kogane.schedules.survey.read`, operation
+`schedules.survey.read`, R0; `kogane.schedules.survey.decide`, operation
+`schedules.survey.decide`; [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)).
+The read is graded like the maintenance read (`schedules.read`, `scheduleSources`,
+`source` optional) and is on `/mcp` only. It returns the schedules page's
+re-survey section for the granted sources: `enabled`, `targets` (freshness and
+last failure code per page), `proposals` (id, source, kind, rule, `baseRevision`,
+`current`, zone, pattern, enabled, scope, status, closed reasons, page URL, fetch
+time, SHA-256) and `truncated`. It never carries page text.
+
+The decision is listed only to a resolved delegation holding
+`schedules.survey.decide` (the `maintainer` role does). Its arguments are
+`decision`, `source`, `proposalId`, `step` and `idempotencyKey`. A rejection is
+`step: "apply"`. An acceptance adds `baseRevision` and takes `step: "prepare"`,
+then `"confirm"` with `confirmationDigest`. The prepare preview carries the
+proposal's kind, status, reasons, rule, base and current revision, the change,
+the deferral class, the writer's remaining daily count and
+`revert: "maintenance-revision"`. Undoing an acceptance is a further maintenance
+revision, by the operator or `kogane.schedules.maintenance.update`. An exact
+retry answers `replayed: true`.
+
+Refusals are closed codes:
+
+- `source_not_granted`: a source outside `scheduleSources`.
+- `proposal_not_found`: another source's proposal, or a missing one.
+- `proposal_already_decided`: the proposal was decided already, by the operator or anyone else.
+- `revision_conflict`: a stale `baseRevision`, or a rule that moved.
+- `maintenance_deferral_too_long`: the deferral exceeds the 31-day ceiling.
+- `operation_not_delegable`: an acceptance of a proposal with `rule_absent_from_page`, `rule_disabled_by_operator`, `ambiguous_rule_match`, `cancellation_stated` or `contradictory_windows`. It is recorded at R3 and stays with the operator on the schedules page; rejecting such a proposal is allowed.
 
 ## Contexts, cursors and hand-off
 
@@ -1354,7 +1386,8 @@ prepare/effect linkage, shared daily budget, rollback, exact retries,
 concurrent joined windows and losing-provenance writes. Production migration
 state and real-client use were not checked. `MCP_DELEGATIONS` stays empty and
 the committed MCP financial-reader grant receives no schedule authority.
-S6 survey acceptance remains unavailable pending the separate owner decision;
+S6 survey acceptance remained unavailable pending the separate owner decision
+(delegated survey decisions since 2026-11-07: [ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07));
 no survey grammar, grants, Access, authentication or deployment is changed.
 
 ## The operator's delegation status (S8, 2026-11-06)
