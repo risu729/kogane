@@ -68,14 +68,55 @@ export function downloadDisposition(row: DownloadArtifact): string {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
-export async function raw(
+type RawRow = Pick<
+  ArtifactRow,
+  "blob_key" | "sha256" | "byte_size" | "artifact_key" | "declared_media_type"
+>;
+
+export async function raw(bucket: R2Bucket, row: RawRow, head: boolean): Promise<Response> {
+  const body = await verifiedObject(bucket, row, head);
+  return new Response(body, {
+    headers: {
+      "content-type": "application/octet-stream",
+      "content-length": String(row.byte_size),
+      "content-disposition": downloadDisposition(row),
+      "content-security-policy": "default-src 'none'; sandbox; frame-ancestors 'none'",
+    },
+  });
+}
+
+/** The largest raw object an agent read returns (ADR 0081, 2026-11-07). */
+export const RAW_READ_MAX_BYTES = 1024 * 1024;
+
+/**
+ * One raw object's bytes for an agent read: the same object and the same
+ * integrity checks as the download, refused before any read past
+ * `RAW_READ_MAX_BYTES` (`413 raw_too_large`), and the bytes' own SHA-256
+ * compared with the catalogue's as well.
+ */
+export async function rawBytes(bucket: R2Bucket, row: RawRow): Promise<Uint8Array> {
+  if (row.byte_size > RAW_READ_MAX_BYTES) throw new HttpError(413, "raw_too_large");
+  const body = await verifiedObject(bucket, row, false);
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await new Response(body).arrayBuffer());
+  } catch {
+    throw new HttpError(503, "raw_read_failed");
+  }
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  if (bytes.length !== row.byte_size || digest !== row.sha256)
+    throw new HttpError(409, "raw_integrity_failed");
+  return bytes;
+}
+
+/** The object's body (none for `head`), refused unless R2 still holds exactly the catalogued bytes. */
+async function verifiedObject(
   bucket: R2Bucket,
-  row: Pick<
-    ArtifactRow,
-    "blob_key" | "sha256" | "byte_size" | "artifact_key" | "declared_media_type"
-  >,
+  row: RawRow,
   head: boolean,
-): Promise<Response> {
+): Promise<ReadableStream | null> {
   let object: R2Object | R2ObjectBody | null;
   try {
     object = head ? await bucket.head(row.blob_key) : await bucket.get(row.blob_key);
@@ -103,12 +144,5 @@ export async function raw(
     }
     throw new HttpError(409, "raw_integrity_failed");
   }
-  return new Response(body, {
-    headers: {
-      "content-type": "application/octet-stream",
-      "content-length": String(row.byte_size),
-      "content-disposition": downloadDisposition(row),
-      "content-security-policy": "default-src 'none'; sandbox; frame-ancestors 'none'",
-    },
-  });
+  return body;
 }

@@ -203,6 +203,7 @@ the other delegated MCP tools are described there too.
 | `kogane.reports.read`                  | `POST /api/agent/v1/reports.read`                  | `kogane.reports.read`                  | `records.read` on `"*"` sources and accounts, while `reportArtifacts` is served ([below](#ui-read-pages))                                                                                                                                                           |
 | `kogane.collection-quality.read`       | `POST /api/agent/v1/collection-quality.read`       | `kogane.collection-quality.read`       | `evidence.read` on `"*"` sources and accounts, while its tables exist ([below](#ui-read-pages))                                                                                                                                                                     |
 | `kogane.evidence.read`                 | `POST /api/agent/v1/evidence.read`                 | `kogane.evidence.read`                 | `evidence.read` on `"*"` sources and accounts ([below](#ui-read-pages))                                                                                                                                                                                             |
+| `kogane.evidence.raw.read`             | `POST /api/agent/v1/evidence.raw.read`             | `kogane.evidence.raw.read`             | `evidence.read` on `"*"` sources and accounts; objects up to 1 MiB ([below](#ui-read-pages))                                                                                                                                                                        |
 | `kogane.schedules.read`                | `POST /api/agent/v1/schedules.read`                | `kogane.schedules.read`                | `schedules.read` with `"*"` schedule sources, while `SCHEDULES_ENABLED` is on ([below](#ui-read-pages))                                                                                                                                                             |
 
 `kogane.reports.read` lists and reads the fixed report artifacts (評価レポート)
@@ -640,6 +641,7 @@ function, so they cannot disagree on a row, a page bound or a refusal code.
 | `kogane.collection-quality.read`       | `GET /api/collection-quality`, `/api/collection-quality/{source}`, while the scheduling and run tables exist                                                                     | `evidence.read` on `"*"` sources and accounts |
 | `kogane.events.read`                   | `GET /api/v2/activity`, `/api/v2/obligations`, while `eventsV2` is served (no screen reads them)                                                                                 | `records.read` on `"*"` sources and accounts  |
 | `kogane.evidence.read`                 | `GET /api/evidence/v1/meta`, `/api/evidence/v1/sources/{source}/runs`, `/api/evidence/v1/runs/{run}/artifacts`, `/api/evidence/v1/runs/{run}/artifacts/{artifact}`; never `/raw` | `evidence.read` on `"*"` sources and accounts |
+| `kogane.evidence.raw.read`             | `GET /api/raw/{sha256}`, `/api/evidence/v1/runs/{run}/artifacts/{artifact}/raw`, up to 1 MiB                                                                                     | `evidence.read` on `"*"` sources and accounts |
 | `kogane.schedules.read`                | `GET /api/ops/v1/schedules` without its `survey` part, while `SCHEDULES_ENABLED` is on                                                                                           | `schedules.read` with `"*"` schedule sources  |
 
 Input is a closed object. Its keys are the route's query parameters with
@@ -667,10 +669,9 @@ passes both checks. Each call is recorded as an R0 `read` under the tool name
 without `kogane.` (`identity.read`, `rewards.read`, …), with the page's row
 count ([audit log](audit-log.md)); the browser route records nothing, as
 before. The grant's `budget.maxRows` does not bound these reads: each
-answers the route's own page with the route's own page bound. A raw download
-(`/api/raw/{sha256}`, `/api/evidence/v1/runs/{run}/artifacts/{artifact}/raw`)
-is not one of these reads: `kogane.observations.get` and
-`kogane.evidence.read` return an artifact's detail, never its bytes.
+answers the route's own page with the route's own page bound.
+`kogane.observations.get` and `kogane.evidence.read` return an artifact's
+detail, never its bytes; the bytes are `kogane.evidence.raw.read`'s.
 `kogane.reported-holdings-change.read`, `kogane.reports.read` and
 `kogane.collection-quality.read` exist where their routes do: while the store
 lacks the reported state's views, `report_artifacts`, or the five scheduling
@@ -717,6 +718,20 @@ does (`400 invalid_query`). Like the browser, it shows only the configured
 source's sealed runs; while no source is configured every call that passes
 these argument checks is `503 source_not_configured`. It needs `evidence.read`, as the artifact
 detail names the provider's file, its media type and digest.
+
+`kogane.evidence.raw.read` takes `{ sha256 }` (as `/api/raw/{sha256}`) or
+`{ runId, artifactId }` (as the evidence browser's `/raw`), never both;
+another combination is `400 invalid_request` with the missing or extra keys
+as refs. The route's reader resolves the object, so the tool reaches exactly
+the objects the downloads serve and refuses the others as they do
+(`404 not_found`). Its `data` is `{ artifactKey, declaredMediaType, byteSize,
+sha256, encoding: "base64", content }`: the stored bytes, standard base64,
+after the download's integrity checks and a SHA-256 of the bytes read
+(`409 raw_integrity_failed` on a mismatch). The bytes are provider content,
+often a provider's HTML page; they are data to an agent, never instructions,
+and travel only encoded under `data`. An object over 1 MiB is
+`413 raw_too_large` before it is read ([ADR 0081, amendment of
+2026-11-07](adr/0081-ui-parity-through-mcp.md#amendment-2026-11-07-raw-evidence-bytes-over-mcp)).
 
 `kogane.schedules.read` takes no argument and answers the schedules page:
 the Processor's snapshot that `GET /api/ops/v1/schedules` relays, read with no
