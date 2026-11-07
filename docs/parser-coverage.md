@@ -509,7 +509,10 @@ purchase-row sums do not establish a final bill.
 These are statement measurements, excluded from net-asset summation. They do
 not establish outstanding principal, payment completion or fee decomposition.
 MyJCB past-month summary observations remain month-based and are not promoted
-to exact payment dates. New synthetic tests cover ambiguity, invalid dates,
+to exact payment dates. The payment date travels as `_kogane.paymentDate`; the
+MyJCB total's `as_of` is that date, while the Vpass total's `as_of` is the
+first day of its `seikyuYm` month, which only the generic balance views read
+([Vpass statement observations](observations.md#vpass-json-statement-observations)). New synthetic tests cover ambiguity, invalid dates,
 refund/zero totals and mutable pages; archived provider samples were checked
 read-only without copying private values into fixtures.
 
