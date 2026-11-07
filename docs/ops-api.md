@@ -522,8 +522,8 @@ spent (`registration_deferred`): it stays `accepted` / `dispatch_pending` and
 is looked at every five minutes, `dispatch.attempts` growing by one each time,
 until the registration succeeds or is blocked. Nothing cancels it, and a new
 idempotency key is a new operation. A registration that throws ends nothing
-either and fails the whole dispatch lane for that tick. This is an open
-limit, not a policy
+either: it is retried five minutes later as `registration_failed`, and the
+lane carries on. This is an open limit, not a policy
 ([processor §7](processor.md#7-operations-dispatch)).
 
 The collector execution services are in

@@ -744,12 +744,12 @@ tick, as the alarm awaits its own.
 
 A failed dispatch never deletes the request. How each kind ends:
 
-| Kind                                       | Closed ends                                                                                                                    | Looked at again                                                                                                                                            |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `import`                                   | `dispatched` once CORE holds the registration; `blocked` with `operation_payload_invalid` or the registration's own block code | every 5 min, **with no expiry**: `terminal_not_found`, a `pending` (staged) registration, a `retryable` refusal, or `registration_deferred` (budget spent) |
-| `replay`                                   | `dispatched` (`plan:<id>`) on the first look, or `blocked` with `replay_plan_missing`                                          | never                                                                                                                                                      |
-| `projection`                               | `dispatched` on the first look                                                                                                 | never                                                                                                                                                      |
-| `collection`, unattended `session-refresh` | the closed execution states of [ADR 0048](adr/0048-operation-collector-dispatch.md), including `expired` 24 h after acceptance | per the gates above, never past the expiry                                                                                                                 |
+| Kind                                       | Closed ends                                                                                                                    | Looked at again                                                                                                                                                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `import`                                   | `dispatched` once CORE holds the registration; `blocked` with `operation_payload_invalid` or the registration's own block code | every 5 min, **with no expiry**: `terminal_not_found`, a `pending` (staged) registration, a `retryable` refusal, `registration_deferred` (budget spent), or `registration_failed` (the registration threw) |
+| `replay`                                   | `dispatched` (`plan:<id>`) on the first look, or `blocked` with `replay_plan_missing`                                          | never                                                                                                                                                                                                      |
+| `projection`                               | `dispatched` on the first look                                                                                                 | never                                                                                                                                                                                                      |
+| `collection`, unattended `session-refresh` | the closed execution states of [ADR 0048](adr/0048-operation-collector-dispatch.md), including `expired` 24 h after acceptance | per the gates above, never past the expiry                                                                                                                                                                 |
 
 An import whose terminal is not in the bucket is retried, not failed: the
 collector may still be running, and a terminal that lands late registers at
@@ -766,16 +766,6 @@ a separate operation that does not close the old one. The ADR 0048 expiry
 applies to collector starts only; an import expiry would be a new decision.
 `services/processor/test/operation-dispatch.test.ts` ("an import has no
 expiry") pins this.
-
-**Open limit: an import whose registration throws** (CORE or R2
-unavailable, or a seal refusal no code classifies) has no end either, and
-it is worse than a `retry`: nothing catches the throw, so the whole
-`operation_dispatch` lane fails that tick (`operation_dispatch_failed` with
-the error class), nothing is written to the request, and since its
-`available_at_ms` did not move it is claimed at the same place in the order
-on the next tick.
-While the cause lasts, every request ordered after it, and the collector
-tracking that runs after the claimed requests, waits.
 
 An import whose registration **throws** — R2 or CORE unavailable, or a
 refusal CORE made that the derivation did not foresee — is treated as the
