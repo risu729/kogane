@@ -484,5 +484,6 @@ export {
   readCardOwnershipForGrant,
   CARD_SETTLEMENT_PROPOSAL_ID,
   CARD_SETTLEMENTS_MAX_OFFSET,
+  CARD_SETTLEMENT_STATEMENT_KEY_MAX,
   type CardSettlementsReadOutcome,
 } from "./query/card-settlements-read.ts";

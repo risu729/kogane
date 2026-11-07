@@ -445,7 +445,15 @@ export function ConfirmPage({ planId }: { planId: string }): ReactNode {
                     </Notice>
                   ) : null}
                   <p className="footnote">
-                    <Link to="/reconciliation">照合候補に戻る</Link>
+                    <Link
+                      to={
+                        settlementProposalId === null
+                          ? "/reconciliation"
+                          : `/reconciliation/${settlementProposalId}`
+                      }
+                    >
+                      照合候補に戻る
+                    </Link>
                   </p>
                 </div>
               </Panel>

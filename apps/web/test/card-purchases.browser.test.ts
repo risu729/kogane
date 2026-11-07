@@ -145,7 +145,8 @@ describe.if(runnable)("card purchase explanation", () => {
     expect(await href("明細の記録と原本")).toBe("/observations/transaction/21");
     expect(await href("請求の記録と原本")).toBe("/observations/balance/31");
     expect(await href("銀行明細と原本")).toBe("/observations/transaction/41");
-    expect(await href("カード照合で確認")).toBe("/reconciliation");
+    // The statement's own settlement review, where its match is corrected.
+    expect(await href("カード照合で確認")).toBe(`/reconciliation/${item.settlement!.proposalId}`);
     const text = await chain.innerText();
     for (const expected of [
       "利用",

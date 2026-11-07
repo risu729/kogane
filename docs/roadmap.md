@@ -253,7 +253,12 @@ lifecycle. Statements without a settlement candidate are listed on
 a closed reason, refund and zero totals under their own code, and the ADR 0074
 planner's read-only answer for statements whose window holds no equal debit
 ([card settlements](card-settlements.md#statements-without-a-candidate)); a
-multi-debit allocation is shown but cannot be accepted. Source ownership,
+multi-debit allocation is shown but cannot be accepted. Each statement/debit
+candidate has its own page listing the candidates it competes with, which the
+purchase chain links, so a wrong match is corrected there by a withdrawal and
+another candidate's acceptance
+([correcting a match](card-settlements.md#correcting-a-match)); agents read
+the same list through `kogane.card-settlements.read` (`relatedTo`). Source ownership,
 supported bank coverage, partial payments and refund handling still need
 completion.
 Securities executions, settlement, holdings and valuation follow that flow.

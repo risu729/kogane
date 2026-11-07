@@ -28,7 +28,7 @@ import { AccountCandidatesPage } from "./pages/AccountCandidates.tsx";
 import { RewardsPage } from "./pages/Rewards.tsx";
 import { ConfirmPage } from "./pages/Confirm.tsx";
 import { CardOwnershipPage } from "./pages/CardOwnership.tsx";
-import { ReconciliationPage } from "./pages/Reconciliation.tsx";
+import { ReconciliationPage, ReconciliationReviewPage } from "./pages/Reconciliation.tsx";
 import { PurchasePage, PurchasesPage } from "./pages/Purchases.tsx";
 import { ReportedStatePage } from "./pages/ReportedState.tsx";
 import { ReconstructedStatePage } from "./pages/ReconstructedState.tsx";
@@ -131,6 +131,8 @@ function View({ route }: { route: Route }): ReactNode {
       return <CardOwnershipPage key={route.proposalId} proposalId={route.proposalId} />;
     case "reconciliation":
       return <ReconciliationPage />;
+    case "reconciliationReview":
+      return <ReconciliationReviewPage key={route.proposalId} proposalId={route.proposalId} />;
     case "purchases":
       return <PurchasesPage />;
     case "purchase":

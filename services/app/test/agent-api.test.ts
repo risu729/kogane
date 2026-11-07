@@ -524,7 +524,7 @@ describe("untrusted provider content (AT71)", () => {
         name: "kogane.card-settlements.read",
         required: [],
         closed: false,
-        properties: ["offset", "proposalId"],
+        properties: ["offset", "proposalId", "relatedTo", "statementKey"],
         annotations: readOnly,
       },
       {

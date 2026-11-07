@@ -113,7 +113,8 @@ Pages compose these instead of writing their own markup or rules:
 A review candidate (a card settlement on カード照合, a pending-to-posted link on
 カード利用) is one panel. Its `.settlement-head` holds the title, a status
 `Badge` and the identifying `.settlement-facts`. The review sits under a
-`.settlement-disclosure` that starts open only while a decision is due. The
+`.settlement-disclosure` that starts open only while a decision is due, and
+always on a card settlement's own page (`/reconciliation/<proposalId>`). The
 decision is a `.settlement-decision`: a required `.settlement-reason`, a button
 per action the candidate allows, and a footnote that planning decides nothing.
 The pending-to-posted review also states each action's effect in words.
