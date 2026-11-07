@@ -279,6 +279,17 @@ describe("reward mappers", () => {
         validTime: { kind: "unknown", reasonCode: "stored_offer_time_invalid" },
         applicationDeadline: { kind: "unknown", reasonCode: "stored_offer_time_invalid" },
       });
+    // A missing value is not the JSON text `null`.
+    expect(
+      conversionOffer({
+        ...row,
+        valid_time_json: null as never,
+        application_deadline_json: null as never,
+      }),
+    ).toMatchObject({
+      validTime: { kind: "unknown", reasonCode: "stored_offer_time_invalid" },
+      applicationDeadline: { kind: "unknown", reasonCode: "stored_offer_time_invalid" },
+    });
   });
 });
 

@@ -227,6 +227,10 @@ function offerValidity(json: string): OfferValidity | null {
 
 /** An offer's stored deadline; JSON `null` is "no deadline", anything invalid is unknown. */
 function offerDeadline(json: string): TemporalValue | null {
+  const invalid: TemporalValue = { kind: "unknown", reasonCode: "stored_offer_time_invalid" };
+  // Only the stored JSON text `null` means "no deadline": a missing value (SQL
+  // NULL, which `JSON.parse` would coerce to `null`) stays unknown.
+  if (typeof json !== "string") return invalid;
   try {
     const parsed: unknown = JSON.parse(json);
     if (parsed === null) return null;
@@ -234,7 +238,7 @@ function offerDeadline(json: string): TemporalValue | null {
   } catch {
     // An unparsable deadline is unknown, never "no deadline".
   }
-  return { kind: "unknown", reasonCode: "stored_offer_time_invalid" };
+  return invalid;
 }
 
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u;
