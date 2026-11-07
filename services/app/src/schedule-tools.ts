@@ -7,6 +7,7 @@ import {
   grantAllowsScheduleSource,
 } from "../../../packages/application/src/index";
 import type { ToolResult } from "./agent-service";
+import { mcpInputSchema } from "./mcp-input-schema";
 
 /** On `/mcp` and, as `schedules.maintenance.read`, on `/api/agent/v1/*`. */
 export const SCHEDULE_READ_TOOL = "kogane.schedules.maintenance.read";
@@ -25,8 +26,7 @@ const scheduleReadSchema = z.strictObject({ source: sourceId.optional() });
 
 /** The published JSON Schema of one argument schema, without the meta key. */
 function inputSchema(schema: z.ZodType): Record<string, unknown> {
-  const generated = z.toJSONSchema(schema) as Record<string, unknown>;
-  delete generated["$schema"];
+  const generated = mcpInputSchema(schema);
   return generated;
 }
 

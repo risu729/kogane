@@ -149,6 +149,11 @@ export default {
             if (outcomeManifest(outcome).status === "failed") {
               throw new Error(`V Point post-auth collection failed; ${runReference(outcome)}`);
             }
+            // A run whose terminal was not written is not a stored run,
+            // whatever the provider outcome was (G1-01).
+            if (!outcome.terminal.persisted) {
+              throw new Error(`V Point post-auth run was not persisted; ${runReference(outcome)}`);
+            }
           }
         }
       }
