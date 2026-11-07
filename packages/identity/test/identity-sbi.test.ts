@@ -323,4 +323,71 @@ describe("SBI identity", () => {
       expect(custody.account.label).toBe(`SBI証券 国内株式 預り区分未確定（区分コード: ${word}）`);
     }
   });
+
+  test("every market and custody entry maps exactly as the shipped object-literal tables did", () => {
+    // The tables as they shipped before they became Maps (plus the MICs the
+    // rule passes through). Reading them by own keys only leaves every mapped
+    // value's identity and label unchanged, so no identity policy version moves.
+    const markets: [string, string][] = [
+      ["TKY", "XTKS"],
+      ["NGY", "XNGO"],
+      ["FKO", "XFKA"],
+      ["SPR", "XSAP"],
+      ["東証", "XTKS"],
+      ["名証", "XNGO"],
+      ["福証", "XFKA"],
+      ["札証", "XSAP"],
+      ["XTKS", "XTKS"],
+      ["XNGO", "XNGO"],
+      ["XFKA", "XFKA"],
+      ["XSAP", "XSAP"],
+    ];
+    for (const [market, mic] of markets) {
+      const routes: { market: string | null; extra: Record<string, unknown> }[] = [
+        { market, extra: {} },
+        { market: null, extra: { _kogane: { marketCode: market } } },
+        { market: null, extra: { marketLabel: market } },
+      ];
+      for (const route of routes) {
+        const plan = sbiIdentity(
+          input({
+            kind: "transaction",
+            sourceAccount: "sbi-securities:domestic",
+            securityCode: null,
+            market: route.market,
+            extra: { accountLabel: "SYN", issueCode: "1234", ...route.extra },
+          }),
+        );
+        expect(plan.instruments.find((item) => item.role === "security")).toEqual({
+          role: "security",
+          kind: "security",
+          namespace: "mic-symbol",
+          scope: mic,
+          value: "1234",
+          label: "Synthetic",
+          status: "provider-local",
+          reason: "provider-reported-listing",
+          details: { securityCode: "1234", countryCode: "JP", providerMarket: market },
+        });
+        expect(plan.issues).not.toContain("security-without-global-crosswalk");
+      }
+    }
+    const custody: [string, string][] = [
+      ["0", "特定預り"],
+      ["1", "一般預り"],
+      ["-", "一般預り"],
+      ["H", "成長投資枠"],
+      ["4", "NISA預り"],
+      ["5", "ジュニアNISA預り"],
+      ["6", "ジュニアNISA預り"],
+      ["7", "ジュニアNISA預り"],
+      ["J", "ジュニアNISA預り"],
+      ["2", "預り区分未確定"],
+    ];
+    for (const [code, label] of custody)
+      expect(
+        sbiIdentity(input({ sourceAccount: `sbi-securities:domestic:deposit-type=${code}` }))
+          .account.label,
+      ).toBe(`SBI証券 国内株式 ${label}（区分コード: ${code}）`);
+  });
 });
