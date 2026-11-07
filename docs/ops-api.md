@@ -44,7 +44,8 @@ identity, one record and one vocabulary, so that:
   session (G3-06, G3-14);
 - a person looking at a screen and an operator with `curl` reach the same
   application service and get the same record (G3-05); a model with an MCP
-  client cannot request an operation at all (ADR 0047).
+  client requests one through the same service as itself, never as the
+  operator ([MCP](#mcp), ADR 0084).
 
 The one thing the API deliberately cannot be is a generic proxy: there is no
 route that takes SQL, a table name, a bucket key, a URL, a database id or a
@@ -254,8 +255,8 @@ already does:
    intended.**
 
    The routes are the only transport that reaches this resolver: `/mcp`
-   refuses an operations tool from its caller object before any grading
-   ([MCP](#mcp)).
+   never grades its caller by these lists and runs an operations tool as the
+   MCP client itself (`callDelegatedOpsTool`, [MCP](#mcp)).
 
 Reads are scoped to the principal that accepted the operation. An operation
 belonging to someone else answers `404 receipt_not_found`, exactly like one

@@ -760,7 +760,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
   widened CHECK, the six kinds accepted and unknown ones refused,
   append-only and forward-only triggers still firing, and an interrupted
   migration rolled back whole.
-- `apps/web/test/confirm.browser.test.ts` (8 tests): read-only
+- `apps/web/test/confirm.browser.test.ts` (9 tests, one an accessibility audit): read-only
   without the capability, no action on a stale plan, accepted vs published
   shown distinctly, and a pending-to-posted review shown against the candidate
   it pins. That review can be approved and committed only while every pin, the
