@@ -123,10 +123,12 @@ key or alias class is held, and a debit without an admitted identity take no
 part; currencies are never combined. Ownership is a rejection condition as in
 the sweep.
 
-Limits: nothing calls the planner. No lane runs it, no table stores its
-output, the review page does not show it, nothing supplies a policy, and the
-acceptance writer still claims exactly one debit, so a multi-debit statement
-still cannot be accepted. Refunds against a statement are not handled.
+Since 2026-11-07 the review read of statements without a candidate calls it
+read-only, under the owner's display policy (below, [Statements without a
+candidate](#statements-without-a-candidate)). Limits: no lane runs it, no
+table stores its output, and the acceptance writer still claims exactly one
+debit, so a multi-debit statement still cannot be accepted. Refunds against a
+statement are not handled.
 
 ### Provider-stated debit accounts
 
@@ -285,14 +287,18 @@ including a `skipped-by-flag` one, in `processor_lane_ticks`
 ### Unmatched statements
 
 A statement that yields no candidate is counted, not recorded: `unmatched`
-maps three closed codes to the number of statements the tick examined that
-yielded none ([ADR 0009, 2026-11-06 amendment](adr/0009-lane-tick-records.md#amendment-2026-11-06-the-settlement-sweep-counts-its-unmatched-statements)):
+maps four closed codes to the number of statements the tick examined that
+yielded none ([ADR 0009, 2026-11-06 amendment](adr/0009-lane-tick-records.md#amendment-2026-11-06-the-settlement-sweep-counts-its-unmatched-statements),
+[2026-11-07 amendment](adr/0009-lane-tick-records.md#amendment-2026-11-07-refund-and-zero-totals-get-their-own-code)),
+checked in this order (`unmatchedStatementCode`,
+`packages/domain/src/card-settlement-unmatched.ts`):
 
-| Code                       | The statement                                                                          |
-| -------------------------- | -------------------------------------------------------------------------------------- |
-| `statement_not_comparable` | has no exact positive total, no valid due date or no period; nothing is compared       |
-| `no_debit_in_window`       | the bank read within three days of its due date returned no row                        |
-| `no_equal_amount_debit`    | the bank read returned rows, and none has an exact amount equal to the statement total |
+| Code                             | The statement                                                                                        |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `statement_total_refund_or_zero` | has an exact total of zero or below (a refund, or nothing to pay); refund allocation is not modelled |
+| `statement_not_comparable`       | has no exact total with a valid unit, no valid due date or no period; nothing is compared            |
+| `no_debit_in_window`             | the bank read within three days of its due date returned no row                                      |
+| `no_equal_amount_debit`          | the bank read returned rows, and none has an exact amount equal to the statement total               |
 
 Every code is present, zero included. The sweep decides the code from the
 rows it has already read and compared, so no query is added and the
@@ -316,6 +322,68 @@ Limits:
   counts as `no_equal_amount_debit` when none of those rows matches.
 - A statement with a candidate is not counted here, even when its window holds
   several equal debits (each is its own candidate).
+
+### Statements without a candidate
+
+The `カード照合` page lists, under the candidates, every current statement
+total that no candidate cites (`照合候補のない請求`), each with its closed
+reason; an agent reads the same page with `kogane.card-settlements.unmatched`
+([agent API](agent-api.md#card-statements-without-a-candidate)). Both call
+`reviewUnmatchedCardStatements`
+(`packages/application/src/query/card-statements-unmatched.ts`) and nothing
+else. The route is `GET /api/v2/reconciliation/card-statements-unmatched`
+(operator-only, like the candidate list; `offset` only); the agent tool needs
+`records.read` over the whole store. Both read only.
+
+A statement is listed when no candidate cites its observation and parse run
+(found through the candidates' `statement_key` index). Its `code` is the one
+the sweep counts it under (table above), decided the same way from the
+sweep's own window read (`CARD_SETTLEMENT_BANK_DEBITS_SQL`, at most 1,000
+rows, each due date read once per page), or
+`equal_amount_debit_awaiting_sweep` when the window holds a debit the sweep's
+matcher pairs with it, so its candidate appears on the sweep's next pass.
+`debitsInWindow` is the number of rows the read returned (null when none was
+made). Amounts and dates are the provider's; an inexact total is `null`, never
+zero.
+
+For `no_equal_amount_debit` only, `planner` is the ADR 0074 planner's answer
+([amendment 2026-11-07](adr/0074-card-statement-allocation-planner.md#amendment-2026-11-07-a-read-only-caller-on-the-review-page))
+under the owner's display policy `card-statement-unmatched-display-v1` (the
+window of three days either side of the due date, at most three debits;
+owner, 2026-11-07 03:58 UTC):
+
+- `proposed` with one `multiple-debits` allocation: whole debits whose exact
+  sum is the total (shown as `複数の出金の合計が一致`);
+- `needs_review` (`candidate_not_unique`, and
+  `debit_in_other_statement_allocation` or `excluded_debit_competes`): every
+  combination listed, none chosen;
+- `unsupported` (`no_exact_allocation` with `in_window_debits_below_total`
+  and/or `debit_above_total`): no remainder is computed, and the page says it
+  does not judge whether that is a partial payment or an overpayment;
+- `refused` with the planner's statement code, or `run_refused` with
+  `input_bound_exceeded` for a group past 16 statements or 32 debits, or whose
+  window read reached its bound.
+
+Statements of one page whose windows share a day are planned in one run, so
+a debit two of them could use is contested. Every item is
+`acceptable: false` and the page offers no action: the acceptance writer
+claims one debit (`manifest.acceptance` is `single-debit-candidates-only`).
+
+Limits:
+
+- A run sees only the page's statements without a candidate. A statement that
+  has a candidate, or sits on another page, does not contest a debit here.
+- `equal_amount_debit_awaiting_sweep` repeats the sweep's matcher; the
+  statement stays listed with that code until the sweep's cursor reaches it
+  (normally within one pass of five-minute ticks).
+- The page is by statement id, 50 per page, and the grant's `maxRows` bounds
+  how deep a caller pages (`budget_exceeded`).
+- A debit without a resolved account has no alias class, so the planner
+  excludes it (`identity_not_admitted`).
+- A window row the sweep never compares (no exact amount, or a debit date
+  that is not a civil date) still goes to the planner, which excludes it under
+  its own code; a dateless one competes, so a statement it could pay is not
+  `proposed` beside it.
 
 The `カード照合` page shows the source facts, evidence links, candidate rationale,
 current readiness blockers and decision history. An authenticated human operator
@@ -387,6 +455,21 @@ connection root is a `card-statement-aggregate`, not an individual card. The
 same root can have separate identities under legacy and current producers;
 those counts are not physical card counts. Self-declaration cannot resolve or
 merge these identities, and the operator must identify the account scope first.
+
+**所有者の既定** (owner default, [ADR 0082](adr/0082-owner-default-ownership.md);
+the owner's decision of 2026-11-07, 03:59 UTC, that an account with no recorded
+owner is theirs) is the same review with the closed marker
+`ownership-declaration:owner-default-v1:<role>:<date>` and the fixed party
+`party:owner`, so a card account and its debit account defaulted separately
+name the same owner. It has the same refusals as the self-declaration below,
+except that a `liable_party` default also admits a MyJCB connection root
+(`card-statement-aggregate`, status `aggregate`); an unresolved placeholder is
+never admitted. The ownership review answers `ownerDefaultBlockers` per side.
+It is a recorded decision per account, planned and committed like any other
+claim, by the operator or by an agent the owner delegated `commands.plan` and
+`commands.decide.relation` to; nothing is defaulted at read time. The
+confirmation page shows its provenance and approves it; the card-ownership
+page does not yet offer to plan one, so it is planned through the command API.
 
 The self-declared fallback also refuses any recorded ownership-role history for the
 same resolved account, including rejected or dated claims and the other role.
@@ -475,6 +558,34 @@ An accepted decision can be withdrawn through a new approved plan. Withdrawal
 retracts the interpretation, never the bank movement or original evidence.
 Rejected and withdrawn candidates remain in history; a different correspondence
 is reviewed as a different candidate. Historical citations keep resolving.
+
+### Agent reads
+
+An agent holding `records.read` on a whole-store grant reads the same two
+answers as the page, over MCP or the agent HTTP route
+([agent API](agent-api.md)): `kogane.card-settlements.read` (`{}` or
+`{"offset": n}` for a page, `{"proposalId": id}` for one review) is
+`GET /api/v2/reconciliation/card-settlements`, and
+`kogane.card-settlements.ownership` (`{"proposalId": id}`) is its
+`/ownership` read. Both call the page's services
+(`packages/application/src/query/card-settlements-read.ts`), answer exactly
+the route's body and write only the R0 audit record of the call. They exist
+exactly while the route does: where its views are absent they are not listed,
+the HTTP path is `404` and the MCP name `unknown_tool`. They are refused
+`unauthorized` without `records.read` and `evidence_restricted` on a narrowed
+source or account scope, before the request is validated: a review joins a
+card account to a bank account, so a narrowed grant could see an account
+outside it. A list read deeper than the grant's `maxRows` (`offset + 50`
+above it) is `413 budget_exceeded` (`budget:maxRows=<n>`); a page's
+`nextOffset` is the route's, so the next page may be refused. A malformed
+request is `400 invalid_query`, and a `proposalId` that names no candidate is
+`404 not_found`. None of these refusals reads a store row; the only statement
+before them is the `sqlite_master` check the route also runs. Deciding a review or recording ownership stays a plan through the change
+lifecycle, graded there; on MCP any client the MCP Access application admits
+plans and decides as itself
+([ADR 0063](adr/0063-delegated-ai-operation-path.md),
+[ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). This is the read half of the owner's UI-parity
+decision of 2026-11-07 ([ADR 0081](adr/0081-ui-parity-through-mcp.md)).
 
 ## Financial meaning and limits
 
@@ -677,6 +788,18 @@ page (51 ms here, so a full page of 100 is about 5 s of D1 time a tick).
 Candidates accrue one per recapture of a paid bill, reached by the index. The
 rest of the purchases page is the current card usage pass
 ([read model](read-model.md#cost)).
+
+The list of statements without a candidate costs one ranking of
+`card_statement_facts` (as the sweep's page does, the candidate check keyed
+on `card_settlement_candidates_statement`), one `card_bank_debit_facts`
+window read per distinct due date of the page's statements that reach a
+window, and, per planner run, four lookups keyed on the run's ids, keys and
+alias classes (`economic_claims_key`, `economic_claims_alias`,
+`card_settlement_candidates_bank`, `card_settlement_candidates_statement`;
+checked without statistics in
+`services/processor/test/card-statements-unmatched.test.ts`). In production
+on 2026-11-07, 8 of 35 current statements had no candidate (5 of them refund
+or zero totals), and no window held more than 10 debits.
 
 ### Readiness
 

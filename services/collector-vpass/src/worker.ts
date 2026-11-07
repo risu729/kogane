@@ -401,7 +401,7 @@ async function collectAllCards(
   scheduledTime: number,
   onPersisted?: (runId: string) => void,
 ): Promise<AllCardsRunSummary> {
-  return withCollectionLease(env, "vpass", async () => {
+  return withCollectionLease(env, "vpass", async (signal) => {
     const started = new Date(scheduledTime);
     const runId = safeRunId(started);
 
@@ -420,6 +420,9 @@ async function collectAllCards(
     const summaries: RunSummary[] = [];
     const failures: number[] = [];
     for (let index = 0; index < session.cards.length; index += 1) {
+      // A holder that stopped itself (ADR 0085) contacts the provider no more:
+      // the abort leaves the loop instead of counting as one failed card.
+      signal.throwIfAborted();
       try {
         summaries.push(
           await diagnostic.step("card-collection", () =>

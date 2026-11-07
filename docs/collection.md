@@ -289,13 +289,15 @@ artifact key, its role and its media type — through the closed table
 [ADR 0022](adr/0022-registration-artifact-datasets.md)). The artifact tables
 below are its source: a collector that renames an artifact, changes its role
 or declares another media type leaves that artifact without a dataset, and so
-unparsed, until the table follows. Vpass statement pages are withheld and
-registered without a dataset until the collector derives the trusted card
-binding ([ADR 0023](adr/0023-vpass-collector-card-binding.md)). The table is
-registration contract `terminal-registration-v2`: a run registered under v1
-whose artifacts gain a dataset registers again under v2 (its v1 artifacts were
-never parsed), and every other v1 registration is carried over unchanged, so
-no capture is parsed twice.
+unparsed, until the table follows. Vpass statement pages were withheld until
+the collector's card binding matched the importer's
+([ADR 0023](adr/0023-vpass-collector-card-binding.md)) and carry
+`statement-page` since registration contract `terminal-registration-v3`
+([ADR 0083](adr/0083-release-vpass-collector-statement-pages.md)); only a
+successful card run's pages are parsed. A run registered under an earlier
+version whose artifacts gain a dataset registers again under the new version
+(its earlier artifacts were never parsed), and every other registration is
+carried over unchanged, so no capture is parsed twice.
 
 ### Sony Bank (`services/collector-sony-bank`, `kogane-sony-bank-collector-poc`)
 
@@ -1076,11 +1078,14 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 - Human-required: a collection that cannot start because re-authentication
   failed, or because the session was refused (401/403) and has never
   re-authenticated, is recorded as a **`failed` run with its own terminal**
-  carrying `human_required_reauth`, and `waitingForHuman` is reported on
+  carrying `human_required_reauth` (`manual_agreement_required` while the
+  provider's terms wait for the owner), and `waitingForHuman` is reported on
   `/health`, on the `/collect` 502 body and in the summary. A recoverable
-  session error uses `session_unhealthy` instead. Nothing retries a login: the
-  existing single, 6-hour-cooled-down re-authentication attempt is unchanged
-  (G3-10, G3-11).
+  session error uses `session_unhealthy` instead. The blocked collection
+  retries no login; the keepalive's re-authentication keeps its cooldown,
+  6 hours, or 1 hour for up to 72 hours while a terms agreement is pending
+  ([source note §16](sources/sbi-vc-trade.md#16-resuming-after-a-terms-agreement-2026-11-07);
+  G3-10, G3-11).
 - No deferral: with no service binding in the chain, a run with more than
   eleven artifacts finishes in place. The retired importer path deferred such
   a run to a backfill route, which no longer exists.

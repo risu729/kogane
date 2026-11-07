@@ -45,7 +45,9 @@ import { ID } from "../../../evidence-contract/src/validate.ts";
  *
  * - `terminal-registration-v1`: no artifact dataset but St George's snapshot.
  * - `terminal-registration-v2` (ADR 0022): the dataset table
- *   `ARTIFACT_DATASETS`.
+ *   `ARTIFACT_DATASETS` without Vpass, whose rule was withheld.
+ * - `terminal-registration-v3` (ADR 0083): the same table with the Vpass
+ *   collector's statement pages (`statement-page`).
  *
  * A terminal already registered under an earlier version whose descriptors
  * the current version does not change is not registered again: the new
@@ -53,11 +55,12 @@ import { ID } from "../../../evidence-contract/src/validate.ts";
  * `register-terminal.ts`, ADR 0022). Registering it again would parse the same
  * capture twice, and a Mizuho capture's transactions would be listed twice.
  */
-export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v2";
+export const REGISTRATION_CONTRACT_VERSION = "terminal-registration-v3";
 
 /** Every version this code can derive, oldest first; each derivation is kept reproducible. */
 export const REGISTRATION_CONTRACT_VERSIONS = [
   "terminal-registration-v1",
+  "terminal-registration-v2",
   REGISTRATION_CONTRACT_VERSION,
 ] as const;
 export type RegistrationContractVersion = (typeof REGISTRATION_CONTRACT_VERSIONS)[number];
@@ -175,8 +178,9 @@ function jsonByName(
  *
  * Mizuho is absent on purpose: its parsers accept `dataset = NULL` and select
  * by key and unit, so its registration does not change. `kogane-synthetic`
- * and `v-point-pay` write nothing a parser reads. `vpass` is known but
- * withheld (`WITHHELD_ARTIFACT_DATASETS`).
+ * and `v-point-pay` write nothing a parser reads. `vpass` was withheld
+ * through `terminal-registration-v2` and is mapped from
+ * `terminal-registration-v3` (ADR 0083).
  */
 export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> = {
   "prestia-bank": [
@@ -378,7 +382,19 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
       dataset: "notification-event",
     },
   ],
-  // `vpass` is withheld: see `WITHHELD_ARTIFACT_DATASETS`.
+  // ADR 0083 released the rule ADR 0022 withheld. A page of a card run that
+  // is not wholly successful (its card unit `partial`, ADR 0023 option 8) is
+  // still never parsed: `statement-page` has run-scope eligibility
+  // (`unitParseable`), so only a successful run's pages get a job.
+  vpass: [
+    {
+      // The collector writes its pages as sanitized captures (ADR 0021).
+      key: /^months\/\d{6}\/(?:top|answer)-\d{3}\.json$/u,
+      role: "sanitized_provider_capture",
+      mediaTypes: JSON_TYPE,
+      dataset: "statement-page",
+    },
+  ],
 };
 
 /**
@@ -387,32 +403,12 @@ export const ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDataset
  * Moving a source from here into `ARTIFACT_DATASETS` is a decision, recorded
  * in an ADR; `scripts/artifact-datasets.test.ts` pins this list.
  *
- * `vpass` (ADR 0022, ADR 0023): the collector derives the trusted card binding
- * (ADR 0023's amendment), but only once the owner sets its binding key, which
- * must be the retired importer's. Until then a parsed collector capture would
- * become the current statement snapshot of its card-month and retire the
- * importer-era Vpass purchases with nothing to replace them. Unparsed, it is
- * never eligible as a snapshot, so the importer-era snapshots stay current.
- * The rule becomes live in a later change, after the binding code is
- * deployed, the key is set and the collector's tokens are shown to be the
- * importer's (docs/identity-operations.md).
+ * Empty since ADR 0083 moved `vpass` (withheld by ADR 0022 and ADR 0023)
+ * into `ARTIFACT_DATASETS` under `terminal-registration-v3`.
  */
 export const WITHHELD_ARTIFACT_DATASETS: Readonly<
   Record<string, { readonly until: string; readonly rules: readonly ArtifactDatasetRule[] }>
-> = {
-  vpass: {
-    until: "the collector's binding key is set and its tokens match the importer's (ADR 0023)",
-    rules: [
-      {
-        // The collector writes its pages as sanitized captures (ADR 0021).
-        key: /^months\/\d{6}\/(?:top|answer)-\d{3}\.json$/u,
-        role: "sanitized_provider_capture",
-        mediaTypes: JSON_TYPE,
-        dataset: "statement-page",
-      },
-    ],
-  },
-};
+> = {};
 
 /**
  * The parser dataset of one terminal artifact, or null when the closed table
@@ -431,16 +427,22 @@ export function artifactDataset(
   return datasetByRules(table[collectorSource]!, artifact);
 }
 
+/** `terminal-registration-v2`'s table: ADR 0022's, with Vpass withheld. */
+const V2_ARTIFACT_DATASETS: Readonly<Record<string, readonly ArtifactDatasetRule[]>> =
+  Object.fromEntries(Object.entries(ARTIFACT_DATASETS).filter(([source]) => source !== "vpass"));
+
 /**
- * The dataset table of each registration contract version. `v1` is kept so
- * that what a registration under it meant stays reproducible: it named one
- * dataset, St George's snapshot, and left every other artifact without one.
+ * The dataset table of each registration contract version. Earlier versions
+ * are kept so that what a registration under them meant stays reproducible:
+ * `v1` named one dataset, St George's snapshot, and left every other artifact
+ * without one; `v2` withheld Vpass's statement pages (ADR 0022, ADR 0023).
  */
 const DATASETS_BY_VERSION: Readonly<
   Record<RegistrationContractVersion, Readonly<Record<string, readonly ArtifactDatasetRule[]>>>
 > = {
   "terminal-registration-v1": { "st-george": ARTIFACT_DATASETS["st-george"]! },
-  "terminal-registration-v2": ARTIFACT_DATASETS,
+  "terminal-registration-v2": V2_ARTIFACT_DATASETS,
+  "terminal-registration-v3": ARTIFACT_DATASETS,
 };
 
 /** The dataset the first matching rule names, or null. */

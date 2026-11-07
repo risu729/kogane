@@ -56,6 +56,8 @@ it("lists reviewed connections even with no parsed observations and validates ro
   await expect(call("/api/identity/connections?source=moneyforward-me")).rejects.toThrow(
     "invalid_query",
   );
+  // Query text with no parameters is still query text.
+  await expect(call("/api/identity/connections?&")).rejects.toThrow("invalid_query");
   await expect(call("/api/identity/connections", "POST")).rejects.toThrow("method_not_allowed");
   expect(
     validAccountConnection({ ...(body as any).connections[0], leafBinding: "confirmed" }),
@@ -150,7 +152,8 @@ it("applies only eligible automatic MF connection names without altering origina
 });
 
 it("retains manual display names even when a reviewed connection name is eligible", async () => {
-  const { connectionAccountLabel } = await import("../src/account-connection-display");
+  const { connectionAccountLabel } =
+    await import("../../../packages/application/src/query/account-connections");
   expect(
     connectionAccountLabel("手動指定", "manual", "moneyforward-me", {
       label: "三井住友銀行（MoneyForward連携）",
