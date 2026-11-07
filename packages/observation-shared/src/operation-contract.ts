@@ -156,6 +156,8 @@ export interface OperationRecordWire {
 /** A stored closed code: the 0039 `blocked_code` rule, which every other code here also meets. */
 const CODE = /^[a-z0-9_]{1,64}$/u;
 const SOURCE_ID = /^[a-z0-9-]{1,100}$/u;
+/** A collector connection (alarm job id): the 0068 `connection_id` CHECK. */
+const CONNECTION_ID = /^[a-z0-9-]{1,100}$/u;
 /**
  * A reported run id: what the collector RPC accepts and stores
  * (`RUN_ID` in `packages/collection/src/operation-rpc.ts`; `collection_runs.
@@ -163,7 +165,7 @@ const SOURCE_ID = /^[a-z0-9-]{1,100}$/u;
  */
 const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 /**
- * A bound target, a connection or a stage's evidence: an identifier, never a
+ * A bound target or a stage's evidence: an identifier, never a
  * URL, within the 0040 bound of 256 characters (`run:<run id>` included).
  */
 const REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:@/-]{0,255}$/u;
@@ -306,7 +308,7 @@ function validExecution(value: unknown, kind: OperationRecordKind): boolean {
     // A collection runs its connection's daily scope; a refresh has none.
     value.scope === (action === "collect" ? "collector_default" : null) &&
     isOneOf(OPERATION_RECORD_EXECUTION_STATES)(value.state) &&
-    reference(value.connectionId) &&
+    orNull(matches(CONNECTION_ID))(value.connectionId) &&
     code(value.reasonCode) &&
     count(value.waits) &&
     instant(value.expiresAt) &&
