@@ -259,6 +259,26 @@ describe("reward mappers", () => {
     // An unknown bucket kind is dropped rather than widening eligibility.
     expect(offer.eligibleBucketKinds).toEqual(["regular"]);
     expect(offer.validTime).toEqual({ kind: "unknown", reasonCode: "stored_offer_time_invalid" });
+    // A standing offer: no end and no deadline are stored values, not unknowns.
+    const standing = conversionOffer({
+      ...row,
+      valid_time_json: '{"kind":"open-ended","start":"2026-04-01","zone":"Asia/Tokyo"}',
+      application_deadline_json: "null",
+    });
+    expect(standing.validTime).toEqual({
+      kind: "open-ended",
+      start: "2026-04-01",
+      zone: "Asia/Tokyo",
+    });
+    expect(standing.applicationDeadline).toBeNull();
+    // Neither shape is guessed from damaged text.
+    for (const text of ["", "{}", '{"kind":"open-ended","start":"2026-04-01"}'])
+      expect(
+        conversionOffer({ ...row, valid_time_json: text, application_deadline_json: text }),
+      ).toMatchObject({
+        validTime: { kind: "unknown", reasonCode: "stored_offer_time_invalid" },
+        applicationDeadline: { kind: "unknown", reasonCode: "stored_offer_time_invalid" },
+      });
   });
 });
 

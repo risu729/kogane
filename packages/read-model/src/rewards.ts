@@ -19,12 +19,14 @@ import {
   EXPIRY_FAMILIES,
   type ExpiryRule,
   type MembershipState,
+  type OfferValidity,
   type QualificationMeasure,
   type RewardBucket,
   type RewardHolding,
   type RewardProgram,
   type RuleVerification,
   RULE_VERIFICATIONS,
+  validOfferValidity,
 } from "../../domain/src/rewards";
 import { validTemporalValue, type TemporalValue } from "../../domain/src/time";
 import type { Quantity, RoundingMode, ValueStatus } from "../../domain/src/values";
@@ -211,6 +213,28 @@ function temporal(json: string | null, fallbackReason: string): TemporalValue | 
   } catch {
     return { kind: "unknown", reasonCode: fallbackReason };
   }
+}
+
+/** An offer's stored validity; an open-ended period is kept, anything invalid is unknown. */
+function offerValidity(json: string): OfferValidity | null {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return validOfferValidity(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** An offer's stored deadline; JSON `null` is "no deadline", anything invalid is unknown. */
+function offerDeadline(json: string): TemporalValue | null {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    if (parsed === null) return null;
+    if (validTemporalValue(parsed)) return parsed;
+  } catch {
+    // An unparsable deadline is unknown, never "no deadline".
+  }
+  return { kind: "unknown", reasonCode: "stored_offer_time_invalid" };
 }
 
 const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/u;
@@ -431,9 +455,8 @@ export function conversionOffer(row: ConversionOfferSqlRow): ConversionOffer {
     ),
     eligibleRestrictionRefs: refs(row.eligible_restriction_refs_json),
     eligibleTiers: row.eligible_tiers_json === null ? null : refs(row.eligible_tiers_json),
-    validTime: temporal(row.valid_time_json, "stored_offer_time_invalid") ?? unknownTime,
-    applicationDeadline:
-      temporal(row.application_deadline_json, "stored_offer_time_invalid") ?? unknownTime,
+    validTime: offerValidity(row.valid_time_json) ?? unknownTime,
+    applicationDeadline: offerDeadline(row.application_deadline_json),
     processingPolicyRef: row.processing_policy_ref,
     processingDays: row.processing_days,
     roundingPolicyRef: row.rounding_policy_ref,

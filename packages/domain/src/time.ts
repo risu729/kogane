@@ -37,6 +37,18 @@ export interface UnknownTime {
 }
 export type TemporalValue = InstantValue | LocalDateValue | PeriodValue | UnknownTime;
 
+/**
+ * A period with a known first day and no end: the provider announces no end
+ * date, so the value holds from `start` on. It is deliberately not part of
+ * `TemporalValue`; only fields that say so (an offer's validity) accept it.
+ */
+export interface OpenEndedPeriodValue {
+  kind: "open-ended";
+  /** First valid civil day, `YYYY-MM-DD`. */
+  start: string;
+  zone: string | null;
+}
+
 export const TEMPORAL_ROLES = [
   "effective",
   "recorded",
@@ -308,6 +320,42 @@ export function validTemporalValue(value: unknown): value is TemporalValue {
     default:
       return false;
   }
+}
+
+export function validOpenEndedPeriodValue(value: unknown): value is OpenEndedPeriodValue {
+  return (
+    isRecord(value) &&
+    value.kind === "open-ended" &&
+    hasExactKeys(value, ["kind", "start", "zone"]) &&
+    validLocalDateText(value.start) &&
+    (value.zone === null || validZone(value.zone))
+  );
+}
+
+/**
+ * `a` against an open-ended period: `-1` when it lies wholly before the first
+ * day, `0` when it lies wholly on or after it. An instant counts by its own
+ * calendar date, since the period is whole days. A value straddling the first
+ * day is `overlap`; zone mismatch and unknown time stay incomparable, as in
+ * `compareTemporal`.
+ */
+export function compareToOpenEnded(a: TemporalValue, b: OpenEndedPeriodValue): TemporalOrder {
+  if (a.kind === "unknown") return { kind: "incomparable", reasonCode: "unknown_time" };
+  const startDate = parseLocalDate(b.start);
+  if (!startDate) return { kind: "incomparable", reasonCode: "unknown_time" };
+  if (!zonesCompatible(a.zone, b.zone))
+    return { kind: "incomparable", reasonCode: "zone_mismatch" };
+  let interval: { start: number; endExclusive: number } | null;
+  if (a.kind === "instant") {
+    const parsed = parseInstant(a.value);
+    const day = parsed ? parseLocalDate(parsed.localDate) : null;
+    interval = day ? { start: daysFromCivil(day), endExclusive: daysFromCivil(day) + 1 } : null;
+  } else interval = dayInterval(a);
+  if (!interval) return { kind: "incomparable", reasonCode: "unknown_time" };
+  const start = daysFromCivil(startDate);
+  if (interval.start >= start) return { kind: "ordered", order: 0 };
+  if (interval.endExclusive <= start) return { kind: "ordered", order: -1 };
+  return { kind: "incomparable", reasonCode: "overlap" };
 }
 
 export function validTemporalReference(value: unknown): value is TemporalReference {

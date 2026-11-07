@@ -154,3 +154,21 @@ test("all 64 directed three-unit graphs at depths 1..3 match simple-path enumera
     }
   expect(cases).toBe(192);
 });
+
+test("a standing offer with no deadline is a route at any later day", () => {
+  const standing = offer({
+    validTime: { kind: "open-ended", start: "2026-04-01", zone: "Asia/Tokyo" },
+    applicationDeadline: null,
+  });
+  const budget = { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  for (const clock of ["2026-04-01", "2030-01-01", "9999-12-31"]) {
+    const result = findConversionPaths(
+      [standing],
+      { quantity: quantity(4), clock: day(clock) },
+      "points:b",
+      budget,
+    );
+    expect(result.paths).toHaveLength(1);
+    expect(result.rejected).toEqual([]);
+  }
+});
