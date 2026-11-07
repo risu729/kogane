@@ -607,7 +607,7 @@ describe("the same person: operator in the browser, agent-only through MCP (matr
     }
   });
 
-  it("never offers an operations tool on /mcp, and refuses one from the caller object", async () => {
+  it("never offers an operations tool on /mcp without a delegation, and refuses one from the caller object", async () => {
     expect(await listTools({ environment: HOSTILE })).toEqual(PUBLISHED);
     const before = await opsRowCount();
     for (const [name, args] of [
@@ -721,6 +721,7 @@ describe("a token minted for MCP reaches no other route, and /mcp takes no other
       ["POST", "/api/command/v1/commit", {}],
       ["GET", "/api/v2/reconciliation/card-settlements", undefined],
       ["GET", "/api/v2/reconciliation/card-settlements/ownership", undefined],
+      ["GET", "/api/v2/reconciliation/card-settlements/statements", undefined],
       ["GET", "/api/v2/card-purchases", undefined],
       ["GET", "/api/v2/reported-state", undefined],
       ["GET", "/api/v2/reported-holdings-change?from=2026-03-01&to=2026-03-31", undefined],
@@ -924,6 +925,7 @@ describe("tools under each grant shape", () => {
               "kogane.instruments.history",
               REPORTED_STATE_TOOL_NAME,
               "kogane.accounts.candidates",
+              "kogane.card-settlements.unmatched",
               "kogane.economic-readiness.read",
               PURCHASES_TOOL_NAME,
               RECONSTRUCTED_STATE_TOOL_NAME,

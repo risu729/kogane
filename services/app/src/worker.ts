@@ -24,6 +24,7 @@ import {
   cardSettlementsApi,
   CARD_SETTLEMENT_PATH,
   CARD_OWNERSHIP_PATH,
+  CARD_SETTLEMENT_STATEMENTS_PATH,
 } from "./card-settlements-api";
 import { cardPurchasesApi, CARD_PURCHASES_PATH } from "./card-purchases-api";
 import { reportedStateApi, REPORTED_STATE_PATH } from "./reported-state-api";
@@ -35,6 +36,10 @@ import { reconstructedStateApi, RECONSTRUCTED_STATE_PATH } from "./reconstructed
 import { collectionQualityApi } from "./collection-quality-api";
 import { identityApi } from "./identity-api";
 import { accountCandidatesApi } from "./account-candidates-api";
+import {
+  CARD_STATEMENTS_UNMATCHED_PATH,
+  cardStatementsUnmatchedApi,
+} from "./card-statements-unmatched-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
 import { instrumentHistoryApi } from "./instrument-history-api";
 import { instrumentCoverageApi } from "./instrument-coverage-api";
@@ -51,7 +56,12 @@ function classify(path: string): string {
   if (isCommandPath(path)) return "command";
   if (path === AUDIT_PATH) return "audit";
   if (path === DELEGATION_STATUS_PATH) return "delegations";
-  if (path === CARD_SETTLEMENT_PATH || path === CARD_OWNERSHIP_PATH)
+  if (
+    path === CARD_SETTLEMENT_PATH ||
+    path === CARD_OWNERSHIP_PATH ||
+    path === CARD_SETTLEMENT_STATEMENTS_PATH ||
+    path === CARD_STATEMENTS_UNMATCHED_PATH
+  )
     return "card_settlement_review";
   if (path === CARD_PURCHASES_PATH) return "card_purchase_explanation";
   if (path === REPORTED_STATE_PATH) return "reported_state";
@@ -121,6 +131,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (delegationResponse) return delegationResponse;
   const settlementResponse = await catalogue(() => cardSettlementsApi(request, env, url, subject));
   if (settlementResponse) return settlementResponse;
+  const unmatchedResponse = await catalogue(() =>
+    cardStatementsUnmatchedApi(request, env, url, subject),
+  );
+  if (unmatchedResponse) return unmatchedResponse;
   // Operator-only and read-only; 404 unless CORE 0047 exists
   // (docs/economic-events.md, HTTP).
   const purchaseResponse = await catalogue(() => cardPurchasesApi(request, env, url, subject));

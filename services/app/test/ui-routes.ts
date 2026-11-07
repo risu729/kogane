@@ -41,7 +41,7 @@ const SHARED_SOURCES = import.meta.glob("../../../packages/observation-shared/sr
 }) as Sources;
 
 /** A source with its comments replaced by spaces; string and template text kept. */
-export function withoutComments(source: string): string {
+function withoutComments(source: string): string {
   let out = "";
   let i = 0;
   // A stack of open template literals and of `${` expressions inside them.

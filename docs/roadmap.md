@@ -244,8 +244,14 @@ slice is implemented, and so is the first purchase-event writer for supported
 single-payment card usage (on in production since 2026-09-24), and so is the
 pending-to-posted link review: the purchases page lists the open candidates
 and reviews each purchase's link (accept, reject, withdraw) through the change
-lifecycle. Source ownership, supported bank coverage, partial payments and
-refund handling still need completion.
+lifecycle. Statements without a settlement candidate are listed on
+`カード照合` (and to agents through `kogane.card-settlements.unmatched`) with
+a closed reason, refund and zero totals under their own code, and the ADR 0074
+planner's read-only answer for statements whose window holds no equal debit
+([card settlements](card-settlements.md#statements-without-a-candidate)); a
+multi-debit allocation is shown but cannot be accepted. Source ownership,
+supported bank coverage, partial payments and refund handling still need
+completion.
 Securities executions, settlement, holdings and valuation follow that flow.
 
 The [2026-09 next-milestone plan](plans/2026-09-next-milestone.md) is a

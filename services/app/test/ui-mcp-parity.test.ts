@@ -5,7 +5,9 @@
 // 2. Every API route the web UI reads has an MCP read, through the explicit
 //    route-to-tool map below, and every other published read tool is mapped
 //    or listed, so a tool that closes a route gap cannot leave it listed.
-// 3. No MCP adapter file runs SQL of its own (ADR 0081, point 2).
+//
+// ADR 0081 point 2 (no SQL in MCP adapters) is guarded by
+// `tests/mcp-tools-no-sql.test.ts`.
 //
 // Each guard has an allow-list of the gaps known when it landed
 // (2026-11-07). A gap's fix removes its entry: a listed gap that is no longer
@@ -26,7 +28,7 @@ import {
 } from "../../../packages/application/src/operation-path/catalogue.ts";
 import { AGENT_CAPABILITIES } from "../../../packages/application/src/grants.ts";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
-import { routeServes, uiApiPatterns, withoutComments } from "./ui-routes";
+import { routeServes, uiApiPatterns } from "./ui-routes";
 
 // ── 1. catalogue operations on `ui` ──────────────────────────────────────
 
@@ -34,8 +36,6 @@ import { routeServes, uiApiPatterns, withoutComments } from "./ui-routes";
 const OPERATION_GAPS: Readonly<Partial<Record<OperationName, string>>> = {
   "schedules.survey.decide":
     "survey proposal accept/reject (POST /api/ops/v1/schedules/proposals/:id); needs a delegated tool over the same writer",
-  "schedules.lease.release":
-    "stopped-execution lease release (POST /api/ops/v1/schedules/leases/:source); R3, needs a tool that refuses with a recorded refusal (ADR 0081 point 3)",
 };
 
 /** Catalogue entries on `ui` that are records, not operations anyone calls. */
@@ -59,6 +59,7 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reported-state": ["kogane.reported-state.read"],
   "/api/v2/reconstructed-state": ["kogane.reconstructed-state.read"],
   "/api/v2/audit": ["kogane.audit.search"],
+  "/api/v2/reconciliation/card-statements-unmatched": ["kogane.card-settlements.unmatched"],
 };
 
 /** UI read routes with no MCP read yet, and what the UI reads there. */
@@ -96,6 +97,8 @@ const READ_ROUTE_GAPS: Readonly<Record<string, string>> = {
   // Reconciliation and reported state.
   "/api/v2/reconciliation/card-settlements":
     "card settlement review; owned by Phase 2 unit 2g, not by this guard's PR",
+  "/api/v2/reconciliation/card-settlements/statements":
+    "card settlement review grouped by statement; owned by Phase 2 unit 2g, not by this guard's PR",
   "/api/v2/reconciliation/card-settlements/ownership":
     "card ownership review; owned by Phase 2 unit 2g, not by this guard's PR",
   "/api/v2/reported-holdings-change": "reported holdings between two dates (ADR 0075)",
@@ -134,41 +137,6 @@ const NOT_READ_ROUTES: Readonly<Record<string, string>> = {
   "/api/command/v1/:operation": "POST only: the catalogue's command.* operations (guard 1)",
   "/api/evidence/v1": "the evidence browser's path prefix constant",
 };
-
-// ── 3. SQL in MCP adapters ───────────────────────────────────────────────
-
-/** MCP adapter files that still run SQL of their own: statements per file. */
-const SQL_GAPS: Readonly<Record<string, { count: number; what: string }>> = {
-  "services/app/src/agent-service.ts": {
-    count: 1,
-    what: "scopedParseRuns, the parse-run window a source-scoped grant opens a context with (context.open, financial.query, explain, reconcile.propose)",
-  },
-  "services/app/src/delegated-maintenance-tools.ts": {
-    count: 1,
-    what: "the 24-hour delegated write count",
-  },
-  "services/app/src/delegated-schedule-tools.ts": {
-    count: 1,
-    what: "the 24-hour delegated write count",
-  },
-  "services/app/src/ops-tools.ts": {
-    count: 1,
-    what: "the ops_requests source lookup of kogane.ops.operation.get",
-  },
-};
-
-/** The files that define or serve MCP tools. */
-const ADAPTER_FILE =
-  /^services\/app\/src\/(?:mcp|agent-api|agent-service|read-tools|schedule-tools|ops-tools|delegated-[a-z-]+-tools)\.ts$/u;
-const APP_SOURCES = import.meta.glob("../src/*.ts", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-}) as Record<string, string>;
-// Upper case only, as this repository writes SQL: with `i`, a `select`
-// identifier and a later `import … from` would count as a statement.
-const SQL_STATEMENT =
-  /\b(?:SELECT\s[\s\S]*?\sFROM|(?:INSERT|REPLACE)(?:\s+OR\s+[A-Z]+)?\s+INTO|UPDATE(?:\s+OR\s+[A-Z]+)?\s+\w+\s+SET|DELETE\s+FROM)\b/gu;
 
 // ── the widest published tool list ───────────────────────────────────────
 
@@ -353,36 +321,5 @@ describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
       names.filter((name) => !tools.has(name)).map((name) => `${route} -> ${name}`),
     );
     expect(unpublished).toEqual([]);
-  });
-});
-
-describe("MCP adapters run no SQL of their own (ADR 0081, point 2)", () => {
-  const adapters = Object.entries(APP_SOURCES)
-    .map(([file, text]) => [file.replace(/^\.\.\//u, "services/app/"), text] as const)
-    .filter(([file]) => ADAPTER_FILE.test(file));
-
-  it("scans every file that names an MCP tool", () => {
-    // A tool name in code, not in a comment: a new tool file the pattern
-    // misses fails here instead of escaping the scan.
-    const naming = Object.entries(APP_SOURCES)
-      .filter(([, text]) => /["'`]kogane\.[a-z]/u.test(withoutComments(text)))
-      .map(([file]) => file.replace(/^\.\.\//u, "services/app/"))
-      .sort();
-    expect(adapters.map(([file]) => file).sort()).toEqual(naming);
-    expect(naming).toContain("services/app/src/mcp.ts");
-  });
-
-  it("only the known files run SQL, each its known number of statements", () => {
-    const found = Object.fromEntries(
-      adapters
-        .map(
-          ([file, text]) =>
-            [file, withoutComments(text).match(SQL_STATEMENT)?.length ?? 0] as const,
-        )
-        .filter(([, count]) => count > 0),
-    );
-    expect(found).toEqual(
-      Object.fromEntries(Object.entries(SQL_GAPS).map(([file, gap]) => [file, gap.count])),
-    );
   });
 });
