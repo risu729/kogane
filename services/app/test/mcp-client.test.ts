@@ -698,6 +698,7 @@ describe("a token minted for MCP reaches no other route, and /mcp takes no other
       ["POST", "/api/command/v1/commit", {}],
       ["GET", "/api/v2/reconciliation/card-settlements", undefined],
       ["GET", "/api/v2/reconciliation/card-settlements/ownership", undefined],
+      ["GET", "/api/v2/reconciliation/card-settlements/statements", undefined],
       ["GET", "/api/v2/card-purchases", undefined],
       ["GET", "/api/v2/reported-state", undefined],
       ["GET", "/api/v2/reported-holdings-change?from=2026-03-01&to=2026-03-31", undefined],
