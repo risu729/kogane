@@ -47,7 +47,9 @@ minutes old (a lease claimed by a build without heartbeats, which has none or
 only one older than its claim: once it is 60 minutes old). Each such release
 is recorded (`alarm.lease.expire`, principal `alarm:processor-tick`). Only that
 alarm frees leases: the release workflow's `/bootstrap`, which runs the same
-reservation repair, frees none.
+reservation repair, frees none. While the `processor-tick` job is disabled, or
+its Pipeline tick throws (a failing lane alone does not), no lease is freed;
+the operator can still release one on this page.
 Freeing a lease starts and replays nothing: the next nominal occurrence, or a
 new operations request, simply finds the source free.
 

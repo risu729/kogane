@@ -210,8 +210,11 @@ record named the wrong principal. The sweep now runs only in the
 `processor-tick` branch of `ScheduleAlarm`, after the Pipeline tick and before
 the reservation repair (as it ran inside that repair before, so a failing
 reconcile still cannot keep a silent lease held). The deployment's bootstrap
-frees no lease; the next tick, at most 5 minutes later, does. Nothing else in
-this ADR changes.
+frees no lease; the next tick, at most 5 minutes later, does. Open limit:
+while the `processor-tick` job is disabled, or its Pipeline tick throws before
+the sweep, no lease is freed (between the merge of this ADR and this amendment a
+deployment's bootstrap still would have); the operator's release remains.
+Nothing else in this ADR changes.
 
 Verification: `services/processor/test/schedule-bootstrap-identity.test.ts`
 (the deployment's bootstrap leaves a silent lease held and writes no
