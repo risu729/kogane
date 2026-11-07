@@ -97,10 +97,11 @@ rewrite of ADR 0030's amendment replaced the card's v1 token by its v2 token
 the owner stages the Vpass pairs, and migration 0063 rewrites the importer's
 fetch unit key, pin and source-account reference of each staged card, keeping
 the importer-era entity). The collector's
-statement pages are not parsed today (ADR 0022), so no card-month is read
-under both yet; once they are, purchase recognition retires the importer-era
-event of a card-month and recognises the collector's on the new entity, so
-the captured total is not doubled. That rewrite is not part of ADR 0029.
+statement pages are parsed from a successful card run since
+[ADR 0083](adr/0083-release-vpass-collector-statement-pages.md); for a
+card-month read under both, purchase recognition retires the importer-era
+event and recognises the collector's on the token's entity, so the captured
+total is not doubled. That rewrite is not part of ADR 0029.
 The operations below describe the retired importer.
 
 ## Operations
