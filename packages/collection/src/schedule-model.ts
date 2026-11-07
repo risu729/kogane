@@ -45,7 +45,12 @@ export const MAINTENANCE_CHANGE_REASONS = [
   "maintenance-survey-proposal-accepted",
 ] as const;
 export type MaintenanceChangeReason = (typeof MAINTENANCE_CHANGE_REASONS)[number];
-/** The reasons a delegated maintenance revision may give: neither the operator's nor a survey's. */
+/**
+ * The reasons a delegated maintenance revision may give: neither the
+ * operator's nor a survey's. A delegated survey acceptance gives the survey's
+ * reason, which only the private survey route's trusted writer option admits
+ * (ADR 0050, 2026-11-07 amendment).
+ */
 export const DELEGATED_MAINTENANCE_REASONS = [
   "official-notice-added",
   "official-notice-changed",

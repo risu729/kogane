@@ -1,4 +1,5 @@
 import { ownershipReviewEvidenceRefs } from "../../../domain/src/ownership-review.ts";
+import type { OwnershipDeclarationScope } from "../../../domain/src/ownership-declaration.ts";
 import {
   validCardSettlementFacts,
   type CardSettlementStatus,
@@ -105,17 +106,21 @@ export async function queryCardOwnership(
         )
       : [];
     const evidenceRefs = mapping ? ownershipReviewEvidenceRefs(row.id, fact.ref, mapping.id) : [];
-    const declarationContext = mapping
-      ? await sql.first<OwnershipDeclarationContext>(
-          OWNERSHIP_DECLARATION_CONTEXT_SQL,
-          ownershipDeclarationContextBinds(
-            mapping.account_id,
-            mapping.source_account_id,
-            evidenceRefs,
-            role,
-          ),
-        )
-      : null;
+    const context = (scope: OwnershipDeclarationScope) =>
+      mapping
+        ? sql.first<OwnershipDeclarationContext>(
+            OWNERSHIP_DECLARATION_CONTEXT_SQL,
+            ownershipDeclarationContextBinds(
+              mapping.account_id,
+              mapping.source_account_id,
+              evidenceRefs,
+              role,
+              scope,
+            ),
+          )
+        : Promise.resolve(null);
+    const declarationContext = await context("sole-personal");
+    const defaultContext = await context("owner-default");
     sides.push({
       role,
       sourceId: fact.sourceId,
@@ -132,6 +137,12 @@ export async function queryCardOwnership(
         ...blockers,
         ...(declarationContext
           ? ownershipDeclarationBlockers(declarationContext)
+          : ["account_mapping_unresolved"]),
+      ],
+      ownerDefaultBlockers: [
+        ...blockers,
+        ...(defaultContext
+          ? ownershipDeclarationBlockers(defaultContext)
           : ["account_mapping_unresolved"]),
       ],
       claims: claims.slice(0, 50).map((claim) => {
