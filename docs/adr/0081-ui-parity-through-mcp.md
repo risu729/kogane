@@ -115,7 +115,8 @@ What the code does today (main `02a915a`):
 ## Verification
 
 - Today: the three tools that ran their own SQL (above) call
-  `delegatedWritesRemaining` and `ownOperationSource` in `packages/application`. The helpers they shared with the screens moved too:
+  `delegatedWritesRemaining` and `ownOperationSource` in `packages/application`.
+  The helpers they shared with the screens moved too:
   the agent service's scoped parse-run window is the read model's
   `sourceParseRuns`, the proposal store is `commandProposalStore` in
   `packages/application/src/propose-store.ts`, and the `sqlite_master` checks
