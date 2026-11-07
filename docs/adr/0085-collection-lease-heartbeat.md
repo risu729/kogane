@@ -74,6 +74,10 @@ stopped, because the server has no way to know that it stopped.
      counts as missing. A new heartbeat is sent every minute even while an
      earlier one is unanswered.
 
+   Once the signal is aborted, both a fulfilled and a rejected action report
+   that stop code. An action that settles during the grace period cannot turn
+   a stopped collection into a successful occurrence.
+
    If the aborted action has not settled 30 s later, the call fails with that
    code and `forceStop` (given the code) ends the execution: the SBI VC session
    Durable Object resets itself with `ctx.abort(code)`, which fails its
@@ -172,7 +176,9 @@ runs and its heartbeat is written.
 
 - `packages/collection/test/schedule-lease.test.ts`: the heartbeat on D1's clock
   while the action runs and its end with the action; the deadline abort and its
-  code; an action that ignores the abort is stopped by force and keeps its lease
+  code, including the finite matrix of fulfilled and rejected actions before a
+  stop and after either stop code; an action that ignores the abort is stopped
+  by force and keeps its lease
   and heartbeat until it settles; a lost lease and a failing heartbeat abort
   with `collection_lease_lost` before the deadline, also when a heartbeat's
   answer never comes; `forceStop` receives the code; a heartbeat answered after
