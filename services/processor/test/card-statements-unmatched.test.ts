@@ -80,10 +80,11 @@ const DEBITS: [string, string, string][] = [
   ["d-9c", "1000", "2098-09-31"],
   // The planner's own bound of 32 debits, each a third of the total: 4,960
   // exact three-debit sums, of which the answer lists the first 50.
-  ...Array.from(
-    { length: 32 },
-    (_, index) => [`d-10-${String(index).padStart(2, "0")}`, "1000", "2098-10-20"] as const,
-  ),
+  ...Array.from<unknown, [string, string, string]>({ length: 32 }, (_, index) => [
+    `d-10-${String(index).padStart(2, "0")}`,
+    "1000",
+    "2098-10-20",
+  ]),
 ];
 
 async function seed() {
