@@ -24,7 +24,7 @@ routeもない。返すのは保有の内訳、観測された期限、規約か
 | ExpiryRule           | `expiry_rules`                                                  | 計算方式のfamilyと、根拠・確認状態・適用範囲               |
 | ConversionOffer      | `conversion_offers`                                             | 倍率は整数比。キャンペーン・会員別は別offer                |
 
-計算は `packages/domain/src/rewards.ts` の純関数で行う。DB・時計・HTTPへ依存しない。
+計算は `packages/domain/src/rewards.ts` と、換算・経路探索を分けた `reward-conversion.ts` の純関数で行う。DB・時計・HTTPへ依存しない。
 
 - `summarizeHolding(holding, qualifications)` — 消費できるbucketだけをプログラム自身の単位で合計し、
   `pending-award` と `qualification` は理由コードつきで除外する。単位違い・未解析があれば合計は
@@ -67,10 +67,10 @@ into `needs-rule-verification`.
 - `{"kind":"unknown"}` keeps its meaning: the period was not established (including
   stored text that does not parse). It is never read as a standing offer, and the
   reader never turns damaged text into `open-ended` or `null`.
-- An `unknown` validity or deadline is still not checked at a clock, as before:
-  `availableForOffer` adds no code for it, and route search does not reject on it. A
-  standing offer stores `open-ended` and `null` instead of relying on that, so
-  tightening the unknown case later cannot drop standing offers.
+- An `unknown` deadline is not checked, and `availableForOffer` adds no code for an
+  `unknown` validity. Route search rejects an `unknown` validity as
+  `needs_rule_verification` (see "Search eligibility at each hop"), which is why a
+  standing offer stores `open-ended` and `null` instead of `unknown`.
 - No migration: both columns already hold JSON text, and nothing writes offer rows
   today (§3).
 
@@ -565,3 +565,40 @@ and bounded route traversal. `rewards.ts` re-exports its existing public API;
 reward contracts, bucket eligibility, expiry and redemption remain in that file.
 The extraction preserves derivation releases and returned values. The finite-domain
 tests cover conversion amounts and all directed offer graphs on three units.
+
+## Search eligibility at each hop
+
+The route search checks an offer's validity and membership at its applied calendar
+day, including after an earlier hop's processing delay. `conversion-search-v2`
+requires a local date or containing civil period in a compatible zone. An instant,
+unknown time or zone mismatch cannot establish a whole application day and yields
+`needs_rule_verification`; a known day outside the offer's period yields
+`offer_not_valid_at_clock`. A standing offer (`open-ended` validity, §1) covers its
+first day and every later day, so it stays a route instead of becoming
+`needs_rule_verification`; a `null` deadline is never passed.
+
+The `/offers/simulate` goal search starts from today's UTC date as a `local-date`
+with zone `null` (`services/app/src/rewards-api.ts`). A `null` zone is compatible with
+any offer zone, so an `Asia/Tokyo` offer is checked against the UTC date: between
+00:00 and 09:00 JST that is the previous JST day, and an offer's first or last day can
+be judged one day off at the boundary.
+
+For a tier-limited offer, a provider membership claim must name the source program,
+an admitted tier and a validity date/period covering that same day. Missing,
+self-reported, another program's or out-of-period claims remain
+`needs_rule_verification`, rather than proving entitlement. These rejection rows
+describe an unestablished condition, not proof that a future application is impossible.
+No provider terms, quota, fee or acceptance policy is inferred. The `/offers/simulate`
+route passes no membership claims, so every tier-limited offer is
+`needs_rule_verification` there until membership is supplied.
+
+`CONVERSION_SEARCH_RELEASE` is part of the reward projection's build digest
+(`packages/read-model/src/reward-projection.ts`), so the bump to `conversion-search-v2`
+builds a new projection snapshot once; stored snapshots are not rewritten and no
+migration is needed.
+
+The exhaustive eligibility test covers all 960 combinations of ten validity shapes
+(including three standing-offer shapes), eight membership scenarios,
+restricted/unrestricted tiers, three application days and direct/two-hop routes. A
+malformed stored validity establishes no day and stays `needs_rule_verification`. The
+existing deadline and completion rules are unchanged.

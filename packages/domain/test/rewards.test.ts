@@ -1119,18 +1119,24 @@ describe("SC14 / AT49-AT54 — conversion simulation and bounded search", () => 
       "needs-rule-verification",
     );
     expect(availableForOffer(buckets, standard, [gold], day("2026-09-09")).state).toBe("available");
-    // Three offers between the same pair are three candidates, not one rate.
+    // The missing platinum claim stays uncertain; it cannot become a feasible path.
     const result = findConversionPaths(
       [standard, campaign, memberOnly],
-      { quantity: q("points:a", "2500"), clock: day("2026-09-09") },
+      { quantity: q("points:a", "2500"), clock: day("2026-09-09"), membership: [gold] },
       "points:b",
       budget,
     );
     expect(result.paths.map((path) => path.hops[0]!.offerRef).sort()).toEqual([
-      "offer:a-to-b:member@v1",
       "offer:a-to-b:standard@v1",
     ]);
-    expect(result.rejected.map((r) => r.reasonCode)).toContain("application_deadline_passed");
+    expect(result.rejected).toContainEqual({
+      offerRef: "offer:a-to-b:campaign@v1",
+      reasonCode: "application_deadline_passed",
+    });
+    expect(result.rejected).toContainEqual({
+      offerRef: "offer:a-to-b:member@v1",
+      reasonCode: "needs_rule_verification",
+    });
   });
 
   test("an unverified offer becomes a separate candidate to check, never a proven impossibility", () => {
