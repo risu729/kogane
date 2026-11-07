@@ -19,9 +19,13 @@
 // amount. States stay apart: `captured` and `authorized` are never added, and
 // an `unknown` event is counted, never summed.
 import {
+  CARD_PURCHASE_SOURCES,
   CARD_USAGE_EXCLUSIONS,
+  CARD_USAGE_UNRECOGNIZED_REASONS,
   cardPurchaseSummary,
+  classifyCardUsage,
   validCardPurchaseFacts,
+  type CardUsageUnrecognizedReason,
   type CardPurchaseAction,
   type CardPurchaseKeyRole,
   type CardPurchaseKind,
@@ -34,6 +38,7 @@ import type {
   CardPurchaseSettlementLink,
   CardPurchaseSourceRow,
   CardPurchaseStatementLink,
+  CardPurchaseUnrecognizedReasons,
   CardPurchaseView,
 } from "../../../domain/src/card-purchase-view.ts";
 import {
@@ -58,8 +63,12 @@ import {
   type Quantity,
 } from "../../../domain/src/values.ts";
 import { cardSettlementOwnershipCtes } from "../../../read-model/src/card-settlement-ownership.ts";
-import { CURRENT_CARD_USAGE_SQL } from "../../../read-model/src/card-usage.ts";
+import {
+  CURRENT_CARD_USAGE_SQL,
+  type CurrentCardUsageRow,
+} from "../../../read-model/src/card-usage.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
+import { cardUsageFactOf } from "../card-usage-fact.ts";
 import { loadPendingPostedCandidates } from "./card-purchase-candidates.ts";
 
 export const CARD_PURCHASE_PAGE_SIZE = 50;
@@ -76,6 +85,12 @@ const CARD_PURCHASE_CANDIDATE_LIMIT = 10;
  * narrows it.
  */
 export const CARD_PURCHASE_SUMMARY_LIMIT = 10_000;
+/**
+ * Unrecognised current rows one request classifies by reason. Beyond it the
+ * total is still exact and the reasons say they cover only these rows
+ * (`complete: false`), never a count scaled up or left at zero.
+ */
+export const CARD_PURCHASE_UNRECOGNIZED_LIMIT = 1_000;
 export const CARD_PURCHASE_PERIOD = /^[0-9]{4}-(?:0[1-9]|1[0-2])$/u;
 export const CARD_PURCHASE_EVENT_ID = /^(?:purchase|refund)_[0-9a-f]{64}$/u;
 /** The provider usage and statement dates are Japanese civil dates. */
@@ -195,9 +210,10 @@ interface SettlementRow {
   event_id: string | null;
   settlement_id: string | null;
 }
-interface CurrentRow {
-  current_key: string | null;
-  unrecognized: number | null;
+interface CurrentRow extends CurrentCardUsageRow {
+  on_page: number;
+  unrecognized: number;
+  unrecognized_total: number;
 }
 
 /**
@@ -315,24 +331,35 @@ export const SETTLEMENT_SQL = `SELECT account_id,source_id,period,id,facts_json,
  ) WHERE position=1`;
 
 /**
- * Which of the page's recognition keys the provider still displays, and how
- * many current usage rows no live event holds, in one pass over the one
- * definition of "current" (packages/read-model/src/card-usage.ts). `?1`/`?2`
- * are that query's cursor and page size: from the start, without a bound (a
- * negative LIMIT is none in SQLite). An unrecognised row is one the policy
- * excludes (installments, revolving, bonus, amountless, unstable identity) or
- * one the writer has not reached yet; a row without an external id has no key
- * and is always unrecognised.
+ * Which of the page's recognition keys the provider still displays, and every
+ * current usage row no live event holds, in one pass over the one definition
+ * of "current" (packages/read-model/src/card-usage.ts). `?1`/`?2` are that
+ * query's cursor and page size: from the start, without a bound (a negative
+ * LIMIT is none in SQLite). An unrecognised row is one the policy excludes
+ * (installments, revolving, bonus, amountless, unstable identity) or one the
+ * writer has not reached yet; a row without an external id has no key and is
+ * always unrecognised. The unrecognised rows come back whole, at most `?4` of
+ * them in observation id order, so the domain can name each one's reason
+ * (`classifyCardUsage`, the writer's own rule); `unrecognized_total` counts
+ * them all, before that bound.
  */
 const CURRENT_SQL = `WITH usage AS MATERIALIZED (
-  SELECT recognition_key FROM (${CURRENT_CARD_USAGE_SQL})
+  SELECT * FROM (${CURRENT_CARD_USAGE_SQL})
+ ), marked AS (
+  SELECT u.*,
+   coalesce(u.recognition_key IN (SELECT value FROM json_each(?3)),0) AS on_page,
+   (u.recognition_key IS NULL
+    OR NOT EXISTS(SELECT 1 FROM current_card_purchase_keys k WHERE k.recognition_key=u.recognition_key))
+    AS unrecognized
+  FROM usage u
+ ), ranked AS (
+  SELECT marked.*,
+   sum(unrecognized) OVER () AS unrecognized_total,
+   ROW_NUMBER() OVER (PARTITION BY unrecognized ORDER BY observation_id) AS position
+  FROM marked WHERE on_page OR unrecognized
  )
- SELECT recognition_key AS current_key,NULL AS unrecognized FROM usage
-  WHERE recognition_key IN (SELECT value FROM json_each(?3))
- UNION ALL
- SELECT NULL,count(*) FROM usage u
-  WHERE u.recognition_key IS NULL
-   OR NOT EXISTS(SELECT 1 FROM current_card_purchase_keys k WHERE k.recognition_key=u.recognition_key)`;
+ SELECT * FROM ranked WHERE on_page OR position <= ?4
+ ORDER BY observation_id`;
 
 function quantity(
   unitRef: string,
@@ -479,6 +506,36 @@ function settlementLink(row: SettlementRow): CardPurchaseSettlementLink {
 const refText = (ref: SourceFactRef): string => `${ref.id}@${ref.revision}`;
 
 /**
+ * Unrecognised rows per source and reason, in the closed orders of
+ * `CARD_PURCHASE_SOURCES` and `CARD_USAGE_UNRECOGNIZED_REASONS`; only reasons
+ * some row has. Counts only: no amount, merchant or key leaves this function.
+ */
+function unrecognizedReasonCounts(
+  rows: readonly CurrentCardUsageRow[],
+  total: number,
+): CardPurchaseUnrecognizedReasons {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const classified = classifyCardUsage(cardUsageFactOf(row));
+    const reasonCode: CardUsageUnrecognizedReason = classified.ok
+      ? "recognition_pending"
+      : classified.reasonCode;
+    const key = `${row.source_id}\u0000${reasonCode}`;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const entries: CardPurchaseUnrecognizedReasons["counts"] = [];
+  for (const sourceId of CARD_PURCHASE_SOURCES)
+    for (const reasonCode of CARD_USAGE_UNRECOGNIZED_REASONS) {
+      const rowsOf = counts.get(`${sourceId}\u0000${reasonCode}`);
+      if (rowsOf !== undefined) entries.push({ sourceId, reasonCode, rows: rowsOf });
+    }
+  const classifiedRows = entries.reduce((sum, entry) => sum + entry.rows, 0);
+  // Every classified row is a card source's: the current usage read selects only those.
+  if (classifiedRows !== rows.length) throw new Error("card_usage_source_unsupported");
+  return { complete: classifiedRows === total, counts: entries };
+}
+
+/**
  * Offset lists, a statement-period filter and exact-id reads share one DTO.
  * The summary covers every live event the filter selects, not only the page.
  */
@@ -556,17 +613,26 @@ export async function queryCardPurchases(
   }
   if (details.size !== page.length) throw new Error("card_purchase_facts_invalid");
 
-  // One pass over current usage: the page's current keys and the unrecognised count.
+  // One pass over current usage: the page's current keys, and each
+  // unrecognised row with the reason the writer skips it.
   const current = await sql.all<CurrentRow>(CURRENT_SQL, [
     0,
     -1,
     JSON.stringify([...new Set(keyRows.map((row) => row.recognition_key))]),
+    CARD_PURCHASE_UNRECOGNIZED_LIMIT,
   ]);
   const currentKeys = new Set(
-    current.flatMap((row) => (row.current_key === null ? [] : [row.current_key])),
+    current.flatMap((row) =>
+      row.on_page === 1 && row.recognition_key !== null ? [row.recognition_key] : [],
+    ),
   );
-  const unrecognizedCurrentRows = current.find((row) => row.current_key === null)?.unrecognized;
-  if (typeof unrecognizedCurrentRows !== "number") throw new Error("card_usage_count_missing");
+  const unrecognizedCurrentRows = current[0]?.unrecognized_total ?? 0;
+  if (!Number.isSafeInteger(unrecognizedCurrentRows) || unrecognizedCurrentRows < 0)
+    throw new Error("card_usage_count_missing");
+  const unrecognizedReasons = unrecognizedReasonCounts(
+    current.filter((row) => row.unrecognized === 1),
+    unrecognizedCurrentRows,
+  );
 
   // Pending-to-posted candidates touching the page's rows, resolved by the
   // one reader the review plan uses (card-purchase-candidates.ts).
@@ -715,6 +781,7 @@ export async function queryCardPurchases(
       completeTransactionHistory: false,
       unsupportedShapes: [...CARD_USAGE_EXCLUSIONS],
       unrecognizedCurrentRows,
+      unrecognizedReasons,
       limit: CARD_PURCHASE_PAGE_SIZE,
     },
   };

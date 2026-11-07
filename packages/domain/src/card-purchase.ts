@@ -119,6 +119,19 @@ export const CARD_USAGE_EXCLUSIONS = [
 ] as const;
 export type CardUsageExclusion = (typeof CARD_USAGE_EXCLUSIONS)[number];
 
+/**
+ * Why a current provider row no live event holds is outside the purchase
+ * list: one of the exclusions above, or `recognition_pending` when
+ * `classifyCardUsage` accepts the row but no live revision holds its key yet
+ * (the writer reaches every current row within one cursor cycle; a row whose
+ * write conflicted stays here until it is written). Closed, like the exclusions.
+ */
+export const CARD_USAGE_UNRECOGNIZED_REASONS = [
+  ...CARD_USAGE_EXCLUSIONS,
+  "recognition_pending",
+] as const;
+export type CardUsageUnrecognizedReason = (typeof CARD_USAGE_UNRECOGNIZED_REASONS)[number];
+
 /** What one stored revision did; the same closed list as the 0047 CHECK. */
 export const CARD_PURCHASE_ACTIONS = [
   "recognize",

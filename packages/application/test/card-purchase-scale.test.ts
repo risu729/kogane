@@ -55,6 +55,7 @@ describe("card purchases on a scaled store without statistics", () => {
     expect(seen.some((query) => query.includes(CURRENT_CARD_USAGE_SQL))).toBe(true);
     expect(first.items).toHaveLength(CARD_PURCHASE_PAGE_SIZE);
     expect(first.coverage.unrecognizedCurrentRows).toBeGreaterThan(0);
+    expect(first.coverage.unrecognizedReasons.counts.length).toBeGreaterThan(0);
     expect(first).toEqual(await queryCardPurchases(executor(true)));
     // The stored period is already `YYYY-MM` (`statementPeriod` in the domain).
     const inputs = [
@@ -76,9 +77,10 @@ describe("card purchases on a scaled store without statistics", () => {
     await queryCardPurchases(executor(false, seen));
     const usage = seen.filter((query) => query.includes(CURRENT_CARD_USAGE_SQL));
     expect(usage).toHaveLength(1);
-    // The wrapper's own relations: the materialized usage and the page's key list.
-    const steps = explain(db, usage[0]!, [0, -1, "[]"]);
-    expect(unboundedScans(steps, ["usage", "u", "json_each"])).toEqual([]);
+    // The wrapper's own relations: the materialized usage, the page's key list and the
+    // ranked unrecognised rows, each read once.
+    const steps = explain(db, usage[0]!, [0, -1, "[]", 1000]);
+    expect(unboundedScans(steps, ["usage", "u", "json_each", "ranked"])).toEqual([]);
     expect(currentRowsDriver(steps)).toMatch(/^SCAN candidate\b/u);
   });
 });
