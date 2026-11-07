@@ -32,6 +32,7 @@ import {
   settlementCell,
   statementCell,
   StatementTotals,
+  UnrecognizedReasons,
 } from "../purchase-display.tsx";
 import { Link, navigate } from "../router.tsx";
 import { EmptyState, Kv, KvRow, Loading, Notice, Nullable, Panel, QueryBoundary } from "../ui.tsx";
@@ -386,8 +387,9 @@ export function PurchasesPage(): ReactNode {
                     </p>
                     <p>
                       取得元が現在表示している明細のうち {data.coverage.unrecognizedCurrentRows}{" "}
-                      件は、カード利用として認識されていないため、どの請求月の一覧にも含まれていません。分割・リボ・ボーナス払い、金額を読み取れない利用、まだ処理していない明細などです。
+                      件は、カード利用として認識されていないため、どの請求月の一覧にも含まれていません。
                     </p>
+                    <UnrecognizedReasons reasons={data.coverage.unrecognizedReasons} />
                     <details className="inline-disclosure">
                       <summary>対象外の条件</summary>
                       <ul className="warning-list">

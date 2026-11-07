@@ -137,3 +137,14 @@ release stays the operator's alone (class R3): only a person who checked the
 execution can confirm it stopped. The operator routes keep their Access
 operator check, same-origin JSON, settings header and body bound; a delegated
 principal reaches the same writers through the MCP tools, never these routes.
+
+## Amendment: a silent lease is freed by the Processor (2026-11-07, ADR 0085)
+
+Status: proposed (ADR 0085)
+
+[ADR 0085](0085-collection-lease-heartbeat.md) replaces "a process death leaves
+a lease blocked; only the operator … may release that exact lease": a holder
+writes a heartbeat on D1's clock while it runs and stops itself within 13
+minutes, and the Processor's tick frees a lease whose heartbeat is 10 minutes
+old, with an audit record. Uncertain occurrences are still never replayed, and
+the operator's release is unchanged.

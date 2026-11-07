@@ -47,9 +47,10 @@ import {
 } from "../../../../packages/collection/src/operation-rpc.ts";
 import { CollectionKeyError, terminalKey } from "../../../../packages/collection/src/keys.ts";
 import { afterMaintenance } from "../../../../packages/collection/src/schedule-model.ts";
+import { isLeaseAbortCode } from "../../../../packages/collection/src/schedule-result.ts";
 import { d1CommandStore } from "../../../../packages/storage-d1/src/core/command-store.ts";
 import type { D1Like } from "../../../../packages/storage-d1/src/d1.ts";
-import { registerCollectionRun, type CollectionEnv } from "../collection/index.ts";
+import { registerCollectionRun, safeFailureCode, type CollectionEnv } from "../collection/index.ts";
 import { maintenanceForSchedule } from "../schedule-store.ts";
 
 /** Requests taken per tick. */
@@ -143,6 +144,12 @@ export interface DispatchOptions {
   collectors?: (connection: OperationConnection) => CollectorRpc | null;
   /** The connection table; the closed mirror of config/alarm-jobs.json unless a test names its own. */
   connections?: readonly OperationConnection[];
+  /**
+   * Told the safe code (the error's class, never its message) of each
+   * `import` registration that threw. The throw is counted in `failed` and
+   * the request looked at again later; it never fails the lane.
+   */
+  onFailure?: (code: string) => void;
 }
 
 /**
@@ -201,7 +208,7 @@ export async function dispatchOperations(
     now,
   };
   for (const receipt of pending) {
-    const outcome = await dispatchOne(env, store, receipt, now, options.budget, collectors);
+    const outcome = await dispatchOne(env, store, receipt, now, options, collectors);
     if (outcome === "dispatched") summary.dispatched += 1;
     else if (outcome === "failed") summary.failed += 1;
     else if (outcome === "awaiting") summary.awaiting += 1;
@@ -230,13 +237,13 @@ async function dispatchOne(
   store: CommandStore,
   receipt: OperationReceipt,
   now: () => Date,
-  budget: RegistrationBudget | undefined,
+  options: Pick<DispatchOptions, "budget" | "onFailure">,
   collectors: CollectorContext,
 ): Promise<OneOutcome> {
   const at = now();
   switch (receipt.kind) {
     case "import":
-      return dispatchImport(env, store, receipt, at, budget);
+      return dispatchImport(env, store, receipt, at, options.budget, options.onFailure);
     case "replay":
       return dispatchReplay(env, store, receipt, at);
     case "collection":
@@ -266,6 +273,7 @@ async function dispatchImport(
   receipt: OperationReceipt,
   at: Date,
   budget: RegistrationBudget | undefined,
+  onFailure: ((code: string) => void) | undefined,
 ): Promise<OneOutcome> {
   const payload = await operationRequestPayload(store, receipt.operationId);
   const source = typeof payload?.source === "string" ? payload.source : null;
@@ -273,12 +281,33 @@ async function dispatchImport(
   if (!source || !runId || !terminalAddressable(source, runId))
     return fail(store, receipt, "operation_payload_invalid", at);
 
-  const result = await registerCollectionRun(
-    env,
-    { source, runId },
-    budget === undefined ? {} : { budget },
-  );
   const iso = at.toISOString();
+  let result: Awaited<ReturnType<typeof registerCollectionRun>>;
+  try {
+    result = await registerCollectionRun(
+      env,
+      { source, runId },
+      budget === undefined ? {} : { budget },
+    );
+  } catch (error) {
+    // Not a verdict about the terminal — R2 or CORE unavailable, or a refusal
+    // CORE made that the derivation did not foresee — so no stage is
+    // recorded, as the collection scan records nothing for a run that threw.
+    // The request is kept, counted as attempted and moved behind the queue
+    // with a closed code, so it neither fails the lane nor holds the head of
+    // the queue while the cause lasts. The class is reported, never the
+    // message, which may quote a key.
+    onFailure?.(safeFailureCode(error));
+    await recordDispatch({
+      store,
+      operationId: receipt.operationId,
+      outcome: "retry",
+      now: iso,
+      retryAtMs: at.valueOf() + RETRY_MS,
+      failureCode: "registration_failed",
+    });
+    return "failed";
+  }
   switch (result.outcome) {
     case "registered":
     case "already_registered": {
@@ -587,15 +616,19 @@ async function dispatchCollector(
             kind: "uncertain",
             reasonCode: threw ? "dispatch_uncertain" : "collector_result_invalid",
           }
-        : result.status === "completed"
-          ? action === "collect"
-            ? { kind: "collected", runIds: result.runIds }
-            : { kind: "refreshed" }
-          : {
-              kind: "failed",
-              reasonCode: result.failureCode ?? "collection_failed",
-              runIds: result.runIds,
-            },
+        : isLeaseAbortCode(result.failureCode)
+          ? // The holder stopped itself after it may have reached the provider
+            // (ADR 0085): uncertain, like a lost answer, and never replayed.
+            { kind: "uncertain", reasonCode: result.failureCode }
+          : result.status === "completed"
+            ? action === "collect"
+              ? { kind: "collected", runIds: result.runIds }
+              : { kind: "refreshed" }
+            : {
+                kind: "failed",
+                reasonCode: result.failureCode ?? "collection_failed",
+                runIds: result.runIds,
+              },
   });
   return "started";
 }

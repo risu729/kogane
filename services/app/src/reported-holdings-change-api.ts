@@ -63,15 +63,28 @@ export async function reportedHoldingsChangeApi(
   // The reader authority: every source and account, summaries and records.
   if (!readerGrant(subject).capabilities.includes("summary.read"))
     throw new HttpError(403, "forbidden");
-  for (const [key, value] of url.searchParams)
-    if (!PARAMETERS.includes(key) || url.searchParams.getAll(key).length !== 1 || !value)
+  return json(await readHoldingsChange(env, url.searchParams));
+}
+
+/**
+ * The two dated reported states side by side for these query parameters: the
+ * answer of the route and of `kogane.reported-holdings-change.read`
+ * (ADR 0081), once the caller's authority and the store's views are known.
+ * Its refusals are `HttpError`s with the route's closed codes.
+ */
+export async function readHoldingsChange(
+  env: Env,
+  params: URLSearchParams,
+): Promise<Record<string, unknown>> {
+  for (const [key, value] of params)
+    if (!PARAMETERS.includes(key) || params.getAll(key).length !== 1 || !value)
       throw new HttpError(400, "invalid_query");
-  const from = url.searchParams.get("from");
-  const to = url.searchParams.get("to");
+  const from = params.get("from");
+  const to = params.get("to");
   if (!validDate(from) || !validDate(to)) throw new HttpError(400, "invalid_date");
-  const source = url.searchParams.get("source");
+  const source = params.get("source");
   if (source !== null && !SOURCE.test(source)) throw new HttpError(400, "invalid_query");
-  const account = url.searchParams.get("account");
+  const account = params.get("account");
   if (account !== null && !ACCOUNT.test(account)) throw new HttpError(400, "invalid_query");
   let change;
   try {
@@ -93,5 +106,5 @@ export async function reportedHoldingsChangeApi(
     }
     throw error;
   }
-  return json({ apiVersion: 2, ...change });
+  return { apiVersion: 2, ...change };
 }

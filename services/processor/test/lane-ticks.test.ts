@@ -94,6 +94,7 @@ const RESULTS = {
     written: 1,
     debitAccountEvidence: 1,
     unmatched: {
+      statement_total_refund_or_zero: 4,
       statement_not_comparable: 1,
       no_debit_in_window: 2,
       no_equal_amount_debit: 0,
@@ -163,7 +164,12 @@ const RESULTS = {
 /** The settlement sweep's synthetic result as its tick keeps it: closed codes only. */
 const SETTLEMENT_COUNTS = {
   ...RESULTS.settlements,
-  unmatched: { statement_not_comparable: 1, no_debit_in_window: 2, no_equal_amount_debit: 0 },
+  unmatched: {
+    statement_total_refund_or_zero: 4,
+    statement_not_comparable: 1,
+    no_debit_in_window: 2,
+    no_equal_amount_debit: 0,
+  },
 };
 
 /** Every stage wired, each resolving to its synthetic result and counting its calls. */
