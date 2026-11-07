@@ -262,6 +262,7 @@ describe("production observation API", () => {
         ...CENTRAL_STORE_CAPABILITIES,
         reportedStateOnDate: true,
         reconstructedStateOnDate: true,
+        reportArtifacts: true,
         eventsV2: true,
         rewardsV2: true,
         cardPurchaseRecognition: true,

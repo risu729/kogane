@@ -1,4 +1,8 @@
-import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
+import {
+  withCollectionLease,
+  type CollectionLeaseOptions,
+  type LeaseTiming,
+} from "../../../packages/collection/src/schedule-lease";
 import {
   scheduledFailure,
   scheduledResult,
@@ -22,7 +26,13 @@ import {
   type SharedRunSummary,
 } from "./shared-collection";
 import { describeArtifact, runPrefix } from "./storage";
-import { blockedScheduleResult, sessionFailureCode, shouldReauthenticate } from "./session-policy";
+import {
+  blockedScheduleResult,
+  manualAgreementPendingSince,
+  reauthCooldownMs,
+  sessionFailureCode,
+  shouldReauthenticate,
+} from "./session-policy";
 import type {
   CollectionFailure,
   CollectionManifest,
@@ -49,8 +59,8 @@ const INITIAL_HEALTH: HealthState = {
   lastReauthAttemptAt: null,
   lastReauthSuccessAt: null,
   lastReauthErrorCode: null,
+  manualAgreementPendingSince: null,
 };
-const REAUTH_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 export class SbiVcSessionState extends DurableObject<Env> {
   #running: Promise<HealthState> | null = null;
   #reauthRunning: Promise<HealthState> | null = null;
@@ -76,40 +86,60 @@ export class SbiVcSessionState extends DurableObject<Env> {
     }
   }
   async getHealth(): Promise<HealthState> {
-    return { ...INITIAL_HEALTH, ...(await this.ctx.storage.get<HealthState>("health")) };
+    const health = { ...INITIAL_HEALTH, ...(await this.ctx.storage.get<HealthState>("health")) };
+    // A record written before the status was closed may still hold the
+    // gateway's own string; it is read, and so re-written, as `rejected`.
+    const status: unknown = health.lastGatewayStatus;
+    health.lastGatewayStatus = status === "OK" ? "OK" : status == null ? null : "rejected";
+    return health;
   }
   async runKeepAlive(): Promise<HealthState> {
-    return withCollectionLease(this.env, "sbi-vc-trade", async () => {
-      if (this.#running) return this.#running;
-      this.#running = this.#exclusive(() => this.#performKeepAlive());
-      try {
-        return await this.#running;
-      } finally {
-        this.#running = null;
-      }
-    });
+    return withCollectionLease(
+      this.env,
+      "sbi-vc-trade",
+      async (signal) => {
+        if (this.#running) return this.#running;
+        this.#running = this.#exclusive(() => this.#performKeepAlive(signal));
+        try {
+          return await this.#running;
+        } finally {
+          this.#running = null;
+        }
+      },
+      this.#leaseOptions(),
+    );
   }
   async runReauthenticate(force = false): Promise<HealthState> {
-    return withCollectionLease(this.env, "sbi-vc-trade", async () => {
-      if (this.#reauthRunning) return this.#reauthRunning;
-      this.#reauthRunning = this.#exclusive(() => this.#performReauthenticate(force));
-      try {
-        return await this.#reauthRunning;
-      } finally {
-        this.#reauthRunning = null;
-      }
-    });
+    return withCollectionLease(
+      this.env,
+      "sbi-vc-trade",
+      async () => {
+        if (this.#reauthRunning) return this.#reauthRunning;
+        this.#reauthRunning = this.#exclusive(() => this.#performReauthenticate(force));
+        try {
+          return await this.#reauthRunning;
+        } finally {
+          this.#reauthRunning = null;
+        }
+      },
+      this.#leaseOptions(),
+    );
   }
   async runCollection(): Promise<CollectionSummary> {
-    return withCollectionLease(this.env, "sbi-vc-trade", async () => {
-      if (this.#collectionRunning) return this.#collectionRunning;
-      this.#collectionRunning = this.#exclusive(() => this.#performCollection());
-      try {
-        return await this.#collectionRunning;
-      } finally {
-        this.#collectionRunning = null;
-      }
-    });
+    return withCollectionLease(
+      this.env,
+      "sbi-vc-trade",
+      async () => {
+        if (this.#collectionRunning) return this.#collectionRunning;
+        this.#collectionRunning = this.#exclusive(() => this.#performCollection());
+        try {
+          return await this.#collectionRunning;
+        } finally {
+          this.#collectionRunning = null;
+        }
+      },
+      this.#leaseOptions(),
+    );
   }
   /**
    * U09: record a collection that could not start because the session was
@@ -291,7 +321,8 @@ export class SbiVcSessionState extends DurableObject<Env> {
     const attemptAt = new Date().toISOString();
     if (!force && previous.lastReauthAttemptAt) {
       const elapsed = Date.now() - Date.parse(previous.lastReauthAttemptAt);
-      if (Number.isFinite(elapsed) && elapsed < REAUTH_COOLDOWN_MS) return previous;
+      if (Number.isFinite(elapsed) && elapsed < reauthCooldownMs(previous, Date.now()))
+        return previous;
     }
     try {
       if (typeof this.env.PASSKEY_CREDENTIAL !== "string" || !this.env.PASSKEY_CREDENTIAL) {
@@ -306,6 +337,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
         lastReauthAttemptAt: attemptAt,
         lastReauthSuccessAt: attemptAt,
         lastReauthErrorCode: null,
+        manualAgreementPendingSince: null,
       };
       // New session, new generation — written in the same batch as the session
       // it names, so a failed re-authentication above leaves the previous
@@ -323,12 +355,29 @@ export class SbiVcSessionState extends DurableObject<Env> {
         ...previous,
         lastReauthAttemptAt: attemptAt,
         lastReauthErrorCode: errorCode,
+        manualAgreementPendingSince: manualAgreementPendingSince(previous, errorCode, attemptAt),
       };
       await this.ctx.storage.put("health", health);
       console.error(JSON.stringify({ message: "sbi_vc_reauth", outcome: "failure", errorCode }));
       return health;
     }
   }
+  /**
+   * A holder that stopped itself but whose operation did not settle is ended
+   * by resetting this object (ADR 0085): its in-memory operation chain goes
+   * with it, so a hung provider request cannot keep the lease alive. The
+   * reset fails the object's in-flight calls with the reason as their error
+   * message, so the abort's own code is the reason: the Worker's
+   * `scheduledFailure` then still reports it, and the run ends `uncertain`.
+   */
+  #leaseOptions(): CollectionLeaseOptions {
+    return {
+      forceStop: (code) => this.ctx.abort(code),
+      ...(this.leaseTiming ? { timing: this.leaseTiming } : {}),
+    };
+  }
+  /** Test seam: shorter lease clocks. Never set outside tests. */
+  leaseTiming: LeaseTiming | undefined;
   async #exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.#operationTail;
     let release!: () => void;
@@ -342,7 +391,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
       release();
     }
   }
-  async #performKeepAlive(): Promise<HealthState> {
+  async #performKeepAlive(signal?: AbortSignal): Promise<HealthState> {
     const attemptAt = new Date().toISOString();
     const previous = await this.getHealth();
     let stage = "load_session";
@@ -352,6 +401,8 @@ export class SbiVcSessionState extends DurableObject<Env> {
       const response = await fetch(TRADE_URL, {
         method: "POST",
         redirect: "manual",
+        // The holder's stop (ADR 0085) cuts off a provider response that never comes.
+        ...(signal ? { signal } : {}),
         headers: {
           Accept: "application/json",
           "Content-Type": "application/json",
@@ -373,12 +424,14 @@ export class SbiVcSessionState extends DurableObject<Env> {
       stage = "parse_gateway";
       const meta = parseGatewayMeta(parsed);
       if (meta.status !== "OK") {
+        // The provider's status string is provider text: health keeps only
+        // that the gateway did not answer `OK`, never what it said instead.
         return await this.recordFailure(
           previous,
           attemptAt,
           response.status,
           "gateway_rejected",
-          meta.status,
+          "rejected",
         );
       }
       stage = "apply_cookie";
@@ -391,7 +444,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
         lastAttemptAt: attemptAt,
         lastSuccessAt: attemptAt,
         lastHttpStatus: response.status,
-        lastGatewayStatus: meta.status,
+        lastGatewayStatus: "OK",
         lastCookieUpdateCount: updated.updateCount,
         consecutiveFailures: 0,
         lastErrorCode: null,
@@ -407,6 +460,10 @@ export class SbiVcSessionState extends DurableObject<Env> {
       );
       return health;
     } catch (error) {
+      // A holder that stopped itself (ADR 0085) does not know what the gateway
+      // did with the request: the stop's own code reaches the caller, which
+      // records the run uncertain, and the health record is left as it was.
+      if (signal?.aborted) throw signal.reason;
       const code = `${stage}_${classifyError(error)}`;
       return await this.recordFailure(previous, attemptAt, null, code);
     }
@@ -452,7 +509,7 @@ export class SbiVcSessionState extends DurableObject<Env> {
     attemptAt: string,
     httpStatus: number | null,
     errorCode: string,
-    gatewayStatus: string | null = null,
+    gatewayStatus: HealthState["lastGatewayStatus"] = null,
   ): Promise<HealthState> {
     const health: HealthState = {
       ...previous,

@@ -5,6 +5,7 @@ import {
   useIdentityCoverage,
   useIdentityInstruments,
   useIdentityConnections,
+  useInstrumentCoverage,
 } from "../identity-api.ts";
 import { EmptyState, Kv, KvRow, ObservationLink, Panel, QueryBoundary } from "../ui.tsx";
 import {
@@ -14,6 +15,8 @@ import {
 import { AccountConnectionDetails, AccountConnectionInventory } from "../account-connection.tsx";
 import { IdentityStatusBadge } from "../organization.tsx";
 import { Link } from "../router.tsx";
+import { IDENTIFIER_STATE_LABELS } from "../instrument-candidate-display.tsx";
+import { IDENTIFIER_RESOLUTION_STATES } from "../../../../packages/domain/src/instrument-candidates.ts";
 export function IdentitiesPage(): ReactNode {
   const [source, setSource] = useViewState("identity.source");
   const [draft, setDraft] = useViewState("identity.draft");
@@ -40,6 +43,11 @@ export function IdentitiesPage(): ReactNode {
         <p className="footnote">
           <Link to="/identities/instrument-candidates">
             同じ銘柄の可能性がある識別子の候補を確認する
+          </Link>
+        </p>
+        <p className="footnote">
+          <Link to="/identities/account-candidates">
+            集約サービスの連携と取得元の口座の対応候補を確認する
           </Link>
         </p>
       </div>
@@ -156,6 +164,7 @@ export function IdentitiesPage(): ReactNode {
           )}
         </QueryBoundary>
       </Panel>
+      <InstrumentCoverage source={source} />
       <Panel
         id="identity-list"
         title={tab === "accounts" ? "整理済みの口座" : "整理済みの通貨・銘柄"}
@@ -191,6 +200,76 @@ export function IdentitiesPage(): ReactNode {
         )}
       </Panel>
     </>
+  );
+}
+/**
+ * Per-source counts of security, crypto and product identifiers by their
+ * candidate state (ADR 0073). An identifier used by two sources counts under
+ * each, so no total across sources is shown. A refusal is shown as the
+ * reason, never as zeros.
+ */
+function InstrumentCoverage({ source }: { source: string }): ReactNode {
+  const query = useInstrumentCoverage(source);
+  return (
+    <Panel
+      id="identity-instrument-coverage"
+      title="銘柄の整理状況"
+      note="株式・暗号資産・商品の識別子を、現在の整理済み記録で使う取得元ごとに数えます。複数の取得元で使われる識別子はそれぞれに数えるため、取得元をまたいだ合計はありません。照合率ではありません。"
+    >
+      <QueryBoundary query={query} label="銘柄の整理状況" coverageNotice={false}>
+        {(data) =>
+          data.rows.length === 0 ? (
+            <div className="panel-body">
+              <EmptyState>
+                {data.query.source === null
+                  ? "現在の整理済み記録に、株式・暗号資産・商品の識別子を使う取得元がありません。"
+                  : "この取得元の現在の整理済み記録は、株式・暗号資産・商品の識別子を使っていません。"}
+                未処理の記録は含まれません。
+              </EmptyState>
+            </div>
+          ) : (
+            <div
+              className="table-scroll"
+              role="region"
+              aria-label="取得元ごとの銘柄の識別子"
+              tabIndex={0}
+            >
+              <table className="identity-coverage-table">
+                <caption>
+                  取得元ごとの銘柄の識別子の数と、同一性の候補に対する判断状況の内訳。表にない取得元は、現在の整理済み記録でこれらの識別子を使っていません。
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">取得元</th>
+                    <th scope="col" className="num">
+                      識別子
+                    </th>
+                    {IDENTIFIER_RESOLUTION_STATES.map((state) => (
+                      <th key={state} scope="col" className="num">
+                        {IDENTIFIER_STATE_LABELS[state]}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.rows.map((row) => (
+                    <tr key={row.source}>
+                      <td>{row.source}</td>
+                      <td className="num">{row.identifiers}</td>
+                      {IDENTIFIER_RESOLUTION_STATES.map((state) => (
+                        <td key={state} className="num">
+                          {row.states[state]}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+      </QueryBoundary>
+    </Panel>
   );
 }
 function Card({

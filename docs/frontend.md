@@ -55,16 +55,18 @@ refresh failures retain previously authorized records with an explicit warning.
 `apps/web/src/styles.css` is an index of `@import` lines; the rules live in
 `apps/web/src/styles/`, imported in cascade order:
 
-| File             | Holds                                                                                                                                            |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tokens.css`     | Every colour, type size, spacing step, radius and shadow, as `:root` custom properties                                                           |
-| `base.css`       | Reset, body, links, focus ring, headings, `summary`, code, value and list helpers                                                                |
-| `shell.css`      | App shell: sidebar, brand, navigation, workspace bar, source notice, main, footer                                                                |
-| `components.css` | Panels and note tones, badges, buttons, filters, key/value grids, states, pagination, disclosures, tiles, provenance chain, code preview         |
-| `tables.css`     | Scroll region, cell defaults, sortable headers, the transaction/balance/identity column contracts                                                |
-| `pages.css`      | Page-specific layouts: overview, source cards, positions, observation lists, rewards, settlement, card ownership, card purchases, reported state |
+| File             | Holds                                                                                                                                                     |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tokens.css`     | Every colour, type size, spacing step, radius and shadow, as `:root` custom properties                                                                    |
+| `base.css`       | Reset, body, links, focus ring, headings, `summary`, code, value and list helpers                                                                         |
+| `shell.css`      | App shell: sidebar, brand, navigation, workspace bar, source notice, main, footer                                                                         |
+| `components.css` | Panels and note tones, badges, buttons, filters, key/value grids, states, pagination, disclosures, tiles, provenance chain, code preview                  |
+| `tables.css`     | Scroll region, cell defaults, sortable headers, the transaction/balance/identity column contracts                                                         |
+| `pages.css`      | Page-specific layouts: overview, source cards, positions, observation lists, rewards, settlement, card ownership, card purchases, reported state, reports |
 
-`balance-display.css` stays beside its component. Responsive rules sit next to
+`styles/schedules.css` is not in the index: `pages/Schedules.tsx` imports it
+directly, and it still carries raw pixel sizes and fallback colours beside its
+token references. `balance-display.css` stays beside its component. Responsive rules sit next to
 the rule they modify, not in one media block, so page work touches one file.
 
 The scales in `tokens.css`:
@@ -129,27 +131,28 @@ parameters each capability unlocks, and the client argument builder are one
 definition in `packages/observation-shared/src/api-schema.ts`. The response
 validator (`validApiResponse`) checks the object against that schema, both
 servers derive their accepted parameters from it, and the same
-conformance checks (`test/api-conformance.ts`) run against the local store,
+conformance checks (`packages/observation-shared/test-support/api-conformance.ts`) run against the local store,
 the local synthetic snapshot adapter, and the production Worker. Capabilities are never
 an authorization switch: Access JWT verification, closed responses on auth
 failure, and `no-store` apply before any capability is read.
 
-| Capability             | Values                  | Local / demo | Production                    | Effect in the client                                                                    |
-| ---------------------- | ----------------------- | ------------ | ----------------------------- | --------------------------------------------------------------------------------------- |
-| `contractVersion`      | `observation-api-v1`    | yes          | yes                           | Validator rejects any other version                                                     |
-| `readOnly`             | `true`                  | yes          | yes                           | No write control exists                                                                 |
-| `rawEvidence`          | `true`                  | yes          | yes                           | `/api/raw/<sha256>` links                                                               |
-| `liveCollectors`       | `false`                 | yes          | yes                           | Refresh never means a collector ran                                                     |
-| `measureViews`         | `balances`, `summaries` | none         | both                          | `view=` is sent only for an advertised view                                             |
-| `identityReadModes`    | `latest`, `as-recorded` | none         | both                          | The 口座・銘柄 page and link exist; `identityRead=` is sent only for an advertised mode |
-| `paginationVersion`    | `none`, `offset-v1`     | `none`       | `offset-v1`                   | Coverage record, next-page links, no client column sort                                 |
-| `balancesV2`           | boolean                 | false        | sealed snapshot               | The 最新の残高 read-model section exists; the v2 balance routes are requested           |
-| `balancesV2Pagination` | `none`, `keyset-v2`     | `none`       | `keyset-v2` when `balancesV2` | Cursor paging over one fixed snapshot, with a "read the newest snapshot" action         |
-| `collectionFilters`    | boolean                 | false        | true                          | Server filter controls replace client record controls                                   |
-| `organizedDisplay`     | boolean                 | false        | true                          | Rows carry `organization`                                                               |
-| `financialProducts`    | boolean                 | false        | true                          | Organized rows may carry a product claim                                                |
-| `evidenceHistory`      | boolean                 | false        | true                          | The 取得履歴 route and link exist                                                       |
-| `sharedQuery`          | boolean                 | false        | true                          | Summary counts come from `GET /api/v2/query`, not page arithmetic                       |
+| Capability             | Values                  | Local / demo | Production                    | Effect in the client                                                                                                                                                                                                                                                                                                         |
+| ---------------------- | ----------------------- | ------------ | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `contractVersion`      | `observation-api-v1`    | yes          | yes                           | Validator rejects any other version                                                                                                                                                                                                                                                                                          |
+| `readOnly`             | `true`                  | yes          | yes                           | No write control exists                                                                                                                                                                                                                                                                                                      |
+| `rawEvidence`          | `true`                  | yes          | yes                           | `/api/raw/<sha256>` links                                                                                                                                                                                                                                                                                                    |
+| `liveCollectors`       | `false`                 | yes          | yes                           | Refresh never means a collector ran                                                                                                                                                                                                                                                                                          |
+| `measureViews`         | `balances`, `summaries` | none         | both                          | `view=` is sent only for an advertised view                                                                                                                                                                                                                                                                                  |
+| `identityReadModes`    | `latest`, `as-recorded` | none         | both                          | With `latest`, the 口座・銘柄 page and link exist; its `/api/identity/*` reads send no `identityRead=` (the server default `latest` applies). No control sets the parameter: an `identityRead=` already in the page URL is forwarded on transaction, balance, v2 balance and position list reads only for an advertised mode |
+| `paginationVersion`    | `none`, `offset-v1`     | `none`       | `offset-v1`                   | Coverage record, next-page links, no client column sort                                                                                                                                                                                                                                                                      |
+| `balancesV2`           | boolean                 | false        | sealed snapshot               | The 最新の残高 read-model section exists; the v2 balance routes are requested                                                                                                                                                                                                                                                |
+| `balancesV2Pagination` | `none`, `keyset-v2`     | `none`       | `keyset-v2` when `balancesV2` | Cursor paging over one fixed snapshot, with a "read the newest snapshot" action                                                                                                                                                                                                                                              |
+| `collectionFilters`    | boolean                 | false        | true                          | Server filter controls replace client record controls                                                                                                                                                                                                                                                                        |
+| `organizedDisplay`     | boolean                 | false        | true                          | Rows carry `organization`                                                                                                                                                                                                                                                                                                    |
+| `financialProducts`    | boolean                 | false        | true                          | Organized rows may carry a product claim                                                                                                                                                                                                                                                                                     |
+| `evidenceHistory`      | boolean                 | false        | true                          | The 取得履歴 route and link exist                                                                                                                                                                                                                                                                                            |
+| `sharedQuery`          | boolean                 | false        | true                          | Summary counts come from `GET /api/v2/query`, not page arithmetic                                                                                                                                                                                                                                                            |
+| `reportArtifacts`      | boolean                 | false        | `report_artifacts` present    | The 評価レポート route and link exist; the report routes are requested                                                                                                                                                                                                                                                       |
 
 `balancesV2` is the one capability that also depends on stored state: the
 production Worker advertises it only when the balance projection has a sealed
@@ -212,6 +215,19 @@ reports synthetic data through `/api/meta`. It does not read or modify the
 regular `state/` database. A normal shutdown removes its temporary store.
 An abrupt process termination can leave a temporary `kogane-preview-*`
 directory; it contains only synthetic data.
+
+Because `/api/meta` reports `source.classification: synthetic`, the client
+mounts no financial or evidence view, and no command view other than the
+schedules page below. Every such route (取引, 残高, 保有資産, 原本・証跡 and the
+others) shows only 表示対象の記録がありません and 接続先を確認してください。,
+even though the preview API still serves the fixtures
+([synthetic display test](../apps/web/test/synthetic-display.browser.test.ts)).
+The preview is therefore a check of the shell and that guard, not of the
+financial pages. 収集スケジュール (`/schedules`) and 監査ログ (`/audit`) are
+drawn outside that guard, but the preview serves neither
+`/api/ops/v1/schedules` nor `/api/v2/audit`: the
+schedules page shows its load-error messages, and the audit page says that
+this source provides no audit log.
 
 `mise run //experiments/observation-pipeline-local:serve` continues to read the regular local store. Its metadata
 reports the data classification as unknown: an operator may have ingested

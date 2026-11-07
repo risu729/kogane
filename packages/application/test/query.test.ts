@@ -7,10 +7,13 @@ import { parseQueryRequest, querySpecDigest, type QueryRequest } from "../src/qu
 import { CONTEXT_INPUTS, grant, HOSTILE_DESCRIPTION, OVERVIEW, reader } from "./fixture.ts";
 import type { Overview } from "../../../packages/observation-shared/src/api-contract.ts";
 import type { Grant } from "../src/grants.ts";
-import type {
-  BalanceProjectionReader,
-  ProjectionCoverageRow,
-  SubtotalRow,
+import type { HoldingsProjection } from "../src/query/execute.ts";
+import {
+  type BalanceSnapshotRow,
+  type ProjectionCoverageRow,
+  SNAPSHOT_REFUSALS,
+  type SnapshotRefusal,
+  type SubtotalRow,
 } from "../../read-model/src/index";
 
 const anyData = (value: unknown): value is QueryData => value !== null && typeof value === "object";
@@ -23,7 +26,7 @@ async function run(
   grantValue: Grant,
   body: QueryRequest,
   rows = reader(),
-  projection?: BalanceProjectionReader,
+  projection?: HoldingsProjection,
 ) {
   const opened = await openContext(grantValue, CONTEXT_INPUTS, { query: body });
   return executeQuery({
@@ -37,37 +40,47 @@ async function run(
 }
 
 /**
- * A stand-in for A07's sealed projection. Only the three methods `holdings`
- * uses are implemented; anything else would be a read this intent must not do.
+ * A stand-in for A07's sealed projection. Only what `holdings` uses is
+ * implemented: the servable snapshot (or its refusal) and the two snapshot
+ * queries. A refused snapshot's rows throw if read, so the test proves the
+ * refusal is answered before anything is summed.
  */
 function projectionStub(options: {
   snapshot?: boolean;
+  refusal?: SnapshotRefusal;
   rows?: SubtotalRow[];
   coverage?: ProjectionCoverageRow[];
   oversized?: boolean;
-}): BalanceProjectionReader {
-  const unsupported = () => {
-    throw new Error("holdings must not read this");
+}): HoldingsProjection {
+  const snapshot = {
+    snapshot_id: "a".repeat(64),
+    created_at: "2026-09-12T00:00:00Z",
+    row_count: options.rows?.length ?? 0,
+    input_manifest_json: "{}",
+    projection_release: "balance-projection-v1",
+  } as BalanceSnapshotRow;
+  const refused = options.refusal;
+  const guard = () => {
+    if (refused !== undefined) throw new Error("a refused snapshot must not be read");
   };
   return {
-    currentSnapshot: async () =>
-      options.snapshot === false
-        ? null
-        : {
-            snapshot_id: "a".repeat(64),
-            created_at: "2026-09-12T00:00:00Z",
-            row_count: options.rows?.length ?? 0,
-            input_manifest_json: "{}",
-            projection_release: "balance-projection-v1",
-          },
-    snapshot: unsupported,
-    projectionInputs: unsupported,
-    latestPage: unsupported,
-    legacyLatestPage: unsupported,
-    historyPage: unsupported,
-    coverage: async () => options.coverage ?? [],
-    summableQuantities: async () => (options.oversized === true ? null : (options.rows ?? [])),
-  } as unknown as BalanceProjectionReader;
+    servable: async () =>
+      refused !== undefined
+        ? { refusal: refused }
+        : options.snapshot === false
+          ? null
+          : { snapshot },
+    reader: {
+      coverage: async () => {
+        guard();
+        return options.coverage ?? [];
+      },
+      summableQuantities: async () => {
+        guard();
+        return options.oversized === true ? null : (options.rows ?? []);
+      },
+    },
+  };
 }
 
 function adopted(overrides: Partial<SubtotalRow> = {}): SubtotalRow {
@@ -105,6 +118,75 @@ describe("query spec validation", () => {
       expect(outcome.ok).toBe(false);
       if (!outcome.ok) expect(outcome.code).toBe("unsupported_semantics");
     }
+  });
+
+  test("an activity date range is calendar days in order, as the v1 route reads it", () => {
+    const activity = (filters: Record<string, string>) =>
+      parseQueryRequest({ intent: "activity", filters });
+    expect(activity({ from: "2024-02-29", to: "2024-03-01" })).toMatchObject({ ok: true });
+    expect(activity({ from: "2026-01-01", to: "2026-01-01" })).toMatchObject({ ok: true });
+    for (const day of ["2026-02-29", "2026-02-30", "2026-04-31", "2026-13-01", "2026-00-10"]) {
+      expect(activity({ from: day })).toEqual({
+        ok: false,
+        code: "invalid_query",
+        refs: ["filter:from"],
+      });
+      expect(activity({ to: day })).toEqual({
+        ok: false,
+        code: "invalid_query",
+        refs: ["filter:to"],
+      });
+    }
+    expect(activity({ from: "2026-12-31", to: "2026-01-01" })).toEqual({
+      ok: false,
+      code: "invalid_query",
+      refs: ["filter:from", "filter:to"],
+    });
+  });
+
+  test("a malformed value of a known key is invalid_query naming that key, never dropped", () => {
+    const refused = (body: unknown, ref: string) => {
+      const outcome = parseQueryRequest(body);
+      expect(outcome).toEqual({ ok: false, code: "invalid_query", refs: [ref] });
+    };
+    expect(parseQueryRequest(null)).toEqual({ ok: false, code: "invalid_query", refs: [] });
+    refused({ intent: 7 }, "intent");
+    refused({ intent: "activity", filters: [] }, "filters");
+    for (const value of ["", "x".repeat(513), "a\u0000b", "a\u007fb", 1])
+      refused({ intent: "activity", filters: { source: value } }, "filter:source");
+    for (const value of ["2026-9-01", "2026-09-01T00:00:00Z", "yesterday"])
+      refused({ intent: "activity", filters: { from: value } }, "filter:from");
+    refused({ intent: "activity", filters: { to: "2026/09/30" } }, "filter:to");
+    refused({ intent: "reported-state", filters: { view: "net-worth" } }, "filter:view");
+    for (const cursor of [1, "c".repeat(2049)]) refused({ intent: "coverage", cursor }, "cursor");
+    for (const limit of [0, 1001, 1.5, "10", Number.NaN])
+      refused({ intent: "coverage", limit }, "limit");
+  });
+
+  test("an accepted request keeps exactly the filters it was given, with defaults made explicit", () => {
+    expect(parseQueryRequest({ intent: "coverage" })).toEqual({
+      ok: true,
+      value: { intent: "coverage", filters: {}, cursor: null, limit: null },
+    });
+    expect(
+      parseQueryRequest({
+        intent: "activity",
+        filters: { source: "fixture-a", from: "2026-09-01", to: "2026-09-30", q: "x".repeat(512) },
+        cursor: "c".repeat(2048),
+        limit: 1000,
+      }),
+    ).toEqual({
+      ok: true,
+      value: {
+        intent: "activity",
+        filters: { source: "fixture-a", from: "2026-09-01", to: "2026-09-30", q: "x".repeat(512) },
+        cursor: "c".repeat(2048),
+        limit: 1000,
+      },
+    });
+    expect(
+      parseQueryRequest({ intent: "reported-state", filters: { view: "summaries" }, limit: 1 }),
+    ).toMatchObject({ ok: true, value: { filters: { view: "summaries" }, limit: 1 } });
   });
 
   test("no request can carry a URL, SQL or an ordering", () => {
@@ -375,6 +457,37 @@ describe("holdings without the adopted projection", () => {
     if (!outcome.ok) return;
     expect(outcome.result.completeness).toBe("unavailable");
   });
+});
+
+describe("holdings over a refused snapshot", () => {
+  // 05 §7: a snapshot built under another CORE epoch, before a use
+  // restriction changed, or in a READ database of another contract is refused
+  // whole. Filtering rows out of it would leave every figure at its old value.
+  for (const refusal of SNAPSHOT_REFUSALS) {
+    test(`${refusal} is unavailable with that code, never a figure`, async () => {
+      const outcome = await run(
+        grant(),
+        request({ intent: "holdings" }),
+        reader(),
+        projectionStub({ refusal, rows: [adopted()] }),
+      );
+      expect(outcome.ok).toBe(true);
+      if (!outcome.ok) return;
+      expect(validFinancialResult(outcome.result, anyData)).toBe(true);
+      expect(outcome.result.completeness).toBe("unavailable");
+      if (outcome.result.data.intent !== "holdings") throw new Error("unreachable");
+      expect(outcome.result.data.units).toEqual([]);
+      expect(outcome.result.coverage.gaps).toEqual([
+        { reasonCode: refusal, scopeRef: outcome.result.resolvedQuery.perimeterRef },
+      ]);
+      expect(outcome.result.quality.numeric).toEqual({
+        state: "not-applicable",
+        reasonCodes: [refusal],
+        evidenceRefs: [],
+      });
+      expect(outcome.result.warnings).toEqual([{ code: refusal, severity: "blocking" }]);
+    });
+  }
 });
 
 describe("holdings from the adopted projection", () => {

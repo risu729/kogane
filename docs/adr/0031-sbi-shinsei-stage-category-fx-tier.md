@@ -1,6 +1,6 @@
 # ADR 0031: The owner's SBI Shinsei stage category, as the same run states it, selects the FX board tier
 
-- Status: proposed
+- Status: accepted (merged 2026-09-28 in #334)
 - Date: 2026-09-27
 - Carried by:
   `packages/parsers/src/parsers/sbi-shinsei-balance-summary-and-stage.ts` (0.1.0),

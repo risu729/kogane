@@ -1,4 +1,5 @@
 import { SchedulesPage } from "./pages/Schedules";
+import { CollectionQualityPage } from "./pages/CollectionQuality.tsx";
 import { useEffect, useRef, type ReactNode } from "react";
 import { useIsFetching, useQueryClient } from "@tanstack/react-query";
 import type {
@@ -8,15 +9,23 @@ import type {
 import { useEvidenceMeta } from "./evidence-api.ts";
 import { EvidenceBoundary } from "./evidence-ui.tsx";
 import { EvidenceArtifactPage, EvidenceHistory, EvidenceRunPage } from "./pages/Evidence.tsx";
-import { Link, usePath } from "./router.tsx";
+import { Link, trimTrailingSlash, usePath } from "./router.tsx";
 import { AppShell, NAV_ICONS, type NavItem } from "./app-shell.tsx";
 import { EmptyState } from "./ui.tsx";
 import type { ApiMetadata } from "../../../packages/observation-shared/src/api-contract.ts";
 import { ParsingHealthNotice } from "./parsing-health.tsx";
 import { GlobalPassEmptyMonthsNotice } from "./global-pass-empty-months.tsx";
 
-function routeFor(path: string) {
+/** Whether the observation app hands this path to the evidence browser's routes. */
+export function isEvidencePath(path: string): boolean {
+  return trimTrailingSlash(path) === "/evidence" || path.startsWith("/runs/");
+}
+
+/** The evidence browser's routes; one trailing slash names the same page, as in matchRoute. */
+export function routeFor(requested: string) {
+  const path = trimTrailingSlash(requested);
   if (path === "/schedules") return { kind: "schedules" as const, title: "収集スケジュール" };
+  if (path === "/collection-quality") return { kind: "quality" as const, title: "収集品質" };
   const artifact = /^\/runs\/(r_[1-9]\d*)\/artifacts\/(a_[1-9]\d*)$/u.exec(path);
   if (artifact)
     return {
@@ -41,6 +50,7 @@ export function EvidenceContent({
   const route = routeFor(usePath());
   const metadata = useEvidenceMeta();
   if (route.kind === "schedules") return <SchedulesPage />;
+  if (route.kind === "quality") return <CollectionQualityPage />;
   return (
     <>
       {route.kind !== "history" ? (
@@ -118,6 +128,12 @@ export function EvidenceApp({
 
   const navItems: NavItem[] = [
     {
+      to: "/collection-quality",
+      label: "収集品質",
+      icon: NAV_ICONS.evidence,
+      current: route.kind === "quality",
+    },
+    {
       to: "/schedules",
       label: "収集スケジュール",
       icon: NAV_ICONS.evidence,
@@ -163,6 +179,10 @@ export function EvidenceApp({
         onRefresh: () => {
           if (client.isFetching({ queryKey: ["evidence-v1"] }) > 0) return;
           void client.invalidateQueries({ queryKey: ["evidence-v1"], refetchType: "active" });
+          void client.invalidateQueries({
+            queryKey: ["collection-quality"],
+            refetchType: "active",
+          });
         },
       }}
       footer={[

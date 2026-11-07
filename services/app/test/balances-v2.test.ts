@@ -291,6 +291,13 @@ describe("v2 balance read model", () => {
     const malformed = await call("/api/v2/balances/latest?cursor=not-a-cursor");
     expect(malformed.status).toBe(400);
     expect(await malformed.json()).toMatchObject({ error: "invalid_cursor" });
+    // A page size is one of the offered sizes as written, not whatever
+    // Number() reads as one.
+    for (const limit of ["0x32", "5e1", "50.0", "+50", "%2050"]) {
+      const odd = await call(`/api/v2/balances/latest?limit=${limit}`);
+      expect(odd.status).toBe(400);
+      expect(await odd.json()).toMatchObject({ error: "invalid_limit" });
+    }
 
     // The snapshot the cursor names is retired and dropped: the reader is
     // told the context expired, never moved silently to a newer list.

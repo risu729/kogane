@@ -6,7 +6,7 @@ import {
 import { sharedRunPersisted, type SharedRunInput } from "./shared-collection";
 import type { PersistRunResult } from "../../../packages/collection/src/index";
 
-import { safeFailureCode, type FailureCode } from "./result";
+import { safeFailureCode, thrownFailureCode, type FailureCode } from "./result";
 
 export function authorized(request: Request, expected: string | undefined): boolean {
   if (!expected || expected.length < 32) return false;
@@ -351,7 +351,7 @@ export class CollectionCoordinator {
         } catch (error) {
           output = {
             status: "failed",
-            reason: safeFailureCode(error instanceof Error ? error.message : null),
+            reason: thrownFailureCode(error),
           };
         }
         run = {

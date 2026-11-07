@@ -5,7 +5,6 @@ import { readDeployOrder, workflowSteps } from "./deploy-order.ts";
 import { REPO_ROOT } from "./repo-root.ts";
 import { releaseProgress } from "./ci/release-ledger.mjs";
 import { containerProgress } from "./ci/cf-container-release.mjs";
-import { grantAllows, parseGrants } from "../../packages/application/src/grants.ts";
 
 const order = readDeployOrder();
 const allTargets = order.workers.filter((worker) => worker.deployBackend === "cf");
@@ -25,7 +24,7 @@ const camel = (value: unknown): any =>
       : value;
 
 describe("cf migration preserves the canonical Wrangler deployment contract", () => {
-  test("current cf deployments share one immutable v2 pin and historical rollback retains v1", () => {
+  test("current cf deployments share one immutable v3 pin and historical rollback retains v1", () => {
     const pins = new Set<string>();
     for (const target of allTargets) {
       const legacy = steps.find((step) => step.body.includes(`id: deploy-${target.name}\n`));
@@ -33,7 +32,7 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(legacy?.body).toMatch(
         /^\s*uses: risu729\/wrangler-deploy-action@[a-f0-9]{40} # v1\.\d+\.\d+$/mu,
       );
-      const pin = /^\s*uses: (risu729\/wrangler-deploy-action@[a-f0-9]{40} # v2\.\d+\.\d+)$/mu.exec(
+      const pin = /^\s*uses: (risu729\/wrangler-deploy-action@[a-f0-9]{40} # v3\.\d+\.\d+)$/mu.exec(
         cf?.body ?? "",
       );
       expect(pin).not.toBeNull();
@@ -222,24 +221,12 @@ describe("cf migration preserves the canonical Wrangler deployment contract", ()
       expect(steps.indexOf(cf!)).toBe(steps.indexOf(legacy!) + 1);
     });
   }
-  test("the configured MCP reader grants only the dedicated identity bounded structured reads", () => {
+  test("the MCP application stays a separate audience, and no grant table is configured (ADR 0084)", () => {
     const old = parseJsonc(readFileSync(`${REPO_ROOT}/services/app/wrangler.jsonc`, "utf8"));
-    const grants = parseGrants(old.vars.AGENT_API_GRANTS);
-    const owner = JSON.parse(old.vars.OPERATOR_SUBJECTS)[0];
-    expect(grants.size).toBe(1);
-    expect(grants.has(owner)).toBe(false);
-    expect(grants.has("mcp-client:ungranted-synthetic-subject")).toBe(false);
-    const grant = grants.get(`mcp-client:${owner}`)!;
-    expect(grant).toBeDefined();
-    expect(grant.scopes).toEqual({ sources: "*", accounts: "*" });
-    expect(grantAllows(grant, "summary.read")).toBe(true);
-    expect(grantAllows(grant, "records.read")).toBe(true);
-    expect(grantAllows(grant, "evidence.read")).toBe(false);
-    expect(grantAllows(grant, "interpretation.propose")).toBe(false);
-    expect(grant.budget.maxRows).toBe(100);
+    expect(old.vars.AGENT_API_GRANTS).toBeUndefined();
+    expect(old.vars.MCP_DELEGATIONS).toBeUndefined();
     expect(old.vars.ACCESS_MCP_AUDIENCE).not.toBe(old.vars.ACCESS_AUDIENCE);
     expect(old.vars.AGENT_GRANTS).toBe("");
-    expect(old.vars.MCP_DELEGATIONS).toBe("");
   });
   test("legacy lifecycle stays canonical and is checked around publication", () => {
     const history: Record<string, unknown[]> = {

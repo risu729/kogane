@@ -10,7 +10,7 @@
 ## Context
 
 Phase 11 asks what adopted events imply from a starting snapshot, beside what
-the provider reported ([roadmap](../roadmap.md#phases-8--11--dated-reported-and-reconstructed-state)).
+the provider reported ([roadmap](../roadmap.md#layers-8--11--dated-reported-and-reconstructed-state)).
 The reported side exists: [reported state on a date](../reported-state.md)
 ([ADR 0019](0019-dated-reported-state.md)) lists, per account, the latest
 complete capture before the end of a date, with each balance's registry metric

@@ -14,6 +14,7 @@ import {
 import { LANE_TICK_COUNTS, laneTick } from "../src/lane-ticks.ts";
 import { runScheduled, type ScheduledStages } from "../src/worker.ts";
 import { startPipeline } from "./harness.ts";
+import { maskRandomTokens } from "../../../packages/application/test/random-tokens.ts";
 
 let mf: Miniflare;
 let env: Env;
@@ -87,7 +88,19 @@ const RESULTS = {
     autoAccepted: 0,
   },
   debitAccounts: { scanned: 3, read: 2, refused: 1, written: 3 },
-  settlements: { scanned: 5, proposed: 1, written: 1, debitAccountEvidence: 1 },
+  settlements: {
+    scanned: 5,
+    proposed: 1,
+    written: 1,
+    debitAccountEvidence: 1,
+    unmatched: {
+      statement_total_refund_or_zero: 4,
+      statement_not_comparable: 1,
+      no_debit_in_window: 2,
+      no_equal_amount_debit: 0,
+      not_a_code: 3,
+    },
+  },
   purchases: PURCHASES,
   rewards: {
     enabled: true,
@@ -147,6 +160,17 @@ const RESULTS = {
   },
   auditOverflow: { counters: 2, written: 2 },
 } satisfies Record<keyof ScheduledStages, object>;
+
+/** The settlement sweep's synthetic result as its tick keeps it: closed codes only. */
+const SETTLEMENT_COUNTS = {
+  ...RESULTS.settlements,
+  unmatched: {
+    statement_total_refund_or_zero: 4,
+    statement_not_comparable: 1,
+    no_debit_in_window: 2,
+    no_equal_amount_debit: 0,
+  },
+};
 
 /** Every stage wired, each resolving to its synthetic result and counting its calls. */
 function stagesFor(
@@ -234,7 +258,8 @@ test("a tick records one row per recorded lane with exactly the counts its log l
   expect(counts["purchase_recognition"]).toEqual(logged);
   expect(counts["purchase_recognition"]).toEqual(PURCHASES);
   expect(counts["reconciliation_sweep"]).toEqual(RESULTS.reconcile);
-  expect(counts["card_settlement_sweep"]).toEqual(RESULTS.settlements);
+  // Only the closed unmatched codes of the settlement sweep are kept.
+  expect(counts["card_settlement_sweep"]).toEqual(SETTLEMENT_COUNTS);
   expect(counts["card_debit_account_sweep"]).toEqual(RESULTS.debitAccounts);
   expect(counts["identity_sweep"]).toEqual(RESULTS.identity);
   // Identifiers, cursors, release names and open-ended outcome keys stay in
@@ -302,7 +327,9 @@ test("a failed lane records `failed` with its safe code, never the message, and 
   expect(JSON.parse(byLane["reconciliation_sweep"]!.counts_json)).toEqual(RESULTS.reconcile);
   expect(byLane["reward_claims_sweep"]).toMatchObject({ outcome: "ran" });
   expect(byLane["decision_outbox"]).toMatchObject({ outcome: "ran" });
-  expect(JSON.stringify(rows)).not.toMatch(/98765|架空|merchant|not an Error/u);
+  // started_at_ms and finished_at_ms are the clock's milliseconds: masked, so
+  // the amount's digits are found only where a row really carries them.
+  expect(maskRandomTokens(JSON.stringify(rows))).not.toMatch(/98765|架空|merchant|not an Error/u);
   // A code that is not a code is reported as `unknown`, as the 0049 check demands.
   expect(laneTick("purchase_recognition", 1, 2, { outcome: "failed", code: "a message" })).toEqual({
     lane: "purchase_recognition",
@@ -467,6 +494,6 @@ test("/status reports the latest tick of every recorded lane", async () => {
   expect(settlement).toMatchObject({
     outcome: "ran",
     errorCode: null,
-    counts: RESULTS.settlements,
+    counts: SETTLEMENT_COUNTS,
   });
 }, 60000);
