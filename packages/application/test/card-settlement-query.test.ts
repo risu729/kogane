@@ -152,12 +152,24 @@ describe("the provider-stated debit account beside each review (ADR 0032)", () =
     reason: string | null,
     proposal: object | null,
     policy = CARD_DEBIT_ACCOUNT_POLICY,
-  ) =>
-    db
-      .prepare(
-        "INSERT INTO card_settlement_debit_account_evidence(candidate_id,statement_id,policy,outcome,reason,proposal_json,created_at) VALUES(?,1,?,?,?,?,'2026-09-12T00:00:00Z')",
-      )
-      .run(candidate, policy, outcome, reason, proposal === null ? null : JSON.stringify(proposal));
+    readerVersion = CARD_INFORMATION_READER_VERSION,
+  ) => {
+    // The reading the row cites: one per reader version, read.
+    const statementId = readerVersion === CARD_INFORMATION_READER_VERSION ? 100 : 101;
+    db.prepare(
+      "INSERT OR IGNORE INTO card_debit_account_statement(id,raw_sha256,card_source_account,reader_version,outcome,refusal_code) VALUES(?,'synthetic-read-sha','synthetic-card',?,'read',NULL)",
+    ).run(statementId, readerVersion);
+    db.prepare(
+      "INSERT INTO card_settlement_debit_account_evidence(candidate_id,statement_id,policy,outcome,reason,proposal_json,created_at) VALUES(?,?,?,?,?,?,'2026-09-12T00:00:00Z')",
+    ).run(
+      candidate,
+      statementId,
+      policy,
+      outcome,
+      reason,
+      proposal === null ? null : JSON.stringify(proposal),
+    );
+  };
   const proposal = (bankSourceAccount: string) => ({
     policy: CARD_DEBIT_ACCOUNT_POLICY,
     status: "proposed",
@@ -204,10 +216,30 @@ describe("the provider-stated debit account beside each review (ADR 0032)", () =
 
   test("a MyJCB candidate shows the newest row under the current policy, else why there is none", async () => {
     const { db, sql } = store();
-    for (const id of ["supports", "other", "none", "older", "unread"]) insert(db, id);
+    for (const id of ["supports", "other", "none", "older", "stale", "unread"]) insert(db, id);
     evidence(db, "supports", "names_other_account", null, proposal("synthetic-other"));
     // A later row of the same candidate under the same policy wins.
     evidence(db, "supports", "supports", null, proposal("synthetic-bank"));
+    // A still later row citing an earlier reader's reading of the page says
+    // nothing about the current reading.
+    evidence(
+      db,
+      "supports",
+      "names_other_account",
+      null,
+      proposal("synthetic-other"),
+      CARD_DEBIT_ACCOUNT_POLICY,
+      "myjcb-card-information-0.9.0",
+    );
+    evidence(
+      db,
+      "stale",
+      "supports",
+      null,
+      proposal("synthetic-bank"),
+      CARD_DEBIT_ACCOUNT_POLICY,
+      "myjcb-card-information-0.9.0",
+    );
     evidence(db, "other", "names_other_account", null, proposal("synthetic-other"));
     evidence(db, "none", "not_proposed", "ambiguous_accounts", null);
     // A row of an earlier policy is not this policy's answer.
@@ -239,7 +271,7 @@ describe("the provider-stated debit account beside each review (ADR 0032)", () =
       reason: "ambiguous_accounts",
       bankSourceId: null,
     });
-    for (const id of ["older", "unread"])
+    for (const id of ["older", "stale", "unread"])
       expect(by.get(id)).toMatchObject({ outcome: "not_recorded", reason: null });
     // Evidence never changes what a review is blocked on.
     for (const item of page.items) expect(item.acceptanceBlockers).toEqual([]);

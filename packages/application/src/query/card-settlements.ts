@@ -120,16 +120,18 @@ export const CARD_SETTLEMENT_REVIEW_SQL = reviewsSql(
 /**
  * What the card provider's statement says about its debit account, for the
  * MyJCB candidates `?1` names (a JSON array of ids): the newest
- * `card_settlement_debit_account_evidence` row of each under policy `?2`, and
- * the refusal code of the reading of the candidate's own statement page under
- * reader version `?3` (`card_debit_account_statement`, migration 0060). Each
- * is found by key: the evidence by its `(candidate_id, …)` index, the page by
- * the candidate's statement parse run and the reading by its unique
- * `(raw_sha256, card_source_account, reader_version)` index.
+ * `card_settlement_debit_account_evidence` row of each under policy `?2` that
+ * cites a reading under reader version `?3`, and the refusal code of the
+ * reading of the candidate's own statement page under that version
+ * (`card_debit_account_statement`, migration 0060). Each is found by key: the
+ * evidence by its `(candidate_id, …)` index and its reading by primary key,
+ * the page by the candidate's statement parse run and the reading by its
+ * unique `(raw_sha256, card_source_account, reader_version)` index.
  */
 export const CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL = `WITH chosen AS MATERIALIZED (
  SELECT c.id,c.statement_parse_run_id,json_extract(c.facts_json,'$.statement.sourceAccount') AS card_source_account,
   (SELECT e.id FROM card_settlement_debit_account_evidence e
+   JOIN card_debit_account_statement r ON r.id=e.statement_id AND r.reader_version=?3
    WHERE e.candidate_id=c.id AND e.policy=?2 ORDER BY e.id DESC LIMIT 1) AS evidence_id
  FROM json_each(?1) selected JOIN card_settlement_candidates c ON c.id=selected.value
 )

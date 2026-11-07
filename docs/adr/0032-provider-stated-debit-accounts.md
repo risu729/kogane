@@ -385,9 +385,11 @@ pages were visible only in D1.
   `not_recorded` or `not_stated_by_source`, and only the values that outcome
   has: the bank source id, source account and compared digit count of the
   rule's proposal; the rule's or the reader's closed reason; the policy and
-  the time of the row. Only the newest row under the current policy and the
-  reading under the current reader version count; an earlier policy's row
-  says nothing about the current rule.
+  the time of the row. Only the newest row under the current policy that
+  cites a reading under the current reader version, and the reading under
+  that version, count; an earlier policy's row says nothing about the
+  current rule, and a row citing an earlier reader's reading says nothing
+  about the current reading.
 - A Vpass review is `not_stated_by_source` with
   `source_states_no_debit_account`, the observation of 2026-09-27 above, and
   the contract refuses any other outcome for a Vpass statement and this one
@@ -412,8 +414,8 @@ pages were visible only in D1.
 ### Verification
 
 - `packages/application/test/card-settlement-query.test.ts`: the newest row
-  wins; an earlier policy's row and an earlier reader version's refusal say
-  nothing; a refusal under the current version is `statement_refused`; a
+  wins; an earlier policy's row, a row citing an earlier reader version's
+  reading and an earlier reader version's refusal say nothing; a refusal under the current version is `statement_refused`; a
   recorded row wins over the reading; a Vpass review reads nothing; rows that
   break the contract are refused.
 - `services/processor/test/card-debit-account.test.ts`: on every CORE

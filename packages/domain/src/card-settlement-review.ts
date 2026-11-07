@@ -37,7 +37,8 @@ export const SOURCE_STATES_NO_DEBIT_ACCOUNT = "source_states_no_debit_account";
  * changes the candidate's facts, blockers or eligibility.
  *
  * - `supports` / `names_other_account`: the newest row the settlement sweep
- *   appended for the candidate under the current rule policy
+ *   appended for the candidate under the current rule policy, citing a
+ *   reading under the current reader version
  *   (`card_settlement_debit_account_evidence`), with the bank account the
  *   rule's proposal names and how many leading digits it compared;
  * - `not_proposed`: that row, where the rule made no proposal, with its
@@ -119,7 +120,8 @@ const isOneOf = <T extends string>(values: readonly T[], value: unknown): value 
 
 /**
  * The reviewer's view of a candidate's provider-stated debit account, from
- * the newest evidence row under the current policy (or none) and the
+ * the newest evidence row under the current policy and reader version (or
+ * none) and the
  * refusal code of the page's reading under the current reader version (or
  * none). A Vpass statement is `not_stated_by_source` whatever is passed. A
  * stored row that breaks the evidence contract throws: an unavailable answer,

@@ -206,7 +206,7 @@ shows it as 「明細が示す引落口座」 beside the evidence links:
 
 | `outcome`              | When                                                                                                 | Carries                                                                |
 | ---------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| `supports`             | the newest evidence row of the candidate under the current policy says so                            | the bank source and source account the proposal names, digits compared |
+| `supports`             | the newest evidence row of the candidate under the current policy and reader version says so         | the bank source and source account the proposal names, digits compared |
 | `names_other_account`  | the same, naming another account; the page shows it as a warning that the match may be wrong         | the same                                                               |
 | `not_proposed`         | the same, where the rule made no proposal                                                            | the rule's closed reason                                               |
 | `statement_refused`    | no such row, and the reading of the candidate's own page under the current reader version is refused | the reader's closed code                                               |
@@ -216,11 +216,12 @@ shows it as 「明細が示す引落口座」 beside the evidence links:
 The first three also carry the policy and the time the row was appended,
 and only the first two name an account; the last three carry no policy,
 account or time. A row of an
-earlier policy or a reading of an earlier reader version is not shown. The
+earlier policy, a row citing a reading of an earlier reader version, or a
+reading of an earlier reader version is not shown. The
 review reads `CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL`
 (`packages/application/src/query/card-settlements.ts`) once per page, for its
 MyJCB reviews only: the newest row by the evidence table's `candidate_id`
-index, and the reading through the candidate's statement parse run and the
+index (its cited reading by primary key), and the reading through the candidate's statement parse run and the
 reading's unique key, with no scan of a base table. No displayed bank name,
 branch name, digit or holder name is served: only source ids, source
 accounts, counts and closed codes. A stored row that breaks the evidence
