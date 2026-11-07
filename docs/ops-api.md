@@ -226,7 +226,9 @@ operation turns `completed` only when every stage of its kind has a
   With a kind or a status, one range of `ops_requests_open` per allowed
   (status, kind) pair, each limited to the page, merged newest first. Rows
   sharing the boundary timestamp are sorted, and rows of other principals
-  with the same status and kind are read and skipped. No migration was added.
+  with the same status and kind are read and skipped, so a filtered page can
+  read every row of its pairs below the cursor when the caller holds few of
+  them. No migration was added.
 - **Audit.** Each request is recorded once as `ops.operation.list`, with the
   number of rows shown and whether a next page exists
   ([audit log](audit-log.md)).
