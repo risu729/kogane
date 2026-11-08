@@ -42,6 +42,7 @@ import {
   importSchema,
   operationIdSchema,
   opsContext,
+  opsReadStore,
   opsServices,
   parseRequest,
   projectionSchema,
@@ -91,7 +92,7 @@ export const OPS_MCP_TOOLS = [
     name: "kogane.ops.collection.request",
     title: "Request collection of a declared source",
     description:
-      "Record a request to collect a declared source over a date window. Accepted means the request is stored, not that a provider was contacted; the collector runs it later.",
+      "Record a request to collect a declared source over a date window. Accepted means the request is stored, not that a provider was contacted; the collector runs it later. Before requesting, read the source's past history: its collection quality (kogane.collection-quality.read with the source), its schedule, next alarm, recent occurrences and held execution leases (kogane.schedules.read), its maintenance windows (kogane.schedules.maintenance.read), and earlier requests (kogane.audit.search with filters.operation ops.collection.request, narrowed to the source by hand; kogane.ops.operation.get follows only your own, and a request from anyone else shows as an occurrence or held lease in kogane.schedules.read). Do not request while the source's alarm is due, its maintenance window is on, a lease is held or an earlier request has not finished, and when its latest runs failed, find the cause before requesting again.",
     inputSchema: inputSchema(collectionSchema),
     annotations: REQUEST_HINTS,
   },
@@ -123,7 +124,7 @@ export const OPS_MCP_TOOLS = [
     name: "kogane.ops.session.refresh",
     title: "Request a session refresh for one source",
     description:
-      "Ask the party that holds a source's credentials to renew its session. Never returns or accepts a credential, and never retries a login: when the source policy needs a person the operation is stored as waiting_for_human.",
+      "Ask the party that holds a source's credentials to renew its session. Never returns or accepts a credential. When the source policy needs a person the operation is stored as waiting_for_human. For an unattended source whose connection is enabled for dispatch, the collector renews the session itself and may log in once: SBI VC runs its keepalive and, if that fails, one passkey login, at most one forced login per hour whoever asks. Otherwise the request waits as collector_dispatch_disabled.",
     inputSchema: inputSchema(sessionRefreshSchema),
     annotations: REQUEST_HINTS,
   },
@@ -190,7 +191,7 @@ export async function callOpsTool(
   }
 }
 
-export const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
+const DELEGATED_OPS_CAPABILITIES: Readonly<Record<OpsToolName, DelegationCapability>> = {
   "kogane.ops.collection.request": "operations.collection.request",
   "kogane.ops.import.request": "operations.import.request",
   "kogane.ops.replay.request": "operations.replay.request",
@@ -259,6 +260,7 @@ function delegatedContext(
 ): OpsContext {
   return {
     store: d1CommandStore(env.DB),
+    readStore: opsReadStore(env),
     principal: {
       id: principal.id,
       kind: "delegated",

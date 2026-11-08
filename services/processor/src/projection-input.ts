@@ -24,7 +24,7 @@ import {
 } from "../../../packages/read-model/src/index";
 
 /** R2 prefix of every stored input; the same DATA bucket, no separate store. */
-export const PROJECTION_INPUT_PREFIX = "projection-inputs";
+const PROJECTION_INPUT_PREFIX = "projection-inputs";
 
 /**
  * What one build is allowed to read. Only `content` is hashed: the digest is
@@ -80,7 +80,7 @@ export interface ProjectionInputStore {
   get(key: string): Promise<{ text(): Promise<string> } | null>;
 }
 
-export function inputStorageRef(digest: string): string {
+function inputStorageRef(digest: string): string {
   return `${PROJECTION_INPUT_PREFIX}/${digest}`;
 }
 export function inputObjectKey(digest: string): string {

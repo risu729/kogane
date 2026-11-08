@@ -13,6 +13,7 @@ import { startTcpRelay } from "./tcp-relay";
 import {
   authorized,
   CollectionCoordinator,
+  credentialDigest,
   parseCollectionOutput,
   parseCredential,
   type CollectionOutput,
@@ -42,19 +43,28 @@ export class StGeorgeCollectionState extends DurableObject<Env> {
       ctx.storage as unknown as StateStorage,
       (runId) => withCollectionLease(env, "st-george", () => collect(env, runId)),
       (run) => persistSharedRun(env.DATA as unknown as R2BucketLike, run),
+      async (salt) => {
+        try {
+          return await credentialDigest(parseCredential(env.ST_GEORGE_CREDENTIAL_JSON), salt);
+        } catch {
+          // An unreadable credential is no evidence that it changed.
+          return null;
+        }
+      },
     );
   }
   override async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname;
-    if (request.method !== "POST" || !["/trigger", "/resume"].includes(path))
+    if (request.method !== "POST" || !["/trigger", "/operator-trigger"].includes(path))
       return Response.json({ error: "not-found" }, { status: 404 });
     try {
-      const result =
-        path === "/resume" ? await this.coordinator.resume() : await this.coordinator.trigger();
+      const result = await this.coordinator.trigger({
+        operatorRequested: path === "/operator-trigger",
+      });
       logStGeorgeResult(result);
       return Response.json(result, {
         status:
-          result.status === "busy" || result.status === "blocked"
+          result.status === "busy" || result.status === "blocked" || result.status === "paused"
             ? 409
             : result.status === "failed"
               ? 503
@@ -80,14 +90,10 @@ export default {
     if (request.headers.get("upgrade")?.toLowerCase() === "websocket" && url.pathname === "/tcp") {
       return relayTcp(request, env, ctx, url);
     }
-    if (request.method !== "POST" || !["/trigger", "/resume"].includes(url.pathname))
-      return Response.json({ error: "not-found" }, { status: 404 });
-    if (!authorized(request, env.ADMIN_TRIGGER_TOKEN))
-      return Response.json({ error: "unauthorized" }, { status: 401 });
-    if (url.searchParams.size !== 0 || (await hasRequestBytes(request)))
-      return Response.json({ error: "no-parameters-accepted" }, { status: 400 });
-    const state = env.SESSION_STATE.get(env.SESSION_STATE.idFromName("st-george"));
-    return state.fetch(new Request(`https://state${url.pathname}`, { method: "POST" }));
+    // Collection is requested through the operations API (ADR 0069,
+    // 2026-11-08 amendment), which reaches this Worker only over the private
+    // `ScheduledCollection` binding. There is no public trigger.
+    return Response.json({ error: "not-found" }, { status: 404 });
   },
   async scheduled(controller, env): Promise<void> {
     // A platform retry must not create a second bank login attempt.
@@ -97,27 +103,6 @@ export default {
     if (!response.ok) throw new Error("st-george-collection-not-completed");
   },
 } satisfies ExportedHandler<Env>;
-
-// Incoming POSTs may have a non-null stream even when the wire body is empty.
-// Reject the first byte without buffering arbitrary authenticated input.
-async function hasRequestBytes(request: Request): Promise<boolean> {
-  if (!request.body) return false;
-  const reader = request.body.getReader();
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) return false;
-      if (value.byteLength > 0) {
-        await reader.cancel();
-        return true;
-      }
-    }
-  } catch {
-    return true;
-  } finally {
-    reader.releaseLock();
-  }
-}
 
 function collectionConfiguration(env: Env) {
   const credential = parseCredential(env.ST_GEORGE_CREDENTIAL_JSON);
@@ -235,15 +220,21 @@ function relayTcp(request: Request, env: Env, ctx: ExecutionContext, url: URL): 
   return new Response(null, { status: 101, webSocket: pair[0] });
 }
 
-/** Private service-binding collection; public token/Access routes keep their checks. */
+/**
+ * Private service-binding collection. `operatorRequested` is an accepted
+ * operations-API request: the operator's explicit decision to try one login
+ * again after a refused or challenged one. The alarm never sets it.
+ */
 export async function alarmCollection(
   env: Env,
   _cron: string,
   _scheduledTime: number,
+  options: { operatorRequested?: boolean } = {},
 ): Promise<ScheduledResult> {
   try {
     const state = env.SESSION_STATE.get(env.SESSION_STATE.idFromName("st-george"));
-    const response = await state.fetch(new Request("https://state/trigger", { method: "POST" }));
+    const path = options.operatorRequested ? "/operator-trigger" : "/trigger";
+    const response = await state.fetch(new Request(`https://state${path}`, { method: "POST" }));
     return stGeorgeScheduledResult(await response.json());
   } catch (error) {
     return scheduledFailure(error);

@@ -54,6 +54,17 @@ export interface SubtotalRow {
 }
 
 /**
+ * What a known-assets subtotal may count once (INV06): one subject scope in one
+ * unit. A subtotal is a figure per unit, so a subject that holds several units
+ * (an exchange account's cash per asset, a broker's foreign cash per currency)
+ * contributes once to each of them; the same subject twice in the same unit is
+ * the double count every summing reader refuses.
+ */
+export function subtotalCountKey(row: Pick<SubtotalRow, "subject_scope_key" | "unit_ref">): string {
+  return JSON.stringify([row.subject_scope_key, row.unit_ref]);
+}
+
+/**
  * Why a published snapshot may not be served (05 §7): the closed codes the v2
  * balance routes answer 503 with, and the reason every other reader of the
  * snapshot names instead of a figure.
@@ -78,9 +89,10 @@ export type SnapshotRefusal = (typeof SNAPSHOT_REFUSALS)[number];
  * is published yet. Only a deployment that can check the snapshot against
  * CORE's epoch, its visibility revision and its contract builds one; a reader
  * of a published figure takes this instead of calling `currentSnapshot()`.
+ * `behind` says whether the fixed context trails CORE; it is still servable.
  */
 export type ServableSnapshot =
-  | { snapshot: BalanceSnapshotRow }
+  | { snapshot: BalanceSnapshotRow; behind: boolean }
   | { refusal: SnapshotRefusal }
   | null;
 

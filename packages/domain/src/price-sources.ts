@@ -47,7 +47,7 @@ export const PRICE_RULE_IDS = [
 ] as const;
 export type PriceRuleId = (typeof PRICE_RULE_IDS)[number];
 
-export const PRICE_CLAIM_KINDS = ["valuation", "position"] as const;
+const PRICE_CLAIM_KINDS = ["valuation", "position"] as const;
 export type PriceClaimKind = (typeof PRICE_CLAIM_KINDS)[number];
 
 /** The claim kind each rule reads; the promotion lane keeps one cursor per kind. */
@@ -57,17 +57,10 @@ export const PRICE_RULE_CLAIM_KIND: Readonly<Record<PriceRuleId, PriceClaimKind>
   "sbi-foreign-stock-price-last-v1": "position",
 };
 
-/** What happened to one claim. Only `promoted` writes anything. */
-export const PRICE_PROMOTION_OUTCOMES = [
-  "promoted",
-  "basis_unverified",
-  "unsupported_currency",
-  "tier_unmatched",
-  "stage_unstated",
-] as const;
-export type PricePromotionOutcome = (typeof PRICE_PROMOTION_OUTCOMES)[number];
-
-/** The FX policy that will value with this board (P2-3); named here so the caveat travels. */
+/**
+ * The FX policy that will value with this board (P2-3); named here so the caveat travels.
+ * @public ADR 0020 and docs/sources/sbi-shinsei-bank.md name it; nothing reads it.
+ */
 export const FX_POLICY_SBI_SHINSEI_MID = "fx-sbi-shinsei-mid-v1";
 
 /**
@@ -81,7 +74,7 @@ export const FX_POLICY_SBI_SHINSEI_MID = "fx-sbi-shinsei-mid-v1";
  * row of any other tier, or with none, stays `unsupported_currency`
  * (ADR 0020 amendment, ADR 0028).
  */
-export interface FxQuoteBasis {
+interface FxQuoteBasis {
   customerCategory: string | number;
   baseQuantity: "1" | "100";
   evidence: string;
@@ -195,7 +188,7 @@ export function priceEffectiveTime(
 }
 
 /** A price row before its id: everything `price_observations` stores. */
-export type PriceDraft = Omit<PriceObservation, "id">;
+type PriceDraft = Omit<PriceObservation, "id">;
 
 export type PriceVerdict =
   | { outcome: "promoted"; rule: PriceRuleId; claim: PriceClaim; price: PriceDraft }
@@ -212,7 +205,7 @@ const CURRENCY = /^[A-Z]{3}$/u;
 const PLAIN = /^(?:0|[1-9]\d*)(?:\.\d+)?$/u;
 
 /** An exact positive decimal from stored text or a JSON integer, else null. */
-export function positiveDecimal(value: unknown): ExactDecimal | null {
+function positiveDecimal(value: unknown): ExactDecimal | null {
   let text: string;
   if (typeof value === "string") text = value;
   else if (typeof value === "number" && Number.isSafeInteger(value)) text = String(value);
@@ -336,7 +329,7 @@ export function fxBoardPrice(
 // ---------------------------------------------------------------------------
 
 /** quantity × price = market value, exactly: the price is per 1 share. */
-export function perShareBasisHolds(
+function perShareBasisHolds(
   quantity: ExactDecimal,
   price: ExactDecimal,
   marketValue: ExactDecimal,
@@ -348,7 +341,7 @@ export function perShareBasisHolds(
  * The payload byte offset of an `sbi-domestic-cash-positions` locator
  * (`mts-shift-jis:payload-byte=<n>,width=<w>`), or null.
  */
-export function domesticRecordOffset(locator: string): number | null {
+function domesticRecordOffset(locator: string): number | null {
   const match = /^mts-shift-jis:payload-byte=(\d+),width=\d+$/u.exec(locator);
   if (!match) return null;
   const offset = Number(match[1]);
@@ -356,7 +349,7 @@ export function domesticRecordOffset(locator: string): number | null {
 }
 
 /** Width of one domestic MTS record: a valuation belongs to the position whose record holds it. */
-export const DOMESTIC_RECORD_BYTES = 423;
+const DOMESTIC_RECORD_BYTES = 423;
 
 /** Whether a valuation locator falls inside a position's record (POSITION_VALUATIONS_SQL's rule). */
 export function inDomesticRecord(positionLocator: string, valuationLocator: string): boolean {
@@ -385,7 +378,7 @@ export interface DomesticPriceRow {
   marketValues: { amountText: string | null; currency: string }[];
 }
 
-export function isDomesticPriceRow(
+function isDomesticPriceRow(
   row: Pick<DomesticPriceRow, "sourceId" | "parserName" | "metric">,
 ): boolean {
   return (
@@ -453,9 +446,7 @@ export interface ForeignPositionRow {
   extra: unknown;
 }
 
-export function isForeignPositionRow(
-  row: Pick<ForeignPositionRow, "sourceId" | "parserName">,
-): boolean {
+function isForeignPositionRow(row: Pick<ForeignPositionRow, "sourceId" | "parserName">): boolean {
   return row.sourceId === "sbi-securities" && row.parserName === "sbi-foreign-cash-positions";
 }
 

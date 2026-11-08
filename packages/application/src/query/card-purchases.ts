@@ -787,6 +787,8 @@ export async function queryCardPurchases(
       unsupportedShapes: [...CARD_USAGE_EXCLUSIONS],
       unrecognizedCurrentRows,
       unrecognizedReasons,
+      // Nothing plans or writes a refund allocation (ADR 0017's kind only).
+      refundsAllocated: false,
       limit: CARD_PURCHASE_PAGE_SIZE,
     },
   };

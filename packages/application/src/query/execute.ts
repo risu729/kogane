@@ -30,6 +30,7 @@ import {
   type ObservationReader,
   type ServableSnapshot,
   type SnapshotRefusal,
+  subtotalCountKey,
 } from "../../../read-model/src/index";
 import { addDecimals, integerDecimal } from "../../../domain/src/values.ts";
 import { financialError } from "../errors.ts";
@@ -103,7 +104,7 @@ export interface ActivityRow {
  * no net worth: different units are not added (INV03), and an asset subtotal
  * with unknown liability coverage is not a net worth (addendum 05 section 5).
  */
-export interface HoldingUnit {
+interface HoldingUnit {
   unitRef: string;
   coefficient: string;
   scale: number;
@@ -378,12 +379,14 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
       return fail("budget_exceeded", [`budget:scopePairs=${String(MAX_SCOPE_PAIRS)}`]);
     const metricIds = knownAssetMetricIds();
     const totals = new Map<string, { coefficient: string; scale: number; adoptedCount: number }>();
-    // One subject may be adopted only once across the whole answer; a subject
-    // reached through two scope pairs would otherwise be counted twice (INV06).
+    // One subject may be adopted only once per unit across the whole answer; a
+    // subject reached through two scope pairs would otherwise be counted twice
+    // (INV06). A subject holding several units counts once in each.
     const subjects = new Set<string>();
     const gaps: { reasonCode: string; scopeRef: string | null }[] = [];
     let stale = false;
     let unresolved = false;
+    if (servable.behind) gaps.push({ reasonCode: "snapshot:behind_published_evidence", scopeRef });
     for (const pair of holdingPairs) {
       const scope = {
         ...(pair.source === undefined ? {} : { source: pair.source }),
@@ -399,8 +402,9 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         // again: a query never observes a scope the grant does not allow.
         if (!grantAllowsSource(grant, row.source_id)) continue;
         if (!grantAllowsAccount(grant, row.source_account)) continue;
-        if (subjects.has(row.subject_scope_key)) return fail("incomplete_evidence", ["overlap"]);
-        subjects.add(row.subject_scope_key);
+        const key = subtotalCountKey(row);
+        if (subjects.has(key)) return fail("incomplete_evidence", ["overlap"]);
+        subjects.add(key);
         const current = totals.get(row.unit_ref) ?? { ...integerDecimal(0), adoptedCount: 0 };
         const sum = addDecimals(
           { coefficient: current.coefficient, scale: current.scale },
@@ -427,7 +431,9 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         schemaVersion: "financial-result-v1",
         contextId: opened.context.contextId,
         resolvedQuery: opened.resolvedQuery,
-        completeness: (unresolved || stale ? "partial" : "complete") satisfies CompletenessState,
+        completeness: (unresolved || stale || servable.behind
+          ? "partial"
+          : "complete") satisfies CompletenessState,
         data: {
           intent: "holdings",
           units,
@@ -440,8 +446,12 @@ export async function executeQuery(input: QueryExecution): Promise<QueryOutcome>
         quality: {
           identity,
           freshness: dimension(
-            stale ? "partial" : "verified",
-            stale ? ["scope_not_re_observed"] : ["snapshot_current"],
+            stale || servable.behind ? "partial" : "verified",
+            [
+              ...(servable.behind ? ["snapshot:behind_published_evidence"] : []),
+              ...(stale ? ["scope_not_re_observed"] : []),
+              ...(!stale && !servable.behind ? ["snapshot_current"] : []),
+            ],
             [snapshot.snapshot_id],
           ),
           // Only adopted, exactly normalised values are summed; a missing,

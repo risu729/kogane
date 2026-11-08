@@ -46,7 +46,7 @@ import {
 } from "./sql.ts";
 import type { PointerRow } from "./writer.ts";
 
-export interface ReadInstanceRow {
+interface ReadInstanceRow {
   read_instance_id: string;
   created_at: string;
   contract_version: string;

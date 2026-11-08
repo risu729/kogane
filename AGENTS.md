@@ -159,7 +159,9 @@ UTC.
   prepare/confirm; R3 refused), through the common command layer, and with an
   audit record. The MCP Access policy decides who that can be, and the owner
   limits tools in the MCP client. A rule, heuristic or the HTTP agent route
-  only reads and proposes
+  only reads and proposes, except the recorded rule decisions an ADR names
+  (provider-linked reconciliation, purchase recognition, `instrument-auto-v1`
+  in [ADR 0055](docs/adr/0055-instrument-candidates.md#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule))
   ([change lifecycle](docs/change-lifecycle.md#grants),
   [agent API](docs/agent-api.md#card-purchase-explanation)). Grants, Access,
   the operator list, secrets and deployment (R4) are never operations
@@ -199,6 +201,21 @@ shapes ([ci](docs/ci.md); examples in
 Logging in to a provider, running a collector by hand, a hosted Container
 experiment, and reading or changing a secret each need the owner's approval for
 that action. Never ask the owner for passwords, codes or HAR captures.
+
+Requesting a collection through `kogane.ops.collection.request` or the
+operations API is not running a collector by hand: agents may request
+collections without a limit, and every healthy connection may be added to
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` (owner, 2026-11-08 03:19 UTC). Before each
+request, read the source's past history (collection quality, schedule and held
+leases, maintenance windows, earlier requests) as the tool description and
+[ops API: requesting a collection as an agent](docs/ops-api.md#requesting-a-collection-as-an-agent)
+list.
+
+The same holds for a provider login that a requested collection or session
+refresh makes (owner, 2026-11-08 03:57 UTC, [ADR 0069](docs/adr/0069-collector-admin-retirement.md)):
+agents may request it, within limits the collector applies to every caller. A
+requested St George collection lifts a login pause at most once per 24 h, and
+SBI VC makes at most one forced passkey login per hour.
 
 ## Toolchain
 

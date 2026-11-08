@@ -91,6 +91,7 @@ import {
   delegatedMaintenanceTools,
 } from "./delegated-maintenance-tools";
 import { boundedRead, HttpError, json } from "./http";
+import { catalogue } from "./read";
 import { mcpDelegationCapabilities, resolveMcpDelegation } from "./delegation";
 
 import { commandsEnabled } from "./command-api";
@@ -105,7 +106,8 @@ import { CARD_SETTLEMENT_TOOL_NAMES, readMcpTools, REPORTED_STATE_TOOL_NAME } fr
 import {
   isPageReadToolName,
   pageReadMcpTools,
-  pageReadNeedsReportedState,
+  pageReadServed,
+  pageReadStore,
 } from "./page-read-tools";
 import {
   callDelegatedSurveyTool,
@@ -136,12 +138,17 @@ export function isAgentPath(path: string): boolean {
   return path === MCP_PATH || path.startsWith(AGENT_PREFIX);
 }
 
+/**
+ * Route label for the request log: a closed code. A path that names no tool
+ * is `agent_unknown`, so the caller's path text never reaches the log.
+ */
 export function classifyAgentPath(path: string): string | null {
   if (path === MCP_PATH) return "mcp";
   if (path === SHARED_QUERY_PATH) return "shared_query";
-  if (path.startsWith(AGENT_PREFIX))
-    return `agent_${path.slice(AGENT_PREFIX.length).replace(/\W/gu, "_")}`;
-  return null;
+  if (!path.startsWith(AGENT_PREFIX)) return null;
+  const rest = path.slice(AGENT_PREFIX.length);
+  const known = toolForPath(path) !== null || `kogane.${rest}` === SCHEDULE_READ_TOOL;
+  return `agent_${known ? rest.replace(/\W/gu, "_") : "unknown"}`;
 }
 
 /** Read a bounded JSON body. An oversized or malformed body never reaches a tool. */
@@ -242,8 +249,11 @@ export async function agentApi(
     // (`cardPurchaseRecognition`): otherwise it is neither listed nor callable.
     // That needs the store's schema, so it is asked once, and only by a message
     // that depends on it: `initialize`, `ping` and notifications touch no table.
+    // Each probe, like its route's (which the Worker wraps in `catalogue`), is
+    // `503 catalogue_read_failed` when the store cannot be read.
     let served: Promise<boolean> | undefined;
-    const purchases = (): Promise<boolean> => (served ??= cardPurchasesAvailable(env));
+    const purchases = (): Promise<boolean> =>
+      (served ??= catalogue(() => cardPurchasesAvailable(env)));
     // Reads require schedules.read; the write is separately listed to a resolved MCP principal.
     const schedules = schedulesServed(env);
     // The reconstructed state likewise exists exactly while its GET route does,
@@ -251,11 +261,17 @@ export async function agentApi(
     // `GET /api/v2/reported-state` is (`reconstructedStateAvailable`).
     let reconstructedServed: Promise<boolean> | undefined;
     const reconstructed = (): Promise<boolean> =>
-      (reconstructedServed ??= reconstructedStateAvailable(env));
+      (reconstructedServed ??= catalogue(() => reconstructedStateAvailable(env)));
     // The card settlement reads exist exactly while the カード照合 route does.
     let settlementsServed: Promise<boolean> | undefined;
     const settlements = (): Promise<boolean> =>
-      (settlementsServed ??= cardSettlementsAvailable(env));
+      (settlementsServed ??= catalogue(() => cardSettlementsAvailable(env)));
+    // The page reads' tables and views, each asked at most once; the reported
+    // state's views are the probe above, the schedule settings the flag.
+    const pageStore = pageReadStore(env, {
+      reportedState: reconstructed,
+      schedules: async () => schedules,
+    });
     const message = await handleMcp(
       request,
       async (name, body) => {
@@ -263,12 +279,7 @@ export async function agentApi(
         if (name === RECONSTRUCTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (name === REPORTED_STATE_TOOL_NAME && !(await reconstructed())) return null;
         if (CARD_SETTLEMENT_TOOL_NAMES.has(name) && !(await settlements())) return null;
-        if (
-          isPageReadToolName(name) &&
-          pageReadNeedsReportedState(name) &&
-          !(await reconstructed())
-        )
-          return null;
+        if (isPageReadToolName(name) && !(await pageReadServed(name, pageStore))) return null;
         // An MCP client's capabilities also carry the operation authority
         // derived for it (ADR 0084), as a safe status; recorded like any call.
         if (name === "kogane.capabilities" && caller.kind === "mcp-client")
@@ -349,7 +360,7 @@ export async function agentApi(
           reportedState: await reconstructed(),
           cardSettlements: await settlements(),
         }),
-        ...pageReadMcpTools(grant, { reportedState: await reconstructed() }),
+        ...(await pageReadMcpTools(grant, pageStore)),
         ...(caller.kind === "mcp-client"
           ? [
               ...delegatedCommandTools(env, await delegation()),
@@ -384,17 +395,21 @@ export async function agentApi(
   }
   const tool = toolForPath(path);
   if (tool === null) throw new HttpError(404, "not_found");
-  // Absent, not refused, while the deployment cannot serve it, like its route.
-  if (tool === PURCHASES_TOOL_NAME && !(await cardPurchasesAvailable(env)))
+  // Absent, not refused, while the deployment cannot serve it, like its route;
+  // a probe the store cannot answer is the route's `503 catalogue_read_failed`.
+  if (tool === PURCHASES_TOOL_NAME && !(await catalogue(() => cardPurchasesAvailable(env))))
     throw new HttpError(404, "not_found");
   if (
-    (tool === RECONSTRUCTED_STATE_TOOL_NAME ||
-      tool === REPORTED_STATE_TOOL_NAME ||
-      (isPageReadToolName(tool) && pageReadNeedsReportedState(tool))) &&
-    !(await reconstructedStateAvailable(env))
+    (tool === RECONSTRUCTED_STATE_TOOL_NAME || tool === REPORTED_STATE_TOOL_NAME) &&
+    !(await catalogue(() => reconstructedStateAvailable(env)))
   )
     throw new HttpError(404, "not_found");
-  if (CARD_SETTLEMENT_TOOL_NAMES.has(tool) && !(await cardSettlementsAvailable(env)))
+  if (
+    CARD_SETTLEMENT_TOOL_NAMES.has(tool) &&
+    !(await catalogue(() => cardSettlementsAvailable(env)))
+  )
+    throw new HttpError(404, "not_found");
+  if (isPageReadToolName(tool) && !(await pageReadServed(tool, pageReadStore(env))))
     throw new HttpError(404, "not_found");
   const body = await boundedJson(request);
   const outcome = (await toolCall(request, env, caller, tool, (audit) =>

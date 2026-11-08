@@ -88,7 +88,18 @@ function identityMutation(db: D1Database) {
     );
     if ("error" in prepared) return null;
     return {
-      writes: prepared.writes.map((write) => ({ sql: write.sql, binds: write.binds })),
+      // The identity command joins only its ledger row (statement 1) to the
+      // guard; its mapping, decision and supersession statements require a
+      // ledger row under the operation id, which a command of another kind
+      // that took the key since the commit's reads (a relation, say) also
+      // writes. Each later statement therefore also requires this command's
+      // own receipt, so such a loser writes no mapping. Every statement ends
+      // in its WHERE condition.
+      writes: prepared.writes.map((write, index) =>
+        index === 0
+          ? { sql: write.sql, binds: write.binds }
+          : { sql: `${write.sql} AND ${guard.sql}`, binds: [...write.binds, ...guard.binds] },
+      ),
       decisionRevisionId: prepared.receipt.decisionRevisionId,
       result: {
         action: prepared.receipt.action,

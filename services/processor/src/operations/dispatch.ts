@@ -45,6 +45,7 @@ import {
   type CollectorOperationRequest,
   type OperationConnection,
 } from "../../../../packages/collection/src/operation-rpc.ts";
+import { CollectionKeyError, terminalKey } from "../../../../packages/collection/src/keys.ts";
 import { afterMaintenance } from "../../../../packages/collection/src/schedule-model.ts";
 import { isLeaseAbortCode } from "../../../../packages/collection/src/schedule-result.ts";
 import { d1CommandStore } from "../../../../packages/storage-d1/src/core/command-store.ts";
@@ -277,7 +278,8 @@ async function dispatchImport(
   const payload = await operationRequestPayload(store, receipt.operationId);
   const source = typeof payload?.source === "string" ? payload.source : null;
   const runId = typeof payload?.runId === "string" ? payload.runId : null;
-  if (!source || !runId) return fail(store, receipt, "operation_payload_invalid", at);
+  if (!source || !runId || !terminalAddressable(source, runId))
+    return fail(store, receipt, "operation_payload_invalid", at);
 
   const iso = at.toISOString();
   let result: Awaited<ReturnType<typeof registerCollectionRun>>;
@@ -391,6 +393,23 @@ async function dispatchImport(
         failureCode: "terminal_not_found",
       });
       return "retry";
+  }
+}
+
+/**
+ * Whether a run names a terminal key at all. The App now accepts only the
+ * bucket key grammar, but a payload stored before it did can still carry a
+ * character (`:`) the key builder throws on; such a request can never
+ * register, so it ends with the closed `operation_payload_invalid` instead of
+ * an unclassified throw that failed the whole lane on every tick.
+ */
+function terminalAddressable(source: string, runId: string): boolean {
+  try {
+    terminalKey(source, runId);
+    return true;
+  } catch (error) {
+    if (error instanceof CollectionKeyError) return false;
+    throw error;
   }
 }
 

@@ -7,6 +7,9 @@
   `AGENT_API_GRANTS` is removed. The MCP principal `mcp-client:<sub>`, its
   separate Access application and audience, and its refusal on every non-agent
   route stand; it now reads and operates over the whole store with no table.
+- Amended 2026-11-07 ([below](#amendment-clients-connect-through-the-mcp-portal-2026-11-07)):
+  clients connect through the Cloudflare MCP Portal `https://mcp.takuk.me/mcp`,
+  which reaches this application as its one upstream OAuth client.
 
 ## Context
 
@@ -347,7 +350,9 @@ metadata — so the boundary has its own tests:
   - _internal failures_ (G3-08): a store failure inside a tool or the tool
     list is `500 internal_error` in both eras, as on the HTTP route, with the
     exception text in neither the answer nor the log, and an exchange logs
-    only the request line;
+    only the request line (since 2026-11-08 a failing availability check,
+    which is every store read the tool list makes, is its route's
+    `503 catalogue_read_failed` instead, through the same rethrow);
   - the connection in both eras, `Origin`, the SDK's refusals, tool
     definitions against the SEP-986 names and Claude Code's load-time checks,
     `tools/list` and `tools/call` under each single capability, and the UI's
@@ -439,3 +444,47 @@ the particular client's upstream OAuth and refresh behavior is unverified.
 
 [cf-custom-domain]: https://developers.cloudflare.com/workers/configuration/routing/custom-domains/
 [cf-portal-policy]: https://developers.cloudflare.com/cloudflare-one/access-controls/ai-controls/mcp-portals/#policy-limitations
+
+## Amendment: clients connect through the MCP Portal (2026-11-07)
+
+- Status: accepted (owner OK 2026-11-08 01:43 UTC)
+- Date: 2026-11-07
+
+Owner decision, 2026-11-07 16:34 UTC: every MCP client (claude.ai, ChatGPT,
+Grok) registers the Cloudflare MCP Portal `https://mcp.takuk.me/mcp`, never
+the origin `https://kogane-mcp.takuk.me/mcp` directly. This replaces option 2's
+rejection for the client route, and decision 1's "DCR redirect URIs for the
+clients" on the MCP application now means the Portal's callbacks; the rest of
+the decision stands.
+
+- The Portal is the only OAuth client of the origin application "Kogane MCP
+  origin". Its Managed OAuth DCR allow-list is exactly the Portal's
+  `https://mcp.takuk.me/servers-callback` and the dashboard's Kogane
+  server callback; localhost and loopback are off (readback 16:40 UTC).
+- Client redirect URIs live on the Portal's own Access application
+  ("MCP Portal"): ChatGPT's two, `https://claude.ai/api/mcp/auth_callback`,
+  Grok's `https://grok.com/connectors-oauth-exchange-code/` and
+  `https://console.x.ai/connectors-oauth-exchange-code/`, and Cursor's
+  `https://www.cursor.com/bot/mcp/oauth/callback` and
+  `https://www.cursor.com/agents/mcp/oauth/callback` (Grok Bot uses
+  Cursor's client), taken from each
+  vendor's CIMD document (readback 16:36 UTC).
+- Two of the gaps under Consequences are answered. The origin's
+  protected-resource `resource` is `https://kogane-mcp.takuk.me`, without
+  `/mcp`; a client checks the Portal's metadata, not the origin's. The one
+  policy, "Owner access", includes only the owner email and has no require
+  or exclude rule since 07:10 UTC, so no posture check applies.
+- Option 2's concern that the Worker could not grade the caller did not
+  hold in practice: through the Portal, `kogane.capabilities` answers
+  `principal: mcp-client:<owner-sub>`, so the upstream assertion still names
+  the owner and ADR 0084's authority applies unchanged.
+- One refused tool descriptor makes a client import none of the server's
+  tools, so descriptors must pass every client's validator
+  ([#1081](https://github.com/risu729/kogane/pull/1081),
+  [#1087](https://github.com/risu729/kogane/pull/1087); see the
+  [Input schema rule](../agent-api.md#contract-for-tools-on-mcp)).
+
+Verified 2026-11-07: the Portal lists Kogane `ready` with 42 tools after
+[ce1aa27](https://github.com/risu729/kogane/commit/ce1aa27); claude.ai's
+"Cloudflare Portal" connector called `kogane.capabilities` (read-only) at
+about 16:40 UTC.

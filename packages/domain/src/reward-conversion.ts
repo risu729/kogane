@@ -5,6 +5,7 @@ import { validOpenEndedPeriodValue } from "./open-ended-period.ts";
 import { CONVERSION_SEARCH_RELEASE, REWARD_POLICY_RELEASE } from "./reward-releases.ts";
 import {
   civilFromDays,
+  periodBounds,
   periodContainsDate,
   validTemporalValue,
   daysFromCivil,
@@ -215,6 +216,27 @@ function coversApplicationDay(
   return periodContainsDate(value, date);
 }
 
+/**
+ * Whether applying on `day` is after the offer's application deadline:
+ * `false` with no deadline (`null`, a standing offer), `null` when the stored
+ * deadline establishes no answer (unknown or malformed, or `day` inside a
+ * period deadline), so an unestablished deadline stays a review reason and is
+ * never read as no deadline (INV05). A local date or an instant is its own
+ * calendar day, as before.
+ */
+function deadlinePassed(deadline: TemporalValue | null, day: number): boolean | null {
+  if (deadline === null) return false;
+  if (!validTemporalValue(deadline) || deadline.kind === "unknown") return null;
+  if (deadline.kind === "period") {
+    const bounds = periodBounds(deadline);
+    if (!bounds) return null;
+    if (day >= daysFromCivil(bounds.endExclusive)) return true;
+    return day < daysFromCivil(bounds.start) ? false : null;
+  }
+  const last = dayNumber(deadline);
+  return last === null ? null : day > last;
+}
+
 /** Membership uncertainty remains a review reason, never an inferred entitlement. */
 function offerConditionsAt(
   offer: ConversionOffer,
@@ -309,9 +331,12 @@ export function findConversionPaths(
         rejected.push({ offerRef, reasonCode: condition });
         continue;
       }
-      const deadlineDay =
-        offer.applicationDeadline === null ? null : dayNumber(offer.applicationDeadline);
-      if (deadlineDay !== null && appliedOn > deadlineDay) {
+      const passed = deadlinePassed(offer.applicationDeadline, appliedOn);
+      if (passed === null) {
+        rejected.push({ offerRef, reasonCode: "needs_rule_verification" });
+        continue;
+      }
+      if (passed) {
         rejected.push({
           offerRef,
           reasonCode:

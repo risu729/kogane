@@ -6,7 +6,7 @@ import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation.ts";
 import { runBalanceProjection } from "../../processor/src/balance-projection-job";
-import { PAGE_READ_ROUTES, pageReadMcpTools } from "../src/page-read-tools";
+import { PAGE_READ_ROUTES, pageReadMcpTools, pageReadStore } from "../src/page-read-tools";
 import { publishParse, seedRegistry, seedRun } from "./fixtures";
 import { pageReadHarness, RECORDS_GRANT, tableCounts } from "./page-read-harness";
 
@@ -71,17 +71,17 @@ describe("observation page reads", () => {
   });
 
   it("are listed only to records.read over the whole store", async () => {
-    const names = (grant: unknown) =>
-      pageReadMcpTools(grant as never, { reportedState: true })
+    const names = async (grant: unknown) =>
+      (await pageReadMcpTools(grant as never, pageReadStore(env as Env)))
         .map((tool) => tool.name)
         .filter((name) => (TOOLS as readonly string[]).includes(name));
-    expect(names(RECORDS_GRANT)).toEqual([...TOOLS]);
-    expect(names({ ...RECORDS_GRANT, capabilities: ["summary.read", "evidence.read"] })).toEqual(
-      [],
-    );
-    expect(names({ ...RECORDS_GRANT, scopes: { sources: ["other-test"], accounts: "*" } })).toEqual(
-      [],
-    );
+    expect(await names(RECORDS_GRANT)).toEqual([...TOOLS]);
+    expect(
+      await names({ ...RECORDS_GRANT, capabilities: ["summary.read", "evidence.read"] }),
+    ).toEqual([]);
+    expect(
+      await names({ ...RECORDS_GRANT, scopes: { sources: ["other-test"], accounts: "*" } }),
+    ).toEqual([]);
     const listed = await page.listed();
     for (const tool of TOOLS) expect(listed).toContain(tool);
   });

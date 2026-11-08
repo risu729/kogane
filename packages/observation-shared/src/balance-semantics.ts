@@ -229,7 +229,7 @@ export interface BalanceProjectionInput extends BalanceSemanticInput {
   observedAt: string | null;
   product: FinancialProductClaim | null;
 }
-export interface BalanceEvidenceRef {
+interface BalanceEvidenceRef {
   id: number;
   artifactId: number | null;
   parseRunId: number | null;

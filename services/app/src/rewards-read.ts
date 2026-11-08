@@ -59,6 +59,12 @@ export interface RewardReadContext {
   read: D1Like;
   readInstanceId: string;
   snapshot: RewardSnapshotRow;
+  /**
+   * The CORE epoch and visibility revision the published snapshot was
+   * verified against. An older snapshot a cursor still names is served only
+   * when its own capture matches both (05 §7).
+   */
+  revision: { coreEpoch: string; visibilityRevision: number };
 }
 
 /**
@@ -82,16 +88,6 @@ export async function rewardReadContext(
     return { unavailable: "reward_read_model_unavailable" };
   const snapshot = await activeRewardSnapshot(read);
   if (!snapshot) return { unavailable: "reward_read_model_unavailable" };
-  const refusal = await snapshotRefusal(env, read, snapshot);
-  if (refusal) return { unavailable: refusal };
-  return { read, readInstanceId: instance.read_instance_id, snapshot };
-}
-
-async function snapshotRefusal(
-  env: Env,
-  read: D1Like,
-  snapshot: RewardSnapshotRow,
-): Promise<string | null> {
   // The old snapshot classified common V Point by expiry display. It is
   // retained as history, never served as the current corrected contract.
   if (
@@ -99,15 +95,32 @@ async function snapshotRefusal(
     snapshot.policy_release !== REWARD_PROJECTION_RELEASE ||
     snapshot.claims_release !== REWARD_READ_RELEASE
   )
-    return "reward_read_model_context_changed";
-  const revision = await createCoreProjectionSource(d1Executor(env.DB)).coreRevision();
+    return { unavailable: "reward_read_model_context_changed" };
+  const current = await createCoreProjectionSource(d1Executor(env.DB)).coreRevision();
+  const revision = {
+    coreEpoch: current.core_epoch,
+    visibilityRevision: current.visibility_revision,
+  };
+  // The published snapshot is vouched for by the pointer: a build whose
+  // content did not change still re-captured it at the current revision.
   const pointer = await rewardPointer(read);
-  const vouched =
+  const refusal = revisionRefusal(
     pointer !== null && pointer.snapshot_id === snapshot.snapshot_id
-      ? { epoch: pointer.core_epoch, visibility: pointer.visibility_revision }
-      : { epoch: snapshot.core_epoch, visibility: snapshot.visibility_revision };
-  if (vouched.epoch !== revision.core_epoch) return "reward_read_model_context_changed";
-  if (vouched.visibility !== revision.visibility_revision)
+      ? { coreEpoch: pointer.core_epoch, visibilityRevision: pointer.visibility_revision }
+      : { coreEpoch: snapshot.core_epoch, visibilityRevision: snapshot.visibility_revision },
+    revision,
+  );
+  if (refusal) return { unavailable: refusal };
+  return { read, readInstanceId: instance.read_instance_id, snapshot, revision };
+}
+
+/** Why rows captured at `captured` may not be served at `current`, or null. */
+function revisionRefusal(
+  captured: RewardReadContext["revision"],
+  current: RewardReadContext["revision"],
+): string | null {
+  if (captured.coreEpoch !== current.coreEpoch) return "reward_read_model_context_changed";
+  if (captured.visibilityRevision !== current.visibilityRevision)
     return "reward_read_model_restriction_changed";
   return null;
 }
@@ -167,6 +180,17 @@ async function continuation(
     named.claims_release !== REWARD_READ_RELEASE
   )
     throw new HttpError(410, "context_expired");
+  // The published snapshot passed the same check in `rewardReadContext`.
+  // An older one the cursor still names was computed under its own epoch and
+  // visibility revision, and is refused whole when either has moved since,
+  // exactly as the published one would be (05 §7, G3-04).
+  if (named.snapshot_id !== context.snapshot.snapshot_id) {
+    const refusal = revisionRefusal(
+      { coreEpoch: named.core_epoch, visibilityRevision: named.visibility_revision },
+      context.revision,
+    );
+    if (refusal) throw new HttpError(503, refusal);
+  }
   return { snapshot: named, afterRowSeq: cursor.position };
 }
 

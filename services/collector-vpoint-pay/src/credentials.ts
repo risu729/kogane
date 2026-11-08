@@ -47,7 +47,7 @@ export function credentialFromSecrets(env: CredentialSecrets): VPointPayCredenti
   };
 }
 
-export class VPointPayCredentialConfigurationError extends Error {
+class VPointPayCredentialConfigurationError extends Error {
   constructor(status: CredentialStatus) {
     super(
       `V Point Pay credential configuration required: missing=${status.missingFields.join(",") || "none"}; invalid=${status.invalidFields.join(",") || "none"}`,

@@ -2,6 +2,7 @@ import { delegatedMaintenanceRoute } from "./delegated-maintenance";
 import { delegatedScheduleRoute } from "./delegated-schedules";
 import { delegatedSurveyRoute } from "./delegated-survey";
 import { retireReplacedJobsSql } from "./job-retirement-sql.ts";
+import { REPLAY_STEP_PROGRESS_SQL, WORK_ITEM_PROGRESS_SQL } from "./lane-progress-sql.ts";
 import { PARSERS } from "../../../packages/parsers/src/parsers/registry.ts";
 import type { PersistedObservation } from "../../../packages/parsers/src/scheduled-payment.ts";
 import { resolveIdentity } from "../../../packages/identity/src/index.ts";
@@ -24,6 +25,10 @@ import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
 import { boundedText } from "./bounded-body.ts";
 import { auditOverflowStage } from "./audit-overflow.ts";
+import {
+  INSTRUMENT_AUTO_ADOPTION_LANE,
+  instrumentAutoAdoptionLane,
+} from "./instrument-auto-adoption.ts";
 import { scheduleRoute } from "./schedule-store";
 import { collectionQualityAlarmRoute } from "./collection-quality-alarms";
 import { maintenanceSurveyLane } from "./maintenance-survey/lane.ts";
@@ -73,7 +78,11 @@ import {
   rollbackRelease,
   type AdoptionRequest,
 } from "./release-adoption.ts";
-import { collectionScan, handleTerminalNotification } from "./collection/index.ts";
+import {
+  collectionScan,
+  handleTerminalNotification,
+  type ScanSummary,
+} from "./collection/index.ts";
 import {
   invocationContext,
   invocationProbe,
@@ -865,15 +874,16 @@ async function consumeWorkItems(env: Env, limit: number) {
   const summary = { processed: 0, created: 0, examined: 0, cursor: 0 };
   const active = await activeParserVersions(env);
   const items = await env.DB.prepare(
-    "SELECT id,fetch_run_id,cursor_artifact_id,jobs_created FROM observation_work_items WHERE processed_at_ms IS NULL ORDER BY id LIMIT ?",
+    "SELECT id,fetch_run_id,cursor_artifact_id FROM observation_work_items WHERE processed_at_ms IS NULL ORDER BY id LIMIT ?",
   )
     .bind(limit)
-    .all<{ id: number; fetch_run_id: number; cursor_artifact_id: number; jobs_created: number }>();
+    .all<{ id: number; fetch_run_id: number; cursor_artifact_id: number }>();
   let pages = 0;
   for (const item of items.results) {
     let cursor = item.cursor_artifact_id;
     let created = 0;
     let complete = false;
+    const examined: number[] = [];
     while (pages < WORK_ITEM_PAGES_PER_SWEEP) {
       pages++;
       const page = await env.DB.prepare(
@@ -884,6 +894,7 @@ async function consumeWorkItems(env: Env, limit: number) {
       summary.examined += page.results.length;
       const now = Date.now();
       const inserts: D1PreparedStatement[] = [];
+      for (const row of page.results) examined.push(row.id);
       for (const row of page.results)
         for (const parser of laneParsers(row, active))
           inserts.push(jobInsert(env, row.id, parser, "incremental", now));
@@ -895,15 +906,25 @@ async function consumeWorkItems(env: Env, limit: number) {
         break;
       }
     }
-    const total = item.jobs_created + created;
-    const outcome = total > 0 ? "jobs_created" : cursor > 0 ? "no_new_jobs" : "not_eligible";
-    await env.DB.prepare(
-      "UPDATE observation_work_items SET cursor_artifact_id=?,jobs_created=?,processed_at_ms=CASE WHEN ? THEN ? ELSE NULL END,outcome=CASE WHEN ? THEN ? ELSE NULL END WHERE id=? AND processed_at_ms IS NULL",
-    )
-      .bind(cursor, total, complete ? 1 : 0, Date.now(), complete ? 1 : 0, outcome, item.id)
+    // The item's jobs are counted from the table, not from this sweep's
+    // inserts: a sweep stopped between its inserts and this update leaves the
+    // jobs and the old cursor, the next sweep re-reads the same pages, and its
+    // re-issued inserts change nothing. An incremental job of an artifact of
+    // this run is this item's (one item per run; only repair jobs ever change
+    // lane). Fenced on the cursor it read, so a concurrent sweep never counts
+    // the same pages twice.
+    const progress = await env.DB.prepare(WORK_ITEM_PROGRESS_SQL)
+      .bind(
+        item.id,
+        item.cursor_artifact_id,
+        cursor,
+        JSON.stringify(examined),
+        complete ? 1 : 0,
+        Date.now(),
+      )
       .run();
     summary.created += created;
-    if (complete) {
+    if (complete && progress.meta.changes === 1) {
       summary.processed++;
       summary.cursor = item.id;
     }
@@ -995,10 +1016,21 @@ async function replayStep(env: Env, plan: PlanRow) {
   const created = await insertJobs(env, inserts);
   const complete = rows.results.length < REPLAY_STEP;
   const cursor = complete ? plan.artifact_id_high_water : rows.results.at(-1)!.id;
-  await env.DB.prepare(
-    "UPDATE observation_replay_plans SET creation_cursor=?,creation_complete=?,jobs_created=jobs_created+?,updated_at_ms=? WHERE id=? AND status='running'",
-  )
-    .bind(cursor, complete ? 1 : 0, created, now, plan.id)
+  // `jobs_created` counts the plan's jobs among the artifacts this step read,
+  // from the table: a step stopped (or paused) between its inserts and this
+  // update reads the same artifacts again, its re-issued inserts change
+  // nothing, and the jobs are still the plan's. A job carries the plan id
+  // only when this plan inserted or attached it. Fenced on the cursor the
+  // step read, so a concurrent step never counts a range twice.
+  await env.DB.prepare(REPLAY_STEP_PROGRESS_SQL)
+    .bind(
+      cursor,
+      complete ? 1 : 0,
+      now,
+      JSON.stringify(rows.results.map((row) => row.id)),
+      plan.id,
+      plan.creation_cursor,
+    )
     .run();
   return { created, examined: rows.results.length, complete };
 }
@@ -1126,9 +1158,18 @@ async function runLane(env: Env, lane: Lane, budget: number): Promise<LaneSummar
       .bind(lane, MAX_ATTEMPTS, null, deployed)
       .first<number>("n")) ?? 0;
   await env.DB.prepare(
-    "UPDATE observation_lane_state SET cursor=?,last_sweep_at_ms=?,last_created=?,last_executed=? WHERE lane=?",
+    "UPDATE observation_lane_state SET cursor=coalesce(?,cursor),last_sweep_at_ms=?,last_created=?,last_executed=? WHERE lane=?",
   )
-    .bind(cursor, Date.now(), summary.created, summary.executed, lane)
+    // The repair cursor mirrors the scan, 0 included when it wraps. The
+    // incremental and replay cursors name the last item processed and the last
+    // plan stepped, so a sweep that did neither keeps them.
+    .bind(
+      lane !== "repair" && cursor === 0 ? null : cursor,
+      Date.now(),
+      summary.created,
+      summary.executed,
+      lane,
+    )
     .run();
   return summary;
 }
@@ -1707,6 +1748,13 @@ export interface ScheduledStages {
    * which it shares with `operations`.
    */
   collection?: (env: Env, context: InvocationContext) => Promise<object>;
+  /**
+   * Rule `instrument-auto-v1` (ADR 0055 amendment 2026-11-08): SBI's bare
+   * domestic code adopted onto SBI's listing of the same code, as a rule
+   * decision. No flag; a cheap gate ends the tick when no pair waits, and the
+   * full candidate read runs at most hourly. Absent stage means it never runs.
+   */
+  instrumentAutoAdoption?: (env: Env) => Promise<object>;
   /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
   reconcile?: (env: Env) => Promise<object>;
   /**
@@ -1776,10 +1824,10 @@ const defaultStages: ScheduledStages = {
   // re-parse is identified on the tick that published it unless the sweep's
   // 200-observation cap or an older backlog defers it (IDENTITY_RUNS_PER_TICK).
   identity: (env) => identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
+  instrumentAutoAdoption: (env) => instrumentAutoAdoptionLane(env.DB),
   // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
   // scan returns `skipped` without touching R2 or CORE (docs/processor.md).
-  collection: (env, context) =>
-    collectionScan(collectionEnv(env), { budget: context.registration }),
+  collection: (env, context) => collectionScanStage(env, context),
   // Off unless BALANCE_PROJECTION_ENABLED is "1"; the job itself returns
   // `skipped` rather than the caller branching on the flag.
   balanceProjection: (env) => runBalanceProjection(env),
@@ -1827,6 +1875,30 @@ const defaultStages: ScheduledStages = {
 };
 
 /**
+ * The deployed `collection_scan` stage. A registration that throws is counted
+ * in the scan's `failed` and never stops the page (G1-13); each one is also
+ * logged here as one `collection_scan_registration_failed` line carrying the
+ * error's class as a closed code (the 0049 grammar, else `unknown`), never
+ * its message, which may quote a key.
+ */
+export function collectionScanStage(
+  env: Env,
+  context: InvocationContext,
+  log: (line: string) => void = (line) => console.log(line),
+): Promise<ScanSummary> {
+  return collectionScan(collectionEnv(env), {
+    budget: context.registration,
+    onFailure: (code) =>
+      log(
+        JSON.stringify({
+          event: "collection_scan_registration_failed",
+          code: /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(code) ? code : "unknown",
+        }),
+      ),
+  });
+}
+
+/**
  * The Worker `Env` as the collection and dispatch lanes need it. The vars are
  * optional there, so a deployment that has not been given them behaves as if
  * the flags were off rather than failing to start.
@@ -1867,6 +1939,9 @@ export async function runScheduled(
     // off, like the projection lane, so an operator can see it is off.
     ["collection_scan", stages.collection, true],
     ["identity_sweep", stages.identity, true],
+    // Right after identity, so a pair a tick's identity run created is
+    // looked at on the same tick (ADR 0055 amendment 2026-11-08).
+    [INSTRUMENT_AUTO_ADOPTION_LANE, stages.instrumentAutoAdoption, true],
     // The projection lane always runs and reports itself skipped while its
     // own flag is off (docs/balance-read-model.md).
     ["balance_projection", stages.balanceProjection, true],

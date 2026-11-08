@@ -18,6 +18,11 @@ export const RECORDS_GRANT = {
 } as const;
 
 const MCP_AUDIENCE = "fixture-mcp-audience";
+/**
+ * Each harness's certificate URL, so two harnesses in one file share the one
+ * `fetch` mock rather than the later replacing the earlier.
+ */
+const CERTS = new Map<string, unknown>();
 const AUDIENCE = "fixture-audience";
 
 export function pageReadHarness(label: string, extraEnv: Record<string, unknown> = {}) {
@@ -33,13 +38,17 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
   });
   beforeEach(() => {
     issuer = `https://${label}-${++sequence}.cloudflareaccess.com`;
+    CERTS.set(`${issuer}/cdn-cgi/access/certs`, jwks);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      if (String(input) !== `${issuer}/cdn-cgi/access/certs`)
-        throw new Error("Unexpected synthetic test request");
-      return Response.json(jwks);
+      const certs = CERTS.get(String(input));
+      if (!certs) throw new Error("Unexpected synthetic test request");
+      return Response.json(certs);
     });
   });
-  afterEach(() => vi.restoreAllMocks());
+  afterEach(() => {
+    CERTS.clear();
+    vi.restoreAllMocks();
+  });
 
   const token = (subject: string, audience: string) =>
     new SignJWT({ type: "app" })
@@ -57,21 +66,27 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
   const environment = () =>
     ({
       ...env,
+      OPERATOR_SUBJECTS: '["synthetic-agent"]',
+      // A page the operator alone reads names its browser subject here too.
       ...extraEnv,
       ACCESS_ISSUER: issuer,
       ACCESS_AUDIENCE: AUDIENCE,
       ACCESS_MCP_AUDIENCE: MCP_AUDIENCE,
-      OPERATOR_SUBJECTS: '["synthetic-agent"]',
     }) as Env;
 
-  /** The UI route as the signed-in browser reads it. */
-  async function route(pathAndQuery: string): Promise<{ status: number; body: unknown }> {
-    const response = await worker.fetch(
+  /** The UI route's response as the signed-in browser receives it. */
+  async function routeResponse(pathAndQuery: string): Promise<Response> {
+    return worker.fetch(
       new Request(`https://fixture.test${pathAndQuery}`, {
         headers: { "cf-access-jwt-assertion": await token("synthetic-reader", AUDIENCE) },
       }),
       environment(),
     );
+  }
+
+  /** The UI route as the signed-in browser reads it. */
+  async function route(pathAndQuery: string): Promise<{ status: number; body: unknown }> {
+    const response = await routeResponse(pathAndQuery);
     return { status: response.status, body: await response.json() };
   }
 
@@ -106,9 +121,9 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
     return { status: response.status, body: await response.json() };
   }
 
-  /** One `/mcp` JSON-RPC message as `mcp-client:synthetic-agent`. */
-  async function mcpMessage(message: Record<string, unknown>) {
-    const response = await worker.fetch(
+  /** The Worker's response to one `/mcp` JSON-RPC message as `mcp-client:synthetic-agent`. */
+  async function mcpResponse(message: Record<string, unknown>): Promise<Response> {
+    return worker.fetch(
       new Request("https://fixture.test/mcp", {
         method: "POST",
         headers: {
@@ -119,6 +134,11 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
       }),
       environment(),
     );
+  }
+
+  /** One `/mcp` JSON-RPC message as `mcp-client:synthetic-agent`. */
+  async function mcpMessage(message: Record<string, unknown>) {
+    const response = await mcpResponse(message);
     expect(response.status).toBe(200);
     return (await response.json()) as Record<string, any>;
   }
@@ -143,10 +163,15 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
    * both agent transports: a served page is the route's body under `data`;
    * a refusal is the route's status and closed code.
    */
-  async function expectSameAnswer(pathAndQuery: string, tool: string, args: unknown) {
+  async function expectSameAnswer(
+    pathAndQuery: string,
+    tool: string,
+    args: unknown,
+    grant: unknown = RECORDS_GRANT,
+  ) {
     const page = await route(pathAndQuery);
-    const overHttp = await http(tool, args);
-    const overMcp = await mcp(tool, args);
+    const overHttp = await http(tool, args, grant);
+    const overMcp = await mcp(tool, args, grant);
     const label = `${pathAndQuery} ${JSON.stringify(args)}`;
     expect(overHttp.status, label).toBe(page.status);
     expect(overMcp.isError, label).toBe(page.status >= 400);
@@ -163,7 +188,33 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
     return page;
   }
 
-  return { route, http, mcp, mcpMessage, direct, listed, expectSameAnswer };
+  return {
+    route,
+    routeResponse,
+    http,
+    mcp,
+    mcpMessage,
+    mcpResponse,
+    direct,
+    listed,
+    expectSameAnswer,
+  };
+}
+
+/**
+ * A store whose schema answers "absent" to every `sqlite_master` probe, as
+ * before the migrations a served-only page read depends on.
+ */
+export function withoutTables(db: D1Database): D1Database {
+  return new Proxy(db, {
+    get(target, property) {
+      if (property === "prepare")
+        return (sql: string) =>
+          target.prepare(sql.includes("sqlite_master") ? "SELECT 0 AS present" : sql);
+      const value = Reflect.get(target, property);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
 }
 
 /**

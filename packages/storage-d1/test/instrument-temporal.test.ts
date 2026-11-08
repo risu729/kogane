@@ -16,6 +16,7 @@ import {
   state,
   request,
   TIME,
+  PAYLOAD_DIGEST,
 } from "./instrument-temporal-fixture.ts";
 beforeAll(() => fullCoreDatabase().close(), 60000);
 function fixture() {
@@ -301,6 +302,7 @@ test("prepare freezes before awaits and refuses sparse, foreign-policy or missin
     request,
     operationId: "op-f",
     principal: "operator",
+    payloadDigest: PAYLOAD_DIGEST,
     decisionRevisionId: "d-f",
     now: TIME,
     maxRows: 15000,

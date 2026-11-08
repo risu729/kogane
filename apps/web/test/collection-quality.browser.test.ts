@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import type { SQLQueryBindings } from "bun:sqlite";
 import { QualityStore } from "../../../packages/read-model/test/collection-quality-fixture.ts";
 import {
@@ -9,6 +10,8 @@ import {
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+/** Every age is counted to this instant: two Tokyo days after the synthetic capture. */
+const AS_OF = "2099-01-03T00:00:00.000Z";
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
@@ -50,12 +53,13 @@ describe.if(runnable)("collection quality browser", () => {
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
         if (url.pathname === "/api/collection-quality")
-          return Response.json(await queryCollectionQualitySummary(executor));
+          return Response.json(await queryCollectionQualitySummary(executor, { asOf: AS_OF }));
         if (url.pathname.startsWith("/api/collection-quality/"))
           return Response.json(
             await queryCollectionQualityCells(executor, {
               sourceId: url.pathname.split("/").at(-1)!,
               offset: Number(url.searchParams.get("offset") ?? 0),
+              asOf: AS_OF,
             }),
           );
         if (url.pathname.startsWith("/api/"))
@@ -90,6 +94,26 @@ describe.if(runnable)("collection quality browser", () => {
       expect(
         await page.getByText("本人による認証・操作が必要です", { exact: false }).count(),
       ).toBeGreaterThan(0);
+      // collection-freshness-v1: the source's newest run is two days old; the
+      // unit with no file waits on a person and has no current capture.
+      expect(await page.locator('.freshness[data-state="recent"]').first().textContent()).toBe(
+        "2日前の取得",
+      );
+      expect(
+        await page.locator('.freshness[data-state="human-required"]').first().textContent(),
+      ).toBe("本人操作待ち（取得なし）");
+      expect(
+        await page.locator('nav .freshness[data-state="human-required"]').count(),
+      ).toBeGreaterThan(0);
+      // PRESTIA bank's only job is disabled and it was never captured.
+      expect(
+        await page.locator('nav .freshness[data-state="disabled"]').first().textContent(),
+      ).toBe("定期実行の停止中（取得なし）");
+      // provider-data-types-v1: what Vpass offers and what of it is collected.
+      expect(await page.getByText("カード利用明細: 収集・解析済み", { exact: false }).count()).toBe(
+        1,
+      );
+      expect(await page.locator('li[data-status="collected"]').count()).toBeGreaterThan(0);
       expect(
         await page.getByText("予約状態を確認できません", { exact: false }).count(),
       ).toBeGreaterThan(0);
@@ -118,7 +142,13 @@ describe.if(runnable)("collection quality browser", () => {
       const reads = requests.filter((request) =>
         request.path.startsWith("/api/collection-quality"),
       ).length;
+      // The spinner appears only once the query cache reports the refetch, so
+      // its absence right after the click proves nothing: wait for the read.
+      const refetched = page.waitForResponse((response) =>
+        new URL(response.url()).pathname.startsWith("/api/collection-quality"),
+      );
       await page.getByRole("button", { name: "表示を更新", exact: false }).click();
+      await refetched;
       await page.waitForFunction(() => !document.querySelector(".refresh-symbol.is-refreshing"));
       expect(
         requests.filter((request) => request.path.startsWith("/api/collection-quality")).length,
@@ -130,6 +160,22 @@ describe.if(runnable)("collection quality browser", () => {
         })
         .waitFor();
       expect(await page.getByText("synthetic-card", { exact: false }).count()).toBe(0);
+      // provider-data-types-v1: Sony Bank's history is partial and its term
+      // deposits are not collected, each linked to the issue that tracks it;
+      // the source list counts the types not wholly collected.
+      expect(await page.locator('li[data-status="partial"]').count()).toBeGreaterThan(0);
+      expect(
+        await page.locator('li[data-status="not_collected"]', { hasText: "term_deposit" }).count(),
+      ).toBe(1);
+      expect(
+        await page
+          .locator('li[data-status="partial"]', { hasText: "cash_movement" })
+          .getByRole("link", { name: "残りの対応 #449" })
+          .getAttribute("href"),
+      ).toBe("https://github.com/risu729/kogane/issues/449");
+      expect(await page.getByText(/未収集・一部のみのデータ種別 \d+ 件/).count()).toBeGreaterThan(
+        0,
+      );
       expect(requests.filter((request) => request.method !== "GET")).toEqual([]);
       expect(
         requests.some(
@@ -142,4 +188,21 @@ describe.if(runnable)("collection quality browser", () => {
       await page.close();
     }
   }, 30000);
+  test("the scope picker and a chosen source pass the accessibility audit", async () => {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await page.goto(`${origin}/collection-quality`);
+      await page
+        .getByText("取得元を選ぶと、対象を限定して状態を読み込みます。", { exact: true })
+        .waitFor();
+      expect(await auditView(page)).toEqual([]);
+      await page.getByRole("link", { name: "vpass", exact: true }).click();
+      await page
+        .getByText("この口座・カードの原本ファイルがありません", { exact: false })
+        .waitFor();
+      expect(await auditView(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 60000);
 });

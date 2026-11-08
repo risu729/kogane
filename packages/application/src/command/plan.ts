@@ -3,6 +3,13 @@
 // changed target, payload, expected revision or context is a different plan
 // and every approval bound to the old digest stops applying (SC17).
 //
+// A plan's lifetime is not part of what it would do, and its row can never be
+// reopened, so a change planned again after its plan expired over unchanged
+// data is a renewal (ADR 0080): the same digest input plus the plan-length
+// window the new plan is created in. Without it the re-plan found the expired
+// row under the same id and the change could not be approved again until an
+// unrelated decision moved one of its pins.
+//
 // Creating a plan changes no economic state.
 import { canonicalDigest } from "../../../domain/src/context.ts";
 import { instrumentTemporalContextRequested } from "../../../domain/src/instrument-temporal.ts";
@@ -58,25 +65,102 @@ export function simulationCounts(simulation: Simulation): Partial<Record<Decisio
 export const PLAN_TTL_SECONDS_DEFAULT = 15 * 60;
 const PLAN_TTL_SECONDS_MAX = 24 * 60 * 60;
 
+/**
+ * What makes a renewed plan's id differ from the expired plan of the same
+ * change (ADR 0080): its lifetime and the index of the lifetime-long window,
+ * counted from the epoch, that its creation instant falls in. Both follow
+ * from the stored `created_at` and `expires_at`, so a reader can re-derive
+ * the id of any stored plan.
+ */
+export interface PlanRenewal {
+  ttlSeconds: number;
+  window: number;
+}
+
 export async function planDigestOf(input: {
   kind: ChangeKind;
   payload: ChangePayload;
   expectedRevisions: Record<string, number>;
   baseContextId: string;
+  renewal?: PlanRenewal;
 }): Promise<string> {
   return canonicalDigest({
     kind: input.kind,
     payload: input.payload as unknown as Record<string, unknown>,
     expectedRevisions: input.expectedRevisions,
     baseContextId: input.baseContextId,
+    ...(input.renewal
+      ? { renewal: { ttlSeconds: input.renewal.ttlSeconds, window: input.renewal.window } }
+      : {}),
   });
+}
+
+/** The renewal window a plan created at `now` with this lifetime falls in. */
+function renewalWindow(now: string, ttlSeconds: number): PlanRenewal {
+  return { ttlSeconds, window: Math.floor(Date.parse(now) / (ttlSeconds * 1000)) };
+}
+
+/**
+ * The renewal a stored plan would carry if it is one, derived from its own
+ * `created_at` and `expires_at`; null when they do not describe a lifetime
+ * `createPlan` could have given it.
+ */
+export function storedRenewal(
+  plan: Pick<ChangePlan, "createdAt" | "expiresAt">,
+): PlanRenewal | null {
+  const ttlMs = Date.parse(plan.expiresAt) - Date.parse(plan.createdAt);
+  const ttlSeconds = ttlMs / 1000;
+  if (!Number.isSafeInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > PLAN_TTL_SECONDS_MAX)
+    return null;
+  return renewalWindow(plan.createdAt, ttlSeconds);
+}
+
+/**
+ * The id the plan of this change takes at `now` (ADR 0080). The first plan of
+ * a change keeps the plain digest. Only when the plan under that digest is
+ * still open (`planned` or `approved`) but has expired is the change renewed:
+ * a renewal created in the previous window that has not expired is the
+ * answer, and otherwise the renewal of the current window. A plan created in
+ * window w lives at least until window w + 1 begins, so no open plan of the
+ * change can be older than the previous window, and three key lookups decide
+ * it. A plan that was committed, marked stale or rejected is never renewed:
+ * it is answered as it was.
+ */
+async function planIdAt(
+  store: CommandStore,
+  content: Omit<Parameters<typeof planDigestOf>[0], "renewal">,
+  now: string,
+  ttlSeconds: number,
+): Promise<string> {
+  const instant = Date.parse(now);
+  const lapsed = async (planId: string): Promise<boolean | null> => {
+    const row = await store.first<{ status: string; expires_at: string }>(
+      "SELECT status,expires_at FROM change_plans WHERE plan_id=?1",
+      [planId],
+    );
+    if (!row) return null;
+    return (
+      (row.status === "planned" || row.status === "approved") &&
+      Date.parse(row.expires_at) <= instant
+    );
+  };
+  const first = await planDigestOf(content);
+  if ((await lapsed(first)) !== true) return first;
+  const current = renewalWindow(now, ttlSeconds);
+  const previous = await planDigestOf({
+    ...content,
+    renewal: { ttlSeconds, window: current.window - 1 },
+  });
+  if ((await lapsed(previous)) === false) return previous;
+  return planDigestOf({ ...content, renewal: current });
 }
 
 /**
  * Validates the payload, resolves its targets against the store, records the
  * revisions those targets are at right now, simulates the change with the same
  * engine the commit will run, and stores the plan under its digest. Planning
- * the same change twice over unchanged data returns the same plan.
+ * the same change twice over unchanged data returns the same plan while that
+ * plan is open and unexpired; after it expired, a renewal (`planIdAt`).
  */
 export async function createPlan(
   kind: unknown,
@@ -101,12 +185,12 @@ export async function createPlan(
   const candidate = await verifyInstrumentCandidateContext(store, kind, payload, ctx.baseContextId);
   if (!candidate.ok) return candidate;
   const { targets, expectedRevisions, simulation } = resolution.resolved;
-  const planId = await planDigestOf({
-    kind,
-    payload,
-    expectedRevisions,
-    baseContextId: ctx.baseContextId,
-  });
+  const planId = await planIdAt(
+    store,
+    { kind, payload, expectedRevisions, baseContextId: ctx.baseContextId },
+    ctx.now,
+    ctx.ttlSeconds,
+  );
   const expiresAt = new Date(Date.parse(ctx.now) + ctx.ttlSeconds * 1000).toISOString();
   const audit = ctx.audit?.effect(
     {

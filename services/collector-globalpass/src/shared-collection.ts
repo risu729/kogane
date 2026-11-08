@@ -51,8 +51,8 @@ const JSON_MEDIA_TYPE = "application/json";
 const UNIT_KEY = "account";
 const UNIT_KIND = "collection";
 
-export const PROVIDER_CAPTURE_ROLE = "sanitized_provider_capture";
-export const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
+const PROVIDER_CAPTURE_ROLE = "sanitized_provider_capture";
+const COLLECTOR_MANIFEST_ROLE = "collector_manifest";
 
 const encoder = new TextEncoder();
 
@@ -65,7 +65,7 @@ export interface SharedCapture {
 }
 
 /** Where the ops API's operation and this attempt enter the terminal (03 §3). */
-export interface SharedRunIdentity {
+interface SharedRunIdentity {
   readonly operationId?: string;
   readonly attemptId: string;
 }
@@ -105,11 +105,10 @@ async function artifactOf(options: {
 
 /**
  * GLOBAL PASS has no re-authentication and no stored session: the collector
- * makes exactly one login attempt per run and the cron is the only retry. The
- * container reports a failed login as the generic `browser_collection_failed`,
- * so nothing here can honestly single out "a person must act" without a
- * container change, which U09 does not make. The hook exists so a later,
- * better-classified failure can set it without changing the terminal contract.
+ * makes exactly one credential POST per run and the cron is the only retry.
+ * The container now names a rejected login (`globalpass_login_rejected`), but
+ * that has never been observed, so it is not yet read as "a person must act".
+ * The hook exists so it can be set without changing the terminal contract.
  */
 export function waitingForHuman(_manifest: CollectionManifest): boolean {
   return false;

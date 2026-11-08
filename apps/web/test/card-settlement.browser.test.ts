@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:tes
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { chromium, type Browser } from "playwright";
+import { auditView } from "./a11y-audit.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { settlementReview } from "../../../packages/application/test/card-settlement-fixture.ts";
 import { cardSettlementImpact } from "../../../packages/domain/src/card-settlement.ts";
@@ -28,14 +29,14 @@ const unmatched = {
   manifest: {
     codes: [],
     planner: {
-      release: "card-statement-allocation-v1",
+      release: "card-statement-allocation-v2",
       policy: {
         policyVersion: "card-statement-unmatched-display-v1",
         window: { minDaysFromDue: -3, maxDaysFromDue: 3 },
         maxDebitsPerAllocation: 3,
       },
       partition: "page-overlapping-windows",
-      bounds: { statements: 16, debits: 32 },
+      bounds: { statements: 16, debits: 32, allocations: 50 },
     },
     pageSize: 50,
     acceptance: "single-debit-candidates-only",
@@ -84,6 +85,8 @@ const unmatched = {
             ],
           },
         ],
+        allocationCount: 1,
+        allocationsTruncated: false,
       },
       acceptable: false,
     },
@@ -110,6 +113,38 @@ const unmatched = {
   ],
   nextOffset: null,
 };
+/** One statement whose window holds 32 equal debits: 4,960 exact sums, the first 50 listed. */
+const truncated = {
+  ...unmatched,
+  items: [
+    {
+      ...unmatched.items[0]!,
+      debitsInWindow: 32,
+      planner: {
+        status: "needs_review",
+        codes: ["candidate_not_unique"],
+        allocations: Array.from({ length: 50 }, (_, index) => ({
+          kind: "multiple-debits",
+          ownership: "unknown",
+          rejectionConditions: ["owner_not_established"],
+          members: [0, 1, 2].map((offset) => ({
+            ref: {
+              kind: "transaction",
+              id: `transaction:${100 + index + offset}`,
+              revision: "parse_run:6",
+            },
+            sourceId: "smbc-bank",
+            sourceAccount: "synthetic-bank",
+            accountId: null,
+            amount: yen("1000"),
+          })),
+        })),
+        allocationCount: 4960,
+        allocationsTruncated: true,
+      },
+    },
+  ],
+};
 
 describe.if(runnable)("card settlement review", () => {
   let browser: Browser;
@@ -121,6 +156,7 @@ describe.if(runnable)("card settlement review", () => {
   let planRevision = 0;
   let action = "accept";
   let older: ReturnType<typeof settlementReview>[] = [];
+  let unmatchedPage: unknown = unmatched;
   const posted: { operation: string; body: Record<string, unknown> }[] = [];
   beforeEach(() => {
     review = settlementReview();
@@ -129,6 +165,7 @@ describe.if(runnable)("card settlement review", () => {
     planRevision = 0;
     action = "accept";
     older = [];
+    unmatchedPage = unmatched;
     posted.length = 0;
   });
   beforeAll(async () => {
@@ -196,7 +233,7 @@ describe.if(runnable)("card settlement review", () => {
             },
           });
         if (url.pathname === "/api/v2/reconciliation/card-statements-unmatched")
-          return Response.json(unmatched);
+          return Response.json(unmatchedPage);
         if (url.pathname.startsWith("/api/command/v1/")) {
           const operation = url.pathname.split("/").at(-1)!;
           const body = (await request.json()) as Record<string, unknown>;
@@ -335,6 +372,21 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  test("a statement with more combinations than the server lists says how many it does not show", async () => {
+    unmatchedPage = truncated;
+    const page = await open();
+    const section = page.getByRole("region", { name: "照合候補のない請求" });
+    const note = section.getByRole("note");
+    await note.waitFor();
+    expect(await note.innerText()).toContain(
+      "一致する組み合わせ 4,960件のうち、出金の件数が少ない順に先頭の50件を表示しています。",
+    );
+    expect(await section.locator(".unmatched-allocation").count()).toBe(50);
+    expect(await section.innerText()).toContain("組み合わせが一つに決まりません");
+    expect(await section.getByRole("button", { name: /採用/u }).count()).toBe(0);
+    await page.close();
+  });
+
   test("the bank is named by its adapter, and an unlabelled source is shown as stored", async () => {
     review.facts.bankDebit.sourceId = "sbi-shinsei-bank";
     let page = await open();
@@ -349,73 +401,89 @@ describe.if(runnable)("card settlement review", () => {
     await page.close();
   });
 
+  // One page load per outcome: each is its own test, so one slow load cannot
+  // spend the budget of the others.
+  const debitStatementRef = {
+    kind: "typed-claim",
+    id: "card_debit_account_statement:7",
+    revision: "reader:myjcb-card-information-1.0.0",
+  } as const;
+  async function debitAccountText(
+    debitAccount: ReturnType<typeof settlementReview>["debitAccount"],
+  ): Promise<string> {
+    review.debitAccount = debitAccount;
+    const page = await open();
+    const text = await page.locator("main").innerText();
+    await page.close();
+    return text;
+  }
+
   test("the provider-stated debit account is shown as evidence and never unblocks adoption", async () => {
     review = settlementReview(true);
     review.debitAccount = {
       outcome: "supports",
       reason: null,
       policy: "card-debit-account-statement-v3",
-      statementRef: {
-        kind: "typed-claim",
-        id: "card_debit_account_statement:7",
-        revision: "reader:myjcb-card-information-1.0.0",
-      },
+      statementRef: debitStatementRef,
       bankSourceId: "sbi-shinsei-bank",
       bankSourceAccount: "synthetic-bank",
       visibleDigitCount: 4,
       recordedAt: "2026-09-11T00:00:00Z",
     };
-    let page = await open();
-    let text = await page.locator("main").innerText();
+    const page = await open();
+    const text = await page.locator("main").innerText();
     expect(text).toContain("カード会社が示す引落口座");
     expect(text).toContain("照合した銀行口座と同じ");
     expect(text).toContain("先頭4桁が一致");
     expect(await page.getByRole("button", { name: "採用内容を確認" }).isDisabled()).toBe(true);
     await page.close();
-    review = settlementReview();
-    review.debitAccount = {
+  });
+
+  test("a provider-stated debit account that names another account is shown as such", async () => {
+    const text = await debitAccountText({
       outcome: "names_other_account",
       reason: null,
       policy: "card-debit-account-statement-v3",
-      statementRef: {
-        kind: "typed-claim",
-        id: "card_debit_account_statement:7",
-        revision: "reader:myjcb-card-information-1.0.0",
-      },
+      statementRef: debitStatementRef,
       bankSourceId: "sbi-shinsei-bank",
       bankSourceAccount: "synthetic-other-bank",
       visibleDigitCount: 4,
       recordedAt: "2026-09-11T00:00:00Z",
-    };
-    page = await open();
-    text = await page.locator("main").innerText();
+    });
     expect(text).toContain("照合した銀行口座とは別の口座 · SBI新生銀行 · synthetic-other-bank");
-    await page.close();
-    review = settlementReview();
-    review.debitAccount = {
+  });
+
+  test("an undecided debit account statement shows its reason", async () => {
+    const text = await debitAccountText({
       outcome: "not_proposed",
       reason: "ambiguous_accounts",
       policy: "card-debit-account-statement-v3",
-      statementRef: {
-        kind: "typed-claim",
-        id: "card_debit_account_statement:7",
-        revision: "reader:myjcb-card-information-1.0.0",
-      },
+      statementRef: debitStatementRef,
       bankSourceId: null,
       bankSourceAccount: null,
       visibleDigitCount: null,
       recordedAt: "2026-09-11T00:00:00Z",
-    };
-    page = await open();
-    text = await page.locator("main").innerText();
+    });
     expect(text).toContain("判定なし（預金種目と口座番号の先頭桁が一致する口座が複数あります）");
-    await page.close();
-    review = settlementReview();
-    page = await open();
-    expect(await page.locator("main").innerText()).toContain(
-      "記録なし（この候補についての判定はまだ記録されていません）",
-    );
-    await page.close();
+  });
+
+  test("a candidate with no recorded debit account outcome says it is not recorded", async () => {
+    const text = await debitAccountText(settlementReview().debitAccount);
+    expect(text).toContain("記録なし（この候補についての判定はまだ記録されていません）");
+  });
+
+  test("an absent debit account statement shows why it is absent", async () => {
+    const text = await debitAccountText({
+      outcome: "absent",
+      reason: "card_information_table_invalid",
+      policy: "card-debit-account-statement-v3",
+      statementRef: null,
+      bankSourceId: null,
+      bankSourceAccount: null,
+      visibleDigitCount: null,
+      recordedAt: null,
+    });
+    expect(text).toContain("記録なし（「カード情報」の表の形が想定と異なります）");
   });
 
   test("server impact remains separate from purchase expense and requires approve then commit", async () => {
@@ -566,6 +634,17 @@ describe.if(runnable)("card settlement review", () => {
     ).toBe(true);
     await page.close();
   });
+
+  test("the review and its confirmation pass the accessibility audit", async () => {
+    const page = await open();
+    expect(await auditView(page)).toEqual([]);
+    await page.getByLabel("判断の理由", { exact: true }).fill("同一保有者の根拠がないため");
+    await page.getByRole("button", { name: "却下内容を確認" }).click();
+    await page.getByRole("heading", { name: "変更の確認", exact: true }).waitFor();
+    await page.locator(".skeleton-bar").first().waitFor({ state: "detached" });
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+  }, 60_000);
   test("one statement's earlier candidates are collapsed under the one to review and stay reachable", async () => {
     const stale = (n: number) => ({
       ...settlementReview(),
@@ -589,6 +668,7 @@ describe.if(runnable)("card settlement review", () => {
     // The full list adds the one the group did not carry, and repeats none.
     expect(await page.locator(".settlement-older section.panel").count()).toBe(2);
     expect(await page.getByRole("button", { name: "採用内容を確認" }).count()).toBe(3);
+    expect(await auditView(page)).toEqual([]);
     await page.setViewportSize({ width: 390, height: 844 });
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1),

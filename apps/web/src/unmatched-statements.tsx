@@ -84,6 +84,14 @@ function PlannerAnswer({ answer }: { answer: UnmatchedPlannerAnswer }): ReactNod
           ))}
         </ul>
       ) : null}
+      {"allocations" in answer && answer.allocationsTruncated ? (
+        // The server lists the first 50 and counts every one (ADR 0074,
+        // amendment 2026-11-07): the page says how many it does not show.
+        <p className="footnote" role="note">
+          {`一致する組み合わせ ${answer.allocationCount.toLocaleString("ja-JP")}件のうち、` +
+            `出金の件数が少ない順に先頭の${answer.allocations.length}件を表示しています。`}
+        </p>
+      ) : null}
       {"allocations" in answer
         ? answer.allocations.map((allocation, index) => (
             <div key={index} className="unmatched-allocation">

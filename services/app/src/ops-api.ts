@@ -48,9 +48,11 @@ import {
   type OperationCall,
   type OperationName,
 } from "../../../packages/application/src/index";
+import { RUN_ID as TERMINAL_RUN_ID } from "../../../packages/collection/src/keys";
+import { d1Executor, type SqlExecutor } from "../../../packages/read-model/src/index";
 import { auditContext, auditedRoute } from "./audit";
 import { principalFor } from "./grants";
-import { boundedText, HttpError, json } from "./http";
+import { assertOwnOrigin, boundedText, HttpError, json } from "./http";
 
 export const OPS_PREFIX = "/api/ops/v1";
 /** Largest request body any operations route reads, in bytes. */
@@ -70,12 +72,27 @@ export function isOpsPath(path: string): boolean {
   return path === OPS_PREFIX || path.startsWith(`${OPS_PREFIX}/`);
 }
 
-/** Route label for the request log; identifiers never reach it. */
+/** The first path segments this prefix serves: the six routes, health and schedules. */
+const OPS_ROUTE_HEADS: readonly string[] = [
+  "collections",
+  "imports",
+  "replays",
+  "projections",
+  "sessions",
+  "operations",
+  "health",
+  "schedules",
+];
+
+/**
+ * Route label for the request log: a closed code. Neither identifiers nor any
+ * other path text the caller sent reach it; an unserved segment is `unknown`.
+ */
 export function classifyOpsPath(path: string): string | null {
   if (!isOpsPath(path)) return null;
   const rest = path.slice(OPS_PREFIX.length).replace(/^\//u, "");
   const head = rest.split("/")[0] ?? "";
-  return `ops_${/^[a-z]{1,32}$/u.test(head) ? head : "unknown"}`;
+  return `ops_${OPS_ROUTE_HEADS.includes(head) ? head : "unknown"}`;
 }
 
 // ── request schemas ─────────────────────────────────────────────────────
@@ -99,8 +116,14 @@ const IDEMPOTENCY_KEY = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u)
   .optional();
-/** A run as the terminal contract names it: one path segment, never a key. */
-const RUN_ID = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
+/**
+ * A run as the terminal contract names it: one path segment, never a key.
+ * The grammar is the bucket key's own (`RUN_ID` in `packages/collection`), not
+ * a copy of it: an import names the run whose terminal is
+ * `runs/<source>/<runId>/terminal.json`, so a run id that key refuses could
+ * never register and is refused here, at acceptance, rather than answered 202.
+ */
+const RUN_ID = z.string().regex(TERMINAL_RUN_ID);
 /** A registered parser release id (0028), never a version string a caller invents. */
 const PARSER_RELEASE = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$/u);
 
@@ -124,13 +147,15 @@ export const replaySchema = z.strictObject({
   idempotencyKey: IDEMPOTENCY_KEY,
 });
 export const projectionSchema = z.strictObject({
-  // Why a rebuild was asked for. Bounded, single-line, no control characters;
+  // Why a rebuild was asked for. Bounded, single-line, no control characters
+  // (Unicode category Cc, spelled as ranges: the published JSON Schema
+  // `pattern` must not use `\p{…}`, which ChatGPT's validator refuses);
   // it is stored with the request and never interpolated anywhere.
   reason: z
     .string()
     .min(1)
     .max(500)
-    .regex(/^[^\p{Cc}]+$/u),
+    .regex(/^[^\u0000-\u001f\u007f-\u009f]+$/u),
   idempotencyKey: IDEMPOTENCY_KEY,
 });
 export const sessionRefreshSchema = z.strictObject({
@@ -210,12 +235,23 @@ export function opsContext(env: Env, subject: string, audit?: OperationCall): Op
     throw new HttpError(403, "approval_required");
   return {
     store: d1CommandStore(env.DB),
+    readStore: opsReadStore(env),
     principal,
     ...(audit ? { audit } : {}),
     now: new Date().toISOString().replace(/\.\d{3}Z$/u, "Z"),
     nowMs: Date.now(),
     policy: sessionRefreshPolicy(env.SESSION_REFRESH_POLICY),
   };
+}
+
+/**
+ * The READ database, read only, for the `projected` stage of an operation
+ * record; null when this deployment binds none (the record then says
+ * `read_model_unavailable`). Both transports build their context here.
+ */
+export function opsReadStore(env: Env): SqlExecutor | null {
+  const read = (env as unknown as { READ?: D1Database }).READ;
+  return read ? d1Executor(read) : null;
 }
 
 interface OpsResponse {
@@ -394,6 +430,7 @@ export async function opsApi(
   const operation = opsOperation(request.method, url.pathname);
   if (operation === null) {
     if (url.search) throw new HttpError(400, "invalid_query");
+    if (request.method === "POST") assertOwnOrigin(request, url);
     return app.fetch(request, { ...env, VERIFIED_SUBJECT: subject });
   }
   // One audit record per operations request (ADR 0064, path `ui`): the
@@ -401,6 +438,9 @@ export async function opsApi(
   // answer — a re-send, a read, a refusal — is recorded after it.
   return auditedRoute(auditContext(request, env, "ui", subject), operation, async (call) => {
     if (url.search) throw new HttpError(400, "invalid_query");
+    // A page on another site never reaches the grant, the schema or the
+    // store (ADR 0078); the refusal is recorded like any other.
+    if (request.method === "POST") assertOwnOrigin(request, url);
     const audit: OpsAudit = { call, quiet: { result: "skip" } };
     const response = await app.fetch(request, { ...env, VERIFIED_SUBJECT: subject, AUDIT: audit });
     return { response, outcome: audit.quiet };

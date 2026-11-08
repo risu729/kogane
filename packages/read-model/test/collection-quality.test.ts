@@ -13,6 +13,7 @@ import {
   COLLECTION_QUALITY_ROW_BOUND,
   ONE_SOURCE_QUALITY_SQL,
   SCHEDULE_QUALITY_SQL,
+  SOURCE_JOBS_SQL,
   SOURCE_QUALITY_SQL,
   TERMINAL_QUALITY_SQL,
   UNCOMPOSED_QUERY_RULE_PARSERS,
@@ -907,6 +908,7 @@ describe("collection quality on the complete CORE schema without statistics", ()
   test("the summary reads are keyed by job, run and source", () => {
     for (const [sql, args] of [
       [SCHEDULE_QUALITY_SQL, []],
+      [SOURCE_JOBS_SQL, [JSON.stringify(["vpoint", "v-point"])]],
       [SOURCE_QUALITY_SQL, []],
       [ONE_SOURCE_QUALITY_SQL, ["vpass"]],
       [TERMINAL_QUALITY_SQL, [JSON.stringify([["vpass", "run-a"]])]],

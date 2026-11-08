@@ -254,3 +254,28 @@ test("a claim whose record cannot be written is not claimed either, and the alar
   ).toBe(nominal);
   expect((await ctx.storage.getAlarm())!).toBeGreaterThan(Date.now());
 });
+
+test("the processor tick frees a silent lease and records it as the tick (ADR 0085)", async () => {
+  const ref = "4e1a2b3c-0000-4000-8000-0000000000c1";
+  await env.DB.prepare(
+    "INSERT OR REPLACE INTO collection_execution_leases(source,lease_ref,started_at,heartbeat_at) VALUES('myjcb',?,strftime('%Y-%m-%dT%H:%M:%fZ','now','-30 minutes'),strftime('%Y-%m-%dT%H:%M:%fZ','now','-20 minutes'))",
+  )
+    .bind(ref)
+    .run();
+  await due("processor-tick");
+  await new AlarmClass(state("processor-tick"), withCollectors()).alarm();
+  expect(
+    await env.DB.prepare(
+      "SELECT lease_ref FROM collection_execution_leases WHERE source='myjcb'",
+    ).first<string | null>("lease_ref"),
+  ).toBeNull();
+  const records = (await alarmRecords()).filter(
+    (record) => record.operation === "alarm.lease.expire",
+  );
+  expect(records).toHaveLength(1);
+  expect(records[0]).toMatchObject({
+    principal: "alarm:processor-tick",
+    target_ref: "collection-lease:myjcb",
+    result: "applied",
+  });
+});

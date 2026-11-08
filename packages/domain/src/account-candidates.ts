@@ -152,7 +152,7 @@ export interface AccountRelationFact {
  * names its review row's key: the row's key was rewritten by migration 0063.
  * `producerId` and `connectionKey` are that review row's now.
  */
-export interface LegacyConnectionRelationFact {
+interface LegacyConnectionRelationFact {
   fromRef: string;
   toRef: string;
   producerId: string;
@@ -168,7 +168,7 @@ export interface AccountCandidateInput {
 }
 
 /** The change lifecycle payload (without `reason`) a candidate names. */
-export interface AccountCandidateCommand {
+interface AccountCandidateCommand {
   kind: "relation.accept" | "relation.reject";
   payload: {
     relationKind: "connection_contains";

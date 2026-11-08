@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import { delegatedSurveySchema } from "../../../packages/application/src/index";
 import { mcpInputSchema } from "../src/mcp-input-schema";
+import { projectionSchema } from "../src/ops-api";
 
 describe("mcpInputSchema", () => {
   it("publishes an object schema as it is, without the meta key", () => {
@@ -72,6 +73,23 @@ describe("mcpInputSchema", () => {
         baseRevision: 0,
       }).success,
     ).toBe(false);
+  });
+
+  it("refuses a pattern with a Unicode property escape", () => {
+    expect(() => mcpInputSchema(z.strictObject({ a: z.string().regex(/^[^\p{Cc}]+$/u) }))).toThrow(
+      /must not use/u,
+    );
+  });
+
+  it("keeps the projection reason free of every Cc control character", () => {
+    const published = JSON.stringify(mcpInputSchema(projectionSchema));
+    expect(published).not.toMatch(/\\\\p\{/u);
+    const reason = (value: string) =>
+      projectionSchema.safeParse({ reason: value, idempotencyKey: "k-1" }).success;
+    expect(reason("rebuild after parser fix")).toBe(true);
+    for (const code of [0x00, 0x09, 0x0a, 0x1f, 0x7f, 0x85, 0x9f])
+      expect(reason(`a${String.fromCharCode(code)}b`), code.toString(16)).toBe(false);
+    expect(reason("a\u00a0b")).toBe(true);
   });
 
   it("refuses a schema that is not an object or a discriminated union of objects", () => {

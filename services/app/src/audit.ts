@@ -243,19 +243,36 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
     };
   // One UI page read (`{ schemaVersion, data }`, src/page-read-tools.ts): the
   // page's `items` or `rows`, else its first list (connections, transactions, …), truncated
-  // when the page says more follow; one detail is one row.
-  if (operation === "observations.get") return { rows: value["data"] ? 1 : 0, truncated: false };
+  // when the page says more follow (`coverage.truncated`, `page.hasMore`, a
+  // `nextCursor`); one detail is one row.
+  if (operation === "observations.get" || operation === "evidence.raw.read")
+    return { rows: value["data"] ? 1 : 0, truncated: false };
+  // The report list's items, truncated while a cursor follows (the list has no
+  // `coverage` or `page`); one report or one explanation is one row, never its
+  // events.
+  if (operation === "reports.read") {
+    const data = (value["data"] ?? null) as Record<string, unknown> | null;
+    if (data && Array.isArray(data["items"]))
+      return { rows: data["items"].length, truncated: typeof data["nextCursor"] === "string" };
+    return { rows: data ? 1 : 0, truncated: false };
+  }
   if (
     operation === "identity.read" ||
     operation === "store.read" ||
     operation === "observations.list" ||
     operation === "balances.read" ||
     operation === "rewards.read" ||
-    operation === "reported-holdings-change.read"
+    operation === "reported-holdings-change.read" ||
+    operation === "events.read" ||
+    operation === "collection-quality.read" ||
+    operation === "evidence.read" ||
+    operation === "schedules.read"
   ) {
     const data = (value["data"] ?? {}) as Record<string, unknown>;
     const coverage = (data["coverage"] ?? {}) as Record<string, unknown>;
     const page = (data["page"] ?? {}) as Record<string, unknown>;
+    // The events pages name their coverage `dataCoverage` (A10).
+    const dataCoverage = (data["dataCoverage"] ?? {}) as Record<string, unknown>;
     // `items` or `rows` when the page has them: a reward expiry page lists
     // its provider display sections before its rows.
     const list = Array.isArray(data["items"])
@@ -265,7 +282,11 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
         : data;
     return {
       rows: countOf(list),
-      truncated: coverage["truncated"] === true || page["hasMore"] === true,
+      truncated:
+        coverage["truncated"] === true ||
+        dataCoverage["truncated"] === true ||
+        page["hasMore"] === true ||
+        typeof data["nextCursor"] === "string",
     };
   }
   // A page of statements; a named next page means more remain.

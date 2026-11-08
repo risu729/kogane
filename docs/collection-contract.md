@@ -29,8 +29,8 @@ projection-inputs/<digest>/<path>      frozen inputs for a repeatable projection
 `objectKey`, `terminalKey`, `runPrefix`, `reportKey` and `projectionInputKey`
 are the only places these strings are formed. Every input is validated and
 never normalized: an upper-case digest, a `.`/`..` segment, an empty segment, a
-backslash, a leading slash and an out-of-charset source or run id are all
-rejected, because a normalized key would silently address a different object
+backslash, a leading slash, a missing or out-of-charset source or run id, and
+a run id without a source are all rejected, because a normalized key would silently address a different object
 than the caller named. `parseTerminalKey` is the exact inverse and returns null
 for anything else, so a listing can skip unrelated objects.
 
@@ -173,8 +173,9 @@ reader's own `readTerminalAt`, so a stored terminal the Processor would block
 `conflict` carrying that reason code — never `already_persisted`, and never
 overwritten. Both halves are deliberate:
 the conditional put closes the race between the HEAD and the write, and the
-digest comparison keeps the helper correct on an R2 implementation that does
-not honour the wildcard condition. The public Workers R2 reference does not
+digest comparison keeps a resend correct on an R2 implementation that does
+not honour the wildcard condition (there, a second writer that races the first
+between its HEAD and its put is not caught). The public Workers R2 reference does not
 document `"*"`, so it is verified here rather than assumed:
 `packages/collection/worker-test/r2-terminal.test.ts` runs against real
 workerd/Miniflare R2 and asserts that the second create-only put returns

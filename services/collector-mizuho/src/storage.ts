@@ -6,7 +6,7 @@ import {
   type TerminalUnit,
 } from "../../../packages/collection/src/index";
 import { sanitizeMizuhoPage } from "../../../packages/parsers/src/parsers/mizuho-html";
-import type { MizuhoArtifact } from "./client";
+import { MIZUHO_CLIENT_ERROR_CODES, MIZUHO_PARSE_ERROR_CODES, type MizuhoArtifact } from "./client";
 
 /** The terminal's source (the collector id) and its producer, `collector-<collector id>` (ADR 0014). */
 export const MIZUHO_SOURCE = "mizuho-bank";
@@ -19,9 +19,28 @@ export interface MizuhoRun {
   version: string;
   artifacts: readonly MizuhoArtifact[];
   failedUnits: readonly string[];
+  /** The closed code that stopped each failed unit; a unit without one keeps the generic code. */
+  failedUnitCodes?: Readonly<Record<string, string>>;
+  /** The closed code that failed the whole run (login or the account list). */
+  failureCode?: string;
   /** Incomplete coverage; actual acquisition failures are separately listed. */
   partial: boolean;
   failed: boolean;
+}
+
+const CLOSED_CODES = new Set<string>([
+  ...MIZUHO_CLIENT_ERROR_CODES,
+  ...MIZUHO_PARSE_ERROR_CODES,
+  "account-limit",
+]);
+
+/**
+ * A code the terminal may carry: one of the collector's closed codes, else the
+ * generic one. It is what the collection-quality read shows for the unit, so
+ * a failure is named without the Worker logs.
+ */
+function closedCode(code: string | undefined, generic: string): string {
+  return code !== undefined && CLOSED_CODES.has(code) ? code : generic;
 }
 
 /** Retain only validated, sanitized provider DOM; the terminal is written last. */
@@ -59,7 +78,10 @@ export async function mizuhoRunPlan(input: MizuhoRun): Promise<PersistRunPlan> {
       unitKind: "container",
       artifactCount: 0,
       coverageStatus: "unknown",
-      safeErrorCode: "collection-unit-failed",
+      safeErrorCode: closedCode(
+        input.failedUnitCodes?.[unitKey] ?? (input.failed ? input.failureCode : undefined),
+        "collection-unit-failed",
+      ),
     });
   }
   if (input.failed && artifacts.length > 0) throw new Error("inconsistent-collection-outcome");
@@ -95,7 +117,9 @@ export async function mizuhoRunPlan(input: MizuhoRun): Promise<PersistRunPlan> {
         ? {}
         : {
             safeErrorCode:
-              providerOutcome === "failed" ? "collection-failed" : "collection-unit-failed",
+              providerOutcome === "failed"
+                ? closedCode(input.failureCode, "collection-failed")
+                : "collection-unit-failed",
           }),
       units,
       ranges: [],
