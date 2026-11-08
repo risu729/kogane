@@ -119,6 +119,36 @@ test("all 24,300 bounded amount-policy combinations match the integer oracle", (
               expect(decimalToString(plan.receive.value.value)).toBe(
                 String(expectedFeasible ? rounded(use * numerator, denominator, mode) : 0),
               );
+              // The adjustments in order, then the refusal or the credit caveat.
+              expect(plan.reasonCodes).toEqual([
+                ...(cap !== null && cap < balance ? ["capped_by_maximum"] : []),
+                ...(use < permitted ? ["rounded_down_to_increment"] : []),
+                expectedFeasible ? "credit_is_not_the_application" : "below_minimum",
+              ]);
+              // The route search reports the same plan, or its refusal by name.
+              const search = findConversionPaths(
+                [
+                  offer({
+                    increment: decimalLiteral(String(increment)),
+                    minimum: decimalLiteral(String(minimum)),
+                    maximumPerRequest: cap === null ? null : decimalLiteral(String(cap)),
+                    ratio: { numerator: String(numerator), denominator: String(denominator) },
+                    rounding: { scale: 0, mode },
+                  }),
+                ],
+                { quantity: quantity(balance), clock: day("2026-04-10") },
+                "points:b",
+                { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null },
+              );
+              if (expectedFeasible) {
+                expect(search.rejected).toEqual([]);
+                expect(search.paths.map((p) => p.hops.map((h) => h.plan))).toEqual([[plan]]);
+              } else {
+                expect(search.paths).toEqual([]);
+                expect(search.rejected).toEqual([
+                  { offerRef: "offer:a-b@v1", reasonCode: "below_minimum" },
+                ]);
+              }
             }
   expect(cases).toBe(24_300);
 });
