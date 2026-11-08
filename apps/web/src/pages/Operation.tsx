@@ -343,7 +343,12 @@ function Runs({ execution }: { execution: OperationRecordExecutionWire }): React
           </EmptyState>
         </div>
       ) : (
-        <div className="table-scroll" role="region" aria-label="報告された収集実行" tabIndex={0}>
+        <div
+          className="table-scroll"
+          role="region"
+          aria-label="報告された収集実行の表"
+          tabIndex={0}
+        >
           <table>
             <caption className="visually-hidden">
               報告された収集実行。実行ID、状態と理由、取得元の結果、取得記録、ファイルの件数。

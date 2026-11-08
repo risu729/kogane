@@ -164,8 +164,12 @@ export async function runCollection(
       for (const artifact of output.artifacts) {
         try {
           artifacts.push(
-            // The manifest entry only: the bytes reach DATA content-addressed
-            // when the terminal is written, and nothing is staged.
+            // Admission only (dataset, filename and media type are checked):
+            // the bytes reach DATA content-addressed when the terminal is
+            // written, and nothing is staged. This record describes the
+            // capture before its token is stripped; the stored collector
+            // manifest's entries are written by `buildSharedRunPlan` from the
+            // bytes DATA holds instead.
             (await describeArtifact({ prefix, artifact })).record,
           );
           collected.push(artifact);

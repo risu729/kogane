@@ -11,7 +11,8 @@
 //     colour alone never carries the meaning.
 import type { RewardProviderExpirySection } from "../../../../packages/domain/src/reward-expiry-observations.ts";
 import { type ReactNode } from "react";
-import { Badge, EmptyState, Kv, KvRow, Nullable, Panel, QueryBoundary } from "../ui.tsx";
+import { useFeatures } from "../api.ts";
+import { Badge, EmptyState, Kv, KvRow, Loading, Nullable, Panel, QueryBoundary } from "../ui.tsx";
 import {
   useRewardExpiry,
   useRewardHoldings,
@@ -280,7 +281,8 @@ function Expiry({ row }: { row: RewardExpiryRow }): ReactNode {
   return (
     <Panel
       id={domId("reward-expiry", row.holdingRef, row.ruleRef)}
-      title={row.ruleRef}
+      // Named by its holding too: one rule can apply to several holdings.
+      title={`${row.ruleRef}（${row.holdingRef}）`}
       note={
         <>
           判定: {STATE_LABELS[row.state] ?? row.state} ／ 規約の確認状況:{" "}
@@ -441,12 +443,12 @@ function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
   return (
     <Panel
       id={domId("reward-read-expiry", row.holdingRef, row.ruleRef, row.bucketRef)}
-      title={`${row.programId} ／ ${BUCKET_LABELS[row.bucketKind] ?? row.bucketKind}`}
-      note={
-        <>
-          判定: {STATE_LABELS[row.state] ?? row.state} ／ 規約: {row.ruleRef}
-        </>
-      }
+      // Named by its bucket and rule too: a programme can hold several buckets
+      // of one kind, and the snapshot holds one row per bucket for every rule
+      // version of the programme. The holding is not needed: a bucket
+      // reference already names the provider account it came from.
+      title={`${row.programId} ／ ${BUCKET_LABELS[row.bucketKind] ?? row.bucketKind}（${row.bucketRef} ／ 規約 ${row.ruleRef}）`}
+      note={<>判定: {STATE_LABELS[row.state] ?? row.state}</>}
     >
       <div className="panel-body">
         <Kv>
@@ -472,8 +474,10 @@ function ReadExpiry({ row }: { row: RewardReadExpiryRow }): ReactNode {
 function ProviderExpirySection({ section }: { section: RewardProviderExpirySection }): ReactNode {
   return (
     <Panel
-      id={domId("reward-provider-expiry", section.holdingRef)}
-      title={`${section.programId === "program:j-point" ? "J-POINT" : section.programId} ／ 取得元の失効予定表示`}
+      id={domId("reward-provider-expiry", section.holdingRef, section.parentBucketRef)}
+      // One section per provider bucket: two accounts of one programme are two
+      // sections, told apart by the bucket they describe.
+      title={`${section.programId === "program:j-point" ? "J-POINT" : section.programId} ／ 取得元の失効予定表示（${section.parentBucketRef}）`}
       note="保有ポイントのうち、取得元が失効予定として表示した分です。合計残高へは加算しません。"
     >
       <div className="panel-body">
@@ -539,8 +543,10 @@ export function RewardExpiryResults({ data }: { data: RewardExpiryPage }): React
 }
 
 export function RewardsPage(): ReactNode {
+  const features = useFeatures();
   const holdings = useRewardHoldings();
   const expiry = useRewardExpiry();
+  if (!features.known) return <Loading label="ポイント・前払式残高" />;
   return (
     <>
       <div className="page-head">
@@ -550,9 +556,32 @@ export function RewardsPage(): ReactNode {
           会員資格、資格指標を分けて表示します。円建ての合計や純資産へは加算しません。
         </p>
       </div>
+      {/* Without the reward routes nothing is requested, so nothing is loading either. */}
+      {!features.rewards ? (
+        <EmptyState>この接続先はポイント・前払式残高を提供していません。</EmptyState>
+      ) : (
+        <RewardResults holdings={holdings} expiry={expiry} />
+      )}
+    </>
+  );
+}
+
+function RewardResults({
+  holdings,
+  expiry,
+}: {
+  holdings: ReturnType<typeof useRewardHoldings>;
+  expiry: ReturnType<typeof useRewardExpiry>;
+}): ReactNode {
+  // Each block states its own bound ("表示は先頭 N 件です"); the shared notice's
+  // next-500 link would reopen this page at the same first page, which is all
+  // it requests.
+  return (
+    <>
       <QueryBoundary
         query={holdings}
         label="ポイント保有"
+        coverageNotice={false}
         isEmpty={(data) => data.rows.length === 0}
         empty={<EmptyState>保有の記録がまだありません。</EmptyState>}
       >
@@ -572,6 +601,7 @@ export function RewardsPage(): ReactNode {
       <QueryBoundary
         query={expiry}
         label="期限の表示・見込み"
+        coverageNotice={false}
         isEmpty={(data) =>
           data.rows.length === 0 &&
           (!("snapshot" in data) || (data.providerDisplaySections ?? []).length === 0)
