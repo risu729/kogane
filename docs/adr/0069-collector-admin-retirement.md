@@ -202,6 +202,13 @@ only job is "try again".
   the unused `retryPending` are removed. A pending snapshot is still stored
   before any new login.
 
+  Amendment ([issue 1137](https://github.com/risu729/kogane/issues/1137)):
+  a failure before a login POST is not a refusal. For `http-denied`,
+  `bank-request-error` and `unexpected-route`, a validated `loginPostCount: 0`
+  prevents a new pause; a positive count or a missing diagnostic still pauses.
+  `login-rejected`, `authentication-challenge` and `human-required` always pause,
+  and stored pauses without diagnostics keep their existing handling.
+
 - **SBI VC.** `/collect` becomes an operations `collection` request. `/reauth`
   becomes an operations `session-refresh` request: the keepalive, and if it
   fails for any reason, a passkey login without the 6-hour cooldown, at most one

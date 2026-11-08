@@ -84,6 +84,13 @@ enabled) calls its private `ScheduledCollection` entrypoint
 ([schedules](../schedules.md)). Whether an authenticated cloud collection and
 downstream publication have succeeded is not recorded here.
 
+For `http-denied`, `bank-request-error` and `unexpected-route`, a validated
+`loginPostCount: 0` means the failed run does not pause the next scheduled
+login. One or more observed POSTs, or a missing diagnostic, keep the pause.
+Explicit login refusals and challenges always pause; an existing stored pause
+has no diagnostic and keeps its conservative handling
+([operations](../../services/collector-st-george/README.md)).
+
 ## Automation PoC (2026-09-13)
 
 An isolated runnable browser experiment now lives in

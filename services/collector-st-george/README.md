@@ -61,7 +61,8 @@ are excluded. `loginPostCount` observes browser-issued requests to the known log
 POST route: 0 means none observed, 1 means one, and 2 means two or more. It does not
 prove bank receipt or acceptance. Logging failure cannot replace the collection
 result or prevent cleanup. Public failure codes and the single-login policy are
-unchanged; diagnostics do not clear a blocked run or authorize another attempt.
+unchanged. A validated zero-POST count prevents the three ambiguous bank errors
+below from creating a pause; it does not clear an existing stored pause.
 After reaching the known portfolio route, the collector allows up to 10 seconds
 for visible account cards to render. Every observation retains the existing
 route and challenge checks; this wait does not navigate or submit another login.
@@ -92,8 +93,8 @@ operations-request and alarm collection.
 
 A refused, challenged or unrecognised login (`login-rejected`,
 `authentication-challenge`, `human-required`, and `http-denied`,
-`bank-request-error` and `unexpected-route`, none observed yet and each
-possibly the bank's answer to a wrong password) **pauses** later logins,
+`bank-request-error` and `unexpected-route`, unless a validated diagnostic
+reports `loginPostCount: 0` for these last three) **pauses** later logins,
 because another unattended login could lock the account. There is no resume
 step ([ADR 0069 amendment](../../docs/adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08),
 owner, 2026-11-08 03:57 UTC). The pause ends by itself in either case:
@@ -109,7 +110,11 @@ owner, 2026-11-08 03:57 UTC). The pause ends by itself in either case:
 An alarm skipped during a pause contacts nobody, reports no run and records
 `st_george_paused_<reason>`. Every other failure (a browser or container
 crash, a network error, a deadline) is a failed run and the next alarm tries
-again. A block stored before 2026-11-08 is read as a pause without a digest; one
+again. The same applies to the three ambiguous bank errors when no login POST
+was observed: no credential was sent, so the failure creates no pause. Counts
+1 or 2 and a missing or invalid diagnostic keep the conservative pause;
+`login-rejected`, `authentication-challenge` and `human-required` always pause.
+A block stored before 2026-11-08 is read as a pause without a digest; one
 whose reason no longer pauses is lifted on the next run. A lease held by
 another execution answers `busy` and records no run. An in-flight marker from
 an object reset mid-attempt does not block: the lease outlives that attempt.

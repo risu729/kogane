@@ -11,6 +11,16 @@ import {
 } from "../src/worker-policy";
 import { persistSharedRun } from "../src/shared-collection";
 import { snapshot } from "./fixture";
+import type { RunDiagnostic } from "../src/run-diagnostic";
+
+const loginDiagnostic = (loginPostCount: 0 | 1 | 2): RunDiagnostic => ({
+  stage: "login-result-state",
+  errorType: "CollectionError",
+  refusal: "unknown",
+  loginPostCount,
+  durationMs: 1,
+  notices: [],
+});
 
 class Storage implements StateStorage {
   values = new Map<string, unknown>();
@@ -34,6 +44,113 @@ class Storage implements StateStorage {
   }
 }
 describe("durable collection policy", () => {
+  test("ambiguous bank failures pause only after an observed login POST or without a diagnostic", async () => {
+    for (const reason of ["http-denied", "bank-request-error", "unexpected-route"] as const) {
+      for (const count of [0, 1, 2, undefined] as const) {
+        const state = new Storage();
+        const bucket = new FakeR2Bucket();
+        let reads = 0;
+        let digests = 0;
+        const create = () =>
+          new CollectionCoordinator(
+            state,
+            async () => {
+              reads++;
+              return {
+                status: "failed",
+                reason,
+                ...(count === undefined ? {} : { diagnostic: loginDiagnostic(count) }),
+              };
+            },
+            (run) => persistSharedRun(bucket, run),
+            async () => {
+              digests++;
+              return "unchanged";
+            },
+          );
+        expect(await create().trigger()).toMatchObject({
+          status: count === 0 ? "failed" : "blocked",
+          reason,
+        });
+        if (count === 0) {
+          expect(state.values.get("state")).toBeUndefined();
+          expect(digests).toBe(0);
+        }
+        expect(await create().trigger()).toMatchObject({
+          status: count === 0 ? "failed" : "paused",
+          reason,
+        });
+        expect(reads).toBe(count === 0 ? 2 : 1);
+      }
+    }
+  });
+  test("explicit refusal and challenge codes pause regardless of the observed POST count", async () => {
+    for (const reason of [
+      "login-rejected",
+      "authentication-challenge",
+      "human-required",
+    ] as const) {
+      for (const count of [0, 1, 2] as const) {
+        const state = new Storage();
+        const bucket = new FakeR2Bucket();
+        let reads = 0;
+        const coordinator = new CollectionCoordinator(
+          state,
+          async () => {
+            reads++;
+            return { status: "failed", reason, diagnostic: loginDiagnostic(count) };
+          },
+          (run) => persistSharedRun(bucket, run),
+        );
+        expect(await coordinator.trigger()).toMatchObject({ status: "blocked", reason });
+        expect(await coordinator.trigger()).toMatchObject({ status: "paused", reason });
+        expect(reads).toBe(1);
+      }
+    }
+  });
+  test("an invalid zero-POST diagnostic cannot make an ambiguous failure retryable", async () => {
+    const state = new Storage();
+    const bucket = new FakeR2Bucket();
+    const coordinator = new CollectionCoordinator(
+      state,
+      async () => ({
+        status: "failed",
+        reason: "http-denied",
+        diagnostic: { ...loginDiagnostic(0), stage: "private-invalid-stage" },
+      }),
+      (run) => persistSharedRun(bucket, run),
+    );
+    expect(await coordinator.trigger()).toMatchObject({ status: "blocked", reason: "http-denied" });
+    expect(await coordinator.trigger()).toMatchObject({ status: "paused", reason: "http-denied" });
+  });
+  test("a persistence retry retains the zero-POST diagnostic without contacting the bank again", async () => {
+    const state = new Storage();
+    const bucket = new FakeR2Bucket();
+    let reads = 0;
+    let outage = true;
+    const create = () =>
+      new CollectionCoordinator(
+        state,
+        async () => {
+          reads++;
+          return { status: "failed", reason: "http-denied", diagnostic: loginDiagnostic(0) };
+        },
+        (run) => {
+          if (outage) throw new Error("synthetic persistence outage");
+          return persistSharedRun(bucket, run);
+        },
+      );
+    expect(await create().trigger()).toMatchObject({
+      status: "failed",
+      reason: "persistence-incomplete",
+    });
+    outage = false;
+    expect(await create().trigger()).toMatchObject({ status: "failed", reason: "http-denied" });
+    expect(reads).toBe(1);
+    expect(state.values.get("state")).toBeUndefined();
+    expect(await create().trigger()).toMatchObject({ status: "failed", reason: "http-denied" });
+    expect(reads).toBe(2);
+  });
   test("legacy blocked state has no invented run id and never starts a bank request", async () => {
     const state = new Storage();
     await state.put("state", { kind: "blocked", reason: "login-rejected" });

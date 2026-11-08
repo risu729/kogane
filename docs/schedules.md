@@ -68,6 +68,10 @@ reason; its next scheduled run tries again. Only a refused, challenged or unreco
 George login pauses the source, until the credential secret changes or one
 requested collection (at most once per 24 hours) allows a login; a skipped alarm
 records `st_george_paused_<reason>`.
+The ambiguous `http-denied`, `bank-request-error` and `unexpected-route`
+failures do not create a pause when a validated diagnostic records zero login
+POSTs. The next alarm may then try again. A missing diagnostic or an existing
+stored pause remains conservative; explicit refusals and challenges still pause.
 
 **停止した実行を解除** remains for the operator, for a source that should not
 wait for the tick. Only after confirming the previous execution stopped, use it.
