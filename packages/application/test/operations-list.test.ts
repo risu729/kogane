@@ -160,7 +160,10 @@ describe("listOperations", () => {
         }
       db.close();
     }
-  });
+    // Every shape at three page sizes, for both principals, over three 160-row
+    // stores: 2.6 s locally, but past bun's 5 s default on a loaded CI runner
+    // (main CI run 42460320412).
+  }, 60_000);
 
   test("an empty list is one page with no cursor; an exact fit does not promise another", async () => {
     const db = migratedDatabase();
