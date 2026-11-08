@@ -139,6 +139,10 @@ const MESSAGE_READS: Readonly<Record<string, { count: number; reason: string }>>
       "compared with the two lease stop codes, otherwise passed to safeFailureCode, which " +
       "admits only the closed failure codes",
   },
+  "services/collector-st-george/src/worker-policy.ts": {
+    count: 1,
+    reason: "compared with the lease refusal code only; the message is never logged or returned",
+  },
   "services/collector-vpoint-pay/src/state.ts": {
     count: 1,
     reason:
@@ -172,10 +176,6 @@ const ERROR_TO_SANITIZING_WRAPPER: Readonly<Record<string, { count: number; reas
   "services/collector-sbi-shinsei/src/tcp-relay.ts": {
     count: 2,
     reason: "the relay's local `log` keeps only `errorType: safeErrorType(error)`",
-  },
-  "services/collector-st-george/src/worker-policy.ts": {
-    count: 1,
-    reason: "compared with the lease refusal code only; the message is never logged or returned",
   },
   "services/collector-st-george/src/tcp-relay.ts": {
     count: 2,
