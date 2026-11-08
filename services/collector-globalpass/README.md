@@ -6,7 +6,7 @@ On 2026-08-30, setting only the Cloudflare Container timezone to `Asia/Tokyo` re
 
 ## Runtime profile
 
-- **Browser: throughout collection.** Ordinary daily/backfill launches headed Google Chrome Stable through Playwright inside a Cloudflare Container.
+- **Browser: entire collection.** Ordinary daily/backfill launches headed Google Chrome Stable through Playwright inside a Cloudflare Container.
 - The browser generates Turnstile tokens, executes official JavaScript login, displays server-rendered details and switches months through the available-month selector. It does not hand off to Worker `fetch` after login; detail HTML comes from the same browser session.
 - The Worker-side Browser Run binding is an unused legacy diagnostic binding; public `/browser-probe` is retired. Production collection does not use it. The Worker handles Container orchestration, opaque relay to TAMIA, NDJSON receipt and R2 storage.
 
