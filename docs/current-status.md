@@ -86,7 +86,7 @@ are separate claims. Historical acceptance records are linked from the
   whole-store on both; the browser requests no operation). The committed
   `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb`; requests for
   any other connection wait and expire after 24 hours. In production one
-  `sony-bank` request was followed to publication; the others are unverified. Collectors run their daily
+  request per named connection was followed to publication. Collectors run their daily
   scope, not a requested window; READ projection of a run is derived from the READ pointer each time the record is read, not stored; only
   SBI VC's keepalive is an unattended session refresh. An accepted operation is
   still not an executed collection. The schedules page's **収集を依頼** sends the
