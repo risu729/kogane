@@ -925,7 +925,11 @@ waits for them; their first requests ended `published`, not `uncertain`.
 The App's committed `SESSION_REFRESH_POLICY` names `sbi-vc-trade` as
 `unattended`, routing its refresh through `sbi-vc-keepalive`. The collector's
 existing limit of one forced passkey login per hour still applies. St George
-keeps its limit of one requested pause lift per 24 hours. After deployment,
+keeps its limit of one requested pause lift per 24 hours; a request after that
+allowance is spent ends `failed` with `st_george_paused_<code>` and no run.
+Neither collector accepts provider terms: while an SBI VC terms agreement is
+pending, a request ends `failed` with `manual_agreement_required` until the
+owner agrees ([ADR 0048](adr/0048-operation-collector-dispatch.md#amendment-2026-11-08-st-george-and-sbi-vc-enabled)). After deployment,
 check each source's history and follow one request per new connection to a
 terminal execution state, one connection at a time; this configuration change
 does not assert those production results.
