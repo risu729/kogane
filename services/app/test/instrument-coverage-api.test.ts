@@ -271,7 +271,7 @@ describe("kogane.instruments.coverage", () => {
                 : []),
               ...(capabilities.includes("summary.read") && whole ? [TOOL] : []),
               ...(capabilities.includes("records.read") && whole
-                ? ["kogane.accounts.candidates"]
+                ? ["kogane.accounts.candidates", "kogane.accounts.history"]
                 : []),
               // Served exactly while the カード照合 routes are, like the two below.
               ...(cardSettlements && capabilities.includes("records.read") && whole
@@ -281,7 +281,11 @@ describe("kogane.instruments.coverage", () => {
                 ? ["kogane.economic-readiness.read"]
                 : []),
               ...(cardSettlements && capabilities.includes("records.read") && whole
-                ? ["kogane.card-settlements.read", "kogane.card-settlements.ownership"]
+                ? [
+                    "kogane.card-settlements.read",
+                    "kogane.card-settlements.statements",
+                    "kogane.card-settlements.ownership",
+                  ]
                 : []),
               ...(capabilities.includes("audit.read") && accounts === "*"
                 ? ["kogane.audit.search", "kogane.audit.get"]

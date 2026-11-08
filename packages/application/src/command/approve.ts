@@ -19,6 +19,7 @@ import type { OperationCall } from "../audit/call.ts";
 import { delegatedCommandFamilyAllowed } from "../delegation/execution.ts";
 import { expectedRevisionsJson, expectedRevisionsSql } from "../operations/sql.ts";
 import { instrumentCandidatePlanIsPinned } from "../operations/instrument-candidate-context.ts";
+import { pairStaleRefs } from "../operations/pair-references.ts";
 import { instrumentTemporalContextRequested } from "../../../domain/src/instrument-temporal.ts";
 
 export const APPROVAL_TTL_SECONDS_DEFAULT = 10 * 60;
@@ -129,6 +130,13 @@ export async function approve(
   if (!check.ok) {
     if (check.marksStale) await markStale(store, plan.planId);
     return commandError(check.error, check.refs);
+  }
+  // A pair the plan decides has a reference it did not pin: one recorded
+  // after planning, or a plan made before pair pins (pair-references.ts).
+  const pair = await pairStaleRefs(store, plan);
+  if (pair.length > 0) {
+    await markStale(store, plan.planId);
+    return commandError("stale_context", [plan.planId, ...pair]);
   }
 
   const scope = [...input.scope].sort();

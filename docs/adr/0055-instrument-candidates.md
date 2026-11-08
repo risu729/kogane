@@ -1320,3 +1320,87 @@ over MCP (`kogane.instruments.candidates`, then the change lifecycle).
   page's coverage table test, each with the new lane or state.
 - After deploy: `kogane.instruments.coverage` and
   `kogane.instruments.candidates` (`view: "decided"`) in production.
+
+## Amendment 2026-11-08: adoption and keeping apart pin the whole pair
+
+- Status: proposed until the PR that carries it merges, then accepted
+- Date: 2026-11-08
+- Carried by: `packages/application/src/operations/pair-references.ts` and its
+  calls in `packages/application/src/operations/targets.ts`,
+  `packages/application/src/command/approve.ts` and
+  `packages/application/src/command/commit.ts`;
+  [change lifecycle](../change-lifecycle.md#pair-pins)
+- Related: [ADR 0077's amendment of the same day](0077-account-connection-candidates.md#amendment-2026-11-08-a-pair-plan-pins-every-reference-of-the-pair),
+  which states the mechanism for both families
+
+### Context
+
+A candidate's status reads both identifiers' mappings and `listed_as` in both
+orientations (from each identifier's current instrument to the other
+identifier), but the adoption plan pinned only the two mappings and the
+keep-apart plan only its own `listed_as` triple. A rejection recorded in the
+other orientation between plan and commit left an adoption fresh, and an
+adoption recorded in between left a keep-apart fresh.
+
+### Options considered
+
+The options are ADR 0077's amendment's (a new pair subject kind in the shared
+revision guard, a candidate-read recheck at approval and commit, or pinning
+every reference with the existing subject kinds); the third is chosen here for
+the same reasons.
+
+### Decision
+
+A candidate adoption (`identity.assign` with candidate provenance) and a
+`listed_as` decision whose evidence names exactly the subject and one other
+identifier (the candidate's keep-apart payload) each pin both mappings and
+both orientations: `listed_as` from the target instrument (the adoption's
+target, which the planner requires to be the anchor's current instrument, or
+the keep-apart's own `fromRef`) to the subject and from the subject's current
+instrument to the anchor. Every one of them is a function of the two pinned
+mappings, so the set cannot change while the plan is fresh. A decision under
+any of them between plan and commit makes the plan stale (`stale_context`). No
+migration and no new subject kind.
+
+A `listed_as` decision whose evidence does not name exactly the subject and
+one other identifier (none, one, two without the subject, or three or more)
+names no pair and pins only its own triple, and that is all it needs. Its
+triple names one instrument and one identifier. The candidate read applies it
+to the pair of that identifier and each identifier mapped to the instrument
+when the read runs, so the pairs it keeps apart are a set that follows
+mappings recorded after the commit, not a pair the plan could pin. The plan
+shows only the triple, and only a decision under that triple changes it.
+Pinning every identifier mapped to the instrument, with each one's reverse
+orientation, was considered and rejected: it would refuse the plan over pairs
+it never showed, and could not bound a decision whose reach is read afresh on
+every candidate read. Evidence of three or more identifiers names no single
+other identifier, so it names no pair either.
+
+A hand-built `listed_as` payload whose evidence names the pair but whose
+`fromRef` is not the anchor's current instrument is pinned as above: its own
+triple, both mappings and the reverse orientation, not `listed_as` from the
+anchor's current instrument. Its triple is then no reference of the pair, and
+the pinned anchor mapping keeps it so until the commit, so the commit cannot
+change the pair's candidate; the candidate read applies it as it applies a
+decision that names no pair. The extra mapping pin can only refuse the plan.
+
+### Consequences
+
+- An adoption or keep-apart plan made before this amendment pins fewer
+  references than its planner now records, so it is stale at simulation and
+  refused (and marked stale) at approval and commit; it is planned again.
+- A keep-apart plan now also goes stale when either identifier's mapping gets
+  a new revision, as an adoption plan already did.
+
+### Verification
+
+`packages/application/test/pair-pins.test.ts` (both plans pin the same four
+references; a reverse-orientation rejection makes the adoption stale; an
+adoption makes the keep-apart stale, and neither commit writes; a `listed_as`
+plan whose evidence names none, only the subject, two without the subject or
+three identifiers pins its own triple only and commits after a rejection in
+the reverse orientation; a plan naming the pair from another instrument does
+not pin the pair's forward orientation, commits after a decision under it and
+leaves the pair's candidate status unchanged) and
+`packages/application/test/instrument-candidate-anchor.test.ts` (the adoption
+plan's pins).

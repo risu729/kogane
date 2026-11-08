@@ -132,7 +132,11 @@ plan stale. A held candidate (evidence no longer eligible, or the direct
 account pinned by two connections) offers keeping apart only. Nothing is
 proposed as the same account. New confirmed reviews come from
 `review-account-connections.ts` ([account connections](account-connections.md));
-an agent reads the same list through `kogane.accounts.candidates`.
+an agent reads the same list through `kogane.accounts.candidates`. Each
+candidate's `取得元の口座の訂正履歴を見る` button lists, oldest first, every
+mapping revision, mapping decision and relation row of its direct source
+account, including earlier acceptances and their withdrawals; an agent reads
+the same history through `kogane.accounts.history`.
 
 ## Verification and rollback
 

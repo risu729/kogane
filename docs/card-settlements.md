@@ -431,8 +431,10 @@ approves and commits the pinned plan. An MCP client does the same through the
 ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)).
 
 The page lists statements, not candidates
-(`GET /api/v2/reconciliation/card-settlements/statements`,
-`queryCardSettlementStatements`). The sweep proposes a new candidate whenever a
+(`GET /api/v2/reconciliation/card-settlements/statements`, through
+`readCardSettlementStatementsForGrant` over `queryCardSettlementStatements`;
+agents read the same page with `kogane.card-settlements.statements`,
+[agent reads](#agent-reads)). The sweep proposes a new candidate whenever a
 fact in its digest changes (a recapture of the statement or the debit, a
 re-parse, an ownership record), so one statement accrues many candidates and
 only the ones citing its newest facts can be accepted. A statement is a
@@ -440,12 +442,42 @@ candidate's stored `statement_key` (source, producer, acquisition namespace,
 card account and period, as `card_statement_facts` keys it), so the
 importer-era and collector-era captures of one month are separate statements.
 Statements are ordered by their newest candidate, ten to a page. Each judges
-its five newest candidates and any accepted one, however old, and leads with
-one of them:
+its five newest candidates and any accepted one, however old, and leads with:
 
 1. its accepted candidate, if any (an acceptance reserves the statement);
-2. otherwise the newest proposed candidate with no acceptance blocker;
+2. otherwise the newest proposed candidate with no acceptance blocker, among
+   its five newest and the older ones the search below judges;
 3. otherwise the newest candidate.
+
+When none of the five newest is accepted or ready and the statement has older
+candidates, the list searches those for rule 2
+([ADR 0090](adr/0090-ready-lead-beyond-newest-candidates.md)): newest first,
+50 a pass, it judges the older ones no decision names whose facts claim the
+same established owner and both accounts (`cardSettlementEligible` requires
+each of those, so a candidate without them is never ready), and stops at the
+first ready one, once a pass is short, or after 200 of them (four passes). A
+ready one found leads, ahead of the five newest; none found leaves the newest
+leading, as rule 3 says.
+
+Each group says how far the lead was looked for (`leadSearch`):
+`not_searched`, `found`, `none_ready` (every older candidate that could be
+ready was judged) or `truncated` (the search stopped after 200, so a ready
+candidate older than those is not ruled out; a statement with exactly 200 is
+`truncated` too, since the last full pass does not read whether more follow).
+The coverage carries the limit (`olderCandidatesSearched: 200`). For
+`truncated` the page says, under the lead, that it checked up to 200 of the
+older candidates that could be ready, that older ones were not checked so a
+ready one is not ruled out, and that opening `この請求のほかの候補` and
+`この請求の候補をすべて表示` shows every one; it never reads as "nothing to
+decide". The passes are separate reads that page by key, not one snapshot:
+the first continues after the oldest of the statement's five newest, and each
+later one after the last candidate the previous pass judged, in the list's
+`created_at DESC, id DESC` order. A decision recorded between two passes on a
+candidate an earlier pass judged therefore moves no later candidate past the
+next pass, and a new candidate with the newest creation time sorts before
+every cursor and is not judged in that load. A decision recorded between two
+passes on a candidate not yet judged takes it out of the search, as it would
+have been on a later load.
 
 The other judged candidates follow, newest first, collapsed under the lead
 (`この請求のほかの候補（N 件）`, N the statement's other candidates). `candidateCount` counts every candidate of the
@@ -466,15 +498,7 @@ named by the heading, the month and that time, so the candidates of one
 statement are told apart by ear as well as by eye. The flat list
 (`?offset=`) and one review (`?proposalId=`) are unchanged.
 
-A limit: a ready candidate older than the five newest of its statement is never
-the lead. When none of those five is a proposed candidate without blockers, the
-newest leads, with its blockers, and the older ready one is only in the
-statement's full list. The sweep proposes after each capture, so the newest
-candidates cite the newest facts; this happens only when the five newer ones
-are all blocked or decided (for example they cite another debit of the same
-amount that is no longer current, or the operator rejected them).
-
-Another limit: the pages are offsets into that order, taken when each page is
+A limit: the pages are offsets into that order, taken when each page is
 read. A new candidate moves its statement to the head of the list and the
 statements that were before it down one place, so a reader paging on can see
 the last statement of the previous page again, and does not meet the moved
@@ -649,17 +673,20 @@ is reviewed as a different candidate. Historical citations keep resolving.
 
 ### Agent reads
 
-An agent holding `records.read` on a whole-store grant reads the same two
+An agent holding `records.read` on a whole-store grant reads the same three
 answers as the pages, over MCP or the agent HTTP route
 ([agent API](agent-api.md)): `kogane.card-settlements.read` (`{}` or
 `{"offset": n}` for a page, `{"statementKey": key}` with an optional
 `offset` for one statement's candidates, `{"proposalId": id}` alone for one
 review, `{"relatedTo": id}` with an optional `offset` for the candidates a
 review competes with, [correcting a match](#correcting-a-match)) is
-`GET /api/v2/reconciliation/card-settlements` with the same parameters, and
+`GET /api/v2/reconciliation/card-settlements` with the same parameters,
+`kogane.card-settlements.statements` (`{}` or `{"offset": n}`) is its
+`/statements` read, the list grouped by statement, and
 `kogane.card-settlements.ownership` (`{"proposalId": id}`) is its
-`/ownership` read. The route and both tools are adapters over the same two
-functions, `readCardSettlementsForGrant` and `readCardOwnershipForGrant`
+`/ownership` read. The route and the three tools are adapters over the same
+three functions, `readCardSettlementsForGrant`,
+`readCardSettlementStatementsForGrant` and `readCardOwnershipForGrant`
 (`packages/application/src/query/card-settlements-read.ts`), so the request
 rules, the refusals and their codes are the service's on every path
 ([ADR 0081](adr/0081-ui-parity-through-mcp.md) point 2). The route turns its
@@ -674,18 +701,21 @@ the HTTP path is `404` and the MCP name `unknown_tool`. They are refused
 source or account scope, before the request is validated: a review joins a
 card account to a bank account, so a narrowed grant could see an account
 outside it. A list read deeper than the grant's `maxRows` (`offset + 50`
-above it, for a page, a statement's or a review's competitors) is
-`413 budget_exceeded` (`budget:maxRows=<n>`), before the anchor of a
+above it, for a page, a statement's or a review's competitors; `offset + 10`
+above it for the grouped list, whose `offset` counts statements, ten to a
+page) is `413 budget_exceeded` (`budget:maxRows=<n>`), before the anchor of a
 `relatedTo` read is looked up. The page's reader grant and every MCP client's
 grant ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md))
 hold the same `maxRows`, 1000 (`GRANT_LIMITS.maxRows`), so the route and the
-tools page equally deep: offset 950 is the last page either reads. A page's
-`nextOffset` does not look at the budget, so the page after offset 950 is
-named and then refused. A malformed request (an `offset` that is not an
-integer from 0 to 1,000,000, a key outside the four, an empty or repeated
-value), or more than one of `proposalId`, `statementKey` and `relatedTo`, is
-`400 invalid_query` (`financial-error-v1`, `refs: ["request"]`, or
-`["proposalId"]` on `/ownership`); a `proposalId` or `relatedTo` that names
+tools page equally deep: offset 950 is the last page either reads, and 990
+the last grouped page (statements 991 to 1,000). A page's
+`nextOffset` does not look at the budget, so the page after offset 950 (990
+grouped) is named and then refused. A malformed request (an `offset` that is
+not an integer from 0 to 1,000,000, a key outside the four, or on the grouped
+list any key but `offset`, an empty or repeated value), or more than one of
+`proposalId`, `statementKey` and `relatedTo`, is `400 invalid_query`
+(`financial-error-v1`, `refs: ["request"]`, or `["proposalId"]` on
+`/ownership`); a `proposalId` or `relatedTo` that names
 no candidate is `404 not_found`, and a `statementKey` with no candidate is an
 empty page. None of these refusals reads a store row; the only statement
 before them is the `sqlite_master` check every path runs.
@@ -699,10 +729,12 @@ itself does not read the flat list: it reads statements
 (below), and pages a statement's candidates and a review's competitors 50 at a
 time (36 candidates per statement on average on the scaled store of
 [Cost](#cost)). A statement or a competitor list of more than 1,000
-candidates would be readable only to offset 950. `/statements` is not one of
-these reads: it has no MCP read yet (a listed gap of the parity guard) and
-keeps its own rules (`offset` only; `400 invalid_offset`, up to 1,000,000,
-not bounded by a grant). Deciding a review or recording ownership stays a plan through the change
+candidates would be readable only to offset 950. The grouped list
+(`/statements`) kept these rules of its own (`offset` only, `400 invalid_offset`
+for a malformed one and `400 invalid_query` as `{error, requestId}` for any
+other key, any `offset` up to 1,000,000 read) until it got its MCP read, also
+on 2026-11-07; it now gives the service's answers above, so more than 1,000
+statements would be readable only to offset 990. Deciding a review or recording ownership stays a plan through the change
 lifecycle, graded there; on MCP any client the MCP Access application admits
 plans and decides as itself
 ([ADR 0063](adr/0063-delegated-ai-operation-path.md),
@@ -1045,7 +1077,60 @@ ten statements (`statement_page`), then reaches each statement's candidates
 through `card_settlement_candidates_statement` and judges at most its five
 newest and its accepted ones (the two grouped rows of the table above,
 measured 2026-11-07 before the debit-account evidence read was added to every
-list; the flat list's first page measured 104 ms in the same run).
+list; the flat list's first page measured 104 ms in the same run). A statement
+whose five newest hold no acceptance and none ready, and which has older
+candidates, adds the search for an older ready one (ADR 0090): one read a pass
+(`CARD_SETTLEMENT_STATEMENT_OLDER_SQL`) for every statement still searching,
+which reaches those statements' candidates by the same index, keeps those
+older than the statement's cursor (the last candidate judged), reads by key
+whether any decision names each kept one and its facts, ranks the rest and
+judges at most 50 of them per statement. No index holds
+`(statement_key, created_at, id)`: `card_settlement_candidates_statement`
+holds `statement_key` alone, so the cursor filters the rows the key finds
+rather than starting an index range, and the pass sorts what it keeps
+(`USE TEMP B-TREE FOR ORDER BY`); the plan check pins both. A pass is one
+read for all the statements of the page still searching, not one per
+statement. The search stops after four passes (200 judged per statement) and
+says `truncated`. A page of ten statements therefore makes at most eight
+reads (the statement page, the window, four passes, the decision history and
+the debit-account evidence) and the search judges at most 10 × 200 = 2,000
+older candidates, beside the window's five newest and accepted ones per
+statement, however long the histories grow. What still grows with the
+history is the read behind each pass: it reaches every candidate of the
+statements it searches through the key and keeps and ranks those older than
+the cursor, so a page whose statements all search reads their candidates up
+to five times (the window read and four passes), and ranks their older ones,
+fewer each pass. An index on `(statement_key, created_at, id)` would let the
+cursor start a range in order; adding one needs a migration and is not done.
+The search does not run for a
+statement its newest candidates decide, which on the scaled store is every
+statement, so the two grouped rows above are unchanged there (not measured
+again).
+`card-settlement-review-scale.test.ts` checks its plan without statistics
+(the key by `card_settlement_candidates_statement`, the pass's sort, no whole
+read, and no index on the cursor's columns);
+the frozen text of the grouped read before it
+(`card-settlement-statement-group-legacy-sql.ts`, digest-pinned) returns the
+same rows as the current read on the random and scaled stores; the frozen
+positional search as #1132 first shipped it
+(`card-settlement-statement-older-legacy-sql.ts`, digest-pinned) returns, pass
+for pass, the rows the keyed passes return on both stores when no decision
+lands between passes, and a rejection recorded between the first and second
+pass on a candidate the first judged no longer skips the ready candidate the
+second pass starts with; every page of
+the grouped list equals the shipped one where no statement's lead changes, and
+with synthetic newer stale candidates added, only the one statement's lead
+changes, to the newest ready candidate its full list holds, found on the first
+or the second pass; with the ready one past the limit the search stops after
+four reads and only the statement's `leadSearch` differs (`truncated`).
+`card-settlement-statements.test.ts` compares the search's choice with a
+reference on random stores with synthetic history, checks that the keyed
+passes, joined, are each statement's candidates as they were before a
+rejection recorded after every pass, and on a scripted store
+checks the loop's bound and codes (199, 200 and 201 older candidates), the
+worst page (ten truncated statements: eight reads, 200 judged each) and, on
+drawn histories, each statement's lead and code against a reference written
+from the counts.
 Not changed here, and not measured: the ownership review's account mapping
 reads (`queryCardOwnership`'s mappings, `prepareOwnershipReview`'s mapping read
 and the two mapping terms of its commit guard) still read
@@ -1115,10 +1200,16 @@ one body on all three. The route's adapter is compared with the handler it repla
 (`services/app/test/card-settlements-api-frozen.ts`) on a store of 1,101
 candidates, over every offset alone and beside each filter plus a fixed
 sample of 600 combinations of offsets, filters, unknown and repeated keys, on
-the list, `/ownership` and `/statements`: every answer is byte-identical
+the list, `/ownership` and `/statements`, and on every tenth grouped
+offset from 0 to 1,000 over 1,002 statements: every answer is byte-identical
 except the two changes recorded under [Agent reads](#agent-reads), and
 methods and non-operators answer as before
-(`services/app/test/card-settlements-api-differential.test.ts`).
+(`services/app/test/card-settlements-api-differential.test.ts`,
+`card-settlement-statements-differential.test.ts`). The grouped
+list's offsets 0, 990, 991, 1,000,000 and malformed ones give one status and
+one body on the route, the agent HTTP route and MCP, and its tool returns the
+page's grouped answer and writes one R0 audit record counting the statements
+on the page (`card-settlements-read-tools.test.ts`).
 The pending-to-posted review is tested the same way. Its plans carry the
 candidate's own relation, and its confirmation refuses a pin, action or
 candidate that changed after planning.

@@ -1,7 +1,7 @@
 # Plan: Phase 2 — card usage → statement → bank debit
 
 - Status: **accepted** by the owner on 2026-11-07 (03:58 UTC): "all units as recommended; the fine order does not matter". Each unit is its own pull request; design changes inside a unit still get an ADR.
-- Done: 2026-11-08. The roadmap's done-when holds ([outcome](../roadmap.md#phase-2-outcome)); the grouped review read's MCP tool is still open in [#1088](https://github.com/risu729/kogane/pull/1088).
+- Done: 2026-11-08. The roadmap's done-when holds ([outcome](../roadmap.md#phase-2-outcome)); the grouped review read's MCP tool, `kogane.card-settlements.statements`, followed in [#1088](https://github.com/risu729/kogane/pull/1088).
 - Written: 2026-11-06 23:40 UTC against main [`54e2d7b`](https://github.com/risu729/kogane/commit/54e2d7b), revised after an independent subagent review (23:55 UTC).
 - Roadmap: [Phase 2](../roadmap.md#phase-2--card-usage--statement--bank-debit). Issues [#543](https://github.com/risu729/kogane/issues/543), [#547](https://github.com/risu729/kogane/issues/547), [#548](https://github.com/risu729/kogane/issues/548); sources [#445 Vpass](https://github.com/risu729/kogane/issues/445), [#444 MyJCB](https://github.com/risu729/kogane/issues/444).
 

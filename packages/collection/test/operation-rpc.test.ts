@@ -11,7 +11,14 @@ import {
   runCollectorOperation,
 } from "../src/operation-rpc";
 import { withCollectionLease, type ScheduleLeaseDatabase } from "../src/schedule-lease";
-import { scheduledFailure, type ScheduledResult } from "../src/schedule-result";
+import {
+  MAX_RUN_IDS,
+  RUN_IDS_OVER_LIMIT,
+  scheduledCompletion,
+  scheduledFailure,
+  scheduledResult,
+  type ScheduledResult,
+} from "../src/schedule-result";
 
 const OPERATION = `op_${"a".repeat(64)}`;
 const REQUEST = {
@@ -160,6 +167,27 @@ test("the Processor accepts back only the closed result shape", () => {
     },
   ])
     expect(collectorOperationResult(value)).toBeNull();
+});
+
+test("every result the shared helpers build is one the Processor accepts back", () => {
+  // Synthetic run ids; 150 distinct, each listed twice, past the 100 an answer carries.
+  const ids = Array.from({ length: 150 }, (_, i) => `synthetic-card-${String(i).padStart(3, "0")}`);
+  const many = [...ids, ...ids];
+  for (const result of [
+    scheduledCompletion(many),
+    scheduledCompletion(ids.slice(0, MAX_RUN_IDS)),
+    scheduledFailure(new Error("synthetic"), many),
+    scheduledResult({ status: "success", runIds: many }),
+    scheduledResult({ status: "failed", runIds: many }),
+  ])
+    expect(collectorOperationResult(result)).toEqual(result);
+  // Past the cap, a finished collection is a closed failure listing the
+  // first 100 runs, never a completed answer naming a subset.
+  expect(collectorOperationResult(scheduledCompletion(many))).toEqual({
+    status: "failed",
+    runIds: ids.slice(0, MAX_RUN_IDS),
+    failureCode: RUN_IDS_OVER_LIMIT,
+  });
 });
 
 test("a lease refusal is reported as collection_busy, every other error as collection_failed", async () => {

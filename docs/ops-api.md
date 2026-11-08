@@ -490,20 +490,20 @@ applied** (`execution.scope: "collector_default"`).
 
 **States.** `execution.state` is closed:
 
-| State               | Means                                                                                         | `status` of the request |
-| ------------------- | --------------------------------------------------------------------------------------------- | ----------------------- |
-| `accepted`          | stored; no executor has looked at it                                                          | `accepted`              |
-| `waiting_for_human` | a refresh the source policy hands to a person; never dispatched, never expires                | `waiting_for_human`     |
-| `waiting`           | not started, nothing contacted; `reasonCode` says why                                         | `accepted`              |
-| `started`           | the collector was called; no answer recorded yet                                              | `running`               |
-| `collected`         | the collector reports its terminal(s) persisted; `runs` lists them                            | `running`               |
-| `refreshed`         | the collector reports the session renewed                                                     | `completed`             |
-| `published`         | every reported run settled and at least one has an adopted (published) parse                  | `running` (see limits)  |
-| `unpublished`       | every run settled with nothing adopted, or nothing settled within 48 h; `reasonCode` says why | `failed`                |
-| `failed`            | the collector's own closed failure code; a run it still persisted is listed in `runs`         | `failed`                |
-| `uncertain`         | the call threw, answered outside the closed shape, or never recorded an outcome in an hour    | `failed`                |
-| `expired`           | not started within 24 h of acceptance                                                         | `blocked`               |
-| `unsupported`       | no connection (or no binding) serves the source and action                                    | `blocked`               |
+| State               | Means                                                                                                                                                                                                                                           | `status` of the request |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `accepted`          | stored; no executor has looked at it                                                                                                                                                                                                            | `accepted`              |
+| `waiting_for_human` | a refresh the source policy hands to a person; never dispatched, never expires                                                                                                                                                                  | `waiting_for_human`     |
+| `waiting`           | not started, nothing contacted; `reasonCode` says why                                                                                                                                                                                           | `accepted`              |
+| `started`           | the collector was called; no answer recorded yet                                                                                                                                                                                                | `running`               |
+| `collected`         | the collector reports its terminal(s) persisted; `runs` lists them                                                                                                                                                                              | `running`               |
+| `refreshed`         | the collector reports the session renewed                                                                                                                                                                                                       | `completed`             |
+| `published`         | every reported run settled and at least one has an adopted (published) parse                                                                                                                                                                    | `running` (see limits)  |
+| `unpublished`       | every run settled with nothing adopted, or nothing settled within 48 h; `reasonCode` says why                                                                                                                                                   | `failed`                |
+| `failed`            | the collector's own closed failure code; a run it still persisted is listed in `runs`                                                                                                                                                           | `failed`                |
+| `uncertain`         | the call threw, answered outside the closed shape or with a lease abort (`collection_deadline_exceeded`, `collection_lease_lost`, [ADR 0085](adr/0085-collection-lease-heartbeat.md)), or never recorded an outcome in an hour; `runs` is empty | `failed`                |
+| `expired`           | not started within 24 h of acceptance                                                                                                                                                                                                           | `blocked`               |
+| `unsupported`       | no connection (or no binding) serves the source and action                                                                                                                                                                                      | `blocked`               |
 
 The closed shape a collector answers is `status` (`completed` or `failed`), a
 `failureCode` exactly when it failed (lower-case letters, digits and `_`, at
@@ -511,8 +511,34 @@ most 64; the pattern is checked, not a fixed list), and at most 100 run ids, eac
 a terminal key can carry (`RUN_ID` in `packages/collection/src/keys.ts`, so
 never a `:`): `collectorOperationResult` in
 `packages/collection/src/operation-rpc.ts`. The collector's own result helpers
-(`scheduledResult`, `scheduledFailure`) report only such ids, and none for a
-run whose terminal was not written, even when the run is listed.
+(`scheduledResult`, `scheduledCompletion`, `scheduledFailure` in
+`packages/collection/src/schedule-result.ts`) report only such ids, each once,
+and none for a run whose terminal was not written, even when the run is
+listed. Every collector answer that names runs comes from them, except SBI VC's
+blocked-session answer (`blockedScheduleResult`), which names its one run
+only when that run's terminal was persisted. Vpass, the one collector that
+persists several runs per collection (one per card), passes them its runs in
+the order it persisted them.
+
+**More than 100 runs.** A collection that finishes with more than 100
+distinct persisted runs answers `failed` with `run_ids_over_limit` and the
+first 100 runs (`MAX_RUN_IDS`, `RUN_IDS_OVER_LIMIT`), so the operation is
+`failed` with those runs listed. It is not answered as `collected` with a
+subset, because tracking would then state `published` or `unpublished` for a
+collection whose other runs it never read; nor is it answered with every run,
+which the Processor refuses as outside the closed shape (`uncertain`, with no
+runs listed). No evidence is lost either way: every run's terminal is in the
+bucket and the collection scan registers it like any other run; only the
+operation's links stop at 100. A collection that fails keeps its own code and
+answers at most its first 100 persisted runs, with no marker that more exist:
+a `failed` operation lists them and is not followed to publication, so the
+shorter list states no verdict, but `runs` alone does not say whether it is
+complete; a lease abort's answer makes the operation `uncertain`, which lists
+none. The alarm path stores the same answer on the schedule occurrence, the
+lease abort's runs included (as `uncertain`). Before this cap the alarm stored
+every Vpass card run, and an occurrence naming more than 100 runs made the
+collection-quality summary fall outside its contract (at most 100 `terminals`
+per occurrence), so the web client refused the whole page.
 
 `startedAt`, `collectedAt`, `publishedAt` and `finishedAt` are set when the
 state is reached; `expiresAt` is acceptance + 24 h.

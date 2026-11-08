@@ -8,6 +8,7 @@ import {
 import {
   CARD_DEBIT_ACCOUNT_STATEMENT_REFUSALS,
   type CardSettlementDebitAccountReview,
+  type CardSettlementLeadSearch,
   type CardSettlementReview,
   type CardSettlementReviewPage,
   type CardSettlementStatementGroup,
@@ -27,6 +28,20 @@ export const CARD_SETTLEMENT_PAGE_SIZE = 50;
 export const CARD_SETTLEMENT_STATEMENT_PAGE_SIZE = 10;
 /** The newest candidates of each statement the grouped list judges. */
 export const CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT = 5;
+/**
+ * The older candidates of a statement one pass of the grouped list's search
+ * for a ready lead judges (ADR 0090).
+ */
+export const CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS = 50;
+/**
+ * The most older candidates of a statement the search judges on one read of
+ * the grouped list, a whole number of passes (ADR 0090). A statement the
+ * search leaves unfinished says so (`leadSearch: "truncated"`), so a page
+ * load reads at most four more times however long the statements' histories
+ * grow.
+ */
+export const CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED =
+  4 * CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS;
 const HISTORY_LIMIT = 20;
 const STATEMENT_KEY_LIMIT = 1024;
 interface ReviewRow {
@@ -94,8 +109,8 @@ interface DebitAccountRow {
  *   row of its own.
  *
  * One row per chosen candidate. A list page holds at most 50 candidates and a
- * grouped page its ten statements' five newest and accepted ones, each with a
- * row per changed outcome.
+ * grouped page its ten statements' five newest and accepted ones and at most
+ * one older ready one each (ADR 0090), each with a row per changed outcome.
  */
 export const CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL = `WITH chosen AS MATERIALIZED (
  SELECT c.id,c.statement_parse_run_id,json_extract(c.facts_json,'$.statement.sourceAccount') AS card_source_account,
@@ -336,6 +351,36 @@ export const CARD_SETTLEMENT_STATEMENT_GROUP_SQL = reviewsSql(
   AND d.revision=(SELECT max(latest.revision) FROM card_settlement_decisions latest WHERE latest.proposal_id=c.id))`,
   ",c.statement_key",
 );
+/**
+ * The older candidates the grouped list judges, at most `?2` per statement and
+ * pass, for a statement whose newest candidates hold no acceptance and none
+ * ready to accept (ADR 0090). `?1` is a JSON array of
+ * `[statement_key, created_at, id]` cursors, one per statement still
+ * searching: the last candidate the statement's window or its previous pass
+ * judged. Of each statement, the candidates after its cursor in the lists'
+ * `created_at DESC, id DESC` order that no decision names and whose facts claim
+ * the same established owner and both accounts, newest first. A candidate any
+ * decision names is accepted, rejected or withdrawn (migration 0044 allows no
+ * other status), so it is not proposed; and `cardSettlementEligible` requires
+ * the three facts terms, so a candidate the terms leave out has an acceptance
+ * blocker. The pass continues by key, not by position, so a decision recorded
+ * between two passes on a candidate already judged moves no later candidate
+ * past the next pass. Each statement's candidates are found by
+ * `card_settlement_candidates_statement`, which holds `statement_key` alone:
+ * the cursor filters the statement's candidates; no index orders them.
+ */
+export const CARD_SETTLEMENT_STATEMENT_OLDER_SQL = reviewsSql(
+  `SELECT id FROM (
+  SELECT c.id,row_number() OVER (PARTITION BY c.statement_key ORDER BY c.created_at DESC,c.id DESC) AS older
+  FROM json_each(?1) page JOIN card_settlement_candidates c ON c.statement_key=json_extract(page.value,'$[0]')
+  WHERE (c.created_at,c.id)<(json_extract(page.value,'$[1]'),json_extract(page.value,'$[2]'))
+  AND NOT EXISTS(SELECT 1 FROM card_settlement_decisions d WHERE d.proposal_id=c.id)
+  AND json_extract(c.facts_json,'$.ownership')='established-same'
+  AND json_extract(c.facts_json,'$.statement.accountId') IS NOT NULL
+  AND json_extract(c.facts_json,'$.bankDebit.accountId') IS NOT NULL
+ ) WHERE older<=?2`,
+  ",c.statement_key",
+);
 
 /** Each review's decision history and provider-stated debit account evidence. */
 async function withHistory(sql: SqlExecutor, items: CardSettlementReview[]): Promise<void> {
@@ -476,14 +521,80 @@ export function leadFirst(candidates: CardSettlementReview[]): CardSettlementRev
   return lead === undefined ? [] : [lead, ...candidates.filter((candidate) => candidate !== lead)];
 }
 
+/** Whether `leadFirst` leads with this candidate for what it is, not for being newest. */
+const decidable = (candidate: CardSettlementReview): boolean =>
+  candidate.status === "accepted" ||
+  (candidate.status === "proposed" && candidate.acceptanceBlockers.length === 0);
+
+/** Where a statement's search continues: after this candidate, newest first. */
+interface OlderCursor {
+  key: string;
+  createdAt: string;
+  id: string;
+}
+
+/**
+ * The newest ready candidate of each statement `start` names among its
+ * candidates older than its cursor (the oldest of the judged window), judged
+ * `CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS` at a time, newest first, each
+ * pass continuing after the last candidate the previous one judged; a
+ * statement leaves the search at its first ready candidate or once a pass
+ * returns fewer than a full pass of its candidates. Only candidates no
+ * decision names and whose facts could be eligible are judged
+ * (`CARD_SETTLEMENT_STATEMENT_OLDER_SQL`), at most
+ * `CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED` per statement: a statement still
+ * searching after them is `truncated`, never reported as having none ready.
+ */
+async function olderReadyCandidates(
+  sql: SqlExecutor,
+  start: OlderCursor[],
+): Promise<{ found: Map<string, CardSettlementReview>; truncated: Set<string> }> {
+  const found = new Map<string, CardSettlementReview>();
+  let searching = start;
+  for (
+    let passed = 0;
+    searching.length > 0 && passed < CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED;
+    passed += CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS
+  ) {
+    const rows = await sql.all<ReviewRow>(CARD_SETTLEMENT_STATEMENT_OLDER_SQL, [
+      JSON.stringify(searching.map((cursor) => [cursor.key, cursor.createdAt, cursor.id])),
+      CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS,
+    ]);
+    const next: OlderCursor[] = [];
+    for (const { key } of searching) {
+      // Newest first, as the read orders them; judged in that order.
+      const own = rows.filter((row) => row.statement_key === key);
+      let ready: CardSettlementReview | undefined;
+      for (const row of own) {
+        const candidate = review(row);
+        if (candidate.status === "proposed" && candidate.acceptanceBlockers.length === 0) {
+          ready = candidate;
+          break;
+        }
+      }
+      const last = own.at(-1);
+      if (ready !== undefined) found.set(key, ready);
+      else if (last !== undefined && own.length === CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS)
+        next.push({ key, createdAt: last.created_at, id: last.id });
+    }
+    searching = next;
+  }
+  return { found, truncated: new Set(searching.map((cursor) => cursor.key)) };
+}
+
 /**
  * The review list grouped by statement (`statement_key`, the statement the
  * sweep read: source, producer, namespace, card account and period), newest
  * candidate first. Each group judges its newest
- * `CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT` candidates and any accepted one,
- * leads with the one `leadFirst` picks, and says how many candidates the
- * statement has; the rest are one `queryCardSettlements({ statementKey })`
- * away. No candidate is hidden or removed: candidates are append-only.
+ * `CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT` candidates and any accepted one;
+ * when none of those is accepted or ready to accept and the statement has
+ * older candidates, it also searches at most
+ * `CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED` of those for the newest ready
+ * one and says how far it looked (`leadSearch`, ADR 0090). It leads with
+ * the one `leadFirst` picks and says how many candidates the statement has;
+ * the rest are one
+ * `queryCardSettlements({ statementKey })` away. No candidate is hidden or
+ * removed: candidates are append-only.
  */
 export async function queryCardSettlementStatements(
   sql: SqlExecutor,
@@ -503,25 +614,50 @@ export async function queryCardSettlementStatements(
           JSON.stringify(page.map((row) => row.statement_key)),
           CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT,
         ]);
-  const judged = rows.map((row) => ({
-    key: row.statement_key,
-    review: review(row),
+  const judged = page.map((statement) => ({
+    statement,
+    reviews: rows.filter((row) => row.statement_key === statement.statement_key).map(review),
   }));
+  // A statement searched holds no acceptance, so its judged candidates are
+  // exactly its window, newest first: the search continues after the last.
+  const start = judged.flatMap(({ statement, reviews }): OlderCursor[] => {
+    const last = reviews.at(-1);
+    return last !== undefined &&
+      reviews.length < statement.candidate_count &&
+      !reviews.some(decidable)
+      ? [{ key: statement.statement_key, createdAt: last.createdAt, id: last.proposalId }]
+      : [];
+  });
+  const searched = start.map((cursor) => cursor.key);
+  const older = await olderReadyCandidates(sql, start);
+  const chosen = judged.map(({ statement, reviews }) => {
+    const key = statement.statement_key;
+    const ready = older.found.get(key);
+    const leadSearch: CardSettlementLeadSearch = !searched.includes(key)
+      ? "not_searched"
+      : ready !== undefined
+        ? "found"
+        : older.truncated.has(key)
+          ? "truncated"
+          : "none_ready";
+    return { statement, leadSearch, reviews: ready === undefined ? reviews : [...reviews, ready] };
+  });
   await withHistory(
     sql,
-    judged.map((row) => row.review),
+    chosen.flatMap((group) => group.reviews),
   );
-  const groups: CardSettlementStatementGroup[] = page.map((statement) => {
-    const candidates = leadFirst(
-      judged.filter((row) => row.key === statement.statement_key).map((row) => row.review),
-    );
-    if (candidates.length === 0) throw new Error("card_settlement_statement_unavailable");
-    return {
-      statementKey: statement.statement_key,
-      candidateCount: statement.candidate_count,
-      candidates,
-    };
-  });
+  const groups: CardSettlementStatementGroup[] = chosen.map(
+    ({ statement, leadSearch, reviews }) => {
+      const candidates = leadFirst(reviews);
+      if (candidates.length === 0) throw new Error("card_settlement_statement_unavailable");
+      return {
+        statementKey: statement.statement_key,
+        candidateCount: statement.candidate_count,
+        candidates,
+        leadSearch,
+      };
+    },
+  );
   return {
     statements: groups,
     nextOffset:
@@ -534,6 +670,7 @@ export async function queryCardSettlementStatements(
       netAssets: "unknown",
       limit: CARD_SETTLEMENT_STATEMENT_PAGE_SIZE,
       candidatesPerStatement: CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT,
+      olderCandidatesSearched: CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED,
     },
   };
 }

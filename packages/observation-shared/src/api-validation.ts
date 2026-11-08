@@ -3,6 +3,7 @@ import {
   INSTRUMENT_HISTORY_PATH,
   validInstrumentHistoryRead,
 } from "./instrument-history-contract.ts";
+import { ACCOUNT_HISTORY_PATH, validAccountHistoryRead } from "./account-history-contract.ts";
 import {
   INSTRUMENT_COVERAGE_PATH,
   validInstrumentCoverage,
@@ -808,6 +809,7 @@ export function validApiResponse(path: string, value: unknown): boolean {
   if (path === INSTRUMENT_CANDIDATES_PATH) return validInstrumentCandidateReview(value);
   if (path === ACCOUNT_CANDIDATES_PATH) return validAccountCandidateReview(value);
   if (path === INSTRUMENT_HISTORY_PATH) return validInstrumentHistoryRead(value);
+  if (path === ACCOUNT_HISTORY_PATH) return validAccountHistoryRead(value);
   if (path === INSTRUMENT_COVERAGE_PATH) return validInstrumentCoverage(value);
   if (path.startsWith(OPERATION_RECORD_PATH_PREFIX)) {
     // The record of exactly the operation the path names, or nothing.

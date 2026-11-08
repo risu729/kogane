@@ -1,6 +1,6 @@
-// `kogane.card-settlements.read` and `kogane.card-settlements.ownership` (ADR
-// 0081): the カード照合 page's reads for an agent, over MCP and the agent HTTP
-// route. Native Worker/D1 and signed Access fixtures only; no production data.
+// `kogane.card-settlements.read`, `kogane.card-settlements.statements` and
+// `kogane.card-settlements.ownership` (ADR 0081): the カード照合 page's reads
+// for an agent, over MCP and the agent HTTP route. Native Worker/D1 and signed Access fixtures only; no production data.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +19,7 @@ const APP_AUD = "synthetic-settlement-browser";
 const MCP_AUD = "synthetic-settlement-mcp";
 const LIST = "kogane.card-settlements.read";
 const OWNERSHIP = "kogane.card-settlements.ownership";
+const STATEMENTS = "kogane.card-settlements.statements";
 const ID = "card-settlement-read-tool";
 const GRANT = {
   capabilities: ["records.read"],
@@ -253,6 +254,8 @@ describe("card settlement reads for agents", () => {
       [LIST, {}, ""],
       [LIST, { offset: 0 }, "?offset=0"],
       [LIST, { proposalId: ID }, `?proposalId=${ID}`],
+      [STATEMENTS, {}, "/statements"],
+      [STATEMENTS, { offset: 0 }, "/statements?offset=0"],
       [OWNERSHIP, { proposalId: ID }, `/ownership?proposalId=${ID}`],
     ] as const) {
       const expected = await page(query);
@@ -273,6 +276,13 @@ describe("card settlement reads for agents", () => {
         result: "read",
         diff_json: '{"kind":"read","rows":1,"truncated":false}',
       })),
+      // One statement on the page: a count of statements, never their candidates.
+      ...[1, 2].map(() => ({
+        operation: "card-settlements.statements",
+        risk_class: "R0",
+        result: "read",
+        diff_json: '{"kind":"read","rows":1,"truncated":false}',
+      })),
       {
         operation: "card-settlements.ownership",
         risk_class: "R0",
@@ -283,9 +293,9 @@ describe("card settlement reads for agents", () => {
   });
 
   it("are listed and answered only to records.read over the whole store", async () => {
-    // Every MCP client holds that grant, so both are listed to it.
-    expect(await listed()).toEqual(expect.arrayContaining([LIST, OWNERSHIP]));
-    expect(listedUnder(GRANT)).toEqual(expect.arrayContaining([LIST, OWNERSHIP]));
+    // Every MCP client holds that grant, so all three are listed to it.
+    expect(await listed()).toEqual(expect.arrayContaining([LIST, STATEMENTS, OWNERSHIP]));
+    expect(listedUnder(GRANT)).toEqual(expect.arrayContaining([LIST, STATEMENTS, OWNERSHIP]));
     for (const [grant, code] of [
       [{ ...GRANT, capabilities: ["summary.read"] }, "unauthorized"],
       [{ ...GRANT, scopes: { sources: ["myjcb"], accounts: "*" } }, "evidence_restricted"],
@@ -293,9 +303,12 @@ describe("card settlement reads for agents", () => {
     ] as const) {
       const names = listedUnder(grant);
       expect(names).not.toContain(LIST);
+      expect(names).not.toContain(STATEMENTS);
       expect(names).not.toContain(OWNERSHIP);
       for (const [tool, args] of [
         [LIST, {}],
+        [STATEMENTS, {}],
+        [STATEMENTS, { offset: -1 }],
         [OWNERSHIP, { proposalId: ID }],
       ] as const) {
         const answer = await direct(tool, args, grant);
@@ -335,9 +348,11 @@ describe("card settlement reads for agents", () => {
     schemaAhead = true;
     const names = await listed();
     expect(names).not.toContain(LIST);
+    expect(names).not.toContain(STATEMENTS);
     expect(names).not.toContain(OWNERSHIP);
     for (const [tool, args] of [
       [LIST, {}],
+      [STATEMENTS, {}],
       [OWNERSHIP, { proposalId: ID }],
     ] as const) {
       expect((await http(tool, args)).status).toBe(404);
@@ -436,6 +451,53 @@ describe("card settlement reads for agents", () => {
         body: expected,
       });
     }
+    // The grouped list takes `offset` alone and pages ten statements at a
+    // time, so the same budget reaches offset 990.
+    for (const [args, query, status, code] of [
+      [{}, "", 200, null],
+      [{ offset: 0 }, "?offset=0", 200, null],
+      [{ offset: 990 }, "?offset=990", 200, null],
+      [{ offset: 991 }, "?offset=991", 413, "budget_exceeded"],
+      [{ offset: 1_000_000 }, "?offset=1000000", 413, "budget_exceeded"],
+      [{ offset: -1 }, "?offset=-1", 400, "invalid_query"],
+      [{ offset: 1_000_001 }, "?offset=1000001", 400, "invalid_query"],
+      [{ offset: 1e20 }, "?offset=100000000000000000000", 400, "invalid_query"],
+      [{ offset: 1.5 }, "?offset=1.5", 400, "invalid_query"],
+      [{ offset: "abc" }, "?offset=abc", 400, "invalid_query"],
+      [{ offset: "01" }, "?offset=01", 400, "invalid_query"],
+      [{ offset: "" }, "?offset=", 400, "invalid_query"],
+      [{ offset: [0, 0] }, "?offset=0&offset=0", 400, "invalid_query"],
+      [{ proposalId: ID }, `?proposalId=${ID}`, 400, "invalid_query"],
+      [{ statementKey: "statement-read-tool" }, `?${STATEMENT}`, 400, "invalid_query"],
+      [{ relatedTo: ID, offset: 0 }, `?relatedTo=${ID}&offset=0`, 400, "invalid_query"],
+      [{ source: "myjcb" }, "?source=myjcb", 400, "invalid_query"],
+    ] as const) {
+      const route = await worker.fetch(
+        new Request(
+          `https://fixture.test/api/v2/reconciliation/card-settlements/statements${query}`,
+          { headers: { "cf-access-jwt-assertion": await token(APP_AUD) } },
+        ),
+        environment(),
+      );
+      const expected = (await route.json()) as Record<string, unknown>;
+      expect({ query, status: route.status, code: expected["code"] ?? null }).toEqual({
+        query,
+        status,
+        code,
+      });
+      const viaHttp = await http(STATEMENTS, args);
+      expect({ query, status: viaHttp.status, body: await viaHttp.json() }).toEqual({
+        query,
+        status,
+        body: expected,
+      });
+      const viaMcp = await call(STATEMENTS, args);
+      expect({ query, isError: viaMcp.isError === true, body: viaMcp.structuredContent }).toEqual({
+        query,
+        isError: status >= 400,
+        body: expected,
+      });
+    }
     // The ownership read takes `proposalId` alone, on every path.
     for (const [args, query] of [
       [{ proposalId: ID, offset: -1 }, `?proposalId=${ID}&offset=-1`],
@@ -490,6 +552,21 @@ describe("card settlement reads for agents", () => {
       expect(viaMcp.isError).not.toBe(true);
       expect(viaMcp.structuredContent).toEqual(expected);
     }
+    // The grouped list carries both under their statement, on both transports.
+    const grouped = (await page("/statements")) as {
+      statements: { statementKey: string; candidateCount: number; candidates: unknown[] }[];
+    };
+    expect(
+      grouped.statements.map((group) => [
+        group.statementKey,
+        group.candidateCount,
+        group.candidates.length,
+      ]),
+    ).toEqual([["statement-read-tool", 2, 2]]);
+    const viaHttp = await http(STATEMENTS, {});
+    expect(viaHttp.status).toBe(200);
+    expect(await viaHttp.json()).toEqual(grouped);
+    expect((await call(STATEMENTS, {})).structuredContent).toEqual(grouped);
     // The competitors never include the review itself.
     expect(
       ((await page(`?relatedTo=${ID}`)) as { items: { proposalId: string }[] }).items.map(
@@ -505,11 +582,11 @@ describe("card settlement reads for agents", () => {
       environment(GRANT),
     );
     expect(route.status).toBe(404);
-    const viaHttp = await http(LIST, { relatedTo: "missing" });
-    expect(viaHttp.status).toBe(404);
-    const viaMcp = await call(LIST, { relatedTo: "missing" });
-    expect(viaMcp.isError).toBe(true);
-    expect(viaMcp.structuredContent).toEqual(await viaHttp.json());
+    const missingHttp = await http(LIST, { relatedTo: "missing" });
+    expect(missingHttp.status).toBe(404);
+    const missingMcp = await call(LIST, { relatedTo: "missing" });
+    expect(missingMcp.isError).toBe(true);
+    expect(missingMcp.structuredContent).toEqual(await missingHttp.json());
     for (const args of [
       { relatedTo: ID, proposalId: ID },
       { relatedTo: ID, statementKey: "statement-read-tool" },

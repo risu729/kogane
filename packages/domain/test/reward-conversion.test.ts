@@ -2,7 +2,13 @@ import { expect, test } from "bun:test";
 import { findConversionPaths, simulateConversion } from "../src/reward-conversion.ts";
 import type { ConversionOffer, MembershipState, OfferValidity } from "../src/rewards.ts";
 import type { LocalDateValue, TemporalValue } from "../src/time.ts";
-import { decimalLiteral, decimalToString, exactQuantity, ROUNDING_MODES } from "../src/values.ts";
+import {
+  absentQuantity,
+  decimalLiteral,
+  decimalToString,
+  exactQuantity,
+  ROUNDING_MODES,
+} from "../src/values.ts";
 
 const day = (value: string): LocalDateValue => ({
   kind: "local-date",
@@ -113,6 +119,36 @@ test("all 24,300 bounded amount-policy combinations match the integer oracle", (
               expect(decimalToString(plan.receive.value.value)).toBe(
                 String(expectedFeasible ? rounded(use * numerator, denominator, mode) : 0),
               );
+              // The adjustments in order, then the refusal or the credit caveat.
+              expect(plan.reasonCodes).toEqual([
+                ...(cap !== null && cap < balance ? ["capped_by_maximum"] : []),
+                ...(use < permitted ? ["rounded_down_to_increment"] : []),
+                expectedFeasible ? "credit_is_not_the_application" : "below_minimum",
+              ]);
+              // The route search reports the same plan, or its refusal by name.
+              const search = findConversionPaths(
+                [
+                  offer({
+                    increment: decimalLiteral(String(increment)),
+                    minimum: decimalLiteral(String(minimum)),
+                    maximumPerRequest: cap === null ? null : decimalLiteral(String(cap)),
+                    ratio: { numerator: String(numerator), denominator: String(denominator) },
+                    rounding: { scale: 0, mode },
+                  }),
+                ],
+                { quantity: quantity(balance), clock: day("2026-04-10") },
+                "points:b",
+                { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null },
+              );
+              if (expectedFeasible) {
+                expect(search.rejected).toEqual([]);
+                expect(search.paths.map((p) => p.hops.map((h) => h.plan))).toEqual([[plan]]);
+              } else {
+                expect(search.paths).toEqual([]);
+                expect(search.rejected).toEqual([
+                  { offerRef: "offer:a-b@v1", reasonCode: "below_minimum" },
+                ]);
+              }
             }
   expect(cases).toBe(24_300);
 });
@@ -419,4 +455,258 @@ test("a period deadline passes after the period and is unestablished inside it",
   expect(at("2026-10-01").rejected).toEqual([
     { offerRef: "offer:a-b@v1", reasonCode: "application_deadline_passed" },
   ]);
+});
+
+test("a deadline is judged on the application day's calendar, never an assumed zone", () => {
+  const budget = { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  // A standing validity with no zone, so only the deadline decides.
+  const validTime: OfferValidity = { kind: "open-ended", start: "2026-01-01", zone: null };
+  const instant = (value: string, zone = "Asia/Tokyo"): TemporalValue => ({
+    kind: "instant",
+    value,
+    zone,
+    basis: "provider",
+  });
+  const at = (applicationDeadline: TemporalValue, clock: LocalDateValue): string => {
+    const result = findConversionPaths(
+      [offer({ validTime, applicationDeadline })],
+      { quantity: quantity(4), clock },
+      "points:b",
+      budget,
+    );
+    return result.paths.length === 1 ? "route" : result.rejected[0]!.reasonCode;
+  };
+  const tokyo = (value: string): LocalDateValue => day(value);
+  const losAngeles = (value: string): LocalDateValue => ({
+    ...day(value),
+    zone: "America/Los_Angeles",
+  });
+  const zoneless = (value: string): LocalDateValue => ({ ...day(value), zone: null });
+
+  // Dates of two zones are not compared (`zone_mismatch`, as for validity).
+  // The end of 2026-04-15 in Los Angeles is 16:00 on 2026-04-16 in Tokyo, so
+  // read as one calendar a Tokyo 16th would be refused although most of it is
+  // before the deadline; the end of the Tokyo 15th is 08:00 on the Los Angeles
+  // 15th, which would be read as a route.
+  for (const clock of ["2026-04-15", "2026-04-16"])
+    expect(at({ ...losAngeles("2026-04-15"), basis: "provider" }, tokyo(clock))).toBe(
+      "needs_rule_verification",
+    );
+  for (const clock of ["2026-04-14", "2026-04-15", "2026-04-16"])
+    expect(at(tokyo("2026-04-15"), losAngeles(clock))).toBe("needs_rule_verification");
+  // The same zone, and a clock whose zone was not stated, compare as days.
+  expect(at(tokyo("2026-04-15"), tokyo("2026-04-15"))).toBe("route");
+  expect(at(tokyo("2026-04-15"), tokyo("2026-04-16"))).toBe("application_deadline_passed");
+  expect(at(tokyo("2026-04-15"), zoneless("2026-04-15"))).toBe("route");
+  expect(at(tokyo("2026-04-15"), zoneless("2026-04-16"))).toBe("application_deadline_passed");
+
+  // 2026-04-15T15:30Z is 00:30 on 2026-04-16 in Tokyo. Read by its written
+  // offset it would fall on the 15th and refuse the whole 16th.
+  const justAfterMidnight = instant("2026-04-15T15:30:00Z");
+  expect(at(justAfterMidnight, tokyo("2026-04-15"))).toBe("route");
+  expect(at(justAfterMidnight, tokyo("2026-04-16"))).toBe("needs_rule_verification");
+  expect(at(justAfterMidnight, tokyo("2026-04-17"))).toBe("application_deadline_passed");
+  // A day that holds the deadline instant is not established at either edge.
+  const lastSecond = instant("2026-04-15T23:59:59+09:00");
+  expect(at(lastSecond, tokyo("2026-04-14"))).toBe("route");
+  expect(at(lastSecond, tokyo("2026-04-15"))).toBe("needs_rule_verification");
+  expect(at(lastSecond, tokyo("2026-04-16"))).toBe("application_deadline_passed");
+  // A Los Angeles day reads the same instant on its own calendar (07:59:59 on
+  // 2026-04-15 there).
+  expect(at(lastSecond, losAngeles("2026-04-14"))).toBe("route");
+  expect(at(lastSecond, losAngeles("2026-04-15"))).toBe("needs_rule_verification");
+  expect(at(lastSecond, losAngeles("2026-04-16"))).toBe("application_deadline_passed");
+  // A clock with no zone reads the instant in the deadline's own zone.
+  expect(at(justAfterMidnight, zoneless("2026-04-15"))).toBe("route");
+  expect(at(justAfterMidnight, zoneless("2026-04-16"))).toBe("needs_rule_verification");
+  // A zone the runtime does not know is not read as UTC.
+  const unknownZone = instant("2026-04-15T12:00:00Z", "Synthetic/Nowhere");
+  for (const clock of ["2026-04-01", "2026-04-15", "2026-04-30"])
+    expect(at(unknownZone, zoneless(clock))).toBe("needs_rule_verification");
+});
+
+test("an instant clock starts on its civil date in its own zone", () => {
+  const budget = { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  // 2026-04-15T15:30Z is 00:30 on 2026-04-16 in Tokyo, the day after the deadline.
+  const clock: TemporalValue = {
+    kind: "instant",
+    value: "2026-04-15T15:30:00Z",
+    zone: "Asia/Tokyo",
+    basis: "collector",
+  };
+  const result = findConversionPaths(
+    [offer({ applicationDeadline: day("2026-04-15") })],
+    { quantity: quantity(4), clock },
+    "points:b",
+    budget,
+  );
+  expect(result.paths).toEqual([]);
+  expect(result.rejected).toEqual([
+    { offerRef: "offer:a-b@v1", reasonCode: "application_deadline_passed" },
+  ]);
+  // A clock zone the runtime does not know establishes no day.
+  const unknown = findConversionPaths(
+    [offer()],
+    { quantity: quantity(4), clock: { ...clock, zone: "Synthetic/Nowhere" } },
+    "points:b",
+    budget,
+  );
+  expect(unknown.rejected).toEqual([{ offerRef: "-", reasonCode: "clock_not_a_date" }]);
+});
+
+test("a required completion date follows the deadline rule on the credit day", () => {
+  const at = (requiredCompletionBy: TemporalValue): string => {
+    const result = findConversionPaths(
+      [offer({ processingDays: 5 })],
+      { quantity: quantity(4), clock: day("2026-04-10") },
+      "points:b",
+      { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy },
+    );
+    return result.paths.length === 1 ? "route" : result.rejected[0]!.reasonCode;
+  };
+  const instant = (value: string, zone = "Asia/Tokyo"): TemporalValue => ({
+    kind: "instant",
+    value,
+    zone,
+    basis: "provider",
+  });
+  // The credit is expected on 2026-04-15.
+  expect(at(day("2026-04-15"))).toBe("route");
+  expect(at(day("2026-04-14"))).toBe("completion_after_required_by");
+  // A date of another zone and an unknown value establish nothing; neither is
+  // read as no requirement (INV05).
+  expect(at({ ...day("2026-04-20"), zone: "America/Los_Angeles" })).toBe("needs_rule_verification");
+  expect(at({ kind: "unknown", reasonCode: "not_stated" })).toBe("needs_rule_verification");
+  // An instant is one moment: its own zone, even one the runtime does not
+  // know, is not needed to read it on the clock's Tokyo calendar. Before, an
+  // unknown zone gave no day and the requirement was silently dropped.
+  expect(at(instant("2026-04-10T00:00:00Z", "Synthetic/Nowhere"))).toBe(
+    "completion_after_required_by",
+  );
+  // With a clock that names no zone, it is read in its own zone, and one the
+  // runtime does not know is never read as UTC.
+  const zoneless = findConversionPaths(
+    [offer({ processingDays: 5 })],
+    { quantity: quantity(4), clock: { ...day("2026-04-10"), zone: null } },
+    "points:b",
+    {
+      maxDepth: 1,
+      maxCandidates: 8,
+      maxExpansions: 100,
+      requiredCompletionBy: instant("2026-04-10T00:00:00Z", "Synthetic/Nowhere"),
+    },
+  );
+  expect(zoneless.rejected).toEqual([
+    { offerRef: "offer:a-b@v1", reasonCode: "needs_rule_verification" },
+  ]);
+  // A clock zone the runtime does not know cannot place an instant either,
+  // even one in a known zone; it is not read as UTC or as the instant's zone.
+  const unknownClock = findConversionPaths(
+    [
+      offer({
+        processingDays: 5,
+        validTime: { ...day("2026-04-10"), zone: null },
+        applicationDeadline: null,
+      }),
+    ],
+    { quantity: quantity(4), clock: { ...day("2026-04-10"), zone: "Synthetic/Nowhere" } },
+    "points:b",
+    {
+      maxDepth: 1,
+      maxCandidates: 8,
+      maxExpansions: 100,
+      requiredCompletionBy: instant("2026-04-01T00:00:00Z"),
+    },
+  );
+  expect(unknownClock.rejected).toEqual([
+    { offerRef: "offer:a-b@v1", reasonCode: "needs_rule_verification" },
+  ]);
+  // An instant is read on the clock's calendar: 2026-04-14T15:30Z is 00:30 on
+  // the Tokyo 15th, the credit day itself, which it cannot place.
+  expect(at(instant("2026-04-14T15:30:00Z"))).toBe("needs_rule_verification");
+  expect(at(instant("2026-04-15T15:30:00Z"))).toBe("route");
+  expect(at(instant("2026-04-13T15:30:00Z"))).toBe("completion_after_required_by");
+});
+
+test("a later hop's passed deadline names the credit wait only when the wait passed it", () => {
+  const budget = { maxDepth: 2, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  // A → C, then C → B; the clock is 2026-04-10 in Tokyo.
+  const reason = (firstProcessingDays: number, applicationDeadline: TemporalValue): string => {
+    const result = findConversionPaths(
+      [
+        offer({ offerId: "offer:a-c", toUnitRef: "points:c", processingDays: firstProcessingDays }),
+        offer({ offerId: "offer:c-b", fromUnitRef: "points:c", applicationDeadline }),
+      ],
+      { quantity: quantity(4), clock: day("2026-04-10") },
+      "points:b",
+      budget,
+    );
+    expect(result.paths).toEqual([]);
+    expect(result.rejected).toHaveLength(1);
+    expect(result.rejected[0]!.offerRef).toBe("offer:c-b@v1");
+    return result.rejected[0]!.reasonCode;
+  };
+  // Open on the clock's day, closed by the credit day: only applying before
+  // the points are credited would meet it.
+  expect(reason(10, day("2026-04-15"))).toBe("reuse_before_credit");
+  expect(reason(10, day("2026-04-10"))).toBe("reuse_before_credit");
+  // Already closed on the clock's day: no wait for a credit passed it.
+  expect(reason(10, day("2026-04-09"))).toBe("application_deadline_passed");
+  expect(reason(0, day("2026-04-09"))).toBe("application_deadline_passed");
+  // Not established on the clock's day (inside a period, the day holding an
+  // instant) but passed by the credit day: the passed deadline is established,
+  // the credit wait as its cause is not.
+  const april: TemporalValue = {
+    kind: "period",
+    start: "2026-04-01",
+    end: "2026-04-15",
+    endExclusive: false,
+    zone: "Asia/Tokyo",
+    granularity: "day",
+  };
+  expect(reason(10, april)).toBe("application_deadline_passed");
+  const noon: TemporalValue = {
+    kind: "instant",
+    value: "2026-04-10T12:00:00+09:00",
+    zone: "Asia/Tokyo",
+    basis: "provider",
+  };
+  expect(reason(10, noon)).toBe("application_deadline_passed");
+});
+
+test("a refused amount names its refusal, not an adjustment made before it", () => {
+  const budget = { maxDepth: 1, maxCandidates: 8, maxExpansions: 100, requiredCompletionBy: null };
+  const reasons = (overrides: Partial<ConversionOffer>, held: number) =>
+    findConversionPaths(
+      [offer(overrides)],
+      { quantity: quantity(held), clock: day("2026-04-10") },
+      "points:b",
+      budget,
+    ).rejected.map((r) => r.reasonCode);
+  // 1,500 rounds down to 1,000, which is below the 2,000 minimum.
+  expect(
+    reasons({ increment: decimalLiteral("1000"), minimum: decimalLiteral("2000") }, 1500),
+  ).toEqual(["below_minimum"]);
+  // A cap below the minimum.
+  expect(
+    reasons({ maximumPerRequest: decimalLiteral("500"), minimum: decimalLiteral("1000") }, 4000),
+  ).toEqual(["below_minimum"]);
+  // Every other refusal of the amount, after an adjustment where one can come first.
+  expect(
+    reasons({ maximumPerRequest: decimalLiteral("500"), increment: decimalLiteral("0") }, 4000),
+  ).toEqual(["division_by_zero"]);
+  expect(
+    reasons(
+      { increment: decimalLiteral("1000"), ratio: { numerator: "1", denominator: "0" } },
+      1500,
+    ),
+  ).toEqual(["invalid_ratio"]);
+  expect(
+    findConversionPaths(
+      [offer()],
+      { quantity: absentQuantity("points:a", "missing", "synthetic"), clock: day("2026-04-10") },
+      "points:b",
+      budget,
+    ).rejected.map((r) => r.reasonCode),
+  ).toEqual(["quantity_not_exact"]);
 });

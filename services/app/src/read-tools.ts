@@ -1,7 +1,8 @@
 // Additional read adapters over the existing history, instrument coverage
-// (ADR 0073), dated reported state, account correspondence candidates
-// (ADR 0077), card statements without a settlement candidate (ADR 0074's
-// 2026-11-07 amendment) and common audit readers.
+// (ADR 0073), dated reported state, account correspondence candidates and
+// one source account's correction history (ADR 0077), card statements
+// without a settlement candidate (ADR 0074's 2026-11-07 amendment) and common
+// audit readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -12,6 +13,7 @@ import {
   financialError,
   readEconomicRowReadinessForGrant,
   readCardSettlementsForGrant,
+  readCardSettlementStatementsForGrant,
   readCardOwnershipForGrant,
   CARD_SETTLEMENT_PROPOSAL_ID,
   CARD_SETTLEMENTS_MAX_OFFSET,
@@ -33,6 +35,7 @@ import {
 } from "../../../packages/application/src/query/card-statements-unmatched.ts";
 import { readInstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
+import { readAccountHistoryForGrant } from "../../../packages/application/src/query/account-history-read.ts";
 import { ECONOMIC_ROW_READINESS_SCHEMA } from "../../../packages/domain/src/economic-row-readiness.ts";
 import { INSTRUMENT_IDENTIFIER_ID } from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
@@ -62,6 +65,7 @@ export const REPORTED_STATE_TOOL_NAME = "kogane.reported-state.read";
  */
 export const CARD_SETTLEMENT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "kogane.card-settlements.read",
+  "kogane.card-settlements.statements",
   "kogane.card-settlements.ownership",
   "kogane.card-settlements.unmatched",
 ]);
@@ -91,6 +95,10 @@ const schemas = {
     offset: z.number().int().min(0).max(ACCOUNT_CANDIDATES_MAX_OFFSET).optional(),
     sourceAccountId: z.string().regex(ACCOUNT_SOURCE_ACCOUNT_ID).optional(),
   }),
+  // The route's one parameter, with the service's own pattern.
+  "kogane.accounts.history": z.strictObject({
+    sourceAccountId: z.string().regex(ACCOUNT_SOURCE_ACCOUNT_ID),
+  }),
   // The route's one parameter, with the service's own limit.
   "kogane.card-settlements.unmatched": z.strictObject({
     offset: z.number().int().min(0).max(UNMATCHED_MAX_OFFSET).optional(),
@@ -116,6 +124,11 @@ const schemas = {
     proposalId: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID).optional(),
     statementKey: z.string().min(1).max(CARD_SETTLEMENT_STATEMENT_KEY_MAX).optional(),
     relatedTo: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID).optional(),
+  }),
+  // The grouped route's one parameter: the published shape of the service's
+  // request rules (`readCardSettlementStatementsForGrant`), which decide.
+  "kogane.card-settlements.statements": z.strictObject({
+    offset: z.number().int().min(0).max(CARD_SETTLEMENTS_MAX_OFFSET).optional(),
   }),
   "kogane.card-settlements.ownership": z.strictObject({
     proposalId: z.string().regex(CARD_SETTLEMENT_PROPOSAL_ID),
@@ -143,12 +156,16 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "Count each source's instrument identifiers by candidate state, the same counts as the owner UI, under summary.read and a whole-store read grant.",
   "kogane.accounts.candidates":
     "One page of the ADR 0077 account correspondence candidates: which direct provider source accounts a reviewed aggregator connection contains, on which evidence, with closed status, hold and same-account reasons, under records.read and a whole-store read grant. Read-only; never proposes same_account. A candidate names the relation.accept or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
+  "kogane.accounts.history":
+    "The append-only correction history of one source account, the same answer as GET /api/identity/account-history on the 口座の対応候補 page: every revision of its account mapping, every assignment or override release decided about it, and every relation row naming it on either side (connection_contains acceptances and withdrawals, same_account decisions), each with its decision kind, reason and closed origin, oldest first. Under records.read and a whole-store read grant; refused past the grant's maxRows, never truncated. Read-only; correcting it is a plan through the change lifecycle.",
   "kogane.card-settlements.unmatched":
     "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes, listing at most the first 50 exact allocations per statement with allocationCount and allocationsTruncated. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit.",
   "kogane.economic-readiness.read":
     "Read current economic-row readiness as closed reasons, counts and digests. Requires records.read and whole-store source/account scope; at most 64 rows within the grant budget. No proposal, writer, financial value or historical coverage is enabled.",
   "kogane.card-settlements.read":
     "The card statement to bank debit reviews of the カード照合 pages: one page (offset), one statement's candidates (statementKey, with offset), one review (proposalId, alone), or the candidates a review competes with (relatedTo, with offset: those sharing its statement key, its bank debit key, or its statement's source, resolved account and period, every status, never the review itself; not_found when it names no candidate), with the source facts, evidence references, acceptance blockers, debit-account evidence and decision history, the same answer as GET /api/v2/reconciliation/card-settlements, under records.read and a whole-store read grant. Read-only; deciding a review, or correcting a wrong acceptance by withdrawing it and accepting a competitor, is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
+  "kogane.card-settlements.statements":
+    "One page of the カード照合 page's review list grouped by statement (offset, counted in statements, 10 per page): each statement key with how many candidates it has and its newest five candidates and any accepted one, plus its newest older ready candidate when none of those is accepted or ready (searching at most coverage.olderCandidatesSearched older ones; leadSearch says not_searched, found, none_ready or truncated, and truncated means older ones were not judged, not that none is ready), the one the page leads with first, each with the source facts, evidence references, acceptance blockers, debit-account evidence and decision history; the statement's other candidates are kogane.card-settlements.read with statementKey. The same answer as GET /api/v2/reconciliation/card-settlements/statements, under records.read and a whole-store read grant. Read-only; deciding a review is a card-settlement.accept, card-settlement.reject or card-settlement.withdraw plan through the change lifecycle, graded there.",
   "kogane.card-settlements.ownership":
     "The ownership review of one card settlement candidate: both accounts' current mappings, recorded ownership claims, self-declaration and owner-default blockers, the same answer as GET /api/v2/reconciliation/card-settlements/ownership, under records.read and a whole-store read grant. Read-only; recording ownership is a relation plan through the change lifecycle, graded there.",
   "kogane.audit.search":
@@ -188,9 +205,11 @@ export function readMcpTools(
       case "kogane.instruments.coverage":
         return grantAllows(grant, "summary.read") && wholeStore(grant);
       case "kogane.accounts.candidates":
+      case "kogane.accounts.history":
       case "kogane.economic-readiness.read":
         return grantAllows(grant, "records.read") && wholeStore(grant);
       case "kogane.card-settlements.read":
+      case "kogane.card-settlements.statements":
       case "kogane.card-settlements.ownership":
       case "kogane.card-settlements.unmatched":
         return served.cardSettlements && grantAllows(grant, "records.read") && wholeStore(grant);
@@ -275,23 +294,31 @@ export async function callReadTool(
           ? { status: 200, body: outcome.review }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       }
+      case "kogane.accounts.history": {
+        // The route's own service: capability, perimeter, existence and the
+        // row budget are decided there, once for both transports.
+        const input = parseRequest(schemas[name], body ?? {});
+        const outcome = await readAccountHistoryForGrant({
+          grant,
+          sql: d1Executor(env.DB),
+          sourceAccountId: input.sourceAccountId,
+        });
+        return outcome.ok
+          ? { status: 200, body: outcome.history }
+          : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
       case "kogane.card-settlements.read":
+      case "kogane.card-settlements.statements":
       case "kogane.card-settlements.ownership": {
         // The page's own services; capability and perimeter are graded there,
         // before validation or database access, for both transports.
-        const sql = d1Executor(env.DB);
+        const input = { grant, sql: d1Executor(env.DB), request: body };
         const outcome =
           name === "kogane.card-settlements.read"
-            ? await readCardSettlementsForGrant({
-                grant,
-                sql,
-                request: body,
-              })
-            : await readCardOwnershipForGrant({
-                grant,
-                sql,
-                request: body,
-              });
+            ? await readCardSettlementsForGrant(input)
+            : name === "kogane.card-settlements.statements"
+              ? await readCardSettlementStatementsForGrant(input)
+              : await readCardOwnershipForGrant(input);
         if (outcome.status === "refused")
           return { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
         if (outcome.status === "not_found") throw new HttpError(404, "not_found");

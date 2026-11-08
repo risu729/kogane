@@ -182,11 +182,14 @@ provider rows no event holds, all Vpass `amount_not_exact`, with `complete: true
 row's first failing check is the payment type, so the installment, revolving and bonus codes
 are exercised by the synthetic tests only.
 
-Left open, outside the done-when: the `カード照合` page's grouped read
-(`/api/v2/reconciliation/card-settlements/statements`) has no MCP read yet (it is on the
-parity guard's `READ_ROUTE_GAPS`; `kogane.card-settlements.read` returns the same candidates
-ungrouped). [#1088](https://github.com/risu729/kogane/pull/1088) adds it and waits on the
-owner's approval of its catalogue entry. The production run corrected a wrong match by
+The `カード照合` page's grouped read
+(`/api/v2/reconciliation/card-settlements/statements`), outside the done-when, has its MCP
+read since [#1088](https://github.com/risu729/kogane/pull/1088):
+`kogane.card-settlements.statements` and the route call one service,
+`readCardSettlementStatementsForGrant`, so the route left the parity guard's
+`READ_ROUTE_GAPS` ([ADR 0081 amendment](adr/0081-ui-parity-through-mcp.md#amendment-the-grouped-card-settlement-list-over-mcp-2026-11-07)).
+
+Left open, outside the done-when: the production run corrected a wrong match by
 withdrawing it and accepting another statement's candidate; the withdrawn statement's next
 candidate is still undecided.
 
@@ -406,6 +409,14 @@ account ([ADR 0088](adr/0088-collection-quality-per-account.md)). A period no
 capture has is not listed and not claimed missing; an account two sources name
 is shown under each; whether an account is the owner's is not decided there.
 It is not verified against production.
+
+The review flows show the existing correction history on request: an
+instrument candidate its identifier's (`kogane.instruments.history`,
+[ADR 0055](adr/0055-instrument-candidates.md)), and an account candidate its
+direct source account's mapping revisions, mapping decisions and relation
+rows (`kogane.accounts.history`,
+[ADR 0077, amendment 2026-11-08](adr/0077-account-connection-candidates.md#amendment-2026-11-08-the-correction-history-of-a-source-account)),
+in knowledge order, not by effective date.
 
 Contracts: [collection](collection.md), [observations](observations.md),
 [identity](identity.md), [source identities](identity-sources.md).

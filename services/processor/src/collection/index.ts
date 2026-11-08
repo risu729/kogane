@@ -22,6 +22,9 @@
 // and the operations dispatch of one cron tick together. A registration that
 // reaches the budget yields `pending` with its progress in CORE, and the scan
 // continues pending runs first on every tick, before it lists new terminals.
+// A pending run whose terminal is not found spends none of the five
+// continuations, so such runs cannot keep the others waiting (ADR 0024,
+// amendment of 2026-11-08).
 //
 // A terminal CORE has already judged — blocked, or refused `retryable` within
 // the retry interval — is answered from its row and neither spends one of the
@@ -57,6 +60,11 @@ export const DEFAULT_SCAN_PAGE = 25;
 export const DEFAULT_SCAN_REGISTRATIONS = 5;
 /** Staged registrations continued in one cron tick, before the page is listed. */
 export const DEFAULT_SCAN_CONTINUATIONS = 5;
+/**
+ * Pending runs read in one cron tick, oldest first. A continuation whose
+ * terminal is missing spends none of the five, so up to this many are tried.
+ */
+export const DEFAULT_SCAN_CONTINUATION_READS = 25;
 
 /**
  * What the collection lanes need from the Worker environment. Structural, so
@@ -144,6 +152,12 @@ export interface ScanSummary {
   failed: number;
   /** Staged registrations continued before the page was listed. */
   continued: number;
+  /**
+   * Of `continued`, the pending runs whose terminal was not found at its key.
+   * Nothing is recorded for them, they spend none of the five continuations,
+   * and the next tick tries them again (ADR 0024, amendment of 2026-11-08).
+   */
+  continuedMissing: number;
   /** Registrations not started because the invocation's budget was spent. */
   deferred: number;
   /** True when this tick finished the walk and the next one starts over. */
@@ -157,6 +171,11 @@ export interface ScanOptions {
   maxRegistrations?: number;
   /** Staged registrations continued per tick before the page is listed. */
   maxContinuations?: number;
+  /**
+   * Pending runs read per tick for those continuations; a run whose terminal
+   * is missing spends none of `maxContinuations`, so up to this many are tried.
+   */
+  maxContinuationReads?: number;
   artifactBudget?: number;
   /** The invocation's shared registration budget; the scan gets its own when absent. */
   budget?: RegistrationBudget;
@@ -193,6 +212,11 @@ function count(summary: ScanSummary, result: RegisterTerminalOutcome): void {
  * its fetch run; up to `maxContinuations` of them, oldest first, are
  * continued before anything is listed, so a large run finishes over
  * consecutive ticks instead of waiting for the walk to come round to it.
+ * A continuation whose terminal is not found at its key (`missing`) records
+ * nothing and spends none of them, so the next pending run is tried in its
+ * place, up to `maxContinuationReads` runs read in all. Without that, five
+ * such runs, the oldest, would take every continuation on every tick
+ * (ADR 0024, amendment of 2026-11-08).
  *
  * The cursor only advances when the whole page was dealt with. A tick that
  * runs out of its registration budget leaves the cursor where it was, so the
@@ -230,6 +254,7 @@ export async function collectionScan(
     missing: 0,
     failed: 0,
     continued: 0,
+    continuedMissing: 0,
     deferred: 0,
     cycleComplete: false,
     budgetExhausted: false,
@@ -242,6 +267,10 @@ export async function collectionScan(
   const pageLimit = Math.max(1, options.pageLimit ?? DEFAULT_SCAN_PAGE);
   const maxRegistrations = Math.max(1, options.maxRegistrations ?? DEFAULT_SCAN_REGISTRATIONS);
   const maxContinuations = Math.max(0, options.maxContinuations ?? DEFAULT_SCAN_CONTINUATIONS);
+  const continuationReads = Math.max(
+    maxContinuations,
+    options.maxContinuationReads ?? DEFAULT_SCAN_CONTINUATION_READS,
+  );
   const budget = options.budget ?? new RegistrationBudget();
   const registration: RegistrationOptions = {
     budget,
@@ -276,14 +305,23 @@ export async function collectionScan(
   const continuations =
     maxContinuations === 0
       ? []
-      : await readPendingRegistrations(env.DB, REGISTRATION_CONTRACT_VERSION, maxContinuations);
+      : await readPendingRegistrations(env.DB, REGISTRATION_CONTRACT_VERSION, continuationReads);
   let budgetExhausted = false;
+  let continuedWork = 0;
   for (const run of continuations) {
+    if (continuedWork >= maxContinuations) break;
     summary.continued += 1;
+    const missingBefore = summary.missing;
     if (!(await attempt({ source: run.source, runId: run.run_id }))) {
       budgetExhausted = true;
       break;
     }
+    // A terminal that is not found records nothing, so a run left pending
+    // without one would be the oldest, and continued first, on every tick.
+    // It costs the terminal read and none of the five; it stays pending and
+    // is tried again next tick, so it registers once its terminal is found.
+    if (summary.missing > missingBefore) summary.continuedMissing += 1;
+    else continuedWork += 1;
   }
 
   const state = await readCollectionScanState(env.DB);

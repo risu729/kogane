@@ -50,6 +50,7 @@ import type { OperationCall } from "../audit/call.ts";
 import { AUDIT_IDEMPOTENCY_KEY } from "../audit/vocabulary.ts";
 import { simulationCounts } from "./plan.ts";
 import { instrumentCandidatePlanIsPinned } from "../operations/instrument-candidate-context.ts";
+import { pairStaleRefs } from "../operations/pair-references.ts";
 import { instrumentTemporalContextRequested } from "../../../domain/src/instrument-temporal.ts";
 import {
   approvalConsumptionWrite,
@@ -298,6 +299,14 @@ export async function commit(
   const { approval, payloadDigest } = check;
   const planner = input.planners[plan.kind];
   if (!planner) return commandError("unsupported_semantics", [plan.kind]);
+  // A pair reference the plan did not pin is refused before the batch; the
+  // pinned ones are the batch's own guard, and an account pair's batch also
+  // refuses a reference that appears in between (`connectionPairGuard`).
+  const pair = await pairStaleRefs(store, plan);
+  if (pair.length > 0) {
+    await store.batch([planStaleWrite(plan.planId)]);
+    return commandError("stale_context", [plan.planId, ...pair]);
+  }
 
   let reversal: CommitGuard | undefined;
   const revertsAuditId = input.audit?.delegatedExecution?.revertsAuditId;
@@ -477,6 +486,11 @@ async function failureReason(
   if (moved.length > 0) {
     await store.batch([planStaleWrite(plan.planId)]);
     return commandError("stale_context", [plan.planId, ...moved.map(([ref]) => ref)]);
+  }
+  const pair = await pairStaleRefs(store, plan);
+  if (pair.length > 0) {
+    await store.batch([planStaleWrite(plan.planId)]);
+    return commandError("stale_context", [plan.planId, ...pair]);
   }
   const approval = await store.first<ApprovalRow>(
     "SELECT approval_id,plan_id,plan_digest,approver_actor,scope_json,expires_at,uses_remaining FROM approvals WHERE approval_id=?1",

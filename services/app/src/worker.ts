@@ -37,6 +37,7 @@ import {
 } from "./card-statements-unmatched-api";
 import { instrumentCandidatesApi } from "./instrument-candidates-api";
 import { instrumentHistoryApi } from "./instrument-history-api";
+import { accountHistoryApi } from "./account-history-api";
 import { instrumentCoverageApi } from "./instrument-coverage-api";
 import { reportsApi } from "./reports-api";
 import { HttpError, json, secureResponse } from "./http";
@@ -158,6 +159,10 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   if (accountCandidatesResponse) return accountCandidatesResponse;
   const historyResponse = await catalogue(() => instrumentHistoryApi(request, env, url, subject));
   if (historyResponse) return historyResponse;
+  const accountHistoryResponse = await catalogue(() =>
+    accountHistoryApi(request, env, url, subject),
+  );
+  if (accountHistoryResponse) return accountHistoryResponse;
   const instrumentCoverageResponse = await catalogue(() =>
     instrumentCoverageApi(request, env, url, subject),
   );

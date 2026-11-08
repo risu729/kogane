@@ -116,6 +116,69 @@ the decision, not the outbox row. `change-lifecycle.test.ts` asserts the row
 counts of all four new tables plus `decision_revisions`, `decision_operations`
 and `account_mappings` before and after a failing guard.
 
+### Pair pins
+
+A candidate read decides an identity pair from records under several
+references, while a command acts on one triple or one mapping. The planner
+(`packages/application/src/operations/pair-references.ts`, called from
+`targets.ts`) therefore pins every reference of the pair a command decides,
+with the subject kinds above, so a decision recorded under any of them between
+plan and commit moves a pin and the plan is stale
+([ADR 0077, amendment 2026-11-08](adr/0077-account-connection-candidates.md#amendment-2026-11-08-a-pair-plan-pins-every-reference-of-the-pair)):
+
+| Command                                                                                                                                                                                     | Pair                                    | Pinned besides its own subject                                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `relation.accept` / `relation.reject` of `connection_contains`, `connection:` → `source_account:`                                                                                           | (identity value, direct source account) | the triple under every producer's review reference of the identity value, and under each reference migration 0029 backfilled under a key 0063 rewrote (mapped through the review row its id names, as the candidate read maps it) |
+| `identity.assign` of an instrument with candidate provenance                                                                                                                                | (anchor identifier, subject identifier) | the anchor's mapping (as before), `listed_as` from the target instrument to the subject and from the subject's current instrument to the anchor                                                                                   |
+| `relation.accept` / `relation.reject` of `listed_as`, `instrument:` → `identifier:`, whose evidence names exactly the subject and one other identifier (the candidate's keep-apart payload) | (that identifier, the subject)          | both identifiers' mappings and `listed_as` from the subject's current instrument to the other identifier                                                                                                                          |
+
+Any other command names no pair and pins only its own subject. The pins are
+not `simulation.targets[]` entries: the confirmation screen's table lists the
+command's own subject, and a moved pair pin answers `stale_context` with the
+moved reference among its refs. Approval and commit also re-read the pair's
+references: one the plan does not pin (another producer's first review of the
+identity value recorded after planning, or a plan made before pair pins) makes
+the plan stale before the batch, and an account pair's commit batch carries
+the same check as a condition of the receipt reservation, so a review recorded
+between the commit's reads and its batch writes nothing. An instrument pair's
+references are functions of its two pinned mappings, so its set cannot change
+while the plan is fresh. A `connection_contains` triple no review names pins
+only its own triple. So do two kinds that decide no pair, so there is nothing
+else to pin:
+
+- A `same_account` decision. Every reader takes its status from its own
+  triple's rows only: the balance projection reads each orientation as a
+  triple of its own (`projectionRelationsSql`), and the account candidate read
+  reports each stored orientation with its own status and derives no status
+  of the pair from them. The plan shows that one triple. A decision under any
+  other triple, the reverse orientation included, therefore changes neither
+  what the plan showed nor what its commit writes. A rejection withdraws only
+  its own orientation: an acceptance stored in the other orientation stays in
+  force in the projection.
+- A `listed_as` decision whose evidence does not name exactly the subject and
+  one other identifier. Its triple names one instrument and one identifier.
+  The instrument candidate read applies it to the pair of that identifier and
+  each identifier mapped to the instrument when the read runs, not when the
+  decision is committed. Those pairs are a set that follows later mappings,
+  not one pair, and the plan shows none of them. So no pair is named: the plan
+  pins the triple, which is all it showed.
+
+A `listed_as` payload whose evidence names the pair but whose instrument
+(`fromRef`) is not the other identifier's current one (a hand-built payload;
+the candidate's keep-apart payload names that instrument) is pinned as the
+table says: its own triple, both mappings and the reverse orientation. It
+does not pin `listed_as` from the other identifier's current instrument,
+because its triple is no reference of the pair: the candidate read applies it
+as it applies a decision that names no pair, and the pinned mapping keeps it
+so until the commit. The mapping pin can only refuse such a plan, never let
+its commit act on a state it did not show.
+
+MCP clients reach the same layer
+(`kogane.command.approve` / `kogane.command.commit` re-simulate before
+forwarding), so they receive the same `stale_context`; like every refusal
+that re-simulation finds, it is answered before forwarding, so the plan row is
+not marked stale.
+
 ## Pending-to-posted link review
 
 Reviewing a [pending-to-posted card usage link](economic-events.md#pending-to-posted-links)
@@ -873,6 +936,20 @@ already recorded is never undone by a DELETE — an undo is a new revision
   it pins. That review can be approved and committed only while every pin, the
   offered action and the candidate itself are unchanged, and while the
   simulation states an action that matches the plan's kind.
+- `packages/application/test/pair-pins.test.ts` and
+  `services/app/test/pair-pins-mcp.test.ts` ([pair pins](#pair-pins)): an
+  account or instrument pair's plan pins every reference of the pair; a
+  decision under another of them between plan and commit, or a reference that
+  appears (before the batch or inside it), refuses approval or commit with
+  `stale_context` and writes nothing, over the lifecycle and over MCP; the
+  pair read reaches relations by primary key only without table statistics; a
+  `same_account` plan, and a `listed_as` plan whose evidence does not name the
+  subject and one other identifier, pin their own triple only and commit after
+  a decision in the reverse orientation, and the account candidate read
+  reports the two `same_account` orientations apart; a `listed_as` plan naming
+  the pair from another instrument does not pin the pair's forward
+  orientation, commits after a decision under it, and leaves the pair's
+  candidate status unchanged.
 - `services/processor/test/balance-projection.test.ts` "the
   dispatcher routes the balance-projection target to that processor": a
   `balance-projection` row reaches A07's real processor and rebuilds the
