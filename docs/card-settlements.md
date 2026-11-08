@@ -1100,11 +1100,11 @@ non-operators. Over MCP and the agent HTTP route
 `kogane.card-settlements.read` with `relatedTo` or `statementKey` answers the
 route's body, `not_found` for a missing anchor, and refuses
 mixed filters and pages past `maxRows`; the service's own refusals precede
-every read (`packages/application/test/card-settlements-read.test.ts`). The
-same file sends offsets -1, 0, 950, 951, 1,000,000, 1,000,001, 10^20, 1.5,
-non-numeric and empty to the route, the agent HTTP route and MCP, each under
-its own grant, and gets one status and one body on all three. The route's
-adapter is compared with the handler it replaced
+every read (`packages/application/test/card-settlements-read.test.ts`).
+`card-settlements-read-tools.test.ts` also sends offsets -1, 0, 950, 951,
+1,000,000, 1,000,001, 10^20, 1.5, non-numeric and empty to the route, the
+agent HTTP route and MCP, each under its own grant, and gets one status and
+one body on all three. The route's adapter is compared with the handler it replaced
 (`services/app/test/card-settlements-api-frozen.ts`) on a store of 1,101
 candidates, over every offset alone and beside each filter plus a fixed
 sample of 600 combinations of offsets, filters, unknown and repeated keys, on
