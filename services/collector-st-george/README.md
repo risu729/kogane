@@ -60,8 +60,17 @@ Wrangler generates binding types. Secret names are declared in `env.d.ts`:
 Non-secret settings are `COLLECTOR_SCHEMA_VERSION`, `EGRESS_MODE` and
 `RELAY_PUBLIC_URL`. The configured daily schedule is 06:35 JST (`35 21 * * *`
 in UTC), with platform retries disabled. The same durable coordinator serializes
-manual and scheduled collection. An authentication/network failure blocks later
-runs until an operator resolves the cause and explicitly resumes collection.
+manual and scheduled collection. Only a refused or challenged login
+(`login-rejected`, `authentication-challenge`, `human-required`) blocks later
+runs until an operator resolves the cause and explicitly resumes collection,
+because another unattended login could lock the account. Every other failure (a
+browser or container crash, a network error, a changed page, a deadline) is a
+failed run and the next scheduled run tries again (2026-11-08 UTC; before that,
+any failure blocked, which left the collector stopped from 2026-10-07 on a
+`runtime-failed` run). A block of another reason left by that older policy is
+cleared on the next run. A lease held by another execution answers `busy` and
+records no run. An in-flight marker from an object reset mid-attempt no longer
+blocks: the lease outlives that attempt, so the next run cannot overlap it.
 Enable this schedule only after authenticated cloud collection and downstream
 publication have been verified.
 

@@ -194,6 +194,26 @@ function snapshotRun(pending: PendingState, chunks: Uint8Array[]): SharedRunInpu
   return { ...pending.run, snapshot };
 }
 
+/**
+ * Failures after which another unattended login could make things worse: the
+ * bank refused the credentials, or it asked for a person (challenge, OTP,
+ * locked account). Only these stop later runs until an operator asks for a
+ * collection again. Every other failure (a container or browser crash, a
+ * network error, a changed page, a deadline) is recorded as a failed run and
+ * the next scheduled run tries again.
+ */
+const LOGIN_BLOCKING_CODES: ReadonlySet<FailureCode> = new Set([
+  "login-rejected",
+  "authentication-challenge",
+  "human-required",
+]);
+export function blocksLaterLogins(reason: FailureCode): boolean {
+  return LOGIN_BLOCKING_CODES.has(reason);
+}
+
+/** What `withCollectionLease` throws when another execution holds the source. */
+const LEASE_REFUSAL = "collection_busy_or_uncertain";
+
 /** A durable attempt marker prevents a restart from replaying an uncertain login. */
 export class CollectionCoordinator {
   private active = false;
@@ -325,15 +345,22 @@ export class CollectionCoordinator {
     try {
       let state = await this.storage.get<StoredState>("state");
       if (state?.kind === "running") {
-        state = { kind: "blocked", reason: "collection-interrupted" };
-        await this.storage.put("state", state);
+        // The object was reset during an attempt. Its lease outlived it, so no
+        // other attempt can still be running once this one holds the lease.
+        logInterruptedAttempt();
+        state = undefined;
       }
-      if (state?.kind === "blocked")
-        return {
-          status: "blocked",
-          reason: state.reason,
-          ...(state.runId ? { runId: state.runId } : {}),
-        };
+      if (state?.kind === "blocked") {
+        if (blocksLaterLogins(state.reason))
+          return {
+            status: "blocked",
+            reason: state.reason,
+            ...(state.runId ? { runId: state.runId } : {}),
+          };
+        // A block that needs no person, left by the older any-failure policy,
+        // no longer stops the run.
+        state = undefined;
+      }
       let run: SharedRunInput;
       let pending: Extract<StoredState, { kind: "pending" }>;
       if (state?.kind === "pending") {
@@ -349,6 +376,11 @@ export class CollectionCoordinator {
         try {
           output = parseCollectionOutput(await this.collect(runId));
         } catch (error) {
+          if (error instanceof Error && error.message === LEASE_REFUSAL) {
+            // Another execution holds the source; nothing was contacted.
+            await this.storage.delete("state");
+            return { status: "busy" };
+          }
           output = {
             status: "failed",
             reason: thrownFailureCode(error),
@@ -375,13 +407,13 @@ export class CollectionCoordinator {
       if (!sharedRunPersisted(result))
         return { status: "failed", reason: "persistence-incomplete", runId: run.runId };
       if (run.reason !== undefined) {
-        await this.finishPending(pending, {
-          kind: "blocked",
-          reason: run.reason,
-          runId: run.runId,
-        });
+        const blocked = blocksLaterLogins(run.reason);
+        await this.finishPending(
+          pending,
+          blocked ? { kind: "blocked", reason: run.reason, runId: run.runId } : undefined,
+        );
         return {
-          status: "blocked",
+          status: blocked ? "blocked" : "failed",
           reason: run.reason,
           runId: run.runId,
           terminalKey: result.terminalKey,
@@ -460,5 +492,13 @@ export class CollectionCoordinator {
       for (let index = 0; index < pending.snapshotChunks; index++)
         await storage.delete(this.chunkKey(pending.run.runId, index));
     });
+  }
+}
+
+function logInterruptedAttempt(): void {
+  try {
+    console.warn(JSON.stringify({ event: "st-george-interrupted-attempt-cleared" }));
+  } catch {
+    /* A diagnostic must not change the run. */
   }
 }
