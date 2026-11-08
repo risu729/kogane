@@ -72,7 +72,7 @@ export function validCardSettlementReviewPage(value: unknown): value is CardSett
 /**
  * The grouped list: at most 10 statements, each with at least one judged
  * candidate, a count no smaller than the candidates it carries and a closed
- * code for how far its lead was looked for (ADR 0089).
+ * code for how far its lead was looked for (ADR 0090).
  */
 export function validCardSettlementStatementPage(
   value: unknown,

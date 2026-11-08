@@ -10,24 +10,49 @@
 // `COLLECTOR_SOURCE_IDS` entries that register under it.
 import { COLLECTOR_SOURCE_IDS, WITHHELD_ARTIFACT_DATASETS } from "../collection/descriptors.ts";
 import {
+  PROVIDER_DATA_TYPES_VERSION,
+  providerDataTypes,
+} from "../collection/provider-data-types.ts";
+import {
+  ACCOUNT_COVERAGE_SQL,
   CELL_QUALITY_SQL,
   COLLECTION_QUALITY_ROW_BOUND,
   ONE_SOURCE_QUALITY_SQL,
   SCHEDULE_QUALITY_SQL,
+  SOURCE_JOBS_SQL,
   SOURCE_QUALITY_SQL,
   TERMINAL_QUALITY_SQL,
   UNCOMPOSED_QUERY_RULE_PARSERS,
   UNREGISTERED_QUALITY_SQL,
+  type AccountCoverageRow,
   type CellQualityRow,
   type ScheduleQualityRow,
+  type SourceJobRow,
   type SourceQualityRow,
   type TerminalQualityRow,
   type UnregisteredQualityRow,
 } from "../../../read-model/src/collection-quality.ts";
 import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import {
+  COLLECTION_FRESHNESS_POLICY,
+  collectionFreshness,
+  tokyoDate,
+  type CollectionWait,
+} from "../../../domain/src/collection-freshness.ts";
+import {
+  ACCOUNT_COVERAGE_API_VERSION,
+  ACCOUNT_COVERAGE_CELL_BOUND,
+  ACCOUNT_COVERAGE_ENTRY_BOUND,
   CELL_REASONS,
   COLLECTION_QUALITY_API_VERSION,
+  MAPPING_STATUSES,
+  OBSERVATION_KINDS,
+  type AccountCoverage,
+  type AccountCoverageAccount,
+  type AccountCoveragePeriod,
+  type AccountStanding,
+  type MappingStatus,
+  type ObservationKind,
   COLLECTION_QUALITY_PAGE,
   SOURCE_REASONS,
   type CellReason,
@@ -91,11 +116,15 @@ const SAFE_CODE = /^[a-z][a-z0-9_]{0,63}$/u;
 /**
  * A stored failure code as the contract carries it. Codes are written as safe
  * codes; anything else (an older free-text error) is never passed through and
- * reads `unclassified`.
+ * reads `unclassified`. Collector terminals spell their unit and run codes
+ * with hyphens (`collection-unit-failed`, the manifest's own grammar), so a
+ * hyphen reads as `_`: the code keeps its meaning instead of becoming
+ * `unclassified`.
  */
 export function safeCode(value: string | null): string | null {
   if (value === null) return null;
-  return SAFE_CODE.test(value) ? value : "unclassified";
+  const code = value.replaceAll("-", "_");
+  return SAFE_CODE.test(code) ? code : "unclassified";
 }
 
 /**
@@ -105,6 +134,46 @@ export function safeCode(value: string | null): string | null {
  */
 const userActionRequired = (code: string | null): boolean =>
   code !== null && (code.startsWith("human_required") || code === "manual_agreement_required");
+
+/** The kinds of job that collect a source's data (a keepalive or the Processor tick does not). */
+const COLLECTING_KINDS: readonly string[] = ["collection", "manual", "email"];
+
+/**
+ * What a source waits on, from its jobs' stored settings and newest receipts
+ * (`collection-freshness-v1`): `human-required` when a job collects only by
+ * hand or its newest attempt stopped on a "a person must act" code;
+ * `disabled` when it has supported collecting jobs and none is enabled; else
+ * nothing. An unsupported job can never be enabled (CORE 0065), so it says
+ * nothing about whether collection was switched off: V Point Pay's app job is
+ * unsupported while its e-mail path, which has no job, still delivers.
+ */
+export function sourceWait(
+  jobs: readonly {
+    kind: string;
+    enabled: boolean;
+    supported: boolean;
+    failureCode: string | null;
+  }[],
+): CollectionWait {
+  if (jobs.some((job) => job.kind === "manual" || userActionRequired(job.failureCode)))
+    return "human-required";
+  const collecting = jobs.filter((job) => job.supported && COLLECTING_KINDS.includes(job.kind));
+  if (collecting.length > 0 && collecting.every((job) => !job.enabled)) return "disabled";
+  return null;
+}
+
+/** The instant and civil date every age of one answer is counted to. */
+export interface FreshnessAsOf {
+  policy: typeof COLLECTION_FRESHNESS_POLICY;
+  at: string;
+  date: string;
+}
+
+export function freshnessAsOf(at: string): FreshnessAsOf {
+  const date = tokyoDate(at);
+  if (date === null) throw new Error("invalid_as_of");
+  return { policy: COLLECTION_FRESHNESS_POLICY, at, date };
+}
 
 function ordered<T extends string>(reasons: Set<T>, order: readonly T[]): T[] {
   return order.filter((reason) => reasons.has(reason));
@@ -203,7 +272,9 @@ function schedule(
   };
 }
 
-function sourceReasons(source: Omit<CollectionQualitySource, "reasons">): SourceReason[] {
+function sourceReasons(
+  source: Omit<CollectionQualitySource, "reasons" | "freshness" | "dataTypes">,
+): SourceReason[] {
   const reasons = new Set<SourceReason>();
   if (source.collectors.length === 0) reasons.add("no_collector");
   else if (source.schedules.length === 0) reasons.add("no_schedule");
@@ -236,10 +307,15 @@ function sourceReasons(source: Omit<CollectionQualitySource, "reasons">): Source
   return ordered(reasons, SOURCE_REASONS);
 }
 
-/** `GET /api/collection-quality`: every configured job and every visible source. */
+/**
+ * `GET /api/collection-quality`: every configured job and every visible
+ * source, each source's freshness counted to `asOf` (an instant).
+ */
 export async function queryCollectionQualitySummary(
   executor: SqlExecutor,
+  input: { asOf: string },
 ): Promise<CollectionQualitySummary> {
+  const asOf = freshnessAsOf(input.asOf);
   const jobs = await executor.all<ScheduleQualityRow>(SCHEDULE_QUALITY_SQL, []);
   const sources = await executor.all<SourceQualityRow>(SOURCE_QUALITY_SQL, []);
   if (jobs.length > COLLECTION_QUALITY_ROW_BOUND || sources.length > COLLECTION_QUALITY_ROW_BOUND)
@@ -291,10 +367,25 @@ export async function queryCollectionQualitySummary(
           newestSeenAt: unregistered.newest_seen_at,
         })),
     };
-    return { ...entry, reasons: sourceReasons(entry) };
+    const wait = sourceWait(
+      jobsOfSource.map((job) => ({
+        kind: job.kind,
+        enabled: job.enabled,
+        supported: job.supported,
+        failureCode: job.latest?.failureCode ?? null,
+      })),
+    );
+    return {
+      ...entry,
+      reasons: sourceReasons(entry),
+      freshness: collectionFreshness(entry.latestFetchRun?.completedAt ?? null, asOf.date, wait),
+      dataTypes: providerDataTypes(row.source_id),
+    };
   });
   return {
     apiVersion: COLLECTION_QUALITY_API_VERSION,
+    freshnessAsOf: asOf,
+    dataTypesVersion: PROVIDER_DATA_TYPES_VERSION,
     sources: summaries,
     otherSchedules: schedules.filter((job) => !placed.has(job.id)),
   };
@@ -312,8 +403,11 @@ function period(row: CellQualityRow): CollectionQualityPeriod {
 
 const UNCOMPOSED: readonly string[] = UNCOMPOSED_QUERY_RULE_PARSERS;
 
+/** A cell as its stored states give it, before its freshness is counted to an instant. */
+export type CollectionQualityCellStates = Omit<CollectionQualityCell, "freshness">;
+
 /** One cell as the contract carries it, with the reasons its stored states give. */
-export function cell(row: CellQualityRow): CollectionQualityCell {
+export function cell(row: CellQualityRow): CollectionQualityCellStates {
   const failureCodes = jsonCodes(row.failure_codes_json);
   const coverageCauses = jsonCodes(row.coverage_causes_json);
   const unitFailureCode = row.unit_failed === 1 ? safeCode(row.unit_failure_code) : null;
@@ -390,11 +484,53 @@ export function cell(row: CellQualityRow): CollectionQualityCell {
   };
 }
 
+/**
+ * A cell's freshness: the age of its current capture, explained by what the
+ * source waits on, or by the cell's own "a person must act" unit code.
+ */
+export function cellFreshness(
+  value: CollectionQualityCellStates,
+  asOfDate: string,
+  wait: CollectionWait,
+): CollectionQualityCell["freshness"] {
+  const own = value.reasons.includes("user_action_required") ? "human-required" : wait;
+  return collectionFreshness(value.current?.capturedAt ?? null, asOfDate, own);
+}
+
+/** The job sources whose runs register under a CORE source: its collectors and their aliases. */
+export function sourceJobSources(sourceId: string): string[] {
+  const own = sourceCollectors(sourceId);
+  const aliases = Object.entries(SCHEDULE_COLLECTOR_SOURCES)
+    .filter(([, collectors]) => collectors.some((collector) => own.includes(collector)))
+    .map(([job]) => job);
+  return [...new Set([...own, ...aliases])].sort();
+}
+
+/** What the jobs of one CORE source wait on, from its stored jobs only (the cells route's read). */
+export async function waitOfSource(
+  executor: SqlExecutor,
+  sourceId: string,
+): Promise<CollectionWait> {
+  const jobs = await executor.all<SourceJobRow>(SOURCE_JOBS_SQL, [
+    JSON.stringify(sourceJobSources(sourceId)),
+  ]);
+  return sourceWait(
+    jobs.map((job) => ({
+      kind: job.kind,
+      enabled: job.enabled === 1,
+      supported: job.supported === 1,
+      failureCode: safeCode(job.occurrence_failure_code),
+    })),
+  );
+}
+
 export interface CollectionQualityCellsInput {
   /** A CORE source id. */
   sourceId: string;
   /** Cells to skip, a multiple of the page in practice. */
   offset: number;
+  /** The instant ages are counted to. */
+  asOf: string;
 }
 
 /**
@@ -407,17 +543,163 @@ export async function queryCollectionQualityCells(
 ): Promise<CollectionQualityCells | null> {
   const source = await executor.first<SourceQualityRow>(ONE_SOURCE_QUALITY_SQL, [input.sourceId]);
   if (source === null) return null;
+  const asOf = freshnessAsOf(input.asOf);
+  const wait = await waitOfSource(executor, source.source_id);
   const rows = await executor.all<CellQualityRow>(CELL_QUALITY_SQL, [input.sourceId, input.offset]);
   const truncated = rows.length > COLLECTION_QUALITY_PAGE;
   return {
     apiVersion: COLLECTION_QUALITY_API_VERSION,
+    freshnessAsOf: asOf,
     sourceId: source.source_id,
     latestFetchRun: fetchRun(source),
-    cells: rows.slice(0, COLLECTION_QUALITY_PAGE).map(cell),
+    cells: rows.slice(0, COLLECTION_QUALITY_PAGE).map((row) => {
+      const value = cell(row);
+      return { ...value, freshness: cellFreshness(value, asOf.date, wait) };
+    }),
     coverage: {
       limit: COLLECTION_QUALITY_PAGE,
       truncated,
       nextOffset: truncated ? input.offset + COLLECTION_QUALITY_PAGE : null,
     },
+  };
+}
+
+// ── accounts (ADR 0088) ───────────────────────────────────────────────────
+
+/** One `accounts_json` entry: `[capture, account id, label, mapping status, kind, observations]`. */
+type NamedAccount = [
+  capture: "newest" | "current",
+  accountId: string,
+  label: string,
+  status: MappingStatus,
+  kind: ObservationKind,
+  observations: number,
+];
+
+interface AccountBucket {
+  label: string;
+  statuses: Set<MappingStatus>;
+  /** `JSON.stringify([dataset, parser, kind])` → its periods, in cell order. */
+  types: Map<string, AccountCoveragePeriod[]>;
+}
+
+const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+/**
+ * `GET /api/collection-quality/<sourceId>/accounts`: every cell of the source,
+ * regrouped by the accounts its captures' observations name, then by data
+ * type (dataset, parser, observation kind) and period; the cells whose
+ * captures' observations name no account are listed apart with their
+ * reasons. Null when the source is not a visible CORE source. More cells than
+ * `ACCOUNT_COVERAGE_CELL_BOUND`, or more account period entries than
+ * `ACCOUNT_COVERAGE_ENTRY_BOUND`, is refused whole
+ * (`CollectionQualityLimitError`), never cut.
+ *
+ * Each entry carries the cell's own state and reasons (`cell` above), so the
+ * two views of one store cannot disagree. Nothing is inferred: a unit key is
+ * never read as an account, a period no cell has is not listed (and is
+ * neither claimed missing nor covered), and an account whose mapping is not
+ * `identified` keeps that status.
+ */
+export async function queryAccountCoverage(
+  executor: SqlExecutor,
+  input: { sourceId: string },
+): Promise<AccountCoverage | null> {
+  const source = await executor.first<SourceQualityRow>(ONE_SOURCE_QUALITY_SQL, [input.sourceId]);
+  if (source === null) return null;
+  const rows = await executor.all<AccountCoverageRow>(ACCOUNT_COVERAGE_SQL, [input.sourceId]);
+  if (rows.length > ACCOUNT_COVERAGE_CELL_BOUND) throw new CollectionQualityLimitError();
+  const accounts = new Map<string, AccountBucket>();
+  const unattributed: AccountCoverage["unattributed"] = [];
+  let entries = 0;
+  for (const row of rows) {
+    const value = cell(row);
+    // Observations per (account, kind) and capture; mapping statuses per account.
+    const counts = new Map<string, { current: number; newest: number }>();
+    for (const [capture, accountId, label, status, kind, observations] of JSON.parse(
+      row.accounts_json,
+    ) as NamedAccount[]) {
+      let bucket = accounts.get(accountId);
+      if (bucket === undefined) {
+        bucket = { label, statuses: new Set(), types: new Map() };
+        accounts.set(accountId, bucket);
+      }
+      bucket.statuses.add(status);
+      const key = JSON.stringify([accountId, kind]);
+      const seen = counts.get(key) ?? { current: 0, newest: 0 };
+      seen[capture] += observations;
+      counts.set(key, seen);
+    }
+    if (counts.size === 0) {
+      unattributed.push({
+        dataset: value.dataset,
+        parser: value.parser,
+        unitKey: value.unitKey,
+        period: value.period,
+        currentRule: value.currentRule,
+        state: value.state,
+        reasons: value.reasons,
+      });
+      continue;
+    }
+    for (const [key, seen] of counts) {
+      const [accountId, kind] = JSON.parse(key) as [string, ObservationKind];
+      // The current capture names the account when it can; else only the newest does.
+      const inCurrent = seen.current > 0 && value.current !== null;
+      const standing: AccountStanding = !inCurrent
+        ? "newest-not-current"
+        : value.state === "current"
+          ? "current"
+          : "older-current";
+      const bucket = accounts.get(accountId)!;
+      // Only a cell with a parser has observations, so its parser is named.
+      const type = JSON.stringify([value.dataset, value.parser, kind]);
+      const periods = bucket.types.get(type) ?? [];
+      bucket.types.set(type, periods);
+      periods.push({
+        unitKey: value.unitKey,
+        period: value.period,
+        currentRule: value.currentRule,
+        cellState: value.state,
+        standing,
+        capture: inCurrent
+          ? value.current!
+          : { fetchRunId: value.newest.fetchRunId, capturedAt: value.newest.capturedAt },
+        observations: inCurrent ? seen.current : seen.newest,
+        reasons: value.reasons,
+      });
+      entries += 1;
+    }
+  }
+  if (entries > ACCOUNT_COVERAGE_ENTRY_BOUND) throw new CollectionQualityLimitError();
+  const kindOrder = (kind: ObservationKind): number => OBSERVATION_KINDS.indexOf(kind);
+  return {
+    apiVersion: ACCOUNT_COVERAGE_API_VERSION,
+    sourceId: source.source_id,
+    latestFetchRun: fetchRun(source),
+    cells: rows.length,
+    accounts: [...accounts.entries()]
+      .sort(([a], [b]) => byText(a, b))
+      .map(([accountId, bucket]): AccountCoverageAccount => ({
+        accountId,
+        label: bucket.label,
+        statuses: MAPPING_STATUSES.filter((status) => bucket.statuses.has(status)),
+        dataTypes: [...bucket.types.entries()]
+          .map(([type, periods]) => {
+            const [dataset, parser, kind] = JSON.parse(type) as [
+              string | null,
+              string,
+              ObservationKind,
+            ];
+            return { dataset, parser, kind, periods };
+          })
+          .sort(
+            (a, b) =>
+              byText(a.dataset ?? "", b.dataset ?? "") ||
+              byText(a.parser, b.parser) ||
+              kindOrder(a.kind) - kindOrder(b.kind),
+          ),
+      })),
+    unattributed,
   };
 }

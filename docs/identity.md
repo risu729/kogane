@@ -15,7 +15,7 @@ balances, calculate holdings, or invent an instrument's ISIN/network.
 
 ## Contract and scope
 
-`src/identity` in the observation PoC contains deterministic, independently
+`packages/identity` contains deterministic, independently
 tested source rules. The production pipeline persists their interpretation in
 migration `0018`. All four observation shapes and every merged parser source
 are covered; the manual PayPay CSV path is also handled. Provider specifics are
@@ -83,7 +83,8 @@ names the interpretation it was computed under.
 One instrument can be stored under several identifiers: a listing identifier
 at one source and a provider code at another, or a listing and a code inside
 SBI when a trade names a venue the SBI rule does not map. Every such
-identifier keeps its own rule mapping until a person re-maps it.
+identifier keeps its own rule mapping until a person re-maps it, or, for one
+shape inside SBI, rule `instrument-auto-v1` does (below).
 `queryInstrumentResolution` (`packages/application/src/query/instrument-resolution.ts`,
 [ADR 0055](adr/0055-instrument-candidates.md)) reads the security, crypto and
 product identifiers that current published observations use and answers,
@@ -107,10 +108,12 @@ under policy `instrument-candidates-v1`:
   instrument or a label is only the identifier's own code (a rule's fallback
   when the provider gives no name). A name is never evidence; a hint has no
   status and nothing to adopt;
-- each identifier's state: `unresolved-candidates`, `resolved-by-decision`,
+- each identifier's state: `unresolved-candidates`, `resolved-by-decision`
+  (a manual mapping among the identifiers on its instrument),
+  `resolved-by-rule` (no manual mapping, an `instrument-auto-v1` decision),
   `kept-separate`, `no-candidate` (it stays what its own mapping says, which
   is not a global identification) or `shared-without-decision` (shares an
-  instrument without a manual mapping; no rule produces it).
+  instrument with no recorded decision; no rule produces it).
 
 Market is compared through MIC or RIC only; the provider's market wording is
 shown, never compared. An identifier's currencies are those the observations
@@ -123,8 +126,9 @@ valuations count, so SBI's yen valuations of a foreign holding beside its
 trading-currency ones make its currencies several and the comparison
 `currency-unconfirmed`.
 
-Nothing here adopts. A candidate is `adopted` only when its two identifiers
-map to one instrument, which only a manual `identity.assign` does today, and
+The read adopts nothing. A candidate is `adopted` only when its two identifiers
+map to one instrument, which a manual `identity.assign` or rule
+`instrument-auto-v1` (below) does, and
 `rejected` only when the current `listed_as` relation from one identifier's
 current instrument to the other identifier is rejected: the pair's newest
 decision, which a proposal recorded after it does not replace
@@ -132,7 +136,10 @@ decision, which a proposal recorded after it does not replace
 names those two commands (assign the subject identifier to the anchor's
 instrument; reject `listed_as` from the anchor's instrument to the subject),
 to be planned with a reason through the [change lifecycle](change-lifecycle.md);
-under today's grant lists an agent can plan them and cannot approve or commit. A manually mapped
+an agent on the browser's command routes can plan them and cannot approve or
+commit, while an MCP client approves and commits as itself through
+`kogane.command.approve` and `kogane.command.commit`
+([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md)). A manually mapped
 identifier, or one sharing its instrument, is always the anchor over one that
 is not; when both identifiers are settled that way the candidate names no
 adopt command and a `hold` code (`subject-decided-elsewhere`,
@@ -140,6 +147,35 @@ adopt command and a `hold` code (`subject-decided-elsewhere`,
 rejection, which moves no mapping, so a person can close it as `rejected`. `queryInstrumentHistory`
 lists an identifier's mapping revisions, mapping decisions and `listed_as`
 relations, oldest first; a correction is always a later entry.
+
+### Automatic adoption: rule `instrument-auto-v1`
+
+The `instrument_auto_adoption` Processor lane
+(`services/processor/src/instrument-auto-adoption.ts`,
+`packages/domain/src/instrument-auto-adoption.ts`,
+[ADR 0055 amendment 2026-11-08](adr/0055-instrument-candidates.md#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule);
+owner direction 2026-11-08 03:16 UTC) adopts one shape without a person: SBI
+Securities' bare domestic code `sbi-security-code/JP/<code>` onto SBI's own
+listing `mic-symbol/<XTKS|XNGO|XFKA|XSAP>/<code>` of the same Japanese
+securities code, both used by SBI Securities only, all in JPY, with no ISIN,
+RIC, share class or product class stated, no conflict, nobody's decision on
+either side (no manual mapping, no `listed_as` relation in any status naming
+either identifier or instrument) and no
+second candidate or separated pair for the bare code. Example: `7203` held on
+東証 (`mic-symbol/XTKS/7203`) and traded on `PTS（X）`
+(`sbi-security-code/JP/7203`).
+
+An adoption is an `assign` identity command under actor
+`rule:instrument-auto-v1`: a `rule` mapping revision onto the listing's
+instrument and a `rule` `assign` decision naming both identifiers, guarded on
+both identifiers' revisions as read, and a `lane` audit record. A later
+identity policy version does not revert it. A person or an agent undoes it
+with `identity.assign` of the bare code back onto its own instrument, which
+the rule never touches again (a `release-override` of that mapping hands it
+back to the rule). Everything else stays a candidate, for a person on the page
+or an agent over MCP. A gate over the identifier catalogue ends a tick with
+nothing to do; the full candidate read runs at most hourly while a pair of
+the shape waits ([processor](processor.md#6-lanes)).
 
 ### Review page, route and agent tool
 
@@ -184,7 +220,9 @@ stored mapping/decision/relation history for one identifier under
 `records.read` and whole-store scope. The page opens it on request. The
 service counts by index before loading entries and refuses past `maxRows`;
 it never truncates the history. This is recorded history, not effective-date
-mapping. The agent/MCP adapter remains pending the shared audit integration.
+mapping. An agent reads the same history through `kogane.instruments.history`
+or `POST /api/agent/v1/instruments.history` (`services/app/src/read-tools.ts`,
+[agent API](agent-api.md#delegated-execution-integration-and-shared-history-reads-s3-2026-10-10)).
 
 Limits today: only SBI
 Securities and SBI VC Trade store security, crypto or product identifiers, so
@@ -285,9 +323,7 @@ Limits today: only SBI Shinsei pairs exist; candidates are listed per
 producer's review (two producers' reviews of one identity value are two
 candidates sharing one status); a plan pins only the revision of the
 candidate's own reference, so a decision recorded under one of the pair's
-other references between planning and commit does not make it stale; the
-balance projection reads every accepted relation row, so a later rejection
-does not remove an earlier acceptance from its declared inputs; no history
+other references between planning and commit does not make it stale; no history
 view of a pair; no validity period; no leaf-account equivalence and no dedup
 of aggregator against direct rows.
 

@@ -1,6 +1,6 @@
 // `CARD_SETTLEMENT_STATEMENT_OLDER_SQL` of src/query/card-settlements.ts as
 // #1132 first shipped it (46049594), before the older-candidate search paged
-// by key (ADR 0089): each pass took the `?4` candidates after the first `?3`
+// by key (ADR 0090): each pass took the `?4` candidates after the first `?3`
 // that earlier passes judged, by position. Frozen as text with the readiness
 // CTEs it embedded, so the differential tests can prove that the keyed passes
 // judge the same candidates in the same order wherever no decision lands

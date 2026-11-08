@@ -1,6 +1,6 @@
 # ADR 0084: Every MCP client Access verifies acts with the UI's authority; MCP_DELEGATIONS and AGENT_API_GRANTS are removed
 
-- Status: proposed
+- Status: accepted (merged 2026-11-07 in [#1034](https://github.com/risu729/kogane/pull/1034))
 - Date: 2026-11-07
 - Decided by: the owner, 2026-11-07 06:00:39 UTC (15:00 JST), 06:32:23 UTC
   and 06:32:43 UTC (15:32 JST)

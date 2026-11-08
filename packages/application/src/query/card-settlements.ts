@@ -30,12 +30,12 @@ export const CARD_SETTLEMENT_STATEMENT_PAGE_SIZE = 10;
 export const CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT = 5;
 /**
  * The older candidates of a statement one pass of the grouped list's search
- * for a ready lead judges (ADR 0089).
+ * for a ready lead judges (ADR 0090).
  */
 export const CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS = 50;
 /**
  * The most older candidates of a statement the search judges on one read of
- * the grouped list, a whole number of passes (ADR 0089). A statement the
+ * the grouped list, a whole number of passes (ADR 0090). A statement the
  * search leaves unfinished says so (`leadSearch: "truncated"`), so a page
  * load reads at most four more times however long the statements' histories
  * grow.
@@ -110,7 +110,7 @@ interface DebitAccountRow {
  *
  * One row per chosen candidate. A list page holds at most 50 candidates and a
  * grouped page its ten statements' five newest and accepted ones and at most
- * one older ready one each (ADR 0089), each with a row per changed outcome.
+ * one older ready one each (ADR 0090), each with a row per changed outcome.
  */
 export const CARD_SETTLEMENT_DEBIT_ACCOUNT_SQL = `WITH chosen AS MATERIALIZED (
  SELECT c.id,c.statement_parse_run_id,json_extract(c.facts_json,'$.statement.sourceAccount') AS card_source_account,
@@ -294,6 +294,37 @@ export const CARD_SETTLEMENT_STATEMENT_REVIEWS_SQL = reviewsSql(
   "SELECT id FROM card_settlement_candidates WHERE statement_key=?1 ORDER BY created_at DESC,id DESC LIMIT ?2 OFFSET ?3",
 );
 /**
+ * The other candidates `?1` competes with: those sharing its statement key,
+ * its bank key, or its statement's (source, resolved account, period), the
+ * three terms by which an accepted review makes every other one
+ * `allocation_already_used` (card-settlement-readiness.ts). Each term is found
+ * through its own index (`card_settlement_candidates_statement`, `_bank` and
+ * `_statement_period`, migrations 0044 and 0050); a missing account or period
+ * matches nothing, as in the reservation. The first term is the one
+ * `CARD_SETTLEMENT_STATEMENT_REVIEWS_SQL` pages alone; here the three are
+ * paged as one list, without the candidate itself. Every status is listed,
+ * so the correction of a wrong acceptance (its withdrawal, then another
+ * candidate's acceptance) starts from it (docs/card-settlements.md,
+ * Correcting a match).
+ */
+export const CARD_SETTLEMENT_RELATED_SQL = reviewsSql(`SELECT id FROM (
+ SELECT related.id,related.created_at FROM card_settlement_candidates anchor
+  JOIN card_settlement_candidates related ON related.statement_key=anchor.statement_key
+  WHERE anchor.id=?1
+ UNION SELECT related.id,related.created_at FROM card_settlement_candidates anchor
+  JOIN card_settlement_candidates related ON related.bank_key=anchor.bank_key
+  WHERE anchor.id=?1
+ UNION SELECT related.id,related.created_at FROM card_settlement_candidates anchor
+  JOIN card_settlement_candidates related
+   ON json_extract(related.facts_json,'$.statement.sourceId')=json_extract(anchor.facts_json,'$.statement.sourceId')
+   AND json_extract(related.facts_json,'$.statement.accountId')=json_extract(anchor.facts_json,'$.statement.accountId')
+   AND json_extract(related.facts_json,'$.statement.period')=json_extract(anchor.facts_json,'$.statement.period')
+  WHERE anchor.id=?1
+ ) related_review WHERE id<>?1 ORDER BY created_at DESC,id DESC LIMIT ?2 OFFSET ?3`);
+/** Whether the candidate `?1` exists, by its key. */
+export const CARD_SETTLEMENT_EXISTS_SQL =
+  "SELECT 1 AS present FROM card_settlement_candidates WHERE id=?1";
+/**
  * A page of statements (`?1` the page size plus one, `?2` the offset): every
  * `statement_key` the sweep proposed for, newest candidate first, with how
  * many candidates it has. Like the flat list's page, it orders every
@@ -323,7 +354,7 @@ export const CARD_SETTLEMENT_STATEMENT_GROUP_SQL = reviewsSql(
 /**
  * The older candidates the grouped list judges, at most `?2` per statement and
  * pass, for a statement whose newest candidates hold no acceptance and none
- * ready to accept (ADR 0089). `?1` is a JSON array of
+ * ready to accept (ADR 0090). `?1` is a JSON array of
  * `[statement_key, created_at, id]` cursors, one per statement still
  * searching: the last candidate the statement's window or its previous pass
  * judged. Of each statement, the candidates after its cursor in the lists'
@@ -428,6 +459,37 @@ export async function queryCardSettlements(
             : CARD_SETTLEMENT_REVIEW_SQL,
           [input.proposalId ?? null, CARD_SETTLEMENT_PAGE_SIZE + 1, offset],
         );
+  return reviewPage(sql, rows, offset);
+}
+
+/**
+ * A page of the candidates `proposalId` competes with
+ * (CARD_SETTLEMENT_RELATED_SQL), in the list's DTO and order, or null when
+ * `proposalId` names no candidate.
+ */
+export async function queryRelatedCardSettlements(
+  sql: SqlExecutor,
+  proposalId: string,
+  input: { offset?: number } = {},
+): Promise<CardSettlementReviewPage | null> {
+  const offset = input.offset ?? 0;
+  validOffset(offset);
+  if ((await sql.first<{ present: number }>(CARD_SETTLEMENT_EXISTS_SQL, [proposalId])) === null)
+    return null;
+  const rows = await sql.all<ReviewRow>(CARD_SETTLEMENT_RELATED_SQL, [
+    proposalId,
+    CARD_SETTLEMENT_PAGE_SIZE + 1,
+    offset,
+  ]);
+  return reviewPage(sql, rows, offset);
+}
+
+/** The list's page of the rows read (page size plus one), with history and evidence. */
+async function reviewPage(
+  sql: SqlExecutor,
+  rows: ReviewRow[],
+  offset: number,
+): Promise<CardSettlementReviewPage> {
   const items = rows.slice(0, CARD_SETTLEMENT_PAGE_SIZE).map(review);
   await withHistory(sql, items);
   return {
@@ -528,7 +590,7 @@ async function olderReadyCandidates(
  * when none of those is accepted or ready to accept and the statement has
  * older candidates, it also searches at most
  * `CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED` of those for the newest ready
- * one and says how far it looked (`leadSearch`, ADR 0089). It leads with
+ * one and says how far it looked (`leadSearch`, ADR 0090). It leads with
  * the one `leadFirst` picks and says how many candidates the statement has;
  * the rest are one
  * `queryCardSettlements({ statementKey })` away. No candidate is hidden or

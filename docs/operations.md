@@ -388,6 +388,11 @@ bun run scripts/load-fixture.ts
 KOGANE_LOAD_DAYS=30 KOGANE_LOAD_UNITS=8 bun run scripts/load-fixture.ts
 ```
 
+`KOGANE_LOAD_UNITS`, `KOGANE_LOAD_OBSERVATIONS`, `KOGANE_LOAD_DAYS` and
+`KOGANE_LOAD_SEED` must be positive integers, and `KOGANE_LOAD_START` (the first
+day, default `2026-01-01`) must be a calendar date `YYYY-MM-DD`; anything else
+is refused rather than rolled over into a different fixture.
+
 `services/app/test/load.test.ts` measures the reader with it. It is
 opt-in, because building the fixture through the real ingest path is slow and
 the numbers only mean something when the shape was chosen deliberately:

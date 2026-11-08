@@ -38,6 +38,22 @@ establish successful bank access.
   a failed log sink cannot prevent collection, retry a storage write, or turn
   an already-persisted run into a failure. A login or storage failure fails the scheduled invocation after
   recording safe acquisition failure evidence where storage is available.
+- The terminal names the same closed code: each failed unit carries the code
+  that stopped it (for example `read-http-error` for a history page, or
+  `account-limit`), and a failed run carries the code that failed it (for
+  example `authentication-required`). A code outside the collector's closed
+  list stays `collection-unit-failed` / `collection-failed`. The
+  collection-quality page and `kogane.collection-quality.read` show a
+  registered unit's code with hyphens read as `_` (`read_http_error`), so a
+  partial run's cause is readable without the Worker logs.
+- A page the shared HTML parser refuses is named by the parser's own check,
+  `parse-<code>` (for example `parse-unrecognized-empty-state`), in the log
+  and on the failed unit, instead of one `read-parse-error`. A refused history
+  page is still stored, sanitized, as `ordinary/<branch>-<account>/history/unparsed.html`
+  (unit `…:page:unparsed`, partial). No parser accepts that key, so nothing is
+  published from it; it is kept for inspection and as a fixture for a
+  parser fix. A page that does not sanitize to itself again is not kept. From 2026-11-01 to 11-06 every daily run's history page
+  was refused this way (`read-parse-error` in the Worker log).
 
 The configured Processor route is `mizuho-bank` / `collector-mizuho-bank` in
 `config/ingest-clients.json`. The existing idempotent bootstrap must be applied

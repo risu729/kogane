@@ -1,4 +1,4 @@
-# ADR 0089: A statement's ready candidate leads the grouped card settlement list however old it is
+# ADR 0090: A statement's ready candidate leads the grouped card settlement list however old it is
 
 - Status: proposed
 - Date: 2026-11-08
@@ -122,9 +122,9 @@ read of the grouped list (ADR 0081) show the same lead.
   group carries at most 50 candidates. Both fields are additive: a client
   that does not know them reads the page as before. The web client and the
   App Worker that serves it deploy together, so the stricter check meets
-  only pages that carry both. No MCP tool serves the grouped read yet (it is
-  on the parity guard's `READ_ROUTE_GAPS`); a tool that returns this page
-  carries both fields and should describe the older ready lead.
+  only pages that carry both. `kogane.card-settlements.statements` (#1088)
+  returns this page over the same service, so it carries both fields, and
+  its description names the older ready lead and `leadSearch`.
 - Cost: no change for a statement its newest candidates decide. Otherwise at
   most four more keyed reads per page load: a pass is one read for all the
   page's statements still searching (their cursors as one JSON array),

@@ -25,6 +25,10 @@ import { executeIdentityCommand } from "./identity-commands.ts";
 import { changeCommandRoute } from "./change-commands.ts";
 import { boundedText } from "./bounded-body.ts";
 import { auditOverflowStage } from "./audit-overflow.ts";
+import {
+  INSTRUMENT_AUTO_ADOPTION_LANE,
+  instrumentAutoAdoptionLane,
+} from "./instrument-auto-adoption.ts";
 import { scheduleRoute } from "./schedule-store";
 import { collectionQualityAlarmRoute } from "./collection-quality-alarms";
 import { maintenanceSurveyLane } from "./maintenance-survey/lane.ts";
@@ -1744,6 +1748,13 @@ export interface ScheduledStages {
    * which it shares with `operations`.
    */
   collection?: (env: Env, context: InvocationContext) => Promise<object>;
+  /**
+   * Rule `instrument-auto-v1` (ADR 0055 amendment 2026-11-08): SBI's bare
+   * domestic code adopted onto SBI's listing of the same code, as a rule
+   * decision. No flag; a cheap gate ends the tick when no pair waits, and the
+   * full candidate read runs at most hourly. Absent stage means it never runs.
+   */
+  instrumentAutoAdoption?: (env: Env) => Promise<object>;
   /** A10 reconciliation. Absent stage, or the flag off, means the lane never runs. */
   reconcile?: (env: Env) => Promise<object>;
   /**
@@ -1813,6 +1824,7 @@ const defaultStages: ScheduledStages = {
   // re-parse is identified on the tick that published it unless the sweep's
   // 200-observation cap or an older backlog defers it (IDENTITY_RUNS_PER_TICK).
   identity: (env) => identitySweep(env.DB, resolveIdentity, IDENTITY_RUNS_PER_TICK),
+  instrumentAutoAdoption: (env) => instrumentAutoAdoptionLane(env.DB),
   // Lists and registers nothing unless SHARED_R2_INGEST_ENABLED is set; the
   // scan returns `skipped` without touching R2 or CORE (docs/processor.md).
   collection: (env, context) => collectionScanStage(env, context),
@@ -1927,6 +1939,9 @@ export async function runScheduled(
     // off, like the projection lane, so an operator can see it is off.
     ["collection_scan", stages.collection, true],
     ["identity_sweep", stages.identity, true],
+    // Right after identity, so a pair a tick's identity run created is
+    // looked at on the same tick (ADR 0055 amendment 2026-11-08).
+    [INSTRUMENT_AUTO_ADOPTION_LANE, stages.instrumentAutoAdoption, true],
     // The projection lane always runs and reports itself skipped while its
     // own flag is off (docs/balance-read-model.md).
     ["balance_projection", stages.balanceProjection, true],
