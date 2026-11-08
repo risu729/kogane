@@ -36,7 +36,7 @@ out of artifacts/logs/HARs/screenshots/commits. No security-control bypass.
 - Prioritized official Mitsubishi UFJ NICOS/JAL Card/JR West pages/FAQs/app store listings.
 - Used December 2025 old-service integration pages to distinguish old DC/MUFG Card WEB services from MDC.
 - Searched public GitHub code by current hosts/app packages/service names.
-- HEADed logged-out public URLs on 2026-08-26, observing only CDN/WAF response headers; no login/challenge triggering/load tests.
+- Sent HEAD requests to logged-out public URLs on 2026-08-26, observing only CDN/WAF response headers; no login/challenge triggering/load tests.
 - No authenticated screens/actual CSV-PDF/app traffic/APKs obtained. Screen descriptions limited to official guides,
   transport to next-stage verification plans; separate hypotheses from facts.
 
