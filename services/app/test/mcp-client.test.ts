@@ -68,6 +68,7 @@ const PUBLISHED = [
   REPORTED_STATE_TOOL_NAME,
   "kogane.instruments.coverage",
   "kogane.accounts.candidates",
+  "kogane.accounts.history",
   "kogane.card-settlements.unmatched",
   "kogane.economic-readiness.read",
   "kogane.card-settlements.read",

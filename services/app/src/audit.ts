@@ -187,7 +187,7 @@ export async function auditedRoute(
 /** How many rows an agent tool's answer carried, and whether more exist: a count, never data. */
 function toolRows(operation: OperationName, body: unknown): { rows: number; truncated: boolean } {
   const value = (body ?? {}) as Record<string, unknown>;
-  if (operation === "instruments.history")
+  if (operation === "instruments.history" || operation === "accounts.history")
     return {
       rows: Array.isArray(value["entries"]) ? value["entries"].length : 0,
       truncated: false,

@@ -262,3 +262,124 @@ Synthetic data only, no production access.
   foreign payload; the page plans exactly the named payload with the reason,
   offers only keeping apart on a held candidate, and plans nothing when the
   candidate changed.
+
+## Amendment 2026-11-08: the correction history of a source account
+
+- Status: proposed
+- Date: 2026-11-08
+- Issue: part of #545; roadmap Phase 3 ("Expose the existing correction
+  history in the review flow")
+- Carried by: `packages/read-model/src/account-history.ts`
+  (`ACCOUNT_HISTORY_SQL`, `ACCOUNT_HISTORY_COUNT_SQL`),
+  `packages/application/src/query/account-history-read.ts`
+  (`readAccountHistoryForGrant`), `services/app/src/account-history-api.ts`
+  (`GET /api/identity/account-history`), the `kogane.accounts.history` case of
+  `services/app/src/read-tools.ts`, the `accounts.history` entry of
+  `packages/application/src/operation-path/catalogue.ts`,
+  `packages/observation-shared/src/account-history-contract.ts` (the wire
+  check), `apps/web/src/AccountHistory.tsx` and its use in
+  `apps/web/src/pages/AccountCandidates.tsx`
+
+### Context
+
+"Explicitly not decided" above left out a history view of a pair's relation
+revisions. The `口座の対応候補` page shows a pair's newest decision under each
+reference (`recordedContainment`) and nothing older, so a withdrawn
+acceptance, the acceptance it withdrew and the reasons given for both are in
+`entity_relations` and `decision_revisions` but on no screen and no agent
+read. Roadmap Phase 3 asks for the existing correction history in the review
+flow. Instruments already have one: `kogane.instruments.history` and the
+`訂正履歴を見る` panel of the instrument candidates (ADR 0055). Accounts had
+none, for the pair or for the account mapping itself (`identity.assign` and
+`identity.release-override` with subject `account` write revisions and
+decisions no page lists). ADR 0081 requires the page's read to be an MCP read
+over the same function.
+
+### Options considered
+
+1. **A history per pair** (connection reference, direct source account).
+   Rejected: a pair is decided under up to three references (this
+   connection's, another producer's, a 0029 key 0063 rewrote), so the read
+   would repeat the candidate read's reference mapping to find its rows, and
+   it would still leave the account mapping's own corrections and the
+   `same_account` decisions out.
+2. **Every decision on the page's list, inline.** Rejected: it grows each
+   page by every candidate's whole history, which the 50-item page bound does
+   not cover.
+3. **A history per source account, read on request (chosen).** Every row that
+   names the account: its mapping revisions, its `account_mapping` decisions
+   and every relation row of any kind with `source_account:<id>` on either
+   side, each with the decision that wrote it. This is the instrument
+   history's shape (mapping, decision, relation) for the account subject, and
+   it covers every reference a pair was decided under, since all of them
+   share the direct account's `to_ref`.
+
+### Decision
+
+- `readAccountHistoryForGrant` answers `kogane-account-history-v1` for one
+  `sourceAccountId` (the candidate read's id pattern): `entries` oldest first
+  (`createdAt`, then entry kind, revision and record id), `total` equal to
+  their count. A mapping entry carries its target account, method, status,
+  label and policy version; a decision entry its kind and `supersededBy`; a
+  relation entry its kind, stored status, `fromRef`, `toRef` and the writing
+  decision's kind. Every entry carries the closed `decisionOrigin` of
+  `decision-origin.ts`, so no actor id leaves the read.
+- Authority is the instrument history's: `records.read` over the whole store,
+  checked before any read; an unknown source account is
+  `evidence_restricted`; the rows are counted through the same keys first and
+  a history past the grant's `maxRows` is `budget_exceeded`, never truncated.
+- One function behind three adapters: the page's
+  `GET /api/identity/account-history` (reader grant behind Access),
+  `POST /api/agent/v1/accounts.history` and the MCP tool
+  `kogane.accounts.history` (catalogue operation `accounts.history`, R0, a
+  `read` audit record with the entry count). The parity guard maps the route
+  to the tool.
+- The page opens it per candidate, for the candidate's direct source account,
+  behind `取得元の口座の訂正履歴を見る`, and fetches nothing until asked. It
+  shows the entries as the server ordered them and derives no status; the
+  candidate's status still comes from the candidate read.
+- Nothing is written, collapsed or reinterpreted: a withdrawal is a later
+  entry beside the acceptance it withdraws.
+
+### Consequences
+
+- The first consequence above about the balance projection no longer holds:
+  since ADR 0001's amendment of 2026-11-06 the projection reads each relation
+  triple's newest decision, so a withdrawal under the same reference removes
+  the acceptance from its declared inputs. An acceptance under another
+  reference of the pair (a 0029 row under a rewritten key) is another triple
+  and stays among them; the history shows both rows.
+- The history is in knowledge order, not effective-date order; there is still
+  no validity period of a containment.
+- The cost grows with one account's own history: the mapping and decision
+  indexes, one probe per relation kind on `entity_relations_from` and
+  `entity_relations_to` (the kind leads both), each decision by primary key.
+  No migration.
+- A new catalogue operation and MCP tool: merging needs the owner's approval
+  of the catalogue entry.
+
+### Verification
+
+Synthetic data only, no production access.
+
+- `packages/application/test/account-history-read.test.ts`: over the account
+  candidate world, decisions through the change lifecycle (an acceptance, its
+  withdrawal, a `same_account` rejection, a manual reassignment, and another
+  account's reassignment that must not appear) read back oldest first with
+  closed origins; the aggregator side sees the `same_account` row; the count
+  equals the read; the read writes nothing; the wire check refuses a relation
+  not naming the account, an open kind, a raw actor and a wrong total;
+  capability, either narrowed scope and malformed ids refuse before any read;
+  an unknown account is restricted; a history past the budget is refused
+  before its rows are read; both statements are keyed on the whole CORE
+  schema without statistics.
+- `services/app/test/account-history-api.test.ts` on workerd: the route's
+  answer, Access, GET/HEAD only, strict query, unknown account; the agent
+  route and MCP return the route's answer; strict input; one audit read per
+  served agent call with its entry count; no table changes.
+- `services/app/test/ui-mcp-parity.test.ts`: the route is mapped to
+  `kogane.accounts.history`.
+- `apps/web/test/account-candidates.browser.test.ts`: the panel reads only
+  when opened, for the candidate's direct source account, lists an acceptance
+  and its withdrawal in order, plans nothing and passes the accessibility
+  audit.

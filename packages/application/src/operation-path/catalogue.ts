@@ -260,6 +260,15 @@ export const OPERATION_CATALOGUE = {
     capability: "records.read",
     paths: AGENT,
   },
+  // One source account's mapping, mapping-decision and relation history
+  // (ADR 0077, amendment 2026-11-08): the 口座の対応候補 page's service.
+  "accounts.history": {
+    risk: ["R0"],
+    effect: null,
+    quiet: "read",
+    capability: "records.read",
+    paths: AGENT,
+  },
   // The カード照合 page's reads (ADR 0081): its review list or one review, and
   // one candidate's ownership review, through the page's own services.
   "card-settlements.read": {

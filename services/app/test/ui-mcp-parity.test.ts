@@ -49,6 +49,7 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/query": ["kogane.financial.query", "kogane.context.open"],
   "/api/identity/instrument-candidates": ["kogane.instruments.candidates"],
   "/api/identity/account-candidates": ["kogane.accounts.candidates"],
+  "/api/identity/account-history": ["kogane.accounts.history"],
   "/api/identity/instrument-history": ["kogane.instruments.history"],
   "/api/identity/instrument-coverage": ["kogane.instruments.coverage"],
   "/api/v2/card-purchases": ["kogane.purchases.explain"],

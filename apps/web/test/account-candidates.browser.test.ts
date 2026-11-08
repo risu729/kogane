@@ -12,6 +12,7 @@ import {
   type AccountCandidate,
   type AccountCandidateView,
 } from "../../../packages/application/src/query/account-candidates.ts";
+import { readAccountHistoryForGrant } from "../../../packages/application/src/query/account-history-read.ts";
 import { world, type Store } from "../../../packages/application/test/account-candidates-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
 import { auditView } from "./a11y-audit.ts";
@@ -74,6 +75,17 @@ describe.if(runnable)("account candidate review", () => {
               url.searchParams.get("sourceAccountId"),
             ),
           );
+        }
+        if (url.pathname === "/api/identity/account-history") {
+          read.push(url);
+          const outcome = await readAccountHistoryForGrant({
+            grant: GRANT,
+            sql: store.sql,
+            sourceAccountId: url.searchParams.get("sourceAccountId"),
+          });
+          return outcome.ok
+            ? Response.json(outcome.history)
+            : Response.json(outcome.error, { status: 403 });
         }
         if (url.pathname.startsWith("/api/command/v1/")) {
           const operation = url.pathname.split("/").at(-1)!;
@@ -230,6 +242,65 @@ describe.if(runnable)("account candidate review", () => {
     expect(posted).toEqual([]);
     await tab.close();
   });
+
+  test("the direct account's correction history is read on request, oldest first, planning nothing", async () => {
+    const [candidate] = (await page("open", 0, null)).items as AccountCandidate[];
+    // A withdrawn acceptance recorded before the page opens: two rows, both kept.
+    for (const [index, status, reason] of [
+      [1, "accepted", "synthetic acceptance"],
+      [2, "rejected", "synthetic withdrawal"],
+    ] as const) {
+      const id = `rel-synthetic-history-${String(index)}`;
+      store.db.run(
+        `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+         VALUES(?,'relation',?,1,?,'manual','synthetic',NULL,?,'[]',NULL,NULL,?)`,
+        [
+          `dr-${id}`,
+          id,
+          status === "accepted" ? "accept" : "reject",
+          reason,
+          `2099-01-0${String(index + 2)}`,
+        ],
+      );
+      store.db.run(
+        `INSERT INTO entity_relations(id,kind,from_ref,to_ref,valid_from,valid_to,status,decision_revision_id,evidence_refs_json,created_at)
+         VALUES(?,'connection_contains',?,?,NULL,NULL,?,?,'[]',?)`,
+        [
+          id,
+          candidate!.connectionRef,
+          `source_account:${candidate!.directSourceAccountId}`,
+          status,
+          `dr-${id}`,
+          `2099-01-0${String(index + 2)}`,
+        ],
+      );
+    }
+    const tab = await browser.newPage({ viewport: { width: 1280, height: 1000 } });
+    await tab.goto(`${origin}/identities/account-candidates`);
+    await tab.getByRole("heading", { name: "口座の対応候補", exact: true }).waitFor();
+    await tab.getByRole("button", { name: "判断済み", exact: true }).click();
+    const card = tab.locator(".identity-card").filter({ hasText: "Synthetic time deposit" });
+    await card.waitFor();
+    expect(read.some((url) => url.pathname === "/api/identity/account-history")).toBe(false);
+    const toggle = card.getByRole("button", { name: "取得元の口座の訂正履歴を見る", exact: true });
+    expect(await toggle.getAttribute("aria-expanded")).toBe("false");
+    await toggle.click();
+    await card.getByText("記録順の履歴です。", { exact: false }).waitFor();
+    const history = read.filter((url) => url.pathname === "/api/identity/account-history");
+    expect(history.map((url) => url.searchParams.get("sourceAccountId"))).toEqual([
+      candidate!.directSourceAccountId,
+    ]);
+    const items = await card.locator("ol li").allInnerTexts();
+    expect(items).toHaveLength(3);
+    expect(items[0]).toContain("対応付け");
+    expect(items[1]).toContain("synthetic acceptance");
+    expect(items[1]).toContain("連携に含まれる");
+    expect(items[2]).toContain("synthetic withdrawal");
+    expect(items[2]).toContain("含まれないと判断");
+    expect(await auditView(tab)).toEqual([]);
+    expect(posted).toEqual([]);
+    await tab.close();
+  }, 60_000);
 
   test("the open and held views and the confirmation pass the accessibility audit", async () => {
     const tab = await open();

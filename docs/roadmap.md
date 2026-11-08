@@ -321,6 +321,14 @@ identifiers, not a match rate; money and reward units have no resolution
 state, and a candidate across providers needs a second source whose identity
 rule records comparable identifiers.
 
+The review flows show the existing correction history on request: an
+instrument candidate its identifier's (`kogane.instruments.history`,
+[ADR 0055](adr/0055-instrument-candidates.md)), and an account candidate its
+direct source account's mapping revisions, mapping decisions and relation
+rows (`kogane.accounts.history`,
+[ADR 0077, amendment 2026-11-08](adr/0077-account-connection-candidates.md#amendment-2026-11-08-the-correction-history-of-a-source-account)),
+in knowledge order, not by effective date.
+
 Contracts: [collection](collection.md), [observations](observations.md),
 [identity](identity.md), [source identities](identity-sources.md).
 

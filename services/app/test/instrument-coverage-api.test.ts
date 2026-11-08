@@ -272,6 +272,7 @@ describe("kogane.instruments.coverage", () => {
               ...(capabilities.includes("records.read") && whole
                 ? [
                     "kogane.accounts.candidates",
+                    "kogane.accounts.history",
                     "kogane.card-settlements.unmatched",
                     "kogane.economic-readiness.read",
                   ]

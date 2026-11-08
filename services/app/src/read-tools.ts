@@ -1,7 +1,8 @@
 // Additional read adapters over the existing history, instrument coverage
-// (ADR 0073), dated reported state, account correspondence candidates
-// (ADR 0077), card statements without a settlement candidate (ADR 0074's
-// 2026-11-07 amendment) and common audit readers.
+// (ADR 0073), dated reported state, account correspondence candidates and
+// one source account's correction history (ADR 0077), card statements
+// without a settlement candidate (ADR 0074's 2026-11-07 amendment) and common
+// audit readers.
 import { z } from "zod";
 import {
   type Grant,
@@ -32,6 +33,7 @@ import {
 } from "../../../packages/application/src/query/card-statements-unmatched.ts";
 import { readInstrumentCoverage } from "../../../packages/application/src/query/instrument-coverage.ts";
 import { readInstrumentHistoryForGrant } from "../../../packages/application/src/query/instrument-history-read.ts";
+import { readAccountHistoryForGrant } from "../../../packages/application/src/query/account-history-read.ts";
 import { ECONOMIC_ROW_READINESS_SCHEMA } from "../../../packages/domain/src/economic-row-readiness.ts";
 import { INSTRUMENT_IDENTIFIER_ID } from "../../../packages/application/src/query/instrument-candidates-review.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
@@ -87,6 +89,10 @@ const schemas = {
     offset: z.number().int().min(0).max(ACCOUNT_CANDIDATES_MAX_OFFSET).optional(),
     sourceAccountId: z.string().regex(ACCOUNT_SOURCE_ACCOUNT_ID).optional(),
   }),
+  // The route's one parameter, with the service's own pattern.
+  "kogane.accounts.history": z.strictObject({
+    sourceAccountId: z.string().regex(ACCOUNT_SOURCE_ACCOUNT_ID),
+  }),
   // The route's one parameter, with the service's own limit.
   "kogane.card-settlements.unmatched": z.strictObject({
     offset: z.number().int().min(0).max(UNMATCHED_MAX_OFFSET).optional(),
@@ -136,6 +142,8 @@ const DESCRIPTIONS: Record<ReadToolName, string> = {
     "Count each source's instrument identifiers by candidate state, the same counts as the owner UI, under summary.read and a whole-store read grant.",
   "kogane.accounts.candidates":
     "One page of the ADR 0077 account correspondence candidates: which direct provider source accounts a reviewed aggregator connection contains, on which evidence, with closed status, hold and same-account reasons, under records.read and a whole-store read grant. Read-only; never proposes same_account. A candidate names the relation.accept or relation.reject payload that would decide it; deciding is a plan through the change lifecycle, graded there.",
+  "kogane.accounts.history":
+    "The append-only correction history of one source account, the same answer as GET /api/identity/account-history on the 口座の対応候補 page: every revision of its account mapping, every assignment or override release decided about it, and every relation row naming it on either side (connection_contains acceptances and withdrawals, same_account decisions), each with its decision kind, reason and closed origin, oldest first. Under records.read and a whole-store read grant; refused past the grant's maxRows, never truncated. Read-only; correcting it is a plan through the change lifecycle.",
   "kogane.card-settlements.unmatched":
     "One page of the card statement totals no settlement candidate cites, the same answer as the operator's カード照合 page: each statement's closed reason (statement_total_refund_or_zero, statement_not_comparable, no_debit_in_window, no_equal_amount_debit, equal_amount_debit_awaiting_sweep) and, for no_equal_amount_debit, the ADR 0074 planner's read-only answer (window three days either side of the due date, at most three debits) with closed codes. Under records.read and a whole-store read grant. Read-only; no allocation listed is acceptable, since the acceptance writer claims one debit.",
   "kogane.economic-readiness.read":
@@ -181,6 +189,7 @@ export function readMcpTools(
       case "kogane.instruments.coverage":
         return grantAllows(grant, "summary.read") && wholeStore(grant);
       case "kogane.accounts.candidates":
+      case "kogane.accounts.history":
       case "kogane.card-settlements.unmatched":
       case "kogane.economic-readiness.read":
         return grantAllows(grant, "records.read") && wholeStore(grant);
@@ -266,6 +275,19 @@ export async function callReadTool(
         });
         return outcome.ok
           ? { status: 200, body: outcome.review }
+          : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
+      }
+      case "kogane.accounts.history": {
+        // The route's own service: capability, perimeter, existence and the
+        // row budget are decided there, once for both transports.
+        const input = parseRequest(schemas[name], body ?? {});
+        const outcome = await readAccountHistoryForGrant({
+          grant,
+          sql: d1Executor(env.DB),
+          sourceAccountId: input.sourceAccountId,
+        });
+        return outcome.ok
+          ? { status: 200, body: outcome.history }
           : { status: ERROR_STATUS[outcome.error.code], body: outcome.error };
       }
       case "kogane.card-settlements.read":
