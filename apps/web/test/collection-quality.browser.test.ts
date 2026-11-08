@@ -109,6 +109,11 @@ describe.if(runnable)("collection quality browser", () => {
       expect(
         await page.locator('nav .freshness[data-state="disabled"]').first().textContent(),
       ).toBe("定期実行の停止中（取得なし）");
+      // provider-data-types-v1: what Vpass offers and what of it is collected.
+      expect(await page.getByText("カード利用明細: 収集・解析済み", { exact: false }).count()).toBe(
+        1,
+      );
+      expect(await page.locator('li[data-status="collected"]').count()).toBeGreaterThan(0);
       expect(
         await page.getByText("予約状態を確認できません", { exact: false }).count(),
       ).toBeGreaterThan(0);

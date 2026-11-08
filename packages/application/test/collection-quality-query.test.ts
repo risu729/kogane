@@ -305,6 +305,42 @@ describe("the summary", () => {
     expect([...waits].sort()).toEqual(["disabled", "human-required", "null"]);
   });
 
+  test("each source with a collector carries the provider's data types; others carry none", async () => {
+    const summary = await queryCollectionQualitySummary(executor(store), { asOf: AS_OF });
+    expect(summary.dataTypesVersion).toBe("provider-data-types-v1");
+    const of = (id: string) => summary.sources.find((source) => source.sourceId === id)!.dataTypes;
+    expect(of("sbi-securities")).toContainEqual({
+      type: "income",
+      status: "not_collected",
+      parsers: [],
+      issue: 446,
+    });
+    expect(of("vpass")).toContainEqual({
+      type: "card_usage",
+      status: "collected",
+      parsers: ["vpass-statement-page"],
+      issue: null,
+    });
+    expect(of("paypay")).toBeNull();
+    // The contract refuses an entry its status does not allow, and a type twice.
+    const sbi = summary.sources.find((source) => source.sourceId === "sbi-securities")!;
+    const withTypes = (dataTypes: unknown) => ({
+      ...summary,
+      sources: summary.sources.map((source) => (source === sbi ? { ...sbi, dataTypes } : source)),
+    });
+    const income = { type: "income", status: "not_collected", parsers: [], issue: 446 };
+    expect(validApiResponse("/api/collection-quality", withTypes([income]))).toBe(true);
+    for (const wrong of [
+      [{ ...income, issue: null }],
+      [{ ...income, status: "collected" }],
+      [{ ...income, status: "partial" }],
+      [{ ...income, status: "collected", parsers: ["sbi-income"], issue: 446 }],
+      [income, income],
+      [],
+    ])
+      expect(validApiResponse("/api/collection-quality", withTypes(wrong))).toBe(false);
+  });
+
   test("more jobs than the bound are refused, never cut", async () => {
     const crowded = new QualityStore();
     for (let index = 0; index < 200; index += 1)
@@ -511,7 +547,7 @@ function row(overrides: Partial<CellQualityRow> = {}): CellQualityRow {
 describe("one reason per stored state", () => {
   const valid = (entry: ReturnType<typeof cell>) =>
     validCollectionQualityCells({
-      apiVersion: 3,
+      apiVersion: 4,
       freshnessAsOf: freshnessAsOf(AS_OF),
       sourceId: "vpass",
       latestFetchRun: null,
