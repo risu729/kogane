@@ -118,6 +118,12 @@ export function BalancesLatestPage({ view = "balances" }: { view?: MeasureView }
             setTrail(trail.slice(0, -1));
           }}
           onRefresh={() => {
+            // On the first page the cursor is already null, so resetting it
+            // would change nothing and send nothing: read that page again.
+            if (cursor === null) {
+              void query.refetch();
+              return;
+            }
             setTrail([]);
             setCursor(null);
           }}
