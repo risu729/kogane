@@ -28,7 +28,7 @@ import {
 import { validInstantText } from "../../domain/src/time.ts";
 
 export const COLLECTION_QUALITY_PATH = "/api/collection-quality";
-export const COLLECTION_QUALITY_API_VERSION = 3;
+export const COLLECTION_QUALITY_API_VERSION = 4;
 /** Cells per page; the read fetches one more to report truncation. */
 export const COLLECTION_QUALITY_PAGE = 500;
 /** More schedules or sources than this in one summary is refused, never cut. */
@@ -151,6 +151,51 @@ export const CELL_REASONS = [
   "query_rule_not_composed",
   "not_in_latest_run",
 ] as const;
+
+/**
+ * The data types a provider offers, in the vocabulary of the roadmap's layers
+ * 0–5 (`provider-data-types-v1`, ADR 0087). A type names what the data is,
+ * not where it is shown: `balance` (a deposit, cash, stored-value or margin
+ * balance), `cash_movement` (bank, wallet or stored-value movements),
+ * `card_usage` (card purchases and refunds), `card_statement` (statement and
+ * payment amounts), `position` (security or crypto holdings), `execution`
+ * (trades), `settlement_cash` (the cash account of a securities or crypto
+ * broker and its movements, kept apart from bank deposits because it settles
+ * trades),
+ * `asset_transfer` (security or crypto moved in or out), `income`
+ * (dividends, distributions, interest, staking or lending rewards),
+ * `valuation_history` (the provider's own valuation and its history, realized
+ * gains), `term_deposit` (term and other deposit contracts: principal,
+ * maturity, rate), `document` (statements and reports the provider delivers
+ * as files), `fx_rate` (the provider's exchange rates), and
+ * `reward_balance`, `reward_activity`, `reward_expiry` (points).
+ */
+export const PROVIDER_DATA_TYPES = [
+  "balance",
+  "cash_movement",
+  "card_usage",
+  "card_statement",
+  "position",
+  "execution",
+  "settlement_cash",
+  "asset_transfer",
+  "income",
+  "valuation_history",
+  "term_deposit",
+  "document",
+  "fx_rate",
+  "reward_balance",
+  "reward_activity",
+  "reward_expiry",
+] as const;
+/**
+ * `collected`: parsers publish it; `partial`: parsers publish part of it
+ * and the rest is tracked by an issue; `not_collected`: an issue tracks it.
+ */
+export const DATA_TYPE_STATUSES = ["collected", "partial", "not_collected"] as const;
+export const PROVIDER_DATA_TYPES_VERSION = "provider-data-types-v1";
+export type ProviderDataType = (typeof PROVIDER_DATA_TYPES)[number];
+export type DataTypeStatus = (typeof DATA_TYPE_STATUSES)[number];
 
 export type ScheduleKind = (typeof SCHEDULE_KINDS)[number];
 export type OccurrenceStatus = (typeof OCCURRENCE_STATUSES)[number];
@@ -278,6 +323,35 @@ const fetchRun = z.nullable(
   }),
 );
 
+const parserName = z.string().check(z.regex(/^[a-z][a-z0-9-]{0,99}$/u));
+/** One data type of the provider-offered catalogue and whether it is collected. */
+const dataType = z
+  .strictObject({
+    type: z.enum(PROVIDER_DATA_TYPES),
+    status: z.enum(DATA_TYPE_STATUSES),
+    /** The parsers that publish it (registered parser names); none when not collected. */
+    parsers: distinct(parserName, 20),
+    /** The issue that tracks what is not collected; null when it is all collected. */
+    issue: z.nullable(id),
+  })
+  .check(
+    z.refine((value) =>
+      value.status === "collected"
+        ? value.parsers.length > 0 && value.issue === null
+        : value.status === "partial"
+          ? value.parsers.length > 0 && value.issue !== null
+          : value.parsers.length === 0 && value.issue !== null,
+    ),
+  );
+/** A catalogued source's data types, once each; null for a source the catalogue does not describe. */
+const dataTypes = z.nullable(
+  z.array(dataType).check(
+    z.minLength(1),
+    z.maxLength(PROVIDER_DATA_TYPES.length),
+    z.refine((values) => new Set(values.map((value) => value.type)).size === values.length),
+  ),
+);
+
 const unregistered = z.strictObject({
   collector: sourceId,
   blockedCode: z.nullable(code),
@@ -296,6 +370,8 @@ const source = z
     reasons: distinct(z.enum(SOURCE_REASONS)),
     /** The age of `latestFetchRun` (whatever its outcome) and what the source waits on. */
     freshness,
+    /** What the provider offers and whether each type is collected (`provider-data-types-v1`). */
+    dataTypes,
   })
   .check(
     // An age is that of the newest fetch run's completion, and only of it.
@@ -308,6 +384,7 @@ const summary = z
   .strictObject({
     apiVersion: z.literal(COLLECTION_QUALITY_API_VERSION),
     freshnessAsOf,
+    dataTypesVersion: z.literal(PROVIDER_DATA_TYPES_VERSION),
     sources: z.array(source).check(
       z.maxLength(COLLECTION_QUALITY_BOUND),
       z.refine((values) => new Set(values.map((value) => value.sourceId)).size === values.length),
@@ -487,6 +564,7 @@ export function validCollectionQualityAlarms(value: unknown): value is Collectio
 }
 export type CollectionQualityFetchRun = NonNullable<z.output<typeof fetchRun>>;
 export type CollectionQualitySource = z.output<typeof source>;
+export type ProviderDataTypeEntry = z.output<typeof dataType>;
 export type CollectionQualitySummary = z.output<typeof summary>;
 export type CollectionQualityPeriod = z.output<typeof period>;
 export type CollectionQualityCell = z.output<typeof cell>;

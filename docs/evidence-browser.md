@@ -876,6 +876,23 @@ the as-of date (a collector clock ahead) is age 0. The page shows the state
 and age per source in the source list and per cell (当日の取得, N日前の取得,
 古い, 本人操作待ち, 定期実行の停止中, 取得なし).
 
+**Data types the provider offers** (`provider-data-types-v1`,
+[ADR 0087](adr/0087-provider-data-type-catalogue.md)). The summary names
+`dataTypesVersion`, and each source with a collector carries `dataTypes`: the
+data types its provider offers for the account kinds it collects (`balance`,
+`cash_movement`, `card_usage`, `card_statement`, `position`, `execution`,
+`settlement_cash`, `asset_transfer`, `income`, `valuation_history`,
+`term_deposit`, `document`, `fx_rate`, `reward_balance`, `reward_activity`,
+`reward_expiry`), each `collected` (with the parsers that publish it),
+`partial` (with its parsers and the issue that tracks the rest) or
+`not_collected` (with the issue). A source the catalogue does not describe
+(one with no collector, and `kogane-synthetic`) has `dataTypes: null`. The list is checked in
+(`packages/application/src/collection/provider-data-types.ts`), built from the
+source research and the per-source issues; it describes the provider, not the
+owner's holdings, and it is not checked against production. The page lists
+them per source under 取得元が提供するデータ種別, and the source list counts
+the types not wholly collected.
+
 Open `/collection-quality` and choose a source. It shows source reasons and
 last attempts alongside the source/unit/dataset/period cells. Actual Alarm
 reservation reads distinguish `observed` (a nullable time) from `unavailable`;
