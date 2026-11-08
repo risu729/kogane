@@ -5,251 +5,247 @@
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-26
+Research date: 2026-08-26
 
-## 1. Scopeとledger境界
+## 1. Scope and ledger boundaries
 
-本sourceは、同じWESTER IDと相互導線を使う次のread-only ledgerを分離する。
+Separate these read-only ledgers sharing WESTER IDs/navigation.
 
-- **WESTERポイント**: `基本`、`期間・用途限定`、`チャージ専用`の残高、付与・利用履歴、有効期限
-- **Wesmo!**: `残高（出金可）`、`残高（出金不可）`、決済、チャージ、送金・受取、出金、取消等のwallet event
-- **J-WESTカード**: issuerが持つ未確定/確定利用明細、請求、返金、家族/追加カード明細
-- **ICOCA**: SF残高、鉄道/物販利用、チャージ、定期券、ICOCA利用由来ポイント
-- **e5489、tabiwa等**: 予約・きっぷledger。ポイント付与根拠にはなり得るが本sourceでは収集しない
+- **WESTERポイント (WESTER Points)**: `基本` ("basic"), `期間・用途限定` ("limited-period/use"), `チャージ専用` ("top-up-only") balances, accrual/use, expiry
+- **Wesmo!**: `残高（出金可）` ("withdrawable balance"), `残高（出金不可）` ("non-withdrawable balance"), payments/top-ups/transfers-receipts/withdrawals/cancellations etc.
+- **J-WESTカード (J-WEST Card)**: issuer pending/confirmed usage/billing/refunds/family-additional statements
+- **ICOCA**: SF balances/rail-retail use/top-ups/commuter passes/ICOCA-use points
+- **e5489, tabiwa etc.**: reservation/ticket ledgers; may support points accrual evidence, not collected here
 
-支払、チャージ、送金・受取、出金、ポイント利用/交換/ICOCAチャージ、予約、カード・口座追加、eKYC、
-profile/認証設定変更を行わない。WESTER ID、ICOCA/card/device ID、氏名、加盟店、token、cookie、OTP、
-passkey material、実残高・実額を保存せず、security controlを回避しない。
+No payments/top-ups/transfers-receipts/withdrawals/points use-exchange-ICOCA top-up/reservations/card-account
+additions/eKYC/profile-authentication settings. Save no WESTER/ICOCA/card/device IDs, names, merchants,
+tokens/cookies/OTPs/passkey material/actual balances-amounts; no security-control bypass.
 
-J-WESTカード明細はポイント明細ではない。JCBブランドはMyJCB、Visa/Mastercardブランドは
-MUFG Card / My Digital Connect系の別sourceを参照するだけとし、protocolを本docへ複製しない。
-将来のrepository内参照先は [MyJCB family](./myjcb.md) と [MUFG Card](./mufg-card.md) とする。
+J-WEST statements are not points history. Refer to separate MyJCB for JCB, MUFG Card/My Digital Connect for
+Visa/Mastercard; do not duplicate protocols here. Future repository references:
+[MyJCB family](./myjcb.md), [MUFG Card](./mufg-card.md).
 
-## 2. 調査方法と公式URL
+## 2. Research method and official URLs
 
-- JR西日本の公式portal、規約、guide、official app listingを一次sourceとして確認。
-- 認証不要の公開page、response header、DNS CNAME、login HTML/JSをread-only観測。
-- GitHubをofficial package ID、auth host、WESTER/Wesmo語で検索し、公開third-party clientを調査。
-- account login、本人app起動、実データ取得、APK取得・decompile、network interceptionは未実施。
+- Official JR West portals/terms/guides/app listings as primary sources.
+- Read-only unauthenticated public pages/headers/DNS CNAMEs/login HTML-JS.
+- GitHub package/auth-host/WESTER-Wesmo searches for public third-party clients.
+- No account login/owner app launches/actual retrieval/APK acquisition-decompilation/network interception.
 
-主要公式URL:
+Main official URLs:
 
-- [WESTERポイント](https://wester.jr-odekake.net/point/)
-- [WESTERポイント規約](https://wester.jr-odekake.net/terms/point-kiyaku/)
-- [WESTERポイント（チャージ専用）規約](https://wester.jr-odekake.net/terms/chargepoint-kiyaku/)
-- [WESTER会員support/login](https://wester.jr-odekake.net/member/entrylog/)
-- [WESTER Web会員登録・移行](https://wester.jr-odekake.net/service/member/)
+- [WESTER Points](https://wester.jr-odekake.net/point/)
+- [WESTER Points terms](https://wester.jr-odekake.net/terms/point-kiyaku/)
+- [Top-up-only points terms](https://wester.jr-odekake.net/terms/chargepoint-kiyaku/)
+- [Member support/login](https://wester.jr-odekake.net/member/entrylog/)
+- [Web registration/migration](https://wester.jr-odekake.net/service/member/)
 - [WESTER Android app](https://play.google.com/store/apps/details?id=jp.co.westjr.wester&hl=ja)
-- [J-WESTカードの利用代金明細](https://wester.jr-odekake.net/j-west/support/meisai/)
+- [J-WEST billing statements](https://wester.jr-odekake.net/j-west/support/meisai/)
 - [Wesmo!](https://wester.jr-odekake.net/wesmo/)
 - [Wesmo! app guide](https://wester.jr-odekake.net/wesmo/user/guide/)
-- [Wesmo!会員登録](https://wester.jr-odekake.net/wesmo/user/guide/register/)
-- [Wesmo!チャージ](https://wester.jr-odekake.net/wesmo/user/guide/charge/)
-- [Wesmo!送金・受取](https://wester.jr-odekake.net/wesmo/user/guide/send/)
-- [Wesmo!会員規約](https://wester.jr-odekake.net/assets/pdf/wesmo/terms-member01.pdf)
-- [Wesmo!資金決済法に基づく表示](https://wester.jr-odekake.net/assets/pdf/wesmo/money-policy01.pdf)
+- [Wesmo! registration](https://wester.jr-odekake.net/wesmo/user/guide/register/)
+- [Wesmo! top-ups](https://wester.jr-odekake.net/wesmo/user/guide/charge/)
+- [Wesmo! transfers/receipts](https://wester.jr-odekake.net/wesmo/user/guide/send/)
+- [Wesmo! member terms](https://wester.jr-odekake.net/assets/pdf/wesmo/terms-member01.pdf)
+- [Wesmo! Payment Services Act disclosure](https://wester.jr-odekake.net/assets/pdf/wesmo/money-policy01.pdf)
 - [Wesmo! Android app](https://play.google.com/store/apps/details?id=jp.co.westjr.wesmo&hl=ja)
-- [WESTERポイントをICOCAへチャージ](https://wester.jr-odekake.net/point/store-use/use-icoca/)
-- [モバイルICOCA残高・利用履歴](https://www.jr-odekake.net/icoca/mobileicoca/use/history/)
+- [Top up ICOCA from WESTER Points](https://wester.jr-odekake.net/point/store-use/use-icoca/)
+- [Mobile ICOCA balances/history](https://www.jr-odekake.net/icoca/mobileicoca/use/history/)
 
-## 3. 公式経路、粒度、期間、export
+## 3. Official routes, granularity, periods, exports
 
-| 経路                     | read範囲                                                                | 粒度/state                           | 期間/件数/export                                                            | tradeoff                                            |
-| ------------------------ | ----------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------- | --------------------------------------------------- |
-| WESTER portal会員support | point種別残高、付与・利用履歴、期限、紐づけICOCAのpoint履歴             | point event / expiry bucket          | 通常pointの履歴期間・row上限・paginationは公開確認できず。CSV/PDF未確認     | Web bootstrap/replay候補。全サービス横断のpoint正本 |
-| WESTER app               | point残高/利用、キャンペーン、card ICOCA残高、ICOCA app/e5489等への導線 | mobile summary/detail                | 履歴期間/件数/export未確認                                                  | 広いfront doorでwrite/予約UIが隣接                  |
-| Wesmo! app               | 出金可/不可残高、決済、charge、send/receive、出金、point利用/付与履歴   | wallet event、送金link/request state | 保持期間・最大件数・pagination・CSV/PDF未確認                               | Wesmo!のprimary route。device-bound、多要素認証     |
-| J-WEST issuer Web        | card利用・請求・返金、家族/追加card                                     | issuerのauthorization/請求event      | MyJCBまたはMy Digital ConnectでPDF等                                        | 別source。WESTER ID/passwordと別credential          |
-| ICOCA app/member Web     | SF残高、鉄道/物販/charge履歴                                            | ICOCA event                          | member Webは前日から26週、最大100件。明細/領収PDFは当日から1年前月初まで    | ICOCA別source。WESTER point履歴と混ぜない           |
-| 券売機                   | ICOCA SF履歴、ICOCA利用由来point履歴                                    | device/card上の直近event、月次point  | SFは通常20件、係員は最大50件、26週まで。pointは前月から過去6か月を表示/印字 | cloud収集不可、manual evidence                      |
+| Route                        | Read scope                                                                                          | Granularity/state                          | Period/count/export                                                                                                               | Tradeoff                                                       |
+| ---------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| WESTER portal member support | Points type balances/accrual-use/expiry/linked ICOCA points                                         | Points events/expiry buckets               | Ordinary points retention/limits/pagination unestablished publicly; CSV/PDF unverified                                            | Web bootstrap/replay candidate; cross-service points authority |
+| WESTER app                   | Points balances/use/campaigns/card ICOCA balances/ICOCA app-e5489 links                             | Mobile summary/detail                      | Periods/counts/exports unknown                                                                                                    | Broad entry with writes/reservations                           |
+| Wesmo! app                   | Withdrawable/non-withdrawable balances/payments/top-ups/send-receive/withdrawals/points use-accrual | Wallet events/transfer-link-request states | Retention/limits/pagination/CSV-PDF unknown                                                                                       | Primary Wesmo! route; device-bound/MFA                         |
+| J-WEST issuer Web            | Card usage/billing/refunds/family-additional                                                        | Issuer authorization/billing events        | PDF etc. in MyJCB/MDC                                                                                                             | Separate credentials/source from WESTER                        |
+| ICOCA app/member Web         | SF/rail-retail-top-up history                                                                       | ICOCA events                               | Member Web 26 weeks from previous day, maximum 100; statement/receipt PDFs from today through first day of month one year earlier | Separate ICOCA source, not WESTER points                       |
+| Ticket machines              | ICOCA SF/ICOCA-use points                                                                           | Recent device-card events/monthly points   | SF normally 20, staff up to 50, within 26 weeks; points previous six months from last month view/print                            | No cloud collection, manual evidence                           |
 
-### WESTERポイント
+### WESTER Points
 
-公式は3種を明示する。
+Officially three types:
 
-| 種別           | 有効期限                      | 主な用途と収集上の注意                                                   |
-| -------------- | ----------------------------- | ------------------------------------------------------------------------ |
-| 基本           | 獲得年度の翌年度末（3月31日） | 店頭/Web、対象商品、ICOCA charge等。年度bucketを保持する                 |
-| 期間・用途限定 | campaign/付与ごと             | common期限を推測せず、表示expiryと利用可能scopeをevent/lotに保持する     |
-| チャージ専用   | 無期限                        | ICOCA charge専用。ICOCAごとに付与対象履歴があり、通常pointと用途が異なる |
+| Type               | Expiry                                                  | Main uses/collection considerations                                         |
+| ------------------ | ------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Basic              | End of fiscal year after accrual fiscal year (March 31) | Stores/Web/eligible products/ICOCA top-ups etc.; retain fiscal-year buckets |
+| Limited-period/use | Per campaign/award                                      | Infer no common expiry; retain displayed expiry/use scope per event/lot     |
+| Top-up-only        | None                                                    | ICOCA only, per-ICOCA eligible-use histories; differs from ordinary points  |
 
-Wesmo!決済に関するpoint付与・利用履歴はWesmo! app、それ以外を含む横断履歴はWESTER portalで確認すると
-公式FAQが案内する。同じWesmo!決済がwallet eventとpoint eventの双方に現れるため、`source_event_id`相当が
-判明するまではtimestamp/merchant/amountだけで自動結合しない。
+Official FAQ directs Wesmo! payment points accrual/use checks to Wesmo! app, cross-service histories to WESTER
+portal. Same payment may appear in wallet/points; do not join by timestamps/merchants/amounts until
+`source_event_id` equivalent established.
 
-WESTERポイント（チャージ専用）規約は、会員support/ICOCA app/券売機で前月から過去6か月の付与pointと
-対象利用履歴を月単位で確認できると定める。これはICOCA利用由来pointの範囲であり、WESTER全体のpoint履歴
-保持期間を意味しない。通常/限定pointの履歴期間、明細列、pagination、exportはlive確認が必要。
+Top-up-only terms specify monthly awards/eligible use for previous six months from last month through member
+support/ICOCA app/machines. ICOCA-use points coverage only, not total WESTER retention. Ordinary/limited points
+periods/columns/pagination/exports need live checks.
 
 ### Wesmo!
 
-残高は出金可/不可を別bucketにする。本人確認後の銀行口座・セブン銀行ATMchargeは出金可、credit card chargeや
-出金不可残高の受取は出金不可となる。公式規約上、Wesmo!残高自体に有効期限はない。totalだけの保存では
-送金・出金可否を失う。
+Separate withdrawable/non-withdrawable buckets. After identity verification, bank/Seven Bank ATM top-ups
+withdrawable; credit-card top-ups/received non-withdrawable balances non-withdrawable. Official terms give no
+balance expiry. Totals alone lose transfer/withdrawal eligibility.
 
-規約は残高確認画面で利用可能残高と利用履歴を確認できるとし、公式campaignはapp履歴に記載された日時を判定に
-使用する。最低限の候補schemaは `occurred_at/type/status/amount/balance_after/counterparty_or_merchant/
-funding_bucket/point_delta` だが、公開情報から確認できた列ではなく、live UI/APIで確定すべき設計仮説である。
+Terms permit balance/history on balance inquiry; official campaigns use app-history datetimes. Minimum candidate
+schema `occurred_at/type/status/amount/balance_after/counterparty_or_merchant/
+funding_bucket/point_delta` is a design hypothesis for live UI/API verification, not publicly established columns.
 
-送金linkは作成から48時間、請求linkは2週間の期限がある。受取前の取消可能stateと受取後の確定stateがあるため、
-link作成をsettled送金として計上しない。決済authorization/売上確定/取消/返金、charge失敗/取消の公式status名は
-未確認。pending/settledを残高差から推測しない。履歴期間、件数、filter、pagination、CSV/PDF/printも未確認。
+Transfer links last 48 hours, request links two weeks. Cancellable pre-receipt/confirmed post-receipt states;
+do not book link creation as settled transfers. Payment authorization/sales/cancellation/refund/top-up failure-
+cancellation official status names unknown. Infer no settlement from balance differences. History periods/
+counts/filters/pagination/CSV-PDF-print also unknown.
 
-### J-WESTカード / ICOCAとの境界
+### J-WEST / ICOCA boundaries
 
-J-WEST cardの請求額・利用明細はbrand Web serviceのledgerで、JCBはMyJCB、Visa/Mastercardは
-My Digital Connect（旧案内にはMUFGカードWeb service表記）を使う。公式もWESTER credentialとは別と明記する。
-WESTER側に現れる獲得pointはcard利用明細の代用にならず、1 card eventから複数point eventや後日訂正があり得る。
+J-WEST billing/statements belong to issuer brand services: JCB MyJCB, Visa/Mastercard MDC (old guidance MUFG
+Card Web). Officially separate from WESTER credentials. Awarded WESTER points do not replace statements;
+one card event can yield multiple points events/later corrections.
 
-WESTER appが表示するcard ICOCA残高はconvenience view。ICOCA SF利用履歴・定期券・PDFはICOCA app/member Web、
-ICOCA利用由来pointはWESTER側にも現れる別eventである。point→ICOCA chargeはpoint利用とICOCA入金の2 eventを生む
-write操作であり、本検証では実行しない。Wesmo!とICOCAも別walletで、片方の残高を他方として扱わない。
+WESTER card ICOCA balance is a convenience view. ICOCA SF/commuter/PDF in ICOCA app/member Web; ICOCA-use
+points on WESTER are separate events. Points → ICOCA top-up creates points use/ICOCA inflow, a write not
+performed here. Wesmo!/ICOCA are separate wallets; do not substitute balances.
 
-## 4. 認証、MFA、passkey、Bitwarden
+## 4. Authentication, MFA, passkeys, and Bitwarden
 
-2026-08-26に公開loginを確認した事実:
+Public login facts on 2026-08-26:
 
-- `wester.jr-odekake.net/member/entrylog/`は`https://auth.westjr.co.jp/web/v1/login`へ遷移する。
-- ID/password loginは同originの`POST /web/v1/login/do_login`、passkey loginは
-  `POST /web/v1/login/do_login_passkey`。CSRF fieldを伴うformであり、account read APIではない。
-- 公開HTML/JSはWebAuthn conditional mediation、`userVerification: required`、RP ID
-  `auth.westjr.co.jp`を示す。challenge/credential/assertion値は保存しない。
-- 旧J-WEST会員移行ではemail宛one-time passwordが使われる。通常login時のOTP trigger条件、trusted device、
-  session寿命、renewal/revocationは未確認。
+- `wester.jr-odekake.net/member/entrylog/` leads to `https://auth.westjr.co.jp/web/v1/login`.
+- Password `POST /web/v1/login/do_login`; passkey `POST /web/v1/login/do_login_passkey`, same-origin CSRF forms,
+  not account read APIs.
+- Public HTML/JS: WebAuthn conditional mediation, `userVerification: required`, RP `auth.westjr.co.jp`;
+  save no challenges/credentials/assertions.
+- Old J-WEST migration uses email OTP; ordinary OTP triggers/trusted devices/lifetimes/renewal-revocation unverified.
 
-Wesmo!はWESTER ID/passwordを基礎に、登録時のemail OTP（新規WESTER ID）、電話番号認証、場合によりlogin OTPを
-使う。公式は多要素認証、登録電話番号からの発信認証、別device access時の再本人認証を明示する。2025-12-24の
-更新後、app起動時等の端末passcode/biometric設定は任意になったが、device binding自体が消えたとはいえない。
-eKYCは出金可能残高等のwrite/enrollment境界であり、collector bootstrapのために実施しない。
+Wesmo! bases on WESTER ID/password, registration email OTP (new IDs), phone verification, possible login OTP.
+Official MFA/registered-phone outgoing-call verification/other-device re-verification explicit. After 2025-12-24
+updates, app-start passcode/biometrics optional; does not establish removal of device binding. eKYC is write/
+enrollment for withdrawable balances etc., not collector bootstrap.
 
-[Bitwarden公式](https://bitwarden.com/help/auto-fill-browser/)はbrowser extensionでWebAuthn passkeyを保存・利用できる。
-したがってWESTER Web passkeyの候補providerにはなり得る。ただし、当該credentialがBitwardenに存在すること、
-RP ID一致、conditional UIでの実動、Wesmo! app内WebView/native loginへの利用可否は未確認。これは互換性の推測で、
-vault、password、passkey private material、OTPを収集基盤へ置く根拠ではない。本人browser/deviceでbootstrapし、
-OTP/passkey/recovery/account lockが出たら自動化を停止する。
+[Official Bitwarden](https://bitwarden.com/help/auto-fill-browser/) supports browser WebAuthn passkeys, thus
+a candidate WESTER provider. Credential existence/RP agreement/conditional UI/Wesmo! WebView-native compatibility
+unknown. Compatibility hypothesis, no basis for vault/password/private passkeys/OTPs in collectors. Bootstrap
+on owner browser/device; stop automation at OTP/passkeys/recovery/locks.
 
 ## 5. WAF / Akamai / public JS
 
-2026-08-26のread-only観測で`wester.jr-odekake.net`と`auth.westjr.co.jp`はいずれも
-`san-www.westjr.co.jp.edgekey.net`、さらに`*.akamaiedge.net`へCNAME解決し、Akamai edgeの利用を確認した。
-portal公開pageはHTTP 200と`Server: nginx`、anonymous `XSRF-TOKEN`/`wester_session` cookie名、login responseは
-`x-azure-ref`を返した。これは公開pathのedge/origin-chain evidenceで、Wesmo! app APIのhost/vendorやBot policyを
-証明しない。公開GETでchallengeは出なかったが、認証後も同じとは限らない。
+Read-only observations on 2026-08-26: `wester.jr-odekake.net`/`auth.westjr.co.jp` CNAME to
+`san-www.westjr.co.jp.edgekey.net` then `*.akamaiedge.net`, establishing Akamai. Public portal 200,
+`Server: nginx`, anonymous `XSRF-TOKEN`/`wester_session` names; login `x-azure-ref`. Public edge/origin-chain
+evidence, not Wesmo! app hosts/vendors/bot policies. No public GET challenge, no authenticated guarantee.
 
-portal/Wesmo!公開pageのJSはstatic navigation、UI、analytics中心で、account balance/history endpointは確認できなかった。
-login JSはWebAuthn assertionをbrowserで生成してform POSTする具体的transportを示す。public JS/source mapをさらに
-静的解析することは調査対象だが、Akamai cookie/fingerprint/challengeの模倣や迂回はしない。401/403/429やchallengeを
-API発見のために反復probeしない。
+Public portal/Wesmo! JS mainly static navigation/UI/analytics, no balance/history endpoints found. Login JS
+shows browser WebAuthn assertions/form POSTs. Further public JS/maps static analysis in scope, no Akamai
+cookie/fingerprint/challenge imitation/bypass or repeated 401/403/429/challenge probes for discovery.
 
 ## 6. APK / deobfuscation / read-only runtime observation
 
-official Android packageはWESTER `jp.co.westjr.wester`、Wesmo! `jp.co.westjr.wesmo`。APKは未取得で、app account
-host/path/schema/tokenを公開listingから推測しない。次段階では本人所有端末/正規Google Playからbase/split APKを
-取得し、package/version/signer/hashを記録したうえで次を行う。
+Official packages: WESTER `jp.co.westjr.wester`, Wesmo! `jp.co.westjr.wesmo`. APKs not obtained; no inferred
+account hosts/paths/schemas/tokens from listings. Next legitimate owner-device/Play base-split acquisition,
+record package/version/signers/hashes, then:
 
-1. `adb shell pm path`と`adb pull`でbase/splitを取得し、`apksigner`/`aapt2`/`apkanalyzer`でmanifest、signer、SDK、
-   exported component、deep link、network security configを確認。
-2. JADX/apktool、resource/DEX strings、Retrofit/OkHttp annotation、protobuf/JSON model、WebView bridge、native libraryの
-   `strings`/`readelf`でhost/path、method、token store、renewal、pagination、device/integrity metadataを分類。
-3. R8等の難読化はresource ID、call graph、serializer field、runtime stack/metadataで追う。存在しないmappingやsymbol名を
-   捏造せず、deobfuscationの確度を記録。
-4. 本人が既存の残高/履歴を開く1回だけ、端末の標準診断または明示proxyでhost/path/method/status/header名とredacted
-   response key/typeを観測。支払/charge/send/point-use/booking controlには触れない。
-5. certificate pinning、Play Integrity、root/emulator拒否等で観測不能なら解除/hook/bypassせず、障壁として記録する。
+1. `adb shell pm path`/`adb pull`, `apksigner`/`aapt2`/`apkanalyzer` manifests/signers/SDKs/exported components/
+   deep links/network config.
+2. JADX/apktool/resources-DEX strings/Retrofit-OkHttp annotations/protobuf-JSON/WebView/native `strings`/`readelf`
+   for hosts/paths/methods/token stores-renewal/pagination/device-integrity metadata.
+3. Follow R8 through resources/call graphs/serializer fields/runtime stacks-metadata; no fabricated mappings/symbols,
+   record deobfuscation confidence.
+4. One owner-operated existing balance/history read: standard diagnostics/explicit proxy, hosts/paths/methods/statuses/
+   header names/redacted keys-types; no payment/top-up/send/points-use/booking controls.
+5. Record barriers without removal/hooks/bypass if pinning/Play Integrity/root-emulator rejection prevents observation.
 
-reverse engineeringは本sourceの調査対象である。ただしsecurity control bypassを目的にせず、得られたread routeを
-write routeから機械的に隔離できる場合だけcollector候補にする。
+Reverse engineering in scope, not security bypass. Collector candidates only when read/write routes mechanically separable.
 
-## 7. third-party transport/auth
+## 7. Third-party transport/auth
 
-GitHubのpackage ID、auth host、WESTER/Wesmo/API語検索では、WESTER pointまたはWesmo! consumer残高/履歴を取得する
-公開client、SDK wrapper、token renewal実装を確認できなかった。package ID hitは広告filter/app inventoryでtransport
-evidenceにならない。Wesmo! package IDは該当なしだった。これは2026-08-26時点のnegative evidenceで、非存在の証明ではない。
+GitHub package/auth-host/WESTER-Wesmo-API searches found no public points/consumer wallet balance-history client,
+SDK wrapper, or token renewal. Package hits advertising filters/inventories, not transport; no Wesmo! package
+hits. Negative evidence as of 2026-08-26, not proof of nonexistence.
 
-具体的な公開third-party実装として、[asapoka/userscriptsのWESTER login userscript](https://github.com/asapoka/userscripts/blob/1371b4987a74ac6f4efb341386d10a4c948c9351/odekake.net/WESTER-login-westjr.co.jp.user.js)
-のみ確認した。`auth.westjr.co.jp/web/v1/login*`上でID/password formへ値を入れbutton clickするUI automationであり、
-balance/history transport、session renewal、read API clientではない。source内にcredential literalを置く設計なので採用しない。
+Only concrete public implementation found:
+[asapoka/userscripts WESTER login userscript](https://github.com/asapoka/userscripts/blob/1371b4987a74ac6f4efb341386d10a4c948c9351/odekake.net/WESTER-login-westjr.co.jp.user.js),
+fills credentials/clicks on `auth.westjr.co.jp/web/v1/login*`; UI automation, not balances/history/renewal/read
+client. Source credential literals, so do not adopt.
 
-現時点で確認できたconsumer transport/authは公式公開loginのHTTPS form POST + CSRF + passwordまたはWebAuthnのみ。
-point/Wesmo read endpointのhost/path/method/schema、app token、refresh、device key、integrity metadataは未確認である。
-公開実装がないことを理由に推測pathをprobeしない。
+Established consumer auth only official HTTPS forms + CSRF + passwords/WebAuthn. Points/Wesmo! read
+hosts/paths/methods/schemas/app tokens/refresh/device keys/integrity unknown. Do not probe guessed paths due to missing clients.
 
-## 8. read/write隔離
+## 8. Read/write isolation
 
-- allowlistは観測済みのpoint balance/history/expiry、Wesmo! balance/history list/detailだけ。
-- J-WEST card、ICOCA/e5489は別collectorへrouteし、本sourceのsessionで辿らない。
-- point use/exchange/ICOCA charge、Wesmo! pay/charge/send/receive/withdraw、bank/card登録、eKYC、limit設定をdeny。
-- booking/purchase/cancel、profile、email/phone/passkey/biometric設定、退会をdeny。
-- login bootstrap POSTは本人操作の別境界。collectorに汎用POST、任意URL、deep link/intent、write scope tokenを持たせない。
-- host/path/method/query/content-type/schemaとredirect先を固定。GETでも副作用が疑われるrouteはdenyする。
-- raw response/token/ID/card/ICOCA/phone/merchant/counterparty/実額をlog、trace、crash dump、CI artifactへ出さない。
-- 401/403/409/429、Akamai challenge、OTP/passkey/recovery、unknown redirect、schema/app version drift、
-  device/integrity要求、PII redaction失敗で停止。
+- Only observed points balances/history/expiry, Wesmo! balances/history lists-details allowlisted.
+- J-WEST/ICOCA-e5489 separate collectors, not followed with this session.
+- Deny points use-exchange-ICOCA top-up, Wesmo! pay/top-up/send-receive-withdraw, bank/card registration/eKYC/limits.
+- Deny booking/purchase/cancellation/profile/email-phone-passkey-biometric settings/termination.
+- Login POST separate owner bootstrap; no generic POST/arbitrary URLs/deep links-intents/write tokens in collectors.
+- Fix hosts/paths/methods/queries/content-types/schemas/redirects; deny suspected side effects even on GET.
+- No raw responses/tokens/IDs/cards/ICOCA/phones/merchants/counterparties/actual amounts in logs/traces/dumps/CI.
+- Stop 401/403/409/429/Akamai challenges/OTP-passkeys-recovery/unknown redirects/schema-app drift/
+  device-integrity requirements/PII redaction failures.
 
-## 9. Runtime適性
+## 9. Runtime suitability
 
-| runtime               | 適性             | 判断                                                                           |
-| --------------------- | ---------------- | ------------------------------------------------------------------------------ |
-| owner browser/device  | 最適             | passkey/OTP/電話発信bootstrap、official UI確認、redacted observation           |
-| Local WSL             | 適               | public JS/APK static analysis、sanitized DOM/schema parser                     |
-| Cloudflare Workers    | 低〜条件付き     | proven GET/token replayなら軽量。WebAuthn/Akamai/device bindingは不向き        |
-| Cloudflare Containers | 条件付き         | browser/parserを隔離可能だがAndroid device trustは提供しない                   |
-| OCI container         | 条件付き         | digest固定、secret store、read-only FS、egress allowlistでreplay候補を試験可能 |
-| Kubernetes            | 過剰             | CronJob/Secret/NetworkPolicyは可能だが単一会員collectorには運用cost過大        |
-| Android実機           | Wesmo!調査に必須 | 正規app/device state。定常UI automationは更新とwrite UI隣接で脆い              |
+| Runtime               | Suitability               | Assessment                                                                     |
+| --------------------- | ------------------------- | ------------------------------------------------------------------------------ |
+| Owner browser/device  | Best                      | Passkeys/OTP/outgoing calls/bootstrap/official UI/redacted observation         |
+| Local WSL             | Suitable                  | Public JS/APK static analysis/sanitized DOM-schema parsers                     |
+| Cloudflare Workers    | Low to conditional        | Proven GET-token replay lightweight, unsuitable WebAuthn/Akamai/device binding |
+| Cloudflare Containers | Conditional               | Browser/parser isolation, no Android trust                                     |
+| OCI container         | Conditional               | Replay tests with digest pinning/secrets/read-only FS/egress allowlists        |
+| Kubernetes            | Excessive                 | CronJob/Secret/NetworkPolicy, excessive operations for one member              |
+| Physical Android      | Essential Wesmo! research | Legitimate state; routine UI fragile from updates/adjacent writes              |
 
-Workersへcredential/bootstrapを移さず、owner deviceで得たsource-scoped、短命、read-only相当sessionのrenewabilityが
-実証された場合だけ検討する。full browserはContainers/OCI、app-only transportはAndroidを調査用に使い、K8sは
-複数sourceを運用する段階まで採用しない。
+Do not move credentials/bootstrap to Workers; consider only demonstrated renewal of source-scoped short-lived
+read-only-equivalent owner-device sessions. Containers/OCI for full browsers, Android for app-only research;
+defer K8s until multiple sources.
 
-## 10. PR #5共通 A-E / cost
+## 10. PR #5 common A-E / cost
 
 - A: direct documented/export API suitable for scheduled headless use
 - B: stable read-only internal API with renewable/reusable session
 - C: browser/app bootstrap + headless replay plausible
 - D: full browser/device automation probably required
 - E: manual capture remains safe default
-- Cost: 1 = small wrapper、5 = device-bound/adversarial
+- Cost: 1 = small wrapper, 5 = device-bound/adversarial
 
-| route                                       |     Level | Cost | 判定                                                        |
-| ------------------------------------------- | --------: | ---: | ----------------------------------------------------------- |
-| WESTER portal/appのmanual sanitized capture |         E |  1-2 | 安全。履歴保持/exportは未確認                               |
-| Wesmo! app manual balance/history capture   |         E |    2 | official primary、残高bucketを保持。外部export未確認        |
-| WESTER browser bootstrap + read replay      |     C候補 |    4 | 公開login transportは確認、read API/session renewalは未確認 |
-| WESTER app bootstrap + API replay           |     C候補 |    5 | APK/host/token/device metadata未確認                        |
-| Wesmo! app bootstrap + API replay           |     C候補 |    5 | 多要素・電話発信・別device再認証・device binding            |
-| full app UI automation                      |         D |    5 | write control隣接、app更新、端末認証で脆い                  |
-| documented consumer/export API              | A該当なし |    5 | 公開公式API/CSV/PDF exportを確認できず                      |
+| Route                                      |       Level | Cost | Assessment                                                |
+| ------------------------------------------ | ----------: | ---: | --------------------------------------------------------- |
+| WESTER portal/app manual sanitized capture |           E |  1-2 | Safe, retention/exports unknown                           |
+| Wesmo! manual balance/history              |           E |    2 | Official primary, retain buckets; external export unknown |
+| WESTER browser bootstrap + read replay     | C candidate |    4 | Public login transport established; reads/renewal unknown |
+| WESTER app bootstrap + API replay          | C candidate |    5 | APK/hosts/tokens/device metadata unknown                  |
+| Wesmo! app bootstrap + API replay          | C candidate |    5 | MFA/outgoing calls/other-device reauth/device binding     |
+| Full app UI automation                     |           D |    5 | Adjacent writes/app updates/device authentication fragile |
+| Documented consumer/export API             |  No A route |    5 | No public official API/CSV-PDF export established         |
 
-総合は **D/cost 5**、安全な既定は **E/cost 1-2**。WESTER Webで安定したread endpointとrenewable scoped sessionが
-実証されればCからB候補へ、Wesmo!はdevice/integrity非依存が確認できるまでC候補に留める。
+Overall **D/cost 5**; safe default **E/cost 1-2**. Stable WESTER reads/renewable scoped sessions could promote
+C to B candidate; Wesmo! remains C candidate until device/integrity independence verified.
 
-## 11. read-only live検証 / stop条件
+## 11. Read-only live verification / stop conditions
 
-1. 公式domain/package/version/signer、login RP/OTP/電話認証triggerだけを確認。秘密は本人入力し、保存しない。
-2. WESTER portalで3種のbalance、lot別expiry、履歴列、最古日、期間filter、件数、pagination、detail、CSV/PDF controlを確認。
-3. WESTER appは同一pointの表示差とICOCA convenience viewだけ確認。point利用、coupon、campaign entry、予約へ進まない。
-4. Wesmo!で出金可/不可bucket、history type/status/timestamp、最古日、件数、pagination、detail、exportを確認。
-5. 既存の送金link/取消/返金/失敗が自然に存在する場合だけstatus名を読む。新しいeventを作らない。
-6. J-WEST card明細はbrand別source、ICOCAはICOCA sourceで確認し、WESTER point eventとの重複keyだけ設計する。
-7. 正規split APKと公開JSを静的解析し、read/write host/path/token/device/integrity metadataを別表化。
-8. 本人が既存残高/履歴を開く1回だけredacted network metadataを観測。unknown/write候補で停止。
-9. replay候補は同一device/local hostで各1回。401/403/429やdevice/integrity bindingならcloud化を中止しmanualへ戻す。
+1. Check only official domains/packages/versions/signers/login RP/OTP-phone triggers; owner enters secrets, no storage.
+2. Portal: three balance types/lot expiry/history columns/oldest dates/filters/counts/pagination/details/CSV-PDF controls.
+3. App: same-point display differences/ICOCA convenience views only, no points use/coupons/campaign entry/reservations.
+4. Wesmo!: withdrawable/non-withdrawable buckets/history types-statuses-timestamps/oldest dates/counts/pagination/details/exports.
+5. Only naturally existing transfer links/cancellations/refunds/failures status names; no new events.
+6. J-WEST statements through brand sources, ICOCA through ICOCA; design only deduplication keys with points events.
+7. Statically analyze legitimate splits/public JS, separately tabulating read-write hosts/paths/tokens/device-integrity.
+8. One owner-operated existing balance/history network metadata observation; stop at unknown/write candidates.
+9. Replay candidates once each on same device/local host; 401/403/429 or device-integrity binding → abandon cloud, manual.
 
-stop: 支払/charge/send/receive/withdraw/point-use/ICOCA-charge/booking/cancel、bank/card/eKYC/profile設定、
-OTP/passkey/recovery、電話発信要求、Bot challenge、pinning/attestation、unknown host/path/redirect、
-POST/PUT/PATCH/DELETE（本人login bootstrap以外）、401/403/409/429、account lock、PII redaction失敗、schema drift。
-security controlを無効化しない。
+Stop payment/top-up/send-receive-withdraw/points-use/ICOCA-top-up/booking-cancellation/bank-card-eKYC-profile
+settings/OTP-passkeys-recovery/outgoing-call requests/Bot challenges/pinning-attestation/unknown hosts-paths-
+redirects/POST-PUT-PATCH-DELETE (except owner bootstrap)/HTTP 401, 403, 409 or 429/locks/PII failures/schema drift.
+Do not disable security controls.
 
-## 12. 事実・推測・未確認
+## 12. Facts, hypotheses, and unverified items
 
-**確認事実:** point 3種と期限、Wesmo!残高2種と残高/履歴画面、送金link/requestの期限・取消state、Wesmo!多要素・
-電話発信認証・別device再認証、WESTER WebAuthn RPとlogin POST、Akamai edge、J-WEST issuer境界、ICOCA別履歴期間/export、
-公開read client不在。
+**Established facts:** Three points types/expiry; two Wesmo! balances/history screens; transfer-request link
+expiry/cancellation states; Wesmo! MFA/outgoing calls/other-device reauth; WebAuthn RP/login POST; Akamai;
+J-WEST issuer boundaries; separate ICOCA retention/exports; no public read clients.
 
-**推測:** WESTER/Wesmo! app内部にはbalance/historyのstructured read transportとpaginationがある。Bitwarden passkeyは
-WESTER Webの候補providerになり得る。公開login sessionをaccount readへ安全にreplayできる可能性はあるが未実証。
+**Hypotheses:** Internal WESTER/Wesmo! structured balance/history reads/pagination. Bitwarden candidate
+WESTER Web provider; public login sessions may replay safely into reads, unproven.
 
-**未確認:** WESTER通常/限定point履歴の期間・件数・export、Wesmo!履歴期間/件数/exportと全status、point/wallet APIの
-host/path/schema/pagination、token renewal/revocation、device key/pinning/integrity、Bitwarden credential実適合、
-WESTER appとportalのschema一致、event間のdedupe key、Cloudflare/OCI replay適性。
+**Unverified:** Ordinary/limited points retention/counts/exports; Wesmo! periods/counts/exports/all statuses;
+points-wallet hosts/paths/schemas/pagination/token renewal-revocation/device keys/pinning-integrity/Bitwarden
+compatibility/app-portal schema consistency/event deduplication keys/Cloudflare-OCI replay suitability.
