@@ -768,6 +768,56 @@ describe.if(runnable)("operator schedule administration", () => {
     }
   }, 30000);
 
+  test("a retry after JST midnight re-sends the first send's window under the same key", async () => {
+    let fail = true;
+    collectionResponse = async () =>
+      fail
+        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        : Response.json(
+            { operationId: `op_${"c".repeat(64)}`, status: "accepted" },
+            { status: 202 },
+          );
+    const page = await browser.newPage();
+    try {
+      // 23:59 JST on 2026-11-08.
+      await page.clock.setFixedTime(new Date("2026-11-08T14:59:00Z"));
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      // 00:01 JST on 2026-11-09: the retry is still the same payload.
+      await page.clock.setFixedTime(new Date("2026-11-08T15:01:00Z"));
+      fail = false;
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText(`依頼ID op_${"c".repeat(64)}`, { exact: false }).waitFor();
+      expect(collections).toHaveLength(2);
+      expect(collections[0]!.body["requestedScope"]).toEqual({
+        from: "2026-11-08",
+        to: "2026-11-08",
+      });
+      expect(collections[1]!.body).toEqual(collections[0]!.body);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
+  test("a refused request says it was not stored instead of offering a retry", async () => {
+    collectionResponse = async () =>
+      Response.json({ error: "method_not_allowed" }, { status: 405 });
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("保存されていません（method_not_allowed）", { exact: false }).waitFor();
+      expect(await card.getByText("同じ依頼として扱われます", { exact: false }).count()).toBe(0);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
   test("a connection the Processor would not start offers no request", async () => {
     const page = await browser.newPage();
     try {

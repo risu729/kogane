@@ -168,11 +168,13 @@ page and one from an MCP client are the same kind of stored operation.
   cannot be taken back. **依頼を送信** sends the request; **やめる** sends
   nothing.
 - **The request.** `{source, requestedScope: {from, to}, idempotencyKey}`:
-  the window is today's date in Japan (stored, not applied: the collector runs
-  its daily scope), and the key is `ui-collect-<uuid>`, new for each
-  confirmation. A retry after a failed or lost answer reuses the key, so it is
-  the same operation; a new confirmation is a new request. The answer shows
-  the operation id.
+  the window is the date in Japan of the confirmation's first send (stored,
+  not applied: the collector runs its daily scope), and the key is
+  `ui-collect-<uuid>`, new for each confirmation. A retry after a failed or
+  lost answer reuses the key and the window, so it is the same payload and the
+  same operation even after midnight; a new confirmation is a new request. A
+  4xx answer other than 408 or 429 is shown as refused and not stored, with
+  its code. The answer shows the operation id.
 - **Following it.** The page does not read the operation yet. The request's
   trail is `GET /api/ops/v1/operations/{id}`, and a finished run appears in
   **取得履歴** like an alarm run.

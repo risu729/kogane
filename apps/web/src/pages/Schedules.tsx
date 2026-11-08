@@ -120,6 +120,10 @@ function requestFailure(error: unknown): string {
     if (error.status === 0)
       return "接続できませんでした。依頼が保存されたか分からないため、もう一度送信してください（同じ依頼として扱われます）。";
     if (error.code === "target_missing") return "この出典は依頼の対象として登録されていません。";
+    // Every other 4xx is refused before anything is stored: a re-send under
+    // the same key is refused the same way, so it is not offered as a retry.
+    if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429)
+      return `依頼は受け付けられず、保存されていません（${error.code ?? `HTTP ${error.status}`}）。`;
   }
   return "依頼を保存できたか確認できません。もう一度送信してください（同じ依頼として扱われます）。";
 }
@@ -137,20 +141,25 @@ function CollectionRequest({
   lease: ScheduleSnapshot["leases"][number] | undefined;
 }): ReactNode {
   // One key per confirmation: a retry after a lost answer is the same request.
-  const [key, setKey] = useState<string | null>(null),
+  // The window's date is fixed by the first send under that key, so a retry
+  // after JST midnight re-sends the same payload instead of meeting
+  // `idempotency_conflict`.
+  const [pending, setPending] = useState<{ key: string; at: Date | null } | null>(null),
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState("");
   const sending = useRef(false);
   const target = value.collectionRequest;
   if (!target) return null;
   async function send() {
-    if (sending.current || key === null || !target) return;
+    if (sending.current || pending === null || !target) return;
     sending.current = true;
+    const at = pending.at ?? new Date();
+    setPending({ key: pending.key, at });
     setBusy(true);
     setMessage("");
     try {
-      const accepted = await postCollectionRequest(target.source, key);
-      setKey(null);
+      const accepted = await postCollectionRequest(target.source, pending.key, at);
+      setPending(null);
       setMessage(
         `依頼を受け付けました（依頼ID ${accepted.operationId}）。保存・解析処理の次回実行で収集を始めます。メンテナンス中や前の実行中は終わるまで待ちます。結果は取得履歴に表示されます。`,
       );
@@ -166,13 +175,13 @@ function CollectionRequest({
       <h3>収集を依頼</h3>
       {target.dispatch !== "enabled" ? (
         <p>{DISPATCH_OFF[target.dispatch]}</p>
-      ) : key === null ? (
+      ) : pending === null ? (
         <button
           type="button"
           className="button"
           onClick={() => {
             setMessage("");
-            setKey(collectionRequestKey());
+            setPending({ key: collectionRequestKey(), at: null });
           }}
         >
           収集を依頼
@@ -210,7 +219,7 @@ function CollectionRequest({
               className="button"
               disabled={busy}
               onClick={() => {
-                setKey(null);
+                setPending(null);
                 setMessage("");
               }}
             >
