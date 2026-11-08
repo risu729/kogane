@@ -5,6 +5,7 @@ import type { Database } from "bun:sqlite";
 import { coreDatabase, sqliteD1 } from "../../storage-d1/test/sqlite.ts";
 import { CORE_MIGRATIONS_URL, migrationSql } from "../../storage-d1/src/migrations.ts";
 import { snapshotCtes } from "../../../packages/parsers/src/snapshot-query.ts";
+import { PARSERS } from "../../parsers/src/parsers/registry.ts";
 
 const MIGRATION = "0084_csv_reader_release_snapshot_policies.sql";
 const POLICIES = [
@@ -26,6 +27,13 @@ const POLICIES = [
     source: "prestia",
     dataset: "prestia-bank-balance-html",
     parser: "prestia-bank-balances",
+    old: "1.0.0",
+    current: "1.0.1",
+  },
+  {
+    source: "st-george",
+    dataset: "account-snapshot",
+    parser: "st-george-balances",
     old: "1.0.0",
     current: "1.0.1",
   },
@@ -143,6 +151,22 @@ test("migration admits each equivalent current snapshot and preserves every old 
     await db.prepare("SELECT * FROM dataset_snapshot_policies ORDER BY parser_name,dataset").all()
   ).results;
   await applyMigration();
+  // Every exact pin must name a reader this build deploys, including policies
+  // outside the examples above. A later shared release must satisfy this too.
+  for (const row of (
+    await db
+      .prepare(
+        "SELECT parser_name,required_parser_version FROM dataset_snapshot_policies WHERE required_parser_version IS NOT NULL",
+      )
+      .all<{ parser_name: string; required_parser_version: string }>()
+  ).results)
+    expect(
+      PARSERS.some(
+        (parser) =>
+          parser.name === row.parser_name && parser.version === row.required_parser_version,
+      ),
+      `${row.parser_name}@${row.required_parser_version}`,
+    ).toBe(true);
   expect(await snapshots()).toEqual(
     POLICIES.map((p) => ({ parser_name: p.parser, required_version: p.current })).sort((a, b) =>
       a.parser_name.localeCompare(b.parser_name),
