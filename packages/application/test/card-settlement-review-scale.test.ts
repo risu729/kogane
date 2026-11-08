@@ -50,6 +50,7 @@ import type {
   CardSettlementStatementPage,
 } from "../../domain/src/card-settlement-review.ts";
 import { LEGACY_CARD_SETTLEMENT_STATEMENT_GROUP_SQL } from "./card-settlement-statement-group-legacy-sql.ts";
+import { LEGACY_CARD_SETTLEMENT_STATEMENT_OLDER_SQL } from "./card-settlement-statement-older-legacy-sql.ts";
 import {
   LEGACY_CARD_OWNERSHIP_CANDIDATE_SQL,
   LEGACY_CARD_SETTLEMENT_PLAN_SQL,
@@ -248,6 +249,48 @@ async function expectLeads(page: {
       if (searched) expect(group.leadSearch).toBe("found");
     } else expect(first).toEqual(all[0]);
   }
+}
+
+/**
+ * The keyed passes over every statement of the store, from the oldest of each
+ * window and then from the last candidate each pass returned for a statement
+ * whose pass was full, against the frozen positional passes
+ * (card-settlement-statement-older-legacy-sql.ts), pass for pass, with no
+ * decision recorded between them. Returns the number of passes.
+ */
+function expectKeyedPassesEqualPositional(limit: number): number {
+  const per = CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT;
+  let searching = db
+    .query(
+      `SELECT statement_key,created_at,id FROM (
+        SELECT statement_key,created_at,id,
+         row_number() OVER (PARTITION BY statement_key ORDER BY created_at DESC,id DESC) AS position
+        FROM card_settlement_candidates) WHERE position=?1 ORDER BY statement_key`,
+    )
+    .values(per) as [string, string, string][];
+  let pass = 0;
+  while (searching.length > 0) {
+    const keyed = rows(CARD_SETTLEMENT_STATEMENT_OLDER_SQL, [JSON.stringify(searching), limit]) as {
+      id: string;
+      created_at: string;
+      statement_key: string;
+    }[];
+    expect(keyed as unknown[]).toEqual(
+      rows(LEGACY_CARD_SETTLEMENT_STATEMENT_OLDER_SQL, [
+        JSON.stringify(searching.map(([key]) => key)),
+        per,
+        pass * limit,
+        limit,
+      ]),
+    );
+    searching = searching.flatMap(([key]): [string, string, string][] => {
+      const own = keyed.filter((row) => row.statement_key === key);
+      const last = own.at(-1);
+      return own.length === limit && last !== undefined ? [[key, last.created_at, last.id]] : [];
+    });
+    pass += 1;
+  }
+  return pass;
 }
 
 describe("card settlement readiness reads on a scaled store without statistics", () => {
@@ -515,6 +558,9 @@ describe("card settlement readiness reads on a scaled store without statistics",
           CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS,
         );
         await expectLeads(fresh);
+        // The keyed passes return the positional ones' rows, pass for pass.
+        expect(expectKeyedPassesEqualPositional(CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS)).toBe(2);
+        expect(expectKeyedPassesEqualPositional(7)).toBeGreaterThan(2);
 
         // Rejected: no candidate of the statement is ready, the newest leads
         // as before, and the search ends once a pass is short.
@@ -533,7 +579,7 @@ describe("card settlement readiness reads on a scaled store without statistics",
         moved = fresh.statements.find((entry) => entry.statementKey === group.statementKey)!;
         expect(moved.candidates.some(decidableReview)).toBe(false);
         const eligibleOlder = (
-          rows(`SELECT count(*) AS n FROM (${CARD_SETTLEMENT_STATEMENT_OLDER_SQL})`, [
+          rows(`SELECT count(*) AS n FROM (${LEGACY_CARD_SETTLEMENT_STATEMENT_OLDER_SQL})`, [
             JSON.stringify([group.statementKey]),
             CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT,
             0,
@@ -560,6 +606,11 @@ describe("card settlement readiness reads on a scaled store without statistics",
         fresh = await everyPage(read.executor);
         legacy = await everyPage(executor(true));
         expect(read.count()).toBe(
+          CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED / CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS,
+        );
+        expect(
+          expectKeyedPassesEqualPositional(CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS),
+        ).toBeGreaterThan(
           CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED / CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS,
         );
         expect(fresh.statements.map((entry) => entry.statementKey)).toEqual(
@@ -756,6 +807,15 @@ describe("card settlement readiness reads on a scaled store without statistics",
         statement_key: string;
       }
     ).statement_key;
+    // A keyed pass continues after the oldest of the statement's window.
+    const cursor = JSON.stringify([
+      db
+        .query(
+          `SELECT statement_key,created_at,id FROM card_settlement_candidates WHERE statement_key=?1
+           ORDER BY created_at DESC,id DESC LIMIT 1 OFFSET ?2`,
+        )
+        .values(key, CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT - 1)[0],
+    ]);
     // The grouped reads: the statement page orders every candidate
     // (`statement_page`), the group and one statement's list reach theirs by key.
     for (const [sql, args, allowed] of [
@@ -763,12 +823,38 @@ describe("card settlement readiness reads on a scaled store without statistics",
       [CARD_SETTLEMENT_STATEMENT_GROUP_SQL, [JSON.stringify([key]), 5], []],
       [
         CARD_SETTLEMENT_STATEMENT_OLDER_SQL,
-        [JSON.stringify([key]), 5, 0, CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS],
+        [cursor, CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS],
         [],
       ],
       [CARD_SETTLEMENT_STATEMENT_REVIEWS_SQL, [key, 51, 0], []],
     ] as const)
       expect(statementPlanProblems(explain(db, sql, args), [...allowed])).toEqual([]);
+    // A keyed pass finds the statement's candidates by key and filters them by
+    // the cursor: no index holds (statement_key, created_at, id), so the
+    // cursor narrows no index range and the pass sorts the candidates it keeps
+    // (docs/card-settlements.md, Cost).
+    const older = explain(db, CARD_SETTLEMENT_STATEMENT_OLDER_SQL, [
+      cursor,
+      CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS,
+    ]).map((step) => step.detail);
+    expect(older).toContain(
+      "SEARCH c USING INDEX card_settlement_candidates_statement (statement_key=?)",
+    );
+    expect(older.filter((step) => /\bcreated_at\b/u.test(step))).toEqual([]);
+    const indexes = (
+      db.query("PRAGMA index_list(card_settlement_candidates)").all() as { name: string }[]
+    ).map(({ name }) => [
+      name,
+      (
+        db.query(`PRAGMA index_info(${JSON.stringify(name)})`).all() as { name: string | null }[]
+      ).map((column) => column.name),
+    ]);
+    expect(
+      indexes.filter(
+        ([, columns]) => columns![0] === "statement_key" && columns![1] === "created_at",
+      ),
+    ).toEqual([]);
+    expect(indexes).toContainEqual(["card_settlement_candidates_statement", ["statement_key"]]);
     for (const [sql, legacy, args, allowed] of reads) {
       // The list orders every candidate to choose its page (`review_page`);
       // nothing else is read whole.

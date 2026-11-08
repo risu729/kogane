@@ -59,13 +59,31 @@ ready candidate to the newest copy.
    would grow with the history, bounded only by D1's per-invocation query
    and time limits.
 
+How the passes continue, for options 4 and 5:
+
+- **By position** (as this ADR first shipped): each pass skips the
+  candidates earlier passes judged by count (`OFFSET`). The passes are
+  separate reads, and the count is taken over candidates no decision names,
+  so a decision recorded between two passes on a candidate already judged
+  moves every later candidate up one place and the next pass skips one: that
+  page load could say `none_ready`, or lead with an older ready candidate
+  than the newest.
+- **By key**: each pass continues after the last candidate the statement's
+  window or previous pass judged, `(created_at, id)` in the lists'
+  `created_at DESC, id DESC` order. A decision on a judged candidate moves
+  nothing past the cursor. It costs no more reads, and on a store no
+  decision changes during the load the passes judge the same candidates.
+
 ## Decision
 
-Option 5. A statement leads with its accepted candidate, else the newest
+Option 5, its passes continuing by key. A statement leads with its accepted
+candidate, else the newest
 proposed candidate with no acceptance blocker among its five newest and the
 older candidates the search judged, else its newest candidate. The search
-reads `CARD_SETTLEMENT_STATEMENT_OLDER_SQL` (the statements still searching,
-the window size, the candidates passed and the pass size, 50), judges the
+reads `CARD_SETTLEMENT_STATEMENT_OLDER_SQL` (a cursor per statement still
+searching, `[statement_key, created_at, id]`, and the pass size, 50): the
+first pass of a statement continues after the oldest of its five newest, each
+later one after the last candidate its previous pass returned. It judges the
 rows with the same readiness CTEs and review mapping as every list, and stops
 a statement at its first ready candidate, at a pass shorter than 50, or after
 `CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED` (200, four passes) of its older
@@ -75,8 +93,7 @@ candidates and leads; the others follow newest first as before.
 Each group says how far its lead was looked for, `leadSearch`, a closed code
 (`CARD_SETTLEMENT_LEAD_SEARCHES`): `not_searched` (the five newest hold an
 acceptance or a ready candidate, or there is no older candidate), `found`,
-`none_ready` (every older candidate that could be ready was judged; none is;
-see the limit under Consequences),
+`none_ready` (every older candidate that could be ready was judged; none is),
 or `truncated` (the search judged 200 without finding one and stopped; a full
 last pass does not read whether more follow, so a statement with exactly 200
 is `truncated` too). `truncated` is unknown, never "none ready" (INV05): the
@@ -110,25 +127,30 @@ read of the grouped list (ADR 0081) show the same lead.
   carries both fields and should describe the older ready lead.
 - Cost: no change for a statement its newest candidates decide. Otherwise at
   most four more keyed reads per page load: a pass is one read for all the
-  page's statements still searching (their keys as one JSON array), judging
-  at most 50 older candidates of each. A page of ten statements therefore
-  makes at most eight reads (the statement page, the window, four passes,
-  the decision history and the debit-account evidence), and the search
-  judges at most 10 × 200 = 2,000 older candidates, beside the window's five
-  newest and accepted ones per statement. Each pass reaches every candidate
-  of the statements it searches through `card_settlement_candidates_statement`
-  to rank them, as the shipped window read does once, so the ranking still
-  grows with the history, up to five times the window read's
-  (docs/card-settlements.md, Cost).
-- The passes are separate reads that page by position, not one snapshot. A
-  decision recorded, between two passes, on an older candidate an earlier
-  pass judged moves the later candidates up one place, so the next pass can
-  skip one: that page load can then say `none_ready`, or lead with an older
-  ready candidate than the newest one. The next load reads again, and the
-  statement's full list judges every candidate. A new candidate moves them
-  down one place at most, so a pass then judges one again and skips none.
-  This is an open limit: `none_ready` is exact only when no such decision
-  lands during the page load.
+  page's statements still searching (their cursors as one JSON array),
+  judging at most 50 older candidates of each. A page of ten statements
+  therefore makes at most eight reads (the statement page, the window, four
+  passes, the decision history and the debit-account evidence), and the
+  search judges at most 10 × 200 = 2,000 older candidates, beside the
+  window's five newest and accepted ones per statement. Each pass reaches
+  every candidate of the statements it searches through
+  `card_settlement_candidates_statement`, keeps those older than the cursor
+  and ranks them, so the read still grows with the history, up to five times
+  the window read's (docs/card-settlements.md, Cost). No index holds
+  `(statement_key, created_at, id)`: that index is `statement_key` alone, so
+  the cursor filters the rows the key finds instead of starting an index
+  range, and the pass sorts what it keeps. An index on those three columns
+  would let the cursor start a range; it needs a migration and is not added
+  here.
+- The passes are separate reads, not one snapshot, and continue by key. A
+  decision recorded between two passes on a candidate an earlier pass judged
+  moves no later candidate past the next pass, so it skips none. A decision
+  on a candidate not yet judged takes it out of the search, as a later load
+  would. A candidate created during the load, with the newest creation time,
+  sorts before every cursor and is not judged until the next load, which
+  judges it in its window. So
+  `none_ready` says that every older candidate that could be ready when its
+  pass read it was judged and none was ready.
 - A malformed older candidate the search judges before finding a ready one is
   an unavailable answer (`card_settlement_facts_invalid`), as a malformed
   candidate of the window already is.
@@ -139,7 +161,13 @@ read of the grouped list (ADR 0081) show the same lead.
   failing case above now leads with the ready candidate; the grouped read's
   rows equal the frozen shipped text's
   (`card-settlement-statement-group-legacy-sql.ts`, digest-pinned in
-  `card-settlement-statements.test.ts`); every page equals the shipped list's
+  `card-settlement-statements.test.ts`); the keyed passes return the rows of
+  the positional search as first shipped
+  (`card-settlement-statement-older-legacy-sql.ts`, digest-pinned), pass for
+  pass, with no decision between them; a rejection recorded between the first
+  and second pass on a candidate the first judged no longer skips the ready
+  candidate the second starts with (the positional search fails this check);
+  every page equals the shipped list's
   where no lead changes; with five, then sixty-five, synthetic newer stale
   candidates only that statement's lead changes, to the newest ready
   candidate its full list holds (one pass, then two, `found`); after the
@@ -148,12 +176,17 @@ read of the grouped list (ADR 0081) show the same lead.
   the limit, the search stops after four reads, the lead is the shipped one
   and only `leadSearch` differs (`truncated`); every statement's lead and
   code are checked against its full list; the search's plan reads nothing
-  whole without table statistics.
+  whole without table statistics, finds the candidates by
+  `card_settlement_candidates_statement`, and no index of the table starts
+  with `(statement_key, created_at)`.
 - `packages/application/test/card-settlement-statements.test.ts`: on random
   stores with synthetic history (owners and accounts drawn otherwise,
-  rejected candidates, tied creation times) the search chooses exactly the
-  candidates a TypeScript reference chooses for windows of 1, 2 and 5 and
-  several passes, and the grouped read equals the frozen text. A scripted
+  rejected candidates, tied creation times) the positional search chooses
+  exactly the candidates a TypeScript reference chooses for windows of 1, 2
+  and 5 and several passes, the keyed passes return its rows pass for pass
+  for pass sizes 50, 3, 2 and 1, joined they are each statement's candidates
+  as they were before a rejection recorded after every pass, and the grouped
+  read equals the frozen text. A scripted
   store checks the loop: only undecided statements are searched, one read a
   pass for the statements still searching, never more than four, and each
   of the four codes, including a ready candidate on the last pass judged

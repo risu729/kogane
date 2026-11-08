@@ -321,33 +321,33 @@ export const CARD_SETTLEMENT_STATEMENT_GROUP_SQL = reviewsSql(
   ",c.statement_key",
 );
 /**
- * The older candidates the grouped list judges, at most `?4` per statement and
+ * The older candidates the grouped list judges, at most `?2` per statement and
  * pass, for a statement whose newest candidates hold no acceptance and none
- * ready to accept (ADR 0089): of each statement `?1` (a JSON array of statement
- * keys), the candidates after its `?2` newest that no decision names and whose
- * facts claim the same established owner and both accounts, newest first,
- * after the `?3` such ones earlier passes judged. A candidate any decision
- * names is accepted, rejected or withdrawn (migration 0044 allows no other
- * status), so it is not proposed; and `cardSettlementEligible` requires the
- * three facts terms, so a candidate the terms leave out has an acceptance
- * blocker. Each statement's candidates are found by
- * `card_settlement_candidates_statement`.
+ * ready to accept (ADR 0089). `?1` is a JSON array of
+ * `[statement_key, created_at, id]` cursors, one per statement still
+ * searching: the last candidate the statement's window or its previous pass
+ * judged. Of each statement, the candidates after its cursor in the lists'
+ * `created_at DESC, id DESC` order that no decision names and whose facts claim
+ * the same established owner and both accounts, newest first. A candidate any
+ * decision names is accepted, rejected or withdrawn (migration 0044 allows no
+ * other status), so it is not proposed; and `cardSettlementEligible` requires
+ * the three facts terms, so a candidate the terms leave out has an acceptance
+ * blocker. The pass continues by key, not by position, so a decision recorded
+ * between two passes on a candidate already judged moves no later candidate
+ * past the next pass. Each statement's candidates are found by
+ * `card_settlement_candidates_statement`, which holds `statement_key` alone:
+ * the cursor filters the statement's candidates; no index orders them.
  */
 export const CARD_SETTLEMENT_STATEMENT_OLDER_SQL = reviewsSql(
   `SELECT id FROM (
-  SELECT candidate_id AS id,
-   row_number() OVER (PARTITION BY candidate_key ORDER BY candidate_created_at DESC,candidate_id DESC) AS older
-  FROM (
-   SELECT c.id AS candidate_id,c.statement_key AS candidate_key,c.created_at AS candidate_created_at,
-    c.facts_json AS candidate_facts,
-    row_number() OVER (PARTITION BY c.statement_key ORDER BY c.created_at DESC,c.id DESC) AS position
-   FROM json_each(?1) page JOIN card_settlement_candidates c ON c.statement_key=page.value
-  ) WHERE position>?2
-  AND NOT EXISTS(SELECT 1 FROM card_settlement_decisions d WHERE d.proposal_id=candidate_id)
-  AND json_extract(candidate_facts,'$.ownership')='established-same'
-  AND json_extract(candidate_facts,'$.statement.accountId') IS NOT NULL
-  AND json_extract(candidate_facts,'$.bankDebit.accountId') IS NOT NULL
- ) WHERE older>?3 AND older<=?3+?4`,
+  SELECT c.id,row_number() OVER (PARTITION BY c.statement_key ORDER BY c.created_at DESC,c.id DESC) AS older
+  FROM json_each(?1) page JOIN card_settlement_candidates c ON c.statement_key=json_extract(page.value,'$[0]')
+  WHERE (c.created_at,c.id)<(json_extract(page.value,'$[1]'),json_extract(page.value,'$[2]'))
+  AND NOT EXISTS(SELECT 1 FROM card_settlement_decisions d WHERE d.proposal_id=c.id)
+  AND json_extract(c.facts_json,'$.ownership')='established-same'
+  AND json_extract(c.facts_json,'$.statement.accountId') IS NOT NULL
+  AND json_extract(c.facts_json,'$.bankDebit.accountId') IS NOT NULL
+ ) WHERE older<=?2`,
   ",c.statement_key",
 );
 
@@ -464,10 +464,18 @@ const decidable = (candidate: CardSettlementReview): boolean =>
   candidate.status === "accepted" ||
   (candidate.status === "proposed" && candidate.acceptanceBlockers.length === 0);
 
+/** Where a statement's search continues: after this candidate, newest first. */
+interface OlderCursor {
+  key: string;
+  createdAt: string;
+  id: string;
+}
+
 /**
- * The newest ready candidate of each statement `keys` names among its
- * candidates older than the judged window, judged
- * `CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS` at a time, newest first; a
+ * The newest ready candidate of each statement `start` names among its
+ * candidates older than its cursor (the oldest of the judged window), judged
+ * `CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS` at a time, newest first, each
+ * pass continuing after the last candidate the previous one judged; a
  * statement leaves the search at its first ready candidate or once a pass
  * returns fewer than a full pass of its candidates. Only candidates no
  * decision names and whose facts could be eligible are judged
@@ -477,23 +485,21 @@ const decidable = (candidate: CardSettlementReview): boolean =>
  */
 async function olderReadyCandidates(
   sql: SqlExecutor,
-  keys: string[],
+  start: OlderCursor[],
 ): Promise<{ found: Map<string, CardSettlementReview>; truncated: Set<string> }> {
   const found = new Map<string, CardSettlementReview>();
-  let searching = keys;
+  let searching = start;
   for (
     let passed = 0;
     searching.length > 0 && passed < CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED;
     passed += CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS
   ) {
     const rows = await sql.all<ReviewRow>(CARD_SETTLEMENT_STATEMENT_OLDER_SQL, [
-      JSON.stringify(searching),
-      CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT,
-      passed,
+      JSON.stringify(searching.map((cursor) => [cursor.key, cursor.createdAt, cursor.id])),
       CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS,
     ]);
-    const next: string[] = [];
-    for (const key of searching) {
+    const next: OlderCursor[] = [];
+    for (const { key } of searching) {
       // Newest first, as the read orders them; judged in that order.
       const own = rows.filter((row) => row.statement_key === key);
       let ready: CardSettlementReview | undefined;
@@ -504,12 +510,14 @@ async function olderReadyCandidates(
           break;
         }
       }
+      const last = own.at(-1);
       if (ready !== undefined) found.set(key, ready);
-      else if (own.length === CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS) next.push(key);
+      else if (last !== undefined && own.length === CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS)
+        next.push({ key, createdAt: last.created_at, id: last.id });
     }
     searching = next;
   }
-  return { found, truncated: new Set(searching) };
+  return { found, truncated: new Set(searching.map((cursor) => cursor.key)) };
 }
 
 /**
@@ -548,13 +556,18 @@ export async function queryCardSettlementStatements(
     statement,
     reviews: rows.filter((row) => row.statement_key === statement.statement_key).map(review),
   }));
-  const searched = judged
-    .filter(
-      ({ statement, reviews }) =>
-        reviews.length < statement.candidate_count && !reviews.some(decidable),
-    )
-    .map(({ statement }) => statement.statement_key);
-  const older = await olderReadyCandidates(sql, searched);
+  // A statement searched holds no acceptance, so its judged candidates are
+  // exactly its window, newest first: the search continues after the last.
+  const start = judged.flatMap(({ statement, reviews }): OlderCursor[] => {
+    const last = reviews.at(-1);
+    return last !== undefined &&
+      reviews.length < statement.candidate_count &&
+      !reviews.some(decidable)
+      ? [{ key: statement.statement_key, createdAt: last.createdAt, id: last.proposalId }]
+      : [];
+  });
+  const searched = start.map((cursor) => cursor.key);
+  const older = await olderReadyCandidates(sql, start);
   const chosen = judged.map(({ statement, reviews }) => {
     const key = statement.statement_key;
     const ready = older.found.get(key);
