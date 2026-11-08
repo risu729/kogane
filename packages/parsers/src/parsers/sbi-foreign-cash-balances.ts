@@ -44,7 +44,7 @@ function withoutChild(value: Record<string, unknown>, child: string): Record<str
 
 export const sbiForeignCashBalances: Parser = {
   name: "sbi-foreign-cash-balances",
-  version: "0.2.0",
+  version: "0.2.1",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "sbi-securities" && artifact.dataset === "foreign-cash-balances";

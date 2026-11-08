@@ -1,3 +1,4 @@
+import { FOREIGN_POSITION_SNAPSHOT_VERSION } from "../../parsers/src/snapshot-query.ts";
 // `queryHoldingsChange` (src/query/holdings-change.ts; ADR 0075) end to end
 // over the migrated CORE schema: synthetic container captures with identities
 // (packages/read-model/test/dated-state-fixture.ts) on two dates. Every
@@ -42,7 +43,7 @@ const FOREIGN = {
   source: "sbi-securities",
   dataset: "foreign-cash-positions",
   parser: "sbi-foreign-cash-positions",
-  version: "0.3.0",
+  version: FOREIGN_POSITION_SNAPSHOT_VERSION,
 } as const;
 const REQUEST: HoldingsChangeRequest = {
   from: "2026-09-01",

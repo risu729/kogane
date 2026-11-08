@@ -362,7 +362,7 @@ describe("named concepts in the final SQL", () => {
         .get(),
     ).toEqual({
       policy_id: "coverage-v1",
-      required_parser_version: "1.0.0",
+      required_parser_version: "1.0.1",
       replaces_previous_on_complete_empty: 0,
       unit_scope: "run",
     });
@@ -375,8 +375,9 @@ describe("named concepts in the final SQL", () => {
     ).toEqual({
       policy_id: "coverage-v1",
       // 0053 inserted 1.0.0; 0056 moved it to 1.0.1, and 0059 to 1.0.2, the
-      // release that reads the stored boards (ADR 0028, amended).
-      required_parser_version: "1.0.2",
+      // release that reads the stored boards. 0084 advances the equivalent reader
+      // after the shared CSV helper release.
+      required_parser_version: "1.0.3",
       replaces_previous_on_complete_empty: 0,
     });
     // The shadow comparison compiles on the production schema and reads the views.

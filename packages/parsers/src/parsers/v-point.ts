@@ -36,7 +36,7 @@ const HISTORY_KEYS = [
 
 export const vPointBalanceInfo: Parser = {
   name: "v-point-balance-info",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts: (artifact) => accepts(artifact, "balance-info"),
   parse(bytes, artifact) {
     requireEligible(artifact, "balance-info");
@@ -145,7 +145,7 @@ export const vPointBalanceInfo: Parser = {
 
 export const vPointSmfgPoint: Parser = {
   name: "v-point-smfg-point",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts: (artifact) => accepts(artifact, "smfg-point"),
   parse(bytes, artifact) {
     requireEligible(artifact, "smfg-point");
@@ -177,7 +177,7 @@ export const vPointSmfgPoint: Parser = {
 
 export const vPointHistoryPage: Parser = {
   name: "v-point-history-page",
-  version: "1.0.0",
+  version: "1.0.1",
   accepts: (artifact) =>
     artifact.sourceId === SOURCE &&
     artifact.mime === MIME &&

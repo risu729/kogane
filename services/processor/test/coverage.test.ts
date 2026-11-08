@@ -97,13 +97,19 @@ test("the current production migration chain preserves legacy policies and adds 
     "coverage-v1",
   );
   expect(containers.every((row) => row.unit_scope === "run")).toBe(true);
-  // A coverage-v1 row that pins a version names one this build deploys: the
-  // selection matches it exactly, so a stale pin would adopt nothing (0056
-  // moves the SBI Shinsei board to 1.0.1, 0059 to 1.0.2).
+  // Every row that pins a version, under either policy, names one this build
+  // deploys: the selection matches it exactly, so a stale pin would adopt
+  // nothing (0056 moves the SBI Shinsei board to 1.0.1, 0059 to 1.0.2, 0084
+  // every pinned row with the shared CSV reader release).
   const pinned = await all<{ parser_name: string; required_parser_version: string }>(
-    "SELECT parser_name,required_parser_version FROM dataset_snapshot_policies WHERE policy_id='coverage-v1' AND required_parser_version IS NOT NULL ORDER BY parser_name",
+    "SELECT parser_name,required_parser_version FROM dataset_snapshot_policies WHERE required_parser_version IS NOT NULL ORDER BY parser_name",
   );
-  expect(pinned.map((row) => row.parser_name)).toContain("sbi-shinsei-exchange-rate");
+  expect(pinned.map((row) => row.parser_name)).toEqual([
+    "prestia-bank-balances",
+    "sbi-foreign-cash-positions",
+    "sbi-shinsei-exchange-rate",
+    "st-george-balances",
+  ]);
   for (const row of pinned)
     expect(
       PARSERS.some(

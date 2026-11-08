@@ -15,7 +15,14 @@
 // parser follows for foreign card use (docs/tooling.md).
 
 import type { ArtifactMeta, Observation, Parser, ParseResult } from "../types.ts";
-import { amountToMinorUnits, decimalText, decodeUtf8, parseCsv } from "./util.ts";
+import {
+  amountToMinorUnits,
+  csvWarningText,
+  decimalText,
+  decodeUtf8,
+  parseCsv,
+  type CsvWarning,
+} from "./util.ts";
 
 const SOURCE_ACCOUNT = "paypay";
 
@@ -141,20 +148,22 @@ export const paypayCsv: Parser = {
   // 0.2.1: a transaction date or time that does not exist gives no asOf and
   // the "not recognized" warning instead of an impossible instant; every
   // existing date and time reads as in 0.2.0.
-  version: "0.2.2",
+  version: "0.2.3",
 
   accepts(artifact: ArtifactMeta): boolean {
     return artifact.sourceId === "paypay" && artifact.mime === "text/csv";
   },
 
   parse(bytes: Uint8Array, _artifact: ArtifactMeta): ParseResult {
-    const rows = parseCsv(decodeUtf8(bytes));
+    const csvWarnings: CsvWarning[] = [];
+    const rows = parseCsv(decodeUtf8(bytes), csvWarnings);
     const header = rows[0];
     if (!header) throw new Error("PayPay CSV is empty");
     if (!header.some((cell) => cell.includes("取引日"))) {
       throw new Error("PayPay CSV header does not mention 取引日");
     }
     const { index, warnings } = mapColumns(header);
+    warnings.push(...csvWarnings.map(csvWarningText));
     const cellFor = (cells: string[], field: string): string => {
       const at = index[field];
       return at === undefined ? "" : (cells[at] ?? "");

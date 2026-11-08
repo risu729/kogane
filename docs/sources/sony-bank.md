@@ -777,6 +777,16 @@ boolean と schema metadata に限定する。
 - [`nakaomote/financial` `sony_download.py` at `44e1d43`](https://github.com/nakaomote/financial/blob/44e1d43b5c010ee692234777baf9a9fc20be83be/sony_download.py)
 - [`nakaomote/financial` 2025 CSV schema update](https://github.com/nakaomote/financial/commit/44e1d43b5c010ee692234777baf9a9fc20be83be)
 
+## History CSV quote recovery (parser 1.0.3)
+
+The shared reader warns about unclosed opening quotes and text after a closing
+quote, keeping recovered rows and following rows. A quote-damaged row that fails
+Sony's strict value checks is retained as one transaction with verbatim named
+cells and dataset-derived account/currency; economics, date, status and identity
+remain absent. Normal rows and well-formed multiline fields keep their previous
+reading. Header/cardinality drift and invalid undamaged rows still refuse the
+artifact. See the [shared CSV recovery boundary](../observations.md#shared-csv-reader-recover-malformed-quotes-without-losing-following-rows).
+
 ## 共通 DATA R2 への切替 (U09)
 
 Collector は `COLLECTION_TARGET` を読まない。保存先は共通 bucket

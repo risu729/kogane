@@ -263,6 +263,7 @@ async function seedCandidate(
   bankId: number,
   connection = "conn-a",
   account?: Record<string, string>,
+  version = "1.1.0",
 ) {
   await db
     .prepare(`INSERT INTO balance_observations(parse_run_id,source_account,metric,amount_minor,amount_text,amount_scale,instrument,as_of,raw_locator,extra_json)
@@ -282,9 +283,9 @@ async function seedCandidate(
   await seedArtifact(env, bankId, "smbc-bank", "synthetic", "synthetic-" + bankId, {});
   await db
     .prepare(
-      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'smbc-direct-transactions','1.1.0','2026-09-12','ok','[]')",
+      "INSERT INTO parse_runs(id,fetch_artifact_id,parser_name,parser_version,parsed_at,status,warnings_json) VALUES(?,?,'smbc-direct-transactions',?,'2026-09-12','ok','[]')",
     )
-    .bind(bankId, bankId)
+    .bind(bankId, bankId, version)
     .run();
   const parsed = await smbcDirectTransactions.parse(
     bytes(
@@ -561,6 +562,53 @@ test("SMBC supports only the debit whose own published parse records its selecte
   expect(
     await db.prepare("SELECT count(*) n FROM card_settlement_decisions").first<number>("n"),
   ).toBe(0);
+}, 60000);
+
+test("the shared-helper SMBC release keeps account matching and readiness diagnostics", async () => {
+  const before = await db
+    .prepare(CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL)
+    .first<Record<string, number>>();
+  await seedPage(
+    810,
+    "conn-current/credit-detail-01.html",
+    page(replace("金融機関名", "三井住友銀行")),
+  );
+  await cardDebitAccountSweep(env);
+  await seedCandidate(
+    810,
+    910,
+    "conn-current",
+    {
+      basis: "authenticated-request-v1",
+      accountType: "ordinary",
+      branchCode: "123",
+      accountNumber: "1234000",
+    },
+    "1.1.1",
+  );
+  const id = (await db
+    .prepare("SELECT id FROM transaction_observations WHERE parse_run_id=910")
+    .first<number>("id"))!;
+  const ref = { kind: "transaction" as const, id: `transaction:${id}`, revision: "parse_run:910" };
+  expect(
+    await knownBankAccounts(db, "smbc-bank", {
+      sourceId: "smbc-bank",
+      sourceAccount: "smbc-bank:ordinary-yen",
+      ref,
+    }),
+  ).toEqual([
+    expect.objectContaining({ comparable: true, accountNumber: "1234000", evidenceRefs: [ref] }),
+  ]);
+  await db.prepare("UPDATE card_settlement_scan_cursor SET last_statement_id=0").run();
+  await cardSettlementSweep(db);
+  const supportingRefs = (await evidence())
+    .filter((row) => row.outcome === "supports")
+    .flatMap((row) => JSON.parse(row.proposal_json!).evidenceRefs);
+  expect(supportingRefs).toContainEqual(ref);
+  const after = await db
+    .prepare(CARD_SETTLEMENT_AUTOMATION_SHADOW_SQL)
+    .first<Record<string, number>>();
+  expect(after!.debit_context_present).toBeGreaterThan(before!.debit_context_present!);
 }, 60000);
 
 test("automation prerequisite diagnostics return only counts and do not adopt decisions", async () => {

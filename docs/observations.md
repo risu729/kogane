@@ -17,6 +17,104 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Shared CSV reader: recover malformed quotes without losing following rows
+
+2026-11-08. Owner decision, 2026-11-08 13:26 UTC: tolerate malformed
+quotes in the shared reader rather than adding provider-specific readers
+([issue 1176](https://github.com/risu729/kogane/issues/1176)).
+
+An opening quote without a matching undoubled closing quote is read literally;
+its physical line still ends the row and following rows remain separate.
+A closing quote must be followed by a comma, a line end or EOF. When the first
+undoubled closing quote has trailing text on a later physical line, the reader
+recovers at the opening line instead. Same-line trailing text (`"ab"c`)
+retains the historical value `abc`. Each case records a closed warning naming
+the one-based logical row and column; empty lines are excluded from that row
+number, as in existing `csv:row` locators. Warnings contain no cell text.
+
+Valid quoted multiline fields, escaped quotes and every well-formed file keep
+their earlier reading. There is an unavoidable ambiguity: `"a\nb",c` is valid
+multiline CSV and could also be an intended unclosed line followed by another
+line. When the bytes form valid multiline CSV, the reader keeps that CSV
+meaning; it does not infer intended physical rows from dates, widths or values.
+
+PayPay keeps the recovered row and its verbatim cells, applying its usual
+field warnings. Sony history CSV keeps normal strict validation on undamaged
+rows. A quote-damaged row whose values cannot pass that validation is kept as
+one transaction observation with verbatim named cells and the account/currency
+from the dataset. Its economics, date, status and external identity are absent,
+with an additional closed warning; no balance observation is invented. If its
+values remain readable, its usual transaction and balance are retained.
+Header and row cardinality drift still refuse Sony CSV.
+
+The shared helper is in every parser's digest closure, so all 43 releases
+receive a patch version, even though only PayPay and Sony history CSV call
+`parseCsv`. Other parser outputs remain unchanged. Migration 0084 advances the
+four exact-version snapshot policies: foreign positions to 0.3.1, the SBI
+Shinsei exchange-rate board to 1.0.3, PRESTIA balances to 1.0.1, and St.George
+balances to 1.0.1. It changes
+only rows still pinned to their previous releases, preserving an operator's
+alternative choice. The local experiment applies the same conditional policy
+updates when its store opens. The new pins select the new published parses; the repair
+lane re-parses stored evidence, and earlier raw objects, observations and
+publication history remain recorded. Until a new successful parse publishes,
+an earlier version cannot satisfy the new exact pin. No production read was
+needed. The processor registers releases and the existing repair lane handles
+new parses; old raw objects and observations remain append-only.
+SMBC debit-account matching and settlement readiness diagnostics accept both
+transaction releases 1.1.0 and 1.1.1, whose account context is identical.
+Frozen coverage expectations were not regenerated. The existing SBI Shinsei
+identity-origin delta now names its new release and keeps the same delta.
+Synthetic tests in `packages/parsers/test/csv-recovery.test.ts` cover first,
+middle and last columns, final rows with or without a line ending, following
+quoted rows, trailing text, multiline fields and logical row numbering.
+
+| Parser                                   | Previous | Release |
+| ---------------------------------------- | -------- | ------- |
+| global-pass-activity                     | 1.2.0    | 1.2.1   |
+| mizuho-account-list                      | 1.0.0    | 1.0.1   |
+| mizuho-ordinary-history                  | 1.0.0    | 1.0.1   |
+| mobile-suica-sf-history                  | 1.0.0    | 1.0.1   |
+| moneyforward-canonical-evidence-boundary | 1.0.2    | 1.0.3   |
+| moneyforward-monthly-transactions        | 2.0.3    | 2.0.4   |
+| myjcb-canonical-evidence-boundary        | 1.1.6    | 1.1.7   |
+| myjcb-credit-ledger                      | 1.2.3    | 1.2.4   |
+| myjcb-credit-past-month-balances         | 1.1.6    | 1.1.7   |
+| myjcb-credit-statement-total             | 1.4.1    | 1.4.2   |
+| myjcb-jpoint-balance                     | 1.0.0    | 1.0.1   |
+| myjcb-skip-payment-schedule              | 0.1.2    | 0.1.3   |
+| paypay-csv                               | 0.2.2    | 0.2.3   |
+| prestia-bank-balances                    | 1.0.0    | 1.0.1   |
+| sbi-account-assets-current               | 1.0.0    | 1.0.1   |
+| sbi-domestic-cash-positions              | 1.0.1    | 1.0.2   |
+| sbi-domestic-trade-records               | 0.2.0    | 0.2.1   |
+| sbi-foreign-cash-balances                | 0.2.0    | 0.2.1   |
+| sbi-foreign-cash-positions               | 0.3.0    | 0.3.1   |
+| sbi-foreign-trade-records                | 1.0.0    | 1.0.1   |
+| sbi-shinsei-balance-summary-and-stage    | 0.1.0    | 0.1.1   |
+| sbi-shinsei-exchange-rate                | 1.0.2    | 1.0.3   |
+| sbi-shinsei-top-balances-and-activity    | 0.1.3    | 0.1.4   |
+| sbi-shinsei-yen-deposit-account          | 0.1.1    | 0.1.2   |
+| sbi-vc-account-margin                    | 0.2.1    | 0.2.2   |
+| sbi-vc-cash-balances                     | 0.2.1    | 0.2.2   |
+| sbi-vc-cashflows                         | 0.2.1    | 0.2.2   |
+| sbi-vc-executions                        | 0.2.1    | 0.2.2   |
+| sbi-vc-position-summary                  | 0.2.1    | 0.2.2   |
+| sbi-yen-detail-history                   | 1.0.2    | 1.0.3   |
+| smbc-direct-balance                      | 1.1.0    | 1.1.1   |
+| smbc-direct-transactions                 | 1.1.0    | 1.1.1   |
+| sony-bank-gross-balance                  | 1.0.2    | 1.0.3   |
+| sony-bank-history-csv                    | 1.0.2    | 1.0.3   |
+| sony-bank-history-json                   | 1.0.1    | 1.0.2   |
+| sony-bank-wallet-history                 | 1.0.3    | 1.0.4   |
+| st-george-balances                       | 1.0.0    | 1.0.1   |
+| st-george-transactions                   | 1.0.0    | 1.0.1   |
+| v-point-balance-info                     | 1.0.0    | 1.0.1   |
+| v-point-history-page                     | 1.0.0    | 1.0.1   |
+| v-point-pay-notification-event           | 1.0.0    | 1.0.1   |
+| v-point-smfg-point                       | 1.0.0    | 1.0.1   |
+| vpass-statement-page                     | 1.2.0    | 1.2.1   |
+
 ## PayPay CSV: a signed amount in either amount column is left empty (parser 0.2.2)
 
 2026-11-06. The export states a row's direction by its column: outgoing
@@ -3123,27 +3221,6 @@ Phase 3 is done when:
   being wrong about it — header-label matching, warned positional
   fallback, undocumented columns reported — but one real export settles
   it.
-- **A CSV quote that is never closed.** `parseCsv` in
-  `packages/parsers/src/parsers/util.ts` reads a quote that opens a field
-  and is never closed as a field that runs to the end of the file, and
-  records no reason. In `paypay-csv` every row after such a quote
-  disappears into that one cell: when the quote opens the last column
-  (the transaction number) the parse has no warning at all and the
-  swallowed rows end up inside one row's `externalId`; in any other
-  column the swallowed rows give no warning of their own, the broken row
-  gets `expected N columns`, and a quote that opens the date or an amount
-  column adds that row's date or amount warning, where a `not recognized`
-  or `unparseable` warning quotes the swallowed text. The Sony history CSV
-  parser refuses every such file (cardinality drift, or a balance or
-  exchange rate that is not an exact decimal), except a quote opening the
-  last column of the last row, whose value reads the same while the
-  verbatim cell in `extra` keeps a trailing line break. Text after a
-  closing quote (`"ab"c`) is likewise joined into the field. No stored
-  export is known to contain either.
-  `util.ts` is in the digest closure of all 43 parser releases, so a
-  change there releases every parser. Owner decision (2026-11-08): fix the
-  shared reader, and tolerate such a file rather than fail it; the work is
-  [#1176](https://github.com/risu729/kogane/issues/1176).
 - **Sony history pages and identical rows.** `sony-bank-history-json`
   and `sony-bank-history-csv` give a row the id
   `sony-bank-history:<fingerprint of currency, date, signed amount and
