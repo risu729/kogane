@@ -176,8 +176,18 @@ function coverage(status: CollectionManifest["status"]): CoverageStatus {
   return status === "partial" ? "partial" : "unknown";
 }
 
-function safeErrorCode(status: CollectionManifest["status"]): string | undefined {
+function safeErrorCode(input: SharedRunInput): string | undefined {
+  const { status } = input;
   if (status === "success") return undefined;
+  for (const entry of input.failures) {
+    const reason = entry.diagnostics?.reason;
+    if (
+      reason === "history_csv_missing_with_transactions" ||
+      reason === "history_csv_count_mismatch" ||
+      reason === "history_csv_invalid"
+    )
+      return reason;
+  }
   return status === "partial" ? "collector_partial" : "collector_failed";
 }
 
@@ -219,7 +229,7 @@ function manifestBytes(input: SharedRunInput, stored: readonly StoredArtifact[])
 export async function sonyBankRunPlan(input: SharedRunInput): Promise<PersistRunPlan> {
   const outcome = providerOutcome(input.status);
   const coverageStatus = coverage(input.status);
-  const errorCode = safeErrorCode(input.status);
+  const errorCode = safeErrorCode(input);
   // A failed run keeps no artifact: there is nothing whose persistence could
   // be claimed, and the terminal states the failure on its own.
   const sources = outcome === "failed" ? [] : input.artifacts;

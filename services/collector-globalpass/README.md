@@ -304,3 +304,22 @@ reviewed hidden inputs, landmarks, forbidden-token occurrences, lengths as digit
 its text, attribute values, URLs or numbers read from it
 ([ADR 0026 amendment of 2026-09-28](../../docs/adr/0026-collector-unit-coverage.md#amendment-2026-09-28-global-pass-sanitizer-refusals-log-a-counts-only-shape)).
 The `terminal` line reports the run's status only and carries no error fields.
+
+Implementation update (2026-11-08 14:56 UTC): `container/collect.mjs` owns the
+collection orchestration and NDJSON error record. `server.mjs` remains the HTTP
+and probe entrypoint and injects the relay, browser launch and existing page
+actions; importing the orchestration starts no HTTP server. Browser and relay
+teardown both run, and their errors cannot replace a primary acquisition error.
+After successful acquisition, the first teardown failure still fails the run,
+including a thrown `undefined` or `null`. A separate failure flag preserves that
+first thrown value; previously an `undefined` teardown could disappear and a
+later error could replace a first nullish value. Provider logout retains the
+auxiliary flag contract above.
+
+`test/container-collection.test.mjs` uses fake pages and resource lifecycles to
+check challenge counts, failure codes/stages, HTTP status bounds, non-Error
+throws, cleanup order and the logout record. `worker-test/relay.test.ts` drives
+the real Worker relay handler in workerd with fake WebSocket endpoints and VPC
+streams: normal/EOF closes, open/read/write failures, queued-write suppression,
+byte counts, and a read error after peer close. These tests use no provider
+connection or browser; the existing Node CONNECT relay suite remains separate.

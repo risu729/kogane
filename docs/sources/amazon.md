@@ -5,192 +5,207 @@
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-調査日: 2026-08-26
+Research date: 2026-08-26
 
-## 1. Scope と境界
+## 1. Scope and boundaries
 
-本 source は Amazon.co.jp consumer account の次の read-only 情報だけを扱う。
+This source covers only the following read-only information from Amazon.co.jp consumer accounts.
 
-- 注文、商品行、配送・キャンセル・返品・返金状態、注文合計、領収書等の表示
-- Amazon ギフトカード残高、有効期限、残高増減履歴
-- Amazon ポイントの利用可能・獲得予定・期間限定残高、有効期限、増減履歴
-- 上記表示に必要な Amazon account の認証/session と公式 shopping app
+- Displays of orders, item rows, delivery/cancellation/return/refund states, order totals, receipts, etc.
+- Amazon ギフトカード (Amazon gift cards) balance, expiry dates, and balance change history
+- Amazon ポイント (Amazon Points) available/pending/limited-time balances, expiry dates, and change history
+- Amazon account authentication/sessions and the official shopping app needed for those displays
 
-**Amazon Mastercard のカード利用明細は対象外である。** Amazon の注文画面は「何を注文し、
-どの支払手段を指定し、Amazon がどう返金したか」の commerce record であり、カード利用日、加盟店、
-未確定/確定、締め、請求額、支払日、分割等の issuer ledger ではない。Amazon Mastercard は三井住友
-カード発行で、明細正本は [Vpass](https://www.smbc-card.com/mem/oshiharai/index.jsp) 側の別 source とする。
-Amazon 注文と Vpass の `AMAZON.CO.JP` 等を額だけで自動同一視せず、複数商品、分割発送、与信、
-返金時差、ポイント/ギフト併用を考慮した reconciliation に限定する。
+**Amazon Mastercard card usage statements are out of scope.** Amazon order screens are commerce records
+of what was ordered, the specified payment methods, and how Amazon refunded it; they are not the issuer ledger
+of card usage dates, merchants, pending/confirmed states, closing dates, billed amounts, payment dates,
+installments, etc. Amazon Mastercard is issued by 三井住友カード (Sumitomo Mitsui Card); its authoritative
+statements are a separate source on [Vpass](https://www.smbc-card.com/mem/oshiharai/index.jsp).
+Do not automatically identify Amazon orders with Vpass entries such as `AMAZON.CO.JP` by amount alone.
+Limit this to reconciliation considering multiple items, split shipments, authorization, refund delays,
+and combined points/gift card payments.
 
-購入、注文確定、再注文、キャンセル、返品申請、レビュー、ギフトカード登録/購入/使用、ポイント使用、
-支払方法・住所・認証・profile変更は禁止する。秘密、cookie、OTP、passkey material、注文番号、住所、
-商品名、実残高・実額を保存しない。security control の回避を目的にしない。
+Purchases, order confirmation, reordering, cancellation, return requests, reviews, gift card registration/purchase/use,
+points use, and payment method/address/authentication/profile changes are prohibited. Do not store secrets,
+cookies, OTPs, passkey material, order numbers, addresses, product names, or actual balances/amounts.
+Do not aim to bypass security controls.
 
-## 2. 調査方法
+## 2. Research method
 
-- Amazon、三井住友カード、Google Play の公式公開ページを優先した。
-- 未ログインで注文履歴、ギフト残高、Privacy Central の入口を Chrome-like GET し、redirect、header、
-  script host、OpenID parameter 名だけを観測した。cookie値は採用・保存していない。
-- 公開 GitHub 実装は公式UIの具体的transport/paginationを補う二次資料としてコードを確認した。
-- login、account page、APK取得/decompile、本人データのlive captureは実施していない。
+- Prioritized official public pages from Amazon, Sumitomo Mitsui Card, and Google Play.
+- Made Chrome-like GETs to order history, gift balance, and Privacy Central entry points while logged out,
+  observing only redirects, headers, script hosts, and OpenID parameter names. Cookie values were neither adopted nor saved.
+- Inspected public GitHub implementations as secondary evidence supplementing the official UI's concrete transport/pagination.
+- Did not log in, access account pages, retrieve/decompile APKs, or capture the owner's data live.
 
-公開入口:
+Public entry points:
 
-- [注文履歴](https://www.amazon.co.jp/your-orders/orders)
-- [ギフトカード残高](https://www.amazon.co.jp/gc/balance)
-- [ギフトカード細則](https://www.amazon.co.jp/gp/help/customer/display.html?nodeId=GNG9PXYZUMQT72QK)
-- [Amazonポイント](https://www.amazon.co.jp/gp/aw/help/id=200041560)
+- [Order history](https://www.amazon.co.jp/your-orders/orders)
+- [Gift card balance](https://www.amazon.co.jp/gc/balance)
+- [Gift card terms](https://www.amazon.co.jp/gp/help/customer/display.html?nodeId=GNG9PXYZUMQT72QK)
+- [Amazon Points](https://www.amazon.co.jp/gp/aw/help/id=200041560)
 - [Privacy Central data request](https://www.amazon.co.jp/hz/privacy-central/data-requests/preview.html)
-- [パスキーについて](https://www.amazon.co.jp/gp/help/customer/display.html?nodeId=TPphmhSWBgcI9Ak87p)
+- [About passkeys](https://www.amazon.co.jp/gp/help/customer/display.html?nodeId=TPphmhSWBgcI9Ak87p)
 - [Amazon Shopping Android](https://play.google.com/store/apps/details?id=com.amazon.mShop.android.shopping)
 - [Amazon Mastercard](https://www.amazon.co.jp/credit/landing)
-- [Vpass 明細](https://qa.smbc-card.com/mem/detail?site=4H4A00IO&category=163&id=40)
+- [Vpass statements](https://qa.smbc-card.com/mem/detail?site=4H4A00IO&category=163&id=40)
 
-## 3. 公式経路とデータ比較
+## 3. Official routes and data comparison
 
-| 経路                    | 取得できる情報                                                        | 粒度・状態                                            | 期間/件数/export                                                                                           | tradeoff                                             |
-| ----------------------- | --------------------------------------------------------------------- | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Amazon Web 注文履歴     | 注文日、注文単位合計、商品行、配送/キャンセル/返品/返金状態、領収書等 | 注文→商品→配送/返金。カード請求行ではない             | UIは期間filterとpaginationを持つ。consumer向け一括CSV/APIは公開確認できず、領収書等は注文別print/PDF相当   | 最も詳細だがPIIが多く、write導線が隣接               |
-| Amazon Shopping app     | Webに近い注文、配送、返品/返金、ギフト/ポイント残高                   | mobile UI。通知や配送状態は便利                       | 固定retention/全件exportは未確認                                                                           | 端末/session/画面変更に拘束。最初のcollectorにしない |
-| ギフトカード残高ページ  | 現在残高、チャージ/登録/注文利用/返金等の増減、期限                   | 残高ledger。注文内訳とは別                            | 公式固定件数、pagination、CSV/PDFは公開確認できず。細則上、有効期限は原則発行から10年                      | reconciliationに有用だが登録・購入導線が同居         |
-| Amazonポイントページ    | 利用可能、獲得予定、期間限定、履歴、期限                              | point増減。注文確定/発送/取消で予定と確定が変化し得る | standard point は原則、最後の購入または獲得から1年で期限更新。期間限定pointは個別期限。CSV/PDF/APIは未確認 | reward ledgerであり現金・カードledgerではない        |
-| 注文別領収書/購入明細   | 注文番号、日付、商品、税、支払内訳等                                  | 注文別document                                        | 個別print/download。全注文一括exportとは別                                                                 | evidenceは強いが一件ずつで高コスト                   |
-| Privacy Central request | Amazonが保有するaccount dataの請求                                    | 非同期snapshot。カテゴリ/schemaはlive確認が必要       | scheduled incremental APIではない。生成時間・形式・retention未確認                                         | 最も包括的な公式export候補だが低頻度/manual          |
-| Vpass                   | Amazon Mastercardを含むカード未確定/確定明細・請求                    | issuer/card ledger                                    | Vpass family sourceで調査                                                                                  | 本sourceへ混ぜない                                   |
+| Route                                  | Available information                                                                                | Granularity/state                                                                        | Period/count/export                                                                                                                                   | Tradeoff                                                                   |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Amazon Web order history               | Order dates, per-order totals, item rows, delivery/cancellation/return/refund states, receipts, etc. | Order → item → delivery/refund; not card billing rows                                    | UI has period filters and pagination. No bulk consumer CSV/API established publicly; receipts etc. are printed/PDF equivalents per order              | Most detailed, but extensive PII and adjacent write paths                  |
+| Amazon Shopping app                    | Orders, deliveries, returns/refunds, gift/points balances similar to Web                             | Mobile UI; notifications and delivery status are convenient                              | Fixed retention/full export unverified                                                                                                                | Tied to devices/sessions/screen changes; do not use as the first collector |
+| Gift card balance page                 | Current balance; changes from top-ups/registration/order use/refunds, etc.; expiry                   | Balance ledger, separate from order breakdowns                                           | Official fixed counts, pagination, and CSV/PDF not established publicly. Terms generally give expiry 10 years from issuance                           | Useful for reconciliation, but adjacent registration/purchase paths        |
+| Amazon Points page                     | Available, pending, limited-time, history, expiry                                                    | Points changes; pending/confirmed may change at order confirmation/shipment/cancellation | Standard points generally renew expiry for one year from last purchase or accrual. Limited-time points have individual expiry. CSV/PDF/API unverified | Reward ledger, not a cash/card ledger                                      |
+| Per-order receipts/purchase statements | Order number, date, items, tax, payment breakdown, etc.                                              | Per-order document                                                                       | Individual print/download; separate from bulk export of all orders                                                                                    | Strong evidence, but costly one at a time                                  |
+| Privacy Central request                | Request for account data held by Amazon                                                              | Asynchronous snapshot; categories/schema require live verification                       | Not a scheduled incremental API; generation time/format/retention unverified                                                                          | Most comprehensive official export candidate, but infrequent/manual        |
+| Vpass                                  | Pending/confirmed card statements and billing, including Amazon Mastercard                           | Issuer/card ledger                                                                       | Researched in the Vpass family source                                                                                                                 | Keep separate from this source                                             |
 
-### 注文・返金と残高の関係
+### Relationship between orders/refunds and balances
 
-確認事実として、Amazonは注文履歴、ギフト残高、ポイントを別画面に分ける。推測を含む照合キーは
-日時範囲、符号、一般化した支払種別、注文単位/配送単位であり、注文番号や商品名を恒久保存しない。
-返品受付は返金settledではない。返金先がカード、ギフト残高、ポイントのどれか、部分返金か、Vpassに
-いつ反映したかを別々の状態として扱う。pending/postedはAmazon共通の一軸ではなく、注文状態、
-ポイント獲得予定→利用可能、返金処理→各残高反映、カード未確定→確定の別state machineである。
+As established fact, Amazon separates order history, gift balance, and points into different screens.
+Reconciliation keys, including hypotheses, are datetime ranges, signs, generalized payment types, and
+order/shipment units; do not permanently store order numbers or product names. Return acceptance is not
+settled refund. Treat whether the destination is a card, gift balance, or points, whether it is a partial
+refund, and when it appears in Vpass as separate states. Pending/posted is not one common Amazon axis:
+order states, pending → available points, refund processing → reflection in each balance, and pending →
+confirmed card entries are separate state machines.
 
-## 4. 認証、MFA、passkey、Bitwarden
+## 4. Authentication, MFA, passkeys, and Bitwarden
 
-未ログインGETでは注文履歴が Amazon sign-in へ OpenID 2.0 `checkid_setup` redirectし、
-`openid.return_to`、`openid.assoc_handle`、`openid.identity`/`claimed_id`を使用した。注文履歴、ギフト残高、
-Privacy Centralは別 `assoc_handle` と異なる `max_auth_age` を持ち、同じsessionでも再認証強度が異なり得る。
-これは公開redirectの確認事実であり、内部authorization APIの仕様ではない。
+Logged-out GETs redirected order history to Amazon sign-in via OpenID 2.0 `checkid_setup`, using
+`openid.return_to`, `openid.assoc_handle`, and `openid.identity`/`claimed_id`. Order history, gift balance,
+and Privacy Central had separate `assoc_handle` and different `max_auth_age` values, so reauthentication
+strength may differ even in the same session. This is an observed public redirect fact, not an internal
+authorization API specification.
 
-Amazon公式はpasswordに加えてpasskeyと2段階認証を提供する。具体的な challenge、RP ID、extension、
-OTP再要求条件、trusted-device寿命はlive captureしていない。Bitwardenは一般にpasskeyを保持・提示できるが、
-当該Amazon accountのcredentialがBitwardenにあること、Amazon.co.jpの実RP IDと一致すること、headless
-assertionが可能なことは未確認であり推測しない。
+Amazon officially offers passkeys and two-step verification in addition to passwords. No live capture
+was made of concrete challenges, RP IDs, extensions, OTP re-request conditions, or trusted-device lifetimes.
+Bitwarden can generally store/present passkeys, but whether this Amazon account's credential is in Bitwarden,
+whether it matches Amazon.co.jp's actual RP ID, and whether headless assertions are possible are unverified;
+do not infer them.
 
-推奨境界は「本人の通常browserで初回/再認証、暗号化したsource-scoped sessionでread replay」。vault、
-password、OTP seed、passkey private keyをcloudへ移さない。challenge、OTP、account recovery、CAPTCHA、
-異常login確認が出たら自動処理を停止して本人へhandoffする。認証設定の変更や新passkey登録はしない。
+The recommended boundary is initial/renewed authentication in the owner's ordinary browser, then read replay
+using an encrypted source-scoped session. Do not move vaults, passwords, OTP seeds, or passkey private keys
+to the cloud. Stop automation and hand off to the owner on challenges, OTP, account recovery, CAPTCHA,
+or suspicious login confirmation. Do not change authentication settings or register new passkeys.
 
-## 5. WAF / anti-bot と公開 JS
+## 5. WAF / anti-bot and public JS
 
-今回のWSLから公式account入口はbot blockではなくsign-in HTMLへ到達し、`x-amz-rid`、Amazon固有session
-cookie、`m.media-amazon.com`のAUI bundles、`unagi.amazon.co.jp` telemetryを確認した。`server: Server`だけ
-ではCloudFront/Akamai等のvendorを断定できない。地域cookieがAustraliaを示したため、region/egressで
-表示・challengeが変わる可能性がある。
+In this observation from WSL, official account entry points reached sign-in HTML rather than bot blocks.
+Observed `x-amz-rid`, Amazon-specific session cookies, AUI bundles from `m.media-amazon.com`, and telemetry
+at `unagi.amazon.co.jp`. `server: Server` alone cannot identify CloudFront/Akamai or another vendor.
+A region cookie indicated Australia, so displays/challenges may vary by region/egress.
 
-未認証HTML/JSからはOpenID redirectと汎用AUI runtimeまでは確認できたが、注文/ギフト/pointのread
-endpointやschemaは取得できなかった。公開bundleの静的解析、本人browserのredacted network観測、所有
-端末から取得した公式APKの静的解析は次段階の正当な調査である。ただし、CAPTCHA解答自動化、fingerprint
-偽装、rate-limit回避、暗号化/難読化を無効化するparameter、TLS pinning/attestation bypassは採用しない。
+Unauthenticated HTML/JS established OpenID redirects and generic AUI runtime, but did not yield order/gift/points
+read endpoints or schemas. Static analysis of public bundles, redacted network observation in the owner's browser,
+and static analysis of official APKs obtained from an owned device are legitimate next research stages.
+However, do not adopt automated CAPTCHA solving, fingerprint spoofing, rate-limit bypass, parameters disabling
+encryption/obfuscation, or TLS pinning/attestation bypass.
 
-公式Android packageは `com.amazon.mShop.android.shopping`。APKを所有端末から split込みで取得し、
-署名、manifest、deep link、network security config、host/path/schema、WebView/native境界を調べる価値がある。
-見つけたwrite endpointは名前だけ分類し、payloadを生成・送信しない。Amazon app全体のcloud emulationは
-device trust、巨大bundle、頻繁な更新に対し費用が高い。
+The official Android package is `com.amazon.mShop.android.shopping`. Obtaining APKs including splits from
+an owned device and examining signatures, manifests, deep links, network security config, hosts/paths/schemas,
+and WebView/native boundaries is worthwhile. Classify discovered write endpoints by name only; do not generate
+or send payloads. Cloud emulation of the entire Amazon app is expensive given device trust, large bundles,
+and frequent updates.
 
-## 6. 第三者clientの具体的transport/auth
+## 6. Concrete third-party client transport/auth
 
 ### `furyutei/amzOrderHistoryFilter`
 
-[repository](https://github.com/furyutei/amzOrderHistoryFilter) はamazon.co.jp注文履歴上で動くuserscript。
-既存browser cookieをambient authorityとして同一origin HTMLを`fetch`し、`/your-orders/orders`を
-`startIndex` 0,10,20...で巡回、DOMのorder cardと領収書画面をparse/printする。1ページ10注文という
-具体的実装証拠になるが、公式APIでもtoken authでもない。repositoryに明確なlicenseを確認できず、codeを
-取り込まない。また同scriptの`disableCsd=missing-library`提案は表示保護を弱める意図が読めるため、
-security-control bypass禁止によりKoganeでは使用しない。
+The [repository](https://github.com/furyutei/amzOrderHistoryFilter) is a userscript running on amazon.co.jp
+order history. It uses existing browser cookies as ambient authority, `fetch`es same-origin HTML,
+iterates `/your-orders/orders` with `startIndex` 0,10,20..., and parses/prints DOM order cards and receipt
+screens. This is concrete implementation evidence of 10 orders per page, not an official API or token auth.
+No clear repository license was found; do not import the code. Its `disableCsd=missing-library` proposal also
+appears intended to weaken display protection, so Kogane does not use it under the prohibition on security-control bypass.
 
 ### `yossyl3oy/amazon2mfcloud`
 
-[repository](https://github.com/yossyl3oy/amazon2mfcloud) はログイン済み注文履歴DOMを読むbrowser extension。
-`GET /your-orders/orders?timeFilter=year-YYYY&startIndex=N`を`fetch(...,{credentials:'include'})`し、
-HTMLを`DOMParser`で解析する。専用API tokenやpassword loginを実装せず、browser sessionに依存する。
-注文番号、商品名、額を外部会計へ渡す設計はKoganeの最小保持方針に合わず、licenseも確認できないため、
-transport evidenceのみ採用する。
+The [repository](https://github.com/yossyl3oy/amazon2mfcloud) is a browser extension reading logged-in order
+history DOM. It `fetch(...,{credentials:'include'})`s
+`GET /your-orders/orders?timeFilter=year-YYYY&startIndex=N` and parses HTML with `DOMParser`.
+It implements neither a dedicated API token nor password login, relying on the browser session. Its design
+of forwarding order numbers, product names, and amounts to external accounting conflicts with Kogane's
+minimal retention policy, and its license is unverified; adopt only the transport evidence.
 
-Amazon Selling Partner API、Product Advertising API、Amazon Pay APIはseller/広告/Amazon Pay merchant向けで、
-個人buyerの注文・ギフト・point履歴を読むconsumer APIとして転用しない。公開third-party実装にもギフト残高・
-ポイントを安定取得するmaintained consumer clientは確認できなかった。
+Amazon Selling Partner API, Product Advertising API, and Amazon Pay API target sellers/advertising/Amazon Pay
+merchants; do not repurpose them as consumer APIs for personal buyers' order/gift/points history. No maintained
+consumer client reliably retrieving gift balances/points was found among public third-party implementations either.
 
-## 7. read/write 隔離
+## 7. Read/write isolation
 
-- allowlistは原則 `GET www.amazon.co.jp/your-orders/orders` と観測後に確定したread-only detail/exportだけ。
-- browser bootstrap中のsign-in POSTは本人操作の認証境界でありcollector transportへ含めない。
-- cancel、return、buy-again、checkout、gift-card redeem/reload、point use、address/payment/profile/securityは
-  methodを問わずdenylistとし、該当controlをclickしない。
-- CSRF tokenはwrite可能性を示す機密session materialとして保存・送信しない。read clientに汎用POST機能を持たせない。
-- rateは1 connection、逐次、十分な間隔、conditional/incremental read。403/429、CAPTCHA、challenge、schema不一致で停止。
-- raw evidenceが必要なら本人端末の暗号化一時領域だけに置き、PII redaction後のschema/hash/countのみ残す。
+- The allowlist is generally `GET www.amazon.co.jp/your-orders/orders` and read-only details/exports established after observation.
+- Sign-in POSTs during browser bootstrap are an owner-operated authentication boundary, outside collector transport.
+- Deny cancel, return, buy-again, checkout, gift-card redeem/reload, point use, address/payment/profile/security
+  regardless of method, and do not click the corresponding controls.
+- Do not save/send CSRF tokens: they are confidential session material indicating potential writes. Give the read client no generic POST capability.
+- Rate: one connection, sequential requests, ample intervals, conditional/incremental reads. Stop on 403/429, CAPTCHA, challenges, or schema mismatches.
+- If raw evidence is needed, keep it only in an encrypted temporary area on the owner's device, retaining only schemas/hashes/counts after PII redaction.
 
-## 8. Runtime 適性
+## 8. Runtime suitability
 
-| Runtime               | 適性     | 判断                                                                                       |
-| --------------------- | -------- | ------------------------------------------------------------------------------------------ |
-| Local browser/WSL     | 最適     | passkey/MFA handoffと同一origin session観測、manual exportに適する                         |
-| Cloudflare Workers    | 条件付き | 確立済みGET replayとparserは可能。browser/passkey、cookie運用、Amazon egress差に不向き     |
-| Cloudflare Containers | 適       | browser/parserを隔離できる。sessionはimage/logに置かずsecret store+tmpfs、egress allowlist |
-| OCI container         | 適       | digest固定browser、Cron、encrypted session、read-only FSを組みやすい。egress再認証を検証   |
-| Kubernetes            | 過剰     | CronJob/Secret/NetworkPolicyは適合するが単一accountには運用costが大きい                    |
-| Android実機           | 調査に適 | 公式app表示/APK/本人操作のread-only tracingに必要。定常UI automationは脆い                 |
+| Runtime                 | Suitability           | Assessment                                                                                                                          |
+| ----------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Local browser/WSL       | Best                  | Suitable for passkey/MFA handoff, same-origin session observation, and manual export                                                |
+| Cloudflare Workers      | Conditional           | Established GET replay and parsing are possible; unsuitable for browsers/passkeys, cookie management, and Amazon egress differences |
+| Cloudflare Containers   | Suitable              | Can isolate browser/parser. Keep sessions out of images/logs; use secret store + tmpfs and egress allowlists                        |
+| OCI container           | Suitable              | Easy to assemble digest-pinned browsers, Cron, encrypted sessions, and read-only FS. Verify egress reauthentication                 |
+| Kubernetes              | Excessive             | CronJob/Secret/NetworkPolicy fit, but operational cost is high for a single account                                                 |
+| Physical Android device | Suitable for research | Needed for official app displays/APKs/owner-operated read-only tracing. Routine UI automation is fragile                            |
 
-## 9. PR #5共通 A-E / Cost
+## 9. PR #5 common A-E / Cost
 
 - A: direct documented/export API suitable for scheduled headless use
 - B: stable read-only internal API with renewable/reusable session
 - C: browser/app bootstrap + headless replay plausible
 - D: full browser/device automation probably required
 - E: manual capture remains safe default
-- Cost: 1 = small wrapper、5 = device-bound/adversarial
+- Cost: 1 = small wrapper, 5 = device-bound/adversarial
 
-| 経路                                                     |     Level | Cost | 判定                                                                    |
-| -------------------------------------------------------- | --------: | ---: | ----------------------------------------------------------------------- |
-| 注文別領収書/Privacy Centralを人手取得してoffline import |         E |  1-2 | 公式で安全。incremental自動化ではない                                   |
-| ログイン済みbrowserで注文HTMLを同一origin巡回            |         D |    3 | 公開実装あり。PII/write UI/session変化に注意                            |
-| local bootstrap後、注文GETをheadless replay              |     C候補 |  3-4 | endpointは具体的。session renewal/WAF/再認証をlive確認するまでBではない |
-| ギフト残高/ポイント internal read replay                 |     C候補 |    4 | endpoint/schema/pagination未確認。残高変動stateの検証が必要             |
-| Amazon Shopping app UI/device automation                 |         D |    5 | device trust、画面変更、write導線、広い権限                             |
-| buyer向け公式scheduled API                               | A該当なし |    5 | consumer注文/ギフト/points APIを確認できない                            |
+| Route                                                                 |       Level | Cost | Assessment                                                                            |
+| --------------------------------------------------------------------- | ----------: | ---: | ------------------------------------------------------------------------------------- |
+| Manually obtain per-order receipts/Privacy Central and import offline |           E |  1-2 | Official and safe; not incremental automation                                         |
+| Iterate same-origin order HTML in a logged-in browser                 |           D |    3 | Public implementation exists; watch PII/write UI/session changes                      |
+| Headless order GET replay after local bootstrap                       | C candidate |  3-4 | Concrete endpoint; not B until session renewal/WAF/reauthentication are verified live |
+| Gift balance/points internal read replay                              | C candidate |    4 | Endpoints/schema/pagination unverified; balance change states need verification       |
+| Amazon Shopping app UI/device automation                              |           D |    5 | Device trust, screen changes, write paths, broad permissions                          |
+| Official scheduled API for buyers                                     |  No A route |    5 | No consumer order/gift/points API established                                         |
 
-総合は **C候補/cost 4**、安全な初期経路は **E/cost 1-2**。注文履歴だけは公開実装によりCへの道筋が
-具体的だが、gift/pointsはまだD寄りである。
+Overall **C candidate/cost 4**; safe initial route **E/cost 1-2**. Public implementations make the path to C
+concrete for order history alone, but gift/points remain closer to D.
 
-## 10. read-only live 検証と stop 条件
+## 10. Read-only live verification and stop conditions
 
-1. 通常browserでAmazon.co.jpのdomain、TLS、login方式だけ確認。passkey/OTPは本人が処理し値を記録しない。
-2. 注文履歴でfilter選択肢、最古年、1ページ件数、pagination、注文/商品/配送/返金field名だけを記録。
-3. 既存注文1件で領収書/購入明細のcontrolとformatを確認するが、ファイル内容・注文番号・実額を保存しない。
-4. ギフト残高ページで残高履歴の列名、期間filter、件数、pagination、期限field、export有無だけ確認。
-5. ポイントページで利用可能/予定/期間限定、履歴列、個別期限、pagination/export有無だけ確認。
-6. DevToolsはhost/path/method/status、header名、redacted JSON key/DOM selectorだけ残す。最初はGETのみ。
-7. 注文GETを同一browserで1回再読し、次に暗号化sessionを同一hostから1回replay。成功後だけOCIで試す。
-8. appがWebにない粒度を持つ場合だけ、所有端末の公式splitを署名検証し静的解析、本人操作中のread-only
-   refreshを観測する。pinning/attestationで見えなければ回避せず障壁として記録する。
+1. Check only Amazon.co.jp domain, TLS, and login method in an ordinary browser. The owner handles passkeys/OTPs; do not record values.
+2. In order history, record only filter options, earliest year, rows per page, pagination, and order/item/delivery/refund field names.
+3. Check receipt/purchase statement controls and formats for one existing order, without saving file contents, order numbers, or actual amounts.
+4. On the gift balance page, check only history column names, period filters, counts, pagination, expiry fields, and export availability.
+5. On the points page, check only available/pending/limited-time categories, history columns, individual expiry dates, and pagination/export availability.
+6. Retain only hosts/paths/methods/statuses, header names, and redacted JSON keys/DOM selectors from DevTools. Initially GET only.
+7. Reread one order GET in the same browser, then replay once from the same host with an encrypted session. Try OCI only after success.
+8. Only if the app offers granularity absent on Web, verify signatures of official splits from an owned device,
+   analyze them statically, and observe read-only refresh during owner operation. If pinning/attestation hides it,
+   record the barrier without bypassing it.
 
-即時stop: 購入/注文確定/再注文/ギフト使用/point使用/設定変更の可能性、POST/PUT/PATCH/DELETE、未知host、
-OTP/CAPTCHA/recovery、403/429、account lock警告、schema drift、PII redaction失敗、sessionが端末/egressにbinding、
-規約/技術controlが自動取得を明示的に拒む場合。停止後はmanual exportへ戻す。
+Immediate stop: possible purchase/order confirmation/reordering/gift use/point use/settings changes,
+POST/PUT/PATCH/DELETE, unknown hosts, OTP/CAPTCHA/recovery, 403/429, account lock warnings, schema drift,
+PII redaction failure, device/egress-bound sessions, or terms/technical controls explicitly rejecting automated
+retrieval. Return to manual export after stopping.
 
-## 11. 確認事実・推測・未確認
+## 11. Established facts, hypotheses, and unverified items
 
-**確認事実:** Amazon注文履歴/ギフト残高/Privacy Centralは未認証時にAmazon sign-inへOpenID redirectする。
-注文履歴の公開実装はambient browser cookieと同一origin HTML、`timeFilter`/`startIndex`を使う。Amazon
-Mastercard明細はSMBC/Vpass境界。公式buyer向けscheduled APIは確認できない。
+**Established facts:** Amazon order history/gift balance/Privacy Central redirect unauthenticated requests
+to Amazon sign-in through OpenID. Public order history implementations use ambient browser cookies,
+same-origin HTML, and `timeFilter`/`startIndex`. Amazon Mastercard statements belong to the SMBC/Vpass
+boundary. No official scheduled buyer API established.
 
-**推測:** 注文GET session replayはlocal bootstrap後に成立する可能性が高い。gift/pointsも同じaccount
-sessionを共有し得るが、異なる`assoc_handle`/再認証強度のため個別検証が必要。注文とカード明細の照合は
-確定的joinではなく候補matchingになる。
+**Hypotheses:** Order GET session replay is likely feasible after local bootstrap. Gift/points may share
+the same account session, but require individual verification because `assoc_handle`/reauthentication strength
+differ. Reconciliation of orders and card statements is candidate matching rather than a deterministic join.
 
-**未確認:** 現行UIの最古年/全件数、gift/pointsの保持期間・pagination・export、Privacy Centralのschema、
-passkey RP ID/Bitwarden適合、2SV/trusted-device/session寿命、内部read endpoint、WAF vendor、app pinning/
-attestation、refundの各残高への正確な遷移、Amazon MastercardとAmazon accountのlinkage表示範囲。
+**Unverified:** Earliest year/total rows in the current UI; gift/points retention, pagination, exports;
+Privacy Central schemas; passkey RP ID/Bitwarden compatibility; 2SV/trusted-device/session lifetimes;
+internal read endpoints; WAF vendor; app pinning/attestation; precise refund transitions in each balance;
+and the scope of Amazon Mastercard/Amazon account linkage displays.

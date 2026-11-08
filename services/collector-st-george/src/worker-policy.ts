@@ -127,10 +127,12 @@ export const REQUESTED_LOGIN_SPACING_MS = 24 * 60 * 60 * 1000;
  * Failures after which another unattended login could make things worse: the
  * bank refused the credentials, or it asked for a person (challenge, OTP,
  * locked account). An HTTP 401/403/429 from the bank, its "Request error" page
- * and an unknown page also block: none has been observed yet, and each may be
- * how the bank answers a wrong password, so retrying daily could lock the
- * account. These pause later logins until the credential changes or an
- * operator requests a collection. Every other failure (a container or browser crash, a network error, a
+ * and an unknown page also block unless a validated diagnostic says the run
+ * failed before the login click with no login POST observed. Otherwise each
+ * may be how the bank answers a wrong password, so retrying daily could lock
+ * the account. These pause later
+ * logins until the credential changes or an operator requests a collection.
+ * Every other failure (a container or browser crash, a network error, a
  * deadline) is recorded as a failed run and the next scheduled run tries again.
  */
 const LOGIN_BLOCKING_CODES: ReadonlySet<FailureCode> = new Set([
@@ -141,8 +143,40 @@ const LOGIN_BLOCKING_CODES: ReadonlySet<FailureCode> = new Set([
   "bank-request-error",
   "unexpected-route",
 ]);
-export function blocksLaterLogins(reason: FailureCode): boolean {
-  return LOGIN_BLOCKING_CODES.has(reason);
+const PRE_SUBMIT_RETRY_CODES: ReadonlySet<FailureCode> = new Set([
+  "http-denied",
+  "bank-request-error",
+  "unexpected-route",
+]);
+/**
+ * Container stages that end before the login button is clicked. The POST count
+ * matches one exact URL, so after the click a zero count does not prove that no
+ * credential left the browser; only a failure in one of these stages does.
+ */
+const PRE_SUBMIT_STAGES: ReadonlySet<string> = new Set([
+  "request-validation",
+  "profile-create",
+  "relay-start",
+  "display-start",
+  "browser-start",
+  "browser-ready",
+  "browser-connect",
+  "extractor-load",
+  "login-navigate",
+  "login-state",
+  "login-form",
+  "credential-user-id",
+  "credential-security-number",
+  "credential-password",
+  "login-pre-submit-state",
+]);
+export function blocksLaterLogins(reason: FailureCode, diagnostic?: RunDiagnostic): boolean {
+  if (!LOGIN_BLOCKING_CODES.has(reason)) return false;
+  return !(
+    PRE_SUBMIT_RETRY_CODES.has(reason) &&
+    diagnostic?.loginPostCount === 0 &&
+    PRE_SUBMIT_STAGES.has(diagnostic.stage)
+  );
 }
 
 /** What `withCollectionLease` throws when another execution holds the source. */
@@ -256,7 +290,7 @@ export class CollectionCoordinator {
         // The digest is taken in the trigger that sent the credential, so a
         // secret changed before a late persist cannot be mistaken for it.
         const credential =
-          run.reason !== undefined && blocksLaterLogins(run.reason)
+          run.reason !== undefined && blocksLaterLogins(run.reason, run.diagnostic)
             ? await this.digest()
             : undefined;
         // Save validated financial evidence, never the credential or browser session.
@@ -271,7 +305,7 @@ export class CollectionCoordinator {
       if (!sharedRunPersisted(result))
         return { status: "failed", reason: "persistence-incomplete", runId: run.runId };
       if (run.reason !== undefined) {
-        const paused = blocksLaterLogins(run.reason);
+        const paused = blocksLaterLogins(run.reason, run.diagnostic);
         const credential = pending.credential;
         await this.finishPending(
           pending,

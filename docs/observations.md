@@ -17,6 +17,58 @@ minimal, or where its behaviour diverges from what the schema comments
 claim, this document says so rather than describing an intention as a
 fact.
 
+## Sony Bank: only CSV history transactions are current
+
+2026-11-08. Owner decision, 2026-11-08 13:29 UTC, with the completeness
+addition on 2026-11-08 ([issue 1182](https://github.com/risu729/kogane/issues/1182),
+[ADR 0092](adr/0092-sony-history-csv-only.md)). Current transaction reads
+exclude every release of `sony-bank-history-json`, even without a CSV.
+The CSV's whole-window occurrence count keeps identical rows on separate
+JSON pages distinct. No parser release or repair is needed; raw JSON and its
+recorded observations stay available as evidence, and JSON after-transaction
+balances keep their existing semantics.
+
+For each nonempty currency/window, the collector requires the CSV's logical
+data-row count to equal JSON `countCnt`; missing or unequal CSV is a failed
+run, never filled from JSON. The terminal carries a closed reason documented
+in [collection.md](collection.md#sony-bank-servicescollector-sony-bank-kogane-sony-bank-collector-poc).
+A zero-count currency still succeeds without CSV. JSON exchange
+counter-currency codes remain stored; CSV's reference-information column
+remains separate evidence. Synthetic read-model tests freeze shipped SQL and
+verify the intended delta on scaled/random CORE stores and plans; collector
+tests verify the actual failed and successful terminal paths.
+
+## V Point Pay: refuse negative notification amounts (notification-event 1.0.2)
+
+2026-11-08. Owner decision, 2026-11-08 13:29 UTC: a notification amount
+whose meaning is unknown fails the artifact
+([issue 1181](https://github.com/risu729/kogane/issues/1181),
+[ADR 0004](adr/0004-payment-type-shapes-from-evidence.md)).
+
+The Layer A extractor keeps a leading `-` in `amountYen`.
+`v-point-pay-notification-event@1.0.2` refuses a negative amount for `usage`,
+`charge` or `balance-addition` with the closed reason
+`v_point_pay_negative_notification_amount_unsupported`, before emitting any
+transaction or balance. Both supported normalized-event schemas use the same
+rule. No negative notification amount has been observed, and no document
+establishes whether one would be a reversal, a correction or a display
+variant. The parser does not infer any of those meanings.
+
+`declined` remains an attempt without posted cashflow amount fields. Its
+optional attempted amount remains only in `extra.amountYen`, including a
+negative value; it does not establish a cashflow. Zero and positive amounts
+on the other event types keep their earlier reading.
+
+This is a new release from 1.0.1; only this parser's digest changes. Complete
+outputs of all four existing synthetic fixtures were frozen from 1.0.1 in
+`v-point-pay-parser-boundaries/expected-1.0.1.json` and compare unchanged.
+Existing fixture bytes and earlier frozen expectations are untouched. No
+migration or production read was needed. The processor registers the release
+and its existing repair lane handles new parses; old evidence and observations
+remain append-only. Tests: `packages/parsers/test/v-point-pay-refusals.test.ts`,
+`packages/parsers/test/parser-digests.test.ts` and
+`experiments/observation-pipeline-local/test/v-point-pay-parser.test.ts`.
+
 ## Shared CSV reader: recover malformed quotes without losing following rows
 
 2026-11-08. Owner decision, 2026-11-08 13:26 UTC: tolerate malformed
@@ -3221,39 +3273,6 @@ Phase 3 is done when:
   being wrong about it — header-label matching, warned positional
   fallback, undocumented columns reported — but one real export settles
   it.
-- **Sony history pages and identical rows.** `sony-bank-history-json`
-  and `sony-bank-history-csv` give a row the id
-  `sony-bank-history:<fingerprint of currency, date, signed amount and
-  balance after>:<occurrence>`, so the two views of one row share an id
-  and the current-transactions read collapses them, preferring the CSV.
-  The occurrence counts identical rows within one artifact only. The
-  provider returns three rows per JSON page, so two rows with one
-  fingerprint on different pages (a deposit, a withdrawal of the same
-  amount, then the same deposit again on one day) both get occurrence
-  `0` and one id, while the CSV gives them `0` and `1`. With the CSV of
-  that window present each CSV row wins its own id; without it, the
-  current-transactions read keeps one of the two JSON rows. Qualifying
-  later pages' ids with their page, as Vpass and GLOBAL PASS do, would
-  stop JSON page rows from matching their CSV rows, so with the CSV
-  present every JSON row past page 1 would be listed beside its CSV row,
-  and a row would change id whenever another fetch window put it on
-  another page. Owner decision (2026-11-08): the CSV, which is skipped only
-  for a currency with no transactions, is the only source of history
-  transactions; a window whose CSV is missing or whose row count differs
-  from the JSON `countCnt` is an error, never filled from the JSON; the work
-  is [#1182](https://github.com/risu729/kogane/issues/1182).
-- **A V Point Pay notification amount with a minus sign.** The Layer A
-  extractor keeps a leading `-` in `amountYen`, and
-  `v-point-pay-notification-event` 1.0.0 accepts a signed integer there,
-  takes its magnitude and signs it by event type: `usage` becomes an
-  outflow, `charge` and `balance-addition` an inflow, with no warning.
-  A negative `charge` would therefore read as an inflow and a negative
-  `usage` as an outflow; only `extra.amountYen` keeps the stated sign.
-  No observation or document records what a negative notification
-  amount means (a reversal, a correction or a display variant). Owner
-  decision (2026-11-08): since the meaning is unknown, such an event fails
-  the artifact; the work, a release of this parser, is
-  [#1181](https://github.com/risu729/kogane/issues/1181).
 - **Reward units.** Point grants are recorded today as JPY transactions,
   contradicting `docs/design.md`. The fix direction is clear; the shape of
   `reward_observations` is not, because the payloads that would settle it

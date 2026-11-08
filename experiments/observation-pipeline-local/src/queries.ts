@@ -354,6 +354,7 @@ export function currentTransactions(store: Store): TransactionRow[] {
          JOIN fetch_artifacts fa ON fa.id = p.fetch_artifact_id
          JOIN fetch_runs f ON f.id = fa.fetch_run_id
          WHERE ${CURRENT}
+           AND p.parser_name <> 'sony-bank-history-json'
            AND (
              p.parser_name <> 'myjcb-credit-ledger'
              OR fa.id IN (SELECT fetch_artifact_id FROM current_myjcb_snapshots)
