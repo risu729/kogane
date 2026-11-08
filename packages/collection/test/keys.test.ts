@@ -65,6 +65,18 @@ describe("collection key layout", () => {
     expect(runPrefix("kogane-synthetic", "run-1")).toBe("runs/kogane-synthetic/run-1/");
   });
 
+  test("a terminal key validates its source even when an untyped caller omits it", () => {
+    // Without a source, `runPrefix` is the whole `runs/` scan prefix; a
+    // terminal key built on it would be `runs/terminal.json`, a key no reader
+    // parses, built without checking the run id at all.
+    const missing = undefined as unknown as string;
+    for (const runId of ["run-1", "../evil"]) {
+      expect(() => terminalKey(missing, runId)).toThrow(CollectionKeyError);
+      expect(() => runPrefix(undefined, runId)).toThrow(CollectionKeyError);
+    }
+    expect(() => terminalKey("kogane-synthetic", missing)).toThrow(CollectionKeyError);
+  });
+
   test("report and projection-input paths refuse traversal", () => {
     expect(reportKey("report-1", "summary.json")).toBe("reports/report-1/summary.json");
     expect(projectionInputKey(DIGEST, "rows/part-001.json")).toBe(

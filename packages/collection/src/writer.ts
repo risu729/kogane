@@ -13,8 +13,9 @@
 // Idempotency (03 §3): same run + same digest is a resend, not a second run;
 // same run + different digest is a conflict and nothing is overwritten. R2's
 // `etagDoesNotMatch: "*"` makes the create-only put atomic; the HEAD-then-
-// compare path below still runs, so the helper is correct on any R2
-// implementation whether or not it honours the wildcard condition.
+// compare path below still runs, so a resend is caught on any R2
+// implementation, whether or not it honours the wildcard condition. Only the
+// condition catches a second writer racing between that HEAD and the put.
 import {
   hexToBytes,
   type R2BucketLike,
