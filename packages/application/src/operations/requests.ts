@@ -563,9 +563,10 @@ export async function requestProjectionRebuild(
 /**
  * `POST /api/ops/v1/sessions/{source}/refresh`: ask the party that owns the
  * source's credentials to renew its session. This path never holds, returns or
- * logs a credential, and it never retries a login: when the source policy says
- * a person is needed the operation is stored as `waiting_for_human` and the UI
- * shows that state (12 §3, G3-11).
+ * logs a credential. When the source policy says a person is needed the
+ * operation is stored as `waiting_for_human` and the UI shows that state
+ * (12 §3, G3-11). Otherwise the collector renews the session itself and limits
+ * its own forced logins (SBI VC: at most one per hour, ADR 0069).
  */
 export async function requestSessionRefresh(
   input: OperationContext & {

@@ -74,125 +74,46 @@ export interface StateStorage {
   delete(key: string): Promise<unknown>;
   transaction<T>(closure: (storage: StateStorage) => Promise<T>): Promise<T>;
 }
+/**
+ * A login refusal pauses later logins. The pause records which run caused it,
+ * since when, and a salted PBKDF2 digest of the credential that run sent, so a
+ * changed credential lifts it by itself. The credential itself is never kept.
+ */
+interface PausedState {
+  kind: "paused";
+  reason: FailureCode;
+  runId?: string;
+  since?: string;
+  credential?: CredentialDigest;
+}
 type StoredState =
   | { kind: "running" }
+  | PausedState
+  /** Written before 2026-11-08; read as a pause without a credential digest. */
   | { kind: "blocked"; reason: FailureCode; runId?: string; since?: string }
-  | { kind: "pending"; run: Omit<SharedRunInput, "snapshot">; snapshotChunks: number };
+  | {
+      kind: "pending";
+      run: Omit<SharedRunInput, "snapshot">;
+      snapshotChunks: number;
+      /** The digest of the credential this run sent, taken when its login was refused. */
+      credential?: CredentialDigest;
+    };
 export interface PublicRunResult {
-  status: "stored" | "blocked" | "busy" | "failed" | "ready";
+  status: "stored" | "blocked" | "paused" | "busy" | "failed";
   reason?: FailureCode | "persistence-incomplete" | "persistence-pending";
   runId?: string;
   terminalKey?: string;
 }
 
-type PendingState = Extract<StoredState, { kind: "pending" }>;
-type RetryPendingResult =
-  | { status: "busy" }
-  | {
-      status: "refused";
-      reason:
-        | "invalid-request"
-        | "not-pending"
-        | "run-mismatch"
-        | "invalid-pending"
-        | "state-changed";
-    }
-  | { status: "failed"; reason: "state-unavailable" | "persistence-incomplete" }
-  | { status: "stored"; runId: string; terminalKey: string }
-  | { status: "blocked" | "failed"; reason: FailureCode; runId: string; terminalKey: string };
+export interface CredentialDigest {
+  salt: string;
+  hash: string;
+}
+/** The digest of the configured credential under `salt`, or null when it cannot be read. */
+export type CredentialFingerprint = (salt: string) => Promise<string | null>;
 
-const RUN_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
-function record(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-function exactKeys(value: Record<string, unknown>, keys: string): boolean {
-  return (
-    Reflect.ownKeys(value).length === keys.split(",").length &&
-    Object.keys(value).sort().join(",") === keys
-  );
-}
-function timestamp(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value) &&
-    Number.isFinite(Date.parse(value)) &&
-    new Date(value).toISOString() === value
-  );
-}
-/** Strict, owned metadata for this new path; legacy trigger/resume decoding is unchanged. */
-function pendingState(value: unknown): PendingState | undefined {
-  const state = record(value);
-  if (!state || !exactKeys(state, "kind,run,snapshotChunks") || state.kind !== "pending") return;
-  const run = record(state.run);
-  if (
-    !run ||
-    !exactKeys(
-      run,
-      Object.hasOwn(run, "reason")
-        ? "attemptId,completedAt,reason,runId,startedAt"
-        : "attemptId,completedAt,runId,startedAt",
-    )
-  )
-    return;
-  if (
-    typeof run.runId !== "string" ||
-    !RUN_UUID.test(run.runId) ||
-    typeof run.attemptId !== "string" ||
-    !run.attemptId.startsWith("attempt-") ||
-    !RUN_UUID.test(run.attemptId.slice(8)) ||
-    !timestamp(run.startedAt) ||
-    !timestamp(run.completedAt) ||
-    run.completedAt < run.startedAt
-  )
-    return;
-  const count = state.snapshotChunks;
-  if (typeof count !== "number" || !Number.isInteger(count) || count < 0 || count > 32) return;
-  const hasReason = Object.hasOwn(run, "reason");
-  if (
-    hasReason
-      ? count !== 0 || typeof run.reason !== "string" || safeFailureCode(run.reason) !== run.reason
-      : count === 0
-  )
-    return;
-  return {
-    kind: "pending",
-    run: {
-      runId: run.runId,
-      attemptId: run.attemptId,
-      startedAt: run.startedAt,
-      completedAt: run.completedAt,
-      ...(hasReason ? { reason: safeFailureCode(run.reason) } : {}),
-    },
-    snapshotChunks: count,
-  };
-}
-
-function samePending(left: PendingState, right: PendingState): boolean {
-  return (
-    left.snapshotChunks === right.snapshotChunks &&
-    left.run.runId === right.run.runId &&
-    left.run.attemptId === right.run.attemptId &&
-    left.run.startedAt === right.run.startedAt &&
-    left.run.completedAt === right.run.completedAt &&
-    left.run.reason === right.run.reason
-  );
-}
-
-function snapshotRun(pending: PendingState, chunks: Uint8Array[]): SharedRunInput {
-  if (pending.snapshotChunks === 0) return { ...pending.run };
-  const bytes = new Uint8Array(chunks.reduce((size, chunk) => size + chunk.byteLength, 0));
-  let offset = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  const snapshot = parseStGeorgeSnapshot(
-    JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)),
-  );
-  return { ...pending.run, snapshot };
-}
+/** A requested collection lifts a pause for one login at most this often. */
+export const REQUESTED_LOGIN_SPACING_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Failures after which another unattended login could make things worse: the
@@ -200,8 +121,8 @@ function snapshotRun(pending: PendingState, chunks: Uint8Array[]): SharedRunInpu
  * locked account). An HTTP 401/403/429 from the bank, its "Request error" page
  * and an unknown page also block: none has been observed yet, and each may be
  * how the bank answers a wrong password, so retrying daily could lock the
- * account. These stop later runs until an operator asks for a collection
- * again. Every other failure (a container or browser crash, a network error, a
+ * account. These pause later logins until the credential changes or an
+ * operator requests a collection. Every other failure (a container or browser crash, a network error, a
  * deadline) is recorded as a failed run and the next scheduled run tries again.
  */
 const LOGIN_BLOCKING_CODES: ReadonlySet<FailureCode> = new Set([
@@ -219,11 +140,17 @@ export function blocksLaterLogins(reason: FailureCode): boolean {
 /** What `withCollectionLease` throws when another execution holds the source. */
 const LEASE_REFUSAL = "collection_busy_or_uncertain";
 
+export interface TriggerOptions {
+  /** An accepted operations-API collection request; the alarm never sets it. */
+  operatorRequested?: boolean;
+}
+
 /**
  * Serializes attempts in one object. The durable attempt marker is written
  * before any provider request; one left by a reset object is logged and
  * cleared, because the collection lease, not the marker, keeps a second login
- * from overlapping the interrupted one.
+ * from overlapping the interrupted one. Nothing here waits for a resume: a
+ * pause ends when the credential changes or an operator requests a collection.
  */
 export class CollectionCoordinator {
   private active = false;
@@ -231,147 +158,10 @@ export class CollectionCoordinator {
     private readonly storage: StateStorage,
     private readonly collect: (runId: string) => Promise<CollectionOutput>,
     private readonly persist: (run: SharedRunInput) => Promise<PersistRunResult>,
+    private readonly fingerprint: CredentialFingerprint = async () => null,
+    private readonly now: () => number = Date.now,
   ) {}
-  /** Internal only: no route/RPC calls this, and the run id is not an authorization credential. */
-  async retryPending(input: unknown): Promise<RetryPendingResult> {
-    let expectedRunId: string;
-    try {
-      const request = record(input);
-      const id = request?.expectedRunId;
-      if (
-        !request ||
-        !exactKeys(request, "expectedRunId") ||
-        typeof id !== "string" ||
-        !RUN_UUID.test(id)
-      )
-        return { status: "refused", reason: "invalid-request" };
-      expectedRunId = id;
-    } catch {
-      return { status: "refused", reason: "invalid-request" };
-    }
-    if (this.active) return { status: "busy" };
-    this.active = true;
-    try {
-      const selected = await this.storage.transaction(async (storage) => {
-        const raw = await storage.get<unknown>("state");
-        if (record(raw)?.kind !== "pending") return { reason: "not-pending" as const };
-        const pending = pendingState(raw);
-        if (!pending) return { reason: "invalid-pending" as const };
-        if (pending.run.runId !== expectedRunId) return { reason: "run-mismatch" as const };
-        const chunks = await this.retryChunks(storage, pending);
-        if (!chunks) return { reason: "invalid-pending" as const };
-        try {
-          return { pending, chunks, run: snapshotRun(pending, chunks) };
-        } catch {
-          return { reason: "invalid-pending" as const };
-        }
-      });
-      if ("reason" in selected) return { status: "refused", reason: selected.reason };
-      let result: PersistRunResult;
-      try {
-        result = await this.persist(selected.run);
-      } catch {
-        return { status: "failed", reason: "persistence-incomplete" };
-      }
-      if (!sharedRunPersisted(result))
-        return { status: "failed", reason: "persistence-incomplete" };
-      // Only storage operations occur inside the retriable transaction. Never repeat external persistence here.
-      const finished = await this.storage.transaction(async (storage) => {
-        const current = pendingState(await storage.get<unknown>("state"));
-        if (!current || !samePending(selected.pending, current)) return false;
-        const chunks = await this.retryChunks(storage, current);
-        if (
-          !chunks ||
-          chunks.some((chunk, index) => {
-            const saved = selected.chunks[index];
-            return (
-              !saved ||
-              chunk.byteLength !== saved.byteLength ||
-              chunk.some((byte, offset) => byte !== saved[offset])
-            );
-          })
-        )
-          return false;
-        const run = selected.pending.run;
-        if (run.reason === undefined || !blocksLaterLogins(run.reason))
-          await storage.delete("state");
-        else
-          await storage.put("state", {
-            kind: "blocked",
-            reason: run.reason,
-            runId: run.runId,
-            since: run.completedAt,
-          });
-        for (let index = 0; index < current.snapshotChunks; index++)
-          await storage.delete(this.chunkKey(run.runId, index));
-        return true;
-      });
-      if (!finished) return { status: "refused", reason: "state-changed" };
-      const run = selected.pending.run;
-      if (run.reason !== undefined && blocksLaterLogins(run.reason))
-        logBlockEvent({
-          event: "st-george-collection-blocked",
-          reason: run.reason,
-          blockedRunId: run.runId,
-          blockedSince: run.completedAt,
-          clearedBy: "operator-resume",
-        });
-      return run.reason === undefined
-        ? { status: "stored", runId: run.runId, terminalKey: result.terminalKey }
-        : {
-            status: blocksLaterLogins(run.reason) ? "blocked" : "failed",
-            reason: run.reason,
-            runId: run.runId,
-            terminalKey: result.terminalKey,
-          };
-    } catch {
-      return { status: "failed", reason: "state-unavailable" };
-    } finally {
-      this.active = false;
-    }
-  }
-  /** Inspect every bounded slot, including absent slots: do not erase changed or residual evidence. */
-  private async retryChunks(
-    storage: StateStorage,
-    pending: PendingState,
-  ): Promise<Uint8Array[] | undefined> {
-    const chunks: Uint8Array[] = [];
-    for (let index = 0; index < 32; index++) {
-      const value = await storage.get<unknown>(this.chunkKey(pending.run.runId, index));
-      if (index >= pending.snapshotChunks) {
-        if (value !== undefined) return;
-      } else {
-        if (
-          !(value instanceof Uint8Array) ||
-          value.byteLength === 0 ||
-          value.byteLength > 64 * 1024
-        )
-          return;
-        chunks.push(value.slice());
-      }
-    }
-    return chunks;
-  }
-  async resume(): Promise<PublicRunResult> {
-    if (this.active) return { status: "busy" };
-    this.active = true;
-    try {
-      const state = await this.storage.get<StoredState>("state");
-      if (state?.kind === "pending") return { status: "failed", reason: "persistence-pending" };
-      await this.storage.delete("state");
-      if (state?.kind === "blocked")
-        logBlockEvent({
-          event: "st-george-block-cleared",
-          reason: state.reason,
-          blockedRunId: state.runId ?? null,
-          cause: "operator-resume",
-        });
-      return { status: "ready" };
-    } finally {
-      this.active = false;
-    }
-  }
-  async trigger(): Promise<PublicRunResult> {
+  async trigger(options: TriggerOptions = {}): Promise<PublicRunResult> {
     if (this.active) return { status: "busy" };
     this.active = true;
     try {
@@ -382,29 +172,34 @@ export class CollectionCoordinator {
         logBlockEvent({ event: "st-george-interrupted-attempt-cleared" });
         state = undefined;
       }
-      if (state?.kind === "blocked") {
-        if (blocksLaterLogins(state.reason)) {
-          // Nothing is contacted. Say which run blocked, since when, and what lifts it.
+      // Put back if the lease is refused after a requested lift, so a busy
+      // source neither loses its pause nor spends the day's requested login.
+      let restore: { pause: StoredState; requestedLoginAt: number | undefined } | undefined;
+      if (state?.kind === "paused" || state?.kind === "blocked") {
+        const requestedLoginAt = await this.storage.get<number>("requestedLoginAt");
+        const lift = blocksLaterLogins(state.reason)
+          ? await this.liftCause(state, options)
+          : "not-a-login-refusal";
+        if (lift === "requested-collection") restore = { pause: state, requestedLoginAt };
+        if (lift === null) {
           logBlockEvent({
-            event: "st-george-collection-skipped-blocked",
+            event: "st-george-collection-skipped-paused",
             reason: state.reason,
-            blockedRunId: state.runId ?? null,
-            blockedSince: state.since ?? null,
-            clearedBy: "operator-resume",
+            pausedRunId: state.runId ?? null,
+            pausedSince: state.since ?? null,
+            liftedBy: "credential-change-or-requested-collection",
           });
           return {
-            status: "blocked",
+            status: "paused",
             reason: state.reason,
             ...(state.runId ? { runId: state.runId } : {}),
           };
         }
-        // A block that needs no person, left by the older any-failure policy,
-        // no longer stops the run.
         logBlockEvent({
-          event: "st-george-block-cleared",
+          event: "st-george-pause-lifted",
           reason: state.reason,
-          blockedRunId: state.runId ?? null,
-          cause: "not-a-login-refusal",
+          pausedRunId: state.runId ?? null,
+          cause: lift,
         });
         state = undefined;
       }
@@ -414,7 +209,7 @@ export class CollectionCoordinator {
         pending = state;
         run = await this.readPending(pending);
       } else {
-        const startedAt = new Date().toISOString();
+        const startedAt = new Date(this.now()).toISOString();
         const runId = crypto.randomUUID();
         const attemptId = `attempt-${crypto.randomUUID()}`;
         // This must finish before any container or provider request starts.
@@ -425,7 +220,12 @@ export class CollectionCoordinator {
         } catch (error) {
           if (error instanceof Error && error.message === LEASE_REFUSAL) {
             // Another execution holds the source; nothing was contacted.
-            await this.storage.delete("state");
+            if (restore) {
+              await this.storage.put("state", restore.pause);
+              if (restore.requestedLoginAt === undefined)
+                await this.storage.delete("requestedLoginAt");
+              else await this.storage.put("requestedLoginAt", restore.requestedLoginAt);
+            } else await this.storage.delete("state");
             return { status: "busy" };
           }
           output = {
@@ -437,13 +237,19 @@ export class CollectionCoordinator {
           runId,
           attemptId,
           startedAt,
-          completedAt: new Date().toISOString(),
+          completedAt: new Date(this.now()).toISOString(),
           ...(output.status === "success"
             ? { snapshot: output.snapshot }
             : { reason: output.reason }),
         };
+        // The digest is taken in the trigger that sent the credential, so a
+        // secret changed before a late persist cannot be mistaken for it.
+        const credential =
+          run.reason !== undefined && blocksLaterLogins(run.reason)
+            ? await this.digest()
+            : undefined;
         // Save validated financial evidence, never the credential or browser session.
-        pending = await this.writePending(run);
+        pending = await this.writePending(run, credential);
       }
       let result: PersistRunResult;
       try {
@@ -454,23 +260,30 @@ export class CollectionCoordinator {
       if (!sharedRunPersisted(result))
         return { status: "failed", reason: "persistence-incomplete", runId: run.runId };
       if (run.reason !== undefined) {
-        const blocked = blocksLaterLogins(run.reason);
+        const paused = blocksLaterLogins(run.reason);
+        const credential = pending.credential;
         await this.finishPending(
           pending,
-          blocked
-            ? { kind: "blocked", reason: run.reason, runId: run.runId, since: run.completedAt }
+          paused
+            ? {
+                kind: "paused",
+                reason: run.reason,
+                runId: run.runId,
+                since: run.completedAt,
+                ...(credential ? { credential } : {}),
+              }
             : undefined,
         );
-        if (blocked)
+        if (paused)
           logBlockEvent({
-            event: "st-george-collection-blocked",
+            event: "st-george-collection-paused",
             reason: run.reason,
-            blockedRunId: run.runId,
-            blockedSince: run.completedAt,
-            clearedBy: "operator-resume",
+            pausedRunId: run.runId,
+            pausedSince: run.completedAt,
+            liftedBy: "credential-change-or-requested-collection",
           });
         return {
-          status: blocked ? "blocked" : "failed",
+          status: paused ? "blocked" : "failed",
           reason: run.reason,
           runId: run.runId,
           terminalKey: result.terminalKey,
@@ -482,11 +295,38 @@ export class CollectionCoordinator {
       this.active = false;
     }
   }
+  /**
+   * Why a login pause may end now, or null. A changed credential always lifts
+   * it. A requested collection lifts it for one login, at most once per
+   * `REQUESTED_LOGIN_SPACING_MS`, whoever sends the request.
+   */
+  private async liftCause(
+    state: PausedState | Extract<StoredState, { kind: "blocked" }>,
+    options: TriggerOptions,
+  ): Promise<string | null> {
+    if (state.kind === "paused" && state.credential) {
+      const current = await this.fingerprint(state.credential.salt);
+      if (current !== null && current !== state.credential.hash) return "credential-changed";
+    }
+    if (options.operatorRequested !== true) return null;
+    const last = await this.storage.get<number>("requestedLoginAt");
+    const now = this.now();
+    if (typeof last === "number" && now - last < REQUESTED_LOGIN_SPACING_MS) return null;
+    await this.storage.put("requestedLoginAt", now);
+    return "requested-collection";
+  }
+  private async digest(): Promise<CredentialDigest | undefined> {
+    const bytes = crypto.getRandomValues(new Uint8Array(16));
+    const salt = btoa(String.fromCharCode(...bytes));
+    const hash = await this.fingerprint(salt);
+    return hash === null ? undefined : { salt, hash };
+  }
   private chunkKey(runId: string, index: number): string {
     return `pending:${runId}:${index}`;
   }
   private async writePending(
     run: SharedRunInput,
+    credential?: CredentialDigest,
   ): Promise<Extract<StoredState, { kind: "pending" }>> {
     const { snapshot, ...metadata } = run;
     const bytes =
@@ -498,6 +338,7 @@ export class CollectionCoordinator {
       kind: "pending" as const,
       run: metadata,
       snapshotChunks: Math.ceil(bytes.length / chunkSize),
+      ...(credential ? { credential } : {}),
     };
     // Metadata and all chunks commit atomically; no network request occurs in this transaction.
     await this.storage.transaction(async (storage) => {
@@ -561,4 +402,32 @@ function logBlockEvent(
   } catch {
     /* A diagnostic must not change the run. */
   }
+}
+
+const PBKDF2_ITERATIONS = 100_000;
+/**
+ * A salted PBKDF2-SHA-256 digest of the parsed credential fields, so a
+ * re-pasted secret with other whitespace or key order is the same credential.
+ */
+export async function credentialDigest(credential: Credential, salt: string): Promise<string> {
+  const material = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(
+      JSON.stringify([credential.userId, credential.securityNumber, credential.password]),
+    ),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  const bits = await crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      hash: "SHA-256",
+      salt: Uint8Array.from(atob(salt), (c) => c.charCodeAt(0)),
+      iterations: PBKDF2_ITERATIONS,
+    },
+    material,
+    256,
+  );
+  return btoa(String.fromCharCode(...new Uint8Array(bits)));
 }

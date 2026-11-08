@@ -61,7 +61,9 @@ Such a run is recorded `uncertain` (`collection_deadline_exceeded` or
 `collection_lease_lost`), since the provider may have been contacted, and is
 never replayed. St George instead records a failed run with the stop as its
 reason; its next scheduled run tries again. Only a refused, challenged or unrecognised St
-George login blocks the source until the operator resumes it.
+George login pauses the source, until the credential secret changes or one
+requested collection (at most once per 24 hours) allows a login; a skipped alarm
+records `st_george_paused_<reason>`.
 
 **停止した実行を解除** remains for the operator, for a source that should not
 wait for the tick. Only after confirming the previous execution stopped, use it.

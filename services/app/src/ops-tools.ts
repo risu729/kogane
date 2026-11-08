@@ -123,7 +123,7 @@ export const OPS_MCP_TOOLS = [
     name: "kogane.ops.session.refresh",
     title: "Request a session refresh for one source",
     description:
-      "Ask the party that holds a source's credentials to renew its session. Never returns or accepts a credential, and never retries a login: when the source policy needs a person the operation is stored as waiting_for_human.",
+      "Ask the party that holds a source's credentials to renew its session. Never returns or accepts a credential. When the source policy needs a person the operation is stored as waiting_for_human. For an unattended source whose connection is enabled for dispatch, the collector renews the session itself and may log in once: SBI VC runs its keepalive and, if that fails, one passkey login, at most one forced login per hour whoever asks. Otherwise the request waits as collector_dispatch_disabled.",
     inputSchema: inputSchema(sessionRefreshSchema),
     annotations: REQUEST_HINTS,
   },

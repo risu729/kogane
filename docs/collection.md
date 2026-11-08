@@ -1092,8 +1092,9 @@ keep-alive and the daily collection — both unchanged. Terminal source id
   failed, or because the session was refused (401/403) and has never
   re-authenticated, is recorded as a **`failed` run with its own terminal**
   carrying `human_required_reauth` (`manual_agreement_required` while the
-  provider's terms wait for the owner), and `waitingForHuman` is reported on
-  `/health`, on the `/collect` 502 body and in the summary. A recoverable
+  provider's terms wait for the owner), and `waitingForHuman` is reported in
+  the summary and the keepalive alarm history (the `/health` and `/collect`
+  routes were removed on 2026-11-08, ADR 0069). A recoverable
   session error uses `session_unhealthy` instead. The blocked collection
   retries no login; the keepalive's re-authentication keeps its cooldown,
   6 hours, or 1 hour for up to 72 hours while a terms agreement is pending

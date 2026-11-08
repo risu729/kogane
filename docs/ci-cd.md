@@ -531,7 +531,7 @@ rather than pretending to check something.
 requested over its `workers.dev` hostname, unauthenticated, and must answer
 200 **with** the identity field the ledger names (`schemaVersion` for most,
 `service` for Vpass). SBI VC Trade uses `/healthz`, a static liveness answer;
-its existing `/health` remains protected by the collector admin token. 200 alone is not a
+it has no other public route (its admin routes were retired on 2026-11-08). 200 alone is not a
 pass: an edge error page and an empty body are both 200-shaped.
 
 **The authenticated half.** The App authenticates every request through
