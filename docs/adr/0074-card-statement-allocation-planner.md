@@ -282,8 +282,9 @@ them all: a run at both bounds (16 such statements) serialized to about
 verification below), and a 50-statement page can hold several such runs,
 against the 128 MB one Worker isolate has. The page rendered every one, and
 the browser's wire contract refused a list above 1,000, so such a statement
-broke the whole page. PR #1099 proposes widening that contract bound to
-5,488 to match the uncapped planner; this amendment bounds the list instead.
+broke the whole page. PR #1099 widened that contract bound to 5,488 to
+match the uncapped planner; this amendment bounds the list instead, and the
+contract now bounds the list at 50 and `allocationCount` at 5,488.
 
 ### Options considered
 

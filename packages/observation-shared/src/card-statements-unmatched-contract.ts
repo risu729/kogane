@@ -6,6 +6,7 @@
 import {
   ALLOCATION_OUTCOME_CODES,
   ALLOCATION_STATEMENT_REFUSALS,
+  CARD_STATEMENT_ALLOCATION_DEBITS_MAX,
   CARD_STATEMENT_ALLOCATION_LISTED_MAX,
   CARD_STATEMENT_ALLOCATION_SIZE_MAX,
 } from "../../domain/src/card-settlement-allocation.ts";
@@ -17,6 +18,20 @@ import { validQuantity } from "../../domain/src/values.ts";
 /** The path the browser reads the list from. */
 export const CARD_STATEMENTS_UNMATCHED_PATH = "/api/v2/reconciliation/card-statements-unmatched";
 const PAGE_LIMIT = 50;
+/** `n` choose `k`, exact for the small bounds below. */
+const choose = (n: number, k: number): number => (k === 0 ? 1 : (choose(n - 1, k - 1) * n) / k);
+/**
+ * Allocations one statement's planner answer may count: the planner counts
+ * every exact allocation of one to `CARD_STATEMENT_ALLOCATION_SIZE_MAX`
+ * debits among at most `CARD_STATEMENT_ALLOCATION_DEBITS_MAX`, so the bound
+ * on `allocationCount` is the number of such debit sets (5,488). The list
+ * itself is at most `CARD_STATEMENT_ALLOCATION_LISTED_MAX` (ADR 0074,
+ * amendment 2026-11-07).
+ */
+export const UNMATCHED_ALLOCATIONS_LIMIT = Array.from(
+  { length: CARD_STATEMENT_ALLOCATION_SIZE_MAX },
+  (_, index) => choose(CARD_STATEMENT_ALLOCATION_DEBITS_MAX, index + 1),
+).reduce((sum, value) => sum + value, 0);
 
 const record = (value: unknown): value is Record<string, any> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
@@ -58,6 +73,7 @@ function validPlanner(value: unknown): boolean {
     Array.isArray(value.allocations) &&
     value.allocations.length <= CARD_STATEMENT_ALLOCATION_LISTED_MAX &&
     validListing(value) &&
+    value.allocationCount <= UNMATCHED_ALLOCATIONS_LIMIT &&
     value.allocations.every(
       (allocation: unknown) =>
         record(allocation) &&
