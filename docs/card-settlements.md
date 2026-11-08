@@ -1075,10 +1075,9 @@ decision below is in the audit log under principal `mcp-client:169b1b83…`.
    the Portal with `kogane.events.read` (`collection: activity`,
    `basis: cash-movement`, added by #1094). It lists exactly two
    `card_settlement` events in state `debited`, one per accepted candidate:
-   `cs_be06321d` as `event_ae848343…` (2026-09-10, JPY 3,410) and
-   `cs_6c1a79c8` as `event_b8560480…` (2026-09-28, JPY 498,802). Each has
-   one exact cash-movement `decrease` leg on the SMBC ordinary account, the
-   unvalued obligation-change leg (`statement_principal_and_fees_unknown`) and
+   `cs_be06321d` as `event_ae848343…` and `cs_6c1a79c8` as
+   `event_b8560480…`. Each has one exact cash-movement `decrease` leg on the
+   paying bank account, the unvalued obligation-change leg (`statement_principal_and_fees_unknown`) and
    one settlement allocation from its bank debit. The withdrawn
    `cs_93bffe03` (`event_501722b7…`) is not listed, and `nextCursor` is
    null. So the cash-movement view counts each accepted case once and the
