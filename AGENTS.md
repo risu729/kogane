@@ -20,11 +20,12 @@ Japanese stays only where it is product data whose exact wording matters:
 - fixture data in tests (not their comments or test names);
 - a short verbatim phrase of the owner, with an English translation beside it.
 
-Such Japanese appears as a term inside an English sentence, never as the sentence.
-Existing Japanese prose in documents, issues and comments is rewritten in
-English, keeping its meaning, links and acceptance criteria, in PRs of its own;
-new text added to a Japanese document is written in English. Agents talk with
-the owner in Japanese outside the repository (chat and threads).
+Such Japanese appears as a term inside an English sentence, never as the
+sentence. Existing Japanese prose in documents, issues and comments is
+rewritten in English, keeping its meaning, links and acceptance criteria, in
+PRs of its own; new text added to a Japanese document is written in English.
+Agents talk with the owner in Japanese outside the repository (chat and
+threads).
 
 ## Continuing the work
 
