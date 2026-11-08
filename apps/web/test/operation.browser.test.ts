@@ -394,7 +394,7 @@ describe.if(runnable)("the operator's 依頼の経過 page", () => {
     }
   }, 60_000);
 
-  test("an unknown operation reads as not found, saying whose it may be", async () => {
+  test("an unknown operation reads as not found", async () => {
     const page = await browser.newPage();
     try {
       await page.goto(`${origin}/operations/${MISSING}`);

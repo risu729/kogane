@@ -199,9 +199,10 @@ Open limits, written down rather than guessed:
 - The operator UI reads one operation's trail on its 依頼の経過 page
   (amendment of 2026-11-07 below); no page lists operations, and the UI sends
   no operations request. `kogane.ops.operation.get` returns the same record to
-  every MCP client, for the operations that client requested itself
-  ([ADR 0084](0084-mcp-operator-authority-without-delegation.md)); it does not
-  read one the operator requested in the browser.
+  every MCP client
+  ([ADR 0084](0084-mcp-operator-authority-without-delegation.md)), whichever
+  principal requested the operation, the operator in the browser included
+  ([ADR 0086](0086-operator-operations-list.md), owner 2026-11-08 04:21 UTC).
 - Session refresh is unattended only for SBI VC's keepalive; every other source
   ends `session_refresh_unsupported` when its policy is unattended, and
   `waiting_for_human` otherwise.
@@ -273,9 +274,9 @@ boundary; the route's operator check is the only gate (`403` reads as
 operator-only, `404` as not found, which also covers a deployment without
 the API). Since [ADR 0086](0086-operator-operations-list.md) (owner,
 2026-11-08 04:21 UTC) the read is whole-store, so the page shows an operation
-whichever principal requested it, an MCP client's included. Option 2 is not taken: requesting
-a provider contact from the browser is a product change the owner has not
-made, and the footer's statement stays true.
+whichever principal requested it, an MCP client's included. Option 2 is not
+taken: requesting a provider contact from the browser is a product change the
+owner has not made, and the footer's statement stays true.
 
 The browser validates the record before rendering it
 (`packages/observation-shared/src/operation-contract.ts`, through
