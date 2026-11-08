@@ -683,10 +683,15 @@ fails while one of these checks runs, the answer is
 `503 catalogue_read_failed`, as on the route (`pageReadStore`): on the HTTP
 path that response, and on `/mcp` the Worker's response to the whole
 `tools/call` or `tools/list` request, with no exception text
-(`test/page-read-probe.test.ts`). A limit: `tools/list` asks the reported
-state's views for `kogane.reported-state.read` and
-`kogane.reconstructed-state.read` before the page reads, and a failure there
-is still `500 internal_error`.
+(`test/page-read-probe.test.ts`). A limit: the other tools' store checks run
+outside `pageReadStore`. `tools/list` asks the reported state's views (for
+`kogane.reported-state.read` and `kogane.reconstructed-state.read`) and the
+card settlement schema before the page reads, and the card purchase schema
+after them; a failure in any of those is still `500 internal_error` for the
+whole request. So is the same failure when `kogane.reported-state.read`,
+`kogane.reconstructed-state.read`, `kogane.purchases.explain` or a
+`kogane.card-settlements.*` read is called, on `/mcp` or on its HTTP path,
+where their routes answer `503 catalogue_read_failed`.
 
 `kogane.reports.read` takes `{ reportId?, view?, offset?, decimalPolicy? }`:
 without `reportId` it is the list (`offset` only), with it the detail
