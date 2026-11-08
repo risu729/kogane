@@ -83,7 +83,7 @@ until Card receives sales data, then formal expected billing including merchants
 refunds/tax refunds/adjustments, varying arrival. [Installment FAQ](https://support.rakuten-card.jp/faq/show/199797?site_domain=guest)
 describes different first/subsequent `利用金額` ("usage amount")/`当月請求額` ("current month bill").
 
-No destructive pending/notice → posted overwrite. Timestamp/source-state each snapshot; reconcile by use dates/
+No destructive pending/notice → posted overwrite. Give each snapshot `observed_at` and source state; reconcile by use dates/
 amounts/users/normalized merchant candidates. Disappearance not cancellation; provisional until confirmed/
 adjustment rows appear. Public material does not establish authorization IDs/original-refund links/timestamps/
 all original foreign amount-rate columns.
