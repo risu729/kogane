@@ -603,8 +603,9 @@ only.
 shows this record read-only: status, stages with their evidence (a fetch run
 links to its 取得記録), the execution and every reported run with its counts,
 each closed code by Japanese name beside the code. It reads once per opening
-and again only when asked, and the 監査ログ page links each `op_` target to
-it. The browser validates the record first
+and again only when asked. The 監査ログ page links each `op_` target to it,
+and the schedules page links a request it has just sent
+([schedules](schedules.md#収集を依頼-collection-request)). The browser validates the record first
 (`packages/observation-shared/src/operation-contract.ts`); a record outside
 the contract is an error. A `403` says the trail is the operator's; a `404`
 says the operation is not found, which also covers a deployment with

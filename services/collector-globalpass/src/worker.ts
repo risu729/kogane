@@ -677,7 +677,7 @@ function parseContainerRecord(line: string): ContainerRecord {
   }
   throw new Error("GLOBAL PASS container returned an invalid record shape");
 }
-async function relayTcp(
+export async function relayTcp(
   request: Request,
   env: Env,
   ctx: ExecutionContext,

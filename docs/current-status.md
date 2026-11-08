@@ -82,7 +82,7 @@ are separate claims. Historical acceptance records are linked from the
   and a trail from the request id to the reported runs, their registration,
   parse and CORE publication or a closed reason
   (`GET /api/ops/v1/operations/{id}`, shown read-only on the operator's
-  依頼の経過 page, opened from the audit log, and `kogane.ops.operation.get`,
+  依頼の経過 page, opened from the audit log or from a request just sent on the schedules page, and `kogane.ops.operation.get`,
   whole-store on both; the browser requests no operation). The committed
   `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`, `mobile-suica`, `moneyforward-me` and `myjcb`; requests for
   any other connection wait and expire after 24 hours. In production one
