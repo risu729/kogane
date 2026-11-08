@@ -63,7 +63,8 @@
     }
   ],
   "triggers": {
-    // Daily at 06:35 JST (21:35 UTC), after the Mizuho scheduled trigger.
+    // No Cron Trigger: the Processor's `st-george` alarm job (config/alarm-jobs.json)
+    // calls ScheduledCollection.runScheduled daily at 06:35 JST (21:35 UTC).
     "crons": []
   },
   "d1_databases": [

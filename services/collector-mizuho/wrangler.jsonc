@@ -11,7 +11,8 @@
   "secrets": {
     "required": ["MIZUHO_CUSTOMER_NUMBER", "MIZUHO_LOGIN_PASSWORD"]
   },
-  // Daily at 06:25 JST, staggered after the other daily bank collectors.
+  // No Cron Trigger: the Processor's `mizuho-bank` alarm job (config/alarm-jobs.json)
+  // calls ScheduledCollection.runScheduled daily at 06:25 JST.
   "triggers": { "crons": [] },
   "observability": { "enabled": true },
   "r2_buckets": [{ "binding": "DATA", "bucket_name": "kogane-raw-evidence" }],
