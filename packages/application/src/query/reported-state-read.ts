@@ -80,17 +80,17 @@ export function parseReportedStateRequest(
 /**
  * The GET route's query string as a request body, or the refusal: each
  * parameter at most once. The body is then validated like any other, so an
- * unknown or empty parameter is the body's `invalid_query`.
+ * unknown (`__proto__` included) or empty parameter is the body's
+ * `invalid_query`.
  */
 export function reportedStateBodyFromQuery(
   params: URLSearchParams,
 ): { ok: true; body: Record<string, string> } | ReturnType<typeof refuse> {
-  const body: Record<string, string> = {};
-  for (const [key, value] of params) {
+  for (const key of params.keys())
     if (params.getAll(key).length !== 1) return refuse("invalid_query");
-    body[key] = value;
-  }
-  return { ok: true, body };
+  // Own data properties: `__proto__` stays a key the body refuses, where an
+  // assignment would set the prototype and drop the parameter unseen.
+  return { ok: true, body: Object.fromEntries(params) };
 }
 
 /** The reported state for one untrusted request body, or its closed refusal. */

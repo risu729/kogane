@@ -633,7 +633,8 @@ else `403 evidence_restricted` (`scope:source`, `scope:account`), as
 new read until a scoped version is proven. Both are `financial-error-v1`
 bodies. Then the service's refusals, with the route's status and its
 `{error}` body on both agent paths, in order: `400 invalid_query` for a body
-that is not an object, another key or an empty value; `400 invalid_date` for
+that is not an object (an absent or `null` body is `{}`, so `invalid_date`),
+another key (`__proto__` included) or an empty value; `400 invalid_date` for
 a missing date or one that is not a `YYYY-MM-DD` calendar day (`20260910`
 included, as on the route); `400 date_in_future`; `400 invalid_query` for a
 malformed `source` or `account`; a value of the wrong type is malformed for

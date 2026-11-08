@@ -48,6 +48,14 @@ describe("one refusal for a body and its query string", () => {
     [{ date: "2026-09-10", source: "" }, "date=2026-09-10&source=", "invalid_query"],
     // An unknown key wins over a malformed date, on both.
     [{ date: "bad", view: "x" }, "date=bad&view=x", "invalid_query"],
+    // A key named like a prototype slot is a key like any other (the route
+    // refused `__proto__` before the service shared its rules).
+    [
+      JSON.parse('{"date":"2026-09-10","__proto__":"x"}'),
+      "date=2026-09-10&__proto__=x",
+      "invalid_query",
+    ],
+    [{ date: "2026-09-10", constructor: "x" }, "date=2026-09-10&constructor=x", "invalid_query"],
   ];
   test.each(cases)("%j", async (body, query, refusal) => {
     const fromQuery = reportedStateBodyFromQuery(new URLSearchParams(query));
