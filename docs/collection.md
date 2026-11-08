@@ -601,7 +601,10 @@ uses, so the same run registers the same way.
 Terminal fields: `producer: collector-vpass`; one run **per card**, `runId = <session run id>-card-NNN`,
 all cards of one session carrying that session id as `acquisitionSessionRef`,
 so several cards stay distinguishable instead of collapsing into one run
-(G1-16). One unit per card (`unitKind: card`), plus the binding unit below
+(G1-16). The alarm's answer lists each persisted card run once; a session with
+more than 100 card runs persists every one and answers `failed` with
+`run_ids_over_limit` and the first 100
+([operations API](ops-api.md#collector-execution-adr-0048)). One unit per card (`unitKind: card`), plus the binding unit below
 when there is a binding, a `statement-months` declared-coverage range over the
 months that were captured, one `terminal` report,
 `requestedScope.scopeKind = full_snapshot`. The run's `coverageStatus` is

@@ -18,7 +18,7 @@
 // validation below is the same closed-key style as `manifest.ts` rather than a
 // schema library (the App's request schemas stay Zod).
 import { RUN_ID } from "./keys";
-import type { ScheduledResult } from "./schedule-result";
+import { MAX_RUN_IDS, type ScheduledResult } from "./schedule-result";
 
 export const COLLECTOR_OPERATION_VERSION = "kogane-collector-operation-v1";
 
@@ -291,7 +291,7 @@ export function collectorOperationResult(value: unknown): ScheduledResult | null
   const record = value as Record<string, unknown>;
   const { status, runIds, failureCode } = record;
   if (status !== "completed" && status !== "failed") return null;
-  if (!Array.isArray(runIds) || runIds.length > 100) return null;
+  if (!Array.isArray(runIds) || runIds.length > MAX_RUN_IDS) return null;
   if (!runIds.every((id): id is string => typeof id === "string" && RUN_ID.test(id))) return null;
   if (failureCode !== null && (typeof failureCode !== "string" || !SAFE_CODE.test(failureCode)))
     return null;

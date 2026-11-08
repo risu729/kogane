@@ -1,5 +1,6 @@
 import { withCollectionLease } from "../../../packages/collection/src/schedule-lease";
 import {
+  scheduledCompletion,
   scheduledFailure,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
@@ -468,7 +469,12 @@ export default {
   },
 } satisfies ExportedHandler<Env>;
 
-/** Private service-binding collection; public HTTP cannot invoke collection. */
+/**
+ * Private service-binding collection; public HTTP cannot invoke collection.
+ * One run per card: the shared helpers list each persisted run once and at
+ * most `MAX_RUN_IDS` of them, and a collection with more runs than that is
+ * `run_ids_over_limit` rather than a `completed` naming a subset.
+ */
 export async function alarmCollection(
   env: Env,
   _cron: string,
@@ -477,7 +483,7 @@ export async function alarmCollection(
   const runIds: string[] = [];
   try {
     await collectAllCards(env, scheduledTime, (runId) => runIds.push(runId));
-    return { status: "completed", runIds, failureCode: null };
+    return scheduledCompletion(runIds);
   } catch (error) {
     return scheduledFailure(error, runIds);
   }

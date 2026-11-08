@@ -9,6 +9,9 @@
 - Amended: 2026-11-07, the operator's 依頼の経過 page
   ([below](#amendment-2026-11-07--the-operators-依頼の経過-page-proposed);
   proposed)
+- Amended: 2026-11-08, a collection with more than 100 runs
+  ([below](#amendment-a-collection-with-more-than-100-runs-2026-11-08);
+  proposed)
 
 ## Context
 
@@ -479,3 +482,88 @@ page); `services/app/test/ui-mcp-parity.test.ts` (the page's route is mapped
 to `kogane.ops.operation.get`); `services/app/test/delegated-ops-parity.test.ts`
 (the tool and the route answer the same receipt for the operator's request and
 for the MCP client's).
+
+## Amendment: a collection with more than 100 runs (2026-11-08)
+
+- Status: proposed
+- Date: 2026-11-08
+- Carried by: `MAX_RUN_IDS`, `RUN_IDS_OVER_LIMIT`, `scheduledCompletion`,
+  `scheduledResult` and `scheduledFailure` in
+  `packages/collection/src/schedule-result.ts`; `collectorOperationResult` in
+  `packages/collection/src/operation-rpc.ts`; Vpass's `alarmCollection` in
+  `services/collector-vpass/src/worker.ts`;
+  [operations API](../ops-api.md#collector-execution-adr-0048)
+
+### Context
+
+An answer carries at most 100 run ids: `collectorOperationResult` refuses
+more, and migration 0068 stores no more on an operation. The shared result
+helpers already listed each run once and at most 100 of them. Vpass, which
+persists one run per card, built its successful answer itself: every run it
+persisted, unchecked. With more than 100 cards the Processor would refuse that
+answer and the operation would end `uncertain` (`collector_result_invalid`)
+with no run listed, although the collector knew exactly what it had written.
+The alarm path stores its answer unchecked, so the same session's schedule
+occurrence named every run; the collection-quality contract allows at most
+100 `terminals` per occurrence, so such an occurrence would have put the whole
+collection-quality summary outside its contract and the web client would have
+refused the page.
+The other collectors name at most one run per answer, through the helpers or,
+for SBI VC's blocked session, only once its terminal is persisted.
+
+### Options considered
+
+1. List the first 100 and answer `completed`. Rejected: tracking follows a
+   collected operation's listed runs to `published` or `unpublished` (every
+   listed run settled), so it would state a verdict for a collection whose
+   other runs it never read: `unpublished` while an unlisted run was adopted.
+2. Answer with every run and let the Processor refuse it (today's result).
+   Rejected: `uncertain` says the outcome cannot be known and links no run,
+   while the collector knows it and could name 100.
+3. Add a truncation marker to the answer and a state for it. Rejected for
+   now: a new contract field (every collector and the Processor) and a new
+   execution state (a migration) for a case only a Vpass session with more
+   than 100 cards reaches.
+4. Answer `failed` with the closed code `run_ids_over_limit` and the first 100
+   runs, in the order persisted. Chosen.
+
+### Decision
+
+`scheduledCompletion(runIds)` builds a finished collection's answer:
+`completed` with each run once, or, past 100 distinct runs, `failed` with
+`run_ids_over_limit` and the first 100. `scheduledResult` uses it for a
+successful value; Vpass's alarm uses it for its card runs. A failed collection
+keeps its own code (a lease abort stays `uncertain`) and lists at most its
+first 100 runs. `collectorOperationResult` checks the same `MAX_RUN_IDS`.
+
+### Consequences
+
+- No evidence is lost: every run's terminal is written and the collection scan
+  registers it like any other. Only the operation's and the schedule
+  occurrence's links stop at 100.
+- Nothing more is claimed than is known: an over-limit operation is `failed`
+  with a code that says why, and is not followed to publication.
+- Open limit: a failed answer with more than 100 runs carries no marker, so
+  its `runs` alone does not say whether the list is complete. Option 3 is the
+  fix if that matters.
+- The alarm shares the answer: a Vpass occurrence with more than 100 card runs
+  is now `failed` with `run_ids_over_limit` and 100 runs, where it was
+  `completed` with every run (the alarm stores the answer as given). The runs
+  past 100 are registered like any other; only the occurrence does not link
+  them. Its collection-quality source shows `occurrence_failed`, and the
+  summary stays within its contract. An occurrence stored before this change
+  with more than 100 runs is not rewritten.
+
+### Verification
+
+- `packages/collection/test/schedule-review.test.ts`: exactly 100 runs with
+  repeats complete; 101 are `run_ids_over_limit` with the first 100; a failure
+  keeps its code, the lease abort's included.
+- `packages/collection/test/operation-rpc.test.ts`: every answer the helpers
+  build, past the cap included, is one `collectorOperationResult` accepts.
+- `services/collector-vpass/test/alarm-run-ids.test.ts`: synthetic sessions of
+  100 and 103 cards, successful and failed, persist every terminal and answer
+  within the closed shape.
+- `packages/application/test/collection-quality-query.test.ts`: an occurrence
+  naming 100 runs keeps the collection-quality summary within its contract;
+  101 do not.
