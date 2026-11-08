@@ -271,7 +271,7 @@ describe("kogane.instruments.coverage", () => {
                 : []),
               ...(capabilities.includes("summary.read") && whole ? [TOOL] : []),
               ...(capabilities.includes("records.read") && whole
-                ? ["kogane.accounts.candidates"]
+                ? ["kogane.accounts.candidates", "kogane.accounts.history"]
                 : []),
               // Served exactly while the カード照合 routes are, like the two below.
               ...(cardSettlements && capabilities.includes("records.read") && whole

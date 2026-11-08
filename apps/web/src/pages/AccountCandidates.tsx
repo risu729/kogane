@@ -5,6 +5,8 @@
 // (`relation.accept`) or keeping the pair apart / withdrawing an acceptance
 // (`relation.reject`). A decision is planned here and approved and committed
 // on the existing confirmation screen; opening that screen decides nothing.
+// Each candidate opens its direct source account's correction history on
+// request (`AccountHistory`, ADR 0077 amendment 2026-11-08).
 import { useState, type ReactNode } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useFeatures } from "../api.ts";
@@ -22,6 +24,7 @@ import {
   type AccountSourceFacts,
   type UnreviewedAggregatorAccount,
 } from "../account-candidates-api.ts";
+import { AccountHistory } from "../AccountHistory.tsx";
 import { CodeList } from "../instrument-candidate-display.tsx";
 import { displayLabel } from "../labels.ts";
 import { Link, navigate } from "../router.tsx";
@@ -222,6 +225,7 @@ function CandidateCard({
           {displayLabel(HOLD_LABELS, candidate.hold)} <code>{candidate.hold}</code>
         </Notice>
       )}
+      <AccountHistory sourceAccountId={candidate.directSourceAccountId} />
       <DecisionActions candidate={candidate} />
     </article>
   );

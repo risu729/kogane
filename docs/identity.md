@@ -338,11 +338,40 @@ Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 current
 relation rows (and 10,000 backfilled relations under a rewritten key),
 refused whole past each. Every read is keyed (ADR 0077, Cost).
 
+**Correction history of a source account.** Each candidate on the page has a
+`取得元の口座の訂正履歴を見る` button that reads, on request, the append-only
+history of the candidate's direct source account
+(`readAccountHistoryForGrant`,
+`packages/application/src/query/account-history-read.ts`, over
+`packages/read-model/src/account-history.ts`;
+[ADR 0077, amendment 2026-11-08](adr/0077-account-connection-candidates.md#amendment-2026-11-08-the-correction-history-of-a-source-account)):
+every revision of its account mapping (rule or manual), every
+`account_mapping` decision (assignments and override releases), and every
+relation row of any kind that names `source_account:<id>` on either side
+(the `connection_contains` acceptances and withdrawals of a pair under any of
+its references, `same_account` decisions), each with its decision kind,
+reason and closed origin (`automatic`, `operator`, `delegated`, `legacy`,
+`unknown`; never an actor id), oldest first. Nothing is collapsed or derived:
+the candidate's status still comes from the candidate read, and a withdrawal
+is a later entry beside the acceptance it withdraws. It is served under
+`records.read` over the whole store as
+`GET /api/identity/account-history?sourceAccountId=`
+(`services/app/src/account-history-api.ts`, reader grant behind Access) and
+`kogane.accounts.history` ([agent API](agent-api.md#account-history)). The
+service counts the rows through the same keys first and refuses past the
+grant's `maxRows` (1,000 for the reader), never truncating; an unknown source
+account is `evidence_restricted`. Each branch is a keyed lookup (the mapping
+and decision indexes, one probe per relation kind on `entity_relations_from`
+and `_to`, each decision by primary key), so the cost grows with that
+account's own history only. The browser checks the answer with
+`validAccountHistoryRead`, which refuses a relation entry that does not name
+the account on exactly one side.
+
 Limits today: only SBI Shinsei pairs exist; candidates are listed per
 producer's review (two producers' reviews of one identity value are two
-candidates sharing one status); no history view of a pair; no validity
-period; no leaf-account equivalence and no dedup of aggregator against direct
-rows.
+candidates sharing one status); the history is per source account, not per
+pair, and records knowledge order, not effective dates; no validity period; no
+leaf-account equivalence and no dedup of aggregator against direct rows.
 
 ## Acceptance gates
 
