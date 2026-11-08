@@ -1,6 +1,6 @@
 # ADR 0089: Classify the MyJCB J-POINT total under identity policy 2, for J-POINT captures only
 
-- Status: proposed
+- Status: accepted (merged 2026-11-08 in [#1147](https://github.com/risu729/kogane/pull/1147))
 - Date: 2026-11-08
 - Carried by:
   `packages/identity/src/other.ts` (MyJCB rule),

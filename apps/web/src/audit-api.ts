@@ -85,6 +85,7 @@ export const AUDIT_OPERATION_LABELS: Readonly<Record<string, string>> = {
   "ops.projection.request": "集計の再構築の依頼",
   "ops.session.refresh": "セッション更新の依頼",
   "ops.operation.get": "依頼の状態の確認",
+  "ops.operation.list": "依頼の一覧",
   "schedules.job.update": "収集スケジュールの変更",
   "schedules.maintenance.update": "定例停止時間の変更",
   "schedules.survey.decide": "定例停止の再調査の提案への判断",

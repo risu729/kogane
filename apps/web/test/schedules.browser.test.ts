@@ -517,6 +517,78 @@ describe.if(runnable)("operator schedule administration", () => {
       await page.close();
     }
   }, 30000);
+  test("a save's result message is not shown over a later change read back from elsewhere", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page
+        .locator(".schedule-card")
+        .filter({ has: page.getByRole("heading", { name: "ソニー銀行", exact: true }) });
+      const time = card.getByLabel("ソニー銀行の実行時刻");
+      await time.fill("06:40");
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card.getByRole("status").getByText("保存しました。", { exact: true }).waitFor();
+      // Another tab then stores revision 3 with its own time, and this page
+      // reads it back: the card shows values this save never wrote.
+      const row = snapshot.schedules.find((schedule) => schedule.id === "sony-bank")!;
+      expect(row.revision).toBe(2);
+      Object.assign(row, {
+        revision: 3,
+        pattern: { ...row.pattern, time: "07:15" },
+      });
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await page.waitForFunction(
+        () =>
+          (document.querySelector('input[aria-label="ソニー銀行の実行時刻"]') as HTMLInputElement)
+            ?.value === "07:15",
+      );
+      expect(await card.getByRole("status").innerText()).toBe("");
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+  test("a save whose read back fails still says it was saved", async () => {
+    // The write lands; every read after it fails, so the card keeps showing
+    // the revision the save was made from.
+    readAfterWrite = async () => {
+      snapshotStatus = 503;
+    };
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page
+        .locator(".schedule-card")
+        .filter({ has: page.getByRole("heading", { name: "ソニー銀行", exact: true }) });
+      await card.getByLabel("ソニー銀行の実行時刻").fill("06:40");
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await page
+        .getByRole("alert")
+        .getByText("設定を確認できません。表示を更新して保存状態を確認してください。", {
+          exact: true,
+        })
+        .waitFor();
+      await card.getByRole("button", { name: "設定を保存", exact: true }).waitFor();
+      expect(writes).toHaveLength(1);
+      expect(await card.getByRole("status").innerText()).toBe("保存しました。");
+      // Reads recover after another tab stored revision 3: the card skips the
+      // revision this save wrote, and the message is not shown over values
+      // the save never wrote.
+      readAfterWrite = null;
+      snapshotStatus = 200;
+      const row = snapshot.schedules.find((schedule) => schedule.id === "sony-bank")!;
+      expect(row.revision).toBe(2);
+      Object.assign(row, { revision: 3, pattern: { ...row.pattern, time: "07:15" } });
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await page.waitForFunction(
+        () =>
+          (document.querySelector('input[aria-label="ソニー銀行の実行時刻"]') as HTMLInputElement)
+            ?.value === "07:15",
+      );
+      expect(await card.getByRole("status").innerText()).toBe("");
+    } finally {
+      await page.close();
+    }
+  }, 30000);
   test("reopening a maintenance rule after it changed edits the stored revision, not the earlier form", async () => {
     // Synthetic rule and page; no provider page is read.
     const rule = {

@@ -323,9 +323,7 @@ Limits today: only SBI Shinsei pairs exist; candidates are listed per
 producer's review (two producers' reviews of one identity value are two
 candidates sharing one status); a plan pins only the revision of the
 candidate's own reference, so a decision recorded under one of the pair's
-other references between planning and commit does not make it stale; the
-balance projection reads every accepted relation row, so a later rejection
-does not remove an earlier acceptance from its declared inputs; no history
+other references between planning and commit does not make it stale; no history
 view of a pair; no validity period; no leaf-account equivalence and no dedup
 of aggregator against direct rows.
 

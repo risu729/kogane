@@ -205,14 +205,29 @@ function SettlementCard({
  */
 function OlderCandidates({
   group,
+  position,
   shown,
 }: {
   group: CardSettlementStatementGroup;
+  /** The statement's place in the statement list, as the list's pager counts it. */
+  position: number;
   shown: ReadonlySet<string>;
 }): ReactNode {
   const [requested, setRequested] = useState(false);
   const [offset, setOffset] = useState(0);
   const query = useStatementCandidates(group.statementKey, offset, requested);
+  // Several statements can show their whole lists at once: each pager, its
+  // spoken count and its loading state name the statement they belong to.
+  // Card, account and month do not tell statements apart (the importer-era
+  // and collector-era captures of one month are two statements,
+  // docs/card-settlements.md), so the name leads with the statement's place
+  // in the list, which no other statement on the page shares.
+  const lead = group.candidates[0];
+  const statement = `請求 ${position} 件目${
+    lead
+      ? `（${statementSource(lead)} · ${lead.facts.statement.sourceAccount} · ${lead.facts.statement.period ?? "請求月不明"}）`
+      : ""
+  }`;
   if (!requested)
     return (
       <button className="button" type="button" onClick={() => setRequested(true)}>
@@ -222,7 +237,7 @@ function OlderCandidates({
   return (
     <QueryBoundary
       query={query}
-      label="この請求の候補"
+      label={`${statement}の候補`}
       isEmpty={(data) => data.items.length === 0}
       empty="この請求の候補はほかにありません。"
     >
@@ -233,8 +248,9 @@ function OlderCandidates({
             .map((review) => (
               <SettlementCard key={review.proposalId} review={review} />
             ))}
-          <nav className="pagination" aria-label="この請求の候補のページ">
+          <nav className="pagination" aria-label={`${statement}の候補のページ`}>
             <span role="status" aria-live="polite">
+              <span className="visually-hidden">{statement}の候補：</span>
               {offset + 1}–{offset + data.items.length} 件目 / {group.candidateCount} 件
             </span>
             <button
@@ -266,7 +282,13 @@ function OlderCandidates({
  * the same statement collapsed under it. Nothing is hidden for good: every
  * candidate stays reachable and keeps its own decision history.
  */
-function StatementGroup({ group }: { group: CardSettlementStatementGroup }): ReactNode {
+function StatementGroup({
+  group,
+  position,
+}: {
+  group: CardSettlementStatementGroup;
+  position: number;
+}): ReactNode {
   const [lead, ...others] = group.candidates;
   if (!lead) return null;
   const otherCount = group.candidateCount - 1;
@@ -284,7 +306,7 @@ function StatementGroup({ group }: { group: CardSettlementStatementGroup }): Rea
             <SettlementCard key={review.proposalId} review={review} />
           ))}
           {group.candidateCount > group.candidates.length ? (
-            <OlderCandidates group={group} shown={shown} />
+            <OlderCandidates group={group} position={position} shown={shown} />
           ) : null}
         </details>
       ) : null}
@@ -319,8 +341,12 @@ export function ReconciliationPage(): ReactNode {
         >
           {(data) => (
             <>
-              {data.statements.map((group) => (
-                <StatementGroup key={group.statementKey} group={group} />
+              {data.statements.map((group, index) => (
+                <StatementGroup
+                  key={group.statementKey}
+                  group={group}
+                  position={offset + index + 1}
+                />
               ))}
               <nav className="pagination" aria-label="照合候補のページ">
                 <span role="status" aria-live="polite">

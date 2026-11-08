@@ -235,6 +235,12 @@ function toolRows(operation: OperationName, body: unknown): { rows: number; trun
       rows: Array.isArray(value["nodes"]) ? value["nodes"].length : 0,
       truncated: value["truncated"] === true,
     };
+  // One page of operations summaries; a next cursor means more remain.
+  if (operation === "ops.operation.list")
+    return {
+      rows: Array.isArray(value["operations"]) ? value["operations"].length : 0,
+      truncated: typeof value["nextCursor"] === "string",
+    };
   if (operation === "purchases.explain") return { rows: countOf(value["data"]), truncated: false };
   // One account's reconstructed state, when there is one to show.
   if (operation === "reconstructed-state.read")

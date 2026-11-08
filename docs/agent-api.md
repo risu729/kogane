@@ -241,11 +241,16 @@ reported state's views), otherwise `unknown_tool` and `404 not_found`.
 `kogane.reported-state.read` follows `GET /api/v2/reported-state` on the same
 condition (`reportedStateOnDate`, the same views); it is listed after
 `kogane.instruments.history`, and only to a grant that holds `records.read`
-over every source and account. The six
+over every source and account. The seven
 `kogane.ops.*` tools of [ops-api.md](ops-api.md) are published on `/mcp`,
 whose callers are all agent-only, to every MCP client, which applies them as
 itself ([ops-api](ops-api.md#mcp), ADR 0084): with `OPS_API_ENABLED` off an
-operations tool name is `unknown_tool`.
+operations tool name is `unknown_tool`. Its two reads,
+`kogane.ops.operation.get` and `kogane.ops.operation.list`, are whole-store
+like every other read: an MCP client reads and lists every operations
+request, the operator's browser requests and other MCP clients' included
+(owner, 2026-11-08 04:21 UTC;
+[ADR 0086](adr/0086-operator-operations-list.md)).
 
 ### Intents
 
@@ -1769,9 +1774,10 @@ owner's agreement.
 1. **Catalogue operations.** Every `OPERATION_CATALOGUE` entry whose paths
    include `ui` also lists `mcp` and has its `kogane.<operation>` tool
    published, unless it is R4. `audit.overflow` is a record, not an
-   operation, and is excluded by name. The six `ops.*` operations pass: since
+   operation, and is excluded by name. The seven `ops.*` operations pass: since
    #660 `delegatedOpsTools` publishes them, and since ADR 0084 to every MCP
-   client, and `schedules.lease.release` passes with a tool
+   client (`ops.operation.list` with its tool since
+   [ADR 0086](adr/0086-operator-operations-list.md)), and `schedules.lease.release` passes with a tool
    that refuses every call (ADR 0081 point 3). `schedules.survey.decide`
    passes with `kogane.schedules.survey.decide` (ADR 0050, 2026-11-07
    amendment), so no gap remains.
@@ -1828,6 +1834,7 @@ owner's agreement.
    | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact` | `kogane.evidence.read` ([UI read pages](#ui-read-pages))                                                                                                       |
    | `/api/raw/:sha256`, `/api/evidence/v1/runs/:run/artifacts/:artifact/raw`                                      | `kogane.evidence.raw.read` ([UI read pages](#ui-read-pages))                                                                                                   |
    | `/api/ops/v1/schedules`                                                                                       | `kogane.schedules.read` ([UI read pages](#ui-read-pages)) without the survey proposals, `kogane.schedules.maintenance.read` and `kogane.schedules.survey.read` |
+   | `/api/ops/v1/operations/:id`                                                                                  | `kogane.ops.operation.get` (the 依頼の経過 page; the same `readOperation` receipt, whole-store, [ADR 0086](adr/0086-operator-operations-list.md))              |
 
    The 1 gap, by group:
 
