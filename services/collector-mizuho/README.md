@@ -44,8 +44,8 @@ establish successful bank access.
   example `authentication-required`). A code outside the collector's closed
   list stays `collection-unit-failed` / `collection-failed`. The
   collection-quality page and `kogane.collection-quality.read` show a
-  registered unit's code, so a partial run's cause is readable without the
-  Worker logs.
+  registered unit's code with hyphens read as `_` (`read_http_error`), so a
+  partial run's cause is readable without the Worker logs.
 
 The configured Processor route is `mizuho-bank` / `collector-mizuho-bank` in
 `config/ingest-clients.json`. The existing idempotent bootstrap must be applied
