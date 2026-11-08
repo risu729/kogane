@@ -55,12 +55,27 @@ export interface ReceiptReservation {
 /**
  * Statement 1 of the commit batch: reserve the operation key. Nothing else in
  * the batch can write unless this one did.
+ *
+ * The key must be free in the decision ledger (`decision_operations`) too.
+ * A commit that writes a ledger row writes it in the same batch as its
+ * receipt, so a ledger row under a key that has no receipt was written by a
+ * route that keeps no receipt: the direct identity command
+ * (`/identity-revise`) or the reconciliation job's rule acceptance
+ * (`acceptProposal`). Those derive their decision ids from the operation id
+ * with the same key function as the commit writers (`dr` over
+ * `["command", id]`, `["proposal", id]`), so a commit reusing the key would
+ * find the other route's ledger row and decision as if they were
+ * its own: an identity commit returned an accepted receipt with no effect,
+ * and a relation commit tried to link the other route's decision. The
+ * commit refuses the key instead (`idempotency_conflict`), and the stored
+ * rows keep their ids.
  */
 export function receiptReservationWrite(input: ReceiptReservation): SqlWrite {
   return {
     sql: `INSERT INTO operation_receipts(operation_id,principal,operation_kind,payload_digest,plan_id,status,result_json,created_at,published_at)
         SELECT ?1,?2,?3,?4,?5,'accepted',?6,?7,NULL
         WHERE NOT EXISTS(SELECT 1 FROM operation_receipts WHERE operation_id=?1)
+        AND NOT EXISTS(SELECT 1 FROM decision_operations WHERE operation_id=?1)
         AND EXISTS(SELECT 1 FROM change_plans WHERE plan_id=?5 AND status IN ('planned','approved') AND expires_at>?7)
         AND EXISTS(SELECT 1 FROM approvals WHERE approval_id=?8 AND plan_id=?5 AND plan_digest=?5
           AND approver_actor=?2 AND uses_remaining>0 AND expires_at>?7)
