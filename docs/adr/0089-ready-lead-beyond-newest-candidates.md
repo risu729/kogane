@@ -75,7 +75,8 @@ candidates and leads; the others follow newest first as before.
 Each group says how far its lead was looked for, `leadSearch`, a closed code
 (`CARD_SETTLEMENT_LEAD_SEARCHES`): `not_searched` (the five newest hold an
 acceptance or a ready candidate, or there is no older candidate), `found`,
-`none_ready` (every older candidate that could be ready was judged; none is),
+`none_ready` (every older candidate that could be ready was judged; none is;
+see the limit under Consequences),
 or `truncated` (the search judged 200 without finding one and stopped; a full
 last pass does not read whether more follow, so a statement with exactly 200
 is `truncated` too). `truncated` is unknown, never "none ready" (INV05): the
@@ -101,15 +102,33 @@ read of the grouped list (ADR 0081) show the same lead.
   `leadSearch` to each group and `olderCandidatesSearched` (200) to the
   coverage, both checked by the web client's contract
   (`validCardSettlementStatementPage`); `candidatesPerStatement` stays 5 and a
-  group carries at most 50 candidates.
+  group carries at most 50 candidates. Both fields are additive: a client
+  that does not know them reads the page as before. The web client and the
+  App Worker that serves it deploy together, so the stricter check meets
+  only pages that carry both. No MCP tool serves the grouped read yet (it is
+  on the parity guard's `READ_ROUTE_GAPS`); a tool that returns this page
+  carries both fields and should describe the older ready lead.
 - Cost: no change for a statement its newest candidates decide. Otherwise at
-  most four more keyed reads per page load, one a pass for every statement
-  still searching, each judging at most 50 candidates per statement, so at
-  most 2,000 judged candidates a page and eight reads in all with the page,
-  window, history and evidence reads. Each pass reaches every candidate of
-  the statements it searches through `card_settlement_candidates_statement`
-  to rank them, as the shipped window read does once (docs/card-settlements.md,
-  Cost).
+  most four more keyed reads per page load: a pass is one read for all the
+  page's statements still searching (their keys as one JSON array), judging
+  at most 50 older candidates of each. A page of ten statements therefore
+  makes at most eight reads (the statement page, the window, four passes,
+  the decision history and the debit-account evidence), and the search
+  judges at most 10 × 200 = 2,000 older candidates, beside the window's five
+  newest and accepted ones per statement. Each pass reaches every candidate
+  of the statements it searches through `card_settlement_candidates_statement`
+  to rank them, as the shipped window read does once, so the ranking still
+  grows with the history, up to five times the window read's
+  (docs/card-settlements.md, Cost).
+- The passes are separate reads that page by position, not one snapshot. A
+  decision recorded, between two passes, on an older candidate an earlier
+  pass judged moves the later candidates up one place, so the next pass can
+  skip one: that page load can then say `none_ready`, or lead with an older
+  ready candidate than the newest one. The next load reads again, and the
+  statement's full list judges every candidate. A new candidate moves them
+  down one place at most, so a pass then judges one again and skips none.
+  This is an open limit: `none_ready` is exact only when no such decision
+  lands during the page load.
 - A malformed older candidate the search judges before finding a ready one is
   an unavailable answer (`card_settlement_facts_invalid`), as a malformed
   candidate of the window already is.
@@ -138,8 +157,13 @@ read of the grouped list (ADR 0081) show the same lead.
   store checks the loop: only undecided statements are searched, one read a
   pass for the statements still searching, never more than four, and each
   of the four codes, including a ready candidate on the last pass judged
-  (`found`), one just past it and a statement with exactly 200 (`truncated`).
+  (`found`), one just past it and statements with exactly 200 and 201
+  (`truncated`) and 199 (`none_ready`); the worst page (ten statements,
+  every one `truncated`) makes eight reads and judges 200 older candidates
+  of each; and on drawn histories each statement's lead and code equal a
+  reference written from the counts, not from the loop.
 - `apps/web/test/card-settlement-contract.test.ts` refuses a group without a
   known `leadSearch` and a coverage without `olderCandidatesSearched`;
-  `apps/web/test/card-settlement.browser.test.ts` shows the `truncated` note
+  `apps/web/test/card-settlement.browser.test.ts` shows the `truncated` note,
+  which says a ready candidate is not ruled out and where the full list is,
   and no note for `none_ready`.

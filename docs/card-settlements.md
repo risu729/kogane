@@ -454,9 +454,16 @@ ready was judged) or `truncated` (the search stopped after 200, so a ready
 candidate older than those is not ruled out; a statement with exactly 200 is
 `truncated` too, since the last full pass does not read whether more follow).
 The coverage carries the limit (`olderCandidatesSearched: 200`). For
-`truncated` the page says, under the lead, that the older candidates past the
-first 200 were not checked and that `この請求の候補をすべて表示` shows every
-one; it never reads as "nothing to decide".
+`truncated` the page says, under the lead, that it checked up to 200 of the
+older candidates that could be ready, that older ones were not checked so a
+ready one is not ruled out, and that opening `この請求のほかの候補` and
+`この請求の候補をすべて表示` shows every one; it never reads as "nothing to
+decide". The passes are separate reads that page by position, not one
+snapshot: a decision recorded, while a page load is between two passes, on
+an older candidate an earlier pass judged moves the later candidates up one
+place, so the next pass can skip one, and that load can say `none_ready` or
+lead with an older ready candidate than the newest. The next load reads
+again; the statement's full list judges every candidate.
 
 The other judged candidates follow, newest first, collapsed under the lead
 (`この請求のほかの候補（N 件）`, N the statement's other candidates). `candidateCount` counts every candidate of the
@@ -932,12 +939,20 @@ candidates, adds the search for an older ready one (ADR 0089): one read a pass
 (`CARD_SETTLEMENT_STATEMENT_OLDER_SQL`) for every statement still searching,
 which reaches those statements' candidates by the same index, ranks every one
 of them (as the window read does), reads each older one's latest decision by
-key and its facts, and judges at most 50 of them per statement. The search
-stops after four passes (200 judged per statement) and says `truncated`, so a
-page load adds at most four reads and 2,000 judged candidates however long
-the histories grow; it does not run for a statement its newest candidates
-decide, which on the scaled store is every statement, so the two grouped rows
-above are unchanged there (not measured again).
+key and its facts, and judges at most 50 of them per statement. A pass is one
+read for all the statements of the page still searching, not one per
+statement. The search stops after four passes (200 judged per statement) and
+says `truncated`. A page of ten statements therefore makes at most eight
+reads (the statement page, the window, four passes, the decision history and
+the debit-account evidence) and the search judges at most 10 × 200 = 2,000
+older candidates, beside the window's five newest and accepted ones per
+statement, however long the histories grow. What still grows with the
+history is the ranking: each pass ranks every candidate of the statements it
+searches, as the window read does once, so a page whose statements all search
+ranks their candidates up to five times. The search does not run for a
+statement its newest candidates decide, which on the scaled store is every
+statement, so the two grouped rows above are unchanged there (not measured
+again).
 `card-settlement-review-scale.test.ts` checks its plan without statistics;
 the frozen text of the grouped read before it
 (`card-settlement-statement-group-legacy-sql.ts`, digest-pinned) returns the
@@ -948,8 +963,11 @@ changes, to the newest ready candidate its full list holds, found on the first
 or the second pass; with the ready one past the limit the search stops after
 four reads and only the statement's `leadSearch` differs (`truncated`).
 `card-settlement-statements.test.ts` compares the search's choice with a
-reference on random stores with synthetic history, and checks the loop's
-bound and codes on a scripted store.
+reference on random stores with synthetic history, and on a scripted store
+checks the loop's bound and codes (199, 200 and 201 older candidates), the
+worst page (ten truncated statements: eight reads, 200 judged each) and, on
+drawn histories, each statement's lead and code against a reference written
+from the counts.
 Not changed here, and not measured: the ownership review's account mapping
 reads (`queryCardOwnership`'s mappings, `prepareOwnershipReview`'s mapping read
 and the two mapping terms of its commit guard) still read

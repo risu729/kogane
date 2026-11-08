@@ -644,6 +644,10 @@ describe.if(runnable)("card settlement review", () => {
     await note.waitFor();
     expect(await note.textContent()).toContain("新しい順に 200 件まで確かめました");
     expect(await note.textContent()).toContain("採用できる候補がないとは限りません");
+    // It names where the full list is: under the collapsed other candidates.
+    expect(await note.textContent()).toContain(
+      "「この請求のほかの候補」を開き、「この請求の候補をすべて表示」",
+    );
     expect(await auditView(page)).toEqual([]);
     await page.close();
     leadSearch = "none_ready";

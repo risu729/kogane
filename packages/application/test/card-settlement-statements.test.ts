@@ -250,6 +250,9 @@ describe("the older-candidate search's bound", () => {
       { key: "s-past-limit", window: "blocked", older: 10_000, readyAt: limit },
       { key: "s-short", window: "blocked", older: 120 },
       { key: "s-exactly-limit", window: "blocked", older: limit },
+      // One short of the limit: the last pass is short, so every one was judged.
+      { key: "s-one-short", window: "blocked", older: limit - 1 },
+      { key: "s-one-past", window: "blocked", older: limit + 1 },
     ]);
     const page = await queryCardSettlementStatements(executor);
     const by = new Map(page.statements.map((group) => [group.statementKey, group]));
@@ -266,12 +269,21 @@ describe("the older-candidate search's bound", () => {
       // A full last pass at the limit: whether more follow is not read, so
       // the group never says none is ready.
       "s-exactly-limit": "truncated",
+      "s-one-short": "none_ready",
+      "s-one-past": "truncated",
     });
     expect(by.get("s-found-second-pass")!.candidates[0]!.proposalId).toBe(
       "s-found-second-pass-o60",
     );
     expect(by.get("s-found-last")!.candidates[0]!.proposalId).toBe(`s-found-last-o${limit - 1}`);
-    for (const key of ["s-past-limit", "s-short", "s-exactly-limit", "s-no-older"])
+    for (const key of [
+      "s-past-limit",
+      "s-short",
+      "s-exactly-limit",
+      "s-no-older",
+      "s-one-short",
+      "s-one-past",
+    ])
       expect(by.get(key)!.candidates[0]!.proposalId).toBe(`${key}-w0`);
     // One read a pass for the statements still searching, never past the limit.
     expect(passes.map((pass) => pass.passed)).toEqual(
@@ -286,11 +298,109 @@ describe("the older-candidate search's bound", () => {
       "s-past-limit",
       "s-short",
       "s-exactly-limit",
+      "s-one-short",
+      "s-one-past",
     ];
     expect(passes[0]!.keys).toEqual(searching);
     expect(passes[1]!.keys).toEqual(searching);
-    expect(passes[2]!.keys).toEqual(["s-found-last", "s-past-limit", "s-short", "s-exactly-limit"]);
-    expect(passes.at(-1)!.keys).toEqual(["s-found-last", "s-past-limit", "s-exactly-limit"]);
+    expect(passes[2]!.keys).toEqual([
+      "s-found-last",
+      "s-past-limit",
+      "s-short",
+      "s-exactly-limit",
+      "s-one-short",
+      "s-one-past",
+    ]);
+    expect(passes.at(-1)!.keys).toEqual([
+      "s-found-last",
+      "s-past-limit",
+      "s-exactly-limit",
+      "s-one-short",
+      "s-one-past",
+    ]);
+  });
+
+  test("its worst case is eight reads a page and 200 judged older candidates a statement", async () => {
+    // Ten statements whose newest decide nothing and whose older candidates
+    // never turn ready: every pass reads all ten at once.
+    const { executor, passes } = scripted(
+      Array.from({ length: 10 }, (_, index) => ({
+        key: `s-worst-${String(index)}`,
+        window: "blocked" as const,
+        older: 10_000,
+      })),
+    );
+    const reads: string[] = [];
+    const older = new Map<string, number>();
+    const counted: SqlExecutor = {
+      all: async <T>(query: string, args: readonly unknown[]): Promise<T[]> => {
+        reads.push(query);
+        const found = await executor.all<T>(query, args);
+        if (query === CARD_SETTLEMENT_STATEMENT_OLDER_SQL)
+          for (const row of found as { statement_key: string }[])
+            older.set(row.statement_key, (older.get(row.statement_key) ?? 0) + 1);
+        return found;
+      },
+      first: executor.first,
+    };
+    const page = await queryCardSettlementStatements(counted);
+    expect(page.statements.map((group) => group.leadSearch)).toEqual(
+      Array.from({ length: 10 }, () => "truncated"),
+    );
+    // The statement page, the window, four passes, the history and the
+    // debit-account evidence.
+    expect(reads.length).toBe(8);
+    expect(reads.filter((query) => query === CARD_SETTLEMENT_STATEMENT_OLDER_SQL).length).toBe(4);
+    expect(passes.map((pass) => pass.keys.length)).toEqual([10, 10, 10, 10]);
+    expect([...older.values()]).toEqual(
+      Array.from({ length: 10 }, () => CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED),
+    );
+    expect([...older.values()].reduce((sum, count) => sum + count, 0)).toBe(2_000);
+  });
+
+  test("on drawn histories its lead and code equal a reference written from the counts", async () => {
+    const limit = CARD_SETTLEMENT_OLDER_CANDIDATES_SEARCHED;
+    const sizes = [0, 1, 49, 50, 51, 149, 150, limit - 1, limit, limit + 1, 260] as const;
+    const seen = new Set<string>();
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const pick = draws(seed);
+      const statements = Array.from({ length: 10 }, (_, index) => {
+        const older = pick(sizes);
+        const at = pick([undefined, 0, 49, 50, limit - 1, limit, older - 1, older] as const);
+        return {
+          key: `s-${String(seed)}-${String(index)}`,
+          window: pick(["blocked", "blocked", "blocked", "ready"] as const),
+          older,
+          ...(at === undefined || at < 0 ? {} : { readyAt: at }),
+        };
+      });
+      const { executor, passes } = scripted(statements);
+      const page = await queryCardSettlementStatements(executor);
+      expect(passes.length).toBeLessThanOrEqual(limit / CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS);
+      for (const statement of statements) {
+        // Written from the counts, not from the loop: the window decides, or
+        // the newest ready one among the first `limit` older ones leads, or
+        // the newest leads and the code says whether all of them were judged.
+        const window = `${statement.key}-w0`;
+        const expected: { lead: string; leadSearch: string } =
+          statement.window === "ready" || statement.older === 0
+            ? { lead: window, leadSearch: "not_searched" }
+            : statement.readyAt !== undefined &&
+                statement.readyAt < Math.min(statement.older, limit)
+              ? { lead: `${statement.key}-o${String(statement.readyAt)}`, leadSearch: "found" }
+              : {
+                  lead: window,
+                  leadSearch: statement.older >= limit ? "truncated" : "none_ready",
+                };
+        const group = page.statements.find((entry) => entry.statementKey === statement.key)!;
+        expect({
+          lead: group.candidates[0]!.proposalId,
+          leadSearch: group.leadSearch as string,
+        }).toEqual(expected);
+        seen.add(expected.leadSearch);
+      }
+    }
+    expect([...seen].sort()).toEqual(["found", "none_ready", "not_searched", "truncated"]);
   });
 });
 

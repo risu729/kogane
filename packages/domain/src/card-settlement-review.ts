@@ -108,7 +108,8 @@ export interface CardSettlementReviewPage {
  *   or the statement has no older candidate, so nothing older was read;
  * - `found`: an older ready candidate was found and leads;
  * - `none_ready`: every older candidate that could be ready was judged and
- *   none is, so the newest leads;
+ *   none is, so the newest leads (the passes are separate reads: a decision
+ *   recorded between two of them can make one skip a candidate, ADR 0089);
  * - `truncated`: the search judged `olderCandidatesSearched` older candidates
  *   without finding a ready one and stopped there. Older ones past them were
  *   not judged, so whether the statement has a ready candidate is unknown,
