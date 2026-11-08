@@ -204,8 +204,10 @@ only job is "try again".
 
   Amendment ([issue 1137](https://github.com/risu729/kogane/issues/1137)):
   a failure before a login POST is not a refusal. For `http-denied`,
-  `bank-request-error` and `unexpected-route`, a validated `loginPostCount: 0`
-  prevents a new pause; a positive count or a missing diagnostic still pauses.
+  `bank-request-error` and `unexpected-route`, a validated diagnostic with
+  `loginPostCount: 0` and a stage before the login click prevents a new pause;
+  a positive count, a stage from the click on, or a missing diagnostic still
+  pauses.
   `login-rejected`, `authentication-challenge` and `human-required` always pause,
   and stored pauses without diagnostics keep their existing handling.
 

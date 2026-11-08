@@ -4,6 +4,7 @@ import {
   CollectionCoordinator,
   REQUESTED_LOGIN_SPACING_MS,
   authorized,
+  blocksLaterLogins,
   credentialDigest,
   parseCollectionOutput,
   parseCredential,
@@ -11,10 +12,10 @@ import {
 } from "../src/worker-policy";
 import { persistSharedRun } from "../src/shared-collection";
 import { snapshot } from "./fixture";
-import type { RunDiagnostic } from "../src/run-diagnostic";
+import { RUN_STAGES, type RunDiagnostic } from "../src/run-diagnostic";
 
-const loginDiagnostic = (loginPostCount: 0 | 1 | 2): RunDiagnostic => ({
-  stage: "login-result-state",
+const loginDiagnostic = (loginPostCount: 0 | 1 | 2, stage = "login-state"): RunDiagnostic => ({
+  stage,
   errorType: "CollectionError",
   refusal: "unknown",
   loginPostCount,
@@ -105,6 +106,36 @@ describe("durable collection policy", () => {
         expect(await coordinator.trigger()).toMatchObject({ status: "blocked", reason });
         expect(await coordinator.trigger()).toMatchObject({ status: "paused", reason });
         expect(reads).toBe(1);
+      }
+    }
+  });
+  test("a zero POST count only makes a failure retryable before the login click", () => {
+    const preSubmit = [
+      "request-validation",
+      "profile-create",
+      "relay-start",
+      "display-start",
+      "browser-start",
+      "browser-ready",
+      "browser-connect",
+      "extractor-load",
+      "login-navigate",
+      "login-state",
+      "login-form",
+      "credential-user-id",
+      "credential-security-number",
+      "credential-password",
+      "login-pre-submit-state",
+    ];
+    for (const stage of preSubmit) expect(RUN_STAGES.has(stage)).toBe(true);
+    for (const reason of ["http-denied", "bank-request-error", "unexpected-route"] as const) {
+      for (const stage of RUN_STAGES) {
+        // The click and everything after it (and an unknown stage) may have sent the
+        // credential by a route the exact-URL POST count does not see.
+        expect(blocksLaterLogins(reason, loginDiagnostic(0, stage))).toBe(
+          !preSubmit.includes(stage),
+        );
+        expect(blocksLaterLogins(reason, loginDiagnostic(1, stage))).toBe(true);
       }
     }
   });
