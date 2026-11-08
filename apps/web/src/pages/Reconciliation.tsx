@@ -280,14 +280,18 @@ function OlderCandidates({
  * One statement: the candidate to look at first (its accepted one, else the
  * newest one ready to accept, else the newest), and the other candidates of
  * the same statement collapsed under it. Nothing is hidden for good: every
- * candidate stays reachable and keeps its own decision history.
+ * candidate stays reachable and keeps its own decision history. A lead search
+ * the server stopped at its limit is said, never shown as "none ready"
+ * (ADR 0090).
  */
 function StatementGroup({
   group,
   position,
+  searched,
 }: {
   group: CardSettlementStatementGroup;
   position: number;
+  searched: number;
 }): ReactNode {
   const [lead, ...others] = group.candidates;
   if (!lead) return null;
@@ -296,6 +300,12 @@ function StatementGroup({
   return (
     <div className="settlement-statement">
       <SettlementCard review={lead} />
+      {group.leadSearch === "truncated" ? (
+        <p className="footnote" role="note">
+          この請求の古い候補のうち採用できる可能性があるものを、新しい順に {searched}{" "}
+          件まで確かめましたが、採用できる候補はありませんでした。それより古い候補は確かめていないため、採用できる候補がないとは限りません。「この請求のほかの候補」を開き、「この請求の候補をすべて表示」ですべての候補を確認できます。
+        </p>
+      ) : null}
       {otherCount > 0 ? (
         <details className="settlement-older">
           <summary>この請求のほかの候補（{otherCount} 件）</summary>
@@ -346,6 +356,7 @@ export function ReconciliationPage(): ReactNode {
                   key={group.statementKey}
                   group={group}
                   position={offset + index + 1}
+                  searched={data.coverage.olderCandidatesSearched}
                 />
               ))}
               <nav className="pagination" aria-label="照合候補のページ">

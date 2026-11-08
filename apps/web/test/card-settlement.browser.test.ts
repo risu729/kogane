@@ -157,6 +157,7 @@ describe.if(runnable)("card settlement review", () => {
   let planRevision = 0;
   let action = "accept";
   let older: ReturnType<typeof settlementReview>[] = [];
+  let leadSearch = "not_searched";
   /** A second statement's candidates, newest first; empty serves one statement. */
   let second: ReturnType<typeof settlementReview>[] = [];
   /** The candidates a `relatedTo` read returns, and the reads of them. */
@@ -171,6 +172,7 @@ describe.if(runnable)("card settlement review", () => {
     planRevision = 0;
     action = "accept";
     older = [];
+    leadSearch = "not_searched";
     second = [];
     related = [];
     relatedReads.length = 0;
@@ -200,6 +202,7 @@ describe.if(runnable)("card settlement review", () => {
                 statementKey: "statement-synthetic",
                 candidateCount: older.length + 1,
                 candidates: [review, ...older.slice(0, 1)],
+                leadSearch,
               },
               ...(second.length
                 ? [
@@ -207,6 +210,7 @@ describe.if(runnable)("card settlement review", () => {
                       statementKey: "statement-synthetic-2",
                       candidateCount: second.length,
                       candidates: second.slice(0, 2),
+                      leadSearch: "not_searched",
                     },
                   ]
                 : []),
@@ -218,6 +222,7 @@ describe.if(runnable)("card settlement review", () => {
               netAssets: "unknown",
               limit: 10,
               candidatesPerStatement: 5,
+              olderCandidatesSearched: 200,
             },
           });
         if (
@@ -806,6 +811,37 @@ describe.if(runnable)("card settlement review", () => {
     ).toBe(true);
     await page.close();
   });
+
+  test("a lead search the server stopped at its limit is said, and the full list stays one click away", async () => {
+    const stale = (n: number) => ({
+      ...settlementReview(),
+      proposalId: `card-settlement-stale-${n}`,
+      createdAt: `2026-09-0${n}T00:00:00Z`,
+      acceptanceBlockers: ["statement_changed"],
+    });
+    review = { ...review, acceptanceBlockers: ["bank_debit_changed"] };
+    older = [stale(2), stale(1)];
+    leadSearch = "truncated";
+    const page = await open();
+    const note = page.getByRole("note").filter({ hasText: "この請求の古い候補" });
+    await note.waitFor();
+    expect(await note.textContent()).toContain("新しい順に 200 件まで確かめました");
+    expect(await note.textContent()).toContain("採用できる候補がないとは限りません");
+    // It names where the full list is: under the collapsed other candidates.
+    expect(await note.textContent()).toContain(
+      "「この請求のほかの候補」を開き、「この請求の候補をすべて表示」",
+    );
+    expect(await auditView(page)).toEqual([]);
+    await page.close();
+    leadSearch = "none_ready";
+    const searched = await open();
+    await searched.getByText("この請求のほかの候補（2 件）", { exact: true }).waitFor();
+    expect(await searched.getByRole("note").filter({ hasText: "この請求の古い候補" }).count()).toBe(
+      0,
+    );
+    await searched.close();
+  });
+
   test("two statements' full candidate lists are paged under their own names", async () => {
     const stale = (n: number) => ({
       ...settlementReview(),

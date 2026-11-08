@@ -543,6 +543,20 @@ describe("every debit is one fact (INV06)", () => {
     ]);
     expect(codesOf(only(result))).toEqual(["no_exact_allocation", "in_window_debits_below_total"]);
   });
+
+  test("one ref id at two revisions is listed in the same order whatever the input order", () => {
+    const at = (revision: number) =>
+      debit(8, 2000, {
+        ref: { kind: "transaction", id: "transaction:8", revision: `parse_run:${revision}` },
+      });
+    const forward = run([statement(1, 2000)], [at(1), at(2)]);
+    const backward = run([statement(1, 2000)], [at(2), at(1)]);
+    expect(backward).toEqual(forward);
+    expect(forward.debitExclusions.map((entry) => entry.debitRef?.revision)).toEqual([
+      "parse_run:1",
+      "parse_run:2",
+    ]);
+  });
 });
 
 describe("statement refusals", () => {
@@ -568,6 +582,20 @@ describe("statement refusals", () => {
       ["balance:4", { status: "refused", code: "statement_already_allocated" }],
       ["balance:5", { status: "refused", code: "statement_repeated" }],
       ["balance:6", { status: "refused", code: "statement_repeated" }],
+    ]);
+  });
+
+  test("one statement ref id at two revisions is listed in the same order whatever the input order", () => {
+    const at = (revision: number) =>
+      statement(5, 3000, {
+        ref: { kind: "balance", id: "balance:5", revision: `parse_run:${revision}` },
+      });
+    const forward = run([at(1), at(2)], [debit(1, 3000)]);
+    const backward = run([at(2), at(1)], [debit(1, 3000)]);
+    expect(backward).toEqual(forward);
+    expect(forward.statements.map((s) => [s.statementRef?.revision, s.outcome])).toEqual([
+      ["parse_run:1", { status: "refused", code: "statement_repeated" }],
+      ["parse_run:2", { status: "refused", code: "statement_repeated" }],
     ]);
   });
 });
@@ -973,5 +1001,172 @@ describe("property: the planner agrees with a brute-force oracle", () => {
       "debit_above_total",
     ].filter((label) => (seen.get(label) ?? 0) < 5);
     expect(rare).toEqual([]);
+  });
+});
+
+describe("property: the output does not follow the input order", () => {
+  // The planner promises the same output for the same input in any order
+  // (ADR 0074). The oracle property above never draws a refusal; this one
+  // draws every debit exclusion, every statement refusal, both pair
+  // exclusions and every outcome code, with ref ids repeated at several
+  // revisions, and compares every output array of a run with runs of
+  // shuffled inputs.
+  test("seeded random runs with every refusal give one output whatever the order", () => {
+    const seen = new Map<string, number>();
+    let debitTies = 0;
+    let statementTies = 0;
+    for (let seed = 1; seed <= 400; seed++) {
+      const random = mulberry32(seed);
+      const pick = <T>(items: readonly T[]) => items[Math.floor(random() * items.length)]!;
+      const policy = {
+        ...POLICY,
+        window: {
+          minDaysFromDue: -Math.floor(random() * 4),
+          maxDaysFromDue: Math.floor(random() * 4),
+        },
+        maxDebitsPerAllocation: 1 + Math.floor(random() * 3),
+      };
+      const debits = Array.from({ length: Math.floor(random() * 21) }, (_, index) => {
+        if (random() < 0.04)
+          return {
+            bankKey: "",
+            aliasClass: null,
+            debit: { index },
+          } as unknown as AllocationDebitInput;
+        // A few ids repeat (at one revision or several); the rest are distinct.
+        const id = random() < 0.2 ? 1 + Math.floor(random() * 3) : 10 + index;
+        const amount = pick<Quantity | number>([
+          500,
+          1000,
+          1500,
+          2000,
+          3000,
+          3000,
+          0,
+          absentQuantity("JPY", "missing", "not_reported"),
+          exactQuantity("USD", integerDecimal(30)),
+        ]);
+        const offset = Math.floor(random() * 13) - 6;
+        const keyDraw = random();
+        const aliasDraw = random();
+        return debit(id, amount, {
+          ref: {
+            kind: "transaction",
+            id: `transaction:${id}`,
+            revision: `parse_run:${pick([1, 2, 3])}`,
+          },
+          key: keyDraw < 0.08 ? "shared-key" : keyDraw < 0.14 ? "held-key" : `key-${index}`,
+          alias:
+            aliasDraw < 0.06
+              ? null
+              : aliasDraw < 0.12
+                ? "shared-alias"
+                : aliasDraw < 0.18
+                  ? "held-alias"
+                  : `alias-${index}`,
+          occurred:
+            random() < 0.08
+              ? { kind: "unknown", reasonCode: "not_reported" }
+              : day(`2026-09-${String(10 + offset).padStart(2, "0")}`),
+        });
+      });
+      const statements = Array.from({ length: Math.floor(random() * 9) }, (_, index) => {
+        if (random() < 0.05)
+          return {
+            statementKey: "",
+            statement: { index },
+          } as unknown as AllocationStatementInput;
+        const id = random() < 0.4 ? 1 : 10 + index;
+        const keyDraw = random();
+        const amount = pick<Quantity | number>([
+          2000,
+          3000,
+          3000,
+          4500,
+          5000,
+          0,
+          absentQuantity("JPY", "missing", "not_reported"),
+        ]);
+        return statement(id, amount, {
+          ref: { kind: "balance", id: `balance:${id}`, revision: `parse_run:${pick([1, 2, 3])}` },
+          // A repeated ref id often keeps its key, so only the revision tells the copies apart.
+          key:
+            keyDraw < 0.08
+              ? "twice"
+              : keyDraw < 0.14
+                ? "reserved"
+                : keyDraw < 0.6
+                  ? `statement-key-${id}`
+                  : `statement-${index}`,
+          ...(random() < 0.06
+            ? { paymentDate: { kind: "unknown", reasonCode: "not_reported" } as const }
+            : {}),
+        });
+      });
+      const held = {
+        bankKeys: ["held-key", ...debits.filter(() => random() < 0.05).map((d) => d.bankKey)],
+        aliasClasses: ["held-alias"],
+        statementKeys: ["reserved"],
+      };
+      const result = run(statements, debits, { policy, held });
+      for (let round = 0; round < 3; round++)
+        expect(
+          run(shuffle(statements, random), shuffle(debits, random), {
+            policy,
+            held: { ...held, bankKeys: shuffle(held.bankKeys, random) },
+          }),
+        ).toEqual(result);
+
+      for (const entry of result.debitExclusions)
+        seen.set(entry.code, (seen.get(entry.code) ?? 0) + 1);
+      for (const item of result.statements) {
+        const outcome = item.outcome;
+        const labels: string[] =
+          outcome.status === "refused" ? [outcome.code] : [outcome.status, ...outcome.codes];
+        labels.push(...item.pairExclusions.map((entry) => entry.code));
+        for (const label of labels) seen.set(label, (seen.get(label) ?? 0) + 1);
+      }
+      // Neighbours equal on every sort key but the last: only the revision orders them.
+      const tiedButRevision = (keys: readonly (readonly [string, string] | null)[]) =>
+        keys.some((key, index) => {
+          const next = keys[index + 1];
+          return key !== null && next != null && key[0] === next[0] && key[1] !== next[1];
+        });
+      if (
+        tiedButRevision(
+          result.debitExclusions.map(({ debitRef, code }) =>
+            debitRef === null ? null : ([`${debitRef.id}\n${code}`, debitRef.revision] as const),
+          ),
+        )
+      )
+        debitTies++;
+      if (
+        tiedButRevision(
+          result.statements.map(({ statementRef, statementKey, outcome }) =>
+            statementRef === null
+              ? null
+              : ([
+                  `${statementRef.id}\n${statementKey}\n${outcome.status === "refused" ? outcome.code : ""}`,
+                  statementRef.revision,
+                ] as const),
+          ),
+        )
+      )
+        statementTies++;
+    }
+    // The seeds draw every closed code the output carries, not only the easy ones.
+    const rare = [
+      ...ALLOCATION_DEBIT_EXCLUSIONS,
+      ...ALLOCATION_STATEMENT_REFUSALS,
+      ...ALLOCATION_PAIR_EXCLUSIONS,
+      ...ALLOCATION_OUTCOME_CODES,
+      "proposed",
+      "needs_review",
+      "unsupported",
+    ].filter((label) => (seen.get(label) ?? 0) < 5);
+    expect(rare).toEqual([]);
+    // The ties the revision breaks are drawn often in both lists.
+    expect(debitTies).toBeGreaterThan(50);
+    expect(statementTies).toBeGreaterThan(50);
   });
 });

@@ -110,10 +110,16 @@ describe("card settlement HTTP contract", () => {
           statementKey: "statement-synthetic",
           candidateCount: 3,
           candidates: [settlementReview()],
+          leadSearch: "truncated",
         },
       ],
       nextOffset: null,
-      coverage: { ...page().coverage, limit: 10, candidatesPerStatement: 5 },
+      coverage: {
+        ...page().coverage,
+        limit: 10,
+        candidatesPerStatement: 5,
+        olderCandidatesSearched: 200,
+      },
     });
     expect(validApiResponse(grouped, statements())).toBe(true);
     for (const change of [
@@ -125,6 +131,12 @@ describe("card settlement HTTP contract", () => {
           netWorthDelta: 0,
         }),
       (value: ReturnType<typeof statements>) => (value.coverage.limit = 50),
+      (value: ReturnType<typeof statements>) =>
+        Object.assign(value.statements[0]!, { leadSearch: "none" }),
+      (value: ReturnType<typeof statements>) =>
+        Reflect.deleteProperty(value.statements[0]!, "leadSearch"),
+      (value: ReturnType<typeof statements>) =>
+        Reflect.deleteProperty(value.coverage, "olderCandidatesSearched"),
     ]) {
       const invalid = statements();
       change(invalid);
