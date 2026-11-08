@@ -1537,6 +1537,12 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   carrying the key. Every other call keeps the SDK's arguments. It fails
   closed: a copy that cannot be read or parsed, or a call no sent message
   matches, is `internal_error`, never a run as if the key were absent.
+  A body the SDK accepted does not reach these: the copy holds the bytes
+  the SDK read and is read with the SDK's own `readRequestBody` and bound,
+  and the SDK's arguments are `JSON.parse`'s without that key, in the same
+  order, so they print as the sent message's do (`test/audit.test.ts`
+  pins nested and escaped `__proto__` keys, duplicate keys, escapes,
+  numbers and nesting up to the body bound against the agent route).
 - **Identity.** The dispatcher has the `AgentCaller` the boundary proved
   (`caller`, `src/auth.ts`) and its resolved `Grant`. Pass the caller object
   on; never derive a role from `caller.principal`, and never read identity

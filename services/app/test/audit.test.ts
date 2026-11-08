@@ -1073,6 +1073,40 @@ describe("the operator's read and the never-recorded list", () => {
         key,
         result: ((await mcpCall(message(1, `{"${key}":"x"}`))).answer as Answer).result,
       }).toEqual({ key, result: refused });
+    // The guard compares each call's arguments as JSON text, so a shape that
+    // parses or prints unusually still answers as on the agent route, never
+    // `internal_error`: a nested `__proto__` (the tool judges `filters` as
+    // sent), an escaped top-level one, duplicate keys (the last wins in both
+    // parses), escapes and a lone surrogate, numbers that print otherwise
+    // than sent, an integer-like key (ordered first in both objects), and
+    // nesting as deep as the body bound allows.
+    const deep = `${"[".repeat(32_400)}${"]".repeat(32_400)}`;
+    for (const args of [
+      '{"filters":{"__proto__":"x"}}',
+      '{"filters":{"a":"b","__proto__":{"c":"d"}}}',
+      String.raw`{"__proto__":"x"}`,
+      '{"cursor":null,"cursor":"a"}',
+      '{"__proto__":"x","__proto__":{"cursor":"y"}}',
+      String.raw`{"cursor":"A\ud800"}`,
+      '{"cursor":1.0}',
+      '{"cursor":12345678901234567890}',
+      '{"cursor":-0}',
+      '{"cursor":null,"1":"x"}',
+      `{"unknown":${deep}}`,
+      `{"__proto__":"x","unknown":${deep}}`,
+    ]) {
+      const agent = await call("/api/agent/v1/audit.search", { rawBody: args });
+      const { result } = (await mcpCall(message(7, args))).answer as Answer;
+      expect({
+        args: args.slice(0, 48),
+        isError: result.isError === true,
+        body: result.structuredContent,
+      }).toEqual({
+        args: args.slice(0, 48),
+        isError: agent.response.status >= 400,
+        body: await agent.response.json(),
+      });
+    }
   });
 
   it("no record holds provider text, a token-shaped value or an amount", async () => {
