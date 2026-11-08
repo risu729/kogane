@@ -38,6 +38,14 @@ establish successful bank access.
   a failed log sink cannot prevent collection, retry a storage write, or turn
   an already-persisted run into a failure. A login or storage failure fails the scheduled invocation after
   recording safe acquisition failure evidence where storage is available.
+- The terminal names the same closed code: each failed unit carries the code
+  that stopped it (for example `read-http-error` for a history page, or
+  `account-limit`), and a failed run carries the code that failed it (for
+  example `authentication-required`). A code outside the collector's closed
+  list stays `collection-unit-failed` / `collection-failed`. The
+  collection-quality page and `kogane.collection-quality.read` show a
+  registered unit's code, so a partial run's cause is readable without the
+  Worker logs.
 
 The configured Processor route is `mizuho-bank` / `collector-mizuho-bank` in
 `config/ingest-clients.json`. The existing idempotent bootstrap must be applied

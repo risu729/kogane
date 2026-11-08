@@ -60,6 +60,8 @@ export interface MizuhoCollection {
   partial: boolean;
   issues: string[];
   failedUnits: string[];
+  /** The closed code that stopped each failed unit, keyed by its unit key. */
+  failedUnitCodes: Record<string, string>;
   artifacts: MizuhoArtifact[];
   session: MizuhoSession;
 }
@@ -549,7 +551,14 @@ export async function collectMizuho(options: {
   const histories: History[] = [];
   const issues: string[] = [];
   const failedUnits: string[] = [];
+  const failedUnitCodes: Record<string, string> = {};
   const unit = (account: Account) => `ordinary:${account.branchCode}:${account.accountNumber}`;
+  const failUnits = (units: string[], code: string) => {
+    for (const key of units) {
+      failedUnits.push(key);
+      failedUnitCodes[key] ??= code;
+    }
+  };
   const result = (): MizuhoCollection => ({
     accounts,
     histories,
@@ -557,6 +566,7 @@ export async function collectMizuho(options: {
     partial: issues.length > 0,
     issues: [...new Set(issues)],
     failedUnits: [...new Set(failedUnits)],
+    failedUnitCodes: { ...failedUnitCodes },
     session: snapshot(),
   });
   async function run(): Promise<MizuhoCollection> {
@@ -574,7 +584,7 @@ export async function collectMizuho(options: {
     let readIndexes = accountReadIndexes(accountRawHtml);
     if (accounts.length > maxAccounts) {
       issues.push("account-limit");
-      failedUnits.push(...accounts.slice(maxAccounts).map(unit));
+      failUnits(accounts.slice(maxAccounts).map(unit), "account-limit");
     }
     for (const account of accounts.slice(0, maxAccounts)) {
       if (histories.length) {
@@ -614,8 +624,8 @@ export async function collectMizuho(options: {
     const code = controller.signal.aborted ? "collection-timeout" : safeMizuhoErrorCode(error);
     if (accounts.length) {
       issues.push(code);
-      failedUnits.push(
-        ...accounts
+      failUnits(
+        accounts
           .filter(
             (a) =>
               !histories.some(
@@ -623,6 +633,7 @@ export async function collectMizuho(options: {
               ),
           )
           .map(unit),
+        code,
       );
       return result();
     }

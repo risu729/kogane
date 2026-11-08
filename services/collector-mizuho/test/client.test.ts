@@ -134,6 +134,7 @@ describe("direct Mizuho read transport", () => {
     expect(result.artifacts).toHaveLength(1);
     expect(result.issues).toEqual(["authentication-required"]);
     expect(result.failedUnits).toEqual(["ordinary:001:1234567"]);
+    expect(result.failedUnitCodes).toEqual({ "ordinary:001:1234567": "authentication-required" });
   });
   test("refreshes the list before each account and uses rediscovered row indexes", async () => {
     const q = queued([
@@ -232,6 +233,7 @@ describe("direct Mizuho read transport", () => {
     expect(result.histories).toHaveLength(1);
     expect(result.issues).toContain("account-limit");
     expect(result.failedUnits).toContain("ordinary:002:7654321");
+    expect(result.failedUnitCodes["ordinary:002:7654321"]).toBe("account-limit");
   });
   test("does not guess account transitions when the observed read event is missing", async () => {
     const q = queued([html(accountHtml().replace("/BALINQ0301002B", "/BALINQ0301003B"))]);
