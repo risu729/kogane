@@ -2,8 +2,46 @@ import { describe, expect, test, spyOn } from "bun:test";
 import { logEvent, relayRunId, withRunId } from "../src/log-context";
 // @ts-expect-error runtime container module is tested directly
 import { createBrowserDiagnostics } from "../container/diagnostics.mjs";
+// @ts-expect-error runtime container module is tested directly
+import { signOut } from "../container/logout.mjs";
 const runId = "01234567-89ab-4cde-8fab-0123456789ab";
 describe("GLOBAL PASS diagnostic boundaries", () => {
+  test("signoff reports a closed durable flag without replacing complete collection", async () => {
+    const lines: string[] = [];
+    const spy = spyOn(console, "log").mockImplementation((line) => lines.push(String(line)));
+    try {
+      for (const failure of ["count", "visibility", "click", "load", "missing", "none"]) {
+        const fail = (stage: string) => {
+          if (failure === stage) throw new Error("private-provider-text");
+        };
+        const page = {
+          getByRole: () => ({
+            count: async () => {
+              fail("count");
+              return failure === "missing" ? 0 : 1;
+            },
+            nth: () => ({
+              isVisible: async () => {
+                fail("visibility");
+                return true;
+              },
+              click: async () => fail("click"),
+            }),
+          }),
+          waitForLoadState: async () => fail("load"),
+        };
+        const diagnostic = createBrowserDiagnostics("invalid");
+        expect(await signOut(page, diagnostic)).toEqual({
+          type: "logout",
+          failed: failure !== "none",
+        });
+        expect(diagnostic.failedStage).toBeUndefined();
+      }
+      expect(lines.join("\n")).not.toContain("private-");
+    } finally {
+      spy.mockRestore();
+    }
+  });
   test("preserves relay routing and accepts only run UUID metadata", () => {
     const url = new URL(withRunId("wss://relay.test/tcp?network=tamia", runId));
     expect(url.searchParams.get("network")).toBe("tamia");

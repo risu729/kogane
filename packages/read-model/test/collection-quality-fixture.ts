@@ -185,7 +185,12 @@ export class QualityStore {
   /** One parse of `artifact` by `parser`, in the given state; returns the parse run id when one exists. */
   parse(artifact: number, parser: string, spec: ParseSpec): number | null {
     const db = this.db;
-    const version = spec.kind === "published" ? (spec.version ?? "1.0.0") : "1.0.0";
+    // Published St.George examples represent the currently admitted snapshot;
+    // a historical release remains available through the explicit override.
+    const version =
+      spec.kind === "published"
+        ? (spec.version ?? (parser === "st-george-balances" ? "1.0.1" : "1.0.0"))
+        : "1.0.0";
     const job = (status: string, code: string | null = null) =>
       db.run(
         `INSERT INTO observation_parse_jobs(fetch_artifact_id,parser_name,parser_version,status,last_error_code,created_at_ms)

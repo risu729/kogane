@@ -1,3 +1,4 @@
+import { FOREIGN_POSITION_SNAPSHOT_VERSION } from "../../parsers/src/snapshot-query.ts";
 // A small synthetic world for the reported holdings change's wire contract
 // and page tests: the answers are produced by `queryHoldingsChange` itself
 // over packages/read-model/test/dated-state-fixture.ts, so the client is
@@ -50,7 +51,7 @@ export function holdingsChangeWorld(): DatedStore {
     source: "sbi-securities",
     dataset: "foreign-cash-positions",
     parser: "sbi-foreign-cash-positions",
-    version: "0.3.0",
+    version: FOREIGN_POSITION_SNAPSHOT_VERSION,
     fetchedAt: "2026-09-05T01:00:00Z",
     positions: [{ account: "sbi-a", code: "VTX", quantity: "2.5", currency: "USD" }],
   });
