@@ -1,389 +1,389 @@
-# SBI証券: 公式データソース一次評価
+# SBI証券 (SBI Securities): initial assessment of official data sources
 
 > Dated source research and implementation notes. Earlier runtime/schedule
 > claims may be superseded by later changes. See the [research scope](README.md),
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-- 調査日: 2026-08-26
-- 対象: SBI証券の証券総合口座だけ
-- 非対象: SBI新生銀行、住信SBIネット銀行、SBI VCトレード、家計簿・資産管理aggregator、注文の発注・訂正・取消
-- 目的: 細かなAPI実装ではなく、実装コストと自動化可能性の一次評価
+- Research date: 2026-08-26
+- Scope: SBI Securities' comprehensive securities account only
+- Excluded: SBI新生銀行 (SBI Shinsei Bank), 住信SBIネット銀行 (Sumishin SBI Net Bank), SBI VCトレード (SBI VC Trade), household-finance/asset-management aggregators, placing/amending/cancelling orders
+- Purpose: an initial assessment of implementation cost and automation feasibility, rather than detailed API implementation
 
-## 結論
+## Conclusion
 
-SBI証券は **実装コスト3/5、条件付きで定期自動化可能（現状B、連続検証後Aを狙える）** と評価する。現口座の実credentialで、ブラウザなしのWebAuthn challenge、assertion、SSO callback、access token復号、MTS session確立、国内現物保有のread-only取得まで成功した。認証から主要データ取得までの技術的不確実性は解消し、残る主な課題はsession寿命、連続実行、実行元変更、読取専用bundleへの縮小である。
+SBI Securities is rated **implementation cost 3/5, conditionally suitable for scheduled automation (currently B, with A achievable after consecutive validation)**. Using real credentials for the current account, the browserless WebAuthn challenge, assertion, SSO callback, access-token decryption, MTS session establishment, and read-only retrieval of domestic cash-equity holdings all succeeded. Technical uncertainty from authentication through primary data retrieval has been resolved; the main remaining issues are session lifetime, consecutive runs, changes in execution origin, and reduction to a read-only bundle.
 
-推奨経路は、公式株アプリが使うMTS通信を、パスキー認証から直接ブラウザなしで呼ぶread-only clientである。現物保有を高頻度に取得する主経路とし、公式Webの `My資産` は商品横断の評価額・履歴・実現損益・配当を補完する第2経路にする。Koganeへ取り込む際は `mnie` 全体に依存せず、必要な認証、MTS login、読取TR codeだけを抽出する。
+The recommended route is a read-only client that calls the MTS transport used by the official stock app directly, from passkey authentication onward, without a browser. Use this as the primary route for frequent cash-equity holdings retrieval, with the official website's `My資産` (My Assets) as a secondary route for cross-product valuations, history, realized gains/losses, and dividends. For Kogane integration, extract only the required authentication, MTS login, and read TR codes rather than depending on all of `mnie`.
 
-既存実装により、保存したパスキーを用いた無人ログインと、Web／アプリ内部通信の直接呼出しは技術的に実現済みである。2026-08-26の実口座試験では、Bitwarden CLIからSBI証券に必要な最小credentialだけをprocess内へ渡し、`mnie` の既存署名関数とpasskey sessionを接続した。entry 200、challenge 200、assertion 302、callback 200、MTS login 200、現物保有照会 200となり、server totalと解析件数が一致した。件数以外の口座データ、token、SID、credential識別子は記録していない。一方で、2026年6月に認証方式が変更され、ログイン入口にはEverspin系の防御がある。現時点ではブラウザなしのHTTP経路が受理されたが、安定運用にはsession失効検知、公式画面との継続的な値照合が必要になる。
+Existing implementations have already demonstrated unattended login using a stored passkey and direct calls to internal Web/app transport. In the real-account test on 2026-08-26, only the minimum credentials required by SBI Securities were passed from Bitwarden CLI into the process, connecting `mnie`'s existing signing function and passkey session. Results were entry 200, challenge 200, assertion 302, callback 200, MTS login 200, and cash-equity holdings inquiry 200; the server total matched the parsed count. Other than counts, no account data were recorded; tokens, SIDs, and credential identifiers were not recorded either. However, authentication changed in June 2026, and the login entrypoint has Everspin defenses. Browserless HTTP was accepted at this point, but stable operation requires session-expiry detection and ongoing comparison with values on official screens.
 
-この`mnie` overlayの実行コードは2026-09のrepository整理でmainから除去した。確認済みの範囲、90日windowの根拠、円貨入出金明細に銘柄コードが無いという制約、MTS originをrepoへ保存しない理由と検証手順、Bitwarden CLIからSBI専用の最小credentialだけを抽出するときの判定規則は[`../research/sbi-securities.md`](../research/sbi-securities.md)に残した。
+The executable code for this `mnie` overlay was removed from main during the repository cleanup in 2026-09. The confirmed coverage, evidence for the 90-day window, limitation that yen deposit/withdrawal statements lack security codes, reasons and verification procedure for keeping the MTS origin out of the repo, and decision rules for extracting only SBI-specific minimum credentials from Bitwarden CLI remain in [`../research/sbi-securities.md`](../research/sbi-securities.md).
 
-Koganeでは、取引機能を絶対に有効化しない。`pnsk-lab/mnie` のSBI providerは有用な仕様資料だが、注文発注・訂正・取消まで公開するため、そのまま依存・登録してはならない。読取部分だけを別パッケージへ抽出し、取引パスワードを設定・保管せず、注文系コードと宛先をビルドに含めない方針とする。
+Kogane must never enable trading functionality. The SBI provider in `pnsk-lab/mnie` is useful specification material, but exposes order placement, amendment, and cancellation and must not be used or registered as-is. Extract only the read components into a separate package, never configure or store a trading password, and exclude order code and destinations from the build.
 
-### 2026-08-27: 独立Cloudflare Worker PoC
+### 2026-08-27: independent Cloudflare Worker PoC
 
-上記方針を具体化し、[`services/collector-sbi-securities`](../../services/collector-sbi-securities/) にWorkers専用の独立実装を追加した。Mnieをruntime dependency、submodule、設定源として再利用せず、必要なpasskey署名、SBI固有のRSA token復号、国内MTS、外国株式REST／GraphQL、メインサイトSSOのread-only部分だけを移植した。公開接続先はKogane側へhardcodeし、Mnieの「base URLを実行時変数にする」というrepo ruleは持ち込んでいない。
+This policy was implemented as an independent Workers-only implementation in [`services/collector-sbi-securities`](../../services/collector-sbi-securities/). It does not reuse Mnie as a runtime dependency, submodule, or configuration source; only the necessary passkey signing, SBI-specific RSA token decryption, domestic MTS, foreign-equity REST/GraphQL, and main-site SSO read-only components were ported. Public destinations are hardcoded on the Kogane side; Mnie's repo rule of making base URLs runtime variables was not carried over.
 
-このPoCでは、Cloudflare secretにSBI専用passkeyの最小6項目と、token復号用の固定RSA transport鍵だけを置き、ログインID／パスワード、取引パスワード、Bitwarden item全体は置かない。access token、SID、Cookie、MTS session header、口座番号をR2や通常ログへ保存せず、データartifactとredacted manifestだけをprivate R2へ保存する。D1は使わない。実Cloudflareで外国scopeは約7秒、国内scopeは約15秒で成功したが、両方を同じinvocationで実行するとError 1102になった。
+This PoC stores only the six minimum fields for an SBI-specific passkey and the fixed RSA transport key for token decryption in Cloudflare secrets. It does not store the login ID/password, trading password, or entire Bitwarden item. Access tokens, SIDs, Cookies, MTS session headers, and account numbers are not saved to R2 or normal logs; only data artifacts and redacted manifests go to private R2. D1 is not used. On actual Cloudflare infrastructure, foreign scope succeeded in about 7 seconds and domestic scope in about 15 seconds, but running both in the same invocation produced Error 1102.
 
-Queue分割も実測したが、Free planのconsumerおよびservice-binding先に適用されるCPU制限を認証・収集処理が超えた。RSA-4096鍵生成を実行時から外しても、外国scopeの通常requestで約0.94秒のCPU timeが観測され、公式のFree上限10msへ最適化だけで収めるのは現実的でなかった。2026-08-27にWorkers Paidへ移行したため、2026-10-05まではGitHub ActionsやQueueを介さず、Cloudflare Cron Triggerが毎日06:00 JSTに`scope=all`を1回起動し、国内・外国を直列収集する。日次Cronの最大CPU time／wall timeはともに15分で、実測約7秒＋約15秒の処理に十分である。
+Queue splitting was also measured, but authentication and collection exceeded the CPU limits applied to Free-plan consumers and service-binding targets. Even after moving RSA-4096 key generation out of runtime, a normal foreign-scope request used about 0.94 seconds of CPU time; fitting within the official Free limit of 10ms through optimization alone was unrealistic. After moving to Workers Paid on 2026-08-27, through 2026-10-05 a Cloudflare Cron Trigger starts `scope=all` once daily at 06:00 JST, collecting domestic and foreign scopes sequentially without GitHub Actions or Queue. The daily Cron's maximum CPU time and wall time are both 15 minutes, sufficient for the measured approximately 7-second plus 15-second processing.
 
 Since [#430](https://github.com/risu729/kogane/pull/430) (2026-10-05) the
 Worker has no Cron trigger: the Processor's alarm job `sbi-securities`
 (06:00 JST, `0 21 * * *` in `config/alarm-jobs.json`) calls its private
 `ScheduledCollection` entrypoint, which runs `scope=all` once, and the run holds
 the source's execution lease in D1 (`SCHEDULE_DB`). Runs are stored in the
-shared `DATA` bucket, not a private one ([below](#追記-共通data-r2への切替u09)).
+shared `DATA` bucket, not a private one ([below](#addendum-switch-to-shared-data-r2-u09)).
 
-初期バックフィルとして、2024-08-28〜2026-05-29を重複のない90日以下の8区間へ分割し、国内8/8、外国8/8の全runが成功、failure 0でprivate R2へ保存された。直近2026-05-30〜2026-08-27も国内・外国それぞれ成功している。これにより現時点で約2年の国内・米国株取引履歴と、各run時点の国内／米国株保有、円／USD預り金、My資産、円貨入出金明細のraw snapshotがR2にある。
+For the initial backfill, 2024-08-28–2026-05-29 was split into eight non-overlapping intervals of at most 90 days. All runs succeeded, domestic 8/8 and foreign 8/8, with failure 0, and were saved to private R2. The recent 2026-05-30–2026-08-27 interval also succeeded for both domestic and foreign scopes. R2 therefore currently holds about two years of domestic/US equity transaction history, plus raw snapshots at each run of domestic/US equity holdings, yen/USD cash deposits, My Assets, and yen deposit/withdrawal statements.
 
-## 評価尺度
+## Assessment scale
 
-自動化レベルは次のように定義する。
+Automation levels are defined as follows.
 
-- A: 初回登録後は原則無人で定期実行できる
-- B: 定期実行できるが、認証変更・リスク判定・セッション失効時に手動復旧があり得る
-- C: 毎回または頻繁に利用者操作が必要
-- D: 現時点では実用的でない
+- A: normally runs unattended on a schedule after initial registration
+- B: scheduled execution is possible, but authentication changes, risk decisions, or session expiry may require manual recovery
+- C: user interaction is required every time or frequently
+- D: currently impractical
 
-SBI証券は現時点でB。現口座でパスキー利用とBitwarden保管が確認できたため、A相当へ到達する見込みは初回評価より上がった。国内固定IP、ローカルissuerによる安全な利用、複数日の連続試験に合格すればA相当まで上げられる可能性がある。
+SBI Securities is currently B. Confirmation of passkey use and Bitwarden storage for the current account improves the prospect of reaching A compared with the initial assessment. It may be raised to A after passing tests with a fixed Japanese IP, secure use through a local issuer, and consecutive runs over multiple days.
 
-## 公式の入口と取得できる情報
+## Official entrypoints and available information
 
-一般個人向けの残高・保有・履歴をOAuth等で取得する公式公開APIは、今回確認したSBI証券の公式資料には見つからなかった。公式の「先物・オプションAPI」は存在するが、事前に外部ツール利用設定とAPIキー発行が必要な取引接続であり、証券総合口座の読取collectorには使わない。従って本評価でいうAPIは、公式Web／公式アプリ自身が使う非公開通信であり、公開仕様や互換性保証はない。
+No official public API for general individual users to retrieve balances, holdings, or history through OAuth or similar mechanisms was found in the SBI Securities official material checked in this research. An official futures/options API exists, but it is a trading connection requiring external-tool configuration and API-key issuance beforehand, and is not used for the comprehensive securities account's read collector. Thus, API in this assessment means undocumented internal transport used by the official website/apps, without a public specification or compatibility guarantee.
 
-### 1. メインサイト（PC／スマートフォン）とMy資産
+### 1. Main site (PC/smartphone) and My Assets
 
-ログイン入口は `https://login.sbisec.co.jp/login/entry`、ログイン後のメインサイトは `ETGate` 系である。2025年10月以降、公開トップページのID／パスワード入力欄は廃止され、専用ログインドメインへ遷移する方式になった。
+The login entrypoint is `https://login.sbisec.co.jp/login/entry`; the authenticated main site uses the `ETGate` family. Since October 2025, the public top-page ID/password fields have been removed in favor of navigation to a dedicated login domain.
 
-`My資産` はPCサイトとスマートフォンサイトの公式資産管理機能で、次のデータを横断表示する。
+`My資産` is the official asset-management feature on PC and smartphone sites, displaying the following cross-product data.
 
-| 項目                     | 粒度                                           | 期間・更新                                                                 | Koganeでの価値                                           |
-| ------------------------ | ---------------------------------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------- |
-| 現在資産                 | 資産全体、商品分類、銘柄別                     | 国内株は約定後・価格とも原則リアルタイム。投信・債券等は商品ごとの更新時刻 | 日次スナップショットの主経路                             |
-| 取得額・評価額・評価損益 | 全体、商品別、銘柄別                           | 現在値と公式計算結果                                                       | 取得価額の再現誤差を避けられる                           |
-| 資産推移                 | 全体・商品別。評価額、取得額、評価損益、損益率 | 2021-08以降。原則毎週土曜7:00基準                                          | 過去スナップショットの初期取込に有用。ただし日次ではない |
-| 実現損益                 | 銘柄別・商品別・預り区分別。約定日／受渡日指定 | 2021-08以降。任意期間指定可                                                | 売却後の損益を取引履歴から再計算せず取得可能             |
-| 配当・分配金・利金       | 銘柄別・商品別・口座区分別、各回の単価等       | 2021-08-01以降                                                             | キャッシュフローの詳細取得に有用                         |
-| 預り金                   | 円・米ドル                                     | 原則リアルタイム                                                           | 現金残高                                                 |
-| スィープ専用銀行口座     | 合計残高                                       | 原則リアルタイム                                                           | 買付原資。ただし銀行側の取引履歴とは別物                 |
+| Item                                                   | Granularity                                                                            | Period/updates                                                                                                                              | Value for Kogane                                                                |
+| ------------------------------------------------------ | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| Current assets                                         | Overall assets, product category, security                                             | Domestic equities are generally real-time for both post-execution updates and prices. Funds, bonds, etc. have product-specific update times | Primary route for daily snapshots                                               |
+| Acquisition amount, valuation, unrealized gains/losses | Overall, product, security                                                             | Current values and official calculation results                                                                                             | Avoids errors from reconstructing acquisition values                            |
+| Asset trends                                           | Overall/product; valuation, acquisition amount, unrealized gains/losses and percentage | Since 2021-08; normally based on 7:00 every Saturday                                                                                        | Useful for initial import of past snapshots, but not daily                      |
+| Realized gains/losses                                  | By security, product, custody category; execution/settlement date selection            | Since 2021-08; arbitrary periods selectable                                                                                                 | Retrieves post-sale gains/losses without recalculation from transaction history |
+| Dividends, distributions, interest                     | By security, product, account category; per-payment unit amounts, etc.                 | Since 2021-08-01                                                                                                                            | Useful for cash-flow detail                                                     |
+| Cash deposits                                          | Yen/US dollars                                                                         | Generally real-time                                                                                                                         | Cash balance                                                                    |
+| Sweep-only bank account                                | Total balance                                                                          | Generally real-time                                                                                                                         | Purchase funding, separate from bank-side transaction history                   |
 
-公式の対象商品は、国内株式（現物・信用）、米国株式（現物）、国内投資信託、外貨建MMF、円貨／米ドル建債券、SBIラップ、iDeCo、円／米ドル預り金、スィープ専用銀行口座。外貨建資産は公式資料上、米ドル建が中心である。
+Officially covered products are domestic equities (cash/margin), US equities (cash), domestic investment trusts, foreign-currency MMFs, yen/USD-denominated bonds, SBIラップ (SBI Wrap), iDeCo, yen/USD cash deposits, and sweep-only bank accounts. Official material focuses primarily on USD-denominated foreign-currency assets.
 
-公開クライアントのコードでは、メインサイトの資産評価JSONから次を読めることが確認できる。
+Public client code confirms that the following can be read from the main site's asset-valuation JSON.
 
-- 合計評価額、前日差・率、前月差・率、評価損益・率、取得額
-- 預り金を含む／除く、iDeCoを含む／除く集計
-- 商品カテゴリ別の同項目と構成比
+- Total valuation, previous-day change/percentage, previous-month change/percentage, unrealized gains/losses and percentage, acquisition amount
+- Totals including/excluding cash deposits and including/excluding iDeCo
+- The same fields by product category, plus composition percentages
 
-同じコードには、円貨入出金明細の内部JSONから、日付、入出金区分、明細区分、摘要、金額、安定IDを取得する処理もある。Kogane collectorは初期responseのpage metadataとrow cardinalityを検証し、単一pageで全件が揃う場合だけ、provider fieldを落とさないpage bundleとして保存する。次page request契約はまだ観測されていないため、複数pageを示すresponseは成功扱いせずfail closedする。
+The same code also retrieves date, deposit/withdrawal category, statement category, description, amount, and stable ID from internal yen deposit/withdrawal statement JSON. The Kogane collector validates the initial response's page metadata and row cardinality, saving a page bundle without dropping provider fields only when a single page contains all rows. The next-page request contract has not yet been observed, so responses indicating multiple pages fail closed rather than count as success.
 
-### 2. 口座管理・取引履歴・電子交付
+### 2. Account management, transaction history, and electronic delivery
 
-公式Webでは次の履歴を取得できる。
+The official website provides the following history.
 
-| 履歴                                     | 公式の保持・表示                         | 粒度                                                      |
-| ---------------------------------------- | ---------------------------------------- | --------------------------------------------------------- |
-| 約定履歴                                 | 過去2年                                  | 取引明細。CSVダウンロード可                               |
-| 円貨入出金明細                           | 過去2年                                  | 日付、区分、摘要、金額等                                  |
-| 譲渡益税明細                             | 過去2年                                  | 特定預りの個別明細、税額合計、損益合計。最大200件／ページ |
-| 電子交付された取引報告書・取引残高報告書 | 原則過去5年                              | PDF等の公式書面                                           |
-| 開示請求                                 | 最大過去10年                             | 自動収集ではなく請求手続き                                |
-| 債券の注文履歴                           | 過去2年                                  | 注文履歴                                                  |
-| 債券の取引・償還・利払概要               | 過去5年                                  | 概要。詳細は書面                                          |
-| 外国株式                                 | 外貨建取引サイトの約定履歴・口座サマリー | 保有残高、約定、為替注文履歴。保持期間は今回未確定        |
+| History                                                   | Official retention/display                                             | Granularity                                                                               |
+| --------------------------------------------------------- | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| Execution history                                         | Past 2 years                                                           | Transaction details; CSV download available                                               |
+| Yen deposit/withdrawal statements                         | Past 2 years                                                           | Date, category, description, amount, etc.                                                 |
+| Capital-gains tax statements                              | Past 2 years                                                           | Individual specific-custody details, total tax, total gains/losses; maximum 200 rows/page |
+| Electronically delivered trade reports/account statements | Normally past 5 years                                                  | Official documents such as PDFs                                                           |
+| Disclosure requests                                       | Up to past 10 years                                                    | Request procedure, not automated collection                                               |
+| Bond order history                                        | Past 2 years                                                           | Order history                                                                             |
+| Bond transaction/redemption/interest-payment summaries    | Past 5 years                                                           | Summaries; documents provide detail                                                       |
+| Foreign equities                                          | Execution history/account summary on the foreign-currency trading site | Holdings, executions, FX order history; retention period not established in this research |
 
-初期バックフィルは、My資産（2021-08以降の週次資産・実現損益・配当等）と、2年CSV、5年電子交付書面を組み合わせるのがよい。CSVや書面は公式サイトから直接取得するためaggregatorには該当しない。
+For initial backfill, combine My Assets (weekly assets, realized gains/losses, dividends, etc. since 2021-08), two-year CSVs, and five-year electronically delivered documents. CSVs/documents retrieved directly from the official site are not an aggregator route.
 
-### 3. 買付余力・保有商品
+### 3. Buying power and holdings
 
-公式Webと株アプリ系通信では、少なくとも次を取得できる。
+The official website and stock-app transport provide at least the following.
 
-- 現金買付余力、信用買付余力、出金可能額
-- 代用有価証券評価、委託保証金率、SBIハイブリッド預金相当残高
-- 国内現物: 銘柄、市場、預り区分、数量、売却可能数量、未約定数量、取得／平均単価、現在値、時価評価額、評価損益・率
-- 国内信用: 建玉ID、売買区分、数量、決済可能数量、建単価、現在値、時価評価額、評価損益・率、建日、期日、諸費用
-- 米国株式: 銘柄／ティッカー、数量、現地通貨と円換算の取得額・評価額・損益
+- Cash/margin buying power, withdrawable amount
+- Collateral securities valuation, margin maintenance ratio, balance equivalent to SBIハイブリッド預金 (SBI Hybrid Deposit)
+- Domestic cash equities: security, market, custody category, quantity, sellable quantity, unexecuted quantity, acquisition/average unit price, current price, market valuation, unrealized gains/losses and percentage
+- Domestic margin: position ID, buy/sell category, quantity, closeable quantity, opening price, current price, market valuation, unrealized gains/losses and percentage, opening date, maturity date, charges
+- US equities: security/ticker, quantity, acquisition amount/valuation/gains and losses in local currency and yen equivalents
 
-公式表示の「取得単価」は、国内株では手数料を含む移動平均価格であり、一般預りの「参考単価」や特定口座の税務上の取得価額と常に同一ではない。Koganeは値の意味と出典画面を保存し、`取得単価`、`参考単価`、`平均取得価額`、`税務上取得価額`を同一フィールドへ潰さない。
+The official `取得単価` (acquisition unit price) for domestic equities is a moving-average price including fees, and is not always identical to general-custody `参考単価` (reference unit price) or a specific account's tax acquisition value. Kogane preserves the meaning and source screen and must not collapse `取得単価`, `参考単価`, `平均取得価額` (average acquisition value), and `税務上取得価額` (tax acquisition value) into one field.
 
-## チャネル別のトレードオフ
+## Channel tradeoffs
 
-| 経路                               | 長所                                                                             | 短所                                                             | コスト | 自動化見込み |
-| ---------------------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -----: | ------------ |
-| PC／スマホのMy資産JSON             | 公式横断集計、履歴が豊富、ブラウザから値を突合しやすい。公開実装でJSON取得例あり | ログインSSOと内部endpointは非公開。画面・認証変更の影響を受ける  |    4/5 | B→A候補      |
-| PCサイトのCSV／電子交付            | 公式エクスポート、過去データ、監査証跡として強い                                 | CSV/PDFごとに取得・解析が必要。日次現在値には不向き              |    3/5 | B            |
-| PC／スマホのブラウザスクレイピング | 既存Go実装が稼働例を持ち、初回検証が早い                                         | Headless判定、DOM変更、Chromiumサイズ、待機時間                  |    3/5 | B            |
-| SBI証券Plusアプリ                  | 資産・実現損益・配当等が読み取り中心でまとまる。PCのMy資産と近い機能             | API仕様未公開。APK／通信解析が必要。認証・アプリ更新追随が必要   |    4/5 | B（未検証）  |
-| SBI証券 株アプリ内部通信           | 買付余力、国内保有、板・価格等の粒度が高い。直接HTTP実装例あり                   | 固定長Shift-JIS独自プロトコル。注文機能と同じAPI面にあり隔離必須 |    4/5 | B→A候補      |
-| 外国株式アプリ系REST／GraphQL      | 米国株の保有・注文・約定の粒度が高い                                             | 別SSO、別session、hash値等が必要。国内と実装が分かれる           |    4/5 | B            |
+| Route                                                          | Advantages                                                                                                    | Disadvantages                                                                                    | Cost | Automation prospects |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | ---: | -------------------- |
+| PC/smartphone My Assets JSON                                   | Official cross-product totals, rich history, easy browser value comparison; public JSON retrieval example     | Login SSO/internal endpoints undocumented; affected by screen/authentication changes             |  4/5 | B→A candidate        |
+| PC-site CSV/electronic delivery                                | Official exports, historical data, strong audit evidence                                                      | Retrieval/parsing per CSV/PDF; unsuitable for daily current values                               |  3/5 | B                    |
+| PC/smartphone browser scraping                                 | Existing Go implementation has operational examples; quick initial validation                                 | Headless detection, DOM changes, Chromium size, wait times                                       |  3/5 | B                    |
+| SBI証券Plus (SBI Securities Plus) app                          | Assets, realized gains/losses, dividends, etc. together in a read-oriented interface; similar to PC My Assets | API undocumented; APK/transport analysis and tracking authentication/app updates required        |  4/5 | B (unvalidated)      |
+| SBI証券 株アプリ (SBI Securities Stock App) internal transport | Detailed buying power, domestic holdings, order book/prices, etc.; direct HTTP implementation example         | Proprietary fixed-length Shift-JIS protocol; shares API surface with orders, requiring isolation |  4/5 | B→A candidate        |
+| Foreign-equity app REST/GraphQL                                | Detailed US equity holdings, orders, executions                                                               | Separate SSO/session, hashes, etc.; separate implementation from domestic scope                  |  4/5 | B                    |
 
-PCサイトとスマートフォンサイトのMy資産は公式上同じ対象・集計期間を持つ。画面幅の差より、内部JSONを取得できるかが重要である。SBI証券PlusはMy資産と近い横断情報を提供するため、APKを調べるなら取引中心の株アプリより先に見る価値がある。ただし、買付余力・国内株の詳細は株アプリ系通信の方が既存実装の裏付けが強い。
+Officially, PC and smartphone My Assets have the same coverage and aggregation periods. Access to internal JSON matters more than screen width. SBI Securities Plus provides similar cross-product information to My Assets, making it worth examining before the trading-oriented Stock App when analyzing APKs. However, existing implementations provide stronger evidence for stock-app transport for buying power and domestic equity details.
 
-## 認証、端末、セッション
+## Authentication, devices, and sessions
 
-### 2026年8月時点の公式仕様
+### Official specifications as of August 2026
 
-- パスキー認証は2026-06-30から原則必須。ただしユーザーネーム／ログインパスワードでのログインも残る。
-- パスキーなら、パスワード入力とログイン時の追加認証なしでログインできる。
-- PC／スマホのメインサイト、スマートフォン専用サイト、SBI証券Plusでパスワードログインした場合、リスク検知時にメール認証コードが必要。
-- 従来のメールURL型「デバイス認証」は2026-06-13で終了。
-- 株アプリ等のパスワードログインは、FIDOまたは電話番号認証が必要。
-- 取引時には別のリスク判定があり、電話認証を求められる可能性がある。Koganeは取引を行わないため、この経路を起動しない。
-- アプリの旧「自動ログイン」は継続可能だが、電話番号認証またはFIDOの追加認証が必要。定期収集には、パスキーによる新規セッション作成の方が構造が明確である。
+- Passkey authentication has been required in principle since 2026-06-30, although username/login-password login remains available.
+- Passkeys allow login without password entry or additional login authentication.
+- Password login on the PC/smartphone main site, smartphone-only site, or SBI Securities Plus requires an email authentication code when risk is detected.
+- The previous email-URL-based device authentication ended on 2026-06-13.
+- Password login in the Stock App and similar apps requires FIDO or phone-number authentication.
+- Trading has a separate risk decision and may require phone authentication. Kogane does not trade and must not activate this route.
+- The apps' former automatic login can continue, but requires additional phone-number or FIDO authentication. Creating fresh sessions with a passkey is structurally clearer for scheduled collection.
 
-### 現口座で確定したこと
+### Confirmed for the current account
 
-- 利用者はSBI証券へのログインにパスキーを利用している。
-- そのパスキーは利用者のBitwarden vaultに保存済みである。
-- Bitwarden CLIは該当itemのFIDO2 credential metadataと秘密鍵を復号済みJSONとして返す。実値はログ、repo、PRへ出していない。
-- 該当passkeyはECDSA P-256でdiscoverable属性を持ち、同一RPの候補は1件だった。RP ID、credential ID、user handle、counterの実値は記録しない。
-- `mnie` の既存 `createBitwardenAssertion` が生成したassertionをSBI証券が受理し、SSO callbackと復号可能なaccess tokenを返した。
-- 復号したtokenを株アプリのMTS loginへ渡してsession化し、read-only TR code `F2631` で国内現物保有一覧を取得できた。HTTPはいずれも200で、server totalと解析件数が一致した。
-- 同じ認証フローから外国株式アプリ用に別のpasskey channelとSSO sessionを作り、公式REST／GraphQL経由で米国株現物保有を取得できた。NASDAQ、NYSE、NYSE Arcaを個別照会し、実口座の保有を欠落なく分類できた。
-- メインサイトへETGate経由でSSOし、`My資産` の現在評価JSONを取得できた。商品カテゴリと評価額の有無を、銘柄名・数量・金額を通常ログへ出さず確認した。
-- 円貨入出金明細JSONの取得に成功した。返却された初期一覧の件数と最古・最新日だけを検証ログへ出し、摘要と金額は出していない。
-- 外国株式の取引履歴GraphQLは90日範囲で成功した。5年超を1回で要求すると拒否されたため、サーバーの検索可能期間を取得して期間分割する実装が必要である。
-- 国内注文照会は当日約定と未約定・直近注文を取得できた。過去の国内約定履歴全体は現行PoC／`mnie` high-level APIでは未実装である。
-- 国内現物は保有一覧の現在値、個別板／現在値、日足チャートを実口座で取得できた。米国株は試験時点で全保有銘柄の前日終値と日足チャートを取得できたが、`last` と保有一覧の現在値は空だった。
-- USD外貨交換の入力レート照会は同じメインサイトsessionで失敗した。口座評価との照合にはMy資産の公式評価額を保存し、汎用UIのFX換算は独立したmarket-data sourceを使う方が安定する。
-- ローカルPoC用に、ログインID、ログインパスワード、RP一致URI、単一passkeyだけをWSLのGit管理外へ保存した。取引パスワードとBitwarden custom fieldsは保存していない。ディレクトリは `0700`、fileは `0600` である。
+- The user logs in to SBI Securities with a passkey.
+- That passkey is already stored in the user's Bitwarden vault.
+- Bitwarden CLI returns the item's FIDO2 credential metadata and private key as decrypted JSON. Actual values have not been exposed in logs, the repo, or PRs.
+- The passkey uses ECDSA P-256, is discoverable, and had one candidate for the same RP. Actual RP ID, credential ID, user handle, and counter values are not recorded.
+- SBI Securities accepted the assertion generated by `mnie`'s existing `createBitwardenAssertion`, returning an SSO callback and decryptable access token.
+- Passing the decrypted token to the stock app's MTS login established a session, and read-only TR code `F2631` retrieved domestic cash-equity holdings. All HTTP responses were 200, and server total matched parsed count.
+- The same authentication flow created a separate passkey channel and SSO session for the foreign-equity app, retrieving US cash-equity holdings through official REST/GraphQL. Separate NASDAQ, NYSE, and NYSE Arca queries classified all actual account holdings without omissions.
+- SSO to the main site through ETGate retrieved current valuation JSON for `My資産`. The presence of product categories and valuations was confirmed without putting security names, quantities, or amounts in normal logs.
+- Yen deposit/withdrawal statement JSON was retrieved successfully. Only the initial list's row count and oldest/newest dates went to validation logs; descriptions and amounts did not.
+- Foreign-equity transaction-history GraphQL succeeded for a 90-day range. A single request for over five years was rejected, so implementation must retrieve the server's searchable period and split it.
+- Domestic order inquiry retrieved same-day executions, unexecuted orders, and recent orders. Complete past domestic execution history is not implemented in the current PoC/`mnie` high-level API.
+- For domestic cash equities, current holdings-list prices, individual order books/current prices, and daily charts were retrieved from the real account. For US equities, previous closing prices and daily charts were retrieved for all holdings at test time, but `last` and holdings-list current prices were empty.
+- USD foreign-exchange input-rate inquiry failed with the same main-site session. Saving official My Assets valuations for account reconciliation and using an independent market-data source for generic UI FX conversion is more stable.
+- For the local PoC, only the login ID, login password, RP-matching URI, and single passkey were saved outside Git management in WSL. No trading password or Bitwarden custom fields were saved. Directory permissions are `0700` and file permissions `0600`.
 
-従って、既存credentialのCLI exportability、ローカル署名、SBI証券とのWebAuthn互換性、国内MTS session、外国株式session、国内・米国現物保有、My資産現在評価、円貨入出金明細、米国株取引履歴のread-only取得は確認済みである。未確認なのは、counterの連続利用時判定、assertion再利用拒否、session寿命、IP／UA変更、国内過去約定履歴、My資産の資産推移・実現損益・配当、履歴の全期間ページングである。
+Thus, CLI exportability of existing credentials, local signing, WebAuthn compatibility with SBI Securities, domestic MTS and foreign-equity sessions, domestic/US cash-equity holdings, current My Assets valuations, yen deposit/withdrawal statements, and US equity transaction-history read-only retrieval are confirmed. Unconfirmed areas are consecutive counter-use decisions, assertion-reuse rejection, session lifetime, IP/UA changes, historical domestic executions, My Assets trends/realized gains and losses/dividends, and full-period history pagination.
 
-### 公開実装から確認したセッション方式
+### Session mechanisms confirmed from public implementations
 
-`pnsk-lab/mnie` は、保存済みWebAuthn credentialから署名を生成し、FIDO challenge／assertion、アプリチャネルのSSO token取得、株アプリ系session確立までをブラウザなしで実装する。session export/importもあるが、メインサイトSSOの認証キャッシュは20分としている。長期間同じcookieを再利用する設計ではなく、必要時にパスキーから再認証できることを前提にするのが安全である。
+`pnsk-lab/mnie` generates signatures from stored WebAuthn credentials and implements FIDO challenge/assertion, app-channel SSO-token acquisition, and stock-app session establishment without a browser. It also supports session export/import, but caches main-site SSO authentication for 20 minutes. Rather than reusing the same cookie for long periods, the safer assumption is that passkeys can reauthenticate when required.
 
-同repoの `auth-bitwarden` は、Bitwarden Desktopのローカル `data.json` をmaster passwordで復号し、PBKDF2-SHA256／Argon2idのKDF、item key、FIDO2 credentialを処理する。`createBitwardenPasskeyProvider` は、取得したchallengeに対し、完全一致するRP IDのcredentialを選び、指定originを含む `clientDataJSON` と `authenticatorData` を組み立て、秘密鍵で署名する。SBI providerは汎用 `PasskeyAssertionProvider` を受け取るため、このproviderを直接接続できる構造である。実口座PoCでは `data.json` を直接復号せず、公式Bitwarden CLIが返す復号済みitemを最小化して同じ署名関数へ渡した。
+The same repo's `auth-bitwarden` decrypts Bitwarden Desktop's local `data.json` with the master password, handling PBKDF2-SHA256/Argon2id KDFs, item keys, and FIDO2 credentials. For a retrieved challenge, `createBitwardenPasskeyProvider` selects a credential with an exactly matching RP ID, builds `clientDataJSON` containing the specified origin and `authenticatorData`, and signs with the private key. The SBI provider accepts a generic `PasskeyAssertionProvider`, allowing direct connection. The real-account PoC minimized a decrypted item returned by official Bitwarden CLI and passed it to the same signing function rather than decrypting `data.json` directly.
 
-ただし実装上の注意がある。
+Implementation caveats follow.
 
-- 同一RP IDに複数credentialがある場合は明示選択が必要で、曖昧な選択は拒否する。credential IDと秘密鍵はSBI専用のCloudflare secret以外へ出さず、repo、GitHub Actions、R2、通常ログへ送らない。
-- `userVerification` optionはauthenticator dataのUV flagを設定するが、OSやBitwarden UIによる生体認証・利用者確認を実行するものではない。実口座ではこのassertionを1回受理したが、サーバー側がUVの実体をどう評価するか、連続利用や認証変更後も通るかは未確認である。
-- counterは保存値が正なら既定で1増やして署名するが、更新値をvaultへ書き戻さない。連続ログインで同じ値になる可能性、保存値が0の場合の挙動、SBI証券側の判定を確認する必要がある。実値は記録しない。
-- 現行のdefault `data.json` pathはmacOS向けである。WSL PoCはBitwarden CLI 2026.8.0を使うことで、このpathとvault形式への直接依存を回避した。
-- 合成credential testに加え、SBI証券の実credentialでpasskey callback、access token復号、MTS session、国内現物保有取得まで確認した。注文、端末登録、取引passwordは呼んでいない。
+- Multiple credentials for the same RP ID require explicit selection; ambiguous selection is rejected. Credential IDs and private keys must remain within SBI-specific Cloudflare secrets and must not go to the repo, GitHub Actions, R2, or normal logs.
+- The `userVerification` option sets the authenticator-data UV flag, but does not perform OS/Bitwarden UI biometric authentication or user verification. The real account accepted this assertion once; how the server evaluates actual UV, or whether it remains accepted over consecutive runs or after authentication changes, is unconfirmed.
+- A positive stored counter is incremented by one for signing by default, but the updated value is not written back to the vault. Repeated logins may therefore use the same value; behavior for a stored zero and SBI Securities' decision need verification. Actual values are not recorded.
+- The current default `data.json` path targets macOS. Using Bitwarden CLI 2026.8.0 in the WSL PoC avoided direct dependence on this path and vault format.
+- In addition to synthetic credential tests, real SBI Securities credentials confirmed passkey callback, access-token decryption, MTS session, and domestic cash-equity holdings retrieval. Orders, device registration, and trading passwords were not invoked.
 
-`createBitwardenAuthManager().credentials()` はusername／passwordに加え、FIDO2秘密鍵をprivate JWKとして含む `portableCredential` を返せる。この汎用export経路はKoganeでは使用禁止とする。Workerへ同期するのは、Bitwarden CLIが復号したitemから抽出したSBI証券用passkeyの最小項目だけであり、vault全体、master password、derived key、ログインpasswordはcloudへ置かない。
+`createBitwardenAuthManager().credentials()` can return a `portableCredential` containing a FIDO2 private key as private JWK in addition to username/password. This generic export route is prohibited in Kogane. Only minimum fields for an SBI Securities passkey extracted from a Bitwarden CLI-decrypted item are synchronized to the Worker; the entire vault, master password, derived key, and login password are not placed in the cloud.
 
-`azuki774/myscrapers` は、保存済みpasskey private keyをChromiumの仮想WebAuthn authenticatorへ復元し、Playwrightで公式ログイン画面を通す。利用者操作なしでログインする実例ではあるが、passkey秘密鍵をサーバーへ持ち出す設計になるため、Koganeでは通常のパスワード以上に強い秘密として扱う必要がある。
+`azuki774/myscrapers` restores a stored passkey private key into a Chromium virtual WebAuthn authenticator and uses Playwright through the official login screen. It demonstrates login without user interaction, but exports the passkey private key to a server, so Kogane must treat it as a stronger secret than a normal password.
 
-現時点の採用PoCは、Bitwardenに保存済みの既存passkeyからSBI専用の最小credentialをWSLへ抽出し、Cloudflare encrypted secretへ同期する方式である。container image、repo、GitHub Actions、CI artifactへは出さない。credential ID、private key、user handle、session ID、cookie、口座番号、金融データを通常ログ、repo、PRへ記録しない。passkeyをcloudへ複製しない構成が必要になった場合は、次節のローカルissuerへ戻す。
+The currently adopted PoC extracts minimum SBI-specific credentials from an existing Bitwarden-stored passkey into WSL and synchronizes them to Cloudflare encrypted secrets. They do not go into container images, the repo, GitHub Actions, or CI artifacts. Credential IDs, private keys, user handles, session IDs, cookies, account numbers, and financial data are not recorded in normal logs, the repo, or PRs. If a design without cloud passkey duplication is required, return to the local issuer described next.
 
-### 安全性を優先する代替: ローカルissuerとsource-scoped envelope
+### Security-first alternative: local issuer and source-scoped envelope
 
-最も安全な構成は、スケジューラが利用者端末上のローカルagentへ収集要求を渡し、agentがBitwardenの復号、WebAuthn署名、SBI証券ログイン、read-only取得までを同じtrust boundary内で完結し、cloudへは暗号化した公式raw evidenceまたは正規化済み結果だけを送る方式である。この場合、vaultとSBI sessionはcloudへ出ない。
+The safest design has a scheduler pass collection requests to a local agent on the user's device. The agent completes Bitwarden decryption, WebAuthn signing, SBI Securities login, and read-only retrieval within the same trust boundary, sending only encrypted official raw evidence or normalized results to the cloud. The vault and SBI session never leave the device.
 
-認証処理を分離する必要がある場合も、issuerをSBI証券専用にし、次を満たす。
+If authentication must be separated, make the issuer SBI Securities-specific and satisfy the following.
 
-1. 要求を `source=sbi-sec`、`purpose=read-only`、1回限りのnonce、短い有効期限、許可したRP ID／originへ固定する。
-2. RP ID／originはSBI証券が返した実challengeと公式ログイン画面からローカルで検証し、推測値を固定しない。
-3. assertionはchallengeへの応答としてローカルSBI auth componentだけへ渡し、永続化、cloud relay、通常ログ出力をしない。
-4. sessionを渡す場合はcookieそのものではなく、ローカルagent内のopaque handleを参照する短寿命の `source-scoped session envelope` とする。envelopeはsource、read-only purpose、audience、発行／失効時刻、許可host／path／TR codeだけを持ち、取引routeを含めない。
-5. cloud schedulerからローカルagentへの常時公開inboundを避け、agentが署名済みの短寿命jobをpullする。rate limit、単一実行、再利用拒否を設ける。
-6. audit logには成功／失敗、source、時刻、失敗分類だけを残し、credential ID、user handle、challenge、assertion、cookie、金融データを残さない。
+1. Fix requests to `source=sbi-sec`, `purpose=read-only`, a one-time nonce, short expiry, and permitted RP ID/origin.
+2. Verify the RP ID/origin locally against the actual challenge returned by SBI Securities and official login screen; do not hardcode guesses.
+3. Pass assertions only to the local SBI auth component as challenge responses; do not persist, relay through the cloud, or put them in normal logs.
+4. If passing a session, use a short-lived `source-scoped session envelope` referencing an opaque handle inside the local agent rather than the cookie itself. The envelope contains only source, read-only purpose, audience, issue/expiry times, and allowed hosts/paths/TR codes, with no trading routes.
+5. Avoid a permanently public inbound endpoint from the cloud scheduler to the local agent. Have the agent pull signed short-lived jobs, with rate limits, single execution, and reuse rejection.
+6. Audit logs retain only success/failure, source, time, and failure category, with no credential IDs, user handles, challenges, assertions, cookies, or financial data.
 
-この代替ではcloud側にassertionやsession cookieを渡さない。現在のWorker PoCは運用簡素化を優先してSBI専用passkeyの最小秘密だけをCloudflare secretへ置くが、Bitwarden vault／master password／derived keyは置かない。
+This alternative passes neither assertions nor session cookies to the cloud. For operational simplicity, the current Worker PoC stores only minimum SBI-specific passkey secrets in Cloudflare secrets, without the Bitwarden vault/master password/derived key.
 
-## WAF・anti-bot・配信基盤
+## WAF, anti-bot, and delivery infrastructure
 
-### 確認できた事実
+### Confirmed facts
 
-- `www.sbisec.co.jp` の公開レスポンスはCloudFront経由で、AWS ALB cookieと`JSESSIONID`を返した。
-- `login.sbisec.co.jp` はDNS上 `*.sbi-everspin.com` へCNAMEされ、観測時のレスポンスは`server: evfw`、CloudFront／API Gateway経由だった。
-- 公開静的画像は `sbisec.akamaized.net` から配信される。これはAkamai CDN利用の証拠だが、認証面がAkamai WAFで保護されている証拠ではない。
-- SBI証券の公式資料は、株アプリ等にEVERSPIN技術を導入し、ログインごとに異なるtokenを割り当てて認証と通信環境を確認すると説明している。
-- 認証なしの通常curlで公開トップは取得でき、CAPTCHA／reCAPTCHA／Turnstileの記述は見つからなかった。
-- 調査時、ログインURLへの単純なHTTPアクセスは保守ページへ302された。ただし、実際の保守時間、UA判定、リクエスト不足のどれが原因かはこの観測だけでは確定できない。
+- Public responses from `www.sbisec.co.jp` passed through CloudFront and returned AWS ALB cookies and `JSESSIONID`.
+- DNS for `login.sbisec.co.jp` CNAMEs to `*.sbi-everspin.com`; observed responses had `server: evfw` and passed through CloudFront/API Gateway.
+- Public static images are served from `sbisec.akamaized.net`. This proves Akamai CDN use, but not Akamai WAF protection of authentication.
+- SBI Securities' official material explains that EVERSPIN technology in the Stock App and similar apps assigns a different token per login to check authentication and the communication environment.
+- Ordinary unauthenticated curl retrieved the public top page; no CAPTCHA/reCAPTCHA/Turnstile references were found.
+- During research, a simple HTTP request to the login URL redirected 302 to maintenance. This observation alone cannot determine whether actual maintenance, UA detection, or missing request elements caused it.
 
-### 第三者実装からの観測・推測
+### Third-party observations and inferences
 
-- `myscrapers` は、`HeadlessChrome` UAだとログインAPIが保守ページへ302するため通常Chrome UAを使う、とコードコメントで記録している。これは再現試験が必要な第三者観測である。
-- CAPTCHA中心の防御より、Everspin token、ブラウザ／端末情報、リスクベース認証、実行元IP、チャネル別sessionの組合せが自動化コストの中心と推測する。
-- 公式FAQは海外から一部サービスを停止する場合があるとしている。海外・可変egressより、日本国内の固定IPを優先する。
+- `myscrapers` records in code comments that the login API redirects 302 to maintenance for a `HeadlessChrome` UA, so it uses a normal Chrome UA. This third-party observation requires reproduction.
+- The main automation cost is inferred to be the combination of Everspin tokens, browser/device information, risk-based authentication, execution IP, and channel-specific sessions, rather than CAPTCHA-centered protection.
+- The official FAQ says some services may be stopped for access from overseas. Prefer a fixed Japanese IP over overseas/variable egress.
 
-従って「Akamaiでログインが保護されている」とは結論しない。現時点の記録は、**静的assetはAkamai、公開／ログイン経路はCloudFront・AWS・Everspin、anti-botの詳細は未確認**である。
+Thus, this does not establish that Akamai protects login. The current finding is **Akamai for static assets; CloudFront/AWS/Everspin for public/login routes; anti-bot details unconfirmed**.
 
-## APKと静的解析
+## APK and static analysis
 
-Android版は公式Google Playから配信される。生の単一APKをSBI証券が公開していることは確認できず、公式入手経路はGoogle Playである。解析用ファイルは、利用者の端末へ正規インストールしたものから取得するか、Google Playの配信物を利用規約に沿って取得する。非公式APKミラーは信頼しない。
+Android apps are distributed through official Google Play. No raw standalone APK published by SBI Securities was confirmed; the official acquisition route is Google Play. Obtain analysis files from a legitimate installation on the user's device or Google Play distribution under its terms. Do not trust unofficial APK mirrors.
 
-| 公式アプリ       | package ID                | 優先度 | 静的解析の狙い                                                        |
-| ---------------- | ------------------------- | -----: | --------------------------------------------------------------------- |
-| SBI証券Plus      | `jp.co.sbisec.sbiapp`     |      1 | My資産相当のendpoint、履歴・ページング、response schema、認証チャネル |
-| SBI証券 株アプリ | `jp.co.sbisec.hyperkabu2` |      2 | MTS base URL、TR code、端末登録、買付余力・保有照会                   |
+| Official app     | Package ID                | Priority | Static-analysis aim                                                                          |
+| ---------------- | ------------------------- | -------: | -------------------------------------------------------------------------------------------- |
+| SBI証券Plus      | `jp.co.sbisec.sbiapp`     |        1 | My Assets-equivalent endpoints, history/pagination, response schemas, authentication channel |
+| SBI証券 株アプリ | `jp.co.sbisec.hyperkabu2` |        2 | MTS base URL, TR codes, device registration, buying-power/holdings inquiries                 |
 
-APK解析は有用である。特に、`mnie` が環境変数として外出ししているauth／MTS／外国株式endpointの現行値、SBI証券Plusの履歴API、アプリ版のschemaを確認できる可能性が高い。一方、公式資料はEVERSPINによるソース暗号化、URL暗号化、改ざん検知を説明しており、静的解析だけでは完結しない可能性がある。詳細解析は後回しにし、まず文字列・manifest・network security config・ホスト名・read-only methodの存在だけを確認する。
+APK analysis is useful, particularly for current auth/MTS/foreign-equity endpoints that `mnie` externalizes as environment variables, SBI Securities Plus history APIs, and app schemas. However, official material describes EVERSPIN source/URL encryption and tamper detection, so static analysis alone may be insufficient. Defer detailed analysis and first check only strings, manifest, network security config, hostnames, and the presence of read-only methods.
 
-2026-08-26、株アプリpackageの配布copyを取得し、mirrorを単独で信用せずJAR署名を検証した。署名者名はSBI SECURITIESで、対象MTS hostのTLS証明書もSBI証券名義だった。JADX 1.5.6で、本番／試験環境tableにMTS originがあり、passkey login classが相対path `/mtsmobile/ssologingate` を結合することを確認した。実originそのものはrepoへ保存しない。
+On 2026-08-26, a distributed copy of the stock-app package was obtained, and its JAR signature was verified rather than trusting the mirror alone. The signer name was SBI SECURITIES, and the target MTS host's TLS certificate was also in SBI Securities' name. JADX 1.5.6 confirmed an MTS origin in a production/test environment table and a passkey login class that appends the relative path `/mtsmobile/ssologingate`. The actual origin itself is not saved to the repo.
 
-`mnie` に `SBI_MTS_BASE_URL` の実値がないのは未発見だからではない。同repoの `AGENTS.md` は実endpointのoriginをhardcodeせず、pathだけをsourceへ置くruleを明記する。アプリもoriginを環境table、MTS methodを相対pathとして分離しており、originはアプリ更新や環境切替で変わり得る。従って `.env.example` は空欄のままにし、実行時に現行公式配信物または通信から検証した値を注入する設計である。
+The absence of an actual `SBI_MTS_BASE_URL` value in `mnie` does not mean it is undiscovered. That repo's `AGENTS.md` explicitly requires keeping actual endpoint origins out of hardcoded source, storing only paths. The app also separates origins in an environment table from relative MTS method paths; origins may change with app updates/environment switching. Accordingly, `.env.example` stays blank, and runtime injects values verified against current official distributions or transport.
 
-TLS pinning、root／emulator検知、PlusアプリへのEVERSPIN適用範囲は未確認である。
+TLS pinning, root/emulator detection, and the scope of EVERSPIN in the Plus app are unconfirmed.
 
-## 3rd party clientのコード調査
+## Third-party client code research
 
 ### `pnsk-lab/mnie` (`c87e65c0a04c03c560962f8ead6e77415fb841f4`)
 
-2026-08-05時点のTypeScript実装。aggregator経由ではなく、SBI証券の公式Web／公式アプリ内部通信へ直接接続する。
+TypeScript implementation as of 2026-08-05. It connects directly to SBI Securities' official Web/app internal transport rather than through an aggregator.
 
-主な実装:
+Main implementation:
 
-- WebAuthn challengeを取得し、保存credentialでassertionを生成
-- アプリチャネル別SSO tokenを取得し、`/mtsmobile/ssologingate` でsession化
-- `/mtsmobile/commgate` の固定長Shift-JISプロトコルで国内株の買付余力・保有・価格・注文等を取得
-- メインサイトへSSOし、`/account/api/assets/valuations/current` のJSONを取得
-- `member.c.sbisec.co.jp` の円貨入出金明細JSONを取得
-- 外国株式系はREST／GraphQL、`Set-Session`、`Account-Id`等を利用
-- browser cookie jar、session export/import、メインサイト認証の20分cache
+- Retrieves WebAuthn challenges and generates assertions with stored credentials
+- Obtains app-channel SSO tokens and establishes sessions at `/mtsmobile/ssologingate`
+- Retrieves domestic-equity buying power, holdings, prices, orders, etc. with the fixed-length Shift-JIS protocol at `/mtsmobile/commgate`
+- Performs main-site SSO and retrieves JSON from `/account/api/assets/valuations/current`
+- Retrieves yen deposit/withdrawal statement JSON from `member.c.sbisec.co.jp`
+- Uses REST/GraphQL, `Set-Session`, `Account-Id`, etc. for foreign equities
+- Browser cookie jar, session export/import, 20-minute main-site authentication cache
 
-`auth-bitwarden` のコードレベル評価:
+Code-level assessment of `auth-bitwarden`:
 
-- `vault.ts`／`crypto.ts` がBitwarden Desktopのローカルvaultを復号し、FIDO2 credentialをprocess内へ展開する。
-- `provider.ts` がRP IDでcredentialを絞り込み、SBI providerが要求したchallengeへローカル署名する。複数候補を暗黙選択しない。
-- `fido2.ts` がRP ID hash、UV／UP／BE／BS flags、counter、origin入りclient dataを生成する。
-- `auth-manager.ts` は可搬private JWKを返す汎用機能を持つため採用しない。SBI証券専用のprovider／issuerだけを境界にする。
-- 実装はassertion生成の技術的可能性を示すが、Bitwarden公式SDKではなく、現行vault形式への追随、master passwordの安全な入力、SBI証券側の受理はKogane側の責任で検証する。
+- `vault.ts`/`crypto.ts` decrypt Bitwarden Desktop's local vault and expand FIDO2 credentials in-process.
+- `provider.ts` filters credentials by RP ID and signs the SBI provider's requested challenge locally. It does not implicitly select among multiple candidates.
+- `fido2.ts` generates the RP ID hash, UV/UP/BE/BS flags, counter, and client data containing the origin.
+- `auth-manager.ts` has a generic portable private-JWK export function, so it is not adopted. Use only an SBI Securities-specific provider/issuer as the boundary.
+- This demonstrates technical feasibility of assertion generation, but is not an official Bitwarden SDK. Kogane is responsible for verifying current vault-format compatibility, safe master-password entry, and SBI Securities acceptance.
 
-問題点:
+Problems:
 
-- provider capabilityに `investments:trade` を含み、現物・信用・IFD・テーマ投資・為替の発注、訂正、取消を実装している。
-- 取引パスワード、device ID登録、取引時電話認証callbackを受け取れる。
-- readとwriteが同じprovider・同じsession面に同居している。
-- endpoint hostの一部は環境変数前提で、repoだけでは再現できない。
+- Provider capabilities include `investments:trade`, implementing placement, amendment, and cancellation for cash/margin/IFD/theme-investment/FX orders.
+- It can accept trading passwords, device ID registration, and phone-authentication callbacks during trading.
+- Reads and writes share the same provider/session surface.
+- Some endpoint hosts require environment variables, so the repo alone is insufficient for reproduction.
 
-採用方針:
+Adoption policy:
 
-- コードをそのままKoganeへ登録しない。
-- 読取メソッドとparsersだけを別moduleに移植またはforkする。
-- 公開capabilityは `accounts:read`、`balances:read`、`transactions:read`、`investments:read`だけに固定する。
-- `tradePassword`、取引認証callback、device registration、order payload builders、発注endpointを依存グラフと配布物から除外する。
-- runtimeのegress allowlistとmethod allowlistで、既知のread-only宛先・操作だけを許可する。
+- Do not register this code in Kogane as-is.
+- Port or fork only read methods and parsers into a separate module.
+- Fix public capabilities to `accounts:read`, `balances:read`, `transactions:read`, and `investments:read` only.
+- Exclude `tradePassword`, trading-authentication callbacks, device registration, order payload builders, and order-placement endpoints from the dependency graph and distribution.
+- Allow only known read-only destinations/operations through runtime egress and method allowlists.
 
-実口座試験の再現用overlay、合成test、秘密管理境界は [`docs/research/sbi-securities.md`](../research/sbi-securities.md) に記録した（overlayのcodeはmainから除去済みで、同documentが読み戻すcommitを示す）。これは対象commitの `mnie/scripts/` へ配置して使ったPoCであり、Koganeのproduction collectorではない。
+The reproduction overlay for real-account tests, synthetic tests, and secret-management boundaries are recorded in [`docs/research/sbi-securities.md`](../research/sbi-securities.md) (the overlay code has been removed from main; that document identifies the commit to read). This PoC was placed in the target commit's `mnie/scripts/`, and is not Kogane's production collector.
 
 ### `azuki774/myscrapers` (`e58339122eef9273fb2566f0a867057d3219b2f6`)
 
-2026-08-23時点のGo／Playwright実装。aggregatorを使わず、SBI証券の公式ログイン画面と5つの固定ページを読む。
+Go/Playwright implementation as of 2026-08-23. It reads SBI Securities' official login screen and five fixed pages without an aggregator.
 
-主な実装:
+Main implementation:
 
-- CDP `WebAuthn.addVirtualAuthenticator` と保存passkeyで非対話ログイン
-- 通常Chrome UAを設定したheadless Chromium
-- 公式のポートフォリオ、NISA、外国株保有、国内／外国口座サマリーを固定URLで巡回
-- body textをparseして、現金、NISA／旧NISA、投信、国内／米国株、米ドル預り金をJSON化
-- quantity、unit cost、unit price、評価額、評価損益、前日／前月差等を出力
+- Noninteractive login through CDP `WebAuthn.addVirtualAuthenticator` and a stored passkey
+- Headless Chromium with a normal Chrome UA
+- Visits official portfolio, NISA, foreign-equity holdings, and domestic/foreign account-summary pages at fixed URLs
+- Parses body text into JSON for cash, NISA/old NISA, investment trusts, domestic/US equities, and USD cash deposits
+- Outputs quantity, unit cost, unit price, valuation, unrealized gains/losses, previous-day/month changes, etc.
 
-制約:
+Limitations:
 
-- DOM／表示テキストparseであり、HTML変更に弱い。
-- 実現損益、配当、取引履歴、入出金履歴を網羅しない。
-- ChromiumとPlaywrightを必要とし、Workers isolateには載らない。
-- passkey private keyを平文JSONとして読む設計で、秘密管理の改善が必要。
-- repo内の旧Python Selenium版はパスワードログイン前提で実行経路も無効化されており、現行仕様の根拠にはしない。
+- DOM/display-text parsing is vulnerable to HTML changes.
+- It does not cover all realized gains/losses, dividends, transaction history, or deposit/withdrawal history.
+- Chromium and Playwright are required; it does not fit a Workers isolate.
+- The design reads passkey private keys as plaintext JSON and needs better secret management.
+- The old Python Selenium version in the repo assumes password login and has its execution route disabled; it is not evidence for current specifications.
 
-この実装は「最短の疎通確認」と「公式画面との値照合」に向く。最終collectorは、画面から確認したread-only JSONへ縮退する方が保守費用を下げられる。
+This implementation suits the quickest connectivity check and value comparison against official screens. Reducing the final collector to read-only JSON confirmed from the screens would reduce maintenance cost.
 
-### その他
+### Others
 
-2017～2018年頃の`requests`／SeleniumによるSBI証券clientや注文botも公開されているが、旧ログインフォームと取引パスワードを前提にする。現行認証の実装資料としては古く、注文機能を持つためKoganeでは再利用しない。
+SBI Securities clients and order bots using `requests`/Selenium from around 2017–2018 are also public, but assume the old login form and trading passwords. They are outdated for current authentication implementation and include ordering functionality, so Kogane does not reuse them.
 
-## 読み取りと取引の厳格な分離
+## Strict separation of reading and trading
 
-KoganeのSBI証券collectorは、次の条件をすべて満たすまで実装完了としない。
+Kogane's SBI Securities collector is not complete until all the following conditions hold.
 
-1. 取引パスワードを入力、保存、環境変数化、ログ出力しない。
-2. 注文のpreview、place、replace、cancel、外貨交換を公開API・CLI・MCPに登録しない。
-3. 注文系source fileをcollector image／bundleへ含めない。
-4. runtime egressを公式の読取用hostとpathへallowlistする。`POST`が必要な読取protocolではpathとTR codeもallowlistする。
-5. 取得対象routeのfixture／schema testで、注文系routeがゼロであることを検査する。
-6. 実口座試験では、ログイン履歴と公式画面の値だけを確認し、取引画面へ遷移しない。
-7. raw responseは暗号化保存し、repo／CI artifact／PRへ載せない。fixtureは構造を保った完全な合成データだけにする。
+1. Never enter, store, put in environment variables, or log a trading password.
+2. Do not register order preview/place/replace/cancel or foreign-exchange conversion in public APIs, CLI, or MCP.
+3. Exclude order-related source files from the collector image/bundle.
+4. Allowlist official read hosts and paths for runtime egress. For read protocols requiring `POST`, allowlist paths and TR codes too.
+5. Verify zero order-related routes in fixtures/schema tests for retrieval routes.
+6. In real-account tests, check only login history and official screen values; do not navigate to trading screens.
+7. Store raw responses encrypted and never put them in the repo/CI artifacts/PRs. Fixtures must be fully synthetic data preserving structure.
 
-`POST`というHTTP methodだけで取引判定はできない。パスキーchallengeやMTSの読取照会もPOSTを使うため、host・path・TR code・capabilityの多層allowlistが必要である。
+The HTTP method `POST` alone cannot identify trading: passkey challenges and MTS read inquiries also use POST. Layered host/path/TR-code/capability allowlists are required.
 
-## 実行環境の適性
+## Execution-environment suitability
 
-| 環境                             | 適性   | 理由                                                                                                                                                 |
-| -------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 利用者端末上のローカルagent      | 高     | Bitwarden vault、derived key、assertion、SBI sessionを端末外へ出さずに署名・取得できる。第一候補                                                     |
-| OCI Tokyo等のk8s CronJob／小型VM | 中～高 | 日本国内固定IP、Chromiumまたは直接HTTP、時刻制御が容易。ただしvaultを配置せず、ローカルagentから暗号化済み結果を受けるscheduler／processorに限定する |
-| 一般OCI container                | 中     | `mnie`型HTTP clientも`myscrapers`型Playwrightも動かせるが、Bitwarden秘密を置かない。ローカルagentからsessionを渡す構成も原則避ける                   |
-| Cloudflare Containers            | 低～中 | Linux imageとoutbound制御が使えるが、固定的な日本egressと永続性を実機確認する必要がある。vault／derived key／passkeyを置かない                       |
-| Cloudflare Workers               | 高     | 独立HTTP実装、encrypted secret、private R2で国内・外国とも実口座取得に成功。Paidの日次Cronから1 invocationで直列収集できる                           |
-| Cloudflare Browser Rendering     | 低～中 | CDP endpointはあるが、仮想WebAuthn credentialの利用可否と永続的な秘密管理を未確認。最初の実装先にはしない                                            |
+| Environment                             | Suitability | Reason                                                                                                                                                                               |
+| --------------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Local agent on user's device            | High        | Signs/retrieves without taking the Bitwarden vault, derived key, assertion, or SBI session off-device; first choice                                                                  |
+| k8s CronJob/small VM in OCI Tokyo, etc. | Medium–high | Easy fixed Japanese IP, Chromium/direct HTTP, and timing control. No vault; restrict it to scheduler/processor receiving encrypted results from a local agent                        |
+| General OCI container                   | Medium      | Supports both `mnie`-style HTTP and `myscrapers`-style Playwright, but no Bitwarden secrets. Generally avoid passing sessions from the local agent too                               |
+| Cloudflare Containers                   | Low–medium  | Linux images and outbound controls available; fixed Japanese egress and persistence need actual verification. No vault/derived key/passkey                                           |
+| Cloudflare Workers                      | High        | Independent HTTP implementation, encrypted secrets, and private R2 succeeded for real domestic/foreign account retrieval. Paid daily Cron can collect sequentially in one invocation |
+| Cloudflare Browser Rendering            | Low–medium  | CDP endpoint available, but virtual WebAuthn credential support and persistent secret management unconfirmed. Not the first implementation target                                    |
 
-Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_process`は非機能stubである。このためMnieをそのまま使わず、RSA混合OAEPを含む必要部分を`node:crypto`だけで独立実装した。vault全体はcloudへ置かず、SBI専用passkey最小項目だけをencrypted secretへ置く。Workers Paid移行後は、日次起動からR2保存までCloudflare Cron内で完結する。Free検証用のGitHub Actions、Queue、dispatcherは採用しない。
+Recent Workers runtimes have improving Node.js API compatibility, but `node:child_process` is a nonfunctional stub. Thus, instead of using Mnie as-is, the necessary parts, including RSA mixed OAEP, were implemented independently using only `node:crypto`. The entire vault is not placed in the cloud; only minimum SBI-specific passkey fields go into encrypted secrets. After moving to Workers Paid, daily invocation through R2 storage completes within Cloudflare Cron. GitHub Actions, Queue, and dispatcher used in Free testing are not adopted.
 
-## 推奨アーキテクチャ
+## Recommended architecture
 
-1. **SBI専用secretへ最小化**: Bitwarden保存済みpasskeyからRP ID、origin、credential ID、秘密鍵、user handle、counterだけをCloudflare secretへ同期する。vault、master password、derived key、ログイン／取引passwordは置かず、sessionは毎run作り直して永続化しない。
-2. **公式Webを主データ源**: My資産の現在評価、週次資産推移、実現損益、配当・分配金を取得。
-3. **公式WebのCSV／書面で補完**: 2年の取引・入出金CSV、5年の電子交付書面を初期バックフィルと監査証跡に利用。
-4. **株アプリ系read-only通信で補完**: 買付余力、国内保有詳細などWebの横断JSONにない項目だけ取得。
-5. **外国株式は別adapter**: REST／GraphQL sessionを国内adapterと混ぜず、米国株保有・約定を別sourceとして保存。
-6. **公式値をそのままraw evidence化**: 取得単価、参考単価、評価額、損益の意味を出典とtimestamp付きで保存し、後段の正規化で統合。
-7. **aggregatorは不使用**: Money Forward、Moneytree等をログイン・取得・fallbackに使わない。
+1. **Minimize into an SBI-specific secret**: synchronize only RP ID, origin, credential ID, private key, user handle, and counter from the Bitwarden-stored passkey to Cloudflare secrets. No vault, master password, derived key, login/trading password; recreate sessions each run without persistence.
+2. **Official Web as primary data source**: retrieve My Assets current valuations, weekly asset trends, realized gains/losses, dividends, and distributions.
+3. **Supplement with official Web CSV/documents**: use two-year transaction/deposit-withdrawal CSVs and five-year electronically delivered documents for initial backfill and audit evidence.
+4. **Supplement with stock-app read-only transport**: retrieve only fields absent from cross-product Web JSON, such as buying power and domestic holdings details.
+5. **Separate foreign-equity adapter**: keep REST/GraphQL sessions separate from the domestic adapter and save US equity holdings/executions as a separate source.
+6. **Preserve official values as raw evidence**: save the meanings of acquisition unit price, reference unit price, valuation, and gains/losses with source and timestamp; integrate in downstream normalization.
+7. **No aggregators**: do not use Money Forward, Moneytree, etc. for login, retrieval, or fallback.
 
-## 次の検証手順
+## Next validation procedure
 
-1. 利用者の通常ブラウザでSBI証券へ公式パスキー認証し、My資産、保有一覧、実現損益、配当・分配金、取引履歴、円貨入出金明細を順に開く。Network logはhost、path、method、status、schemaだけを記録し、token・cookie・口座番号・実データを保存しない。
-2. **完了**: 利用者端末内だけでBitwarden CLI 2026.8.0からSBI証券itemを取得し、秘密値を表示せず、RP一致・候補一意性・passkey metadataを検証した。
-3. **完了**: 公式challengeから返るRP IDとBitwarden credentialを照合し、origin入りassertionを生成した。actual valueやcredential ID／user handleはrepoへ記録していない。
-4. **完了**: 既存 `createBitwardenAssertion` とSBI providerを接続した1回限りのHTTP試験で、passkey callback、access token復号、MTS login、国内現物保有 `F2631` をすべてブラウザなしで実行した。server totalと解析件数は一致した。
-5. HTTP assertionが受理されない場合のみ、Playwright／CDPのvirtual authenticatorをローカルで試す。resident／discoverable credential、user verification、conditional UI、`allowCredentials`指定、パスキーボタン経路の差を比較し、秘密鍵を平文fixtureへexportしない。
-6. ログイン成功後、sessionのidle／absolute寿命、同時session、再起動後の再利用、IP／UA変更、日中／夜間／週末、429／403／302、メール・電話追加認証を7日以上観測する。session cookieや識別子は保存せず、寿命と失敗分類だけを記録する。
-7. SBI証券Plusを正規にGoogle Playから取得し、manifest、host名、network security config、My資産相当のread endpointだけを静的に確認する。株アプリは第2優先。
-8. `mnie`から注文コード、端末登録、取引passwordと汎用 `credentials()`／`portableCredential` exportを完全に除いた最小prototypeを作り、まずMTS loginと現物保有 `F2631` だけをallowlistする。その後、買付余力、My資産current JSON、円貨入出金を個別に追加する。
-9. ローカルagentのpull型job、1回限りnonce、短寿命envelope、egress allowlist、重複実行禁止、指数backoff、失敗時のみ通知、raw暗号化、redacted schema logを実装する。OCI／Cloudflareへは暗号化済み結果だけを送る。
-10. 安定後にCloudflare Containers、次にpure fetch化したWorkersをscheduler・結果処理層として比較する。海外／可変egressで認証追加が増えるなら採用しない。
-11. 2年CSV、5年電子交付、My資産の2021-08以降履歴を一度だけ取得し、重複と期間の穴を可視化する。
+1. Authenticate to SBI Securities with the official passkey flow in the user's normal browser; open My Assets, holdings, realized gains/losses, dividends/distributions, transaction history, and yen deposit/withdrawal statements in order. Network logs record only host, path, method, status, and schema, never tokens/cookies/account numbers/actual data.
+2. **Complete**: retrieved the SBI Securities item using Bitwarden CLI 2026.8.0 only on the user's device, verifying RP match, unique candidate, and passkey metadata without displaying secrets.
+3. **Complete**: matched the RP ID returned by the official challenge to the Bitwarden credential and generated an assertion containing the origin. Actual values, credential IDs, and user handles are not recorded in the repo.
+4. **Complete**: a one-time HTTP test connecting existing `createBitwardenAssertion` and the SBI provider completed passkey callback, access-token decryption, MTS login, and domestic cash-equity holdings `F2631` entirely without a browser. Server total matched parsed count.
+5. Only if HTTP assertions are not accepted, try a local Playwright/CDP virtual authenticator. Compare resident/discoverable credentials, user verification, conditional UI, `allowCredentials`, and passkey-button route differences; do not export private keys to plaintext fixtures.
+6. After successful login, observe idle/absolute session lifetimes, concurrent sessions, reuse after restart, IP/UA changes, daytime/night/weekend behavior, 429/403/302, and additional email/phone authentication for at least 7 days. Save no session cookies or identifiers, only lifetimes and failure categories.
+7. Obtain SBI Securities Plus legitimately from Google Play and statically check only the manifest, hostnames, network security config, and My Assets-equivalent read endpoints. The Stock App is second priority.
+8. Build a minimal prototype completely excluding order code, device registration, trading passwords, and generic `credentials()`/`portableCredential` export from `mnie`. Initially allowlist only MTS login and cash-equity holdings `F2631`; then add buying power, My Assets current JSON, and yen deposits/withdrawals individually.
+9. Implement local-agent pull jobs, one-time nonces, short-lived envelopes, egress allowlists, prevention of duplicate runs, exponential backoff, failure-only notifications, raw encryption, and redacted schema logs. Send only encrypted results to OCI/Cloudflare.
+10. Once stable, compare Cloudflare Containers, then pure-fetch Workers as scheduling/result-processing layers. Reject them if overseas/variable egress increases additional authentication.
+11. Retrieve two-year CSVs, five-year electronic delivery, and My Assets history since 2021-08 once, visualizing duplicates and period gaps.
 
-## 未確認事項
+## Unconfirmed items
 
-- signature counterの連続利用時のサーバー側判定、assertion再利用拒否、認証方式変更後の互換性
-- Bitwarden CLI更新時のFIDO2 credential JSON schema互換性
-- パスワード無効化の有無、電話番号認証、conditional UIとパスキーボタン経路の差
-- 現行sessionのidle／absolute寿命、再利用条件、IP／UA変更時の追加認証
-- 現行My資産の全endpoint、ページング、rate limit、session寿命
-- 円貨入出金内部APIの次page request endpoint／parameterと、UI上の2年分を全件返す条件（未確認のrequestを推測して送らず、現在は複数pageを検出するとfail closedする）
-- 外国株式の注文／約定／入出金履歴の正確なオンライン保持期間
-- SBI証券Plusのendpointと、PC My資産backendとの共有範囲
-- Plus／株アプリのTLS pinning、emulator／root検知、EVERSPIN適用範囲
-- Cloudflare Containers／Browser Renderingからの日本egressとWebAuthn仮想認証器の実用性
-- 保存passkeyをサーバーで利用する運用がSBI証券の最新規約・利用条件に適合するか
-- 公式画面のメンテナンス時間帯と、単純HTTPアクセスが保守ページへ送られた直接原因
+- Server decisions on consecutive signature-counter use, assertion-reuse rejection, compatibility after authentication changes
+- FIDO2 credential JSON schema compatibility on Bitwarden CLI updates
+- Whether passwords can be disabled, phone-number authentication, conditional UI versus passkey-button route differences
+- Current idle/absolute session lifetimes, reuse conditions, additional authentication after IP/UA changes
+- All current My Assets endpoints, pagination, rate limits, session lifetime
+- Next-page request endpoint/parameters for internal yen deposit/withdrawal APIs and conditions returning all two years shown in UI (do not guess/send unobserved requests; currently fail closed on multiple-page detection)
+- Exact online retention periods for foreign-equity order/execution/deposit-withdrawal history
+- SBI Securities Plus endpoints and backend sharing with PC My Assets
+- Plus/Stock App TLS pinning, emulator/root detection, scope of EVERSPIN
+- Practicality of Japanese egress and virtual WebAuthn authenticators from Cloudflare Containers/Browser Rendering
+- Whether server-side use of stored passkeys complies with SBI Securities' latest terms/conditions
+- Official-screen maintenance periods and the direct cause of simple HTTP access being redirected to maintenance
 
-## 根拠
+## Evidence
 
-### SBI証券公式
+### Official SBI Securities sources
 
-- [パスキー認証の全チャネル対応とWEBサイトのログイン方式変更](https://www.sbisec.co.jp/ETGate/?OutSide=on&_ActionID=DefaultAID&_ControlID=WPLETmgR001Control&_PageID=WPLETmgR001Mdtl30&burl=search_home&cat1=home&cat2=info&dir=info&file=home_info260430_passkey.html&getFlg=on)
-- [パスキー認証は必須になるか](https://faq.sbisec.co.jp/answer/6937e6e3b14749ed0cd6062a/)
-- [WEBサイトへのログイン導線変更](https://www.sbisec.co.jp/ETGate/?OutSide=on&_ActionID=DefaultAID&_ControlID=WPLETmgR001Control&_DataStoreID=DSWPLETmgR001Control&_PageID=WPLETmgR001Mdtl20&burl=search_home&cat1=home&cat2=none&dir=info&file=home_info251022_login_modification.html&getFlg=on)
-- [不正アクセスを防止するための対策](https://faq.sbisec.co.jp/answer/67e65898faf45f7a65208b67/)
-- [取引や入出金の履歴](https://faq.sbisec.co.jp/answer/5eba63cc171ba70012b8feb0/)
-- [過去2年を超える取引明細](https://faq.sbisec.co.jp/answer/5eba698b1149dd0011cbefa2/)
-- [譲渡益税明細](https://faq.sbisec.co.jp/answer/5ee8737d144d40001145db62)
-- [My資産提供開始資料](https://search.sbisec.co.jp/v2/popwin/info/home/irpress/prestory210826_011500.pdf)
-- [SBI証券Plusでできること](https://search.sbisec.co.jp/v2/popwin/guide/tool/sbi_app/01_first/feature.html)
-- [過去の資産推移](https://search.sbisec.co.jp/v2/popwin/guide/tool/sbi_app/04_assets/balance_02.html)
-- [実現損益](https://search.sbisec.co.jp/v2/popwin/guide/tool/sbi_app/04_assets/profits_loss.html)
-- [資産情報の更新タイミング](https://search.sbisec.co.jp/v2/popwin/guide/tool/assets/06_update/update_assets.html)
-- [取得単価・参考単価](https://faq.sbisec.co.jp/answer/5eafd3ef171ba70012b8fb35/)
-- [評価額・評価損益の計算](https://faq.sbisec.co.jp/answer/5f191f5329ee940011749926/)
-- [外国株式の取引・残高](https://faq.sbisec.co.jp/answer/5ee9c598144d40001145dcc5/)
-- [債券の取引・利払履歴](https://faq.sbisec.co.jp/answer/5ee1df0050df500012207449/)
-- [先物・オプションAPI](https://www.sbisec.co.jp/ETGate/?OutSide=on&_ActionID=DefaultAID&_ControlID=WPLETmgR001Control&_PageID=WPLETmgR001Mdtl20&burl=search_op&cat1=op&cat2=none&dir=service&file=op_service_05.html&getFlg=on)
-- [海外からの接続](https://faq.sbisec.co.jp/answer/5ecb87e7d31ea500111ec9e1)
-- [SBI証券Plus Google Play](https://play.google.com/store/apps/details?id=jp.co.sbisec.sbiapp&hl=ja)
-- [SBI証券 株アプリ Google Play](https://play.google.com/store/apps/details?id=jp.co.sbisec.hyperkabu2&hl=ja)
-- [EVERSPIN導入の説明](https://www.sbisec.co.jp/ETGate/WPLETmgR001Control?OutSide=on&burl=search_home&cat1=home&cat2=none&dir=info&file=home_info201230_01.html&getFlg=on)
+- [Passkey support across all channels and website login changes](https://www.sbisec.co.jp/ETGate/?OutSide=on&_ActionID=DefaultAID&_ControlID=WPLETmgR001Control&_PageID=WPLETmgR001Mdtl30&burl=search_home&cat1=home&cat2=info&dir=info&file=home_info260430_passkey.html&getFlg=on)
+- [Whether passkey authentication becomes mandatory](https://faq.sbisec.co.jp/answer/6937e6e3b14749ed0cd6062a/)
+- [Website login navigation changes](https://www.sbisec.co.jp/ETGate/?OutSide=on&_ActionID=DefaultAID&_ControlID=WPLETmgR001Control&_DataStoreID=DSWPLETmgR001Control&_PageID=WPLETmgR001Mdtl20&burl=search_home&cat1=home&cat2=none&dir=info&file=home_info251022_login_modification.html&getFlg=on)
+- [Measures against unauthorized access](https://faq.sbisec.co.jp/answer/67e65898faf45f7a65208b67/)
+- [Transaction and deposit/withdrawal history](https://faq.sbisec.co.jp/answer/5eba63cc171ba70012b8feb0/)
+- [Transaction statements older than two years](https://faq.sbisec.co.jp/answer/5eba698b1149dd0011cbefa2/)
+- [Capital-gains tax statements](https://faq.sbisec.co.jp/answer/5ee8737d144d40001145db62)
+- [My Assets launch material](https://search.sbisec.co.jp/v2/popwin/info/home/irpress/prestory210826_011500.pdf)
+- [SBI Securities Plus features](https://search.sbisec.co.jp/v2/popwin/guide/tool/sbi_app/01_first/feature.html)
+- [Historical asset trends](https://search.sbisec.co.jp/v2/popwin/guide/tool/sbi_app/04_assets/balance_02.html)
+- [Realized gains/losses](https://search.sbisec.co.jp/v2/popwin/guide/tool/sbi_app/04_assets/profits_loss.html)
+- [Asset-information update timing](https://search.sbisec.co.jp/v2/popwin/guide/tool/assets/06_update/update_assets.html)
+- [Acquisition/reference unit prices](https://faq.sbisec.co.jp/answer/5eafd3ef171ba70012b8fb35/)
+- [Valuation and unrealized gains/losses calculations](https://faq.sbisec.co.jp/answer/5f191f5329ee940011749926/)
+- [Foreign-equity transactions/balances](https://faq.sbisec.co.jp/answer/5ee9c598144d40001145dcc5/)
+- [Bond transaction/interest-payment history](https://faq.sbisec.co.jp/answer/5ee1df0050df500012207449/)
+- [Futures/options API](https://www.sbisec.co.jp/ETGate/?OutSide=on&_ActionID=DefaultAID&_ControlID=WPLETmgR001Control&_PageID=WPLETmgR001Mdtl20&burl=search_op&cat1=op&cat2=none&dir=service&file=op_service_05.html&getFlg=on)
+- [Access from overseas](https://faq.sbisec.co.jp/answer/5ecb87e7d31ea500111ec9e1)
+- [SBI Securities Plus Google Play](https://play.google.com/store/apps/details?id=jp.co.sbisec.sbiapp&hl=ja)
+- [SBI Securities Stock App Google Play](https://play.google.com/store/apps/details?id=jp.co.sbisec.hyperkabu2&hl=ja)
+- [EVERSPIN introduction explanation](https://www.sbisec.co.jp/ETGate/WPLETmgR001Control?OutSide=on&burl=search_home&cat1=home&cat2=none&dir=info&file=home_info201230_01.html&getFlg=on)
 
-### 公開クライアント（仕様資料として参照）
+### Public clients (referenced as specification material)
 
 - [`pnsk-lab/mnie` SBI provider](https://github.com/pnsk-lab/mnie/tree/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/provider-sbi-sec)
 - [`mnie` passkey session](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/provider-sbi-sec/src/session/index.ts)
@@ -391,34 +391,36 @@ Workersの最新runtimeはNode.js API互換が進んでいるが、`node:child_p
 - [`mnie` Bitwarden passkey provider](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/auth-bitwarden/src/provider.ts)
 - [`mnie` Bitwarden WebAuthn assertion generation](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/auth-bitwarden/src/fido2.ts)
 - [`mnie` Bitwarden vault decryption](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/auth-bitwarden/src/vault.ts)
-- [`mnie` portable credential export path (Koganeでは不使用)](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/auth-bitwarden/src/auth-manager.ts)
+- [`mnie` portable credential export path (not used in Kogane)](https://github.com/pnsk-lab/mnie/blob/c87e65c0a04c03c560962f8ead6e77415fb841f4/packages/auth-bitwarden/src/auth-manager.ts)
 - [`azuki774/myscrapers` SBI implementation](https://github.com/azuki774/myscrapers/tree/e58339122eef9273fb2566f0a867057d3219b2f6/myscraper/internal/sbi)
 - [`myscrapers` Playwright passkey session](https://github.com/azuki774/myscrapers/blob/e58339122eef9273fb2566f0a867057d3219b2f6/myscraper/internal/sbi/session_playwright.go)
 - [`myscrapers` fixed-page collector](https://github.com/azuki774/myscrapers/blob/e58339122eef9273fb2566f0a867057d3219b2f6/myscraper/internal/sbi/fetch.go)
 
-### 実行基盤
+### Execution infrastructure
 
-- [Cloudflare Workers Node.js互換](https://developers.cloudflare.com/workers/runtime-apis/nodejs/)
-- [Cloudflare Containers outbound制御](https://developers.cloudflare.com/containers/platform-details/outbound-traffic/)
-- [Cloudflare Containers概要](https://developers.cloudflare.com/containers/get-started/)
+- [Cloudflare Workers Node.js compatibility](https://developers.cloudflare.com/workers/runtime-apis/nodejs/)
+- [Cloudflare Containers outbound controls](https://developers.cloudflare.com/containers/platform-details/outbound-traffic/)
+- [Cloudflare Containers overview](https://developers.cloudflare.com/containers/get-started/)
 - [Cloudflare Workers limits](https://developers.cloudflare.com/workers/platform/limits/)
 
-## 追記: 共通DATA R2への切替（U09）
+## Addendum: switch to shared DATA R2 (U09)
 
-`services/collector-sbi-securities`は`COLLECTION_TARGET`を読まない。保存先は
-binding `DATA`（`kogane-raw-evidence`）だけである。切替とimporterは
-2026-09-13に廃止された（`docs/collection.md`）。同じ`JSON.stringify(body)` bytesを
-`objects/<2hex>/<sha256>`へ保存し、
-`runs/sbi-securities/<runId>/terminal.json`を最後に書く。
+`services/collector-sbi-securities` does not read `COLLECTION_TARGET`. Its only
+storage destination is binding `DATA` (`kogane-raw-evidence`). Switching and the
+importer were retired on 2026-09-13 (`docs/collection.md`). The same
+`JSON.stringify(body)` bytes are saved to `objects/<2hex>/<sha256>`, and
+`runs/sbi-securities/<runId>/terminal.json` is written last.
 
-artifactは全て role `collector_derived`で、dataset名の`foreign-` prefixにより
-`domestic`/`foreign` unitへ割り当てる（Importerと同じ規則）。terminalは要求scopeごとに
-unitを持ち、そのscopeのartifact数・coverage・safe codeを個別に記録する。
-片方のscopeの失敗がもう片方を不完全に見せず、artifact 0件のscopeは
-`unknown`であって残高0の観測ではない。triggerが期間を指定した場合のみ
-`requested-window` rangeと`date_range`を記録する。
+All artifacts have role `collector_derived` and are assigned to
+`domestic`/`foreign` units by the dataset name's `foreign-` prefix (the same rule
+as the Importer). The terminal has a unit per requested scope and records each
+scope's artifact count, coverage, and safe code separately. Failure in one scope
+does not make the other look incomplete; a scope with 0 artifacts is `unknown`,
+not an observation of zero balance. The `requested-window` range and `date_range`
+are recorded only when the trigger specifies a period.
 
-passkey credential、handshake key、session idはartifactにもterminalにも出さず、
-失敗は`safeErrorDetails`由来の機械codeだけを残す。Worker名、secretは変更しない。
-Processorの`SHARED_R2_INGEST_ENABLED`は登録のゲートであり、collectorの保存先スイッチではない。
-詳細は`docs/collection.md`。
+Passkey credentials, handshake keys, and session IDs appear in neither artifacts
+nor terminals; failures retain only machine codes derived from `safeErrorDetails`.
+Worker names and secrets are unchanged. The Processor's
+`SHARED_R2_INGEST_ENABLED` gates registration, rather than switching the collector's
+storage destination. See `docs/collection.md` for details.
