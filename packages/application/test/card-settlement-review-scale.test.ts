@@ -586,6 +586,90 @@ describe("card settlement readiness reads on a scaled store without statistics",
   );
 
   test(
+    "a decision recorded between two passes on a candidate already judged skips no older candidate",
+    async () => {
+      db.run("SAVEPOINT older_decided");
+      try {
+        const before = await queryCardSettlementStatements(executor(false));
+        const group = before.statements.find(
+          (entry) =>
+            entry.candidates[0]!.status === "proposed" &&
+            entry.candidates[0]!.acceptanceBlockers.length === 0 &&
+            entry.candidates.every((item) => item.status !== "accepted"),
+        )!;
+        const ready = group.candidates[0]!;
+        const stale = db
+          .query(
+            `SELECT * FROM card_settlement_candidates WHERE statement_key=?1 AND id<>?2
+             ORDER BY created_at DESC,id DESC LIMIT 5`,
+          )
+          .all(group.statementKey, ready.proposalId) as Record<string, SQLQueryBindings>[];
+        expect(stale).toHaveLength(5);
+        // The five newest and one full pass of newer stale copies: the ready
+        // candidate is the first older candidate the second pass judges.
+        const count =
+          CARD_SETTLEMENT_CANDIDATES_PER_STATEMENT + CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS;
+        for (let index = 1; index <= count; index += 1) {
+          const row = stale[index % stale.length]!;
+          db.query(
+            `INSERT INTO card_settlement_candidates(id,statement_key,bank_key,statement_observation_id,statement_parse_run_id,
+              bank_observation_id,bank_parse_run_id,policy_release,facts_json,proposal_digest,created_at)
+             VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
+          ).run(
+            `cs_synthetic_judged_${String(index).padStart(3, "0")}`,
+            row["statement_key"]!,
+            row["bank_key"]!,
+            row["statement_observation_id"]!,
+            row["statement_parse_run_id"]!,
+            row["bank_observation_id"]!,
+            row["bank_parse_run_id"]!,
+            row["policy_release"]!,
+            row["facts_json"]!,
+            String(index).padStart(64, "d"),
+            new Date(Date.parse("2026-12-01T00:00:00Z") + index * 60_000).toISOString(),
+          );
+        }
+        // The operator rejects a candidate the first pass judged while the
+        // page is read: the decision lands between the first and second pass.
+        const plain = executor(false);
+        const judged: string[][] = [];
+        const racing: SqlExecutor = {
+          ...plain,
+          all: async <T>(query: string, args: readonly unknown[]): Promise<T[]> => {
+            const found = await plain.all<T>(query, args);
+            if (query !== CARD_SETTLEMENT_STATEMENT_OLDER_SQL) return found;
+            judged.push((found as { id: string }[]).map((row) => row.id));
+            if (judged.length === 1) {
+              const rejected = judged[0]![10]!;
+              db.query(
+                `INSERT INTO decision_revisions(id,subject_kind,subject_ref,revision,decision_kind,method,actor_id,operation_id,reason,evidence_refs_json,previous_revision,superseded_by,created_at)
+                 VALUES('dr_synthetic_between_passes','relation',?,1,'reject','manual','synthetic-operator',NULL,'synthetic','[]',NULL,NULL,'2026-12-02T00:00:00Z')`,
+              ).run(`card-settlement:${rejected}`);
+              db.query(
+                `INSERT INTO card_settlement_decisions(proposal_id,revision,status,decision_revision_id,event_id,obligation_id,settlement_id,created_at)
+                 VALUES(?,1,'rejected','dr_synthetic_between_passes',NULL,NULL,NULL,'2026-12-02T00:00:00Z')`,
+              ).run(rejected);
+            }
+            return found;
+          },
+        };
+        const page = await queryCardSettlementStatements(racing);
+        const moved = page.statements.find((entry) => entry.statementKey === group.statementKey)!;
+        expect(judged[0]).toHaveLength(CARD_SETTLEMENT_OLDER_CANDIDATES_PER_PASS);
+        expect(judged[0]).not.toContain(ready.proposalId);
+        // The second pass starts at the ready candidate, not one past it.
+        expect(judged[1]![0]).toBe(ready.proposalId);
+        expect(moved.leadSearch).toBe("found");
+        expect(moved.candidates[0]!.proposalId).toBe(ready.proposalId);
+      } finally {
+        db.run("ROLLBACK TO older_decided");
+        db.run("RELEASE older_decided");
+      }
+    },
+    TIMEOUT,
+  );
+
+  test(
     "the grouped and per-statement lists read debit-account evidence once, for the reviews they return, as one review's read does",
     async () => {
       // The scaled store records no evidence, so the read answers with a
