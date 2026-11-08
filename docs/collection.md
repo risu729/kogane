@@ -1297,7 +1297,10 @@ format change is needed for that step.
   lower bound. An old saved success that captured an open day keeps its bytes
   and provider outcome but publishes `coverageStatus: partial` with
   `coverage_day_not_finished`, even if publication is retried after midnight;
-  a fresh backfill is needed for complete coverage. Existing immutable terminals
+  stored progress and `/api/status` retain this coverage reason and report
+  `waitingForHuman: true`. The UI explains that a fresh QR approval and backfill
+  are needed, and that retrying shared publication cannot repair coverage. A
+  new run clears this recovery reason. Existing immutable terminals
   are never rewritten. See [ADR 0044](adr/0044-smbc-resume-publication.md).
 - Media types lose their `charset` parameter in the terminal (`application/json`);
   the Shift_JIS bytes themselves are stored unchanged.

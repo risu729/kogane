@@ -16,6 +16,7 @@ mock.module("cloudflare:workers", () => ({
   },
 }));
 const { SmbcBackfillSession } = await import("../src/session");
+const { default: worker } = await import("../src/worker");
 const restores: Array<() => void> = [];
 afterEach(() => {
   for (const restore of restores.splice(0)) restore();
@@ -231,8 +232,105 @@ test("publishing an old open-day success after midnight never upgrades its cover
     expect(plan.run).toMatchObject({
       providerOutcome: "success",
       coverageStatus: "partial",
-      safeErrorCode: "coverage_day_not_finished",
-      units: [expect.objectContaining({ coverageStatus: "partial" })],
+      units: [
+        expect.objectContaining({
+          coverageStatus: "partial",
+          safeErrorCode: "coverage_day_not_finished",
+        }),
+      ],
     });
+    expect(plan.run.safeErrorCode).toBeUndefined();
   }
+});
+
+test("saved open-day success exposes recovery through progress and the status API until a fresh backfill", async () => {
+  setSystemTime(new Date("2099-03-02T01:00:00.000Z"));
+  const h = await harness({
+    phase: "success",
+    runId: "synthetic-saved-open-day",
+    startedAt: "2099-03-01T01:00:00.000Z",
+    completedAt: "2099-03-01T01:10:00.000Z",
+    from: "2099-03-01",
+    to: "2099-03-01",
+    completedChunks: 0,
+    totalChunks: 1,
+    logoutSucceeded: true,
+  });
+  const prefix = runPrefix("2099-03-01T01:00:00.000Z", "synthetic-saved-open-day");
+  const range = { start: "2099-03-01", end: "2099-03-01" };
+  h.values.set("artifacts", [
+    await storeBytes({
+      bucket: h.bucket as unknown as R2Bucket,
+      key: `${prefix}/transactions/20990301-20990301.raw.json.sjis`,
+      bytes: encoder.encode('{"rows":[]}'),
+      mediaType: "application/json",
+      artifact: { dataset: "transactions-raw", range },
+    }),
+    await storeJson({
+      bucket: h.bucket as unknown as R2Bucket,
+      key: `${prefix}/transactions/20990301-20990301.normalized.json`,
+      value: { range, transactions: [] },
+      artifact: { dataset: "transactions-normalized", range },
+    }),
+  ]);
+  h.values.set("progress", {
+    ...(await h.session.getStatus()),
+    completedChunks: 1,
+    artifactCount: 2,
+    manifestKey: `${prefix}/manifest.json`,
+  });
+
+  const published = await h.session.publishStoredRun();
+  const recovery = {
+    phase: "success",
+    publicationStatus: "persisted",
+    publicationErrorCode: null,
+    coverageStatus: "partial",
+    coverageErrorCode: "coverage_day_not_finished",
+  };
+  expect(published).toMatchObject(recovery);
+  expect(await h.session.getStatus()).toMatchObject(recovery);
+  const fetchStatus = worker.fetch as unknown as (
+    request: Request,
+    env: object,
+    ctx: object,
+  ) => Promise<Response>;
+  const response = await fetchStatus(
+    new Request("https://collector.invalid/api/status"),
+    { BACKFILL_SESSION: { getByName: () => h.session } },
+    { access: { getIdentity: async () => ({ user_uuid: "synthetic-human" }) } },
+  );
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ ...recovery, waitingForHuman: true });
+  const original = await readTerminal(h.bucket, "smbc-direct", "synthetic-saved-open-day");
+  if (original.outcome !== "found") throw new Error("missing synthetic terminal");
+  expect(original.manifest).toMatchObject({
+    providerOutcome: "success",
+    coverageStatus: "partial",
+    units: [
+      expect.objectContaining({
+        coverageStatus: "partial",
+        safeErrorCode: "coverage_day_not_finished",
+      }),
+    ],
+  });
+
+  // A publication retry preserves the recovery reason; a fresh approved run clears it.
+  expect(await h.session.publishStoredRun()).toMatchObject(recovery);
+  h.values.set("challenge", h.challenge);
+  const fresh = await h.session.finishAndStart();
+  expect(fresh.progress).toMatchObject({
+    phase: "running",
+    coverageStatus: "unknown",
+    coverageErrorCode: null,
+  });
+  await h.session.alarm();
+  expect(await h.session.getStatus()).toMatchObject({
+    phase: "success",
+    coverageStatus: "complete",
+    coverageErrorCode: null,
+  });
+  const unchanged = await readTerminal(h.bucket, "smbc-direct", "synthetic-saved-open-day");
+  if (unchanged.outcome !== "found") throw new Error("missing synthetic terminal");
+  expect(unchanged.terminalDigest).toBe(original.terminalDigest);
 });

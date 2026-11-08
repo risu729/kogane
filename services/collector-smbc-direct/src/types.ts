@@ -59,6 +59,8 @@ export interface BackfillProgress {
   manifestKey: string | null;
   publicationStatus?: "pending" | "persisted" | "failed";
   publicationErrorCode?: string | null;
+  coverageStatus?: "complete" | "partial" | "unknown";
+  coverageErrorCode?: "coverage_day_not_finished" | null;
 }
 
 export interface StoredArtifact {

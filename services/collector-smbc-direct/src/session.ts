@@ -9,6 +9,7 @@ import {
   persistBackfillRun,
   readStagedArtifacts,
   sharedRunPersisted,
+  sharedOutcome,
 } from "./shared-collection";
 import {
   ApprovalNotCompletedError,
@@ -47,6 +48,8 @@ const INITIAL_PROGRESS: BackfillProgress = {
   lastErrorCode: null,
   logoutSucceeded: null,
   manifestKey: null,
+  coverageStatus: "unknown",
+  coverageErrorCode: null,
 };
 const CHUNKS_PER_ALARM = 3;
 const MAX_RETRIES = 3;
@@ -165,6 +168,8 @@ export class SmbcBackfillSession extends DurableObject<Env> {
           logoutSucceeded: null,
           publicationStatus: "pending",
           publicationErrorCode: null,
+          coverageStatus: "unknown",
+          coverageErrorCode: null,
         };
         await this.ctx.storage.put({
           progress: resumed,
@@ -553,6 +558,10 @@ export class SmbcBackfillSession extends DurableObject<Env> {
     const continuationSessionRef = await this.ctx.storage.get<string>("sessionRef");
     try {
       const staging = dataBucket(this.env.DATA);
+      const coverage = sharedOutcome(manifest);
+      progress.coverageStatus = coverage.coverageStatus;
+      progress.coverageErrorCode =
+        coverage.safeErrorCode === "coverage_day_not_finished" ? coverage.safeErrorCode : null;
       const summary = await persistBackfillRun(dataBucket(this.env.DATA), {
         manifest,
         manifestBytes: manifestBytes(manifest),
