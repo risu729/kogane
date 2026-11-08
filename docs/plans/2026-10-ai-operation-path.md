@@ -568,7 +568,7 @@ each (`result = "read"`, a row count, no data).
 | D11 | 取得記録 → `/api/artifacts`, `/api/artifacts/:id`                                          | `kogane.artifacts.search`, `kogane.artifacts.get` (new)                                                                                                                                                                      | `records.read`   | whole-store only                                                                          |
 | D12 | 観測の詳細 → `/api/observations/:kind/:id`                                                 | `kogane.observations.get` (new)                                                                                                                                                                                              | `records.read`   | whole-store only                                                                          |
 | D13 | 原本 → `/api/raw/:sha256`                                                                  | `kogane.evidence.raw.get` (new, last)                                                                                                                                                                                        | `evidence.read`  | whole-store only; `evidence.read` stays a separate owner decision (ADR 0047)              |
-| D14 | 取得履歴 (evidence browser) → `/api/evidence/v1/…`                                         | `kogane.evidence.runs.search` (new)                                                                                                                                                                                          | `records.read`   | the route's single configured source; refused unless that source is granted               |
+| D14 | 取得履歴 (evidence browser) → `/api/evidence/v1/…`                                         | `kogane.evidence.read` (exists; meta, runs, artifacts and artifact detail, never `/raw`; ADR 0081)                                                                                                                           | `evidence.read`  | whole-store only; the route's single configured source                                    |
 | D15 | 収集スケジュール → `GET /api/ops/v1/schedules`                                             | `kogane.schedules.read` (new; extends #564's `kogane.schedules.maintenance.read`)                                                                                                                                            | `schedules.read` | scoped by `scheduleSources` (#564's read view); no lease state, no other principal        |
 | D16 | 確認画面 (plan view)                                                                       | `kogane.command.simulate` (W10)                                                                                                                                                                                              | `commands.plan`  | the plan's own targets                                                                    |
 | D17 | — → `/api/collection-quality`                                                              | `kogane.collection-quality.read` (new)                                                                                                                                                                                       | `summary.read`   | whole-store only                                                                          |
@@ -600,9 +600,17 @@ routes, H8 the agents' proposal route) and 20 reads (D1–D20). Operations with
    record will be its only durable trace. It stays R3.
 5. Agent-facing contracts for the review queues (D8, D9): only the purchases
    page has one (`validAgentCardPurchasePage`).
-6. D2–D4, D6, D7, D11–D14, D17, D18: the routes exist, no MCP tool does, and
-   none is proven computable inside a listed scope. D5's and D19's
-   (`kogane.events.read`) tools exist, whole-store only.
+6. D2–D7, D11–D15 and D17–D19 have MCP reads over the routes' own readers,
+   whole-store only, under the names in
+   [agent API: UI read pages](../agent-api.md#ui-read-pages) rather than the
+   proposed ones above (`kogane.observations.list`, `kogane.observations.get`,
+   `kogane.store.read`, `kogane.balances.read`, `kogane.identity.read`,
+   `kogane.rewards.read`, `kogane.evidence.read`, `kogane.evidence.raw.read`,
+   `kogane.schedules.read`, `kogane.collection-quality.read`,
+   `kogane.reports.read`, `kogane.events.read`; D5's is
+   `kogane.reported-state.read`). None is proven computable inside a listed
+   scope. D7's `/api/v2/rewards/simulations` has no MCP read; no screen reads
+   it either. D16 is `kogane.command.simulate`, not a route read.
 7. W1, W2, W4, W5: the writers exist, no agent adapter does.
 8. #564's tool exists only on its branch, with a free-text reason.
 

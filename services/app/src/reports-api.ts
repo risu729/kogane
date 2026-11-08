@@ -1,4 +1,13 @@
 import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
+import {
+  latestCalculationRun,
+  listReportArtifacts,
+  reportArtifact,
+  reportEvents,
+  reportRestrictions,
+  type CalculationRunRow,
+  type ReportArtifactRow,
+} from "../../../packages/application/src/query/report-artifacts.ts";
 import { HttpError, json } from "./http";
 import { decimalPolicySelection } from "./decimal-policy";
 import {
@@ -11,7 +20,6 @@ import {
   replayCapabilities,
   reportStorageRef,
   validReportBody,
-  type EvidenceUseRestriction,
   type Replayability,
 } from "../../../packages/domain/src/index";
 
@@ -47,17 +55,6 @@ const MAX_BODY_BYTES = 4 * 1024 * 1024;
 export const REPORTS_PAGE_SIZE = 50;
 
 /**
- * The newest artifacts first, ties by id, so paging is deterministic. Catalogue
- * columns only: listing never reads a body from R2, never derives
- * replayability and never counts rows, so the list cannot disagree with what
- * re-displaying one report says about it. `?1` limit, `?2` offset.
- */
-export const REPORT_LIST_SQL = `SELECT report_id,context_id,purpose,schema_version,content_digest,created_by,created_at
-FROM report_artifacts
-ORDER BY created_at DESC,report_id DESC
-LIMIT ?1 OFFSET ?2`;
-
-/**
  * The capability is not a static claim: the list is served only where CORE
  * 0034 created `report_artifacts`, so `/api/meta` never advertises a page the
  * store cannot answer.
@@ -66,7 +63,7 @@ export async function reportArtifactsAvailable(env: Env): Promise<boolean> {
   return storeHasFeature(d1Executor(env.DB), "reportArtifacts");
 }
 
-function listOffset(url: URL): number {
+function listOffset(url: Pick<URL, "searchParams">): number {
   for (const key of url.searchParams.keys()) {
     const value = url.searchParams.get(key)!;
     if (key !== "offset" || url.searchParams.getAll(key).length !== 1 || value.length > 16)
@@ -84,14 +81,12 @@ function listOffset(url: URL): number {
  * page at a time. There is no total: a count would be a second read the page
  * could not keep consistent with the rows, and the caller does not need one.
  */
-async function listReports(env: Env, url: URL): Promise<Response> {
+async function listReports(env: Env, url: Pick<URL, "searchParams">): Promise<unknown> {
   const offset = listOffset(url);
   if (!(await reportArtifactsAvailable(env))) throw new HttpError(404, "not_found");
-  const rows = await env.DB.prepare(REPORT_LIST_SQL)
-    .bind(REPORTS_PAGE_SIZE + 1, offset)
-    .all<Omit<ArtifactRow, "storage_ref">>();
-  const page = rows.results.slice(0, REPORTS_PAGE_SIZE);
-  return json({
+  const rows = await listReportArtifacts(d1Executor(env.DB), REPORTS_PAGE_SIZE + 1, offset);
+  const page = rows.slice(0, REPORTS_PAGE_SIZE);
+  return {
     apiVersion: 2,
     items: page.map((row) => ({
       reportId: row.report_id,
@@ -102,30 +97,12 @@ async function listReports(env: Env, url: URL): Promise<Response> {
       createdBy: row.created_by,
       createdAt: row.created_at,
     })),
-    nextCursor: rows.results.length > REPORTS_PAGE_SIZE ? String(offset + REPORTS_PAGE_SIZE) : null,
-  });
+    nextCursor: rows.length > REPORTS_PAGE_SIZE ? String(offset + REPORTS_PAGE_SIZE) : null,
+  };
 }
 
-interface ArtifactRow {
-  report_id: string;
-  context_id: string;
-  purpose: string;
-  schema_version: string;
-  content_digest: string;
-  storage_ref: string;
-  created_by: string;
-  created_at: string;
-}
-
-interface RunRow {
-  run_id: string;
-  policy_refs_json: string;
-  input_manifest_digest: string;
-  status: string;
-  replayability: Replayability;
-  started_at: string;
-  completed_at: string | null;
-}
+type ArtifactRow = ReportArtifactRow;
+type RunRow = CalculationRunRow;
 
 function reportsRoute(path: string): { reportId: string; view: string } | null {
   const match = /^\/api\/v2\/reports\/([^/]+)(?:\/(explanation|export))?$/.exec(path);
@@ -141,42 +118,30 @@ function reportsRoute(path: string): { reportId: string; view: string } | null {
   return { reportId, view: match[2] ?? "body" };
 }
 
-async function restrictionsFor(
-  db: D1Database,
-  refs: readonly string[],
-): Promise<EvidenceUseRestriction[]> {
-  if (refs.length === 0) return [];
-  const rows = await db
-    .prepare(
-      `SELECT evidence_ref,restriction,since,affected_manifests_json,actor,reason
-       FROM evidence_use_restrictions
-       WHERE evidence_ref IN (${refs.map(() => "?").join(",")})
-          OR EXISTS(SELECT 1 FROM json_each(affected_manifests_json) m
-                    WHERE m.value IN (${refs.map(() => "?").join(",")}))`,
-    )
-    .bind(...refs, ...refs)
-    .all<{
-      evidence_ref: string;
-      restriction: EvidenceUseRestriction["restriction"];
-      since: string;
-      affected_manifests_json: string;
-      actor: string;
-      reason: string;
-    }>();
-  return rows.results.map((row) => ({
-    evidenceRef: row.evidence_ref,
-    restriction: row.restriction,
-    since: row.since,
-    affectedManifests: [],
-    actor: row.actor,
-    reason: row.reason,
-  }));
-}
-
 /** Called only after the Access gate and the read-only method check in worker.ts. */
 export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
   const path = url.pathname;
   if (path !== PREFIX && !path.startsWith(`${PREFIX}/`)) return null;
+  return json(await readReportRoute(env, url));
+}
+
+/**
+ * One report route's answer for this path and query: the reader of
+ * `GET /api/v2/reports[/{id}[/explanation|/export]]` and of
+ * `kogane.reports.read` (ADR 0081), with the route's refusals as
+ * `HttpError`s. `refuseRestricted` is the agent read's rule (ADR 0072,
+ * amendment of 2026-11-06): a restricted or unavailable report is refused on
+ * every view, before its body is read, instead of re-displayed as the
+ * operator page does it (`403 evidence_restricted` where explanation is
+ * refused, `404 not_found` where only the body is gone, the codes `/export`
+ * answers).
+ */
+export async function readReportRoute(
+  env: Env,
+  url: { pathname: string; searchParams: URLSearchParams },
+  options: { refuseRestricted?: boolean } = {},
+): Promise<unknown> {
+  const path = url.pathname;
   if (path === PREFIX) return listReports(env, url);
   const route = reportsRoute(path);
   if (!route) throw new HttpError(404, "not_found");
@@ -195,23 +160,14 @@ export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
     decimalPolicy,
   );
 
-  const artifact = await env.DB.prepare(
-    `SELECT report_id,context_id,purpose,schema_version,content_digest,storage_ref,created_by,created_at
-     FROM report_artifacts WHERE report_id=?`,
-  )
-    .bind(route.reportId)
-    .first<ArtifactRow>();
+  const reads = d1Executor(env.DB);
+  const artifact = await reportArtifact(reads, route.reportId);
   if (!artifact) throw new HttpError(404, "not_found");
 
-  const run = await env.DB.prepare(
-    `SELECT run_id,policy_refs_json,input_manifest_digest,status,replayability,started_at,completed_at
-     FROM calculation_runs WHERE context_id=? ORDER BY started_at DESC LIMIT 1`,
-  )
-    .bind(artifact.context_id)
-    .first<RunRow>();
+  const run = await latestCalculationRun(reads, artifact.context_id);
 
   const stored = await env.EVIDENCE.head(artifact.storage_ref);
-  const restrictions = await restrictionsFor(env.DB, [
+  const restrictions = await reportRestrictions(reads, [
     artifact.context_id,
     artifact.report_id,
     ...(run ? [run.run_id, run.input_manifest_digest] : []),
@@ -224,6 +180,12 @@ export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
     restrictions,
   });
   const capabilities = replayCapabilities(replayability);
+  if (options.refuseRestricted && !capabilities.explain)
+    throw new HttpError(403, "evidence_restricted");
+  // A complete run keeps a report replayable after its body is gone; the
+  // operator page shows it as `unavailable`, the agent read refuses it as
+  // `/export` does.
+  if (options.refuseRestricted && stored === null) throw new HttpError(404, "not_found");
 
   if (route.view !== "body") {
     const allowed = route.view === "export" ? capabilities.export : capabilities.explain;
@@ -237,25 +199,27 @@ export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
     const cached = await env.EVIDENCE.get(`${artifact.storage_ref}.explanation`);
     if (!cached) throw new HttpError(404, "not_found");
     if (cached.size > MAX_BODY_BYTES) throw new HttpError(503, "report_body_too_large");
-    return json({
+    return {
       reportId: artifact.report_id,
       contextId: artifact.context_id,
       replayability,
       interpretationContext: interpretation,
       explanation: JSON.parse(await cached.text()) as unknown,
-    });
+    };
   }
 
   const object = await env.EVIDENCE.get(artifact.storage_ref);
   if (!object) {
-    if (route.view === "export") throw new HttpError(404, "not_found");
+    // A body that left R2 after the `head` above is refused to the agent read
+    // too, as `/export` refuses it, never re-displayed as `unavailable`.
+    if (route.view === "export" || options.refuseRestricted) throw new HttpError(404, "not_found");
     // The catalogue row survives even when the body is gone; say so instead of
     // rebuilding a different report under the same id.
-    return json({
+    return {
       report: reportDto(artifact, run, "unavailable", replayCapabilities("unavailable")),
       interpretationContext: interpretation,
       body: null,
-    });
+    };
   }
   if (object.size > MAX_BODY_BYTES) throw new HttpError(503, "report_body_too_large");
   const bytes = new Uint8Array(await object.arrayBuffer());
@@ -272,24 +236,15 @@ export async function reportsApi(env: Env, url: URL): Promise<Response | null> {
   }
   if (!validReportBody(body)) throw new HttpError(503, "report_body_invalid");
 
-  const events = await env.DB.prepare(
-    "SELECT kind,actor,related_report_id,occurred_at FROM report_events WHERE report_id=? ORDER BY occurred_at,id LIMIT 200",
-  )
-    .bind(artifact.report_id)
-    .all<{
-      kind: string;
-      actor: string;
-      related_report_id: string | null;
-      occurred_at: string;
-    }>();
+  const events = await reportEvents(reads, artifact.report_id);
 
-  return json({
+  return {
     report: reportDto(artifact, run, replayability, capabilities),
     interpretationContext: interpretation,
-    events: events.results,
+    events,
     view: route.view,
     body,
-  });
+  };
 }
 
 function reportDto(

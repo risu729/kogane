@@ -21,6 +21,17 @@ export const STORE_FEATURES = {
   economicEvents: { tables: ["economic_event_revisions"], views: [] },
   /** The report artifact catalogue (CORE 0034). */
   reportArtifacts: { tables: ["report_artifacts"], views: [] },
+  /** `/api/collection-quality`: the scheduling and collection run tables (CORE 0065). */
+  collectionQuality: {
+    tables: [
+      "collection_schedules",
+      "collection_schedule_occurrences",
+      "collection_execution_leases",
+      "collection_runs",
+      "collection_run_stages",
+    ],
+    views: [],
+  },
   /** `queryDatedState`: snapshot policies, statements and settlement reviews (CORE 0044). */
   datedState: {
     tables: ["dataset_snapshot_policies"],

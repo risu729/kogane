@@ -4,6 +4,11 @@ Type: operational runbook. Checked: 2026-11-04 against main `033d3ce`.
 Landed on main on 2026-11-06 from closed
 [#887](https://github.com/risu729/kogane/pull/887) without a new connection
 check, so every observation below is as of 2026-11-04.
+Superseded in part on 2026-11-07: clients connect through the MCP Portal, the
+Portal lists Kogane `ready`, the origin policy has had no Gateway
+requirement since 07:10 UTC, and the origin's protected-resource `resource`
+reads without `/mcp`
+([ADR 0047 amendment](adr/0047-mcp-client-connection.md#amendment-clients-connect-through-the-mcp-portal-2026-11-07)).
 Related: [#684](https://github.com/risu729/kogane/issues/684),
 [#559](https://github.com/risu729/kogane/issues/559),
 [client connection design](agent-api.md#connecting-an-mcp-client).

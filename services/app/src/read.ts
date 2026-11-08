@@ -1,8 +1,4 @@
-import type {
-  EvidenceRun,
-  EvidenceArtifact,
-  EvidenceArtifactDetail,
-} from "../../../packages/observation-shared/src/evidence-contract";
+import type { EvidenceArtifactRow } from "../../../packages/application/src/query/evidence-catalogue.ts";
 import { HttpError } from "./http";
 
 export async function catalogue<T>(operation: () => Promise<T>): Promise<T> {
@@ -14,145 +10,8 @@ export async function catalogue<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-interface RunRow {
-  id: number;
-  source_id: string;
-  producer_id: string;
-  first_recorded_at_ms: number;
-  sealed_at_ms: number;
-  normalized_outcome: EvidenceRun["outcome"];
-  started_at_ms: number | null;
-  completed_at_ms: number | null;
-  started_at_basis: EvidenceRun["startedAtBasis"];
-  completed_at_basis: EvidenceRun["completedAtBasis"];
-  expected_artifact_count: number;
-}
-export interface ArtifactRow {
-  id: number;
-  fetch_run_id: number;
-  artifact_key: string;
-  artifact_role: EvidenceArtifact["role"];
-  payload_fidelity: EvidenceArtifact["payloadFidelity"];
-  dataset: string | null;
-  sha256: string;
-  byte_size: number;
-  recorded_at_ms: number;
-  descriptor_sha256: string;
-  container_kind: EvidenceArtifactDetail["artifact"]["containerKind"];
-  lineage_disposition: EvidenceArtifactDetail["artifact"]["lineageDisposition"];
-  format_id: string | null;
-  format_version: string | null;
-  declared_media_type: string | null;
-  blob_key: string;
-}
-
-// financial_fetch_runs (raw-evidence migration 0004) excludes synthetic sources
-// and runs annotated exclude_from_financial_views for both queries below.
-const RUN_SELECT = `SELECT r.id, r.source_id, r.producer_id, r.first_recorded_at_ms,
- s.sealed_at_ms, p.normalized_outcome, p.started_at_ms, p.completed_at_ms,
- p.started_at_basis, p.completed_at_basis, i.expected_artifact_count
- FROM financial_fetch_runs r
- JOIN fetch_run_seals s ON s.fetch_run_id = r.id
- JOIN run_inventories i ON i.id = s.inventory_id AND i.fetch_run_id = r.id
- JOIN fetch_run_reports p ON p.fetch_run_id = r.id AND p.report_kind = 'terminal'`;
-
-// Repeat visibility and inventory membership for artifact reads: a previous run lookup
-// never grants access to an artifact outside that run's sealed inventory.
-const ARTIFACT_SELECT = `SELECT a.id, a.fetch_run_id, a.artifact_key, a.artifact_role,
- a.payload_fidelity, a.dataset, a.sha256, a.byte_size, a.recorded_at_ms,
- a.descriptor_sha256, a.container_kind, a.lineage_disposition, a.format_id,
- a.format_version, a.declared_media_type, o.blob_key
- FROM fetch_artifacts a
- JOIN financial_fetch_runs r ON r.id = a.fetch_run_id
- JOIN fetch_run_seals s ON s.fetch_run_id = r.id
- JOIN run_inventory_items item ON item.inventory_id = s.inventory_id
-   AND item.fetch_run_id = r.id AND item.artifact_key = a.artifact_key
-   AND item.sha256 = a.sha256 AND item.descriptor_sha256 = a.descriptor_sha256
- JOIN raw_objects o ON o.sha256 = a.sha256 AND o.byte_size = a.byte_size
- WHERE r.source_id = ? AND a.source_id = r.source_id AND r.id = ?`;
-
-const date = (value: number | null): string | null =>
-  value === null ? null : new Date(value).toISOString();
-function runDto(row: RunRow): EvidenceRun {
-  return {
-    id: `r_${row.id}`,
-    sourceId: row.source_id,
-    producerId: row.producer_id,
-    recordedAt: date(row.first_recorded_at_ms)!,
-    sealedAt: date(row.sealed_at_ms)!,
-    outcome: row.normalized_outcome,
-    startedAt: date(row.started_at_ms),
-    startedAtBasis: row.started_at_basis,
-    completedAt: date(row.completed_at_ms),
-    completedAtBasis: row.completed_at_basis,
-    artifactCount: row.expected_artifact_count,
-  };
-}
-function artifactDto(row: ArtifactRow): EvidenceArtifact {
-  return {
-    id: `a_${row.id}`,
-    runId: `r_${row.fetch_run_id}`,
-    artifactKey: row.artifact_key,
-    role: row.artifact_role,
-    payloadFidelity: row.payload_fidelity,
-    dataset: row.dataset,
-    sha256: row.sha256,
-    byteSize: row.byte_size,
-    recordedAt: date(row.recorded_at_ms)!,
-  };
-}
-export function detailDto(row: ArtifactRow): EvidenceArtifactDetail["artifact"] {
-  return {
-    ...artifactDto(row),
-    descriptorSha256: row.descriptor_sha256,
-    containerKind: row.container_kind,
-    lineageDisposition: row.lineage_disposition,
-    formatId: row.format_id,
-    formatVersion: row.format_version,
-    declaredMediaType: row.declared_media_type,
-  };
-}
-export async function listRuns(db: D1Database, source: string, before: number) {
-  const { results } = await db
-    .prepare(`${RUN_SELECT} WHERE r.source_id = ? AND r.id < ? ORDER BY r.id DESC LIMIT 51`)
-    .bind(source, before)
-    .all<RunRow>();
-  return {
-    items: results.slice(0, 50).map(runDto),
-    nextCursor: results.length > 50 ? `c_${results[49].id}` : null,
-  };
-}
-export async function getRun(db: D1Database, source: string, id: number): Promise<EvidenceRun> {
-  const row = await db
-    .prepare(`${RUN_SELECT} WHERE r.source_id = ? AND r.id = ?`)
-    .bind(source, id)
-    .first<RunRow>();
-  if (!row) throw new HttpError(404, "not_found");
-  return runDto(row);
-}
-export async function listArtifacts(db: D1Database, source: string, run: number, before: number) {
-  const { results } = await db
-    .prepare(`${ARTIFACT_SELECT} AND a.id < ? ORDER BY a.id DESC LIMIT 51`)
-    .bind(source, run, before)
-    .all<ArtifactRow>();
-  return {
-    items: results.slice(0, 50).map(artifactDto),
-    nextCursor: results.length > 50 ? `c_${results[49].id}` : null,
-  };
-}
-export async function getArtifact(
-  db: D1Database,
-  source: string,
-  run: number,
-  id: number,
-): Promise<ArtifactRow> {
-  const row = await db
-    .prepare(`${ARTIFACT_SELECT} AND a.id = ?`)
-    .bind(source, run, id)
-    .first<ArtifactRow>();
-  if (!row) throw new HttpError(404, "not_found");
-  return row;
-}
+/** The catalogue row of an artifact whose raw bytes a route streams. */
+export type ArtifactRow = EvidenceArtifactRow;
 
 type DownloadArtifact = Pick<ArtifactRow, "artifact_key" | "declared_media_type" | "sha256">;
 
@@ -209,14 +68,55 @@ export function downloadDisposition(row: DownloadArtifact): string {
   return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
 }
 
-export async function raw(
+type RawRow = Pick<
+  ArtifactRow,
+  "blob_key" | "sha256" | "byte_size" | "artifact_key" | "declared_media_type"
+>;
+
+export async function raw(bucket: R2Bucket, row: RawRow, head: boolean): Promise<Response> {
+  const body = await verifiedObject(bucket, row, head);
+  return new Response(body, {
+    headers: {
+      "content-type": "application/octet-stream",
+      "content-length": String(row.byte_size),
+      "content-disposition": downloadDisposition(row),
+      "content-security-policy": "default-src 'none'; sandbox; frame-ancestors 'none'",
+    },
+  });
+}
+
+/** The largest raw object an agent read returns (ADR 0081, 2026-11-07). */
+export const RAW_READ_MAX_BYTES = 1024 * 1024;
+
+/**
+ * One raw object's bytes for an agent read: the same object and the same
+ * integrity checks as the download, refused before any read past
+ * `RAW_READ_MAX_BYTES` (`413 raw_too_large`), and the bytes' own SHA-256
+ * compared with the catalogue's as well.
+ */
+export async function rawBytes(bucket: R2Bucket, row: RawRow): Promise<Uint8Array> {
+  if (row.byte_size > RAW_READ_MAX_BYTES) throw new HttpError(413, "raw_too_large");
+  const body = await verifiedObject(bucket, row, false);
+  let bytes: Uint8Array;
+  try {
+    bytes = new Uint8Array(await new Response(body).arrayBuffer());
+  } catch {
+    throw new HttpError(503, "raw_read_failed");
+  }
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) =>
+    byte.toString(16).padStart(2, "0"),
+  ).join("");
+  if (bytes.length !== row.byte_size || digest !== row.sha256)
+    throw new HttpError(409, "raw_integrity_failed");
+  return bytes;
+}
+
+/** The object's body (none for `head`), refused unless R2 still holds exactly the catalogued bytes. */
+async function verifiedObject(
   bucket: R2Bucket,
-  row: Pick<
-    ArtifactRow,
-    "blob_key" | "sha256" | "byte_size" | "artifact_key" | "declared_media_type"
-  >,
+  row: RawRow,
   head: boolean,
-): Promise<Response> {
+): Promise<ReadableStream | null> {
   let object: R2Object | R2ObjectBody | null;
   try {
     object = head ? await bucket.head(row.blob_key) : await bucket.get(row.blob_key);
@@ -244,12 +144,5 @@ export async function raw(
     }
     throw new HttpError(409, "raw_integrity_failed");
   }
-  return new Response(body, {
-    headers: {
-      "content-type": "application/octet-stream",
-      "content-length": String(row.byte_size),
-      "content-disposition": downloadDisposition(row),
-      "content-security-policy": "default-src 'none'; sandbox; frame-ancestors 'none'",
-    },
-  });
+  return body;
 }
