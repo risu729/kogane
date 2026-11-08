@@ -7,6 +7,7 @@ import type { SQLQueryBindings } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, test } from "bun:test";
+import { MAX_RUN_IDS } from "../../collection/src/schedule-result.ts";
 import { validApiResponse } from "../../observation-shared/src/api-validation.ts";
 import { validCollectionQualityCells } from "../../observation-shared/src/collection-quality-contract.ts";
 import type { CellQualityRow } from "../../read-model/src/collection-quality.ts";
@@ -546,5 +547,26 @@ describe("one reason per stored state", () => {
     ).toBe(false);
     expect(valid({ ...entry, total: 0 } as never)).toBe(false);
     expect(valid({ ...entry, reasons: ["no_current_capture", "no_current_capture"] })).toBe(false);
+  });
+});
+
+describe("an occurrence's run ids and the wire contract", () => {
+  // A collector answer names at most MAX_RUN_IDS runs (a Vpass session with
+  // more cards answers `run_ids_over_limit` with the first 100, ADR 0048
+  // amendment 2026-11-08), and the alarm stores the answer as given. An
+  // occurrence naming one run more puts the whole summary outside its
+  // contract, which the web client refuses.
+  test.each([
+    [MAX_RUN_IDS, true],
+    [MAX_RUN_IDS + 1, false],
+  ])("an occurrence naming %i runs: summary valid %p", async (count, valid) => {
+    const store = new QualityStore();
+    store.occurrence("vpass", {
+      nominalAt: "2099-01-02T21:00:00.000Z",
+      status: "completed",
+      runIds: Array.from({ length: count }, (_, i) => `synthetic-card-${i + 1}`),
+    });
+    const summary = await queryCollectionQualitySummary(executor(store));
+    expect(validApiResponse("/api/collection-quality", summary)).toBe(valid);
   });
 });

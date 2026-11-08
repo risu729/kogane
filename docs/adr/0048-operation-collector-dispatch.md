@@ -3,6 +3,9 @@
 - Status: accepted (merged 2026-10-08 in #576; production dispatch unverified)
 - Date: 2026-10-08
 - Issue: #544
+- Amended: 2026-11-08, a collection with more than 100 runs
+  ([below](#amendment-a-collection-with-more-than-100-runs-2026-11-08);
+  proposed)
 
 ## Context
 
@@ -258,6 +261,11 @@ persists one run per card, built its successful answer itself: every run it
 persisted, unchecked. With more than 100 cards the Processor would refuse that
 answer and the operation would end `uncertain` (`collector_result_invalid`)
 with no run listed, although the collector knew exactly what it had written.
+The alarm path stores its answer unchecked, so the same session's schedule
+occurrence named every run; the collection-quality contract allows at most
+100 `terminals` per occurrence, so such an occurrence would have put the whole
+collection-quality summary outside its contract and the web client would have
+refused the page.
 The other collectors name at most one run per answer, through the helpers or,
 for SBI VC's blocked session, only once its terminal is persisted.
 
@@ -300,7 +308,9 @@ first 100 runs. `collectorOperationResult` checks the same `MAX_RUN_IDS`.
   is now `failed` with `run_ids_over_limit` and 100 runs, where it was
   `completed` with every run (the alarm stores the answer as given). The runs
   past 100 are registered like any other; only the occurrence does not link
-  them.
+  them. Its collection-quality source shows `occurrence_failed`, and the
+  summary stays within its contract. An occurrence stored before this change
+  with more than 100 runs is not rewritten.
 
 ### Verification
 
@@ -312,3 +322,6 @@ first 100 runs. `collectorOperationResult` checks the same `MAX_RUN_IDS`.
 - `services/collector-vpass/test/alarm-run-ids.test.ts`: synthetic sessions of
   100 and 103 cards, successful and failed, persist every terminal and answer
   within the closed shape.
+- `packages/application/test/collection-quality-query.test.ts`: an occurrence
+  naming 100 runs keeps the collection-quality summary within its contract;
+  101 do not.
