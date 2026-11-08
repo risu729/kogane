@@ -720,7 +720,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/processor/test/change-lifecycle.test.ts` (31 tests):
+- `services/processor/test/change-lifecycle.test.ts` (34 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
