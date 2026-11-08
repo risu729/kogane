@@ -384,7 +384,8 @@ collection delays `decision_outbox` on that tick by the same amount.
 
 Neither is a parse lane: they create no `observation_parse_jobs` rows and have
 no job budget. `collection_scan` is bounded by one R2 list page (25 keys), at
-most five continuations and five registration attempts per tick, and the
+most five continuations that find their terminal (of up to 25 pending runs
+read) and five registration attempts per tick, and the
 invocation's operation budget of 500 (ADR 0010); a terminal already
 registered, already blocked or refused `retryable` within the last 24 hours
 is answered from its row and spends none of the five, so a page of judged

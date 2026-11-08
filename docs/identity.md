@@ -210,8 +210,12 @@ first. A reader pages to offset 950 of a view (no `nextOffset` past it);
 plans and plans nothing if the candidate, its commands or either
 identifier's mapping revision changed. Candidate adoption payloads carry the
 candidate id, anchor identifier, anchor revision and subject revision; the
-server verifies the current open candidate and pins both mappings. Their
-revisions are checked at approval and atomically in the commit batch.
+server verifies the current open candidate and pins both mappings. An
+adoption, and a keep-apart rejection whose evidence names the two identifiers,
+also pin `listed_as` in both orientations, so a decision recorded under any
+reference of the pair between plan and commit makes the plan stale
+([change lifecycle: pair pins](change-lifecycle.md#pair-pins)). The pins are
+checked at approval and atomically in the commit batch.
 A direct manual assignment carries no candidate provenance and cannot use
 an `instrument-candidate:` base context without that bundle.
 
@@ -279,7 +283,9 @@ Shinsei only. `reviewAccountCandidates`
   to `source_account:<id>`, with evidence `connection-review-confirmed` and
   the review's artifact refs. Status comes from the newest stored relation of
   the pair (`accepted`, `rejected`, else `proposed`) under any reference it
-  may have been recorded under, listed as `recordedContainment`: the
+  may have been recorded under, where each reference's relation is its newest
+  decision and a later proposal never replaces one (ADR 0077's amendment of
+  2026-11-08), listed as `recordedContainment`: the
   candidate's own (`this-connection`), another producer's current review of
   the same identity value (`same-identity-value`), or a reference migration
   0029 backfilled under a key the identity-value rewrite (migration 0063)
@@ -292,11 +298,16 @@ Shinsei only. `reviewAccountCandidates`
   identity values pin the same direct account (none is chosen). Each names
   the `relation.accept` and `relation.reject` payloads that would decide it,
   to be planned with a reason through the [change lifecycle](change-lifecycle.md);
-  rejecting an accepted pair withdraws it as a later row;
+  rejecting an accepted pair withdraws it as a later row. A plan pins the
+  triple under every reference of the pair, so a decision recorded under any
+  of them, or a reference that appears, between planning and commit makes it
+  stale ([pair pins](change-lifecycle.md#pair-pins));
 - **never `same_account`**: every candidate says why
   (`aggregator-account-connection-scoped`, and `several-direct-accounts` when
   one connection pins several direct accounts) and reports a `same_account`
-  relation already stored between its two sides, in either orientation;
+  relation already stored between its two sides, in either orientation, by the
+  same rule: an agent's later `same_account` proposal does not hide a
+  person's acceptance or rejection;
 - **connections**: every current review with its state (`confirmed`,
   `unresolved`, `evidence-ineligible`) and its aggregator source accounts of
   any producer; **unreviewed**: aggregator source accounts no current review
@@ -315,17 +326,15 @@ and the page `/identities/account-candidates` (`口座の対応候補`), whose
 buttons plan the named payload with the reason a person writes after reading
 the candidate again; approval and commit happen on the confirmation screen.
 Views `open`, `held`, `decided`, `connections`, `unreviewed`; 50 items a page.
-Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 newest
+Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 current
 relation rows (and 10,000 backfilled relations under a rewritten key),
 refused whole past each. Every read is keyed (ADR 0077, Cost).
 
 Limits today: only SBI Shinsei pairs exist; candidates are listed per
 producer's review (two producers' reviews of one identity value are two
-candidates sharing one status); a plan pins only the revision of the
-candidate's own reference, so a decision recorded under one of the pair's
-other references between planning and commit does not make it stale; no history
-view of a pair; no validity period; no leaf-account equivalence and no dedup
-of aggregator against direct rows.
+candidates sharing one status); no history view of a pair; no validity
+period; no leaf-account equivalence and no dedup of aggregator against direct
+rows.
 
 ## Acceptance gates
 

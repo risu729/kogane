@@ -9,12 +9,17 @@
 // - `AGGREGATOR_SOURCE_ACCOUNTS_SQL`: every `moneyforward-me` source account
 //   of any producer, through the `UNIQUE(source_id,producer_id,
 //   reference_json)` index.
-// - `ACCOUNT_RELATIONS_SQL`: the newest `connection_contains` relation from a
-//   `connection:` reference to a `source_account:` reference, and the newest
+// - `ACCOUNT_RELATIONS_SQL`: the current `connection_contains` relation from a
+//   `connection:` reference to a `source_account:` reference, and the current
 //   `same_account` relation between two `source_account:` references, per
-//   pair of references, ordered as the change lifecycle orders a relation's
-//   history (`created_at` then `id`, newest first). Each kind is one keyed
-//   range of a `(kind, ref)` index (`entity_relations_from` or `_to`).
+//   pair of references: the newest decision (`accepted`, `rejected` or
+//   `released`), or the newest proposal when the pair has none, ordered as the
+//   change lifecycle orders a relation's history (`created_at` then `id`,
+//   newest first). A proposal recorded after a decision never replaces it
+//   (ADR 0001's and ADR 0017's amendments of 2026-11-06; ADR 0077's of
+//   2026-11-08): `reconcile.propose` appends `proposed` `same_account` rows
+//   between two source accounts. Each kind is one keyed range of a
+//   `(kind, ref)` index (`entity_relations_from` or `_to`).
 // - `LEGACY_CONNECTION_RELATIONS_SQL`: the `connection_contains` relations
 //   migration 0029 backfilled whose `from_ref` no longer names the key of the
 //   review row they were backfilled from (migration 0063 rewrote the
@@ -66,11 +71,12 @@ export interface AggregatorSourceAccountRow {
   referenceJson: string;
 }
 
-/** Newest relation rows one read may return before it is refused (domain bound 10,000). */
+/** Current relation rows (one per triple) one read may return before it is refused (domain bound 10,000). */
 const ACCOUNT_RELATION_ROW_BOUND = 10_000;
 export const ACCOUNT_RELATIONS_SQL = `SELECT kind,fromRef,toRef,status,createdAt,id FROM (
  SELECT r.kind,r.from_ref AS fromRef,r.to_ref AS toRef,r.status,r.created_at AS createdAt,r.id,
-  row_number() OVER (PARTITION BY r.kind,r.from_ref,r.to_ref ORDER BY r.created_at DESC,r.id DESC) AS rank
+  row_number() OVER (PARTITION BY r.kind,r.from_ref,r.to_ref
+   ORDER BY r.status<>'proposed' DESC,r.created_at DESC,r.id DESC) AS rank
  FROM entity_relations r
  WHERE (r.kind='connection_contains' AND r.from_ref>='connection:' AND r.from_ref<'connection;'
    AND r.to_ref>='source_account:' AND r.to_ref<'source_account;')

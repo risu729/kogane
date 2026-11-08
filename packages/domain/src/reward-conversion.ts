@@ -1,6 +1,7 @@
 // Pure reward conversion arithmetic and bounded route traversal.
 // Contracts remain exported from rewards.ts for existing callers.
 import type { ConversionOffer, ConversionPlan, MembershipState, OfferValidity } from "./rewards.ts";
+import { civilDateOfInstant } from "./civil-date.ts";
 import { validOpenEndedPeriodValue } from "./open-ended-period.ts";
 import { CONVERSION_SEARCH_RELEASE, REWARD_POLICY_RELEASE } from "./reward-releases.ts";
 import {
@@ -25,14 +26,26 @@ import {
   type Quantity,
 } from "./values.ts";
 
+/** A plan with the code that refused it, which the route search reports. */
+interface PlannedConversion {
+  plan: ConversionPlan;
+  /** The refusal; `null` for a computed plan, feasible or not verified. */
+  refusal: string | null;
+}
+
+/**
+ * An infeasible plan lists the adjustments made on the way (`capped_by_maximum`,
+ * `rounded_down_to_increment`, `offer_not_verified`), then the refusal.
+ */
 function infeasible(
   offer: ConversionOffer,
   eligible: Quantity,
   fees: readonly Quantity[],
-  reasonCodes: string[],
-): ConversionPlan {
+  adjustments: readonly string[],
+  refusal: string,
+): PlannedConversion {
   const zero = exactQuantity(offer.fromUnitRef, integerDecimal(0));
-  return {
+  const plan: ConversionPlan = {
     offerRef: `${offer.offerId}@${offer.version}`,
     offerVersion: offer.version,
     use: zero,
@@ -40,11 +53,12 @@ function infeasible(
     remainder: eligible.value.status === "exact" ? eligible : zero,
     fees: [...fees],
     feasible: false,
-    reasonCodes,
+    reasonCodes: [...adjustments, refusal],
     basis: "policy-estimated",
     conditionRefs: conditionRefs(offer),
     release: REWARD_POLICY_RELEASE,
   };
+  return { plan, refusal };
 }
 
 function conditionRefs(offer: ConversionOffer): string[] {
@@ -69,10 +83,18 @@ export function simulateConversion(
   eligibleQuantity: Quantity,
   fees: readonly Quantity[] = offer.fixedFees,
 ): ConversionPlan {
+  return planConversion(offer, eligibleQuantity, fees).plan;
+}
+
+function planConversion(
+  offer: ConversionOffer,
+  eligibleQuantity: Quantity,
+  fees: readonly Quantity[],
+): PlannedConversion {
   if (eligibleQuantity.unitRef !== offer.fromUnitRef)
-    return infeasible(offer, eligibleQuantity, fees, ["unit_mismatch"]);
+    return infeasible(offer, eligibleQuantity, fees, [], "unit_mismatch");
   if (eligibleQuantity.value.status !== "exact")
-    return infeasible(offer, eligibleQuantity, fees, ["quantity_not_exact"]);
+    return infeasible(offer, eligibleQuantity, fees, [], "quantity_not_exact");
   const reasonCodes: string[] = [];
   if (offer.verification !== "verified") reasonCodes.push("offer_not_verified");
   const balance = eligibleQuantity.value.value;
@@ -84,19 +106,17 @@ export function simulateConversion(
   // Whole increments only: `down` truncates towards zero, so a partial step is
   // never rounded up into a quantity the member does not hold.
   const steps = divideDecimals(capped, offer.increment, { scale: 0, mode: "down" });
-  if (!steps.ok)
-    return infeasible(offer, eligibleQuantity, fees, [...reasonCodes, steps.error.code]);
+  if (!steps.ok) return infeasible(offer, eligibleQuantity, fees, reasonCodes, steps.error.code);
   const use = multiplyDecimals(steps.value, offer.increment);
   if (compareDecimals(use, capped) < 0) reasonCodes.push("rounded_down_to_increment");
   if (compareDecimals(use, offer.minimum) < 0)
-    return infeasible(offer, eligibleQuantity, fees, [...reasonCodes, "below_minimum"]);
+    return infeasible(offer, eligibleQuantity, fees, reasonCodes, "below_minimum");
   const received = multiplyByRatio(use, offer.ratio, offer.rounding);
-  if (!received.ok)
-    return infeasible(offer, eligibleQuantity, fees, [...reasonCodes, "invalid_ratio"]);
+  if (!received.ok) return infeasible(offer, eligibleQuantity, fees, reasonCodes, "invalid_ratio");
   // An application is not a credit: the destination quantity is what the plan
   // predicts, and only a later observation makes it a holding.
   reasonCodes.push("credit_is_not_the_application");
-  return {
+  const plan: ConversionPlan = {
     offerRef: `${offer.offerId}@${offer.version}`,
     offerVersion: offer.version,
     use: exactQuantity(offer.fromUnitRef, use),
@@ -109,11 +129,21 @@ export function simulateConversion(
     conditionRefs: conditionRefs(offer),
     release: REWARD_POLICY_RELEASE,
   };
+  return { plan, refusal: null };
 }
 
+/**
+ * The calendar day of a date, or of an instant in its own named zone
+ * (`civilDateOfInstant`, ADR 0056), never the date its offset was written in:
+ * an instant written in UTC can fall on the next Tokyo day. A zone the runtime
+ * does not know establishes no day.
+ */
 function localDate(value: TemporalValue): CivilDate | null {
   if (value.kind === "local-date") return parseLocalDate(value.value);
-  if (value.kind === "instant") return parseLocalDate(value.value.slice(0, 10));
+  if (value.kind === "instant") {
+    const date = civilDateOfInstant(value.value, value.zone);
+    return date === null ? null : parseLocalDate(date);
+  }
   return null;
 }
 
@@ -217,16 +247,37 @@ function coversApplicationDay(
 }
 
 /**
- * Whether applying on `day` is after the offer's application deadline:
- * `false` with no deadline (`null`, a standing offer), `null` when the stored
- * deadline establishes no answer (unknown or malformed, or `day` inside a
- * period deadline), so an unestablished deadline stays a review reason and is
- * never read as no deadline (INV05). A local date or an instant is its own
- * calendar day, as before.
+ * Whether applying on `day` (a calendar day in `zone`, the clock's zone) is
+ * after the offer's application deadline: `false` with no deadline (`null`, a
+ * standing offer), `null` when the stored deadline establishes no answer, so an
+ * unestablished deadline stays a review reason and is never read as no deadline
+ * (INV05). As in `compareTemporal`, a day is answered only when it lies wholly
+ * before or after the deadline: a local date is its own whole day, a period
+ * ends with its last day, and an instant falls inside its civil date, so the
+ * day holding an instant, or a day inside a period, establishes nothing. A date
+ * or period of another zone is not compared (`zone_mismatch`); a `null` zone on
+ * either side is compatible, as for validity. An instant is one moment, read on
+ * the application day's calendar (`civilDateOfInstant`), or on its own zone's
+ * when the clock names none; a zone the runtime does not know is never read as
+ * UTC. The caller's `requiredCompletionBy` is judged the same way on the
+ * credit day.
  */
-function deadlinePassed(deadline: TemporalValue | null, day: number): boolean | null {
+function deadlinePassed(
+  deadline: TemporalValue | null,
+  day: number,
+  zone: string | null,
+): boolean | null {
   if (deadline === null) return false;
   if (!validTemporalValue(deadline) || deadline.kind === "unknown") return null;
+  if (deadline.kind === "instant") {
+    const date = civilDateOfInstant(deadline.value, zone ?? deadline.zone);
+    const civil = date === null ? null : parseLocalDate(date);
+    if (civil === null) return null;
+    const instantDay = daysFromCivil(civil);
+    if (day > instantDay) return true;
+    return day < instantDay ? false : null;
+  }
+  if (zone !== null && deadline.zone !== null && zone !== deadline.zone) return null;
   if (deadline.kind === "period") {
     const bounds = periodBounds(deadline);
     if (!bounds) return null;
@@ -280,7 +331,6 @@ export function findConversionPaths(
   const paths: ConversionPath[] = [];
   let expansions = 0;
   const startDay = dayNumber(start.clock);
-  const requiredBy = budget.requiredCompletionBy ? dayNumber(budget.requiredCompletionBy) : null;
   if (startDay === null)
     return {
       paths,
@@ -331,27 +381,42 @@ export function findConversionPaths(
         rejected.push({ offerRef, reasonCode: condition });
         continue;
       }
-      const passed = deadlinePassed(offer.applicationDeadline, appliedOn);
+      const passed = deadlinePassed(offer.applicationDeadline, appliedOn, zone);
       if (passed === null) {
         rejected.push({ offerRef, reasonCode: "needs_rule_verification" });
         continue;
       }
       if (passed) {
+        // The wait for an earlier hop's credit passed the deadline only when
+        // the deadline is established as open on the clock's day; one already
+        // passed there, or unestablished there, is the deadline itself. The
+        // first hop is applied on the clock's day, so it is never a reuse.
+        const openAtClock = deadlinePassed(offer.applicationDeadline, startDay, zone) === false;
         rejected.push({
           offerRef,
-          reasonCode:
-            state.hops.length === 0 ? "application_deadline_passed" : "reuse_before_credit",
+          reasonCode: openAtClock ? "reuse_before_credit" : "application_deadline_passed",
         });
         continue;
       }
       const creditOn = appliedOn + offer.processingDays;
-      if (requiredBy !== null && creditOn > requiredBy) {
+      // The caller's completion deadline follows the application deadline's
+      // rule on the credit day; one that establishes no answer is a review
+      // reason, never read as no deadline (INV05).
+      const late = deadlinePassed(budget.requiredCompletionBy, creditOn, zone);
+      if (late === null) {
+        rejected.push({ offerRef, reasonCode: "needs_rule_verification" });
+        continue;
+      }
+      if (late) {
         rejected.push({ offerRef, reasonCode: "completion_after_required_by" });
         continue;
       }
-      const plan = simulateConversion(offer, state.quantity, offer.fixedFees);
+      const { plan, refusal } = planConversion(offer, state.quantity, offer.fixedFees);
       if (!plan.feasible) {
-        rejected.push({ offerRef, reasonCode: plan.reasonCodes[0] ?? "not_feasible" });
+        // The refusal itself, never an adjustment made on the way to it
+        // (`capped_by_maximum`, `rounded_down_to_increment`). Only verified
+        // offers reach this point, so a computed plan is feasible.
+        rejected.push({ offerRef, reasonCode: refusal ?? "not_feasible" });
         continue;
       }
       const hop: ConversionHop = {
