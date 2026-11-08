@@ -19,6 +19,7 @@ import {
   type SnapshotPolicyComparisonRow,
 } from "../../../packages/parsers/src/snapshot-query.ts";
 import { insertFetchRun, listArtifacts, upsertSource, type Store } from "../src/store.ts";
+import { openTestStore } from "./test-store.ts";
 import {
   balance,
   closeStores,
@@ -29,6 +30,47 @@ import {
 } from "./snapshot-fixture.ts";
 
 afterEach(closeStores);
+
+test("reopening upgrades the local exact-version policies and preserves an operator alternative", () => {
+  const store = database();
+  const versions = [
+    ["sbi-foreign-cash-positions", "0.3.0", "0.3.1"],
+    ["sbi-shinsei-exchange-rate", "1.0.2", "1.0.3"],
+    ["prestia-bank-balances", "1.0.0", "1.0.1"],
+  ] as const;
+  for (const [parser, old] of versions)
+    store.db
+      .query("UPDATE dataset_snapshot_policies SET required_parser_version=? WHERE parser_name=?")
+      .run(old, parser);
+  const reopened = openTestStore(join(store.blobDir, ".."));
+  try {
+    for (const [parser, , current] of versions)
+      expect(
+        reopened.db
+          .query(
+            "SELECT required_parser_version AS version FROM dataset_snapshot_policies WHERE parser_name=?",
+          )
+          .get(parser),
+      ).toEqual({ version: current });
+    reopened.db.exec(
+      "UPDATE dataset_snapshot_policies SET required_parser_version='9.0.0' WHERE parser_name='sbi-foreign-cash-positions'",
+    );
+  } finally {
+    reopened.db.close();
+  }
+  const preserved = openTestStore(join(store.blobDir, ".."));
+  try {
+    expect(
+      preserved.db
+        .query(
+          "SELECT required_parser_version AS version FROM dataset_snapshot_policies WHERE parser_name='sbi-foreign-cash-positions'",
+        )
+        .get(),
+    ).toEqual({ version: "9.0.0" });
+  } finally {
+    preserved.db.close();
+  }
+});
 
 interface PolicyRow {
   source_id: string;

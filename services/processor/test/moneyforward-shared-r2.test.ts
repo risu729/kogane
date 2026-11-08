@@ -201,14 +201,14 @@ test("with no secret the run's pages parse with no error under the v2 account id
   expect(await jobs(runId)).toEqual([
     {
       parser_name: "moneyforward-canonical-evidence-boundary",
-      parser_version: "1.0.2",
+      parser_version: "1.0.3",
       status: "done",
       last_error_code: null,
       n: 2,
     },
     {
       parser_name: "moneyforward-monthly-transactions",
-      parser_version: "2.0.3",
+      parser_version: "2.0.4",
       status: "done",
       last_error_code: null,
       n: 2,
@@ -269,21 +269,21 @@ test("without a tuple the units stay positional and every parse is parser_reject
   expect(await jobs(runId)).toEqual([
     {
       parser_name: "moneyforward-canonical-evidence-boundary",
-      parser_version: "1.0.2",
+      parser_version: "1.0.3",
       status: "done",
       last_error_code: null,
       n: 1,
     },
     {
       parser_name: "moneyforward-canonical-evidence-boundary",
-      parser_version: "1.0.2",
+      parser_version: "1.0.3",
       status: "failed",
       last_error_code: "parser_rejected",
       n: 1,
     },
     {
       parser_name: "moneyforward-monthly-transactions",
-      parser_version: "2.0.3",
+      parser_version: "2.0.4",
       status: "failed",
       last_error_code: "parser_rejected",
       n: 2,

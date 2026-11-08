@@ -80,9 +80,19 @@ Header and row cardinality drift still refuse Sony CSV.
 
 The shared helper is in every parser's digest closure, so all 43 releases
 receive a patch version, even though only PayPay and Sony history CSV call
-`parseCsv`. Other parser outputs remain unchanged. No migration or production
-read was needed. The processor registers releases and the existing repair lane
-handles new parses; old raw objects and observations remain append-only.
+`parseCsv`. Other parser outputs remain unchanged. Migration 0084 advances the
+three exact-version snapshot policies: foreign positions to 0.3.1, the SBI
+Shinsei exchange-rate board to 1.0.3, and PRESTIA balances to 1.0.1. It changes
+only rows still pinned to their previous releases, preserving an operator's
+alternative choice. The local experiment applies the same conditional policy
+updates when its store opens. The new pins select the new published parses; the repair
+lane re-parses stored evidence, and earlier raw objects, observations and
+publication history remain recorded. Until a new successful parse publishes,
+an earlier version cannot satisfy the new exact pin. No production read was
+needed. The processor registers releases and the existing repair lane handles
+new parses; old raw objects and observations remain append-only.
+SMBC debit-account matching and settlement readiness diagnostics accept both
+transaction releases 1.1.0 and 1.1.1, whose account context is identical.
 Frozen coverage expectations were not regenerated. The existing SBI Shinsei
 identity-origin delta now names its new release and keeps the same delta.
 Synthetic tests in `packages/parsers/test/csv-recovery.test.ts` cover first,

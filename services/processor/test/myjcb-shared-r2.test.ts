@@ -806,7 +806,7 @@ test("ADR 0005 amendment (e): only the ショッピングスキップ払い page
     {
       artifact_key: `${connectionId}/credit-skip-payment-08.html`,
       parser_name: "myjcb-skip-payment-schedule",
-      parser_version: "0.1.2",
+      parser_version: "0.1.3",
       status: "done",
     },
   ]);
