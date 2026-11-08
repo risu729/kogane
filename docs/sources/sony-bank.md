@@ -1,367 +1,235 @@
-# ソニー銀行: 公式 Web / 公式アプリ一次評価
+# ソニー銀行 (Sony Bank): initial official Web/app assessment
 
 > Dated source research and implementation notes. Earlier runtime/schedule
 > claims may be superseded by later changes. See the [research scope](README.md),
 > [current status](../current-status.md) and [schedules](../schedules.md) before
 > using these notes as operational instructions.
 
-- 調査日: 2026-08-26（Australia/Sydney）
-- 対象: 個人向けソニー銀行口座だけ
-- 非対象: 他行、証券会社、家計簿・資産管理 aggregator、振込・振替・売買・
-  預入・解約・設定変更
+- Research date: 2026-08-26 (Australia/Sydney)
+- Scope: personal Sony Bank accounts only
+- Excluded: other banks, securities firms, household-finance/asset-management aggregators, transfers/account transfers/trades/deposits/cancellations/settings changes
 
-## 結論
+## Conclusion
 
-- **正本は公式 Web と公式 CSV** とする。円普通預金は公式に「過去すべて」の
-  入出金履歴を閲覧でき、普通預金取引履歴を CSV で download できる。外貨は
-  全通貨の外貨普通、外貨定期、為替リンク預金（外貨スタート型）をまたぐ入出金
-  CSV があり、契約番号、摘要、入出金額、取引後残高、適用レート、円換算額、
-  特約レートまで持つ。これらを初期 backfill と差分収集の第一候補にする。
-- 残高の公式対象は広い。円普通・円定期・積立定期、外貨普通・外貨定期、
-  円定期 plus+、為替リンク預金、投資信託、FX、Sony Bank GATE、住宅ローン、
-  カードローンまで、公式 Web / 公式アプリまたは契約先向け参照系 API で残高照会
-  対象と確認できる。ただし ledger が公式に用意されるのは主に円普通と外貨普通。
-  定期・仕組み預金等は残高合計だけでなく、契約・預入ロットを別モデルで読む。
-- Web の通常ログインは店番号3桁、口座番号7桁、ログインパスワードである。
-  スマホ認証、物理トークン OTP、合い言葉は「重要な取引」の追加認証であり、
-  passkey/WebAuthn ではない。公式資料、現行ログイン UI、公開 bundle のいずれにも
-  passkey 対応は確認できなかった。Bitwarden は通常の店番号・口座番号・password
-  を fill する候補であって、Bitwarden に保存されていることだけから passkey と
-  判定してはならない。
-- 現行 Web は 2025-05-06 のサービス更新後の Next.js SPA で、同一 origin の
-  `/custom-web00` BFF に JSON を送る。public asset からrequest header、payload構造、
-  CSRF/revision/event-hash interceptorを確認できる。調査開始時buildのlogin pathは
-  同日rebuild後のbundleでliteralを再確認できず、runtimeで現行性を確定する。旧
-  `o2o.moneykit.net` の HTML form scraper は現在 DNS 解決せず、そのままは使えない。
-- 2026-08-26 の公開観測では `sonybank.jp` は Amazon CloudFront、静的画面は S3、
-  BFF は AWS trace header を返した。Akamai は観測していない。一方、ログイン画面は
-  PhishWall と Caulis の端末情報送信 script を明示的に読み、銀行も firewall、常時
-  監視、自動 logout を案内している。CloudFront に AWS WAF が関連付いているか、
-  bot score、headless/datacenter 判定条件は公開情報から確定できない。
-- 公式アプリは二つある。`ソニー銀行 アプリ` は全商品の残高と認証・取引、
-  `Sony Bank WALLET アプリ` は円/外貨普通預金と Visa debit 履歴・カード設定が
-  中心。公式 Play listing の package/version はそれぞれ
-  `net.moneykit.SonyBankApp` / `8.02.00`、`net.moneykit.sbw` / `12.04.00` だった。
-  ただし前者は本日開始の renewal 告知と listing 更新日が一致せず、staged rollout
-  または公開 metadata 遅延を含む未解決の version gap がある。Web gap の有無を
-  APK 調査開始条件にせず、Web bundle と正規 split APK を並行解析する。
-- 現段階の総合評価は **実装コスト 4/5、自動化レベル C**。最初は通常 Chrome で
-  login と公式 CSV download を低頻度で自動化し、現行 BFF の read endpoint が
-  capture で確定した後だけ JSON replay を検討する。Workers 単体より、永続 profile
-  を持つ local/OCI/Cloudflare Container が適する。
+- **Use official Web and CSV as authoritative records**. Official yen ordinary deposits provide `過去すべて` (all past) transactions and ordinary-deposit CSV downloads. Foreign-currency CSVs span all currencies across ordinary/time deposits and 為替リンク預金（外貨スタート型） (FX-linked deposits, foreign-currency start), with contract numbers, descriptions, inflows/outflows, post-transaction balances, applied rates, yen equivalents, and special-agreement rates. These are first candidates for initial backfill/incremental collection.
+- Official balance coverage is broad: yen ordinary/time/installment-time, foreign ordinary/time, 円定期 plus+ (Yen Time Deposit plus+), FX-linked deposits, investment trusts, FX, Sony Bank GATE, home/card loans through Web/apps or contracted read APIs. Ledgers mainly cover yen/foreign ordinary deposits; model time/structured products by contract/deposit lot as well as totals.
+- Normal Web login uses three-digit branch number, seven-digit account number, and password. Smartphone authentication, physical-token OTP, and `合い言葉` (security phrase) authenticate important transactions, not passkeys/WebAuthn. No official material, current UI, or public bundle confirmed passkeys. Bitwarden may fill ordinary branch/account/password credentials; storage in Bitwarden alone does not establish passkeys.
+- Current Web is a Next.js SPA after the 2025-05-06 update, sending JSON to same-origin `/custom-web00` BFF. Public assets reveal headers, payload structure, CSRF/revision/event-hash interceptors. The initial build's login-path literal was not reconfirmed after a same-day rebuild; establish current transport at runtime. Old `o2o.moneykit.net` HTML scrapers no longer resolve in DNS and cannot run unchanged.
+- Public observations on 2026-08-26 showed Amazon CloudFront for `sonybank.jp`, S3 static screens, AWS BFF trace headers, and no Akamai. Login explicitly loads PhishWall/Caulis device-information scripts; bank guidance describes firewalls, continuous monitoring, automatic logout. AWS WAF association, bot scores, and headless/datacenter decisions are not established publicly.
+- Two official apps exist. `ソニー銀行 アプリ` (Sony Bank App) covers all-product balances/authentication/transactions; `Sony Bank WALLET アプリ` (Sony Bank WALLET App) focuses on yen/foreign ordinary balances, Visa debit history, card settings. Play package/version pairs were `net.moneykit.SonyBankApp`/`8.02.00`, `net.moneykit.sbw`/`12.04.00`. The main app's renewal announcement starting that day conflicts with listing dates, leaving staged-rollout/metadata-delay version gaps unresolved. Analyze Web bundles/legitimate split APKs in parallel, without requiring Web gaps first.
+- Current overall rating is **implementation cost 4/5, automation level C**. Start low-frequency normal-Chrome login/official CSV downloads, considering JSON replay only after captured current BFF read endpoints. Persistent-profile local/OCI/Cloudflare Containers suit this better than Workers alone.
 
-## スコープ、安全境界、調査方法
+## Scope, safety boundaries, and method
 
-本人名義口座を銀行自身の Web / app から直接、読み取り専用で取得する経路だけを
-対象とする。次を絶対条件とする。
+Only direct read-only retrieval of the user's own accounts through bank Web/apps is covered, with these absolute conditions.
 
-- 口座 ID、店番号、口座番号、氏名、住所、メール、電話、実残高、取引内容、password、
-  OTP、合い言葉、cookie、token、端末鍵を取得・記録・commit しない。
-- 振込、振替、外貨売買、定期預入/解約、投信/FX 注文、loan 操作、証明書申込、
-  情報連携同意、認証方式変更、app 再登録、通知/カード設定変更を行わない。
-- 読み取り画面に `メモを編集` があっても、メモ登録は write なので触らない。
-- login 失敗、401/403/429、challenge、追加認証、規約同意、登録情報確認、app 承認、
-  CAPTCHA、account lock の兆候が出た時点で止め、自動 retry しない。
+- Do not retrieve/record/commit account IDs, branch/account numbers, names, addresses, emails, phones, actual balances/transactions, passwords, OTPs, security phrases, cookies, tokens, or device keys.
+- No transfers/account transfers, FX trades, time deposits/cancellations, fund/FX orders, loan operations, certificate applications, information-sharing consent, auth-method changes, app re-registration, notification/card settings.
+- Do not touch `メモを編集` (edit memo) on read screens; memo registration is a write.
+- Stop on login failure, 401/403/429, challenges, additional authentication, terms consent, registration checks, app approval, CAPTCHA, or lock signs, without automatic retries.
 
-今回、認証済み口座へ新規 login せず、公開公式ページ、未認証の公式 login 入口、
-公式配信の JavaScript/config、Google Play の公式掲載、公開 GitHub 実装を調べた。
-follow-up では 2026-08-26 の current Next.js build、公式 Play の package/version/update
-metadata、workspace 内の APK artifact/tool availability も再確認した。
-未認証入口には架空値も含めて何も入力していない。公開 header の確認は HEAD/GET
-だけであり、口座データや認証 cookie は取得していない。
+This research made no fresh authenticated-account login, checking public official pages/login entrypoints, official JavaScript/configs, Google Play, and public GitHub code. Follow-up rechecked the 2026-08-26 current Next.js build, Play package/version/update metadata, and workspace APK/tool availability. No values, including invented ones, were entered. Public headers were checked with HEAD/GET only; no account data/auth cookies acquired.
 
-情報源の優先順位は次の通りである。
+Source priority:
 
-1. ソニー銀行の公式 Web、公式 help、公式規約、公式配信 asset
-2. ソニー銀行がリンクする Google Play の公式アプリ掲載
-3. 実装方式の参考に限って、commit 固定した第三者公開コード
-4. aggregator は初期経路にしない。公式 API の対象範囲を知る比較資料としてのみ参照
+1. Official Sony Bank Web/help/terms/served assets
+2. Official Google Play listings linked by the bank
+3. Commit-pinned public third-party code only as implementation references
+4. No aggregator initial routes; use only comparison material for official API coverage
 
-## 公式経路と取得対象
+## Official routes and retrieval targets
 
-| 公式経路                                                                                              | 読み取り対象                                                                   | 位置付け                                                   |
-| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------------------- |
-| [ソニー銀行 Web](https://sonybank.jp/) / [現行ログイン](https://sonybank.jp/pages/db/dbca0100/input/) | 全商品残高、円通帳、外貨/定期/仕組み預金の残高・履歴、投信、FX、loan、電子交付 | primary。CSV/公式画面を保存する                            |
-| [円預金・通帳](https://sonybank.jp/products/yen/)                                                     | 円普通の過去すべての入出金履歴、普通預金取引履歴 CSV                           | MVP と backfill の第一候補                                 |
-| [外貨入出金履歴 CSV](https://sonybank.jp/products/fc/39.html)                                         | 全通貨の外貨普通・外貨定期・為替リンク預金（外貨 start）の入出金               | 外貨の primary artifact                                    |
-| [外貨損益状況](https://sonybank.jp/tool/fc/40.html)                                                   | 商品/通貨別評価損益、直近2年の実現損益、開始から現在までの集計明細             | ledger と別の公式計算結果。必要なら第2段階                 |
-| [ソニー銀行 アプリ](https://sonybank.jp/tool/app/sb/)                                                 | 全商品残高、外貨普通取引、振込、OTP、情報照会                                  | 認証補助・manual 照合。取引機能は使わない                  |
-| [Sony Bank WALLET アプリ](https://sonybank.jp/tool/app/sbw/)                                          | 円/外貨普通残高、通貨別履歴、Visa debit 利用状況                               | debit/普通預金の manual fallback                           |
-| [情報連携サービス](https://sonybank.jp/services/api/)                                                 | 契約済み外部事業者へ残高・明細・金利・為替レート                               | 安定した公式 API だが aggregator 経由のため初期不採用      |
-| [参照系 API 方針](https://sonybank.jp/stpl/161.html)                                                  | 預金、投信、FX、GATE、loan 等の残高/通帳                                       | 個人用 self-service token ではなく、適格企業との契約が必要 |
+| Route                                                                                                 | Read targets                                                                                                        | Role                                                         |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| [Sony Bank Web](https://sonybank.jp/) / [current login](https://sonybank.jp/pages/db/dbca0100/input/) | All-product balances, yen passbook, foreign/time/structured balances/history, funds, FX, loans, electronic delivery | Primary; save official CSV/screens                           |
+| [Yen deposits/passbook](https://sonybank.jp/products/yen/)                                            | All past yen ordinary transactions, ordinary-deposit CSV                                                            | First MVP/backfill candidate                                 |
+| [Foreign transaction CSV](https://sonybank.jp/products/fc/39.html)                                    | All-currency ordinary/time/FX-linked foreign-start flows                                                            | Primary foreign artifact                                     |
+| [Foreign gains/losses](https://sonybank.jp/tool/fc/40.html)                                           | Product/currency valuations, past 2-year realized gains/losses, inception-to-current aggregates                     | Separate official calculations; phase 2 if needed            |
+| [ソニー銀行 アプリ](https://sonybank.jp/tool/app/sb/)                                                 | All-product balances, foreign ordinary transactions, transfers, OTP, inquiries                                      | Auth assistance/manual checking; no transactions             |
+| [Sony Bank WALLET アプリ](https://sonybank.jp/tool/app/sbw/)                                          | Yen/foreign ordinary balances, currency history, Visa debit usage                                                   | Debit/ordinary manual fallback                               |
+| [Information-linking service](https://sonybank.jp/services/api/)                                      | Balances/statements/rates to contracted outside providers                                                           | Stable official API, but aggregator route excluded initially |
+| [Read-API policy](https://sonybank.jp/stpl/161.html)                                                  | Deposit/fund/FX/GATE/loan balances/passbooks                                                                        | Eligible-company contract, not personal self-service token   |
 
-### 残高・口座対象範囲
+### Balance/account coverage
 
-[公式アプリの表示内容](https://sonybank.jp/tool/app/banking/01.html) と
-[公式の参照系 API 一覧](https://sonybank.jp/stpl/161.html) を合わせると、少なくとも
-次を公式に列挙できる。
+Combining [official app displays](https://sonybank.jp/tool/app/banking/01.html) and [official read-API list](https://sonybank.jp/stpl/161.html) establishes at least the following.
 
-| 商品                      | 残高の粒度                                                    | 履歴/明細の扱い                                                 |
-| ------------------------- | ------------------------------------------------------------- | --------------------------------------------------------------- |
-| 円普通預金                | 口座の現在残高。外貨送金の円貨未受渡金を含む場合がある        | 通帳/CSV。過去すべての入出金                                    |
-| 円定期預金                | 円預金合計と契約/預入明細                                     | 取引型 ledger ではなく元金、期間、満期、金利等の lot として取得 |
-| 積み立て定期預金          | plan/契約と残高。app 表示金利は預入分の加重平均               | 積立 plan と各預入の関係を live 確認                            |
-| 外貨普通預金              | 通貨別 native 残高。未受渡金を含む表示がある                  | 通貨別取引履歴、全通貨横断 CSV                                  |
-| 外貨定期預金              | 通貨・契約単位。現在/予約 rate による円換算は参考値           | 横断 CSV では契約番号、元本/利息を分けた満期・中途解約明細      |
-| 円定期 plus+              | 契約単位。未受渡金を含む                                      | 円普通 ledger と分離。預入日の0時以降に商品明細へ反映           |
-| 為替リンク預金            | 円 start / 外貨 start、通貨・契約単位。円換算は条件付き参考値 | 外貨 start は横断 CSV 対象。特約 rate を別 field に保持         |
-| 投資信託                  | 円建/外貨建、口座区分、fund、口数、基準価額、評価額/損益      | 取引履歴 CSV と電子交付書面があるが、預金 MVP 後に別 collector  |
-| FX                        | 有効証拠金、評価損益、建玉/入出金/取引履歴                    | 独立取引 system。預金 collector に混ぜない                      |
-| Sony Bank GATE            | 募集中 fund の申込金、投資残高                                | 独立商品。募集/償還 lifecycle を別モデル化                      |
-| 住宅・目的別・カード loan | 契約別残高/返済予定                                           | asset と相殺せず liability として保存。PDF は商品別に存在       |
+| Product                                      | Balance granularity                                                                  | History/details                                                                |
+| -------------------------------------------- | ------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| 円普通預金 (yen ordinary deposits)           | Current account balance, sometimes including unsettled yen for foreign remittances   | Passbook/CSV, all past transactions                                            |
+| 円定期預金 (yen time deposits)               | Yen totals and contract/deposit details                                              | Principal, term, maturity, rate lots, not transaction ledgers                  |
+| 積み立て定期預金 (installment time deposits) | Plans/contracts/balances; app rates are weighted deposit averages                    | Validate plan/deposit relationships live                                       |
+| 外貨普通預金 (foreign ordinary deposits)     | Native balance per currency, sometimes including unsettled amounts                   | Per-currency history/cross-currency CSV                                        |
+| 外貨定期預金 (foreign time deposits)         | Currency/contract; yen conversions at current/reserved rates are reference values    | Cross-product CSV separates principal/interest for maturity/early cancellation |
+| 円定期 plus+                                 | Contracts including unsettled amounts                                                | Separate from ordinary ledger; appears from 0:00 on deposit date               |
+| 為替リンク預金 (FX-linked deposits)          | Yen/foreign start, currency/contract; conditional reference yen conversions          | Foreign-start covered in cross-product CSV; separate special rate              |
+| 投資信託 (investment trusts)                 | Yen/foreign denomination, account category, fund, units, base price, valuation/gains | Transaction CSV/electronic documents; separate post-deposit-MVP collector      |
+| FX                                           | Effective margin, unrealized gains/losses, positions/deposits/transactions           | Separate trading system, outside deposit collector                             |
+| Sony Bank GATE                               | Application funds for open offerings, invested balance                               | Separate product/offer-redemption lifecycle                                    |
+| Home/purpose/card loans                      | Contract balances/repayment schedules                                                | Liabilities without netting assets; product-specific PDFs                      |
 
-アプリの総残高は円預金、外貨預金、仕組み預金、投資信託の未受渡金を含む一方、
-FX の有効証拠金は総残高に含めない。native amount/currency、公式の参考円換算、
-未受渡金、評価時刻を分離し、円換算値を簿価や約定 rate として扱わない。
+App totals include unsettled yen/foreign/structured-deposit/fund amounts but exclude effective FX margin. Separate native amount/currency, official reference yen conversions, unsettled amounts, valuation time. Yen equivalents are not book costs/execution rates.
 
-契約先向け参照系 API は、円普通残高/通帳、円定期、積立定期、外貨普通残高/通帳、
-外貨定期、rate、金利、円定期 plus+、為替リンク預金、FX、投資信託、GATE、住宅 loan、
-カード loan の残高を公式に列挙している。これは対象範囲の強い根拠だが、銀行が
-適格性を認めた企業との契約が前提で、Kogane が直ちに利用できる public API ではない。
+Contracted read APIs officially enumerate yen ordinary balances/passbooks, yen time/installment time, foreign ordinary balances/passbooks, foreign time, FX/interest rates, plus+, FX-linked deposits, FX, funds, GATE, home/card loan balances. Strong coverage evidence, but bank-approved eligible-company contracts are required, not immediate public Kogane API access.
 
-## 明細の粒度、期間、件数、export
+## Statement granularity, periods, counts, and export
 
-### 円普通預金
+### Yen ordinary deposits
 
-[円預金の公式案内](https://sonybank.jp/products/yen/) は次を明記している。
+[Official yen-deposit guidance](https://sonybank.jp/products/yen/) explicitly states:
 
-- 紙通帳ではなく Web の「通帳」で**過去すべて**の入出金履歴を確認できる。
-- 「普通預金取引履歴」は CSV で download できる。
-- [通帳 help](https://sonybank.jp/guide/bankbook/01.html) では開始/終了日の片方だけでも
-  期間指定でき、入金/出金、昇順/降順、keyword で絞り込める。
-- keyword は摘要、利用者が登録した入出金 memo、振込 EDI 情報を検索対象とする。
+- Web `通帳` (passbook), rather than paper, provides **all past** transactions.
+- `普通預金取引履歴` (ordinary-deposit transaction history) downloads as CSV.
+- [Passbook help](https://sonybank.jp/guide/bankbook/01.html) supports either/both start/end dates, inflow/outflow, ascending/descending order, keywords.
+- Keywords search descriptions, user-entered transaction memos, and transfer EDI information.
 
-公式公開資料は1画面/1 download の最大件数、page size、同一日の順序保証、CSV の
-文字 code と全 column を公開していない。第三者実装の 2025-05-18 時点の CSV parser
-では `取引日`、`摘要`、`引出額`、`預入額`、`差引残高` を読み、Shift_JIS としている。
-これは現行 2026 schema の保証ではなく、live fixture で再確認する。
+Public material does not specify per-screen/download maxima, page size, same-day ordering, encoding, or full CSV columns. A third-party parser as of 2025-05-18 reads `取引日` (transaction date), `摘要` (description), `引出額` (withdrawal), `預入額` (deposit), `差引残高` (resulting balance) as Shift_JIS. This does not guarantee 2026 schemas; reconfirm with live fixtures.
 
-銀行通帳のメモは40文字まで編集可能だが write なので collector は編集しない。
-表示上の memo と EDI 情報が CSV に含まれるか、HTML だけかも live 確認事項である。
+Passbook memos allow 40 characters but are writes, never edited by collectors. Whether memos/EDI appear in CSV or only HTML remains for live validation.
 
-### 外貨普通・外貨定期・為替リンク預金
+### Foreign ordinary/time/FX-linked deposits
 
-[外貨入出金履歴 CSV の公式仕様](https://sonybank.jp/products/fc/39.html) は、全通貨・
-対象商品間の振替を含む履歴を古い順に一括 download し、次の9項目を持つ。
+[Official foreign transaction CSV specifications](https://sonybank.jp/products/fc/39.html) provide oldest-first combined downloads across currencies/products, including internal transfers, with nine fields.
 
-1. お取引日
-2. 契約番号
-3. 摘要
-4. 入金額（外貨）
-5. 出金額（外貨）
-6. 取引後残高（外貨）
-7. 適用 rate（TTS/TTB/TTM）
-8. 取引円換算額
-9. 特約 rate
+1. `お取引日` (transaction date)
+2. `契約番号` (contract number)
+3. `摘要`
+4. `入金額（外貨）` (foreign-currency inflow)
+5. `出金額（外貨）` (foreign-currency outflow)
+6. `取引後残高（外貨）` (post-transaction foreign balance)
+7. `適用 rate` (applied rate, TTS/TTB/TTM)
+8. `取引円換算額` (transaction yen equivalent)
+9. `特約 rate` (special-agreement rate)
 
-満期・中途解約は元本と利息を分ける。外貨普通から外貨定期への預入など、商品間
-振替も記録されるため、同一資産の内部移動を外部 income/expense と誤認しない。
+Maturity/early cancellations separate principal/interest. Internal movements such as foreign ordinary→time deposits are recorded; do not mistake them for external income/expense.
 
-外貨商品画面の「取引履歴」は取引完了時に作る一方、横断 CSV は他商品への振替
-完了時に明細を作る。外貨建投信、外貨 MMF、募集型外貨定期、為替リンク預金の
-未受渡中には残高差が出る。artifact type と取得時刻を保存し、瞬間的な不一致を
-欠損と断定しない。
+Foreign-product `取引履歴` (transaction history) is created on completion, while cross-product CSV details arise when transfers to other products complete. Unsettled foreign funds/MMFs/offering-type foreign time/FX-linked deposits may cause balance differences. Preserve artifact types/times; temporary mismatch does not establish missing data.
 
-[外貨損益状況](https://sonybank.jp/tool/fc/40.html) は、直近2年の実現損益と、取引開始
-から直近までの為替差損益/利息の集計明細を表示する。これは cash ledger の代わり
-ではなく、銀行公式の tax/評価計算を別 artifact として保存する候補である。
+[Foreign gains/losses](https://sonybank.jp/tool/fc/40.html) displays past 2-year realized gains/losses and inception-to-latest FX/interest aggregates. These are separate official tax/valuation calculation artifacts, not cash ledgers.
 
-### CSV、PDF、statement の整理
+### CSV, PDF, and statements
 
-| artifact                     | 期間/対象                                              | 機械可読性                        | 用途                      |
-| ---------------------------- | ------------------------------------------------------ | --------------------------------- | ------------------------- |
-| 円通帳 HTML                  | 口座開設後の過去すべて                                 | DOM/BFF。件数/page 未確認         | 最新照合、memo/EDI        |
-| 円普通 CSV                   | 公式に download 可。過去全件を一度に出せるか live 確認 | 高い。2025例は Shift_JIS、5主要列 | primary ledger            |
-| 外貨横断 CSV                 | 外貨普通/定期/為替リンク外貨 start の全通貨入出金      | 高い。公式9項目                   | primary FX/deposit ledger |
-| 外貨損益集計                 | 実現損益2年、集計明細は開始から現在                    | HTML/CSV可否は live 確認          | 公式損益との照合          |
-| 投信取引履歴 CSV             | 公式に存在                                             | 高い。口座区分、取得単価等        | 投信専用 collector        |
-| 電子交付書面                 | 外貨預金、投信、GATE、FX 等                            | PDF                               | audit/reference           |
-| 通常預金の残高証明/statement | 指定日/期間。申込、手数料、郵送を伴う                  | 紙/手続 artifact                  | 自動収集対象外            |
+| Artifact                               | Period/scope                                                  | Machine readability                                  | Use                              |
+| -------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------- | -------------------------------- |
+| Yen passbook HTML                      | All since account opening                                     | DOM/BFF; count/pages unconfirmed                     | Current checks, memos/EDI        |
+| Yen ordinary CSV                       | Official download; all-history single export needs live check | High; 2025 example Shift_JIS/5 main columns          | Primary ledger                   |
+| Cross-product foreign CSV              | All-currency ordinary/time/FX-linked foreign-start flows      | High; official 9 fields                              | Primary FX/deposit ledger        |
+| Foreign gains/losses totals            | 2-year realized, inception-to-current aggregate details       | HTML/CSV availability needs live check               | Official gains/losses comparison |
+| Fund transaction CSV                   | Officially exists                                             | High; account category/acquisition unit prices, etc. | Dedicated fund collector         |
+| Electronic documents                   | Foreign deposits/funds/GATE/FX, etc.                          | PDF                                                  | Audit/reference                  |
+| Ordinary balance certificate/statement | Specified dates/periods; application/fees/mail                | Paper/procedure artifact                             | Excluded from automation         |
 
-普通預金通帳そのものの PDF download は公開資料で確認できない。残高証明書や
-お取引明細書の申込は外部 write、手数料引落、郵送を伴うため、read-only collector
-は絶対に申込まない。商品別電子交付 PDF は「閲覧/download」だけが明確な場合に限る。
+Ordinary-passbook PDF downloads were not confirmed publicly. Certificate/statement applications involve external writes, fee debits, and mail; read-only collectors must never apply. Product-specific PDFs are allowed only when clearly viewing/downloading.
 
-## 認証、passkey、Bitwarden
+## Authentication, passkeys, and Bitwarden
 
-### 確認できた事実
+### Confirmed facts
 
-- [公式 login guide](https://sonybank.jp/guide/support/howtologin/) は、通常 login に
-  店番号、口座番号、32桁以内の login password を入力すると説明する。2026-08-26の
-  現行 login UI も3項目で、公開 bundle は3桁/7桁へ zero padding して JSON POST する。
-- [公式認証一覧](https://sonybank.jp/guide/auth/) は重要取引用に、スマホ認証、物理
-  token OTP、合い言葉の3方式を挙げる。どの方式でも Web 取引には login password
-  等が別途必要である。
-- [スマホ認証](https://sonybank.jp/guide/auth/01.html) は app 内6桁 OTP と、振込内容を
-  app 固有暗号鍵で署名する transaction 認証である。利用端末は1口座1台。初回登録は
-  Web 初回 login、cash card、状況により登録電話への SMS を使う。
-- Web からの振込は app へ内容を通知し、利用者が振込先・口座・金額を確認して実行する。
-  これは write 境界であり、Kogane は通知要求も app 実行も行わない。
-- 2026-08-26 の app renewal は再登録/SMS 認証を要求し、pattern 認証、残高推移、
-  一部絞込、通知履歴を削除する。旧版は一定期間使えるが通知が止まる。
-- 公式 page と現行 login asset の語彙/実装から、WebAuthn、FIDO2、passkey、
-  `PublicKeyCredential` は確認できなかった。
+- The [official login guide](https://sonybank.jp/guide/support/howtologin/) specifies branch/account numbers and passwords up to 32 characters. Current UI on 2026-08-26 also has three fields; public bundles zero-pad numbers to three/seven digits and JSON POST them.
+- [Official authentication guidance](https://sonybank.jp/guide/auth/) lists smartphone auth, physical-token OTP, security phrases for important transactions. All still require separate Web login passwords, etc.
+- [Smartphone authentication](https://sonybank.jp/guide/auth/01.html) uses six-digit app OTP and transaction signatures with app-specific keys for transfer contents. One device per account; initial registration uses initial Web login, cash card, and sometimes registered-phone SMS.
+- Web transfers notify the app; users verify recipient/account/amount and execute. This is a write boundary; Kogane requests no notification and performs no app execution.
+- The 2026-08-26 renewal requires re-registration/SMS, removing pattern auth, balance trends, some filtering, and notification history. Older versions remain briefly usable but notifications stop.
+- Official pages/current assets did not reveal WebAuthn, FIDO2, passkeys, or `PublicKeyCredential`.
 
-### Bitwarden と passkey の区別
+### Distinguish Bitwarden from passkeys
 
-| 状況                                                                      | 判定                                         |
-| ------------------------------------------------------------------------- | -------------------------------------------- |
-| Bitwarden が店番号/口座番号/password を fill                              | password manager 利用。passkey ではない      |
-| browser が WebAuthn prompt を出し、RP ID に紐づく credential で assertion | passkey。ただしソニー銀行で未確認            |
-| app の生体認証/PIN で app を開き6桁 OTP を表示                            | app local unlock + OTP。passkey ではない     |
-| app が振込内容を確認して署名値を作る                                      | transaction 認証。Web login passkey ではない |
+| Situation                                                  | Assessment                              |
+| ---------------------------------------------------------- | --------------------------------------- |
+| Bitwarden fills branch/account/password                    | Password manager, not passkey           |
+| Browser WebAuthn prompt/assertion with RP-bound credential | Passkey, unconfirmed at Sony Bank       |
+| Biometrics/PIN opens app displaying six-digit OTP          | Local unlock + OTP, not passkey         |
+| App verifies/signs transfer contents                       | Transaction auth, not Web-login passkey |
 
-Bitwarden vault の中身は開かない。live 検証では extension UI に表示される credential
-type と browser の WebAuthn dialog 有無だけを利用者と一緒に目視し、値を capture、
-log、environment variable、session envelope、Git に出さない。公開事実と異なる
-「Bitwardenにあるからpasskey」という推測は採用しない。
+Do not open Bitwarden vault contents. In live validation, visually check only extension credential types/WebAuthn-dialog presence with the user. Never capture/log/pass values through environment variables, session envelopes, or Git. Do not infer passkeys merely from Bitwarden storage against public facts.
 
-### login と追加認証の境界
+### Login versus additional authentication
 
-残高/明細の通常 login が password のみで完了する見込みは高いが、risk 判定による
-step-up 条件は公開されていない。次のいずれかが出たら自動化は止める。
+Ordinary balance/statement login likely needs only passwords, but risk-based step-up conditions are unpublished. Stop automation for:
 
-- OTP、合い言葉、cash card 製造番号、SMS、電話音声 code、app 登録/再登録
-- `お客さま情報の確認/変更`、規約/電子交付への同意、認証方式変更
-- 振込、振替、売買、預入、解約、限度額、カード/通知設定への遷移
+- OTP, security phrases, cash-card manufacturing numbers, SMS, voice codes, app registration/re-registration
+- `お客さま情報の確認/変更` (customer-information confirmation/change), terms/electronic-delivery consent, auth-method changes
+- Navigation to transfers/account transfers/trades/deposits/cancellations/limits/card-notification settings
 
-読み取りに不要な OTP/合い言葉を collector secret として保管しない。
+Do not store unnecessary OTPs/security phrases as collector secrets.
 
-## 現行 Web の transport と session
+## Current Web transport and sessions
 
-2026-08-26 の未認証 public asset から、現在の login flow は次の構成と確認できた。
+Unauthenticated public assets on 2026-08-26 establish this login composition.
 
-- `sonybank.jp/pages/db/...` は Next.js SPA。HTML/JS は S3 origin の CloudFront 配信。
-- [`core.js`](https://sonybank.jp/pages/config/core.js) は BFF base を
-  `/custom-web00`、認証 provider header を `FBaaS-Provider-Key: CustomAuth` と定義する。
-- 調査開始時のlogin bundleでは
-  `POST /custom-web00/dbca/cust-web/to-customers/login`を確認した。同日follow-up時の
-  rebuildではpath literalがshared chunkに露出せず、current runtime transportは未確定。
-- JSON payload は `requestBizHdCommon.screenId = DBCA0100I1f`、
-  `eventId = DBCA0100I1fE15` と、data 内の `branchNum`、`accountNum`、`loginPwd`。
-- axios interceptor は CSRF token、locale、`FBaaS-SS: db`、
-  `FBaaS-Revision: revision-<current>`、event hash を request に追加する。revision は
-  public JSON で更新確認し、画面切替/timeout/error も BFF response に依存する。
-- 2026-08-26 の調査開始時public revisionは691だったがdeployのたびに変わる。hard-codeせず
-  page asset が提供する値を使う。
-- credential なしの BFF HEAD は401、CloudFront `Error from cloudfront`、
-  `x-amzn-trace-id` を返した。401 は正常な未認証結果で、endpoint availability のみを示す。
+- `sonybank.jp/pages/db/...` is a Next.js SPA; S3-origin HTML/JS through CloudFront.
+- [`core.js`](https://sonybank.jp/pages/config/core.js) sets BFF base `/custom-web00` and auth-provider header `FBaaS-Provider-Key: CustomAuth`.
+- Initial login bundles showed `POST /custom-web00/dbca/cust-web/to-customers/login`; same-day follow-up rebuild did not expose the literal in shared chunks, leaving current runtime transport unconfirmed.
+- JSON payload has `requestBizHdCommon.screenId = DBCA0100I1f`, `eventId = DBCA0100I1fE15`, and data `branchNum`, `accountNum`, `loginPwd`.
+- Axios interceptors add CSRF, locale, `FBaaS-SS: db`, `FBaaS-Revision: revision-<current>`, and event hashes. Check revision through public JSON; screen transitions/timeouts/errors depend on BFF responses.
+- Initial public revision on 2026-08-26 was 691, changing with deployment. Use served values, never hardcode.
+- Credential-free BFF HEAD returned 401, CloudFront `Error from cloudfront`, and `x-amzn-trace-id`: normal unauthenticated behavior establishing endpoint availability only.
 
-ログイン password を JSON body で送る以上、BFF replay を実装する場合も auth request
-body、headers、Caulis telemetry は raw evidence として保存しない。認証後 response の
-read endpoint だけを allowlist し、write endpoint は source code と runtime egress
-allowlist の両方から除外する。
+Because passwords are in JSON bodies, BFF replay must not retain auth bodies/headers/Caulis telemetry as raw evidence. Allowlist only authenticated-response read endpoints; exclude writes from source and runtime egress allowlists.
 
-session cookie の名前、idle/absolute lifetime、並行 session、IP/UA binding、logout 時
-失効、cookie export/import 可否は未確認。画面遷移の local/session storage と cookie
-だけを保存しても、Caulis/PhishWall state が足りない可能性がある。
+Cookie names, idle/absolute lifetime, concurrency, IP/UA binding, logout invalidation, export/import are unconfirmed. Local/session storage and cookies alone may omit required Caulis/PhishWall state.
 
 ### 2026-08-26 public Web/BFF follow-up
 
-同日 11:03 AEST 頃の login HTML は Next build ID `swtv76wAOANOG8i6C3jrC` を参照した。
-route chunk は423 bytesで、login本体 module `00Lr`をshared chunkから読む構成だった。
-shared chunk `5c38...c01c91f...js`の SHA-256 は
-`5c0170415f29dd83649446e0f4e0bd1eabb1bbef34a645f74fc159378667f950`である。
-これはpublic assetのprovenanceで、bank APKまたは認証sessionのhashではない。対応する
-source mapはHTTP 403で、取得を迂回しなかった。
+Around 11:03 AEST that day, login HTML referenced Next build `swtv76wAOANOG8i6C3jrC`. The 423-byte route chunk loaded module `00Lr` from shared chunks. Shared `5c38...c01c91f...js` SHA-256 was `5c0170415f29dd83649446e0f4e0bd1eabb1bbef34a645f74fc159378667f950`, public-asset provenance, not APK/auth-session hashes. Source maps returned HTTP 403; no bypass.
 
-current public bundleで確認できたsession bootstrapは次の通り。
+Current public-bundle session bootstrap:
 
-1. 未認証画面はevent `DBCA5700C1fE99`でCSRF初期化を行い、成功responseの
-   `bff-csrf` headerを以後の`BFF-CSRF` request headerへ入れる。
-2. login formはevent `DBCA0100I1fE15`とbranch/account/passwordをlogin action
-   `DBCA185AF`へ渡す。Caulis scriptはsubmit stateに連動して読み込まれる。
-3. public response modelは`accountInfo[]`、`customerLoginResFlg`、氏名field、
-   `integratedId`、`maUniqueId`等を含む。これらはPII/identifierなのでcaptureしない。
-4. login後のcurrent-user action `DBBA505AF`はresponse wrapperの
-   `fbaas-login-info` headerを`loginId`として読む。localStorageの`loginStat=1`は
-   複数画面間の表示statusにすぎず、認証credentialまたはreusable tokenではない。
-5. authenticated sessionを実際に発行するcookie/header、その`Secure`/`HttpOnly`/
-   `SameSite`、rotation、logout失効はpublic JSに露出せず未確認である。
+1. Unauthenticated event `DBCA5700C1fE99` initializes CSRF; response `bff-csrf` becomes later `BFF-CSRF` headers.
+2. Login passes `DBCA0100I1fE15`/branch/account/password to action `DBCA185AF`; Caulis loads with submit state.
+3. Public models include `accountInfo[]`, `customerLoginResFlg`, name fields, `integratedId`, `maUniqueId`, etc.; PII/identifiers excluded from capture.
+4. Authenticated current-user action `DBBA505AF` reads wrapper header `fbaas-login-info` as `loginId`. LocalStorage `loginStat=1` is cross-screen display state, not credentials/reusable tokens.
+5. Actual session cookies/headers, `Secure`/`HttpOnly`/`SameSite`, rotation, logout invalidation are not exposed and remain unconfirmed.
 
-前回確認した`/custom-web00/dbca/cust-web/to-customers/login`はBFF transportの強い候補
-だが、当日のrebuild後のpublic chunkではpath literalを再確認できず、API IDから推測して
-probeしない。本人操作runtime観測でhost/path/method/statusとheader**名だけ**を確認して
-現行性を確定する。public bundleには円/外貨、card loan、住宅loan等のtransaction group
-IDと広いresponse modelが含まれるが、認証後read endpointのURL、pagination、session
-scopeを証明するものではない。
+The earlier `/custom-web00/dbca/cust-web/to-customers/login` is a strong transport candidate, but same-day rebuilt chunks did not reconfirm its literal; do not infer/probe API IDs. Establish current transport from user-operated runtime host/path/method/status and header **names only**. Public bundles contain yen/foreign/card-home-loan transaction-group IDs/broad models, not proof of read URLs/pagination/session scope.
 
-## CDN、WAF、anti-bot / anti-fraud
+## CDN, WAF, anti-bot / anti-fraud
 
-### 確認できた事実
+### Confirmed facts
 
-- `sonybank.jp` は 2026-08-26 に CloudFront IP を返し、public HTML は
-  `Server: AmazonS3`、`Via: ...cloudfront.net`、`x-amz-cf-*` を返した。
-- BFF の未認証 response も CloudFront 経由で、AWS `x-amzn-trace-id` があった。
-- [公式セキュリティ案内](https://sonybank.jp/guide/securityinfo/07.html) は firewall、
-  24時間365日監視、TLS、一定時間での自動 logout、フィッシング検知を明記する。
-- [`env.js`](https://sonybank.jp/pages/config/env.js) は login page の PhishWall script
-  7本と、Caulis の `static.fraud-alert.net` / `p.fraud-alert.net`、site ID、cookie domain
-  `sonybank.jp`、login 専用 `Caulis.snbk_v3.min.js` を公開設定として持つ。
-- login component は submit 時に Caulis hook を実行する。単なる HTML form 送信ではなく、
-  JavaScript、BFF headers、anti-fraud telemetry を含む SPA flow である。
+- On 2026-08-26, `sonybank.jp` returned CloudFront IPs; public HTML had `Server: AmazonS3`, `Via: ...cloudfront.net`, `x-amz-cf-*`.
+- Unauthenticated BFF responses also passed CloudFront with AWS `x-amzn-trace-id`.
+- [Official security guidance](https://sonybank.jp/guide/securityinfo/07.html) specifies firewalls, 24/365 monitoring, TLS, timed automatic logout, phishing detection.
+- [`env.js`](https://sonybank.jp/pages/config/env.js) publicly configures seven PhishWall scripts, Caulis `static.fraud-alert.net`/`p.fraud-alert.net`, site ID, `sonybank.jp` cookie domain, login-specific `Caulis.snbk_v3.min.js`.
+- Login invokes Caulis hooks on submit; this is SPA JavaScript/BFF headers/fraud telemetry, not simple HTML forms.
 
-### 確認できなかったこと / 推測
+### Unconfirmed/inferred
 
-- 現行経路で Akamai の DNS、header、script、cookie は観測しなかった。旧または別商品
-  host での Akamai 利用を否定するものではないが、Sony Bank Web の現行 login を
-  Akamai と記述する根拠はない。
-- CloudFront distribution に AWS WAF / Bot Control が関連付いているかは header から
-  確定できない。CloudFront を観測したことと AWS WAF 採用は別事実である。
-- Caulis が送る端末情報、risk score、cookie、bank 側の decision rule、headless 判定、
-  datacenter/cloud IP 判定は未確認。公開 config から anti-fraud 用途は強く示唆されるが、
-  bot product としての具体的挙動を断定しない。
-- PhishWall の存在は利用者保護/不正対策の事実であり、それ自体が browser automation を
-  block するという証拠ではない。
+- No current Akamai DNS/headers/scripts/cookies observed. This does not exclude historical/other-product hosts, but there is no basis to label current Sony Web login Akamai.
+- Headers cannot establish AWS WAF/Bot Control associations. Observing CloudFront is separate from WAF adoption.
+- Caulis device data, risk scores, cookies, bank rules, headless/datacenter/cloud-IP decisions remain unconfirmed. Config strongly suggests anti-fraud use, not specific bot behavior.
+- PhishWall establishes user protection/fraud measures, not proof of automation blocking.
 
-従って、最初の login は公式対応 browser と通常 profile で行う。素の Worker `fetch()`
-で login を再現できると仮定せず、低頻度、同一 profile、同一 UA/egress で成功/失敗を
-測る。401/403/429 や challenge を bypass しない。
+Use official supported browsers/normal profiles initially. Do not assume bare Worker `fetch()` reproduces login; measure low-frequency success/failure with the same profile/UA/egress. Never bypass 401/403/429/challenges.
 
-### 2026-08-30 本人同意済みlive replayとWorkers実行
+### 2026-08-30 user-authorized live replay and Workers execution
 
-上の段階的方針に従って本人の実口座で確認した結果、現行read-only loginはbrowserを必要と
-しなかった。最初にKuebiko Chromeで成功flowを1回観測した後、Chrome cookieを流用しない
-新規`.NET HttpClient`で次の連鎖がすべて200になった。
+Following that staged policy on the user's real account established browserless current read-only login. After observing one successful Kuebiko Chrome flow, a fresh `.NET HttpClient` without Chrome cookies completed all these with 200.
 
 1. `GET /pages/db/dbca0100/input/`
-2. `POST /custom-web00/dbca/csrf-token/get`で`BFF-CSRF`と`FSID`を取得
-3. `FBaaS-Provider-Key: CustomAuth`、画面/event header、店番号、口座番号、login passwordを
-   `POST /custom-web00/dbca/cust-web/to-customers/login`へ送信
+2. `POST /custom-web00/dbca/csrf-token/get` retrieves `BFF-CSRF`/`FSID`
+3. Send `FBaaS-Provider-Key: CustomAuth`, screen/event headers, branch/account/password to `POST /custom-web00/dbca/cust-web/to-customers/login`
 4. `POST /custom-web00/dcba/cust-web/gross-balance/acq`
 5. `POST /custom-web00/eaba/cust-web/ordinary-deposit-transaction-histories`
-6. pagerと`POST /custom-web00/eaba/ordinary-deposit-transaction-histories/csv/load`
+6. Pager and `POST /custom-web00/eaba/ordinary-deposit-transaction-histories/csv/load`
 
-UA、`sec-*`、Origin、Referer、TLS impersonation、Caulis/PhishWall telemetryは付けなかった。
-読取APIはCookie、`BFF-CSRF`、`FBaaS-Message-Locale`、`FBaaS-Request-Biz-Hd-Common`、
-`FBaaS-Revision`、`FBaaS-SS`、`FBaaS-URI`だけで再生できた。`FBaaS-Provider-Key`は
-公開`core.js`にある静的値で、端末評価tokenではない。revisionは
-`/pages/config/revisions/<area>/revision.json`から毎回取得し、固定しない。
+No UA, `sec-*`, Origin, Referer, TLS impersonation, Caulis/PhishWall telemetry was added. Reads replayed using only Cookies, `BFF-CSRF`, `FBaaS-Message-Locale`, `FBaaS-Request-Biz-Hd-Common`, `FBaaS-Revision`, `FBaaS-SS`, `FBaaS-URI`. `FBaaS-Provider-Key` is static public `core.js` configuration, not device-assessment tokens. Fetch `/pages/config/revisions/<area>/revision.json` each time, without pinning revisions.
 
-同じ実装をCloudflare Workerの標準`fetch()`へ移し、Cloudflare egressからも新規login、
-総残高、非空の円履歴、公式CSV取得に成功した。raw responseはprivate R2
-`kogane-sony-bank-collector-poc`へ日付/run単位で保存し、login response、Cookie値、CSRF、
-passwordは保存しない。従って現時点のSony銀行Web collectorはContainer、Browser Rendering、
-Chrome profile、Akamai workaroundを必要としない。
+Porting to standard Cloudflare Worker `fetch()` also succeeded through Cloudflare egress for fresh login, total balances, nonempty yen history, and official CSV. Raw responses went to private R2 `kogane-sony-bank-collector-poc` by date/run; no login responses/Cookie values/CSRF/passwords saved. Thus current Sony Web collection needs no Container, Browser Rendering, Chrome profile, or Akamai workaround.
 
-CSV requestで任意の`depositAndWithdrawalSg`を空文字として送ると422 `FCB00010`になった。
-UI実装どおり値が未定義ならfield自体を省略すると200になる。任意項目を空文字で補完しない。
+Sending optional `depositAndWithdrawalSg` as empty string caused 422 `FCB00010`. Omitting undefined fields as UI does returned 200. Do not fill optional fields with empty strings.
 
-## Sony Bank WALLET利用履歴
+## Sony Bank WALLET usage history
 
-Sony Bank WALLETのVisa debit明細は普通預金BFFの別datasetではなく、銀行BFFから外部card
-基盤へSSOする別系統である。
+Visa debit details are a separate external-card-system SSO route from bank BFF, not another ordinary-deposit dataset.
 
-- [商品詳細説明書](https://sonybank.jp/products/sbw/03.html)はWeb明細の保持を直近15か月とする。
-- `確定日`が日付なら確定、`未確定`なら加盟店から売上確定dataが未着である。
-- 利用、利用取消、売上確定、売上確定取消が別行になる場合と、当初利用行が確定行へ
-  置換される場合がある。merchant名も確定時に変わりうるためappend-only ledgerとして扱わない。
-- [WALLET app](https://sonybank.jp/tool/app/sbw/)は当月利用状況、過去1年の月別推移、
-  都度/継続利用の内訳、継続利用明細、family debitのcard別利用状況を案内する。
-- Visa debit専用明細のCSV/PDFは公式公開資料で確認できない。円/外貨普通CSVは照合に使えるが、
-  確定日、未確定状態、備考、card識別、行置換関係の完全な代替ではない。
+- [Product specifications](https://sonybank.jp/products/sbw/03.html) give Web retention of 15 months.
+- Dated `確定日` (finalization date) means finalized; `未確定` (unfinalized) means merchant sales data not received.
+- Use/cancellation/finalization/finalization-cancellation may be separate rows or original rows replaced by finalized ones. Merchant names may change; not an append-only ledger.
+- [WALLET app](https://sonybank.jp/tool/app/sbw/) describes current-month use, past-year monthly trends, one-off/recurring breakdowns, recurring details, per-card family debit use.
+- Dedicated Visa debit CSV/PDF unconfirmed in public official material. Ordinary yen/foreign CSV aids reconciliation but does not fully replace finalization dates/statuses/remarks/card IDs/replacement relationships.
 
-現行公開bundleの直接利用明細flowは次である。
+Current public-bundle direct usage-details flow:
 
 ```text
 screenId: JADA160AC5f
@@ -371,407 +239,298 @@ data: branchNum, accountNum,
       debitSSOTransactionType="10", serviceId="DAYA070Ao", buttonId="021"
 ```
 
-このresponseの`debitSsoBinDat`は明細ではなく一時SSO dataである。browserはこれをhidden
-`MessageCheck`として`POST https://igw.sonybank.jp/vcfb/vcfb02001`へ送る。通常menuの
-`POST /custom-web00/jada/debit-sso/login`も同じ外部入口へ遷移する。
+Response `debitSsoBinDat` is temporary SSO data, not transactions. Browsers submit it as hidden `MessageCheck` to `POST https://igw.sonybank.jp/vcfb/vcfb02001`. Normal-menu `POST /custom-web00/jada/debit-sso/login` goes to the same external entrypoint.
 
-2026-08-31にKuebikoで本人操作をlive captureし、続けてChrome Cookieを流用しない通常HTTP
-clientで再生した。銀行BFFから発行した一時SSO値を`igw.sonybank.jp`へ渡すと、ASCII hidden
-`r01`/`cc`を持つauto-submit HTMLが返り、これを`dc.sonybank.jp/p/sLogin/RW13F2010101`へ
-POSTすると`利用明細照会`が200になった。Linux BunとCloudflare Workerの標準`fetch()`で
-実装でき、Chrome profileやbrowser runtimeは不要である。
+On 2026-08-31, captured user operation in Kuebiko, then replayed with a normal HTTP client without Chrome Cookies. Bank-issued temporary SSO data sent to `igw.sonybank.jp` returned auto-submit HTML with ASCII hidden `r01`/`cc`; POSTing to `dc.sonybank.jp/p/sLogin/RW13F2010101` returned `利用明細照会` (usage-details inquiry) 200. Linux Bun/standard Worker `fetch()` suffice without Chrome profiles/browser runtimes.
 
-card基盤はJSON APIではなくShift_JIS HTMLで、構造は次だった。
+The card platform is Shift_JIS HTML, not JSON, with this structure.
 
-- 直近15か月は`W131301.referenceDate`の15 optionとして返る。
-- 月切替はNablarch form POST `RW1313010201`。各月は一覧HTML全体として返る。
-- お取引日、ご利用通貨・金額、お取引通貨・金額、換算レート、海外取引経費、現地手数料、
-  お取引内容、承認番号、確定日、備考が一覧内にあり、別detail endpointはない。
-- `RW1313010301`は月別PDFのGET formだが、現PoCはHTMLだけを保存する。
-- 公開`/js/W131301.js`は利用明細月検索を10秒以内に連続送信すると後者を拒否する。
-  実口座でも高速走査の途中で403になり、10.25秒間隔では15か月すべて成功した。
-- 一時SSO値、`r01`、`cc`、Cookie/JSESSIONID、hidden input値はR2へ保存しない。月別HTMLは
-  `;jsessionid`を除去し、hidden inputのvalueを空にしてからprivate R2へ保存する。
+- Last 15 months appear as 15 `W131301.referenceDate` options.
+- Month switching is Nablarch POST `RW1313010201`, returning whole monthly HTML.
+- Lists include `お取引日`, `ご利用通貨・金額` (usage currency/amount), `お取引通貨・金額` (transaction currency/amount), `換算レート` (conversion rate), `海外取引経費` (overseas transaction charges), `現地手数料` (local fees), `お取引内容` (transaction contents), `承認番号` (authorization number), `確定日`, `備考` (remarks); no separate detail endpoint.
+- `RW1313010301` is a monthly-PDF GET form; current PoC saves HTML only.
+- Public `/js/W131301.js` rejects a second month search within 10 seconds. Actual-account rapid scans reached 403; all 15 months succeeded at 10.25-second intervals.
+- No temporary SSO, `r01`, `cc`, Cookies/JSESSIONID, hidden values in R2. Strip `;jsessionid` and blank hidden values before saving monthly HTML privately.
 
-同じlive captureで普通預金取引履歴画面`/pages/ea/eaba0600/`も確認した。通貨はJPYに加え
-USD/EUR/GBP/AUD/NZD/CAD/CHF/HKD/ZAR/SEK、初回は
-`/eaba/cust-web/ordinary-deposit-transaction-histories`、2ページ目以降は
-`/eaba/cust-web/ordinary-deposit-transaction-histories-pager`、CSVは
-`/eaba/ordinary-deposit-transaction-histories/csv/load`である。3件単位、開始位置は
-1/4/7...、20か月を一度に指定しても200になった。2025-01-01〜2026-08-31の実口座smoke
-testでは外貨57 artifact、WALLET 15か月を含む102 artifactを生成し、保存前WALLET HTMLの
-session/hidden値残存は0件だった。明細の実値はdocumentationへ記録していない。
+The same capture confirmed ordinary-deposit screen `/pages/ea/eaba0600/`, with JPY plus USD/EUR/GBP/AUD/NZD/CAD/CHF/HKD/ZAR/SEK. Initial `/eaba/cust-web/ordinary-deposit-transaction-histories`, subsequent `/eaba/cust-web/ordinary-deposit-transaction-histories-pager`, CSV `/eaba/ordinary-deposit-transaction-histories/csv/load`; groups of 3 starting 1/4/7..., even 20-month ranges returned 200. Actual-account smoke test for 2025-01-01–2026-08-31 produced 102 artifacts, including 57 foreign artifacts/15 WALLET months; zero residual sessions/hidden values before storage. No transaction values recorded in documentation.
 
-同日のCloudflare Worker本番検証では2025-09-01〜2026-08-31を走査し、円10件、外貨6件・
-11ページ、WALLET 15か月を含む34 artifactをprivate R2へ保存してfailure 0だった。R2から
-月別HTMLを再取得し、日本語title、JSESSIONIDなし、非空hidden値なし、MessageCheckなしを確認した。
-EURなど取引0件の通貨でCSV生成を呼ぶとCloudflare egressだけ500になる場合があったため、
-0件では空CSVを省略し、残高と空の履歴JSONは保持する。取引がある通貨のCSVは保存する。
+Same-day production Worker validation scanned 2025-09-01–2026-08-31, saving 34 artifacts including 10 yen rows, 6 foreign rows/11 pages, and 15 WALLET months, failure 0. Reread monthly HTML from R2 to confirm Japanese titles, no JSESSIONID/nonempty hidden values/MessageCheck. CSV generation for zero-transaction currencies such as EUR sometimes returned 500 only through Cloudflare egress; omit empty CSVs while retaining balances/empty history JSON. Save CSVs for currencies with transactions.
 
-### 2026-09-04 中央raw-evidence移行の本番検証
+### 2026-09-04 production validation of central raw-evidence migration
 
-source R2を全120 listing page走査して11 manifestを中央へ取り込み、D1で旧v1が2 run、現行v2が
-9 run、合計11 runすべてseal済み、未seal 0を確認した。先頭から同じ11 manifestを再投入した後も
-run数は11のままで、seal済みrunのexact replayは冪等だった。旧v1 manifestのsource objectと
-中央content-addressed objectを1件比較し、SHA-256とbyte数がともに一致した。本文、hash値、残高、
-明細値はverification outputやこの文書へ記録していない。
+Scanned all 120 source-R2 listing pages and ingested 11 manifests. D1 showed 2 old v1/9 current v2 runs, all 11 sealed, 0 unsealed. Replaying the same 11 from the start left counts at 11, confirming exact sealed-run replay idempotence. One old-v1 source/central content-addressed object matched SHA-256/byte counts. No bodies, hashes, balances, or statement values in outputs/docs.
 
-現段階ではoperator実行のbackfill scriptが10 object単位でstaged inventoryを送り、最後にsealする。
-source R2はdurable outboxとして残し、削除しない。後続のreconcilerはmanifest eventと定期repair
-scanを入口にし、同じ冪等contractを自動実行する。
+Currently operator-run backfills send staged inventories in groups of 10 objects, then seal. Source R2 remains a durable outbox without deletion. Future reconcilers use manifest events/periodic repair scans to automate the same idempotent contract.
 
 Historical record: the backfill script, the importer, the outbox reconciler
 Queue and the source bucket `kogane-sony-bank-collector-poc` were retired on
 2026-09-13, after the bucket's objects were copied to `DATA` and verified
 ([legacy retirement](../legacy-retirement.md)). The collector writes each run once, into `DATA`
-([U09 below](#共通-data-r2-への切替-u09)), and its daily run is the Processor's
+([U09 below](#switch-to-shared-data-r2-u09)), and its daily run is the Processor's
 alarm job `sony-bank` (06:00 JST, `0 21 * * *` in `config/alarm-jobs.json`).
 
-## 公式 APK / app と Web の役割
+## Official APKs/apps and Web roles
 
-### 公式配布物
+### Official distribution
 
-- ソニー銀行 アプリ Android package:
+- Sony Bank App Android package:
   [`net.moneykit.SonyBankApp`](https://play.google.com/store/apps/details?id=net.moneykit.SonyBankApp)
-- Sony Bank WALLET アプリ Android package:
+- Sony Bank WALLET App Android package:
   [`net.moneykit.sbw`](https://play.google.com/store/apps/details?id=net.moneykit.sbw)
-- 両方ともソニー銀行公式ページから Google Play / App Store へリンクされ、Play 掲載の
-  developer は SONY BANK INCORPORATED。root 等の不正改造端末では使えない。
-- 公式 site から直接 download する standalone APK は確認できない。Play の split APK/
-  bundle を第三者 mirror から取ると provenance を失うため、Kogane の入力にしない。
+- Both official pages link Google Play/App Store; Play developer is SONY BANK INCORPORATED. Rooted/otherwise improperly modified devices are unsupported.
+- No direct official standalone APK download confirmed. Third-party Play split/bundle mirrors lose provenance and are not Kogane inputs.
 
 ### Play package/version/provenance follow-up
 
-公式bank pageから各Google Play listingへのlinkを再取得し、Play自身のpublic metadataを
-確認した。versionは端末へ配信されたartifactをまだ意味しない。
+Reacquired official bank→Play links and public Play metadata; displayed versions do not yet establish device-delivered artifacts.
 
-| app               | package                    | Play public version / update                   | provenance判定                                                                           |
-| ----------------- | -------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| ソニー銀行 アプリ | `net.moneykit.SonyBankApp` | `8.02.00` / 2026-03-27（JP listingの英語表示） | 公式bank pageから直接link、developer `SONY BANK INCORPORATED`。8月26日renewalとのgapあり |
-| Sony Bank WALLET  | `net.moneykit.sbw`         | `12.04.00` / 2026-08-18                        | 公式bank pageから直接link、developer `SONY BANK INCORPORATED`                            |
+| App               | Package                    | Public Play version/update                  | Provenance assessment                                                           |
+| ----------------- | -------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------- |
+| ソニー銀行 アプリ | `net.moneykit.SonyBankApp` | `8.02.00` / 2026-03-27 (English JP listing) | Direct bank link/developer `SONY BANK INCORPORATED`; gap with August 26 renewal |
+| Sony Bank WALLET  | `net.moneykit.sbw`         | `12.04.00` / 2026-08-18                     | Direct bank link/developer `SONY BANK INCORPORATED`                             |
 
-main appのrenewal告知は2026-08-26に再登録を伴う新versionを配信すると明記する一方、同日の
-Play public metadataは3月の`8.02.00`だった。公式の動作環境pageも2025-10-17更新のまま
-Android 9〜16を掲げるが、renewal告知はnew appをAndroid 12〜16とする。これはstaged rollout、
-地域/device compatibility、cache、metadata反映待ちのいずれかをpublic情報だけでは区別できない。
-`8.02.00`をrenewal後buildと呼ばず、取得deviceに実際に配信された`versionCode/versionName`を
-manifestから読む。
+Renewal notices explicitly scheduled a re-registration-requiring version for 2026-08-26, while that day's public Play metadata still showed March `8.02.00`. Official environments still listed Android 9–16 with a 2025-10-17 update, while renewal guidance said Android 12–16. Public information cannot distinguish staged rollout, region/device compatibility, caching, or metadata delay. Do not call `8.02.00` the renewed build; read actual device-delivered `versionCode/versionName` from manifests.
 
-workspaceには`.apk`/`.apks`/`.aab`/`.xapk`がなく、WSLにも`adb`、`apksigner`、`aapt2`、
-`apkanalyzer`、JADX、apktool、bundletoolがなかった。このため今回manifest/DEX/native libraryを
-解析したという事実はない。mirrorや非公開Play download endpointへ迂回せず、障壁と再実行手順を
-次に固定する。
+No `.apk`/`.apks`/`.aab`/`.xapk` existed in the workspace; WSL lacked `adb`, `apksigner`, `aapt2`, `apkanalyzer`, JADX, apktool, bundletool. Thus no manifest/DEX/native libraries were analyzed here. Do not route around this through mirrors/private Play-download endpoints; record barriers/reproduction below.
 
-### 正規split APKの取得・照合手順
+### Legitimate split-APK acquisition/comparison
 
-本人所有Android端末でGoogle Playの公式listingからinstall/updateした**直後**に行う。
+Perform **immediately after** official Google Play installation/update on the user's Android.
 
-1. 端末とPCの日時、Play account region、device model/ABI/Android version、公式listing URLを
-   local research noteに記録する。account email、Android serial、Advertising IDは記録しない。
-2. Android Platform Toolsをofficial SDKから導入し、`adb shell pm path <package>`でbase/splitの
-   package pathを列挙する。`net.moneykit.SonyBankApp`と`net.moneykit.sbw`を別directoryへ
-   `adb pull`し、original filenameとpull時刻を保持する。
-3. 各APKを`sha256sum`し、`apksigner verify --verbose --print-certs`で全splitが同一signerか確認。
-   signer certificate digest、package、versionCode/versionName、base/split filenameだけを保存する。
-4. `apkanalyzer manifest application-id/version-name/version-code/min-sdk/target-sdk`と
-   `aapt2 dump badging/xmltree`でmanifest metadataを読む。銀行account/device identifierは存在しない
-   install artifactだけを対象にする。
-5. app update後に同じ手順を繰り返し、signer continuity、split集合、version差を比較する。
-   Play public versionとdevice配信versionが異なる場合は両方を残し、片方を上書きしない。
-6. base/split、decompile output、runtime captureはGit/CI/cloudへuploadせず、owner-controlled local
-   encrypted storageで期限付き保持する。repositoryにはhash、version、sanitized findingだけを書く。
+1. Locally record device/PC times, Play-account region, model/ABI/Android version, official listing URL. No account emails, Android serials, Advertising IDs.
+2. Install official SDK Android Platform Tools; list base/split paths with `adb shell pm path <package>`. `adb pull` `net.moneykit.SonyBankApp`/`net.moneykit.sbw` into separate directories, retaining original filenames/pull times.
+3. `sha256sum` each APK; `apksigner verify --verbose --print-certs` checks matching split signers. Save only signer-certificate digest, package, versionCode/versionName, base/split filenames.
+4. Read metadata with `apkanalyzer manifest application-id/version-name/version-code/min-sdk/target-sdk` and `aapt2 dump badging/xmltree`. Only installation artifacts without bank-account/device identifiers are in scope.
+5. Repeat after updates, comparing signer continuity, split sets, versions. Retain both public Play/device versions if they differ; do not overwrite either.
+6. Do not upload APKs/decompilations/runtime captures to Git/CI/cloud. Retain temporarily in owner-controlled encrypted local storage; repository contains only hashes, versions, sanitized findings.
 
-`pm path`が返すinstall directoryのrandom segmentはprovenanceに不要なので正規化する。Play Integrityや
-license checkを騙すためのbundle再署名、repack、patched APK、root/emulator、別region取得は行わない。
+Normalize unnecessary random installation-directory segments returned by `pm path`. Do not re-sign/repack/patch APKs, use root/emulators or alternate-region acquisition to deceive Play Integrity/license checks.
 
-### manifest / static analysisで確認する項目
+### Manifest/static-analysis targets
 
-| 項目                  | 具体的確認                                                                                                                 | 現在の状態                                                 |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| package/provenance    | package、version、split、signer digest、Play listing/updateとの一致                                                        | listingのみ確認。artifact未取得                            |
-| components            | exported activity/service/receiver/provider、permission、intent filter、App Link/deep link                                 | 未確認                                                     |
-| transport             | manifest network security config、cleartext flag、host/path literal、Retrofit/OkHttp、WebView bridge、JSON/protobuf schema | 未確認                                                     |
-| session issuance      | login/register response model、cookie/token/key alias、refresh/rotation/logout、app→Web SSO handoff                        | 未確認                                                     |
-| device binding        | Android Keystore/key alias、device registration ID、SMS/cash-card enrollment、1口座1端末 enforcement                       | 公式はmain appの1口座1端末と再登録/SMSを確認。機構は未確認 |
-| integrity/anti-tamper | Play Integrity/SafetyNet/App Check library、root/hook/debug/emulator check、runtime protection/native library              | 公式はroot/解析・改ざん防御を明記。vendor/実装は未確認     |
-| TLS/pinning           | network security config、`CertificatePinner`/TrustKit、native trust store、pin/backup pin                                  | 未確認。proxy失敗だけで原因を断定しない                    |
-| Web fraud tools       | `fraud-alert.net`/Caulis、`dd.sonybank.jp`/PhishWall、WebView asset/cookie共有                                             | Webでは確認、appでの採用は未確認                           |
-| read/write route      | balance/history/list/detailとpay/transfer/trade/card-setting routeのmethod/path/schema                                     | 未確認。static call graphで別表化する                      |
+| Item                  | Concrete checks                                                                                               | Current status                                                                |
+| --------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| Package/provenance    | Package/version/splits/signers matching Play listing/update                                                   | Listing only; no artifacts                                                    |
+| Components            | Exported activities/services/receivers/providers, permissions, intent filters, App/deep links                 | Unconfirmed                                                                   |
+| Transport             | Network security config, cleartext flags, host/path literals, Retrofit/OkHttp, WebView bridges, JSON/protobuf | Unconfirmed                                                                   |
+| Session issuance      | Login/register models, cookies/tokens/key aliases, refresh/rotation/logout, app→Web SSO                       | Unconfirmed                                                                   |
+| Device binding        | Keystore/key aliases, device IDs, SMS/cash-card enrollment, one-device-per-account enforcement                | Official one-device rule/re-registration/SMS confirmed; mechanisms unknown    |
+| Integrity/anti-tamper | Play Integrity/SafetyNet/App Check, root/hook/debug/emulator checks, runtime/native protection                | Official root/analysis/tamper defenses stated; vendors/mechanisms unconfirmed |
+| TLS/pinning           | Network config, `CertificatePinner`/TrustKit, native trust stores, pins/backups                               | Unconfirmed; proxy failure alone does not establish cause                     |
+| Web fraud tools       | `fraud-alert.net`/Caulis, `dd.sonybank.jp`/PhishWall, WebView asset/cookie sharing                            | Web confirmed; app adoption unconfirmed                                       |
+| Read/write routes     | Methods/paths/schemas for balances/history/list/detail versus pay/transfer/trade/card settings                | Unconfirmed; separate tables through static call graphs                       |
 
-JADX/apktoolでresource/DEX call graph、serializer annotation、native library strings/`readelf`を追い、
-R8名はresource ID、method signature、schema field、callsiteで関連付ける。deobfuscationとruntime tracingは
-調査対象であり、Webで不足するまで延期しない。ただしroot/anti-tamper/pinning/integrityの解除やhookを
-成功条件にせず、観測不能ならcontrol名、error class、到達点を障壁として残す。
+Use JADX/apktool resources/DEX call graphs, serializer annotations, native strings/`readelf`; relate R8 names through resource IDs, method signatures, schema fields, call sites. Deobfuscation/runtime tracing are in scope alongside Web research, not deferred until Web gaps. Do not make root/anti-tamper/pinning/integrity removal/hooks success conditions. Record control names, error classes, reachability barriers when observation fails.
 
-### 役割分担
+### Role separation
 
-| surface                 | 強み                                                                        | 自動化上の判断                                                 |
-| ----------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| 公式 Web                | 全商品の画面、過去通帳、CSV、電子交付。browser からraw evidenceを取りやすい | primary ledger/export。BFF schema基準                          |
-| ソニー銀行 アプリ       | 全商品残高、OTP、transaction認証、外貨普通取引、振込、Web shortcut          | read surfaceとauth/session handoffを並行調査。取引UIは触らない |
-| Sony Bank WALLET アプリ | 円/外貨普通残高、通貨別履歴、Visa debit の1年推移/継続利用、family debit    | debit/read schemaのprimary mobile evidence。設定機能はdeny     |
-| 公式参照系 API          | 最も安定した構造化 read                                                     | 契約した電子決済等代行業者向け。個人 Kogane の初期経路ではない |
+| Surface                 | Strength                                                                                      | Automation decision                                                                |
+| ----------------------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Official Web            | All-product screens, old passbooks, CSV, electronic delivery, accessible browser raw evidence | Primary ledger/export, BFF schema baseline                                         |
+| ソニー銀行 アプリ       | All balances, OTP, transaction auth, foreign ordinary transactions, transfers, Web shortcuts  | Parallel read/auth/session-handoff research; no transaction UI                     |
+| Sony Bank WALLET アプリ | Yen/foreign balances/currency history, past-year debit trends/recurring/family debit          | Primary mobile debit/read-schema evidence; deny settings                           |
+| Official read APIs      | Most stable structured reads                                                                  | Contracted electronic payment service providers, not personal Kogane initial route |
 
-ソニー銀行 アプリは2026-08-26に大きく更新され、再登録が必要になった。旧/新版が
-併存する移行日なので、公開 screenshot や以前のapp UIを固定仕様にしない。renewal告知は
-残高推移、pattern login、一部円普通絞込、通知履歴をnew appから削除するとする一方、
-current Play listingは過去1年の残高推移をまだ説明する。このcoverage gapもversion差として
-扱い、Web CSVと同時点のapp表示を手動照合する。
+The major 2026-08-26 update requires re-registration. Old/new versions coexist that day; public screenshots/old UI are not fixed specifications. Renewal removes trends, pattern login, some yen filtering, notification history, while current Play still describes past-year balance trends. Treat this coverage gap as a version difference; manually compare app/Web CSV at the same time.
 
-main appからpassword不要でlogin後Webへ移るofficial shortcutはapp→Webのsession handoffが
-存在する証拠だが、session tokenの形式・scope・再利用性は不明である。WALLETは円/外貨普通と
-debitに深く、Webは全商品・長期CSVに強い。APK/static/runtime調査を並行しても定常collectorの
-primaryは引き続きWeb/official exportとし、mobile routeはWebにないdebit status/schema、
-device-bound auth、app→Web boundaryを解明するために使う。
+Official password-free shortcuts from authenticated main app to Web establish app→Web handoff, not token formats/scopes/reusability. WALLET specializes in yen/foreign ordinary/debit; Web in all products/long CSV. Even with parallel APK/static/runtime research, steady-state primary remains Web/official exports; mobile clarifies missing debit status/schemas, device-bound auth, app→Web boundaries.
 
-### 本人操作read-only runtime metadata観測
+### User-operated read-only runtime metadata
 
-1. 正規version/signatureを確認したstock端末で、既存のdashboard、円/外貨普通残高・履歴、
-   WALLETの既存debit利用状況/継続利用だけを各1回開く。実値をscreenshot/logへ残さない。
-2. 端末自身の明示proxy/VPNまたはOS標準診断でDNS/SNI、host、path、method、status、MIME、
-   header**名**、TLS certificate chain metadataを観測する。login/register/OTP request body、
-   token/cookie/device ID/attestation値はcapture filterで破棄する。
-3. read responseはkey名、type、nullability、array count range、pagination field名だけをlocalで
-   redactし、amount、merchant、date/location、card/account/member IDを保存しない。
-4. app→Web shortcutは、既存login済みstateからread-only dashboardへ遷移する1回だけhost/
-   redirect chain/header名を観測し、handoff parameter値を保存しない。
-5. write routeはstatic call graphからmethod/path patternだけ抽出し、runtimeでは呼ばない。
-   外貨売買、振込、ATM、Google Pay登録、card停止/制限解除/limit/family設定を操作しない。
-6. user CAをappが受け入れなければSNI/DNSまでで停止する。pinning、root、attestation、
-   anti-tamperをpatch/hook/disableせず、観測障壁として記録する。
+1. On verified legitimate-version/signature stock devices, open existing dashboard, yen/foreign balances/history, WALLET existing/recurring debit once each. No actual-value screenshots/logs.
+2. Use explicit device proxies/VPNs or standard OS diagnostics for DNS/SNI, host/path/method/status/MIME, header **names**, TLS-chain metadata. Capture filters discard login/register/OTP bodies, tokens/cookies/device IDs/attestation values.
+3. Locally redact responses to key names/types/nullability/array-count ranges/pagination fields. No amounts, merchants, dates/locations, card/account/member IDs.
+4. Observe one app→Web authenticated read-dashboard transition's hosts/redirect chain/header names, never handoff values.
+5. Extract only static write-route method/path patterns, never runtime calls. No FX trades/transfers/ATMs/Google Pay enrollment/card stopping/restriction removal/limits/family settings.
+6. If user CAs are rejected, stop at SNI/DNS. Record pinning/root/attestation/anti-tamper as barriers without patch/hook/disabling.
 
-stop: OTP/transaction認証、SMS/cash card/app再登録、write/unknown control、401/403/429、
-account lock、pinning/integrity/root/anti-tamper error、unexpected host/redirect、PII/secretが
-captureへ入った疑い、version/signature不一致。retryやcontrol bypassは行わない。
+Stop for OTP/transaction auth, SMS/cash-card/app re-registration, writes/unknown controls, 401/403/429, locks, pinning/integrity/root/anti-tamper errors, unexpected hosts/redirects, suspected captured PII/secrets, version/signature mismatches. No retries/bypasses.
 
-## 公開第三者実装
+## Public third-party implementations
 
-第三者実装は transport の歴史資料としてのみ使い、credential handling や現行互換性を
-信用しない。
+Use third-party code only as transport history, trusting neither credential handling nor current compatibility.
 
-### `mktakuya/puppeteer-sonybank-scraper`（2021）
+### `mktakuya/puppeteer-sonybank-scraper` (2021)
 
-[commit `3e59a37`](https://github.com/mktakuya/puppeteer-sonybank-scraper/blob/3e59a37d6e339c7d2e6bbba63e1581d983d6d07f/index.js)
-は Puppeteer を headless 起動し、次を行う約40行の実装だった。
+[commit `3e59a37`](https://github.com/mktakuya/puppeteer-sonybank-scraper/blob/3e59a37d6e339c7d2e6bbba63e1581d983d6d07f/index.js) starts headless Puppeteer in about 40 lines.
 
-1. `https://o2o.moneykit.net/` を開く。
-2. `input[name=TenNo]`、`KozaNo`、`Password` に環境変数を入力。
-3. yellow login link を押し、navigation/network idle を待つ。
-4. DOM `#setEnYkinZandaka` の文字列から comma を除き、円普通残高を integer 化。
+1. Opens `https://o2o.moneykit.net/`.
+2. Enters environment variables into `input[name=TenNo]`, `KozaNo`, `Password`.
+3. Clicks yellow login link; waits navigation/network idle.
+4. Strips commas from `#setEnYkinZandaka` text, converting yen ordinary balance to integer.
 
-browser DOM scraper であり API client ではない。外貨、定期、明細、pagination、OTP、
-anti-fraud は扱わない。2021年当時に password login で残高 DOM へ到達する設計だった
-ことは示すが、現行 host/SPA の成功証拠にはならない。
+A browser DOM scraper, not API client; no foreign/time/history/pagination/OTP/fraud handling. Establishes a 2021 password-to-balance design, not success on current hosts/SPA.
 
-### `nakaomote/financial`（2019–2025）
+### `nakaomote/financial` (2019–2025)
 
-[`sony_download.py`](https://github.com/nakaomote/financial/blob/44e1d43b5c010ee692234777baf9a9fc20be83be/sony_download.py)
-は `requests.Session` と BeautifulSoup で旧 HTML protocol を再現する。
+[`sony_download.py`](https://github.com/nakaomote/financial/blob/44e1d43b5c010ee692234777baf9a9fc20be83be/sony_download.py) recreates old HTML through `requests.Session`/BeautifulSoup.
 
-1. 旧 login HTML `NBG100001G01.html` を GET。
-2. `TDGate1/gate/NBW000010` へ `TenNo`、`KozaNo`、`Password` と画面 ID 群を form POST。
-3. response の全 hidden input を parse し、次の handoff form を POST。
-4. `TDGate000036/gate/NBW000036/YenFutsuRireki.csv` に開始 `1900/01/01`、終了=当日を
-   POST し、円普通履歴 CSV を取得。
+1. GET old `NBG100001G01.html`.
+2. Form POST `TenNo`, `KozaNo`, `Password`, screen IDs to `TDGate1/gate/NBW000010`.
+3. Parse all response hidden inputs, POST next handoff form.
+4. POST start `1900/01/01`/end today to `TDGate000036/gate/NBW000036/YenFutsuRireki.csv` for yen ordinary CSV.
 
-[2025-05-18 commit `44e1d43`](https://github.com/nakaomote/financial/commit/44e1d43b5c010ee692234777baf9a9fc20be83be)
-はサービス更新後の CSV 変更に対応し、download request から `__sid` を削除、parser を
-header 名参照へ変更した。CSV は Shift_JIS とし、`取引日`、`摘要`、`引出額`、`預入額`、
-`差引残高` を読む。Visa debit 摘要の末尾を merchant description として扱い、連続行で
-前残高 + 入出金額 = 次残高を検算する。
+[2025-05-18 commit `44e1d43`](https://github.com/nakaomote/financial/commit/44e1d43b5c010ee692234777baf9a9fc20be83be) handled updated CSV by removing download `__sid` and parsing by header names. Reads Shift_JIS `取引日`, `摘要`, `引出額`, `預入額`, `差引残高`, uses Visa-description suffixes as merchants, and checks previous balance + movements = next balance across consecutive rows.
 
-この実装は transport、date range、CSV 列、残高検算の具体例として価値がある。しかし
-2026-08-26 に `o2o.moneykit.net` は DNS 解決せず、公式入口は `sonybank.jp/pages/...`
-へ移行している。旧 endpoint/field を現行に送る、DNS を迂回する、保存 credential を
-流用することは禁止する。
+Valuable transport/date-range/CSV/balance-check examples, but on 2026-08-26 `o2o.moneykit.net` no longer resolved and official login had moved to `sonybank.jp/pages/...`. Never send old endpoints/fields to current systems, bypass DNS, or reuse stored credentials.
 
-### 現行実装への含意
+### Implications
 
-- Puppeteer の「公式 browser で login し公式値を読む」という分離は再利用できる。
-- Python 実装の「公式 CSV を raw 保存し、header 名で parse、残高連鎖を検算」は再利用
-  できる。
-- 旧 URL、旧 form field、旧 DOM selector、HTTP-only login は再利用しない。
-- 現行 BFF は公開 bundle から request shape が見えるが、authenticated read endpoint は
-  live Kuebiko capture で確認し、推測 URL を probe しない。
+- Reuse separation of official browser login/read from Puppeteer.
+- Reuse raw official CSV retention, header-name parsing, balance-chain checks from Python.
+- Do not reuse old URLs/form fields/DOM selectors/HTTP-only login.
+- Public bundles reveal current BFF request shapes, but establish authenticated reads through live Kuebiko capture, never guessed probes.
 
-## 実行環境の適性
+## Execution-environment suitability
 
-| 環境                     | 適性 | 理由                                                                                                                                   |
-| ------------------------ | ---: | -------------------------------------------------------------------------------------------------------------------------------------- |
-| 利用者の local Chrome    |  5/5 | Bitwarden fill、追加認証の目視、app handoff、CSV download が安全。最初の基準環境                                                       |
-| local/OCI 単一 container |  4/5 | Playwright/Chrome、persistent profile、download、Shift_JIS、cookie jar を扱いやすい。固定 egress と暗号化 volume が必要                |
-| Cloudflare Container     |  4/5 | full browser/Node を載せられる。R2/D1/DO coordinator と近い。Cloudflare egress で Caulis/risk 判定が変わるか要検証                     |
-| OCI Kubernetes           |  3/5 | CronJob/Secret/volume は可能だが個人口座1件には過剰。Pod 再配置、同時実行、egress、profile volume を固定する必要                       |
-| Cloudflare Workers       |  2/5 | 認証後の純粋 JSON/CSV replay なら候補。login は JS telemetry、cookie、CSRF、revision、event hash、download を伴い isolate 単体に不向き |
+| Environment                | Rating | Reason                                                                                                                               |
+| -------------------------- | -----: | ------------------------------------------------------------------------------------------------------------------------------------ |
+| User's local Chrome        |    5/5 | Safe Bitwarden fill, visible step-up, app handoff, CSV; initial baseline                                                             |
+| Local/OCI single container |    4/5 | Easy Playwright/Chrome, persistent profiles, downloads, Shift_JIS, cookie jars; fixed egress/encrypted volumes needed                |
+| Cloudflare Container       |    4/5 | Full browser/Node near R2/D1/DO coordination; egress Caulis/risk changes need validation                                             |
+| OCI Kubernetes             |    3/5 | CronJobs/Secrets/volumes possible, excessive for one account; fix rescheduling/concurrency/egress/profile volumes                    |
+| Cloudflare Workers         |    2/5 | Candidate for authenticated JSON/CSV replay; login telemetry/cookies/CSRF/revision/event hashes/downloads unsuited to isolates alone |
 
-推奨構成は `Durable Object/cron coordinator -> one active Container -> R2 raw evidence`。
-login issuer と read consumer を分けられるかは session export/import 検証後に決める。
-現時点では同じ persistent browser profile で login から CSV download まで完結させる方が
-変数が少ない。同一 source で cron/manual/遅延 run を並行させない。
+Recommended `Durable Object/cron coordinator -> one active Container -> R2 raw evidence`. Decide login-issuer/read-consumer separation after session export/import validation. One persistent browser from login through download currently minimizes variables. No concurrent cron/manual/delayed runs per source.
 
-OCI と Cloudflare Container の比較で重要なのは Kubernetes の有無ではなく、安定した
-browser profile、1 source 1 active run、固定的な egress、secret 非出力、download 保存、
-失効時停止である。K8s は多数 source/worker を分離する段階まで導入しない。
+OCI versus Containers depends on stable profiles, one active run/source, fixed egress, no secret output, retained downloads, expiry stops, rather than Kubernetes. Defer K8s until many sources/workers need isolation.
 
-## 自動化レベル A–E と実装コスト 1–5
+## Automation levels A–E and cost 1–5
 
-### 評価尺度
+### Scale
 
-- **A**: documented/export API を直接利用でき、scheduled headless 実行に適する
-- **B**: renewable/reusable session で安定した read-only internal API を利用できる
-- **C**: browser/app bootstrap 後の headless read replay が成立しそうである
-- **D**: full browser/device UI automation が必要になる
-- **E**: manual capture を安全な既定とする
+- **A**: direct documented/export API suitable for scheduled headless execution
+- **B**: stable read-only internal APIs with renewable/reusable sessions
+- **C**: headless reads likely after browser/app bootstrap
+- **D**: full browser/device UI automation required
+- **E**: manual capture as safe default
 
-実装コストは 1=保存/import のみ、5=契約・複数 runtime・mobile/reverse engineering 等を
-要するものとする。
+Cost 1 means saving/import only; 5 involves contracts, multiple runtimes, mobile/reverse engineering, etc.
 
-| 案                                           |  cost | level          | 範囲                                               | 判断                                                |
-| -------------------------------------------- | ----: | -------------- | -------------------------------------------------- | --------------------------------------------------- |
-| 利用者が円/外貨 CSV を公式 Web から取得      |   1/5 | E              | 円普通、外貨横断                                   | **即時採用**。最も安全な backfill                   |
-| local Chrome で password fill + CSV download |   3/5 | D              | 円/外貨 CSV、残高画面                              | **MVP 推奨**。更新/step-up 時だけ handoff           |
-| 現行 BFF の認証後 read replay                |   4/5 | C、検証後B候補 | 口座列挙、残高、明細、lot                          | Kuebiko capture 後。login は browser のままでもよい |
-| password login も pure HTTP/Worker で再現    |   4/5 | 未検証C        | 同上                                               | telemetry/session 要件不明。最初に選ばない          |
-| 公式契約済み参照系 API                       |   5/5 | A              | 公式一覧の広範な残高/通帳                          | 適格企業との契約が必要。個人 MVP はE相当            |
-| ソニー銀行 アプリ UI automation              |   5/5 | D              | 全商品表示、認証                                   | 1端末制限・SMS/生体・write UI 混在のため非推奨      |
-| 2 appの正規split APK static/deobfuscation    | 3–4/5 | C調査          | manifest、host/schema/session/device/integrity候補 | **Webと並行実施**。artifact provenance必須          |
-| WALLET本人操作read-only runtime metadata     |   4/5 | C候補          | debit/円・外貨普通                                 | host/schemaが確認できればheadless replayを別評価    |
-| WALLET/full app UI automation                |   5/5 | D              | debit/普通預金/全商品                              | write UI、device binding、更新で脆く定常採用しない  |
-| aggregator 情報連携                          | 1–2/5 | A              | 残高/明細等                                        | 公式 OAuth-like 同意だが初期経路から除外            |
+| Option                                      |  Cost | Level                 | Scope                                                       | Decision                                                |
+| ------------------------------------------- | ----: | --------------------- | ----------------------------------------------------------- | ------------------------------------------------------- |
+| User retrieves official yen/foreign CSV     |   1/5 | E                     | Yen ordinary/cross-product foreign                          | **Adopt immediately**, safest backfill                  |
+| Local Chrome password fill/CSV download     |   3/5 | D                     | Yen/foreign CSV/balance screens                             | **MVP recommended**, handoff only on updates/step-up    |
+| Current BFF authenticated read replay       |   4/5 | C, B after validation | Accounts/balances/history/lots                              | After Kuebiko capture; login may remain browser         |
+| Pure HTTP/Worker password login             |   4/5 | Unvalidated C         | Same                                                        | Telemetry/session unknown; not first choice             |
+| Contracted official read APIs               |   5/5 | A                     | Broad official balances/passbooks                           | Eligible-company contract; personal MVP equivalent to E |
+| Sony Bank App UI automation                 |   5/5 | D                     | All products/auth                                           | Not recommended: one device, SMS/biometrics, writes     |
+| Legitimate 2-app split static/deobfuscation | 3–4/5 | C research            | Manifest/hosts/schemas/sessions/device/integrity candidates | **Parallel with Web**, provenance required              |
+| User-operated WALLET read-only metadata     |   4/5 | C candidate           | Debit/yen-foreign ordinary                                  | Separately assess replay after hosts/schemas confirmed  |
+| WALLET/full-app UI automation               |   5/5 | D                     | Debit/ordinary/all products                                 | Fragile writes/device binding/updates; not steady-state |
+| Aggregator information linking              | 1–2/5 | A                     | Balances/statements, etc.                                   | Official OAuth-like consent, excluded initially         |
 
-総合判定は **cost 4/5、level C**。円/外貨 CSV だけの MVP は cost 3/5 まで下げられる。
-次の条件を複数日、再起動後も満たせれば、認証後 read replay を B と再評価できる。
+Overall **cost 4/5, level C**; yen/foreign CSV-only MVP can fall to 3/5. Reassess authenticated replay as B only after these hold across days/restarts.
 
-- 通常 login が追加認証なしで低頻度に成功する
-- session/profile を encrypted storage から復元できる
-- read endpoint が write endpoint と明確に分離できる
-- CloudFront/Caulis が選定 runtime/egress を安定して受け入れる
-- CSV と BFF/DOM の件数、入出金合計、末尾残高が一致する
+- Low-frequency normal login without step-up succeeds
+- Restore sessions/profiles from encrypted storage
+- Clear read/write endpoint separation
+- Stable CloudFront/Caulis acceptance of runtime/egress
+- Matching CSV/BFF-DOM counts, inflow/outflow totals, ending balances
 
-## read-only live 検証計画
+## Read-only live-validation plan
 
-実口座を使う検証では、画面の値を report、terminal、screenshot、commit に出さない。
-比較は件数/合計/末尾残高の一致・不一致だけを local ephemeral process 内で行い、出力は
-boolean と schema metadata に限定する。
+Never expose actual-account screen values in reports, terminals, screenshots, or commits. Compare only matching/nonmatching counts/totals/ending balances in local ephemeral processes; output booleans/schema metadata only.
 
-1. 利用者の通常 Chrome で公式 top から current login へ進み、URL と TLS 証明書を確認。
-2. Bitwarden の item type が通常 login/password か passkey かを UI 表示だけで確認。
-   値は表示/読み上げ/capture せず、利用者に fill してもらう。
-3. 通常 login が店番号・口座番号・password のみで完了するか、追加認証が出るかを記録。
-4. login 後に前回 login 日時と read-only dashboard であることを確認。表示残高は記録しない。
-5. `商品/残高` から、契約のある product category 名と masked identifier の有無だけを確認。
-   category ごとの件数を記録する場合も、amount や契約番号は残さない。
-6. 円普通通帳で期間、入出金、昇降順、keyword、pagination/件数表示を確認。メモ編集は押さない。
-7. 利用者操作で短い既知期間の円普通 CSV を download。file 名、MIME、encoding、header、
-   page/期間上限、stable ID 有無だけを local 解析し、実 row は保存先から外へ出さない。
-8. 外貨契約がある場合だけ、同様に外貨横断 CSV の9項目、小数桁、currency 表現、契約番号
-   masking、未受渡行を確認。外貨売買/定期操作へは進まない。
-9. Kuebiko は auth request body/header と anti-fraud telemetry を upload 対象から除外し、
-   authenticated response の host/path/MIME/status だけを allowlist 候補として観測する。
-10. 同一期間の公式 CSV と read DOM/BFF を local で件数、入金合計、出金合計、末尾残高だけ
-    照合し、差があれば未受渡/取消/表示時刻/期間境界を確認する。
-11. 無操作15分、browser 再起動、翌日の順に session を検証。失効時は login redirect を
-    正常に検知して止まり、credential login を自動 retry しないことを確認する。
-12. local 基準が安定した後だけ OCI/Cloudflare Container で1回ずつ同じ read flow を実施。
-    egress、UA、profile を固定し、401/403/429/challenge の差だけを記録する。
-13. Web安定化を待たず、正規Play installから2 packageのbase/splitを取得し、version、signer、
-    manifest、network security config、host/schema、session/device/integrity候補を静的解析する。
-14. 本人が既存read画面を開く各1回だけapp metadataを観測し、Web BFF/CSVとのcoverage、
-    schema、session handoffを比較する。write controlを操作して差分を作らない。
-15. pinning/integrity/root/anti-tamperでpath/bodyが見えなければDNS/SNIまでを結果とし、
-    hook/repack/bypassへ進まない。
+1. Navigate from official top to current login in the user's normal Chrome; check URL/TLS certificates.
+2. Check Bitwarden UI item type as ordinary login/password versus passkey. The user fills without displaying/reading aloud/capturing values.
+3. Record whether branch/account/password alone completes login or step-up appears.
+4. Confirm previous-login time and read-only dashboard after login; no recorded balances.
+5. From `商品/残高` (products/balances), check only contracted product-category names and masked-identifier presence. Category counts exclude amounts/contract numbers.
+6. Check yen-passbook periods, inflow/outflow, sorting, keywords, pagination/count displays; no memo editing.
+7. User downloads a short known-period yen CSV. Locally inspect only filename/MIME/encoding/headers/page-period limits/stable-ID presence; real rows stay within storage.
+8. Only with foreign holdings, similarly check nine fields, decimals, currencies, masked contracts, unsettled rows. No FX/time-deposit operations.
+9. Exclude auth bodies/headers/fraud telemetry from Kuebiko upload; observe only authenticated-response host/path/MIME/status as allowlist candidates.
+10. Locally reconcile same-period CSV/DOM-BFF counts, inflow/outflow totals, ending balances; investigate unsettled/cancelled/timing/boundary differences.
+11. Test 15-minute idle, browser restart, next-day sessions in order. Confirm expiry redirects stop normally without automatic credential-login retries.
+12. Only after local stability, perform one same-flow OCI/Container test each, fixed egress/UA/profile, recording only 401/403/429/challenge differences.
+13. Without waiting for Web stability, acquire two legitimate Play base/split packages; statically check versions/signers/manifests/network config/hosts/schemas/session-device-integrity candidates.
+14. Observe one user-operated existing read screen per app, comparing Web BFF/CSV coverage/schemas/handoff. Never operate writes to generate differences.
+15. If pinning/integrity/root/anti-tamper hides paths/bodies, report DNS/SNI only; no hooks/repacking/bypasses.
 
-### stop 条件
+### Stop conditions
 
-次のいずれかでその run を直ちに終了し、cookie jar/profile の再利用を保留する。
+End the run immediately and suspend cookie-jar/profile reuse on any of these.
 
-- 401、403、429、Access Denied、challenge/CAPTCHA、maintenance、system error
-- password/OTP/合い言葉の誤り、account lock、再設定、認証方式変更の案内
-- SMS、電話、cash card 製造番号、app 再登録、transaction 認証の要求
-- 未認証/認証済み URL の予期しない変化、TLS certificate/host の不一致
-- read allowlist 外への request、または振込/振替/売買/預入/解約/申込/変更 endpoint
-- CSV/DOM/BFF の schema 変化、合計/末尾残高の不一致、partial download の疑い
-- 実口座 ID、残高、明細、secret、PII が log/capture/PR に出た疑い
-- 同一 session generation の並行使用、session expiry、profile corruption
+- 401, 403, 429, Access Denied, challenges/CAPTCHA, maintenance/system errors
+- Wrong password/OTP/security phrase, locks, resets, auth-method change guidance
+- SMS, phone, cash-card manufacturing number, app re-registration, transaction-auth requests
+- Unexpected authenticated/unauthenticated URL changes, TLS certificate/host mismatch
+- Requests outside read allowlists or transfer/account-transfer/trade/deposit/cancellation/application/change endpoints
+- CSV/DOM/BFF schema changes, total/ending-balance mismatches, suspected partial downloads
+- Suspected actual account IDs/balances/statements/secrets/PII in logs/captures/PRs
+- Concurrent same-generation sessions, expiry, profile corruption
 
-失敗後は同じ login を自動再送しない。既存 session の authenticated 状態を読み取りで確認し、
-二重実行や lock の可能性を排除してから利用者へ handoff する。
+Never resend the same login automatically after failure. Read-check existing authentication, rule out duplicate runs/lock risks, then hand off.
 
-## 推奨実装順
+## Recommended implementation order
 
-1. 手動取得した公式円/外貨 CSV の local importer を作り、raw file を content hash で保存。
-2. 円普通 CSV の現行 schema fixture を実データ匿名化ではなく、構造だけの synthetic fixture
-   として作る。実 row を Git に入れない。
-3. 同時に2公式packageの正規base/splitを取得し、provenance/manifest/host/schema/session/
-   device/integrity/pinning候補を静的解析する。Web gapを開始条件にしない。
-4. 通常 Chrome の persistent profileでloginとCSV downloadを1 source 1 active runにする。
-5. Kuebiko captureからauthenticated read endpointを特定し、path allowlistを作る。
-6. 本人操作のapp read-only metadata観測を1回行い、Web/CSVとcoverage/schemaを比較する。
-7. CSVと同一期間のread JSON/DOMを照合し、read-only BFF replayを追加する。app routeの
-   replayはdevice binding/session scopeが独立に証明された場合だけ別collectorで評価する。
-8. 円普通が安定してから外貨横断CSV、定期/積立/仕組み預金lot、投信等を別moduleで追加。
-9. local で複数日安定後、OCI または Cloudflare Container へ移す。Workers は coordinator、
-   session lease、ingestion に限定し、login fetch は後回しにする。
+1. Build local importers for manually retrieved official yen/foreign CSVs, saving raw files by content hash.
+2. Create current yen-CSV synthetic structural fixtures, not anonymized real rows. Never put real rows in Git.
+3. In parallel acquire both legitimate base/split packages and statically inspect provenance/manifests/hosts/schemas/session-device-integrity-pinning candidates; no Web-gap prerequisite.
+4. One source/one active normal-Chrome persistent-profile login/download.
+5. Identify authenticated reads from Kuebiko; build path allowlists.
+6. One user-operated app read-only metadata observation, comparing Web/CSV coverage/schemas.
+7. Reconcile same-period CSV/read JSON-DOM and add read-only BFF replay. Separately assess app replay only after independent device-binding/session-scope proof.
+8. After stable yen ordinary, add foreign CSV, time/installment/structured lots, funds in separate modules.
+9. After stable local operation over days, move to OCI/Containers. Restrict Workers to coordination/session leases/ingestion; defer login fetch.
 
-## 未確認事項
+## Unconfirmed items
 
-- 実口座の現在の認証方式と、通常残高 login での step-up 頻度
-- Bitwarden item が通常 credential か passkey か（値は確認不要）
-- 2026-08-26 renewal 後の app login が biometric/PIN のどちらで、旧版併存がいつまでか
-- Play public `8.02.00`と8月26日renewal buildの対応、staged rollout/region/device別version
-- 現行円普通 CSV の全 column、encoding、quote/newline、最大期間/件数、stable ID、同日順
-- 通帳 HTML/BFF の page size、pagination、memo/EDI の export 可否
-- 外貨横断 CSV の保持開始日、最大件数、一括範囲、currency precision
-- 円定期、積立定期、外貨定期、仕組み預金の現行 lot field と終了済み契約の保持期間
-- confirmed BFF以外の商品別read endpoint、sessionのidle/absolute lifetime
-- Caulis/PhishWallが現在成功しているpassword login以外のrisk条件に与える影響。Cloudflare
-  egressはtelemetryなしで成功、OCIは未評価
-- CloudFront に AWS WAF/Bot Control が関連付くか。Akamai は現行 login で未観測
-- session の browser/profile 間 export/import と同時 session の扱い
-- WALLET SSO後の`igw.sonybank.jp`一覧/detail/pagination API、15か月走査、stable ID、
-  family debit識別、未確定から確定への行置換規則
-- 2 appのbase/split集合、versionCode、signer、manifest component/permission/deep link
-- app read APIのhost/path/method/schema/pagination、token/cookie/key alias、refresh/logout
-- main appの1口座1端末、transaction key、app→Web SSO handoffの具体的device/session binding
-- appでのCaulis/PhishWall採用有無、certificate pinning、Play Integrity、attestation、
-  root/anti-tamper vendor、端末secure storage
-- 普通預金 ledger の PDF download 有無（公開資料では CSV のみ確認）
-- 参照系 API の開発環境/仕様書を個人が契約なしで利用できるか（現状は不可と評価）
+- Current account auth methods and ordinary-balance-login step-up frequency
+- Bitwarden ordinary credentials versus passkeys (no value inspection needed)
+- Biometric/PIN login after 2026-08-26 renewal and old-version coexistence duration
+- Public Play `8.02.00` versus August 26 renewal builds; staged/region/device variants
+- Current yen-CSV columns/encoding/quotes/newlines/max periods-counts/stable IDs/same-day order
+- Passbook HTML/BFF page sizes/pagination/memo-EDI export
+- Foreign CSV earliest retention/max counts/bulk scope/currency precision
+- Current yen-time/installment/foreign-time/structured lot fields/ended-contract retention
+- Product reads beyond confirmed BFF, idle/absolute session lifetimes
+- Caulis/PhishWall effects beyond currently successful password login; telemetry-free Cloudflare succeeds, OCI untested
+- CloudFront AWS WAF/Bot Control association; no Akamai observed at current login
+- Browser/profile session export/import and concurrency
+- Post-SSO WALLET `igw.sonybank.jp` list/detail/pagination APIs, 15-month traversal, stable IDs, family-debit IDs, pending→finalized replacement rules
+- Both apps' base/split sets/versionCode/signers/components/permissions/deep links
+- App read hosts/paths/methods/schemas/pagination/tokens-cookies-key aliases/refresh/logout
+- Main app's one-account/one-device, transaction keys, app→Web SSO device/session binding
+- App Caulis/PhishWall, pinning/Play Integrity/attestation/root-anti-tamper vendors/secure storage
+- Ordinary ledger PDF downloads (publicly only CSV confirmed)
+- Personal contract-free API development environments/specifications (currently assessed unavailable)
 
-## 主要参照
+## Main references
 
-### 公式一次情報
+### Official primary sources
 
-- [ソニー銀行 Web](https://sonybank.jp/)
-- [ログイン方法](https://sonybank.jp/guide/support/howtologin/)
-- [ソニー銀行の認証方式](https://sonybank.jp/guide/auth/)
-- [スマホ認証方式](https://sonybank.jp/guide/auth/01.html)
-- [ソニー銀行のセキュリティ対策](https://sonybank.jp/guide/securityinfo/07.html)
-- [円預金 / 過去すべての通帳と CSV](https://sonybank.jp/products/yen/)
-- [通帳 help](https://sonybank.jp/guide/bankbook/01.html)
-- [外貨入出金履歴 CSV の表示内容](https://sonybank.jp/products/fc/39.html)
-- [外貨預金 損益状況](https://sonybank.jp/tool/fc/40.html)
-- [ソニー銀行 アプリの表示内容](https://sonybank.jp/tool/app/banking/01.html)
-- [二つの公式アプリの違い](https://sonybank.jp/inquiry/app/01.html)
-- [Sony Bank WALLET アプリ](https://sonybank.jp/tool/app/sbw/)
-- [Sony Bank WALLET 商品詳細説明書](https://sonybank.jp/products/sbw/03.html)
-- [Visa debitの引落・返金・明細状態](https://sonybank.jp/products/sbw/29.html)
-- [Sony Bank WALLET明細の公式確認手順](https://sonybank.jp/campaign/wallet202606/)
-- [WALLET利用明細直リンク](https://sonybank.jp/pages/ja/jada160a/confirm1/)
+- [Sony Bank Web](https://sonybank.jp/)
+- [Login procedure](https://sonybank.jp/guide/support/howtologin/)
+- [Sony Bank authentication methods](https://sonybank.jp/guide/auth/)
+- [Smartphone authentication](https://sonybank.jp/guide/auth/01.html)
+- [Sony Bank security measures](https://sonybank.jp/guide/securityinfo/07.html)
+- [Yen deposits/all-history passbook and CSV](https://sonybank.jp/products/yen/)
+- [Passbook help](https://sonybank.jp/guide/bankbook/01.html)
+- [Foreign transaction CSV fields](https://sonybank.jp/products/fc/39.html)
+- [Foreign deposit gains/losses](https://sonybank.jp/tool/fc/40.html)
+- [Sony Bank App fields](https://sonybank.jp/tool/app/banking/01.html)
+- [Differences between official apps](https://sonybank.jp/inquiry/app/01.html)
+- [Sony Bank WALLET App](https://sonybank.jp/tool/app/sbw/)
+- [Sony Bank WALLET specifications](https://sonybank.jp/products/sbw/03.html)
+- [Visa debit debits/refunds/statuses](https://sonybank.jp/products/sbw/29.html)
+- [Official WALLET statement procedure](https://sonybank.jp/campaign/wallet202606/)
+- [WALLET direct usage-details link](https://sonybank.jp/pages/ja/jada160a/confirm1/)
 - [WALLET SSO confirm4 bundle](https://sonybank.jp/pages/ja/_next/static/chunks/pages/jada160a/confirm4-ff822f4f2d314a11e514.js)
 - [WALLET SSO confirm5 bundle](https://sonybank.jp/pages/ja/_next/static/chunks/pages/jada160a/confirm5-1c58728bac0d7c38262f.js)
-- [ソニー銀行 アプリ Google Play](https://play.google.com/store/apps/details?id=net.moneykit.SonyBankApp)
+- [Sony Bank App Google Play](https://play.google.com/store/apps/details?id=net.moneykit.SonyBankApp)
 - [Sony Bank WALLET Google Play](https://play.google.com/store/apps/details?id=net.moneykit.sbw)
-- [2026-08-26 アプリ renewal](https://sonybank.jp/info/2026/0724-01.html)
-- [アプリ動作確認環境](https://sonybank.jp/guide/spec/04.html)
-- [スマートフォンアプリ約款](https://sonybank.jp/stpl/84.html)
-- [情報連携サービス](https://sonybank.jp/services/api/)
-- [参照系 API の対象一覧](https://sonybank.jp/stpl/161.html)
-- [API 接続先の適格性基準](https://sonybank.jp/stpl/162.html)
-- [現行 Web core config](https://sonybank.jp/pages/config/core.js)
-- [現行 Web environment / anti-fraud config](https://sonybank.jp/pages/config/env.js)
+- [2026-08-26 app renewal](https://sonybank.jp/info/2026/0724-01.html)
+- [Supported app environments](https://sonybank.jp/guide/spec/04.html)
+- [Smartphone app terms](https://sonybank.jp/stpl/84.html)
+- [Information-linking service](https://sonybank.jp/services/api/)
+- [Read-API coverage](https://sonybank.jp/stpl/161.html)
+- [API partner eligibility criteria](https://sonybank.jp/stpl/162.html)
+- [Current Web core config](https://sonybank.jp/pages/config/core.js)
+- [Current Web environment/anti-fraud config](https://sonybank.jp/pages/config/env.js)
 
-### 公開第三者実装
+### Public third-party implementations
 
 - [`mktakuya/puppeteer-sonybank-scraper` commit `3e59a37`](https://github.com/mktakuya/puppeteer-sonybank-scraper/blob/3e59a37d6e339c7d2e6bbba63e1581d983d6d07f/index.js)
 - [`nakaomote/financial` `sony_download.py` at `44e1d43`](https://github.com/nakaomote/financial/blob/44e1d43b5c010ee692234777baf9a9fc20be83be/sony_download.py)
@@ -787,15 +546,15 @@ remain absent. Normal rows and well-formed multiline fields keep their previous
 reading. Header/cardinality drift and invalid undamaged rows still refuse the
 artifact. See the [shared CSV recovery boundary](../observations.md#shared-csv-reader-recover-malformed-quotes-without-losing-following-rows).
 
-## 共通 DATA R2 への切替 (U09)
+## Switch to shared DATA R2 (U09)
 
-Collector は `COLLECTION_TARGET` を読まない。保存先は共通 bucket
-`kogane-raw-evidence`（binding `DATA`）だけである。切替と importer は
-2026-09-13 に廃止された（`docs/collection.md`）。run は `packages/collection`
-経由で保存され、terminal manifest を最後に書く。保存する bytes は廃止前に
-中央へ送っていたものと同じで、Wallet 明細は collector 自身の
-`sanitizeWalletHtml` 済み HTML である。artifact と role の対応、terminal の
-項目は `docs/collection.md` の該当節を参照。
+The collector does not read `COLLECTION_TARGET`. Its only destination is shared
+`kogane-raw-evidence` (binding `DATA`). Switching/importer retired on
+2026-09-13 (`docs/collection.md`). Runs save through `packages/collection`,
+writing terminal manifests last. Saved bytes match those previously sent centrally;
+Wallet details are HTML already processed by collector `sanitizeWalletHtml`.
+See the relevant `docs/collection.md` sections for artifact/role mappings and
+terminal fields.
 
 ## 2026-11-08: CSV is the only current deposit transaction history
 
@@ -806,7 +565,7 @@ transactions come only from the official CSV. JSON history pages remain
 stored evidence; their per-page occurrence identities cannot distinguish
 identical rows across pages. JSON also uniquely retains exchange
 counter-currency codes `currencyCdSpndl`, `currencyCdStl` and
-`otherPrtyCcyCd`; the CSV uniquely retains `参考情報`. This change does
+`otherPrtyCcyCd`; the CSV uniquely retains `参考情報` (reference information). This change does
 not promote those codes into a new observation field. JSON after-transaction
 balances retain their existing contract.
 
