@@ -14,6 +14,8 @@ import { logEvent, relayRunId, withRunId } from "./log-context";
 import {
   artifactFilename,
   assertCanonicalMonths,
+  GLOBALPASS_CONTAINER_FAILURE_CODES,
+  GLOBALPASS_CONTAINER_STAGES,
   GLOBALPASS_DATASET,
   GLOBALPASS_MEDIA_TYPE,
   GLOBALPASS_PAGINATION_STATUS,
@@ -212,7 +214,12 @@ async function collectWithContainer(
   // decided (`monthCoverageCode`) when the next month starts, the container
   // reports an error, or the stream ends.
   let walk:
-    | { month: string; monthIndex: number; pageCount: number; pages: CapturedActivityPage[] }
+    | {
+        month: string;
+        monthIndex: number;
+        pageCount: number;
+        pages: CapturedActivityPage[];
+      }
     | undefined;
   const walkFinished = (current: NonNullable<typeof walk>): boolean =>
     current.pages.length === Math.min(current.pageCount, ACTIVITY_PAGE_CAP);
@@ -287,14 +294,24 @@ async function collectWithContainer(
       if (record.type === "error") {
         if (containerErrorSeen) throw new CollectionContractError();
         containerErrorSeen = true;
+        // The closed code is the diagnostic's `code`, so the Worker's log line
+        // names the failed step instead of `category: unknown`.
         diagnostics.failure(
           "browser-collection",
-          Object.assign(new Error(), { name: record.errorType }),
+          Object.assign(new Error(record.errorCode), {
+            name: record.errorType,
+            code: record.errorCode,
+          }),
         );
         failures.push({
           operation: record.operation,
           errorType: record.errorType,
           errorCode: record.errorCode,
+          ...(record.stage === undefined ? {} : { stage: record.stage }),
+          ...(record.challengeAttempts === undefined
+            ? {}
+            : { challengeAttempts: record.challengeAttempts }),
+          ...(record.lastHttpStatus === undefined ? {} : { lastHttpStatus: record.lastHttpStatus }),
         });
         // The container stopped; a month it was walking is decided on the
         // pages it sent, after the container's own failure.
@@ -605,17 +622,31 @@ function parseContainerRecord(line: string): ContainerRecord {
   }
   if (
     record["type"] === "error" &&
-    exactKeys(record, ["type", "operation", "errorType", "errorCode"]) &&
+    exactKeys(
+      record,
+      ["type", "operation", "errorType", "errorCode"],
+      ["stage", "challengeAttempts", "lastHttpStatus"],
+    ) &&
     record["operation"] === "browser-collection" &&
     typeof record["errorType"] === "string" &&
     /^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(record["errorType"]) &&
-    record["errorCode"] === "browser_collection_failed"
+    oneOf(GLOBALPASS_CONTAINER_FAILURE_CODES, record["errorCode"]) &&
+    (record["stage"] === undefined || oneOf(GLOBALPASS_CONTAINER_STAGES, record["stage"])) &&
+    (record["challengeAttempts"] === undefined || integerIn(record["challengeAttempts"], 0, 10)) &&
+    (record["lastHttpStatus"] === undefined || integerIn(record["lastHttpStatus"], 400, 599))
   ) {
     return {
       type: "error",
       operation: record["operation"],
       errorType: record["errorType"],
       errorCode: record["errorCode"],
+      ...(record["stage"] === undefined ? {} : { stage: record["stage"] }),
+      ...(record["challengeAttempts"] === undefined
+        ? {}
+        : { challengeAttempts: record["challengeAttempts"] as number }),
+      ...(record["lastHttpStatus"] === undefined
+        ? {}
+        : { lastHttpStatus: record["lastHttpStatus"] as number }),
     };
   }
   throw new Error("GLOBAL PASS container returned an invalid record shape");
@@ -640,63 +671,93 @@ async function relayTcp(
   }
   const runId = relayRunId(url);
   const relayId = crypto.randomUUID();
+  const startedAt = Date.now();
   let peerClosed = false;
+  let bytesUp = 0;
+  let bytesDown = 0;
+  // The first failure on either side, and whether the container had already
+  // closed its end when it happened (then it is teardown, not a fault).
+  let failure: { side: "read" | "write"; error: unknown; afterPeerClosed: boolean } | undefined;
   const pair = new WebSocketPair();
   const client = pair[0];
   const server = pair[1];
   server.accept();
   const binding = network === "cf-gateway" ? env.CF_EGRESS : env.MESH;
   const socket = (binding as VpcNetworkBinding).connect({ hostname, port });
+  let opened = false;
+  void Promise.resolve(socket.opened).then(
+    () => {
+      opened = true;
+    },
+    () => undefined,
+  );
   const writer = socket.writable.getWriter();
   let writeChain = Promise.resolve();
   ctx.waitUntil(
     (async () => {
       const reader = socket.readable.getReader();
+      let readEnded = false;
       try {
         while (true) {
           const { value, done } = await reader.read();
           if (done) break;
+          bytesDown += value.byteLength;
           server.send(value);
         }
+        readEnded = true;
       } catch (error) {
-        logEvent(
-          "error",
-          JSON.stringify({
-            event: "globalpass-relay-read-error",
-            phase: "relay",
-            runId,
-            relayId,
-            peerClosed,
-            ...safeErrorDetails(error),
-          }),
-        );
+        failure ??= { side: "read", error, afterPeerClosed: peerClosed };
       } finally {
         reader.releaseLock();
         try {
           server.close(1000, "upstream closed");
         } catch {}
+        // One closed record per tunnel: which host class and network, how
+        // long, bytes each way and how it ended. Counts and codes only.
+        const outcome = relayOutcome({
+          failure,
+          peerClosed,
+          readEnded,
+          opened,
+        });
+        logEvent(
+          outcome.endsWith("-failed") ? "error" : "log",
+          JSON.stringify({
+            event: "globalpass-relay-closed",
+            phase: "relay",
+            runId,
+            relayId,
+            host: relayHostClass(hostname),
+            network,
+            outcome,
+            durationMs: Date.now() - startedAt,
+            bytesUp,
+            bytesDown,
+            // Error fields only on a failure: teardown reads as teardown.
+            ...(failure && outcome.endsWith("-failed") ? safeErrorDetails(failure.error) : {}),
+          }),
+        );
       }
     })(),
   );
   server.addEventListener("message", (event) => {
     writeChain = writeChain.then(async () => {
-      await writer.write(await websocketBytes(event.data));
+      if (failure?.side === "write") return;
+      try {
+        const bytes = await websocketBytes(event.data);
+        await writer.write(bytes);
+        bytesUp += bytes.byteLength;
+      } catch (error) {
+        failure ??= { side: "write", error, afterPeerClosed: peerClosed };
+        // The tunnel cannot carry the browser's bytes any more: end it so the
+        // browser sees a closed connection instead of a stalled one.
+        try {
+          server.close(1011, "upstream write failed");
+        } catch {}
+        await socket.close().catch(() => undefined);
+      }
     });
-    ctx.waitUntil(
-      writeChain.catch((error) =>
-        logEvent(
-          "error",
-          JSON.stringify({
-            event: "globalpass-relay-write-error",
-            phase: "relay",
-            runId,
-            relayId,
-            peerClosed,
-            ...safeErrorDetails(error),
-          }),
-        ),
-      ),
-    );
+    ctx.waitUntil(writeChain);
   });
   server.addEventListener("close", () => {
     peerClosed = true;
@@ -709,6 +770,44 @@ async function relayTcp(
   });
   return new Response(null, { status: 101, webSocket: client });
 }
+/** A relay host as a closed class, so a log line never carries a host name. */
+function relayHostClass(
+  hostname: string,
+): "globalpass" | "turnstile" | "turnstile-helper" | "egress-probe" {
+  if (hostname === GLOBALPASS_HOST) return "globalpass";
+  if (hostname === TURNSTILE_HOST) return "turnstile";
+  if (hostname === TURNSTILE_HELPER_HOST) return "turnstile-helper";
+  return "egress-probe";
+}
+
+export type RelayOutcome =
+  | "peer-closed"
+  | "upstream-closed"
+  | "upstream-connect-failed"
+  | "upstream-read-failed"
+  | "upstream-write-failed";
+
+/**
+ * How one relay tunnel ended. A read or write error after the container closed
+ * its end is the teardown of a tunnel the browser no longer needs
+ * (`peer-closed`), not a fault; before that it is a failure of the upstream
+ * side, and `upstream-connect-failed` when the upstream never opened.
+ */
+export function relayOutcome(input: {
+  failure: { side: "read" | "write"; afterPeerClosed: boolean } | undefined;
+  peerClosed: boolean;
+  readEnded: boolean;
+  opened: boolean;
+}): RelayOutcome {
+  const { failure } = input;
+  if (failure && !failure.afterPeerClosed) {
+    if (!input.opened) return "upstream-connect-failed";
+    return failure.side === "write" ? "upstream-write-failed" : "upstream-read-failed";
+  }
+  if (input.peerClosed) return "peer-closed";
+  return input.readEnded ? "upstream-closed" : "upstream-read-failed";
+}
+
 async function websocketBytes(data: string | ArrayBuffer | Blob): Promise<Uint8Array> {
   if (typeof data === "string") return new TextEncoder().encode(data);
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
@@ -745,6 +844,12 @@ function collectionFailure(
 function safeErrorType(error: unknown): string {
   const candidate = error instanceof Error ? error.name : "UnknownError";
   return /^[A-Za-z][A-Za-z0-9]{0,79}$/u.test(candidate) ? candidate : "UnknownError";
+}
+function oneOf<T extends string>(values: readonly T[], value: unknown): value is T {
+  return typeof value === "string" && (values as readonly string[]).includes(value);
+}
+function integerIn(value: unknown, min: number, max: number): boolean {
+  return Number.isInteger(value) && (value as number) >= min && (value as number) <= max;
 }
 function sameStrings(left: string[], right: string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);

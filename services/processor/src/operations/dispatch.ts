@@ -383,11 +383,11 @@ async function dispatchImport(
 }
 
 /**
- * Whether a run names a terminal key at all. The App's run grammar admits
- * characters (`:`) the bucket key grammar refuses, and the key builder throws
- * on them; such a request can never register, so it ends with the closed
- * `operation_payload_invalid` instead of an unclassified throw that failed the
- * whole lane on every tick.
+ * Whether a run names a terminal key at all. The App now accepts only the
+ * bucket key grammar, but a payload stored before it did can still carry a
+ * character (`:`) the key builder throws on; such a request can never
+ * register, so it ends with the closed `operation_payload_invalid` instead of
+ * an unclassified throw that failed the whole lane on every tick.
  */
 function terminalAddressable(source: string, runId: string): boolean {
   try {

@@ -7,7 +7,13 @@ import {
 import { alarmClaimWrite } from "../../../packages/application/src/index.ts";
 import { isLeaseAbortCode } from "../../../packages/collection/src/schedule-result";
 import { collectorBindingName } from "./collector-binding";
-import { jobFor, readSchedule, maintenanceForSchedule, bootstrapSchedules } from "./schedule-store";
+import {
+  jobFor,
+  readSchedule,
+  maintenanceForSchedule,
+  bootstrapSchedules,
+  expireStaleLeases,
+} from "./schedule-store";
 interface DispatchResult {
   status: "completed" | "failed";
   runIds: string[];
@@ -147,6 +153,11 @@ export class ScheduleAlarm extends DurableObject<Env> {
         // The idempotent processor also repairs reservations whose configuration
         // was saved while another object's RPC was unavailable.
         await this.ctx.exports.ScheduledPipeline.runTick();
+        // Only this alarm frees silent leases: each release is recorded with
+        // `alarm:processor-tick` as its principal (ADR 0085). It runs before
+        // the reservation repair, so a failing reconcile cannot keep a silent
+        // lease held.
+        await expireStaleLeases(this.env.DB);
         await bootstrapSchedules(this.env);
         result = { status: "completed", runIds: [], failureCode: null };
       } else {

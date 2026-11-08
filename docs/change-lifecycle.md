@@ -182,7 +182,7 @@ receipt, so a moved pin writes nothing anywhere, and a resend replays the
 receipt. Every id the batch writes is keyed by the operation (the event
 decisions' digest includes it), so a resend whose batch was built before the
 first commit landed finds its own rows and writes nothing more, and another
-operation of the same plan finds the plan committed and writes nothing. Agents cannot approve or commit it, like every other change. The
+operation of the same plan finds the plan committed and writes nothing. As for every other change, an agent on the browser's command routes cannot approve or commit it; an MCP client can, as itself, through `kogane.command.approve` and `kogane.command.commit` ([ADR 0084](adr/0084-mcp-operator-authority-without-delegation.md), [agent API](agent-api.md#change-lifecycle-decisions)). The
 receipt's `result` adds `proposalId`, `proposalDecisionRevisionId`, `review`
 (`accept`, `reject` or `withdraw`) and `eventRevisions`.
 
@@ -409,11 +409,13 @@ internal judgements towards the read models.
 
 `packages/storage-d1/src/core/decision-outbox.ts` (the Processor keeps the
 historical import path) runs one bounded pass
-per `scheduled` invocation, as the last of the seven scheduled stages — after
-the projections a decision may have invalidated
-(`docs/observation-lanes.md`): it claims up to 20 due rows under a 60 s lease,
-runs each target's processor, and turns the operation's receipt `published`
-once no row of that operation is unprocessed.
+per `scheduled` invocation, after the projections a decision may have
+invalidated and the operation dispatch lane; only the audit log's
+`audit_overflow` lane runs after it (`runScheduled` in
+`services/processor/src/worker.ts`; `docs/observation-lanes.md`): it claims
+up to 20 due rows under a 60 s lease, runs each target's processor, and turns
+the operation's receipt `published` once no row of that operation is
+unprocessed.
 
 ### The four processor results
 
@@ -498,6 +500,11 @@ POST /api/command/v1/operation  { operationId }                     -> { receipt
 - POST only, on exactly these five paths. Everything else in the evidence
   browser stays GET-only; any other non-GET request is still `405`.
 - No query string, body bounded to 16 KiB, `no-store` on every answer.
+- An `Origin` that is present and not the Worker's own is
+  `403 origin_not_allowed` before the flag, the grant or the body is read
+  ([ADR 0078](adr/0078-own-origin-state-changing-routes.md)), so a page on
+  another site cannot drive the operator's browser session into an approval
+  or a commit. A client that sends no `Origin` is unaffected.
 - Only the upstream status and JSON body cross back to the client: no upstream
   headers, no exception text, no provider content.
 
@@ -592,7 +599,7 @@ lifecycle codes `invalid_command`, `commands_disabled`, `subject_not_granted`,
 
 Statuses: 400 invalid input, 403 refusal (`approval_required`,
 `commands_disabled`, `subject_not_granted`, `actor_not_supported`,
-`evidence_restricted`), 404 not found, 409 conflict (`stale_context`,
+`evidence_restricted`, `origin_not_allowed`), 404 not found, 409 conflict (`stale_context`,
 `idempotency_conflict`, approval/plan state), 429 `budget_exceeded`, 500
 `commit_failed`, 503 this deployment cannot serve the request at all
 (`grants_misconfigured`, `command_executor_unavailable`). No error text
@@ -687,7 +694,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
 
 ## Verified locally (synthetic data only)
 
-- `services/processor/test/change-lifecycle.test.ts` (16 tests):
+- `services/processor/test/change-lifecycle.test.ts` (31 tests):
   plan contents and server-computed impact; SC17/AT69 (approval refused with
   `stale_context` after a concurrent change, plan marked stale, re-simulation
   yields a new digest); a stale plan refused at commit with **no rows written
@@ -713,7 +720,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
   on all four tables; migration 0031 applied on a seeded 0017–0035 schema with
   no existing row touched; and an unadopted successful run kept out of the
   simulated difference until the publication gate adopts it.
-- `services/app/test/command-api.test.ts` (9 tests): 401 without
+- `services/app/test/command-api.test.ts` (21 tests): 401 without
   a JWT, 403 with the flag off or set to anything but `"true"`, POST-only and
   404 for unknown command paths, the rest of the Worker still GET-only, an
   agent refused approve/commit before forwarding, `503` when the writer binding
@@ -770,7 +777,7 @@ already recorded is never undone by a DELETE — an undo is a new revision
   widened CHECK, the six kinds accepted and unknown ones refused,
   append-only and forward-only triggers still firing, and an interrupted
   migration rolled back whole.
-- `apps/web/test/confirm.browser.test.ts` (8 tests): read-only
+- `apps/web/test/confirm.browser.test.ts` (9 tests, one an accessibility audit): read-only
   without the capability, no action on a stale plan, accepted vs published
   shown distinctly, and a pending-to-posted review shown against the candidate
   it pins. That review can be approved and committed only while every pin, the

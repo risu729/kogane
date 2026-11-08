@@ -52,11 +52,53 @@ export interface StoredArtifact {
   bytes: number;
   sha256: string;
 }
+/**
+ * The closed failure codes the container's `error` record may carry
+ * (`container/failure.mjs` holds the same list): the step that failed, so a
+ * failed run's `safeErrorCode` names it. `browser_collection_failed` is a
+ * failure in no known step, and what a container image older than
+ * `timezone-collector-v8` always sent.
+ */
+export const GLOBALPASS_CONTAINER_FAILURE_CODES = [
+  "globalpass_relay_start_failed",
+  "globalpass_browser_launch_failed",
+  "globalpass_login_page_failed",
+  "globalpass_challenge_failed",
+  "globalpass_challenge_timeout",
+  "globalpass_challenge_denied",
+  "globalpass_login_submit_failed",
+  "globalpass_login_denied",
+  "globalpass_login_rejected",
+  "globalpass_activity_open_failed",
+  "globalpass_month_discovery_failed",
+  "globalpass_statement_read_failed",
+  "globalpass_browser_close_failed",
+  "browser_collection_failed",
+] as const;
+export type GlobalPassContainerFailureCode = (typeof GLOBALPASS_CONTAINER_FAILURE_CODES)[number];
+
+/** The container's stages (`container/diagnostics.mjs`) an `error` record may name. */
+export const GLOBALPASS_CONTAINER_STAGES = [
+  "collection",
+  "relay-start",
+  "browser-launch",
+  "login-page",
+  "challenge",
+  "login-submit",
+  "activity-open",
+  "month-discovery",
+  "statement-read",
+  "logout",
+  "browser-close",
+  "relay-close",
+] as const;
+export type GlobalPassContainerStage = (typeof GLOBALPASS_CONTAINER_STAGES)[number];
+
 export interface CollectionFailure {
   operation: "browser-collection" | "contract" | "sanitization" | "pagination" | "r2";
   errorType: string;
   errorCode:
-    | "browser_collection_failed"
+    | GlobalPassContainerFailureCode
     | "container_contract_invalid"
     /** A sanitizer refusal that carried no closed code (none is thrown today). */
     | "html_sanitization_failed"
@@ -72,6 +114,12 @@ export interface CollectionFailure {
    * contract failed (ADR 0026's amendment of 2026-09-28). A closed code.
    */
   expectationCode?: GlobalPassSanitizerExpectation;
+  /** On a container failure: the container stage it failed in. */
+  stage?: GlobalPassContainerStage;
+  /** On a container failure: how many Turnstile challenge attempts were made. */
+  challengeAttempts?: number;
+  /** On a container failure: the last HTTP error status (400-599) the page saw. */
+  lastHttpStatus?: number;
 }
 
 export interface CollectionManifest {
@@ -112,7 +160,10 @@ export type ContainerRecord =
       type: "error";
       operation: "browser-collection";
       errorType: string;
-      errorCode: "browser_collection_failed";
+      errorCode: GlobalPassContainerFailureCode;
+      stage?: GlobalPassContainerStage;
+      challengeAttempts?: number;
+      lastHttpStatus?: number;
     };
 
 export function parseMode(value: string | null): CollectionMode {

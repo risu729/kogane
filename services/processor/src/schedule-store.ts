@@ -207,7 +207,9 @@ export async function bootstrapSchedules(env: Env) {
   // A generous grace exceeds the platform alarm's 15-minute execution limit.
   // The exact finish time is unknown, so finished_at deliberately remains null.
   await markAbandonedOccurrences(env.DB, new Date(Date.now() - 60 * 60_000).toISOString());
-  await expireStaleLeases(env.DB);
+  // Stale leases are freed by the `processor-tick` alarm only
+  // (`ScheduleAlarm`), whose principal the release records name; the release
+  // workflow's bootstrap, which also calls this, is not that alarm (ADR 0085).
   const reservations = [];
   for (const job of jobs) {
     const row = await initializeSchedule(env, job.id);

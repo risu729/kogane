@@ -1,7 +1,10 @@
 # Collector admin bearer retirement
 
-- Status: in progress; the first slice (13 of 15 registrations) merged
-  2026-10-10 in #665, and the St.George saved-only preparation in #680
+- Status: done in code; the first slice (13 of 15 registrations) merged
+  2026-10-10 in #665, and the last two (SBI VC, St.George) on 2026-11-08
+  ([ADR 0069 amendment](../adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)).
+  Removing the two remaining secret registrations from the deployed Workers
+  is the only open step.
 - Date: 2026-10-10
 - Decision: [ADR 0069](../adr/0069-collector-admin-retirement.md)
 
@@ -33,7 +36,11 @@ secret-sync scripts no longer create or upload admin tokens. Provider credential
 relay token and encryption-key synchronization remain. Native generated binding
 types are regenerated; ignored outputs are not hand-edited.
 
-## Deferred necessary recovery
+## Deferred necessary recovery (resolved 2026-11-08)
+
+Both were replaced by operations-API requests in the
+[ADR 0069 amendment](../adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08);
+the table below is the state before it.
 
 | Worker                       | Secret still required | Unresolved operation                                 |
 | ---------------------------- | --------------------- | ---------------------------------------------------- |

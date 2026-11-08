@@ -569,6 +569,24 @@ describe("authenticated read-only evidence", () => {
     expect((await call(`${prefix}/missing`)).status).toBe(404);
     expect((await call(`${prefix}/meta`, { method: "POST" })).status).toBe(405);
   });
+  // An authenticated answer is the operator's financial data. Another site may
+  // not embed it as a no-cors subresource (an image, a script, a media
+  // element), where it would sit in that site's process, and a window this
+  // Worker opens or is opened from keeps no handle on the other.
+  it("isolates every answer from other origins, the shell, a read and a refusal alike", async () => {
+    for (const [path, jwt, status] of [
+      ["/evidence/sources/sony-bank", undefined, 200],
+      [`${prefix}/meta`, undefined, 200],
+      [`${prefix}/missing`, undefined, 404],
+      [`${prefix}/meta`, null, 401],
+    ] as const) {
+      const response = await call(path, { jwt });
+      expect(response.status, path).toBe(status);
+      expect(response.headers.get("cross-origin-resource-policy"), path).toBe("same-origin");
+      expect(response.headers.get("cross-origin-opener-policy"), path).toBe("same-origin");
+      await response.arrayBuffer();
+    }
+  });
   it("classifies malformed identity keys as a provider outage rather than invalid credentials", async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue(
       new Response("invalid private upstream JSON", { status: 200 }),

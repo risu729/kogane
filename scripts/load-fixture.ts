@@ -133,8 +133,26 @@ export function shapeFromEnv(source: Record<string, string | undefined>): LoadSh
     observationsPerDay: read("KOGANE_LOAD_OBSERVATIONS", DEFAULT_SHAPE.observationsPerDay),
     days: read("KOGANE_LOAD_DAYS", DEFAULT_SHAPE.days),
     seed: read("KOGANE_LOAD_SEED", DEFAULT_SHAPE.seed),
-    startDate: source.KOGANE_LOAD_START ?? DEFAULT_SHAPE.startDate,
+    startDate: readStartDate(source.KOGANE_LOAD_START),
   };
+}
+
+/**
+ * `KOGANE_LOAD_START` as a calendar day. `addDays` hands its parts to
+ * `Date.UTC`, which rolls an impossible day over (`2026-02-30` would start
+ * the history on 2026-03-02) and turns anything unparsable into an invalid
+ * date, so both are refused here instead of becoming a different fixture.
+ */
+function readStartDate(value: string | undefined): string {
+  if (value === undefined) return DEFAULT_SHAPE.startDate;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value);
+  const valid =
+    match !== null &&
+    new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+      .toISOString()
+      .slice(0, 10) === value;
+  if (!valid) throw new RangeError("KOGANE_LOAD_START must be a calendar date YYYY-MM-DD");
+  return value;
 }
 
 export function describeShape(shape: LoadShape): string {

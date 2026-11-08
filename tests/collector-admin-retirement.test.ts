@@ -17,6 +17,9 @@ const retired = [
   "prestia-bank",
   "vpoint-pay",
   "smbc-direct",
+  // The last two, retired 2026-11-08 (ADR 0069 amendment).
+  "sbi-vc-trade",
+  "st-george",
 ];
 const read = (path: string) => readFileSync(resolve(root, path), "utf8");
 
@@ -56,9 +59,7 @@ describe("collector admin retirement inventory", () => {
     ])
       expect(existsSync(resolve(root, `services/collector-${path}`))).toBe(false);
   });
-  test("the two recovery consumers and non-admin secret boundaries remain explicit", () => {
-    expect(read("services/collector-sbi-vc-trade/src/worker.ts")).toContain("env.ADMIN_TOKEN");
-    expect(read("services/collector-st-george/src/worker.ts")).toContain("env.ADMIN_TRIGGER_TOKEN");
+  test("non-admin secret boundaries remain explicit", () => {
     for (const name of ["globalpass", "sbi-shinsei", "st-george"])
       expect(read(`services/collector-${name}/src/worker.ts`)).toContain("env.RELAY_TOKEN");
     for (const name of ["sbi-vc-trade", "smbc-direct"])

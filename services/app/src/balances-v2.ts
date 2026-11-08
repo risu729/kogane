@@ -50,6 +50,7 @@ import {
   type BalanceSnapshotRow,
   type ProjectionPageRow,
   snapshotIsBehind,
+  subtotalCountKey,
   type CoreRevisionRow,
   type ServableSnapshot,
   type SnapshotRefusal,
@@ -432,10 +433,13 @@ async function dataCoverage(
 /**
  * Assets the adopted set accounts for, per unit, over the whole filter scope
  * rather than the page. Exact integer arithmetic only; a unit is summed only
- * across distinct subject scopes, so a subject reported twice makes the
- * subtotal unavailable instead of double counting it (INV06). There is
- * deliberately no net worth: unfetched liabilities mean this is not even a
- * lower bound (addendum 05 section 5).
+ * across distinct subject scopes, so a subject reported twice in one unit
+ * makes the subtotal unavailable instead of double counting it (INV06). One
+ * subject may hold several units (an exchange account's cash per asset, a
+ * broker's foreign cash per currency): each unit is its own figure, so that
+ * is not a subject reported twice. There is deliberately no net worth:
+ * unfetched liabilities mean this is not even a lower bound (addendum 05
+ * section 5).
  */
 async function knownAssetSubtotals(
   reader: BalanceProjectionReader,
@@ -452,14 +456,15 @@ async function knownAssetSubtotals(
     };
   const subjects = new Set<string>();
   for (const row of rows) {
-    if (subjects.has(row.subject_scope_key))
+    const key = subtotalCountKey(row);
+    if (subjects.has(key))
       return {
         policyRelease: KNOWN_ASSETS_POLICY,
         knownAssetsSubtotal: null,
         liabilitiesCoverage: "unknown",
         reasonCode: "subject_reported_twice",
       };
-    subjects.add(row.subject_scope_key);
+    subjects.add(key);
   }
   const totals = new Map<string, { coefficient: string; scale: number; adoptedCount: number }>();
   for (const row of rows) {

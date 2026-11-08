@@ -287,8 +287,10 @@ test("success: accepted, started, collected and published are distinct, timestam
       },
     ],
   });
-  // READ projection of the run is not traced: `projected` stays pending and
-  // the request is not reported complete (ADR 0048, limits).
+  // `projected` is derived from READ when the record is read (ADR 0048,
+  // amended). Publication stored the CORE revision it needs; this reader
+  // passes no READ database, so it stays pending with that closed reason and
+  // the request is not reported complete.
   expect(stages(published)).toEqual([
     "persisted:completed",
     "registered:completed",
@@ -296,7 +298,24 @@ test("success: accepted, started, collected and published are distinct, timestam
     "adopted:completed",
     "projected:pending",
   ]);
+  expect(published.stages[4]).toMatchObject({
+    evidenceRef: null,
+    failureCode: "read_model_unavailable",
+  });
   expect(published.status).toBe("running");
+  const [requirement] = rows<{ evidence_ref: string; state: string }>(
+    w.db,
+    "SELECT evidence_ref,state FROM ops_request_stages WHERE operation_id=? AND stage='projected'",
+    operationId,
+  );
+  const revision = rows<{ source_revision: number; core_epoch: string }>(
+    w.db,
+    "SELECT source_revision,core_epoch FROM core_source_revision WHERE id=1",
+  )[0]!;
+  expect(requirement).toEqual({
+    state: "pending",
+    evidence_ref: `core-revision:${revision.core_epoch}:${revision.source_revision}`,
+  });
 
   // Nothing further happens: no second call, nothing left to track.
   expect(await w.tick(publishedAt + HOUR)).toMatchObject({ claimed: 0, started: 0, tracked: 0 });

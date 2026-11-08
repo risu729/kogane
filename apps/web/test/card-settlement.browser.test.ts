@@ -29,14 +29,14 @@ const unmatched = {
   manifest: {
     codes: [],
     planner: {
-      release: "card-statement-allocation-v1",
+      release: "card-statement-allocation-v2",
       policy: {
         policyVersion: "card-statement-unmatched-display-v1",
         window: { minDaysFromDue: -3, maxDaysFromDue: 3 },
         maxDebitsPerAllocation: 3,
       },
       partition: "page-overlapping-windows",
-      bounds: { statements: 16, debits: 32 },
+      bounds: { statements: 16, debits: 32, allocations: 50 },
     },
     pageSize: 50,
     acceptance: "single-debit-candidates-only",
@@ -85,6 +85,8 @@ const unmatched = {
             ],
           },
         ],
+        allocationCount: 1,
+        allocationsTruncated: false,
       },
       acceptable: false,
     },
@@ -111,6 +113,38 @@ const unmatched = {
   ],
   nextOffset: null,
 };
+/** One statement whose window holds 32 equal debits: 4,960 exact sums, the first 50 listed. */
+const truncated = {
+  ...unmatched,
+  items: [
+    {
+      ...unmatched.items[0]!,
+      debitsInWindow: 32,
+      planner: {
+        status: "needs_review",
+        codes: ["candidate_not_unique"],
+        allocations: Array.from({ length: 50 }, (_, index) => ({
+          kind: "multiple-debits",
+          ownership: "unknown",
+          rejectionConditions: ["owner_not_established"],
+          members: [0, 1, 2].map((offset) => ({
+            ref: {
+              kind: "transaction",
+              id: `transaction:${100 + index + offset}`,
+              revision: "parse_run:6",
+            },
+            sourceId: "smbc-bank",
+            sourceAccount: "synthetic-bank",
+            accountId: null,
+            amount: yen("1000"),
+          })),
+        })),
+        allocationCount: 4960,
+        allocationsTruncated: true,
+      },
+    },
+  ],
+};
 
 describe.if(runnable)("card settlement review", () => {
   let browser: Browser;
@@ -122,6 +156,7 @@ describe.if(runnable)("card settlement review", () => {
   let planRevision = 0;
   let action = "accept";
   let older: ReturnType<typeof settlementReview>[] = [];
+  let unmatchedPage: unknown = unmatched;
   const posted: { operation: string; body: Record<string, unknown> }[] = [];
   beforeEach(() => {
     review = settlementReview();
@@ -130,6 +165,7 @@ describe.if(runnable)("card settlement review", () => {
     planRevision = 0;
     action = "accept";
     older = [];
+    unmatchedPage = unmatched;
     posted.length = 0;
   });
   beforeAll(async () => {
@@ -197,7 +233,7 @@ describe.if(runnable)("card settlement review", () => {
             },
           });
         if (url.pathname === "/api/v2/reconciliation/card-statements-unmatched")
-          return Response.json(unmatched);
+          return Response.json(unmatchedPage);
         if (url.pathname.startsWith("/api/command/v1/")) {
           const operation = url.pathname.split("/").at(-1)!;
           const body = (await request.json()) as Record<string, unknown>;
@@ -332,6 +368,21 @@ describe.if(runnable)("card settlement review", () => {
     expect(text).toContain("三井住友銀行 · synthetic-bank · 2000 JPY");
     expect(text).toContain("返金の割り当ては未対応");
     expect(text).toContain("まだ採用できません");
+    expect(await section.getByRole("button", { name: /採用/u }).count()).toBe(0);
+    await page.close();
+  });
+
+  test("a statement with more combinations than the server lists says how many it does not show", async () => {
+    unmatchedPage = truncated;
+    const page = await open();
+    const section = page.getByRole("region", { name: "照合候補のない請求" });
+    const note = section.getByRole("note");
+    await note.waitFor();
+    expect(await note.innerText()).toContain(
+      "一致する組み合わせ 4,960件のうち、出金の件数が少ない順に先頭の50件を表示しています。",
+    );
+    expect(await section.locator(".unmatched-allocation").count()).toBe(50);
+    expect(await section.innerText()).toContain("組み合わせが一つに決まりません");
     expect(await section.getByRole("button", { name: /採用/u }).count()).toBe(0);
     await page.close();
   });

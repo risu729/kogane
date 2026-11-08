@@ -531,7 +531,7 @@ login responseの属性では、`vct_bff_sid`と`__cf_bm`の`Expires`が約30分
 - responseは64 KiB上限でJSON envelopeと`meta.status === "OK"`だけを確認し、bodyを保存しない。
 - `Set-Cookie`は8 Cookieだけを追従し、`__cf_bm`は無視する。`meta.secureKey`が変化した場合も暗号化状態へ反映する。
 - 平文healthはlast attempt/success、HTTP status、gateway statusの閉じた区分（`OK`か`rejected`。gatewayが返した`OK`以外の文字列は保存もlogもしない）、Cookie更新数、連続失敗数、固定error codeだけで、残高・履歴・Cookie値・response bodyを含まない。
-- 手動`/run`、`/reauth`、`/health`はrandom bearer tokenのWorker Secretで保護する。
+- 手動`/run`、`/reauth`、`/collect`、`/health`と`ADMIN_TOKEN`は2026-11-08に廃止した。手動の収集はoperations APIの`collection`、強制loginは`session-refresh`（1時間に1回まで）で依頼する（[ADR 0069](../adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08)）。
 - keepaliveがHTTP 401/403、gateway拒否、seed欠落になった場合だけ再認証する（while a terms agreement is pending, also on the gateway's 3xx `http_rejected`; [§16](#16-resuming-after-a-terms-agreement-2026-11-07)）。6時間cooldown（1 hour for up to 72 hours while an agreement is pending）で反復loginを抑止し、同種の同時実行を単一Promiseへ畳み込み、keepaliveと再認証のsession変更はDurable Object内で直列化する。
 - passkey完了responseの`body.accountId`は直後のread APIの`secureKey`と一致したため、新規sessionの`secureKey`として使う。`isAgreed !== true`なら`setAgreement`を送らずそのloginを`manual_agreement_required`で終える。
 
@@ -609,7 +609,7 @@ runがcurrent observation 0になるend-to-end regressionで固定している�
 - Durable Object class: `SbiVcSessionState`
 - R2 bucket: `kogane-sbi-vc-trade-poc`
 - Cron: `*/15 * * * *`, `5 21 * * *`
-- Secrets: `SESSION_SEED`, `SESSION_ENCRYPTION_KEY`, `ADMIN_TOKEN`, `PASSKEY_CREDENTIAL`
+- Secrets: `SESSION_SEED`, `SESSION_ENCRYPTION_KEY`, `PASSKEY_CREDENTIAL` (`ADMIN_TOKEN` was retired on 2026-11-08 with its routes, [ADR 0069 amendment](../adr/0069-collector-admin-retirement.md#retirement-of-the-last-two-admin-routes-2026-11-08))
 
 検証終了時は`services/collector-sbi-vc-trade`から`npx wrangler delete --name kogane-sbi-vc-session-poc`でWorker、DO binding、Cron、Secretsを削除する。R2 dataが不要になったことを別途確認した後だけ、objectsとbucket `kogane-sbi-vc-trade-poc`を削除する。現時点では日次収集の継続検証のためすべて残す。
 
@@ -645,7 +645,9 @@ Owner decision, 2026-11-07 06:28 UTC (options A and D of the reviewed
 proposal; recorded in the
 [ADR 0026 amendment](../adr/0026-collector-unit-coverage.md#amendment-sbi-vc-retries-the-login-while-a-terms-agreement-is-pending-2026-11-07)):
 collection resumes by itself once the owner has agreed to the provider's
-terms. No `ADMIN_TOKEN`, `/reauth` call or other manual step is needed.
+terms. No `ADMIN_TOKEN`, `/reauth` call or other manual step is needed. (Since
+2026-11-08 there is no `/reauth` route: an operations-API `session-refresh`
+request is the operator's forced login, ADR 0069 amendment.)
 
 What happened before: a passkey login whose result has `isAgreed !== true`
 stored `lastReauthErrorCode: "manual_agreement_required"`, and from then on

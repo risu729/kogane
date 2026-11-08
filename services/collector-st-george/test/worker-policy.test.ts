@@ -1,9 +1,10 @@
-import { describe, expect, test, mock, spyOn } from "bun:test";
-import { readFileSync } from "node:fs";
+import { describe, expect, test, spyOn } from "bun:test";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
 import {
   CollectionCoordinator,
+  REQUESTED_LOGIN_SPACING_MS,
   authorized,
+  credentialDigest,
   parseCollectionOutput,
   parseCredential,
   type StateStorage,
@@ -45,8 +46,7 @@ describe("durable collection policy", () => {
         throw new Error("must not persist");
       },
     );
-    expect(await coordinator.trigger()).toEqual({ status: "blocked", reason: "login-rejected" });
-    expect(await coordinator.resume()).toEqual({ status: "ready" });
+    expect(await coordinator.trigger()).toEqual({ status: "paused", reason: "login-rejected" });
   });
   test("an R2 outage retries a large captured snapshot after restart without another bank request", async () => {
     const state = new Storage();
@@ -72,7 +72,6 @@ describe("durable collection policy", () => {
       status: "failed",
       reason: "persistence-incomplete",
     });
-    expect(await first.resume()).toMatchObject({ reason: "persistence-pending" });
     const chunks = [...state.values.values()].filter(
       (value): value is Uint8Array => value instanceof Uint8Array,
     );
@@ -84,11 +83,19 @@ describe("durable collection policy", () => {
     expect(reads).toBe(1);
     expect(state.values.size).toBe(0);
   });
-  test("auth and network failures remain blocked until an explicit resume", async () => {
-    for (const reason of ["authentication-challenge", "bank-request-error"] as const) {
+  test("a refused, challenged or unrecognised login pauses later logins; a requested collection tries one", async () => {
+    for (const reason of [
+      "login-rejected",
+      "authentication-challenge",
+      "human-required",
+      "http-denied",
+      "bank-request-error",
+      "unexpected-route",
+    ] as const) {
       const state = new Storage();
       const bucket = new FakeR2Bucket();
       let reads = 0;
+      let clock = Date.parse("2026-11-08T00:00:00.000Z");
       const create = () =>
         new CollectionCoordinator(
           state,
@@ -97,37 +104,335 @@ describe("durable collection policy", () => {
             return { status: "failed", reason };
           },
           (run) => persistSharedRun(bucket, run),
+          async () => "unchanged",
+          () => clock,
         );
       const first = await create().trigger();
       expect(first).toMatchObject({ status: "blocked", reason });
       expect(first.runId).toBeString();
       const restarted = create();
-      expect(await restarted.trigger()).toEqual({ status: "blocked", reason, runId: first.runId! });
+      // The alarm never lifts a pause.
+      expect(await restarted.trigger()).toEqual({ status: "paused", reason, runId: first.runId! });
       expect(reads).toBe(1);
-      expect(await restarted.resume()).toEqual({ status: "ready" });
-      await restarted.trigger();
+      // A requested collection tries exactly one login; a second refusal pauses again.
+      expect(await restarted.trigger({ operatorRequested: true })).toMatchObject({
+        status: "blocked",
+        reason,
+      });
       expect(reads).toBe(2);
+      // Another request within 24 hours does not log in again, whoever sends it.
+      clock += REQUESTED_LOGIN_SPACING_MS - 1;
+      expect(await restarted.trigger({ operatorRequested: true })).toMatchObject({
+        status: "paused",
+        reason,
+      });
+      expect(reads).toBe(2);
+      clock += 1;
+      await restarted.trigger({ operatorRequested: true });
+      expect(reads).toBe(3);
     }
   });
-  test("a persisted in-flight marker blocks an uncertain login after restart", async () => {
+  test("a changed credential lifts the pause by itself; an unreadable one does not", async () => {
     const state = new Storage();
-    await state.put("state", { kind: "running" });
+    let credential: string | null = "first";
+    let reads = 0;
+    let outcome: "failed" | "success" = "failed";
     const coordinator = new CollectionCoordinator(
       state,
       async () => {
-        throw new Error("must not call provider");
+        reads++;
+        return outcome === "failed"
+          ? { status: "failed", reason: "login-rejected" }
+          : { status: "success", snapshot: snapshot() };
+      },
+      (run) => persistSharedRun(new FakeR2Bucket(), run),
+      async (salt) => (credential === null ? null : `${credential}:${salt}`),
+    );
+    expect(await coordinator.trigger()).toMatchObject({ status: "blocked" });
+    const paused = state.values.get("state") as { credential?: { salt: string; hash: string } };
+    expect(paused.credential?.salt).toBeString();
+    expect(paused.credential?.hash).toBe(`first:${paused.credential!.salt}`);
+    expect(await coordinator.trigger()).toMatchObject({ status: "paused" });
+    credential = null;
+    expect(await coordinator.trigger()).toMatchObject({ status: "paused" });
+    expect(reads).toBe(1);
+    credential = "second";
+    outcome = "success";
+    expect(await coordinator.trigger()).toMatchObject({ status: "stored" });
+    expect(reads).toBe(2);
+    // The digest is gone with the pause.
+    expect(state.values.size).toBe(0);
+  });
+  test("the credential digest reads the parsed fields, not the JSON spelling", async () => {
+    const salt = btoa("synthetic-salt-0");
+    const a = await credentialDigest({ userId: "u", securityNumber: "1", password: "p" }, salt);
+    expect(a).toBe(
+      await credentialDigest(
+        parseCredential('{"userId":"u","securityNumber":"1","password":"p"}'),
+        salt,
+      ),
+    );
+    expect(a).toBe(
+      await credentialDigest(
+        parseCredential('{ "password": "p",\n  "securityNumber": "1", "userId": "u" }\n'),
+        salt,
+      ),
+    );
+    expect(a).not.toBe(
+      await credentialDigest({ userId: "u", securityNumber: "1", password: "q" }, salt),
+    );
+    expect(a).not.toBe(
+      await credentialDigest(
+        { userId: "u", securityNumber: "1", password: "p" },
+        btoa("synthetic-salt-1"),
+      ),
+    );
+    // A base64 SHA-256 output: nothing of the credential is kept in it.
+    expect(a).toMatch(/^[A-Za-z0-9+/]{43}=$/u);
+    expect(a).not.toContain("SYNTHETIC_SECRET_PASSWORD");
+    expect(
+      await credentialDigest(
+        { userId: "u", securityNumber: "1", password: "SYNTHETIC_SECRET_PASSWORD" },
+        salt,
+      ),
+    ).not.toContain("SYNTHETIC_SECRET_PASSWORD");
+  });
+  test("a refused run persisted late keeps the digest of the credential it sent", async () => {
+    const state = new Storage();
+    let credential = "old";
+    let outage = true;
+    let reads = 0;
+    const coordinator = new CollectionCoordinator(
+      state,
+      async () => {
+        reads++;
+        return { status: "failed", reason: "login-rejected" };
+      },
+      async (run) => {
+        if (outage) throw new Error("synthetic storage outage");
+        return persistSharedRun(new FakeR2Bucket(), run);
+      },
+      async (salt) => `${credential}:${salt}`,
+    );
+    expect(await coordinator.trigger()).toMatchObject({ reason: "persistence-incomplete" });
+    // The owner rotates the secret before the refused run is stored.
+    credential = "new";
+    outage = false;
+    expect(await coordinator.trigger()).toMatchObject({ status: "blocked" });
+    const paused = state.values.get("state") as { credential?: { salt: string; hash: string } };
+    expect(paused.credential?.hash).toBe(`old:${paused.credential!.salt}`);
+    // So the new credential is tried by the next alarm, with no request.
+    expect(await coordinator.trigger()).toMatchObject({ status: "blocked" });
+    expect(reads).toBe(2);
+  });
+  test("a requested lift refused by the lease keeps the pause and the day's request", async () => {
+    const state = new Storage();
+    let busy = false;
+    let reads = 0;
+    const coordinator = new CollectionCoordinator(
+      state,
+      async () => {
+        if (busy) throw new Error("collection_busy_or_uncertain");
+        reads++;
+        return { status: "failed", reason: "login-rejected" };
+      },
+      (run) => persistSharedRun(new FakeR2Bucket(), run),
+    );
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await coordinator.trigger()).toMatchObject({ status: "blocked" });
+      const pause = state.values.get("state");
+      busy = true;
+      expect(await coordinator.trigger({ operatorRequested: true })).toEqual({ status: "busy" });
+      expect(state.values.get("state")).toEqual(pause);
+      expect(state.values.has("requestedLoginAt")).toBe(false);
+      // The alarm still does not log in; a later request still can.
+      busy = false;
+      expect(await coordinator.trigger()).toMatchObject({ status: "paused" });
+      expect(reads).toBe(1);
+      expect(await coordinator.trigger({ operatorRequested: true })).toMatchObject({
+        status: "blocked",
+      });
+      expect(reads).toBe(2);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  test("a legacy login block is lifted by one requested collection", async () => {
+    const state = new Storage();
+    await state.put("state", { kind: "blocked", reason: "login-rejected", runId: "legacy" });
+    let reads = 0;
+    const coordinator = new CollectionCoordinator(
+      state,
+      async () => {
+        reads++;
+        return { status: "success", snapshot: snapshot() };
+      },
+      (run) => persistSharedRun(new FakeR2Bucket(), run),
+    );
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(await coordinator.trigger()).toMatchObject({ status: "paused", runId: "legacy" });
+      expect(await coordinator.trigger({ operatorRequested: true })).toMatchObject({
+        status: "stored",
+      });
+      expect(reads).toBe(1);
+      expect(state.values.get("state")).toBeUndefined();
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  test("a pause and every skipped run log which run paused, since when and what lifts it", async () => {
+    const state = new Storage();
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const coordinator = new CollectionCoordinator(
+        state,
+        async () => ({ status: "failed", reason: "login-rejected" }),
+        (run) => persistSharedRun(new FakeR2Bucket(), run),
+      );
+      const first = await coordinator.trigger();
+      await coordinator.trigger();
+      await coordinator.trigger({ operatorRequested: true });
+      const events = warn.mock.calls.map(([line]) => JSON.parse(line as string));
+      const paused = {
+        event: "st-george-collection-paused",
+        reason: "login-rejected",
+        pausedRunId: first.runId,
+        pausedSince: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/u),
+        liftedBy: "credential-change-or-requested-collection",
+      };
+      expect(events.slice(0, 3)).toEqual([
+        paused,
+        {
+          event: "st-george-collection-skipped-paused",
+          reason: "login-rejected",
+          pausedRunId: first.runId,
+          pausedSince: events[0].pausedSince,
+          liftedBy: "credential-change-or-requested-collection",
+        },
+        {
+          event: "st-george-pause-lifted",
+          reason: "login-rejected",
+          pausedRunId: first.runId,
+          cause: "requested-collection",
+        },
+      ]);
+      expect(events[3]).toMatchObject({ event: "st-george-collection-paused" });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  test("lifting a block of the older policy is logged with its reason", async () => {
+    const state = new Storage();
+    await state.put("state", { kind: "blocked", reason: "runtime-failed" });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      await new CollectionCoordinator(
+        state,
+        async () => ({ status: "success", snapshot: snapshot() }),
+        (run) => persistSharedRun(new FakeR2Bucket(), run),
+      ).trigger();
+      expect(JSON.parse(warn.mock.calls[0]![0] as string)).toEqual({
+        event: "st-george-pause-lifted",
+        reason: "runtime-failed",
+        pausedRunId: null,
+        cause: "not-a-login-refusal",
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  test("any other failure is a failed run and the next trigger tries again", async () => {
+    for (const reason of [
+      "runtime-failed",
+      "network-error",
+      "container-failed",
+      "login-layout-unknown",
+      "session-expired",
+      "invalid-credentials",
+    ] as const) {
+      const state = new Storage();
+      const bucket = new FakeR2Bucket();
+      let reads = 0;
+      const coordinator = new CollectionCoordinator(
+        state,
+        async () => {
+          reads++;
+          return { status: "failed", reason };
+        },
+        (run) => persistSharedRun(bucket, run),
+      );
+      const first = await coordinator.trigger();
+      expect(first).toMatchObject({ status: "failed", reason });
+      expect(first.runId).toBeString();
+      expect(first.terminalKey).toBeString();
+      expect(state.values.size).toBe(0);
+      expect(await coordinator.trigger()).toMatchObject({ status: "failed", reason });
+      expect(reads).toBe(2);
+    }
+  });
+  test("a block left by the older any-failure policy no longer stops the run", async () => {
+    const state = new Storage();
+    await state.put("state", {
+      kind: "blocked",
+      reason: "runtime-failed",
+      runId: "00000000-0000-4000-8000-000000000000",
+    });
+    let reads = 0;
+    const coordinator = new CollectionCoordinator(
+      state,
+      async () => {
+        reads++;
+        return { status: "success", snapshot: snapshot() };
+      },
+      (run) => persistSharedRun(new FakeR2Bucket(), run),
+    );
+    expect(await coordinator.trigger()).toMatchObject({ status: "stored" });
+    expect(reads).toBe(1);
+    expect(state.values.size).toBe(0);
+  });
+  test("a lease held by another execution is busy, contacts nobody and records no run", async () => {
+    const state = new Storage();
+    let persisted = 0;
+    const coordinator = new CollectionCoordinator(
+      state,
+      async () => {
+        throw new Error("collection_busy_or_uncertain");
       },
       async () => {
+        persisted++;
         throw new Error("must not persist");
       },
     );
-    expect(await coordinator.trigger()).toEqual({
-      status: "blocked",
-      reason: "collection-interrupted",
-    });
-    expect(await coordinator.resume()).toEqual({ status: "ready" });
+    expect(await coordinator.trigger()).toEqual({ status: "busy" });
+    expect(persisted).toBe(0);
+    expect(state.values.size).toBe(0);
   });
-  test("concurrent triggers and resume never start a second authentication", async () => {
+  test("an in-flight marker left by a reset object does not stop the next attempt", async () => {
+    const state = new Storage();
+    await state.put("state", { kind: "running" });
+    const warn = spyOn(console, "warn").mockImplementation(() => {});
+    let reads = 0;
+    try {
+      const coordinator = new CollectionCoordinator(
+        state,
+        async () => {
+          reads++;
+          return { status: "success", snapshot: snapshot() };
+        },
+        (run) => persistSharedRun(new FakeR2Bucket(), run),
+      );
+      expect(await coordinator.trigger()).toMatchObject({ status: "stored" });
+      expect(reads).toBe(1);
+      expect(JSON.parse(warn.mock.calls[0]![0] as string)).toEqual({
+        event: "st-george-interrupted-attempt-cleared",
+      });
+    } finally {
+      warn.mockRestore();
+    }
+  });
+  test("concurrent triggers never start a second authentication", async () => {
     const state = new Storage();
     const bucket = new FakeR2Bucket();
     let release!: () => void;
@@ -146,28 +451,31 @@ describe("durable collection policy", () => {
     );
     const pending = coordinator.trigger();
     expect(await coordinator.trigger()).toEqual({ status: "busy" });
-    expect(await coordinator.resume()).toEqual({ status: "busy" });
+    expect(await coordinator.trigger({ operatorRequested: true })).toEqual({ status: "busy" });
     release();
     expect(await pending).toMatchObject({ status: "stored" });
     expect(reads).toBe(1);
   });
-  test("a holder that stopped itself blocks with its own reason, not container-failed", async () => {
-    // ADR 0085: withCollectionLease rejects with the stop's code.
+  test("a holder that stopped itself fails with its own reason, not container-failed", async () => {
+    // ADR 0085: withCollectionLease rejects with the stop's code. The lease is
+    // released only once that action settles, so the next attempt cannot overlap it.
     for (const [code, reason] of [
       ["collection_deadline_exceeded", "deadline-exceeded"],
       ["collection_lease_lost", "collection-interrupted"],
     ] as const) {
       const state = new Storage();
+      let calls = 0;
       const coordinator = new CollectionCoordinator(
         state,
         async () => {
+          calls++;
           throw new Error(code);
         },
         (run) => persistSharedRun(new FakeR2Bucket(), run),
       );
-      expect(await coordinator.trigger()).toMatchObject({ status: "blocked", reason });
-      // A later trigger contacts nobody until the operator resumes.
-      expect(await coordinator.trigger()).toMatchObject({ status: "blocked", reason });
+      expect(await coordinator.trigger()).toMatchObject({ status: "failed", reason });
+      expect(await coordinator.trigger()).toMatchObject({ status: "failed", reason });
+      expect(calls).toBe(2);
     }
   });
   test("credentials and error text cannot enter the safe outcome", () => {
@@ -191,536 +499,5 @@ describe("durable collection policy", () => {
         "short",
       ),
     ).toBe(false);
-  });
-});
-
-const savedRunId = "11111111-1111-4111-8111-111111111111";
-const otherRunId = "22222222-2222-4222-8222-222222222222";
-const savedMetadata = {
-  runId: savedRunId,
-  attemptId: "attempt-33333333-3333-4333-8333-333333333333",
-  startedAt: "2026-01-01T00:00:00.000Z",
-  completedAt: "2026-01-01T00:01:00.000Z",
-};
-function savedState(reason?: "login-rejected" | "authentication-challenge"): Storage {
-  const storage = new Storage();
-  const bytes = reason ? new Uint8Array() : new TextEncoder().encode(JSON.stringify(snapshot()));
-  const count = Math.ceil(bytes.length / (64 * 1024));
-  storage.values.set("state", {
-    kind: "pending",
-    run: { ...savedMetadata, ...(reason ? { reason } : {}) },
-    snapshotChunks: count,
-  });
-  for (let index = 0; index < count; index++)
-    storage.values.set(
-      `pending:${savedRunId}:${index}`,
-      bytes.slice(index * 64 * 1024, (index + 1) * 64 * 1024),
-    );
-  return storage;
-}
-function retryHarness(
-  storage: StateStorage,
-  persist: ConstructorParameters<typeof CollectionCoordinator>[2] = (run) =>
-    persistSharedRun(new FakeR2Bucket(), run),
-) {
-  const collect = mock(async (): Promise<never> => {
-    throw new Error("provider must not run");
-  });
-  return { coordinator: new CollectionCoordinator(storage, collect, persist), collect };
-}
-async function onlyRetry(
-  coordinator: CollectionCoordinator,
-  input: unknown = { expectedRunId: savedRunId },
-) {
-  const uuid = spyOn(crypto, "randomUUID").mockImplementation(() => {
-    throw new Error("must not invent identity");
-  });
-  try {
-    const result = await coordinator.retryPending(input);
-    expect(uuid).not.toHaveBeenCalled();
-    return result;
-  } finally {
-    uuid.mockRestore();
-  }
-}
-function deferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
-
-describe("internal saved-only retry", () => {
-  test("restarts existing large pending evidence and preserves identity, without collect or UUID", async () => {
-    const storage = new Storage();
-    const bucket = new FakeR2Bucket();
-    const financial = snapshot();
-    financial.accounts[0]!.transactions = Array.from({ length: 200 }, () => ({
-      ...financial.accounts[0]!.transactions[0]!,
-      description: "Synthetic purchase ".repeat(40),
-    }));
-    const first = new CollectionCoordinator(
-      storage,
-      async () => ({ status: "success", snapshot: financial }),
-      async () => {
-        throw new Error("synthetic outage");
-      },
-    );
-    const failed = await first.trigger();
-    expect(failed.status).toBe("failed");
-    const metadata = await storage.get<{ run: typeof savedMetadata; snapshotChunks: number }>(
-      "state",
-    );
-    expect(metadata!.snapshotChunks).toBeGreaterThan(2);
-    const runs: Parameters<typeof persistSharedRun>[1][] = [];
-    const { coordinator, collect } = retryHarness(storage, async (run) => {
-      runs.push(structuredClone(run));
-      return persistSharedRun(bucket, run);
-    });
-    expect(await onlyRetry(coordinator, { expectedRunId: failed.runId })).toMatchObject({
-      status: "stored",
-      runId: failed.runId,
-    });
-    expect(runs).toEqual([{ ...metadata!.run, snapshot: financial }]);
-    expect(storage.values.size).toBe(0);
-    expect(await onlyRetry(coordinator, { expectedRunId: failed.runId })).toEqual({
-      status: "refused",
-      reason: "not-pending",
-    });
-    expect(collect).not.toHaveBeenCalled();
-  });
-
-  test("a failure terminal remains blocked rather than reporting collection success", async () => {
-    for (const reason of ["login-rejected", "authentication-challenge"] as const) {
-      const storage = savedState(reason);
-      const { coordinator, collect } = retryHarness(storage);
-      expect(await onlyRetry(coordinator)).toMatchObject({
-        status: "blocked",
-        runId: savedRunId,
-        reason,
-      });
-      expect(await storage.get<unknown>("state")).toEqual({
-        kind: "blocked",
-        reason,
-        runId: savedRunId,
-      });
-      expect(await onlyRetry(coordinator)).toEqual({ status: "refused", reason: "not-pending" });
-      expect(collect).not.toHaveBeenCalled();
-    }
-  });
-
-  test("exact input refuses wrong shape, excess fields, symbols, access errors and invalid UUID", async () => {
-    for (const input of [
-      null,
-      [],
-      {},
-      { expectedRunId: "bad" },
-      { expectedRunId: savedRunId, force: true },
-      { expectedRunId: savedRunId, [Symbol("extra")]: true },
-      Object.defineProperty({}, "expectedRunId", {
-        enumerable: true,
-        get() {
-          throw new Error("secret");
-        },
-      }),
-    ]) {
-      const storage = savedState();
-      const before = structuredClone(storage.values);
-      const persist = mock(async (): Promise<never> => {
-        throw new Error("must not persist");
-      });
-      const { coordinator, collect } = retryHarness(storage, persist);
-      expect(await onlyRetry(coordinator, input)).toEqual({
-        status: "refused",
-        reason: "invalid-request",
-      });
-      expect(storage.values).toEqual(before);
-      expect(persist).not.toHaveBeenCalled();
-      expect(collect).not.toHaveBeenCalled();
-    }
-  });
-
-  test("copies the input before the first await", async () => {
-    const storage = savedState();
-    const gate = deferred();
-    const original = storage.get.bind(storage);
-    storage.get = async <T>(key: string) => {
-      await gate.promise;
-      return original<T>(key);
-    };
-    const { coordinator, collect } = retryHarness(storage);
-    const input = { expectedRunId: savedRunId };
-    const promise = onlyRetry(coordinator, input);
-    input.expectedRunId = otherRunId;
-    gate.resolve();
-    expect(await promise).toMatchObject({ status: "stored", runId: savedRunId });
-    expect(collect).not.toHaveBeenCalled();
-  });
-
-  test("absent/running/blocked/mismatched state refuses without writes or external callbacks", async () => {
-    for (const state of [
-      undefined,
-      { kind: "running" },
-      { kind: "blocked", reason: "login-rejected" },
-      { kind: "blocked", runId: savedRunId, reason: "login-rejected" },
-      { kind: "pending", run: { ...savedMetadata, runId: otherRunId }, snapshotChunks: 1 },
-    ]) {
-      const storage = savedState();
-      if (state === undefined) storage.values.delete("state");
-      else storage.values.set("state", state);
-      const before = structuredClone(storage.values);
-      const persist = mock(async (): Promise<never> => {
-        throw new Error("must not persist");
-      });
-      const { coordinator, collect } = retryHarness(storage, persist);
-      expect(await onlyRetry(coordinator)).toMatchObject({ status: "refused" });
-      expect(storage.values).toEqual(before);
-      expect(persist).not.toHaveBeenCalled();
-      expect(collect).not.toHaveBeenCalled();
-    }
-  });
-
-  test("strict pending metadata and mutually exclusive snapshot/failure shape", async () => {
-    const invalid = [
-      { run: { ...savedMetadata, extra: "secret" }, snapshotChunks: 1 },
-      { run: { ...savedMetadata, runId: "bad" }, snapshotChunks: 1 },
-      { run: { ...savedMetadata, attemptId: savedRunId }, snapshotChunks: 1 },
-      { run: { ...savedMetadata, startedAt: "yesterday" }, snapshotChunks: 1 },
-      { run: { ...savedMetadata, startedAt: "2026-02-30T00:00:00.000Z" }, snapshotChunks: 1 },
-      { run: { ...savedMetadata, completedAt: "2025-12-31T00:00:00.000Z" }, snapshotChunks: 1 },
-      { run: savedMetadata, snapshotChunks: 0 },
-      { run: savedMetadata, snapshotChunks: 33 },
-      { run: savedMetadata, snapshotChunks: -1 },
-      { run: savedMetadata, snapshotChunks: 1.5 },
-      { run: savedMetadata, snapshotChunks: "1" },
-      { run: { ...savedMetadata, reason: "login-rejected" }, snapshotChunks: 1 },
-      { run: { ...savedMetadata, reason: "provider secret" }, snapshotChunks: 0 },
-      { run: { ...savedMetadata, reason: undefined }, snapshotChunks: 0 },
-      { run: { ...savedMetadata, snapshot: snapshot() }, snapshotChunks: 1 },
-      { run: savedMetadata, snapshotChunks: 1, extra: true },
-    ];
-    for (const item of invalid) {
-      const storage = savedState();
-      storage.values.set("state", { kind: "pending", ...item });
-      const before = structuredClone(storage.values);
-      const persist = mock(async (): Promise<never> => {
-        throw new Error("must not persist");
-      });
-      const { coordinator, collect } = retryHarness(storage, persist);
-      expect(await onlyRetry(coordinator)).toEqual({
-        status: "refused",
-        reason: "invalid-pending",
-      });
-      expect(storage.values).toEqual(before);
-      expect(persist).not.toHaveBeenCalled();
-      expect(collect).not.toHaveBeenCalled();
-    }
-  });
-
-  test("missing, oversized, empty, invalid UTF8/JSON/shape and residual chunks remain untouched", async () => {
-    for (const chunk of [
-      undefined,
-      "text",
-      new Uint8Array(),
-      new Uint8Array(64 * 1024 + 1),
-      new Uint8Array([0xff]),
-      new TextEncoder().encode("{"),
-      new TextEncoder().encode("{}"),
-    ]) {
-      const storage = savedState();
-      if (chunk === undefined) storage.values.delete(`pending:${savedRunId}:0`);
-      else storage.values.set(`pending:${savedRunId}:0`, chunk);
-      const before = structuredClone(storage.values);
-      const persist = mock(async (): Promise<never> => {
-        throw new Error("must not persist");
-      });
-      const { coordinator, collect } = retryHarness(storage, persist);
-      expect(await onlyRetry(coordinator)).toEqual({
-        status: "refused",
-        reason: "invalid-pending",
-      });
-      expect(storage.values).toEqual(before);
-      expect(persist).not.toHaveBeenCalled();
-      expect(collect).not.toHaveBeenCalled();
-    }
-    for (const reason of [undefined, "login-rejected"] as const) {
-      const storage = savedState(reason);
-      storage.values.set(`pending:${savedRunId}:31`, new Uint8Array([1]));
-      const before = structuredClone(storage.values);
-      const { coordinator, collect } = retryHarness(storage);
-      expect(await onlyRetry(coordinator)).toEqual({
-        status: "refused",
-        reason: "invalid-pending",
-      });
-      expect(storage.values).toEqual(before);
-      expect(collect).not.toHaveBeenCalled();
-    }
-  });
-
-  test("storage failures are closed and release the active guard", async () => {
-    const storage = savedState();
-    const before = structuredClone(storage.values);
-    const original = storage.get.bind(storage);
-    storage.get = async () => {
-      throw new Error("synthetic secret storage error");
-    };
-    const { coordinator, collect } = retryHarness(storage);
-    expect(await onlyRetry(coordinator)).toEqual({ status: "failed", reason: "state-unavailable" });
-    expect(storage.values).toEqual(before);
-    storage.get = original;
-    expect(await onlyRetry(coordinator)).toMatchObject({ status: "stored" });
-    expect(collect).not.toHaveBeenCalled();
-  });
-
-  test("persistence throw, incomplete and conflict keep the exact original evidence", async () => {
-    const bucket = new FakeR2Bucket();
-    const success = await persistSharedRun(bucket, { ...savedMetadata, snapshot: snapshot() });
-    if (success.outcome !== "persisted") throw new Error("synthetic fixture failed");
-    for (const outcome of ["throw", "incomplete", "conflict"] as const) {
-      const storage = savedState();
-      const before = structuredClone(storage.values);
-      const { coordinator, collect } = retryHarness(storage, async () => {
-        if (outcome === "throw") throw new Error("synthetic secret");
-        return {
-          ...success,
-          outcome,
-          reasonCode: "synthetic",
-          storedDigest: null,
-          failedArtifactKey: null,
-        };
-      });
-      expect(await onlyRetry(coordinator)).toEqual({
-        status: "failed",
-        reason: "persistence-incomplete",
-      });
-      expect(storage.values).toEqual(before);
-      expect(collect).not.toHaveBeenCalled();
-    }
-  });
-
-  test("held persistence cannot erase a replacement state, metadata, failure reason or chunk", async () => {
-    const mutations: ((storage: Storage) => void)[] = [
-      (s) =>
-        s.values.set("state", { kind: "blocked", reason: "login-rejected", runId: otherRunId }),
-      (s) =>
-        s.values.set("state", {
-          kind: "pending",
-          run: { ...savedMetadata, runId: otherRunId },
-          snapshotChunks: 1,
-        }),
-      ...["attemptId", "startedAt", "completedAt"].map((field) => (s: Storage) => {
-        const state = s.values.get("state") as { run: Record<string, unknown> };
-        state.run[field] =
-          field === "attemptId" ? `attempt-${otherRunId}` : "2026-01-01T00:00:30.000Z";
-      }),
-      (s) =>
-        s.values.set("state", {
-          kind: "pending",
-          run: { ...savedMetadata, reason: "login-rejected" },
-          snapshotChunks: 0,
-        }),
-      (s) => s.values.set(`pending:${savedRunId}:0`, new Uint8Array([1])),
-      (s) => s.values.delete(`pending:${savedRunId}:0`),
-      (s) => s.values.set(`pending:${savedRunId}:31`, new Uint8Array([1])),
-      (s) => s.values.delete("state"),
-    ];
-    for (const mutate of mutations) {
-      const storage = savedState();
-      const entered = deferred();
-      const release = deferred();
-      const bucket = new FakeR2Bucket();
-      let writes = 0;
-      const { coordinator, collect } = retryHarness(storage, async (run) => {
-        writes++;
-        entered.resolve();
-        await release.promise;
-        return persistSharedRun(bucket, run);
-      });
-      const pending = onlyRetry(coordinator);
-      await entered.promise;
-      mutate(storage);
-      const changed = structuredClone(storage.values);
-      release.resolve();
-      expect(await pending).toEqual({ status: "refused", reason: "state-changed" });
-      expect(storage.values).toEqual(changed);
-      expect(writes).toBe(1);
-      expect(collect).not.toHaveBeenCalled();
-    }
-    const storage = savedState("login-rejected");
-    const { coordinator, collect } = retryHarness(storage, async (run) => {
-      storage.values.set("state", {
-        kind: "pending",
-        run: { ...savedMetadata, reason: "authentication-challenge" },
-        snapshotChunks: 0,
-      });
-      return persistSharedRun(new FakeR2Bucket(), run);
-    });
-    expect(await onlyRetry(coordinator)).toEqual({ status: "refused", reason: "state-changed" });
-    expect(await storage.get<unknown>("state")).toMatchObject({
-      run: { reason: "authentication-challenge" },
-    });
-    expect(collect).not.toHaveBeenCalled();
-  });
-
-  test("cleanup rollback retains pending, then already-persisted retry finishes the same run", async () => {
-    const storage = savedState();
-    const before = structuredClone(storage.values);
-    const bucket = new FakeR2Bucket();
-    const outcomes: string[] = [];
-    const originalDelete = storage.delete.bind(storage);
-    storage.delete = async (key) => {
-      await originalDelete(key);
-      throw new Error("synthetic cleanup outage");
-    };
-    const { coordinator, collect } = retryHarness(storage, async (run) => {
-      const result = await persistSharedRun(bucket, run);
-      outcomes.push(result.outcome);
-      return result;
-    });
-    expect(await onlyRetry(coordinator)).toEqual({ status: "failed", reason: "state-unavailable" });
-    expect(storage.values).toEqual(before);
-    storage.delete = originalDelete;
-    expect(await onlyRetry(coordinator)).toMatchObject({ status: "stored", runId: savedRunId });
-    expect(outcomes).toEqual(["persisted", "already_persisted"]);
-    expect(storage.values.size).toBe(0);
-    expect(collect).not.toHaveBeenCalled();
-  });
-
-  test("uses the transaction handle and a transaction retry never repeats external persistence", async () => {
-    const storage = savedState();
-    let inTransaction = false;
-    let transactions = 0;
-    let persistence = 0;
-    const directGet = storage.get.bind(storage),
-      directPut = storage.put.bind(storage),
-      directDelete = storage.delete.bind(storage);
-    const handle: StateStorage = {
-      get: directGet,
-      put: directPut,
-      delete: directDelete,
-      transaction: async () => {
-        throw new Error("nested transaction");
-      },
-    };
-    storage.get = async <T>(key: string) => {
-      if (inTransaction) throw new Error("wrong handle");
-      return directGet<T>(key);
-    };
-    storage.put = async (key, value) => {
-      if (inTransaction) throw new Error("wrong handle");
-      await directPut(key, value);
-    };
-    storage.delete = async (key) => {
-      if (inTransaction) throw new Error("wrong handle");
-      await directDelete(key);
-    };
-    storage.transaction = async (closure) => {
-      inTransaction = true;
-      try {
-        transactions++;
-        if (transactions === 2) {
-          const before = structuredClone(storage.values);
-          await closure(handle);
-          storage.values = before;
-        }
-        return await closure(handle);
-      } finally {
-        inTransaction = false;
-      }
-    };
-    const { coordinator, collect } = retryHarness(storage, async (run) => {
-      expect(inTransaction).toBe(false);
-      persistence++;
-      return persistSharedRun(new FakeR2Bucket(), run);
-    });
-    expect(await onlyRetry(coordinator)).toMatchObject({ status: "stored" });
-    expect(persistence).toBe(1);
-    expect(transactions).toBe(2);
-    expect(collect).not.toHaveBeenCalled();
-  });
-
-  test("retry holds the same busy guard as trigger and resume", async () => {
-    const storage = savedState();
-    const entered = deferred();
-    const release = deferred();
-    const { coordinator, collect } = retryHarness(storage, async (run) => {
-      entered.resolve();
-      await release.promise;
-      return persistSharedRun(new FakeR2Bucket(), run);
-    });
-    const pending = onlyRetry(coordinator);
-    await entered.promise;
-    expect(await coordinator.retryPending({ expectedRunId: savedRunId })).toEqual({
-      status: "busy",
-    });
-    expect(await coordinator.trigger()).toEqual({ status: "busy" });
-    expect(await coordinator.resume()).toEqual({ status: "busy" });
-    release.resolve();
-    expect(await pending).toMatchObject({ status: "stored" });
-    expect(collect).not.toHaveBeenCalled();
-  });
-
-  test("trigger and resume each keep retry busy without altering their existing behavior", async () => {
-    for (const method of ["trigger", "resume"] as const) {
-      const storage = savedState();
-      const gate = deferred();
-      const originalGet = storage.get.bind(storage);
-      storage.get = async <T>(key: string) => {
-        await gate.promise;
-        return originalGet<T>(key);
-      };
-      const { coordinator, collect } = retryHarness(storage);
-      const active = coordinator[method]();
-      expect(await onlyRetry(coordinator)).toEqual({ status: "busy" });
-      expect(await coordinator.trigger()).toEqual({ status: "busy" });
-      expect(await coordinator.resume()).toEqual({ status: "busy" });
-      gate.resolve();
-      expect(await active).toMatchObject(
-        method === "trigger"
-          ? { status: "stored" }
-          : { status: "failed", reason: "persistence-pending" },
-      );
-      expect(collect).not.toHaveBeenCalled();
-    }
-  });
-
-  test("accepts the full 2 MiB / 32 chunk bound and refuses one additional byte", async () => {
-    for (const extra of [0, 1]) {
-      const storage = savedState();
-      const serialized = JSON.stringify(snapshot());
-      const bytes = new TextEncoder().encode(
-        serialized + " ".repeat(2 * 1024 * 1024 - serialized.length + extra),
-      );
-      storage.values.set("state", { kind: "pending", run: savedMetadata, snapshotChunks: 32 });
-      for (let index = 0; index < 32; index++)
-        storage.values.set(
-          `pending:${savedRunId}:${index}`,
-          bytes.slice(index * 64 * 1024, index === 31 ? undefined : (index + 1) * 64 * 1024),
-        );
-      const before = structuredClone(storage.values);
-      const { coordinator, collect } = retryHarness(storage);
-      expect(await onlyRetry(coordinator)).toMatchObject(
-        extra === 0 ? { status: "stored" } : { status: "refused", reason: "invalid-pending" },
-      );
-      if (extra) expect(storage.values).toEqual(before);
-      expect(collect).not.toHaveBeenCalled();
-    }
-  });
-
-  test("the method remains absent from Worker and private schedule entrypoints", () => {
-    for (const file of ["../src/worker.ts", "../src/schedule-entrypoint.ts"])
-      expect(readFileSync(new URL(file, import.meta.url), "utf8")).not.toContain("retryPending");
-  });
-
-  test("unaddressed keys outside the bounded run namespace are not deleted", async () => {
-    const storage = savedState();
-    storage.values.set(`pending:${savedRunId}:32`, new Uint8Array([9]));
-    storage.values.set(`pending:${otherRunId}:0`, new Uint8Array([8]));
-    const { coordinator, collect } = retryHarness(storage);
-    expect(await onlyRetry(coordinator)).toMatchObject({ status: "stored" });
-    expect(storage.values.size).toBe(2);
-    expect(storage.values.get(`pending:${savedRunId}:32`)).toEqual(new Uint8Array([9]));
-    expect(collect).not.toHaveBeenCalled();
   });
 });

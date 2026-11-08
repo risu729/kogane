@@ -39,6 +39,7 @@ const OBSERVED_LANES = [
   "observation_sweep",
   "collection_scan",
   "identity_sweep",
+  "instrument_auto_adoption",
   "balance_projection",
   "reconciliation_sweep",
   "card_debit_account_sweep",

@@ -150,6 +150,21 @@ export function verifyDoIdentity(before, after) {
 }
 
 /**
+ * The one line the command line prints when it fails: its own closed code, or
+ * `cf_do_internal_error` for anything else, whose message (a path, a parser
+ * excerpt, a stack) must not reach the release log. The codes may name a
+ * Worker from the deployment ledger and a binding from its configuration.
+ *
+ * @param {unknown} error
+ * @returns {string}
+ */
+export function doIdentityFailureCode(error) {
+  return error instanceof Error && /^cf_do_[A-Za-z0-9_-]+$/u.test(error.message)
+    ? error.message
+    : "cf_do_internal_error";
+}
+
+/**
  * Whether node was started with this module, compared by real path: node
  * resolves the main module through symlinks but leaves `argv[1]` as given, and
  * a raw comparison would skip the command and exit 0 through a symlinked path.
@@ -165,38 +180,43 @@ function invokedDirectly() {
   }
 }
 if (invokedDirectly()) {
-  const [mode, baselinePath] = process.argv.slice(2);
-  if (!["capture", "verify", "validate"].includes(mode) || !baselinePath)
-    throw new Error("cf_do_invalid_command");
-  const root =
-    mode === "validate" ? fileURLToPath(new URL("../../../", import.meta.url)) : process.cwd();
-  const order = JSON.parse(readFileSync(resolve(root, "infra/deploy-order.json"), "utf8"));
-  if (mode === "validate") {
-    const targets = preservedDoTargets({ root, order, selected: [baselinePath] });
-    if (targets.length !== 1) throw new Error("cf_do_invalid_artifact_target");
-    const worker = order.workers.find((entry) => entry.name === baselinePath);
-    const artifact = JSON.parse(
-      readFileSync(
-        resolve(root, worker.path, ".cloudflare/output/v0/workers/default/worker.config.json"),
-        "utf8",
-      ),
-    );
-    verifyPreservedDoArtifact(targets[0], artifact);
-    console.log(`Existing DO build identity verified: ${baselinePath}.`);
-  } else {
-    const plan = JSON.parse(
-      readFileSync(resolve(process.env.RUNNER_TEMP, "release-plan.json"), "utf8"),
-    );
-    const targets = preservedDoTargets({ root, order, selected: plan.selected });
-    const snapshot = await readDoIdentity({
-      targets,
-      accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
-      token: process.env.CLOUDFLARE_API_TOKEN,
-    });
-    if (mode === "capture") writeFileSync(baselinePath, JSON.stringify(snapshot));
-    else verifyDoIdentity(JSON.parse(readFileSync(baselinePath, "utf8")), snapshot);
-    console.log(
-      `Existing DO identity ${mode === "capture" ? "captured" : "verified"}: ${snapshot.length} Workers.`,
-    );
+  try {
+    const [mode, baselinePath] = process.argv.slice(2);
+    if (!["capture", "verify", "validate"].includes(mode) || !baselinePath)
+      throw new Error("cf_do_invalid_command");
+    const root =
+      mode === "validate" ? fileURLToPath(new URL("../../../", import.meta.url)) : process.cwd();
+    const order = JSON.parse(readFileSync(resolve(root, "infra/deploy-order.json"), "utf8"));
+    if (mode === "validate") {
+      const targets = preservedDoTargets({ root, order, selected: [baselinePath] });
+      if (targets.length !== 1) throw new Error("cf_do_invalid_artifact_target");
+      const worker = order.workers.find((entry) => entry.name === baselinePath);
+      const artifact = JSON.parse(
+        readFileSync(
+          resolve(root, worker.path, ".cloudflare/output/v0/workers/default/worker.config.json"),
+          "utf8",
+        ),
+      );
+      verifyPreservedDoArtifact(targets[0], artifact);
+      console.log(`Existing DO build identity verified: ${baselinePath}.`);
+    } else {
+      const plan = JSON.parse(
+        readFileSync(resolve(process.env.RUNNER_TEMP, "release-plan.json"), "utf8"),
+      );
+      const targets = preservedDoTargets({ root, order, selected: plan.selected });
+      const snapshot = await readDoIdentity({
+        targets,
+        accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+        token: process.env.CLOUDFLARE_API_TOKEN,
+      });
+      if (mode === "capture") writeFileSync(baselinePath, JSON.stringify(snapshot));
+      else verifyDoIdentity(JSON.parse(readFileSync(baselinePath, "utf8")), snapshot);
+      console.log(
+        `Existing DO identity ${mode === "capture" ? "captured" : "verified"}: ${snapshot.length} Workers.`,
+      );
+    }
+  } catch (error) {
+    console.error(doIdentityFailureCode(error));
+    process.exitCode = 1;
   }
 }

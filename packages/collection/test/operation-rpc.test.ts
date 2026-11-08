@@ -148,6 +148,8 @@ test("the Processor accepts back only the closed result shape", () => {
     null,
     { status: "success", runIds: [], failureCode: null },
     { status: "completed", runIds: ["has space"], failureCode: null },
+    // No terminal key can carry `:` (keys.ts `RUN_ID`), so no persisted run has it.
+    { status: "completed", runIds: ["synthetic:run"], failureCode: null },
     { status: "completed", runIds: [], failureCode: "collection_failed" },
     { status: "failed", runIds: [], failureCode: null },
     { status: "failed", runIds: [], failureCode: "Provider said: no" },
