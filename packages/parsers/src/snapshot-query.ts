@@ -49,9 +49,10 @@ function artifactContainerMatch(artifact: string, policy: string): string {
     AND (${artifact}.dataset IS NULL OR ${artifact}.dataset = ${policy}.dataset)`;
 }
 
-// Earlier foreign-position parsers did not validate pagination. Their stored
-// success is not proof of completeness, even if a newer reparse fails.
-export const FOREIGN_POSITION_SNAPSHOT_VERSION = "0.3.0";
+// Pagination validation began at 0.3.0; the CSV helper release preserves it.
+// The operational policy pins its equivalent 0.3.1 reader (migration 0084).
+// Earlier unvalidated successes never prove completeness on a failed reparse.
+export const FOREIGN_POSITION_SNAPSHOT_VERSION = "0.3.1";
 
 /**
  * Selection policies a dataset row may name. `legacy-warning-compat-v1` is
