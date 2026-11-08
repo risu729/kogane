@@ -796,3 +796,24 @@ Collector は `COLLECTION_TARGET` を読まない。保存先は共通 bucket
 中央へ送っていたものと同じで、Wallet 明細は collector 自身の
 `sanitizeWalletHtml` 済み HTML である。artifact と role の対応、terminal の
 項目は `docs/collection.md` の該当節を参照。
+
+## 2026-11-08: CSV is the only current deposit transaction history
+
+Owner decision, 2026-11-08 13:29 UTC, with the completeness addition on
+2026-11-08 ([issue 1182](https://github.com/risu729/kogane/issues/1182),
+[ADR 0092](../adr/0092-sony-history-csv-only.md)): current deposit history
+transactions come only from the official CSV. JSON history pages remain
+stored evidence; their per-page occurrence identities cannot distinguish
+identical rows across pages. JSON also uniquely retains exchange
+counter-currency codes `currencyCdSpndl`, `currencyCdStl` and
+`otherPrtyCcyCd`; the CSV uniquely retains `参考情報`. This change does
+not promote those codes into a new observation field. JSON after-transaction
+balances retain their existing contract.
+
+For each currency/window, the collector requires the logical CSV data-row
+count to equal the first JSON page's `countCnt`. Positive JSON history
+without matching CSV fails with a closed terminal code; it is never filled
+from JSON. Zero history still skips CSV and succeeds, avoiding the previously
+observed empty-CSV server failure. Successful JSON and CSV bytes are stored
+unchanged. No provider login or production-data inspection was performed for
+this implementation.
