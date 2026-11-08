@@ -115,6 +115,29 @@ function inputOf(manifest: BackfillManifest) {
 }
 
 describe("terminal field derivation", () => {
+  test("failed logout is durable without lowering completed acquisition or unit coverage", async () => {
+    const manifest = await manifestOf({ logoutSucceeded: false });
+    const bucket = new FakeR2Bucket();
+    expect((await persistSharedRun(bucket, inputOf(manifest))).outcome).toBe("persisted");
+    const terminal = await readTerminal(bucket, "smbc-direct", manifest.runId);
+    if (terminal.outcome !== "found") throw new Error("missing terminal");
+    expect(terminal.manifest).toMatchObject({
+      providerOutcome: "success",
+      coverageStatus: "complete",
+    });
+    expect(terminal.manifest.safeErrorCode).toBeUndefined();
+    expect(terminal.manifest.units[0]?.coverageStatus).toBe("complete");
+    expect(terminal.manifest.artifacts).toHaveLength(manifest.artifacts.length + 1);
+    expect(terminal.manifest.reports).toEqual([
+      {
+        reportRef: "logout",
+        reportKind: "logout",
+        scope: "run",
+        outcome: "failed",
+        safeErrorCode: "logout_failed",
+      },
+    ]);
+  });
   test("a media type loses its charset parameter, never its identity", () => {
     expect(baseMediaType("application/json; charset=Shift_JIS")).toBe("application/json");
     expect(baseMediaType("application/json")).toBe("application/json");

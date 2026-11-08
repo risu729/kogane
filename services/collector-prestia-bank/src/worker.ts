@@ -36,7 +36,7 @@ export function createCollection(overrides: Partial<Dependencies> = {}) {
           startedAt,
           completedAt: new Date().toISOString(),
           version: env.COLLECTOR_SCHEMA_VERSION,
-          ...(collection ? { body: collection.body } : {}),
+          ...(collection ? { body: collection.body, signoffFailed: collection.signoffFailed } : {}),
         });
         const complete = ["persisted", "already_persisted"].includes(persisted.outcome);
         return {

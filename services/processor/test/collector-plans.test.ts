@@ -543,7 +543,7 @@ test("prestia-globalpass: a run with a sanitizer code and an unwalked page regis
   expect(registered.unitFailureCodes).toEqual(["globalpass_html_shape_unreviewed"]);
 });
 
-test("prestia-globalpass: a walked two-page month and an empty month register success and parse-eligible pages", async () => {
+test("prestia-globalpass: complete months and a failed logout register success and parse-eligible pages", async () => {
   // Every selected month proven whole (ADR 0026's amendment of 2026-10-04):
   // the first month's two pages, page 2 under its page-qualified key, and an
   // empty second month. The account unit is complete, so the run registers
@@ -577,6 +577,7 @@ test("prestia-globalpass: a walked two-page month and an empty month register su
       sha256: "a".repeat(64),
     })),
     failures: [],
+    logoutFailed: true,
   };
   const plan = await globalPassRunPlan({
     manifest,

@@ -367,9 +367,8 @@ export class SmbcBackfillSession extends DurableObject<Env> {
             }
             progress = { ...progress, logoutSucceeded };
           }
-          if (!logoutSucceeded && !failureCodes.includes("logout_failed")) {
-            failureCodes.push("logout_failed");
-          }
+          // Sign-off is cleanup: all planned chunks are already stored. Its
+          // outcome stays in progress and the terminal's auxiliary report.
           const completed: BackfillProgress = {
             ...progress,
             phase: failureCodes.length === 0 ? "success" : "partial",
@@ -400,6 +399,7 @@ export class SmbcBackfillSession extends DurableObject<Env> {
               completedChunks: completed.completedChunks,
               transactionCount: completed.transactionCount,
               artifactCount: completed.artifactCount,
+              logoutFailed: !logoutSucceeded,
             }),
           );
           return;

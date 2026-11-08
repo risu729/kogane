@@ -137,9 +137,11 @@ export interface CollectionManifest {
   paginationStatus: typeof GLOBALPASS_PAGINATION_STATUS;
   artifacts: StoredArtifact[];
   failures: CollectionFailure[];
+  logoutFailed?: boolean;
 }
 
 export type ContainerRecord =
+  | { type: "logout"; failed: boolean }
   | {
       type: "metadata";
       runtimeRevision?: string;
