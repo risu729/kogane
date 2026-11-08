@@ -1510,6 +1510,20 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   `test/mcp-sdk-client.test.ts`
   lists the whole catalogue with every tool-adding flag on through the
   official SDK client, in both negotiation modes.
+- **Argument keys.** A key check sees every key the caller sent, including
+  `__proto__`. Assigning `body["__proto__"] = value` sets the prototype, and
+  a Zod record drops that key without an issue, so a request body is never
+  built from a query string by assignment (the routes use
+  `Object.fromEntries`). Where a record stands in front of a key check, the
+  tool passes the argument's own object on: `kogane.audit.search` judges
+  `filters`, and `kogane.command.plan` forwards `payload`, as sent. A
+  `__proto__` key is then refused with the code the route answers for any
+  unknown key: `invalid_query` on `/api/v2/audit` and the カード照合 reads,
+  `unsupported_semantics` on `/api/v2/query`, `invalid_command` from the
+  Processor for a plan payload. A limit: the SDK reads `params.arguments`
+  as a record too, so a top-level `__proto__` argument key never reaches a
+  tool on `/mcp`. The call is answered as if the key were absent, where
+  `/api/agent/v1/<tool>` sees the key and a closed argument refuses it.
 - **Identity.** The dispatcher has the `AgentCaller` the boundary proved
   (`caller`, `src/auth.ts`) and its resolved `Grant`. Pass the caller object
   on; never derive a role from `caller.principal`, and never read identity

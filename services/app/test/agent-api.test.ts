@@ -941,6 +941,31 @@ describe("the UI and an agent share one path (AT72)", () => {
     ])
       expect((await call(path, { environment })).status, path).toBe(400);
   });
+
+  it("refuses a `__proto__` filter on the shared route as the agent route refuses it", async () => {
+    const environment = {};
+    const route = await call("/api/v2/query?intent=coverage&__proto__=1", { environment });
+    expect(route.status).toBe(400);
+    // The route answers an `HttpError`; the agent paths a financial error, the same code.
+    expect(await route.json()).toMatchObject({ error: "unsupported_semantics" });
+    const agent = await call("/api/agent/v1/financial.query", {
+      // JSON.parse keeps `__proto__` as an own key, as a client's body does.
+      body: JSON.parse('{"intent":"coverage","filters":{"__proto__":"1"}}'),
+      environment,
+    });
+    expect(agent.status).toBe(400);
+    expect(await agent.json()).toMatchObject({ code: "unsupported_semantics" });
+    const tool = (await mcp({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: JSON.parse(
+        '{"name":"kogane.financial.query","arguments":{"intent":"coverage","filters":{"__proto__":"1"}}}',
+      ),
+    })) as { result: { isError?: boolean; structuredContent: unknown } };
+    expect(tool.result.isError).toBe(true);
+    expect(tool.result.structuredContent).toMatchObject({ code: "unsupported_semantics" });
+  });
 });
 
 // ── helpers ──────────────────────────────────────────────────────────

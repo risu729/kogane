@@ -941,6 +941,28 @@ describe("the operator's read and the never-recorded list", () => {
     }
   });
 
+  it("refuses a `__proto__` filter on the route, the agent route and MCP alike", async () => {
+    const route = await call("/api/v2/audit?__proto__=x");
+    expect(route.response.status).toBe(400);
+    const expected = (await route.response.json()) as Record<string, unknown>;
+    expect(expected).toMatchObject({ error: "invalid_query" });
+    // JSON.parse keeps `__proto__` as an own key, as a client's body does.
+    const sent = '{"filters":{"__proto__":"x"}}';
+    const agent = await call("/api/agent/v1/audit.search", { rawBody: sent });
+    expect(agent.response.status).toBe(400);
+    expect(await agent.response.json()).toMatchObject({ error: "invalid_query" });
+    const tool = await call("/mcp", {
+      via: "mcp",
+      headers: MCP_HEADERS,
+      rawBody: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kogane.audit.search","arguments":${sent}}}`,
+    });
+    const message = (await tool.response.json()) as {
+      result: { isError?: boolean; structuredContent: unknown };
+    };
+    expect(message.result.isError).toBe(true);
+    expect(message.result.structuredContent).toMatchObject({ error: "invalid_query" });
+  });
+
   it("no record holds provider text, a token-shaped value or an amount", async () => {
     const rows = (await env.DB.prepare("SELECT * FROM audit_records").all()).results;
     expect(rows.length).toBeGreaterThan(10);

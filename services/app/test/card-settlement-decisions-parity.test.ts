@@ -556,3 +556,20 @@ describe("card settlement decisions over the page's path and MCP (ADR 0081, unit
       });
   });
 });
+
+describe("a plan payload's keys reach the Processor as sent", () => {
+  it("refuses a `__proto__` payload key on the page's path and over MCP alike", async () => {
+    const plans = await count("change_plans");
+    // JSON.parse keeps `__proto__` as an own key, as a client's body does.
+    const payload = JSON.parse('{"proposalId":"synthetic-absent","reason":"r","__proto__":"x"}');
+    const page = await http("plan", { kind: "card-settlement.accept", payload });
+    expect(page).toEqual({ failed: true, body: { error: "invalid_command" } });
+    const tool = await mcp("kogane.command.plan", {
+      kind: "card-settlement.accept",
+      payload,
+      idempotencyKey: "synthetic-proto-payload",
+    });
+    expect(tool).toEqual(page);
+    expect(await count("change_plans")).toBe(plans);
+  });
+});
