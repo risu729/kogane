@@ -430,12 +430,12 @@ Not verified: production D1/Workers, the current contents of actual provider ter
 
 [Vポイントサービス利用規約]: sources/v-point.md
 
-[W09]: 設計レビュー追補99 W09（ANAマイル口座グループ）
-[W10]: 同 W10（ANAマイル有効期限）
-[W11]: 同 W11（Qantas Frequent Flyer terms）
-[W12]: 同 W12（楽天ポイントのルール）
-[W13]: 同 W13（JRE POINTからSuicaへチャージ・検索抜粋のみ）
-[W14]: 同 W14（JAL Life Statusプログラム）
+[W09]: Design-review addendum 99 W09 (ANA mileage account groups)
+[W10]: Same addendum W10 (ANA mileage expiry)
+[W11]: Same addendum W11 (Qantas Frequent Flyer terms)
+[W12]: Same addendum W12 (`楽天ポイント` (Rakuten Points) rules)
+[W13]: Same addendum W13 (JRE POINT-to-Suica top-up; search excerpts only)
+[W14]: Same addendum W14 (JAL Life Status program)
 
 <a id="2026-10-09-現在の集合と種類未確認"></a>
 
