@@ -133,41 +133,55 @@ function requestFailure(error: unknown): string {
  * run, a held lease, the next scheduled run and the maintenance status —
  * because a request cannot be taken back once a collector starts it.
  */
+/**
+ * One job's request state, held by the page: a card remounts on each new
+ * revision, and a pending key or an operation id must survive that.
+ */
+interface RequestState {
+  /**
+   * One key per confirmation: a retry after a lost answer is the same request.
+   * The window's date is fixed by the first send under that key, so a retry
+   * after JST midnight re-sends the same payload instead of meeting
+   * `idempotency_conflict`.
+   */
+  pending: { key: string; at: Date | null } | null;
+  busy: boolean;
+  message: string;
+}
+const IDLE: RequestState = { pending: null, busy: false, message: "" };
 function CollectionRequest({
   value,
   lease,
+  state,
+  update,
+  sending,
 }: {
   value: ScheduleView;
   lease: ScheduleSnapshot["leases"][number] | undefined;
+  state: RequestState;
+  update: (patch: Partial<RequestState>) => void;
+  /** The page's synchronous guard against a second send for the same job. */
+  sending: Set<string>;
 }): ReactNode {
-  // One key per confirmation: a retry after a lost answer is the same request.
-  // The window's date is fixed by the first send under that key, so a retry
-  // after JST midnight re-sends the same payload instead of meeting
-  // `idempotency_conflict`.
-  const [pending, setPending] = useState<{ key: string; at: Date | null } | null>(null),
-    [busy, setBusy] = useState(false),
-    [message, setMessage] = useState("");
-  const sending = useRef(false);
+  const { pending, busy, message } = state;
   const target = value.collectionRequest;
   if (!target) return null;
   async function send() {
-    if (sending.current || pending === null || !target) return;
-    sending.current = true;
+    if (sending.has(value.id) || pending === null || !target) return;
+    sending.add(value.id);
     const at = pending.at ?? new Date();
-    setPending({ key: pending.key, at });
-    setBusy(true);
-    setMessage("");
+    update({ pending: { key: pending.key, at }, busy: true, message: "" });
     try {
       const accepted = await postCollectionRequest(target.source, pending.key, at);
-      setPending(null);
-      setMessage(
-        `依頼を受け付けました（依頼ID ${accepted.operationId}）。保存・解析処理の次回実行で収集を始めます。メンテナンス中や前の実行中は終わるまで待ちます。結果は取得履歴に表示されます。`,
-      );
+      update({
+        pending: null,
+        message: `依頼を受け付けました（依頼ID ${accepted.operationId}）。保存・解析処理の次回実行で収集を始めます。メンテナンス中や前の実行中は終わるまで待ちます。結果は取得履歴に表示されます。`,
+      });
     } catch (error) {
-      setMessage(requestFailure(error));
+      update({ message: requestFailure(error) });
     } finally {
-      sending.current = false;
-      setBusy(false);
+      sending.delete(value.id);
+      update({ busy: false });
     }
   }
   return (
@@ -179,10 +193,9 @@ function CollectionRequest({
         <button
           type="button"
           className="button"
-          onClick={() => {
-            setMessage("");
-            setPending({ key: collectionRequestKey(), at: null });
-          }}
+          onClick={() =>
+            update({ message: "", pending: { key: collectionRequestKey(), at: null } })
+          }
         >
           収集を依頼
         </button>
@@ -218,10 +231,7 @@ function CollectionRequest({
               type="button"
               className="button"
               disabled={busy}
-              onClick={() => {
-                setPending(null);
-                setMessage("");
-              }}
+              onClick={() => update({ pending: null, message: "" })}
             >
               やめる
             </button>
@@ -235,12 +245,14 @@ function CollectionRequest({
 function ScheduleCard({
   value,
   lease,
+  collection,
   refresh,
   message,
   setMessage,
 }: {
   value: ScheduleView;
   lease: ScheduleSnapshot["leases"][number] | undefined;
+  collection: Omit<Parameters<typeof CollectionRequest>[0], "value" | "lease">;
   refresh: () => Promise<unknown>;
   /** Held by the page: the card remounts on each new revision, its result must not. */
   message: string;
@@ -396,7 +408,7 @@ function ScheduleCard({
       ) : (
         <p className="muted">この設定による実行記録はまだありません。</p>
       )}
-      <CollectionRequest value={value} lease={lease} />
+      <CollectionRequest value={value} lease={lease} {...collection} />
     </article>
   );
 }
@@ -816,8 +828,10 @@ export function SchedulesPage(): ReactNode {
     [filter, setFilter] = useState("collection"),
     [leaseMessage, setLeaseMessage] = useState(""),
     [cardMessages, setCardMessages] = useState<Record<string, string>>({}),
+    [requestStates, setRequestStates] = useState<Record<string, RequestState>>({}),
     [releasingSources, setReleasingSources] = useState<string[]>([]);
   const leaseRequests = useRef(new Set<string>());
+  const collectionSends = useRef(new Set<string>());
   const refresh = () => client.invalidateQueries({ queryKey: ["schedules"] });
   async function releaseLease(lease: ScheduleSnapshot["leases"][number]) {
     // The ref closes the gap before React disables the button, including
@@ -888,6 +902,15 @@ export function SchedulesPage(): ReactNode {
                 key={`${s.id}:${s.revision}`}
                 value={s}
                 lease={query.data.leases.find((lease) => lease.source === s.source)}
+                collection={{
+                  state: requestStates[s.id] ?? IDLE,
+                  update: (patch) =>
+                    setRequestStates((states) => ({
+                      ...states,
+                      [s.id]: { ...(states[s.id] ?? IDLE), ...patch },
+                    })),
+                  sending: collectionSends.current,
+                }}
                 refresh={refresh}
                 message={cardMessages[s.id] ?? ""}
                 setMessage={(message) =>

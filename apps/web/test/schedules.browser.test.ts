@@ -818,6 +818,38 @@ describe.if(runnable)("operator schedule administration", () => {
     }
   }, 30000);
 
+  test("a request's result and pending key survive the card's new revision", async () => {
+    let fail = true;
+    collectionResponse = async () =>
+      fail
+        ? Response.json({ error: "commit_failed" }, { status: 503 })
+        : Response.json(
+            { operationId: `op_${"c".repeat(64)}`, status: "accepted" },
+            { status: 202 },
+          );
+    const page = await browser.newPage();
+    try {
+      await page.goto(`${origin}/schedules`);
+      const card = page.locator(".schedule-card").filter({ hasText: "ソニー銀行" });
+      await card.getByRole("button", { name: "収集を依頼", exact: true }).click();
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText("同じ依頼として扱われます", { exact: false }).waitFor();
+      // Saving the job's settings bumps its revision, which remounts the card.
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card.getByText("保存しました。", { exact: true }).waitFor();
+      fail = false;
+      await card.getByRole("button", { name: "依頼を送信", exact: true }).click();
+      await card.getByText(`依頼ID op_${"c".repeat(64)}`, { exact: false }).waitFor();
+      expect(collections).toHaveLength(2);
+      expect(collections[1]!.body["idempotencyKey"]).toBe(collections[0]!.body["idempotencyKey"]);
+      await card.getByRole("button", { name: "設定を保存", exact: true }).click();
+      await card.getByText(`依頼ID op_${"c".repeat(64)}`, { exact: false }).waitFor();
+      expect(writes.filter((w) => w.path === "/api/ops/v1/schedules/sony-bank")).toHaveLength(2);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
+
   test("a connection the Processor would not start offers no request", async () => {
     const page = await browser.newPage();
     try {
