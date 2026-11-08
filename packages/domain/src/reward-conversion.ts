@@ -1,6 +1,7 @@
 // Pure reward conversion arithmetic and bounded route traversal.
 // Contracts remain exported from rewards.ts for existing callers.
 import type { ConversionOffer, ConversionPlan, MembershipState, OfferValidity } from "./rewards.ts";
+import { civilDateOfInstant } from "./civil-date.ts";
 import { validOpenEndedPeriodValue } from "./open-ended-period.ts";
 import { CONVERSION_SEARCH_RELEASE, REWARD_POLICY_RELEASE } from "./reward-releases.ts";
 import {
@@ -111,9 +112,18 @@ export function simulateConversion(
   };
 }
 
+/**
+ * The calendar day of a date, or of an instant in its own named zone
+ * (`civilDateOfInstant`, ADR 0056), never the date its offset was written in:
+ * an instant written in UTC can fall on the next Tokyo day. A zone the runtime
+ * does not know establishes no day.
+ */
 function localDate(value: TemporalValue): CivilDate | null {
   if (value.kind === "local-date") return parseLocalDate(value.value);
-  if (value.kind === "instant") return parseLocalDate(value.value.slice(0, 10));
+  if (value.kind === "instant") {
+    const date = civilDateOfInstant(value.value, value.zone);
+    return date === null ? null : parseLocalDate(date);
+  }
   return null;
 }
 
@@ -217,16 +227,37 @@ function coversApplicationDay(
 }
 
 /**
- * Whether applying on `day` is after the offer's application deadline:
- * `false` with no deadline (`null`, a standing offer), `null` when the stored
- * deadline establishes no answer (unknown or malformed, or `day` inside a
- * period deadline), so an unestablished deadline stays a review reason and is
- * never read as no deadline (INV05). A local date or an instant is its own
- * calendar day, as before.
+ * Whether applying on `day` (a calendar day in `zone`, the clock's zone) is
+ * after the offer's application deadline: `false` with no deadline (`null`, a
+ * standing offer), `null` when the stored deadline establishes no answer, so an
+ * unestablished deadline stays a review reason and is never read as no deadline
+ * (INV05). As in `compareTemporal`, a day is answered only when it lies wholly
+ * before or after the deadline: a local date is its own whole day, a period
+ * ends with its last day, and an instant falls inside its civil date, so the
+ * day holding an instant, or a day inside a period, establishes nothing. A date
+ * or period of another zone is not compared (`zone_mismatch`); a `null` zone on
+ * either side is compatible, as for validity. An instant is one moment, read on
+ * the application day's calendar (`civilDateOfInstant`), or on its own zone's
+ * when the clock names none; a zone the runtime does not know is never read as
+ * UTC. The caller's `requiredCompletionBy` is judged the same way on the
+ * credit day.
  */
-function deadlinePassed(deadline: TemporalValue | null, day: number): boolean | null {
+function deadlinePassed(
+  deadline: TemporalValue | null,
+  day: number,
+  zone: string | null,
+): boolean | null {
   if (deadline === null) return false;
   if (!validTemporalValue(deadline) || deadline.kind === "unknown") return null;
+  if (deadline.kind === "instant") {
+    const date = civilDateOfInstant(deadline.value, zone ?? deadline.zone);
+    const civil = date === null ? null : parseLocalDate(date);
+    if (civil === null) return null;
+    const instantDay = daysFromCivil(civil);
+    if (day > instantDay) return true;
+    return day < instantDay ? false : null;
+  }
+  if (zone !== null && deadline.zone !== null && zone !== deadline.zone) return null;
   if (deadline.kind === "period") {
     const bounds = periodBounds(deadline);
     if (!bounds) return null;
@@ -280,7 +311,6 @@ export function findConversionPaths(
   const paths: ConversionPath[] = [];
   let expansions = 0;
   const startDay = dayNumber(start.clock);
-  const requiredBy = budget.requiredCompletionBy ? dayNumber(budget.requiredCompletionBy) : null;
   if (startDay === null)
     return {
       paths,
@@ -331,7 +361,7 @@ export function findConversionPaths(
         rejected.push({ offerRef, reasonCode: condition });
         continue;
       }
-      const passed = deadlinePassed(offer.applicationDeadline, appliedOn);
+      const passed = deadlinePassed(offer.applicationDeadline, appliedOn, zone);
       if (passed === null) {
         rejected.push({ offerRef, reasonCode: "needs_rule_verification" });
         continue;
@@ -345,7 +375,15 @@ export function findConversionPaths(
         continue;
       }
       const creditOn = appliedOn + offer.processingDays;
-      if (requiredBy !== null && creditOn > requiredBy) {
+      // The caller's completion deadline follows the application deadline's
+      // rule on the credit day; one that establishes no answer is a review
+      // reason, never read as no deadline (INV05).
+      const late = deadlinePassed(budget.requiredCompletionBy, creditOn, zone);
+      if (late === null) {
+        rejected.push({ offerRef, reasonCode: "needs_rule_verification" });
+        continue;
+      }
+      if (late) {
         rejected.push({ offerRef, reasonCode: "completion_after_required_by" });
         continue;
       }

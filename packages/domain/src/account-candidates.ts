@@ -38,9 +38,9 @@ type AccountCandidateEvidence = (typeof ACCOUNT_CANDIDATE_EVIDENCE)[number];
 
 /**
  * A candidate's status, from stored relations only: `accepted` or `rejected`
- * when the newest `connection_contains` relation for the pair (under any
- * reference of `CONTAINMENT_REFERENCES`) says so; otherwise (none, proposed
- * or released) `proposed`.
+ * when the newest of the pair's current `connection_contains` relations (one
+ * per reference of `CONTAINMENT_REFERENCES`) says so; otherwise (none,
+ * proposed or released) `proposed`.
  */
 export const ACCOUNT_CANDIDATE_STATUSES = ["proposed", "accepted", "rejected"] as const;
 type AccountCandidateStatus = (typeof ACCOUNT_CANDIDATE_STATUSES)[number];
@@ -135,13 +135,17 @@ export interface AggregatorAccountFact {
   connectionKey: string | null;
 }
 
-/** The newest stored relation of one kind between two references. */
+/**
+ * The current stored relation of one kind between two references: its newest
+ * decision, or its newest proposal when it has none (ADR 0077's amendment of
+ * 2026-11-08).
+ */
 export interface AccountRelationFact {
   kind: "connection_contains" | "same_account";
   fromRef: string;
   toRef: string;
   status: StoredRelationStatus;
-  /** The newest row's `created_at` and `id`: the change lifecycle's order of a relation's history. */
+  /** The current row's `created_at` and `id`: the change lifecycle's order of a relation's history. */
   createdAt: string;
   id: string;
 }
@@ -198,7 +202,7 @@ export interface AccountCandidate {
   status: AccountCandidateStatus;
   hold: AccountCandidateHold | null;
   /**
-   * The newest stored `connection_contains` relation of this pair under each
+   * The current stored `connection_contains` relation of this pair under each
    * reference it may have been recorded under, sorted by reference; `status`
    * is the newest of them. A decision recorded under another producer's
    * reference or a pre-rewrite key decides this pair too, so the pair is
@@ -212,7 +216,7 @@ export interface AccountCandidate {
   sameAccount: {
     proposed: false;
     reasons: SameAccountReason[];
-    /** Newest `same_account` relations already stored between an aggregator side and the direct side. */
+    /** Current `same_account` relations already stored between an aggregator side and the direct side. */
     recorded: { fromRef: string; toRef: string; status: StoredRelationStatus }[];
   };
   /**
