@@ -1516,7 +1516,10 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   built from a query string by assignment (the routes use
   `Object.fromEntries`). Where a record stands in front of a key check, the
   tool passes the argument's own object on: `kogane.audit.search` judges
-  `filters`, and `kogane.command.plan` forwards `payload`, as sent. A
+  `filters`, and `kogane.command.plan` forwards `payload`, as sent, and
+  binds its idempotency key to the digest of that same payload, so a
+  payload that differs only by a `__proto__` key is `idempotency_conflict`
+  under an earlier key, never a replay of the earlier plan. A
   `__proto__` key is then refused with the code the route answers for any
   unknown key: `invalid_query` on `/api/v2/audit` and the カード照合 reads,
   `unsupported_semantics` on `/api/v2/query`, `invalid_command` from the

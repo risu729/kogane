@@ -14,6 +14,7 @@ import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CardOwnershipReview } from "../../../packages/domain/src/card-ownership-review";
+import { canonicalDigest } from "../../../packages/domain/src/context";
 import { smbcDirectTransactions } from "../../../packages/parsers/src/parsers/smbc-direct";
 import {
   identifyParse,
@@ -564,6 +565,12 @@ describe("a plan payload's keys reach the Processor as sent", () => {
     const payload = JSON.parse('{"proposalId":"synthetic-absent","reason":"r","__proto__":"x"}');
     const page = await http("plan", { kind: "card-settlement.accept", payload });
     expect(page).toEqual({ failed: true, body: { error: "invalid_command" } });
+    const route = pipeline.fetch.getMockImplementation()!;
+    let forwarded = "";
+    pipeline.fetch.mockImplementationOnce(async (request: Request) => {
+      forwarded = await request.clone().text();
+      return route(request);
+    });
     const tool = await mcp("kogane.command.plan", {
       kind: "card-settlement.accept",
       payload,
@@ -571,5 +578,57 @@ describe("a plan payload's keys reach the Processor as sent", () => {
     });
     expect(tool).toEqual(page);
     expect(await count("change_plans")).toBe(plans);
+    // The Processor received the key, and the delegated digest the audit
+    // record binds is the digest of exactly the body it received.
+    const sent = JSON.parse(forwarded) as { payload: object };
+    expect(Object.hasOwn(sent.payload, "__proto__")).toBe(true);
+    const rows = (
+      await env.DB.prepare(
+        "SELECT * FROM audit_records WHERE idempotency_key='synthetic-proto-payload' AND path='mcp'",
+      ).all<Record<string, unknown>>()
+    ).results;
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row["payload_digest"]).toBe(
+        await canonicalDigest({
+          v: "kogane-delegated-payload-v1",
+          operation: row["operation"],
+          payload: sent,
+        }),
+      );
+      // Closed codes and refs only: no payload text reaches the record.
+      expect(JSON.stringify(row)).not.toMatch(/synthetic-absent|__proto__/u);
+    }
+  });
+
+  it("binds an idempotency key to the payload with its `__proto__` key, never without it", async () => {
+    // The rejection planned over MCP under `j2-plan` above, as the plan stored it.
+    const stored = await env.DB.prepare(
+      "SELECT payload_json FROM change_plans WHERE kind='card-settlement.reject' AND created_by=?1",
+    )
+      .bind(MCP_PRINCIPAL)
+      .first<{ payload_json: string }>();
+    const { proposalId, reason } = JSON.parse(stored!.payload_json) as {
+      proposalId: string;
+      reason: string;
+    };
+    const plan = (payload: unknown) =>
+      mcp("kogane.command.plan", {
+        kind: "card-settlement.reject",
+        payload,
+        idempotencyKey: "j2-plan",
+      });
+    // Key order is not part of the payload: the same key answers the same plan.
+    expect(await plan({ reason, proposalId })).toMatchObject({
+      failed: false,
+      body: { created: false },
+    });
+    // The same payload plus a `__proto__` key is another payload under that key.
+    const forwarded = pipeline.fetch.mock.calls.length;
+    const proto = JSON.parse(
+      `{"reason":${JSON.stringify(reason)},"proposalId":${JSON.stringify(proposalId)},"__proto__":"x"}`,
+    );
+    expect(await plan(proto)).toEqual({ failed: true, body: { error: "idempotency_conflict" } });
+    expect(pipeline.fetch.mock.calls.length).toBe(forwarded);
   });
 });
