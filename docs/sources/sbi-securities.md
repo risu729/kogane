@@ -28,7 +28,14 @@ Koganeでは、取引機能を絶対に有効化しない。`pnsk-lab/mnie` のS
 
 このPoCでは、Cloudflare secretにSBI専用passkeyの最小6項目と、token復号用の固定RSA transport鍵だけを置き、ログインID／パスワード、取引パスワード、Bitwarden item全体は置かない。access token、SID、Cookie、MTS session header、口座番号をR2や通常ログへ保存せず、データartifactとredacted manifestだけをprivate R2へ保存する。D1は使わない。実Cloudflareで外国scopeは約7秒、国内scopeは約15秒で成功したが、両方を同じinvocationで実行するとError 1102になった。
 
-Queue分割も実測したが、Free planのconsumerおよびservice-binding先に適用されるCPU制限を認証・収集処理が超えた。RSA-4096鍵生成を実行時から外しても、外国scopeの通常requestで約0.94秒のCPU timeが観測され、公式のFree上限10msへ最適化だけで収めるのは現実的でなかった。2026-08-27にWorkers Paidへ移行したため、現在はGitHub ActionsやQueueを介さず、Cloudflare Cron Triggerが毎日06:00 JSTに`scope=all`を1回起動し、国内・外国を直列収集する。日次Cronの最大CPU time／wall timeはともに15分で、実測約7秒＋約15秒の処理に十分である。
+Queue分割も実測したが、Free planのconsumerおよびservice-binding先に適用されるCPU制限を認証・収集処理が超えた。RSA-4096鍵生成を実行時から外しても、外国scopeの通常requestで約0.94秒のCPU timeが観測され、公式のFree上限10msへ最適化だけで収めるのは現実的でなかった。2026-08-27にWorkers Paidへ移行したため、2026-10-05まではGitHub ActionsやQueueを介さず、Cloudflare Cron Triggerが毎日06:00 JSTに`scope=all`を1回起動し、国内・外国を直列収集する。日次Cronの最大CPU time／wall timeはともに15分で、実測約7秒＋約15秒の処理に十分である。
+
+Since [#430](https://github.com/risu729/kogane/pull/430) (2026-10-05) the
+Worker has no Cron trigger: the Processor's alarm job `sbi-securities`
+(06:00 JST, `0 21 * * *` in `config/alarm-jobs.json`) calls its private
+`ScheduledCollection` entrypoint, which runs `scope=all` once, and the run holds
+the source's execution lease in D1 (`SCHEDULE_DB`). Runs are stored in the
+shared `DATA` bucket, not a private one ([below](#追記-共通data-r2への切替u09)).
 
 初期バックフィルとして、2024-08-28〜2026-05-29を重複のない90日以下の8区間へ分割し、国内8/8、外国8/8の全runが成功、failure 0でprivate R2へ保存された。直近2026-05-30〜2026-08-27も国内・外国それぞれ成功している。これにより現時点で約2年の国内・米国株取引履歴と、各run時点の国内／米国株保有、円／USD預り金、My資産、円貨入出金明細のraw snapshotがR2にある。
 
@@ -412,6 +419,6 @@ unitを持ち、そのscopeのartifact数・coverage・safe codeを個別に記�
 `requested-window` rangeと`date_range`を記録する。
 
 passkey credential、handshake key、session idはartifactにもterminalにも出さず、
-失敗は`safeErrorDetails`由来の機械codeだけを残す。Worker名、cron、secretは変更しない。
+失敗は`safeErrorDetails`由来の機械codeだけを残す。Worker名、secretは変更しない。
 Processorの`SHARED_R2_INGEST_ENABLED`は登録のゲートであり、collectorの保存先スイッチではない。
 詳細は`docs/collection.md`。

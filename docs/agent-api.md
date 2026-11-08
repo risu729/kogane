@@ -357,11 +357,11 @@ which pending-to-posted candidates are open".
 
 Input, a closed object (every key optional):
 
-| Key       | Shape                                    | Means                                                             |
-| --------- | ---------------------------------------- | ----------------------------------------------------------------- |
-| `period`  | `YYYY-MM`                                | Only the events of that statement period, and figures over them   |
-| `eventId` | `purchase_<sha256>` or `refund_<sha256>` | One event, exactly; never beside `period` or `offset`             |
-| `offset`  | integer, 0 to 1,000,000                  | Page start; a page is 50 events, `data.nextOffset` names the next |
+| Key       | Shape                                    | Means                                                                                                  |
+| --------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `period`  | `YYYY-MM`                                | Only the events of that statement period, and figures over them                                        |
+| `eventId` | `purchase_<sha256>` or `refund_<sha256>` | One event, exactly; never beside `period` or `offset`                                                  |
+| `offset`  | integer, 0 to 1,000,000                  | Page start; a page is 50 events, `data.nextOffset` names the next one this grant may read (`nextPage`) |
 
 Output:
 
@@ -370,13 +370,28 @@ Output:
   "schemaVersion": "kogane-card-purchases-v1",
   "query": { "period": "2026-09", "eventId": null, "offset": 0 },
   "decisions": "operator-only",
+  "nextPage": "offered", // or "none", or "budget_exceeded"
   "data": {/* the page: items, nextOffset, summary, coverage */},
 }
 ```
 
+`nextPage` is the closed reason for `data.nextOffset`: `offered` when it names
+the next page, `none` when no event follows (or the read is one `eventId`),
+and `budget_exceeded` when events follow but the next page would reach past
+the grant's `maxRows` (bound 3 below): the request it would name is refused
+with that code, so `data.nextOffset` is `null` and the answer says why.
+`data.summary.events` still counts every event of the filter, and a
+statement `period` narrows it. With the whole-store grant every MCP client
+holds (`maxRows` 1000) the last page offered starts at offset 950. This is
+the rule of the candidate reviews below, whose `nextOffset` is null where the
+next page would exceed `maxRows`. The card settlement reads and the unmatched
+statements still offer such a page, and refuse it when asked
+([ADR 0081](adr/0081-ui-parity-through-mcp.md), 2026-11-07 amendment): an
+open limit.
+
 `data` is the operator page's `CardPurchasePage` (`packages/domain/src/card-purchase-view.ts`),
-field for field: the figures of the whole filter per unit with captured,
-authorized, captured refunds and authorized refunds apart and no combined
+field for field but for a `nextOffset` past the grant's bound: the figures
+of the whole filter per unit with captured, authorized, captured refunds and authorized refunds apart and no combined
 total, the unresolved count, the provider statement totals beside them and
 `settlementAddsPurchaseExpense: false`; `coverage`, which says the list is not
 a complete transaction history, counts the current provider rows no event
@@ -421,7 +436,8 @@ agent path makes:
    whatever the store holds.
 3. The grant's `maxRows` bounds how deep the caller pages: `offset + 50` rows
    (one for an `eventId` read) above it is `413 budget_exceeded`
-   (`budget:maxRows=<n>`), before anything is read.
+   (`budget:maxRows=<n>`), before anything is read. An answer never offers
+   such a page as `data.nextOffset` (`nextPage: "budget_exceeded"`).
 
 "Before anything is read" is exact: the only statement the Worker runs before
 one of these refusals is the `sqlite_master` check that decides whether the
@@ -590,14 +606,19 @@ nothing it lists can be accepted.
 what each provider last reported on a date, per account, beside the card
 statements due around it ([reported state](reported-state.md)). It is not the
 `reported-state` intent of `kogane.financial.query`, which reads the latest
-balances and positions. Route and tool share one function,
-`readReportedState` in `services/app/src/reported-state-api.ts`: the route's
-request rules and its reader `queryDatedState`
-(`packages/application/src/query/dated-state.ts`). The body is the route's
+balances and positions. Route and tool are adapters over one service,
+`readReportedStateRequest` in
+`packages/application/src/query/reported-state-read.ts`: its request rules
+and refusal codes, and its reader `queryDatedState`
+(`packages/application/src/query/dated-state.ts`). The route turns its query
+string into the tool's body (`reportedStateBodyFromQuery`), so the same
+request gets the same answer on the route, the agent HTTP path and MCP
+([ADR 0081](adr/0081-ui-parity-through-mcp.md) point 2). The body is the route's
 answer, field for field, `apiVersion: 2` included (`validReportedState` in
 `packages/observation-shared/src/reported-state-contract.ts`).
 
-Input, a closed object (`src/read-tools.ts`); the patterns are the route's own:
+Input, a closed object (published in `src/read-tools.ts` with the service's
+patterns; the service decides):
 
 | Key       | Shape                 | Means                                                       |
 | --------- | --------------------- | ----------------------------------------------------------- |
@@ -610,12 +631,18 @@ Authorization, before the body is validated: `records.read`, else
 else `403 evidence_restricted` (`scope:source`, `scope:account`), as
 [ADR 0063](adr/0063-delegated-ai-operation-path.md) decision 10 asks of every
 new read until a scoped version is proven. Both are `financial-error-v1`
-bodies. A body outside the closed object is `400 invalid_request` with the
-offending keys, as for the other read tools of `src/read-tools.ts`. The
-route's own refusals keep its status and its `{error}` body on both agent
-paths: `400 invalid_date` (a date that is not a calendar day),
-`400 date_in_future`, and `413 result_limit_exceeded` past the read's 5,000
-rows (refused, never cut). The answer is not paged, so the grant's
+bodies. Then the service's refusals, with the route's status and its
+`{error}` body on both agent paths, in order: `400 invalid_query` for a body
+that is not an object (an absent or `null` body is `{}`, so `invalid_date`),
+another key (`__proto__` included) or an empty value; `400 invalid_date` for
+a missing date or one that is not a `YYYY-MM-DD` calendar day (`20260910`
+included, as on the route); `400 date_in_future`; `400 invalid_query` for a
+malformed `source` or `account`; a value of the wrong type is malformed for
+its key. All are decided before the store is read. `413
+result_limit_exceeded` past the read's 5,000 rows (refused, never cut). Until
+2026-11-08 a body outside the published patterns was `400 invalid_request`
+on both agent paths where the route answered `invalid_date` or
+`invalid_query`. The answer is not paged, so the grant's
 `budget.maxRows` does not bound it. It reads and never writes.
 
 Every MCP client holds `records.read` over `"*"` sources and accounts (ADR
@@ -1048,12 +1075,48 @@ the App's capability check (`decisionCapabilityFor`), the delegated envelope's
 `commandFamilies`, the Processor route's plan and decision checks
 (`delegatedPlanAllowed`, `delegatedDecisionAllowed`) and the writer's
 `delegatedCommandFamilyAllowed` all derive from it, so a family is decidable at
-every gate or at none. A `prepare` checks the plan
-(open, not expired, digest unchanged, simulation not stale) and the approval,
-and returns a `cfm_` digest; it writes no approval and no decision. A
-`confirm` with that digest within ten minutes applies it, and a repeated
-confirm replays the result. A refusal from the lifecycle is the same code on
-both paths (`stale_context` with the candidate's ref, `plan_not_found`, …).
+every gate or at none.
+
+The tools' pre-check is `previewApproval` or `previewCommit`
+(`packages/application/src/command/decision-preview.ts`,
+[ADR 0081 amendment](adr/0081-ui-parity-through-mcp.md#amendment-one-pre-check-for-the-mcp-approve-and-commit-tools-2026-11-08)).
+It runs the functions `approve` and `commit` themselves run on the loaded plan
+before they write (`approvalPrecheck`; `commitPrecheck`, then `reversalCheck`
+for a `revertsAuditId`), then the simulation the preview carries. A `prepare`
+runs it, writes no approval and no decision, and returns a `cfm_` digest and
+the simulation report; for an operation id the caller already completed it
+answers with that receipt as a replay, as `commit` does, issues no
+confirmation and is recorded `replayed` with `operation:<id>`. A `confirm`
+with the digest within ten minutes checks the confirmation first (an invalid,
+used or expired one is refused with its own code before any lifecycle
+refusal, since the Processor runs `approve` or `commit` only for a verified
+confirmation), then runs the pre-check and forwards to the Processor, whose `approve` or `commit` applies it and answers
+every refusal the lifecycle gives itself; a repeated confirm replays the
+result. So a refusal is the same code with the same `refs`, in the same
+order, on both paths, at `prepare` and at `confirm`: an ended override
+release with an expired approval is `approval_expired` with the approval id,
+a moved plan with an expired approval the same, a wrong digest on an expired
+plan `stale_context` with the plan id, another principal's approval
+`approval_required`, an ended release alone `target_missing` with the
+subject, and a release whose override another release ends between the
+commit's reads and its batch `stale_context` with the plan id ([`services/app/test/command-precheck-parity.test.ts`](../services/app/test/command-precheck-parity.test.ts),
+[`services/app/test/identity-release-parity.test.ts`](../services/app/test/identity-release-parity.test.ts)).
+The caller's authority stays each path's own: the operator's grant on the
+page's path, the MCP client's capability and confirmation here.
+
+Two differences belong to the R2 step. The confirmation page offers 承認 and
+確定 only on a simulation report that loaded and is not stale
+(`apps/web/src/pages/Confirm.tsx`), which `approve` and `commit` do not
+re-check; the tools return that report as the preview, so after every
+lifecycle check they refuse, at `prepare` and at `confirm`, a plan whose
+simulation fails (with the code and refs `kogane.command.simulate` gives) and
+one whose re-derived plan differs while none of its pinned revisions moved
+(`stale_context` with the plan id). And a `prepare` writes nothing to the
+change lifecycle: a plan whose pinned revisions moved is refused
+`stale_context` with the plan id and each moved ref, as on the page's path,
+but `approve` (and `commit`, at its batch) also marks the plan `stale`, and a
+`prepare` leaves it as it is, as the page's `simulate` does; a `confirm`
+leaves that refusal to the Processor, which marks it.
 
 This is how the カード照合 decisions work over MCP (Phase 2 unit 2g.2,
 [ADR 0081](adr/0081-ui-parity-through-mcp.md)): `card-settlement.accept`,
@@ -1087,11 +1150,20 @@ pure. The trade is that a context has no server-side lifetime — an id whose
 inputs have moved on is simply a different id — which is acceptable because
 every pinned input is already immutable in the store.
 
-A cursor is base64url of `{contextId, queryDigest, offset}`. The digest covers
-the intent, perimeter, bases and filters but not the page size, so a client
-cannot change the answer by resizing a page. A cursor from another context or
-another query is `stale_context`; it is never quietly restarted from the
-newest rows.
+A cursor is base64url of `{basisRef, queryDigest, offset}`. `basisRef` is the
+context's paging basis: the digest of its manifest without the request's
+clock (`effectiveTime`, `evaluationClock`, and `knowledgeCutoff` unless the
+caller stated it), so the next page is read on a later request while every
+pinned input holds, although each request's `contextId` includes its own
+clock ([ADR 0091](adr/0091-query-cursor-paging-basis.md)). The digest covers
+the intent, perimeter, bases and filters but not the page size or the
+effective time, so a client cannot change the answer by resizing a page. A
+cursor from a context with other pinned inputs (a later publication, another
+perimeter) or another query is `stale_context`; it is never quietly restarted
+from the newest rows. Limit: the publication high-water is the highest visible
+parse run id, so a release activation onto older candidate runs or a rollback
+need not move it, and a cursor resumed across one can repeat or skip rows
+([ADR 0091: consequences](adr/0091-query-cursor-paging-basis.md#consequences)).
 
 `resultRef` is the digest of `{contextId, resolvedQuery, data}`. It, together
 with `contextId` and a proposal's `proposalId`, is what a page and an agent

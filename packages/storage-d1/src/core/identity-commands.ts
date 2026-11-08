@@ -200,6 +200,17 @@ export interface PreparedIdentityCommand {
   receipt: IdentityCommandReceipt;
   digest: string;
   writes: IdentityCommandWrite[];
+  /**
+   * What the ledger statement requires of the stored subject: the mapping is
+   * still at the expected revision, and an assignment's target exists or a
+   * release still has a protection to release. A caller that reserves its own
+   * idempotency row first (the A09 commit) puts this on that reservation too:
+   * a release keeps the mapping revision, so a plan's expected revision still
+   * holds after another release ended the override, and a reservation without
+   * this condition would accept a command whose ledger row, decision and
+   * supersession all wrote nothing.
+   */
+  precondition: IdentityCommandWrite;
 }
 
 /**
@@ -251,16 +262,24 @@ export async function prepareIdentityCommand(
   // and none of this command's mapping, decision or supersession may ride on it.
   const ownLedger = "op.operation_id=? AND op.payload_digest=? AND op.actor_id=?";
   const ownLedgerBinds = [command.operationId, digest, command.actorId] as const;
+  const precondition: IdentityCommandWrite = {
+    sql: `${revisionGuard} AND ${
+      assign
+        ? `EXISTS(SELECT 1 FROM ${entities} WHERE id=?)`
+        : "EXISTS(SELECT 1 FROM protected_mapping_subjects WHERE subject_kind=? AND subject_ref=?)"
+    }`,
+    binds: [
+      command.referenceId,
+      command.expectedRevision,
+      ...(assign ? [command.targetId] : [subjectKind, command.referenceId]),
+    ],
+  };
   const writes: IdentityCommandWrite[] = [
     // The ledger row carries every precondition; later statements exist only if it was written.
     {
       sql: `INSERT INTO decision_operations(operation_id,actor_id,actor_verification,action,payload_digest,result_json,created_at)
       SELECT ?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM decision_operations WHERE operation_id=?)
-      AND ${revisionGuard} AND ${
-        assign
-          ? `EXISTS(SELECT 1 FROM ${entities} WHERE id=?)`
-          : "EXISTS(SELECT 1 FROM protected_mapping_subjects WHERE subject_kind=? AND subject_ref=?)"
-      }${guard ? ` AND ${guard.sql}` : ""}`,
+      AND ${precondition.sql}${guard ? ` AND ${guard.sql}` : ""}`,
       binds: [
         command.operationId,
         command.actorId,
@@ -270,9 +289,7 @@ export async function prepareIdentityCommand(
         JSON.stringify(receipt),
         now,
         command.operationId,
-        command.referenceId,
-        command.expectedRevision,
-        ...(assign ? [command.targetId] : [subjectKind, command.referenceId]),
+        ...precondition.binds,
         ...(guard ? guard.binds : []),
       ],
     },
@@ -372,7 +389,7 @@ export async function prepareIdentityCommand(
         ...ownLedgerBinds,
       ],
     });
-  return { receipt, digest, writes };
+  return { receipt, digest, writes, precondition };
 }
 
 /** Never accepts amounts or edits Layer B. Entity creation is not part of this command. */

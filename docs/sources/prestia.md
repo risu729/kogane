@@ -33,12 +33,13 @@ metadata remain valuation evidence accessible through artifact parse-run
 references and observation details, separate from the native balance screen.
 No transaction-history or empty-account completeness is claimed.
 
-The [decision](../adr/0042-prestia-bank-worker.md) is proposed until merge and the
+The [decision](../adr/0042-prestia-bank-worker.md) is accepted (merged
+2026-10-05 in [#437](https://github.com/risu729/kogane/pull/437)) and the
 [delivery plan](../plans/2026-10-prestia-bank-worker.md) remains pending production
-verification. The Processor-managed 06:30 JST alarm is seeded disabled; Worker
-Cron triggers are empty. Full checks/independent review, merge, exact deployment,
-first production registration/parse/publication and separate schedule activation
-remain gates. No provider values or identifying captures are recorded here.
+verification. The Processor-managed 06:30 JST alarm (`prestia-bank` in
+`config/alarm-jobs.json`) is seeded disabled; Worker Cron triggers are empty.
+Exact deployment, first production registration/parse/publication and separate
+schedule activation remain gates. No provider values or identifying captures are recorded here.
 
 ## Scope and decision
 
@@ -913,13 +914,19 @@ the `DATA` binding to `kogane-raw-evidence` only. The switch and the importer
 were retired on 2026-09-13 (`docs/collection.md`). The Worker persists the run
 itself with `packages/collection` — the already-sanitized monthly activity
 pages and the collector manifest, then the `terminal-v1` manifest last. The
-daily `17 18 * * *` cron is unchanged, and the Container image, relay, browser
+daily `17 18 * * *` schedule was unchanged by this switch; since
+[#430](https://github.com/risu729/kogane/pull/430) (2026-10-05) it is the
+Processor's alarm job `prestia-globalpass` (03:17 JST in
+`config/alarm-jobs.json`), not a Cron trigger. The Container image, relay, browser
 binding and tunnels are untouched: the Worker writes the run, not the
 container. The run is stored once, in `DATA` (plan 00).
 
 A successful run still declares `coverageStatus: partial`, because the provider
-exposes a rolling window of statement months and the collector stores only
-the first page of a month (below).
+exposes a rolling window of statement months. Since the page walk of 2026-10-04
+(below) the account unit of a successful run is `complete`: every selected
+month was captured whole (`sharedOutcome`,
+`services/collector-globalpass/src/shared-collection.ts`). Until then the
+collector stored only the first page of a month.
 
 Artifact roles and terminal fields are in
 [`docs/collection.md`](../collection.md#prestia-globalpass-kogane-globalpass-collector-poc).

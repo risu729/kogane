@@ -11,7 +11,7 @@ import {
   type Principal,
   principalCan,
 } from "./contract.ts";
-import { commandError, type CommandResult } from "./errors.ts";
+import { commandError, type CommandError, type CommandResult } from "./errors.ts";
 import { resolveAndSimulate } from "../operations/targets.ts";
 import { loadPlan } from "./plan.ts";
 import { currentRevisions, markStale } from "./simulate.ts";
@@ -38,6 +38,58 @@ export interface ApproveInput {
   now: string;
   /** The route's audit call (ADR 0064): the approval's record joins its batch. */
   audit?: OperationCall;
+}
+
+/** A refusal of `approvalPrecheck`; `marksStale` asks `approve` to mark the plan stale. */
+export type ApprovalPrecheck = { ok: true } | (CommandError & { marksStale?: true });
+
+/**
+ * Every check `approve` makes of a loaded plan before it writes, in its
+ * order, as pure reads. `approve` runs it after the caller's authority; the
+ * MCP decision tools run the same function at `prepare` (ADR 0081), so both
+ * paths give one code, one set of refs and one order for every input. The
+ * only write it implies, marking a moved plan stale, is left to `approve`:
+ * the App is not the change lifecycle's writer.
+ */
+export async function approvalPrecheck(
+  store: CommandStore,
+  plan: ChangePlan,
+  input: { planDigest: unknown; now: string },
+): Promise<ApprovalPrecheck> {
+  if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
+  if (instrumentTemporalContextRequested(plan.baseContextId))
+    return commandError("unsupported_semantics");
+  if (typeof input.planDigest !== "string" || input.planDigest !== plan.planDigest)
+    return commandError("stale_context", [plan.planId]);
+  if (Date.parse(plan.expiresAt) <= Date.parse(input.now))
+    return commandError("plan_expired", [plan.planId]);
+  if (plan.status !== "planned" && plan.status !== "approved")
+    return commandError("plan_not_open", [plan.planId]);
+  // An economic-event kind is approvable only while its planner accepts it:
+  // with none registered (ADR 0054, G2) a plan row of such a kind that
+  // reached the table any other way is refused here, so no approval of it is
+  // ever written. An override release is approvable only while its subject
+  // still has a protection to release: its expected revision does not move
+  // when another release ends the override, so only the planner can tell.
+  if (isEconomicEventKind(plan.kind) || plan.kind === "identity.release-override") {
+    const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
+    if (!eligibility.ok) return eligibility;
+  }
+
+  // SC17: the human confirmed a plan pinned to rev7. If a concurrent change
+  // moved it to rev8, the approval is refused and the plan is marked stale;
+  // re-simulating produces a different digest, so the old approval can never
+  // be reused for the new one.
+  const current = await currentRevisions(store, plan.expectedRevisions);
+  const moved = Object.entries(plan.expectedRevisions).filter(
+    ([ref, revision]) => current[ref] !== revision,
+  );
+  if (moved.length > 0)
+    return {
+      ...commandError("stale_context", [plan.planId, ...moved.map(([ref]) => ref)]),
+      marksStale: true,
+    };
+  return { ok: true };
 }
 
 export async function approve(
@@ -74,35 +126,10 @@ export async function approve(
   if (!plan) return commandError("plan_not_found");
   if (input.actor.kind === "delegated" && !delegatedCommandFamilyAllowed(input.audit, plan.kind))
     return commandError("approval_required");
-  if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
-  if (instrumentTemporalContextRequested(plan.baseContextId))
-    return commandError("unsupported_semantics");
-  if (typeof input.planDigest !== "string" || input.planDigest !== plan.planDigest)
-    return commandError("stale_context", [plan.planId]);
-  if (Date.parse(plan.expiresAt) <= Date.parse(input.now))
-    return commandError("plan_expired", [plan.planId]);
-  if (plan.status !== "planned" && plan.status !== "approved")
-    return commandError("plan_not_open", [plan.planId]);
-  // An economic-event kind is approvable only while its planner accepts it:
-  // with none registered (ADR 0054, G2) a plan row of such a kind that
-  // reached the table any other way is refused here, so no approval of it is
-  // ever written.
-  if (isEconomicEventKind(plan.kind)) {
-    const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
-    if (!eligibility.ok) return eligibility;
-  }
-
-  // SC17: the human confirmed a plan pinned to rev7. If a concurrent change
-  // moved it to rev8, the approval is refused and the plan is marked stale;
-  // re-simulating produces a different digest, so the old approval can never
-  // be reused for the new one.
-  const current = await currentRevisions(store, plan.expectedRevisions);
-  const moved = Object.entries(plan.expectedRevisions).filter(
-    ([ref, revision]) => current[ref] !== revision,
-  );
-  if (moved.length > 0) {
-    await markStale(store, plan.planId);
-    return commandError("stale_context", [plan.planId, ...moved.map(([ref]) => ref)]);
+  const check = await approvalPrecheck(store, plan, input);
+  if (!check.ok) {
+    if (check.marksStale) await markStale(store, plan.planId);
+    return commandError(check.error, check.refs);
   }
   // A pair the plan decides has a reference it did not pin: one recorded
   // after planning, or a plan made before pair pins (pair-references.ts).

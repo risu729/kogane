@@ -637,6 +637,57 @@ it("real MCP R2 owner decision prepares, confirms through the existing writer, a
     d1CommandStore(env.DB),
   );
   if (!reverse.ok) throw new Error(reverse.error);
+  // A second release planned while the same override stands: the reversal
+  // below ends it without moving the mapping revision.
+  const second = await createPlan(
+    "identity.release-override",
+    {
+      subject: "instrument",
+      referenceId: "delegated-history-identifier",
+      reason: "synthetic second release",
+    },
+    {
+      actor: {
+        id: OWNER,
+        kind: "human",
+        verification: "server",
+        capabilities: ["interpretation.propose", "interpretation.accept"],
+      },
+      baseContextId: "identity-current-v1",
+      now: new Date().toISOString(),
+      ttlSeconds: 900,
+    },
+    d1CommandStore(env.DB),
+  );
+  if (!second.ok) throw new Error(second.error);
+  // Approved while the override stands: approving re-checks the plan.
+  const secondApproval = {
+    planId: second.plan.planId,
+    planDigest: second.plan.planDigest,
+    scope: [],
+    idempotencyKey: "mcp-r2-second-release-approval",
+  };
+  const secondPrepare = await invoke("kogane.command.approve", {
+    ...secondApproval,
+    step: "prepare",
+  });
+  const approvedSecond = await invoke("kogane.command.approve", {
+    ...secondApproval,
+    step: "confirm",
+    confirmationDigest: secondPrepare.result.structuredContent.confirmation.digest,
+  });
+  expect(approvedSecond.result.isError).not.toBe(true);
+  const secondApprovalId = approvedSecond.result.structuredContent.approval.approvalId as string;
+  const secondCommit = {
+    planId: second.plan.planId,
+    approvalId: secondApprovalId,
+    operationId: "mcp-r2-second-release",
+  };
+  const secondConfirmation = await invoke("kogane.command.commit", {
+    ...secondCommit,
+    step: "prepare",
+  });
+  expect(secondConfirmation.result.isError).not.toBe(true);
   const reverseApproval = {
     planId: reverse.plan.planId,
     planDigest: reverse.plan.planDigest,
@@ -663,7 +714,12 @@ it("real MCP R2 owner decision prepares, confirms through the existing writer, a
     revertsAuditId: "aud_11111111-2222-4333-8444-555555555555",
     step: "prepare",
   });
-  expect(invalidReverse.result.structuredContent.error).toBe("revert_invalid");
+  // `commit`'s own reversal check, which the tool's pre-check runs after the
+  // plan's and the approval's (ADR 0081).
+  expect(invalidReverse.result.structuredContent).toEqual({
+    error: "stale_context",
+    refs: [reverse.plan.planId, "revert_invalid"],
+  });
   const reverseConfirmation = await invoke("kogane.command.commit", {
     ...reverseCommit,
     step: "prepare",
@@ -696,6 +752,36 @@ it("real MCP R2 owner decision prepares, confirms through the existing writer, a
       .bind(original!.audit_id)
       .first(),
   ).not.toBeNull();
+  // The second release's expected revision still holds, but nothing is left
+  // to release. The Processor's `commit` refuses the confirmation before its
+  // batch, so no receipt is kept, its approval stays unspent and its plan
+  // open: the same `target_missing`, with the subject, that the HTTP route
+  // gives (services/processor/test/change-lifecycle.test.ts).
+  const stale = await invoke("kogane.command.commit", {
+    ...secondCommit,
+    step: "confirm",
+    confirmationDigest: secondConfirmation.result.structuredContent.confirmation.digest,
+  });
+  expect(stale.result.isError).toBe(true);
+  expect(stale.result.structuredContent).toEqual({
+    error: "target_missing",
+    refs: ["instrument_mapping:delegated-history-identifier"],
+  });
+  expect(
+    await env.DB.prepare("SELECT count(*) n FROM operation_receipts WHERE operation_id=?")
+      .bind(secondCommit.operationId)
+      .first<number>("n"),
+  ).toBe(0);
+  expect(
+    await env.DB.prepare("SELECT uses_remaining FROM approvals WHERE approval_id=?")
+      .bind(secondApprovalId)
+      .first<number>("uses_remaining"),
+  ).toBe(1);
+  expect(
+    await env.DB.prepare("SELECT status FROM change_plans WHERE plan_id=?")
+      .bind(second.plan.planId)
+      .first<string>("status"),
+  ).toBe("approved");
 });
 
 it("provider-contact requests use R2, pin human session policy, refuse expired preparation and roll back spent budget", async () => {

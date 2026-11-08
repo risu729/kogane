@@ -303,6 +303,40 @@ describe("the agent tool", () => {
       code: "invalid_query",
       refs: ["refusal:range_too_long", "maxDays:366"],
     });
+    // A date that fails its pattern is the route's invalid_date on every path:
+    // one parser decides the route's query string and the tool's body.
+    const route = await call(`${PATH}?account=${ACCOUNT}&from=20260301&to=2026-03-31`);
+    expect(route.status).toBe(400);
+    expect(await route.json()).toMatchObject({ error: "invalid_date", refs: ["from"] });
+    const expected = {
+      schemaVersion: "financial-error-v1",
+      code: "invalid_query",
+      refs: ["refusal:invalid_date", "from"],
+    };
+    const http = await call(TOOL_PATH, {
+      subject: "agent-principal",
+      body: { ...body, from: "20260301" },
+      environment: granted,
+    });
+    expect(http.status).toBe(400);
+    expect(await http.json()).toMatchObject(expected);
+    const viaMcp = (await (
+      await call("/mcp", {
+        subject: "agent-principal",
+        body: {
+          jsonrpc: "2.0",
+          id: 5,
+          method: "tools/call",
+          params: {
+            name: RECONSTRUCTED_STATE_TOOL_NAME,
+            arguments: { ...body, from: "20260301" },
+          },
+        },
+        environment: granted,
+      })
+    ).json()) as { result: { isError: boolean; structuredContent: Record<string, unknown> } };
+    expect(viaMcp.result.isError).toBe(true);
+    expect(viaMcp.result.structuredContent).toMatchObject(expected);
   });
 
   it("is neither a tool nor a path where the route is absent, and needs Access", async () => {

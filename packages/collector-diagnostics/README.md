@@ -1,6 +1,6 @@
 # Collector operational diagnostics
 
-This module emits structured `collector-diagnostic` events, correlated by an internally generated run ID. Stage outcomes describe individual operations; only `stage=terminal` describes the final collection status. A central-import error can follow successful source collection and must not be confused with a provider failure. SMBC Direct additionally emits `collector-retry` with its existing retry decision; logout has its own stage.
+This module emits structured `collector-diagnostic` events, correlated by an internally generated run ID. Stage outcomes describe individual operations; only `stage=terminal` describes the final collection status. A storage error can follow successful source collection and must not be confused with a provider failure; GLOBAL PASS and SBI VC still report their shared DATA write under the `central-import` stage name, although no central import exists any more. SMBC Direct additionally emits `collector-retry` with its existing retry decision; logout has its own stage.
 
 Source and stage names, error types and domain error codes use explicit allowlists. HTTP status is retained only from a numeric error property (100–599) or exact known collector error formats. Arbitrary exception messages, names, stacks, URLs, provider bodies, account identifiers and credentials are never copied into diagnostic events. An unknown error remains unknown rather than being guessed from text. Logging and inspection failures must not replace the provider result or exception.
 
@@ -27,6 +27,7 @@ Every consumer is a collector Worker; nothing in `services/app`, `services/proce
 | `services/collector-sbi-securities` | `createDiagnostics`, `safeErrorDetails` |
 | `services/collector-sbi-vc-trade`   | `createDiagnostics`                     |
 | `services/collector-smbc-direct`    | `createDiagnostics`                     |
+| `services/collector-st-george`      | `createDiagnostics`                     |
 | `services/collector-vpass`          | `createDiagnostics`, `safeErrorDetails` |
 
 The API also supports PRESTIA GLOBAL PASS stages that the GLOBAL PASS Worker does not emit yet. The GLOBAL PASS activity sanitizer's `GlobalPassSanitizerError` and its four refusal codes (`globalpass_html_*`) are on the error-type and code allowlists, so its `artifact-write` failure line names which check refused a page (ADR 0026, 2026-09-27 amendment). Collectors outside this repository are not covered.

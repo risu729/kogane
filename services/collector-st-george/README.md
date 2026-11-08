@@ -33,7 +33,7 @@ are not reconfigured.
 The container is destroyed in a `finally` block and has a 30-second idle sleep
 fallback. A Durable Object serializes collection, records interrupted attempts,
 and retains only a validated financial snapshot while its storage is incomplete.
-A later trigger retries storing that same snapshot rather than logging in again.
+A later run (alarm or operations request) retries storing that same snapshot rather than logging in again.
 
 A failed run keeps what the browser saw in its R2 manifest (`failures[0].diagnostic`,
 2026-11-08 UTC), because Worker logs last only 7 days: the closed `stage`,
@@ -82,9 +82,13 @@ Wrangler generates binding types. Secret names are declared in `env.d.ts`:
 - `RELAY_TOKEN`: separate bearer token of at least 32 characters for the constrained TCP relay.
 
 Non-secret settings are `COLLECTOR_SCHEMA_VERSION`, `EGRESS_MODE` and
-`RELAY_PUBLIC_URL`. The configured daily schedule is 06:35 JST (`35 21 * * *`
-in UTC), with platform retries disabled. The same durable coordinator serializes
-manual and scheduled collection.
+`RELAY_PUBLIC_URL`. The Worker has no Cron Trigger (`triggers.crons` is empty in
+`wrangler.jsonc`): the Processor's `ScheduleAlarm` calls
+`ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the
+`st-george` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json),
+daily at 06:35 JST (`35 21 * * *` in UTC). The alarm records each occurrence's
+outcome and does not retry it. The same durable coordinator serializes
+operations-request and alarm collection.
 
 A refused, challenged or unrecognised login (`login-rejected`,
 `authentication-challenge`, `human-required`, and `http-denied`,
@@ -115,8 +119,7 @@ The Worker log records `st-george-collection-paused` (reason, run id,
 and `st-george-pause-lifted` with its `cause` (`credential-changed`,
 `requested-collection` or `not-a-login-refusal`).
 
-Enable this schedule only after authenticated cloud collection and downstream
-publication have been verified.
+The `st-george` job is seeded enabled in `config/alarm-jobs.json`.
 
 `GET /health` reports service configuration without contacting the bank. It and
 the relay's `/tcp` are the only public routes. Collection runs only from the

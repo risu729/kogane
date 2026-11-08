@@ -16,8 +16,10 @@ Workerで日次実行するPoCである。BitwardenはWorkerから参照しな�
    Cookieと`baseVariable`をWorker内部だけで受け取る。
 5. plain Worker `fetch`で履歴を1ページだけ取得する。HTMLをparseした後、唯一の
    `baseVariable`を`__KOGANE_REDACTED_BASE_VARIABLE__`へ置換し、CP932へ再encodeした
-   sanitized HTML、正規化JSON、summary、manifestをprivate R2へ保存する。
-6. manifest保存直後にService Binding経由で中央raw-evidenceへimportする。
+   sanitized HTML、正規化JSON、summaryを共有DATA bucket（`kogane-raw-evidence`）へ保存する。
+6. Writes the run's `terminal-v1` manifest last (`src/shared-run.ts`, `packages/collection`);
+   the Processor registers the terminal in process. There is no Service Binding import any
+   more (see 収集物 below).
 
 Bitwarden vault、master password、`BW_SESSION`、JRE ID password、Cookie、raw
 WebAuthn assertionはR2、ログ、manifest、Gitへ保存しない。
@@ -80,7 +82,9 @@ HTMLとJSONには本人の交通・購買履歴、残高、金額が含まれる
 日付検索は「指定日以前」で、1ページ最大100件である。v2は1ページだけを取得し、
 100件未満ならcomplete success、100件ちょうどなら3 artifactを保存した上で
 `partial` / `history_boundary_unproven`とする。前日cursorへ進めず、完全取得を主張しない。
-manual triggerはpartialをHTTP 502、scheduled runはthrowとして可観測にする。
+The alarm entry point (`alarmCollection`, `src/worker.ts`) reports a persisted `partial`
+run as completed (`packages/collection/src/schedule-result.ts`); the `partial` status and
+its issue code stay on the terminal. A run whose terminal was not written is reported as failed.
 
 各objectのR2 custom metadataは`packages/collection`が書く`sha256`と`byteSize`だけである。
 
@@ -97,22 +101,27 @@ node scripts/sync-bitwarden-passkey.mjs
 unset BW_SESSION
 ```
 
-`bw:sync`はRP ID `id.jreast.co.jp`に完全一致するcredentialが1件だけであることを
+`scripts/sync-bitwarden-passkey.mjs`はRP ID `id.jreast.co.jp`に完全一致するcredentialが1件だけであることを
 確認してから、`wrangler secret put JRE_ID_CREDENTIAL_JSON`を実行する。Vault全体や
-master passwordは送らない。署名検査はローカルの `bw:verify` を使う。旧公開 `/credential-check` と browser 診断入口は404であり、認証情報の状態を公開しない。
+master passwordは送らない。署名検査はローカルの `scripts/verify-bitwarden-passkey.mjs` を使う。旧公開 `/credential-check` と browser 診断入口は404であり、認証情報の状態を公開しない。
 
 ## 実行
 
-日次Cronは21:10 UTC（日本時間06:10）で、サービス停止時間00:50〜05:00 JSTを
-避ける。通常収集は既存の固定action private RPC／schedule経路のみ。旧 `/trigger?asOf=YYYY-MM-DD` は404で、任意日付指定は廃止した。
+The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`). The
+Processor's `ScheduleAlarm` calls `ScheduledCollection.runScheduled`
+(`src/schedule-entrypoint.ts`) for the `mobile-suica` job in
+[`config/alarm-jobs.json`](../../config/alarm-jobs.json): daily at 06:10 JST (21:10 UTC),
+which avoids the 00:50–05:00 JST service outage. 通常収集は既存の固定action private RPC経路のみ。旧 `/trigger?asOf=YYYY-MM-DD` は404で、任意日付指定は廃止した。
 
 ```sh
-bun install --frozen-lockfile
-bun test
-mise run //services/collector-mobile-suica:typecheck
+mise run install                                  # from the repository root
+mise run //services/collector-mobile-suica:test      # bun suite, then the Miniflare R2 suite
+mise run //services/collector-mobile-suica:ci
 mise run //services/collector-mobile-suica:dry-run
-./node_modules/.bin/wrangler deploy
 ```
+
+Production deployment is the release workflow's, in the order of
+[`infra/deploy-order.json`](../../infra/deploy-order.json), with a `/health` postcheck.
 
 管理用Bearerは不要。登録済みadmin secretの削除は、対応codeの本番反映と残存依存ゼロの確認後に限る。
 
@@ -121,7 +130,8 @@ mise run //services/collector-mobile-suica:dry-run
 - Worker: `kogane-mobile-suica-collector-poc`
 - Browser binding: `BROWSER`
 - R2 binding: `DATA` → `kogane-raw-evidence`（全collector共有。旧source専用bucketは2026-09-13に削除済み）
-- Cron: `10 21 * * *`
+- Schedule: Processor alarm job `mobile-suica` (`config/alarm-jobs.json`, `10 21 * * *` UTC); no Cron Trigger
+- D1 binding: `SCHEDULE_DB` → `kogane-raw-evidence` (the execution lease, `packages/collection/src/schedule-lease.ts`)
 - Secrets: `JRE_ID_CREDENTIAL_JSON`
 
 旧`MOBILE_SUICA_SESSION_JSON`、`JRE_ID_FINGERPRINT`、TAMIA VPC bindingは実行に不要で

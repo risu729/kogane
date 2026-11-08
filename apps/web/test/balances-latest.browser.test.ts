@@ -1,7 +1,9 @@
 // The latest-balance read model's paging controls. Local synthetic responses
 // only; exercises the production bundle without live accounts. What is proved
 // here: "最新の状態に更新" reads the newest snapshot again from the first page
-// too, where the cursor it resets to is the one already shown.
+// too, where the cursor it resets to is the one already shown; and the page,
+// which then holds the read model's pager beside the record list's, passes the
+// accessibility audit on both measure views.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -10,6 +12,7 @@ import {
   CENTRAL_STORE_CAPABILITIES,
   withBalancesV2,
 } from "../../../packages/observation-shared/src/api-schema.ts";
+import { auditView } from "./a11y-audit.ts";
 
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
@@ -112,4 +115,20 @@ describe.if(runnable)("latest balance read model paging", () => {
       await page.close();
     }
   }, 30_000);
+
+  for (const [path, heading] of [
+    ["/balances", "項目ごとの最新の残高"],
+    ["/summaries", "項目ごとの最新の期間実績・請求"],
+  ] as const)
+    test(`${path} with the read model passes the accessibility audit`, async () => {
+      const page = await browser.newPage();
+      try {
+        await page.goto(`${origin}${path}`);
+        await page.getByRole("heading", { level: 2, name: heading }).waitFor();
+        // Two pagers on one page: each is named by the list it pages.
+        expect(await auditView(page)).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    }, 60_000);
 });

@@ -382,6 +382,12 @@ Workers Web Cryptoによるassertion生成、Money Forward ME側へのOAuth遷�
 
 ## Layer A raw-evidence取込（2026-09-05）
 
+Historical record: the private outbox bucket and the strict importer into
+`kogane-ingest` described here were retired on 2026-09-13
+([legacy retirement](../legacy-retirement.md)). The backfill collector now
+writes its runs into the shared `DATA` bucket
+([below](#shared-data-bucket-u09-2026-09-11)).
+
 private R2をdurable outboxとして残したまま、中央`kogane-ingest`へ取り込むstrict importerを実装した。manifest、balance/transactionsのraw Shift_JIS JSONとnormalized JSON、failure補集合、prefix内の完全inventory、exact metadata、native checksum（存在時）と再計算SHA-256を中央state作成前に検証する。rawとnormalizedの残高・期間・明細・合計も相互照合し、未知fieldや説明できない欠落・追加objectはfail closedにする。
 
 中央canonical sourceは`smbc-direct`ではなく既存registryの`smbc-bank`である。専用credential `collector-r2-smbc-direct`だけにこのproducer/source routeを許可し、storage originは具体的なobject keyを保存せず、review済みtemplateと不可逆fingerprintで表現する。大きなhistorical runは完全inventoryを固定して10 artifactずつ継続し、同じmanifestの再送は冪等に収束する。source R2へのwrite/delete、GitHub Actions cron、Queue、追加scheduled triggerは行わない。

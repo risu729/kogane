@@ -592,10 +592,10 @@ only. A collected execution with no reported run is `unpublished`
 (`run_not_reported`); one whose runs do not settle within 48 h of collection is
 `unpublished` (`publication_not_observed`).
 
-Limits: no deployed collector has served `runOperation` and no connection is
-enabled; the requested window is not applied; one collector call is awaited
-per Processor invocation, inside the tick. The web UI cannot request an
-operation, and no page lists operations: the list route
+Limits: only the connections `OPS_COLLECTOR_DISPATCH_CONNECTIONS` names are
+started; the requested window is not applied; one collector call is awaited
+per Processor invocation, inside the tick. The web UI requests only a
+collection, from `/schedules`, and no page lists operations: the list route
 ([ADR 0086](adr/0086-operator-operations-list.md)) is read over HTTP and MCP
 only.
 
@@ -834,11 +834,16 @@ Synthetic data only.
   Processor tick starting one request over a named service binding).
 
 The tests above use no deployed instance, live Access policy, real provider or
-session. In production, `sony-bank` served `runOperation` for an MCP client's
-collection request, and the run it reported was registered and every
-parse-selected artifact published; the other connections the committed
-configuration names had not run a request when they were added. Dated MCP
-client connection evidence is in the [recovery runbook](mcp-recovery.md).
+session. In production, each of the five connections the committed
+configuration names (`sony-bank`, `sbi-securities`, `mobile-suica`,
+`moneyforward-me`, `myjcb`) served `runOperation` for one MCP client collection
+request, sent one connection at a time. Each reported one run, which was
+registered with every parse-selected artifact published, and the execution
+ended `published` with no reason code. Four of them also reached `projected`
+and request `status: completed`; `sony-bank`'s was published before
+`projected` tracing was deployed, so its `projected` reads
+`projection_revision_unrecorded`. Dated MCP client connection evidence is in
+the [recovery runbook](mcp-recovery.md).
 
 Acceptance ids and the test that carries each:
 
@@ -903,15 +908,16 @@ already `started` is not interrupted, and nothing started is retried.
 The owner allowed every healthy connection (2026-11-08 03:19 UTC). `sony-bank`
 came first; once its first request was followed to publication, the healthy
 connections that wait on no open fix were added together, and their first
-requests are sent one connection at a time, each after the previous one ends.
+requests were sent one connection at a time, each after the previous one ended.
 The committed value names `sony-bank`, `sbi-securities`, `mobile-suica`,
 `moneyforward-me` and `myjcb`. `sbi-vc-trade`, `sbi-vc-keepalive` and
-`st-george` follow [#1131](https://github.com/risu729/kogane/pull/1131)
+`st-george` need only enabling now that
+[#1131](https://github.com/risu729/kogane/pull/1131) is merged
 ([#1140](https://github.com/risu729/kogane/issues/1140)); the remaining
 connections (`prestia-globalpass`, `sbi-shinsei`, `vpass`, `mizuho-bank`,
 `vpoint`, `prestia-bank`) come after their open fixes. `mobile-suica` and
 `myjcb` drive a browser and run far longer than `sony-bank`; the Processor tick
-waits for them, so their first requests are watched for `uncertain`.
+waits for them; their first requests ended `published`, not `uncertain`.
 `SESSION_REFRESH_POLICY` must also name `sbi-vc-trade` before an unattended
 refresh of it is dispatched, and only once its unattended renewal has been
 demonstrated.

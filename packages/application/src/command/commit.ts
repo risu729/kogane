@@ -149,6 +149,118 @@ function receiptFromRow(row: ReceiptRow): CommandReceipt {
   };
 }
 
+/** What `commitPrecheck` found: the replay a completed operation answers with, or the approval to spend. */
+export type CommitPrecheck = CommandResult<
+  { replay: CommandReceipt } | { replay: null; approval: ApprovalRow; payloadDigest: string }
+>;
+
+/**
+ * Every check `commit` makes of a loaded plan before its planner runs, in
+ * its order, as pure reads. `commit` runs it after the caller's authority;
+ * the MCP decision tools run the same function at `prepare` (ADR 0081), so
+ * both paths give one code, one set of refs and one order for every input.
+ */
+export async function commitPrecheck(
+  store: CommandStore,
+  plan: ChangePlan,
+  input: {
+    operationId: string;
+    principal: string;
+    approvalId: unknown;
+    idempotencyPayloadDigest?: unknown;
+    now: string;
+  },
+): Promise<CommitPrecheck> {
+  const { operationId } = input;
+  if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
+  const payloadDigest = await canonicalDigest({
+    planId: plan.planId,
+    approvalId: typeof input.approvalId === "string" ? input.approvalId : null,
+    kind: plan.kind,
+    payload: plan.payload as unknown as Record<string, unknown>,
+  });
+  if (
+    input.idempotencyPayloadDigest !== undefined &&
+    input.idempotencyPayloadDigest !== payloadDigest
+  )
+    return commandError("idempotency_conflict", [operationId]);
+
+  // Before anything else: a completed operation answers with its receipt. A
+  // reconnecting client must not be told to redo an accepted judgement because
+  // the approval it used has since expired (addendum 10 §5).
+  const existing = await store.first<ReceiptRow>(RECEIPT_SQL, [input.principal, operationId]);
+  if (existing)
+    return existing.payload_digest === payloadDigest
+      ? { ok: true, replay: receiptFromRow(existing) }
+      : commandError("idempotency_conflict", [operationId]);
+
+  // A labelled temporal selection is not a current-only mutation. Keep exact
+  // completed receipts replayable, but never create a new effect from this context.
+  if (instrumentTemporalContextRequested(plan.baseContextId))
+    return commandError("unsupported_semantics");
+
+  if (Date.parse(plan.expiresAt) <= Date.parse(input.now))
+    return commandError("plan_expired", [plan.planId]);
+  if (plan.status !== "planned" && plan.status !== "approved")
+    return commandError("plan_not_open", [plan.planId]);
+
+  const approval = await store.first<ApprovalRow>(
+    `SELECT approval_id,plan_id,plan_digest,approver_actor,scope_json,expires_at,uses_remaining
+      FROM approvals WHERE approval_id=?1`,
+    [typeof input.approvalId === "string" ? input.approvalId : ""],
+  );
+  if (!approval) return commandError("approval_not_found");
+  if (approval.plan_id !== plan.planId || approval.plan_digest !== plan.planDigest)
+    return commandError("stale_context", [plan.planId]);
+  // The same principal must approve and commit, including delegated callers.
+  if (approval.approver_actor !== input.principal) return commandError("approval_required");
+  if (Date.parse(approval.expires_at) <= Date.parse(input.now))
+    return commandError("approval_expired", [approval.approval_id]);
+  if (approval.uses_remaining < 1)
+    return commandError("approval_exhausted", [approval.approval_id]);
+  const scope = JSON.parse(approval.scope_json) as string[];
+  if (scope.length > 0 && !Object.keys(plan.expectedRevisions).every((ref) => scope.includes(ref)))
+    return commandError("approval_scope_mismatch", [approval.approval_id]);
+
+  // An economic-event kind commits only while its planner accepts it, checked
+  // before its writer runs: a writer slot alone never opens a kind whose
+  // planner is not registered (ADR 0054, G2), as `approve` checks too. An
+  // override release likewise commits only while its planner finds a
+  // protection to release, as `approve` checks; a release that loses it
+  // between this read and the batch is refused by the reservation's
+  // precondition instead (`stale_context`, in `failureReason`).
+  if (isEconomicEventKind(plan.kind) || plan.kind === "identity.release-override") {
+    const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
+    if (!eligibility.ok) return eligibility;
+  }
+  return { ok: true, replay: null, approval, payloadDigest };
+}
+
+/**
+ * A delegated reversal (ADR 0063) names the still-current effect of an
+ * immutable prior commit, or the commit is refused `stale_context` with
+ * `revert_invalid`. `commit` checks it after `commitPrecheck`, and the MCP
+ * commit tool at `prepare` in the same place.
+ */
+export async function reversalCheck(
+  store: CommandStore,
+  subject: string,
+  principal: string,
+  plan: ChangePlan,
+  revertsAuditId: string,
+): Promise<CommandResult<{ guard: CommitGuard }>> {
+  try {
+    return {
+      ok: true,
+      guard: await assertDelegatedReversal(store, subject, principal, plan, revertsAuditId),
+    };
+  } catch (error) {
+    if (error instanceof DelegatedOperationError)
+      return commandError("stale_context", [plan.planId, "revert_invalid"]);
+    throw error;
+  }
+}
+
 export async function commit(
   store: CommandStore,
   input: CommitInput,
@@ -175,63 +287,16 @@ export async function commit(
   if (!plan) return commandError("plan_not_found");
   if (principal.kind === "delegated" && !delegatedCommandFamilyAllowed(input.audit, plan.kind))
     return commandError("approval_required");
-  if (!instrumentCandidatePlanIsPinned(plan)) return commandError("stale_context", [plan.planId]);
-  const payloadDigest = await canonicalDigest({
-    planId: plan.planId,
-    approvalId: typeof input.approvalId === "string" ? input.approvalId : null,
-    kind: plan.kind,
-    payload: plan.payload as unknown as Record<string, unknown>,
+  const check = await commitPrecheck(store, plan, {
+    operationId,
+    principal: principal.id,
+    approvalId: input.approvalId,
+    idempotencyPayloadDigest: input.idempotencyPayloadDigest,
+    now: input.now,
   });
-  if (
-    input.idempotencyPayloadDigest !== undefined &&
-    input.idempotencyPayloadDigest !== payloadDigest
-  )
-    return commandError("idempotency_conflict", [operationId]);
-
-  // Before anything else: a completed operation answers with its receipt. A
-  // reconnecting client must not be told to redo an accepted judgement because
-  // the approval it used has since expired (addendum 10 §5).
-  const existing = await store.first<ReceiptRow>(RECEIPT_SQL, [principal.id, operationId]);
-  if (existing)
-    return existing.payload_digest === payloadDigest
-      ? { ok: true, replayed: true, receipt: receiptFromRow(existing) }
-      : commandError("idempotency_conflict", [operationId]);
-
-  // A labelled temporal selection is not a current-only mutation. Keep exact
-  // completed receipts replayable, but never create a new effect from this context.
-  if (instrumentTemporalContextRequested(plan.baseContextId))
-    return commandError("unsupported_semantics");
-
-  if (Date.parse(plan.expiresAt) <= Date.parse(input.now))
-    return commandError("plan_expired", [plan.planId]);
-  if (plan.status !== "planned" && plan.status !== "approved")
-    return commandError("plan_not_open", [plan.planId]);
-
-  const approval = await store.first<ApprovalRow>(
-    `SELECT approval_id,plan_id,plan_digest,approver_actor,scope_json,expires_at,uses_remaining
-      FROM approvals WHERE approval_id=?1`,
-    [typeof input.approvalId === "string" ? input.approvalId : ""],
-  );
-  if (!approval) return commandError("approval_not_found");
-  if (approval.plan_id !== plan.planId || approval.plan_digest !== plan.planDigest)
-    return commandError("stale_context", [plan.planId]);
-  // The same principal must approve and commit, including delegated callers.
-  if (approval.approver_actor !== principal.id) return commandError("approval_required");
-  if (Date.parse(approval.expires_at) <= Date.parse(input.now))
-    return commandError("approval_expired", [approval.approval_id]);
-  if (approval.uses_remaining < 1)
-    return commandError("approval_exhausted", [approval.approval_id]);
-  const scope = JSON.parse(approval.scope_json) as string[];
-  if (scope.length > 0 && !Object.keys(plan.expectedRevisions).every((ref) => scope.includes(ref)))
-    return commandError("approval_scope_mismatch", [approval.approval_id]);
-
-  // An economic-event kind commits only while its planner accepts it, checked
-  // before its writer runs: a writer slot alone never opens a kind whose
-  // planner is not registered (ADR 0054, G2), as `approve` checks too.
-  if (isEconomicEventKind(plan.kind)) {
-    const eligibility = await resolveAndSimulate(store, plan.kind, plan.payload);
-    if (!eligibility.ok) return eligibility;
-  }
+  if (!check.ok) return check;
+  if (check.replay) return { ok: true, replayed: true, receipt: check.replay };
+  const { approval, payloadDigest } = check;
   const planner = input.planners[plan.kind];
   if (!planner) return commandError("unsupported_semantics", [plan.kind]);
   // A pair reference the plan did not pin is refused before the batch; the
@@ -246,19 +311,15 @@ export async function commit(
   let reversal: CommitGuard | undefined;
   const revertsAuditId = input.audit?.delegatedExecution?.revertsAuditId;
   if (revertsAuditId) {
-    try {
-      reversal = await assertDelegatedReversal(
-        store,
-        input.audit!.actor.subject!,
-        principal.id,
-        plan,
-        revertsAuditId,
-      );
-    } catch (error) {
-      if (error instanceof DelegatedOperationError)
-        return commandError("stale_context", [plan.planId, "revert_invalid"]);
-      throw error;
-    }
+    const reverted = await reversalCheck(
+      store,
+      input.audit!.actor.subject!,
+      principal.id,
+      plan,
+      revertsAuditId,
+    );
+    if (!reverted.ok) return reverted;
+    reversal = reverted.guard;
   }
 
   const expectedJson = expectedRevisionsJson(plan.expectedRevisions);
@@ -390,6 +451,7 @@ export async function commit(
     operationId,
     payloadDigest,
     input.now,
+    mutation.precondition,
   );
   // A raced exact receipt is still a replay; a changed original effect is stale.
   if (
@@ -410,6 +472,7 @@ async function failureReason(
   operationId: string,
   payloadDigest: string,
   now: string,
+  precondition?: CommitGuard,
 ): Promise<CommandResult<CommitOutput>> {
   const concurrent = await store.first<ReceiptRow>(RECEIPT_SQL, [principal, operationId]);
   if (concurrent)
@@ -473,5 +536,13 @@ async function failureReason(
     [operationId],
   );
   if (ledger) return commandError("idempotency_conflict", [operationId]);
+  // The planner's own condition on the reservation no longer holds: the
+  // subject moved in a way the expected revisions do not count (an override
+  // release that another release already ended keeps its mapping revision).
+  if (
+    precondition &&
+    !(await store.first("SELECT 1 AS valid WHERE " + precondition.sql, precondition.binds))
+  )
+    return commandError("stale_context", [plan.planId]);
   return commandError("commit_failed", [plan.planId]);
 }

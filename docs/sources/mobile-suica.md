@@ -795,6 +795,12 @@ transformationを記録する。`coverageStatus`が`complete`になるのは成�
 履歴終端を証明できた場合だけで、証明できない場合は`history_boundary_unproven`付きの
 `partial`である。cookie・session envelope・browser bootstrapはartifactにしない。
 
-Worker名、cron、Browser binding、secretは変更しない。Processorの
+Worker名、Browser binding、secretは変更しない。Processorの
 `SHARED_R2_INGEST_ENABLED`は登録のゲートであり、collectorの保存先スイッチではない。
 詳細は`docs/collection.md`。
+
+The Worker has no Cron trigger since
+[#430](https://github.com/risu729/kogane/pull/430) (2026-10-05): the
+Processor's alarm job `mobile-suica` (06:10 JST, `10 21 * * *` in
+`config/alarm-jobs.json`) calls its private `ScheduledCollection` entrypoint
+([schedules](../schedules.md)).

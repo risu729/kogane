@@ -6,8 +6,8 @@
 // provider is contacted and no real statement appears anywhere.
 import { describe, expect, mock, spyOn, test } from "bun:test";
 import { FakeR2Bucket } from "../../../packages/collection/test/fake-bucket";
-import { readTerminal, terminalKey } from "../../../packages/collection/src/index";
-import { GLOBALPASS_SCHEMA_VERSION } from "../src/model";
+import { objectKey, readTerminal, terminalKey } from "../../../packages/collection/src/index";
+import { artifactFilename, GLOBALPASS_SCHEMA_VERSION } from "../src/model";
 
 let container: {
   startAndWaitForPorts(): Promise<void>;
@@ -151,5 +151,35 @@ describe("G1-15 the collector writes the run where COLLECTION_TARGET says", () =
     expect(everything).not.toContain("private-state1");
     expect(everything).not.toContain("private-password");
     expect(everything).not.toContain("private-relay-token");
+  });
+
+  test("the collector manifest names the objects DATA holds, as the terminal does", async () => {
+    const { result, data } = await trigger("shared");
+    expect(result.status).toBe("success");
+    const read = await readTerminal(data, "prestia-globalpass", String(result.runId));
+    if (read.outcome !== "found") throw new Error("unreachable");
+    const manifest = JSON.parse(
+      new TextDecoder().decode(data.entries.get(String(result.manifestKey))!.bytes),
+    ) as {
+      artifacts: { month: string; page: number; key: string; sha256: string; bytes: number }[];
+    };
+    const planned = read.manifest.artifacts.filter(
+      (entry) => entry.artifactKey !== "manifest.json",
+    );
+    expect(manifest.artifacts).toHaveLength(2);
+    expect(manifest.artifacts).toHaveLength(planned.length);
+    for (const entry of manifest.artifacts) {
+      const terminalEntry = planned.find(
+        (candidate) => candidate.artifactKey === artifactFilename(entry.month, entry.page),
+      );
+      // Digest, size and key are those of the object DATA holds. Before the
+      // key was content-addressed it named a run-prefix staging key that
+      // shared mode never writes.
+      expect(terminalEntry?.sha256).toBe(entry.sha256);
+      expect(terminalEntry?.byteSize).toBe(entry.bytes);
+      expect(entry.key).toBe(objectKey(entry.sha256));
+      expect(terminalEntry?.storageRef.key).toBe(entry.key);
+      expect(data.entries.get(entry.key)?.bytes.byteLength).toBe(entry.bytes);
+    }
   });
 });

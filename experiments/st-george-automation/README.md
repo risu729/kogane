@@ -161,9 +161,10 @@ automatic navigation hop, rather than relying on Playwright route matching alone
 ## Lifecycle
 
 Owner: the Kogane source-collection experiment. Keep this local and opt-in; it has
-no deployed worker or schedule. Review or retire it after the first authenticated
-Kuebiko session, or by 2026-10-13 if that session is still unavailable. Promotion
-requires current selectors, request/response schema evidence, verified read
-semantics, pagination/session behavior, and separate decisions on secret handling.
-Unknown layouts, rejected browser control, or missing user authentication are
-stop conditions rather than a reason to substitute a statement import.
+no deployed worker or schedule (`infra/deploy-order.json` does not list it). The
+first authenticated Kuebiko session took place on 2026-09-13, and the collector
+was promoted to [services/collector-st-george](../../services/collector-st-george/README.md);
+this workspace stays only as the local diagnostic client described above, and
+carries no `EXPERIMENT.md`. Unknown layouts, rejected browser control, or missing
+user authentication are stop conditions rather than a reason to substitute a
+statement import.

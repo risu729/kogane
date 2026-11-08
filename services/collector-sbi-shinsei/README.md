@@ -1,7 +1,7 @@
 # SBI新生銀行 Worker collector PoC
 
 SBI新生銀行 PowerDirect の read-only collector を Kogane 内で独立実装する PoC です。
-`mnie` は dependency にせず、既存 Kogane collector と同じ R2 raw-store / manifest / daily Cron / authenticated manual trigger の境界だけを採用します。
+`mnie` は dependency にせず、既存 Kogane collector と同じ shared DATA raw-store / terminal manifest / Processor alarm schedule の境界だけを採用します。
 
 ## 現在の重要な制限
 
@@ -49,11 +49,11 @@ TAMIA経路のCloudflare live run `0e999a32-6994-450e-a495-2daff0e7aeb1` は `st
 
 ## Worker surface
 
-| Trigger                           | Behavior                                                                                                                                           |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET /health`                     | schema version、source、live-read readiness のみ返す。                                                                                             |
-| Private `ScheduledCollection` RPC | 既存の固定actionで現在snapshotを収集する。公開 `/trigger` は404。                                                                                  |
-| Cron `0 21 * * *`                 | 毎日 06:00 JSTに同じContainer収集を1回実行。全失敗はfailure manifestを保存した上でinvocationを失敗させ、部分取得はpartial evidenceとして保存する。 |
+| Trigger                           | Behavior                                                                                                                                                                                             |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /health`                     | schema version、source、live-read readiness のみ返す。                                                                                                                                               |
+| Private `ScheduledCollection` RPC | 既存の固定actionで現在snapshotを収集する。公開 `/trigger` は404。                                                                                                                                    |
+| Processor alarm `sbi-shinsei`     | The Processor's `ScheduleAlarm` calls `runScheduled` daily at 06:00 JST (`config/alarm-jobs.json`). 全失敗はfailure terminalを保存した上で`failed`を返し、部分取得はpartial evidenceとして保存する。 |
 
 R2 key（共有DATA bucket `kogane-raw-evidence`）:
 
@@ -95,15 +95,15 @@ FIDO、SMS、telephone approval の値は collector secret に含めません。
 ## Local verification
 
 ```bash
-bun install --frozen-lockfile
-bun test
-mise run //services/collector-sbi-shinsei:typecheck
+mise run install                                 # from the repository root
+mise run //services/collector-sbi-shinsei:test
+mise run //services/collector-sbi-shinsei:ci       # typecheck, cf-typecheck, test, container
 mise run //services/collector-sbi-shinsei:dry-run
 bun src/local/cli.ts --dry-run
 bun src/local/check-jsc.ts
 ```
 
-`cf:check` は dry-run だけで、deploy しません。
+`dry-run` and `cf-build` only build and validate; neither deploys.
 
 実収集は、専用Kuebiko Chromeを公式login画面に置いた状態で次の形です。stdin JSONは画面やshell historyへ出さないproducerからpipeします。
 
@@ -127,14 +127,14 @@ catalog entry を production で有効にするには、同じ commit/PR で以�
 5. credential、token、cookie、account number、customer name、real amount を capture note/fixture/log から除外。
 6. same-session で一度だけ replay し、UI/export の行数・意味と一致することを確認。
 
-この checklist を満たさない entry は daily/manual trigger から到達できません。
+この checklist を満たさない entry は daily alarm や operations request から到達できません。
 
 ## Cleanup inventory
 
 PoCを廃止するときは、次をまとめて削除します。現在はlive検証結果を保持するためactiveのままです。
 
-- deployed WorkerとCron `0 21 * * *`;
-- Cloudflare secrets 3件（SBI credential、admin trigger、relay）;
+- deployed Worker (its schedule is the Processor's `sbi-shinsei` alarm job; the Worker has no Cron Trigger);
+- the two Cloudflare secrets `SBI_SHINSEI_CREDENTIAL_JSON` and `RELAY_TOKEN` (the admin trigger secret is no longer read);
 - （旧source専用R2 bucketは2026-09-13に削除済み。保存先の共有DATA bucketは他のcollectorとProcessorも使うため削除しない）;
 - Container applicationとimage revisions;
 - TAMIAの`tunnel_id`を直接指定するVPC binding設定;
@@ -164,9 +164,9 @@ An unknown stage stays `unknown-browser-stage`; a failed read is separate from
 subsequent `NotAttempted` reads. No retries or collection requests are added.
 
 Worker `sbi-shinsei-stage` and Container `sbi-shinsei-container-stage` events provide
-stage start/end durations, including browser login, authenticated reads, storage,
-central import and teardown. A validated partial handoff logs `partial`, and the
-source terminal outcome remains distinct from central import and cleanup. The
+stage start/end durations, including browser login, authenticated reads, storage
+(`shared-persist`) and teardown. A validated partial handoff logs `partial`, and the
+source terminal outcome remains distinct from storage and cleanup. The
 Container image must be rebuilt to include `stage-diagnostics.mjs`; deploying only
 the Worker updates relay cleanup but does not update browser-side stage logging.
 
@@ -203,7 +203,7 @@ Container lifecycle hooks retain bounded exit codes and fixed stop/error reasons
 HTTP 500 diagnostics distinguish the SDK's startup, disconnected-transport and
 proxy-error envelopes using a maximum 2 KiB, one-second read; response text is
 discarded. Unknown or unreadable responses stay unclassified. A 500 alone does
-not prove that the Node process crashed; source completion and central import
+not prove that the Node process crashed; source completion and storage
 remain separate outcomes. These diagnostic changes do not retry collection.
 
 ### Correlate relay activity and unused preconnections
@@ -245,7 +245,7 @@ while that rollout is replacing instances. The platform can then stop that image
 during an authenticated read, producing an SDK HTTP 500 even when the bank login
 succeeded. Do not attribute an unclassified Container HTTP 500 to the bank.
 
-Before manually triggering a smoke run, wait until the latest Container rollout
+Before a smoke run, wait until the latest Container rollout
 is `completed`, its target version/image matches the application's current
 version/image, and any available prewarmed instances match that image. Do not
 deploy another Container revision while the smoke run is in progress. After the

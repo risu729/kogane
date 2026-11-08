@@ -23,13 +23,13 @@ for current behavior.
 - [ADR 0010: Bound terminal registration by a per-invocation operation budget](0010-terminal-registration-budget.md)
 - [ADR 0011: Resolve settlement ownership through keyed CTEs, keep the 0044 views as the contract](0011-keyed-ownership-ctes.md)
 - [ADR 0012: Map Mizuho ordinary deposits under identity policy version 2](0012-mizuho-identity-policy-v2.md)
-- [ADR 0013: Give agents card purchases through a separate read-only tool](0013-agent-card-purchase-read.md) — accepted; amended by ADR 0063
+- [ADR 0013: Give agents card purchases through a separate read-only tool](0013-agent-card-purchase-read.md) — accepted; amended by ADR 0063; next-page amendment 2026-11-08 proposed
 - [ADR 0014: A shared-R2 collector's producer is `collector-<collector id>`](0014-collector-producer-ids.md)
 - [ADR 0015: Source authority v2 names CORE source ids](0015-source-authority-v2.md)
 - [ADR 0016: Key MyJCB pending statements by payment month, current while their position shows them](0016-myjcb-pending-statement-slots.md)
 - [ADR 0017: Add card purchase review command kinds with one rebuild, not relation markers](0017-card-purchase-review-commands.md)
 - [ADR 0018: SBI Shinsei as the second bank debit adapter of card settlement review](0018-sbi-shinsei-bank-debit-adapter.md)
-- [ADR 0019: Reported state on a date from the latest complete capture before it](0019-dated-reported-state.md) — accepted; agent read `kogane.reported-state.read` (amendment 2026-11-06, #953)
+- [ADR 0019: Reported state on a date from the latest complete capture before it](0019-dated-reported-state.md) — accepted; agent read `kogane.reported-state.read` (amendment 2026-11-06, #953); request rules amendment 2026-11-08 proposed
 - [ADR 0020: Prices are provider observations promoted by a closed rule list](0020-price-promotion-by-rule.md)
 - [ADR 0021: Collectors state the registration contract; the Processor's refusals stay](0021-collector-registration-contract.md)
 - [ADR 0022: Give registered shared-R2 artifacts their parser dataset](0022-registration-artifact-datasets.md)
@@ -98,3 +98,4 @@ for current behavior.
 - [ADR 0088: Regroup one source's collection quality cells by the accounts their captures' observations name](0088-collection-quality-per-account.md) — proposed; `GET /api/collection-quality/<sourceId>/accounts`, the `口座ごと` view and `view: "accounts"` on `kogane.collection-quality.read`, through the routes' one reader (ADR 0081); the cell page's SQL is unchanged byte for byte; no migration
 - [ADR 0089: Classify the MyJCB J-POINT total under identity policy 2, for J-POINT captures only](0089-myjcb-jpoint-identity.md) — accepted; `reward-account` / `provider-local`, re-identifies J-POINT captures only so the statement root's mapping id stays
 - [ADR 0090: A statement's ready candidate leads the grouped card settlement list however old it is](0090-ready-lead-beyond-newest-candidates.md) — proposed; the five newest stay judged, a statement they do not decide searches up to 200 older candidates for the newest ready one and says when it stopped short (`leadSearch`)
+- [ADR 0091: A query cursor is bound to its context's pinned inputs, not to the request's clock](0091-query-cursor-paging-basis.md) — proposed; `financial.query`'s next page is read on a later request (`basisRef` in place of `contextId`), and `no_rows_in_scope` is named only for a source read to its end

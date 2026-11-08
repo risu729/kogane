@@ -28,9 +28,8 @@
 
 ```sh
 chmod 600 /secure/sbi-vc-session.json
-bun install --frozen-lockfile
-bun test
-mise run //packages/sbi-vc-trade-client:typecheck
+mise run install                                # from the repository root
+mise run //packages/sbi-vc-trade-client:ci        # typecheck and test
 bun src/cli.ts -- \
   --session-file /secure/sbi-vc-session.json \
   --output /secure/sbi-vc-output

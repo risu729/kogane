@@ -43,11 +43,11 @@ import type { ToolResult } from "./agent-service";
 import { HttpError } from "./http";
 import { parseRequest } from "./ops-api";
 import {
-  readReportedState,
   REPORTED_STATE_ACCOUNT,
   REPORTED_STATE_DATE,
   REPORTED_STATE_SOURCE,
-} from "./reported-state-api";
+} from "../../../packages/application/src/query/reported-state-read.ts";
+import { readReportedState } from "./reported-state-api";
 import { mcpInputSchema } from "./mcp-input-schema";
 
 /**
@@ -74,7 +74,8 @@ const schemas = {
   "kogane.instruments.history": z.strictObject({
     identifierId: z.string().regex(INSTRUMENT_IDENTIFIER_ID),
   }),
-  // The route's query parameters, as a body; the patterns are the route's own.
+  // The route's query parameters, as a body: the published shape of the
+  // service's request rules (`readReportedStateRequest`), which decide.
   "kogane.reported-state.read": z.strictObject({
     date: z.string().regex(REPORTED_STATE_DATE),
     source: z.string().regex(REPORTED_STATE_SOURCE).optional(),
@@ -257,13 +258,9 @@ export async function callReadTool(
             status: ERROR_STATUS.evidence_restricted,
             body: financialError("evidence_restricted", "reported-state.read", narrowed),
           };
-        const input = parseRequest(schemas[name], body ?? {});
-        // The route's own request rules and reader; its refusals keep their codes.
-        const state = await readReportedState(env, {
-          date: input.date,
-          source: input.source ?? null,
-          account: input.account ?? null,
-        });
+        // The route's own service decides the body: its request rules, its
+        // reader and its refusal codes, once for both transports.
+        const state = await readReportedState(env, body ?? {});
         return { status: 200, body: { apiVersion: 2, ...state } };
       }
       case "kogane.instruments.coverage": {

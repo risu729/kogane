@@ -1,6 +1,6 @@
 # MyJCB read-only Worker PoC
 
-MyJCBの公式WebをCloudflare WorkersのScheduled handlerから読み、取得時の公式HTMLと取得manifestを共有DATA bucket（`kogane-raw-evidence`）へ追記保存する独立PoCである。`mnie`は利用せず、Okuraのコードも取り込んでいない。
+MyJCBの公式WebをCloudflare Workerから読み（the Processor alarm calls its `ScheduledCollection` RPC entrypoint, `src/schedule-entrypoint.ts`）、取得時の公式HTMLと取得manifestを共有DATA bucket（`kogane-raw-evidence`）へ追記保存する独立PoCである。`mnie`は利用せず、Okuraのコードも取り込んでいない。
 
 Worker PoCは2026-08-31にdeployし、第一のMyJCB IDで実auth testまで完了した。Bitwardenから一項目だけをlocal syncし、Browser Runの一時virtual authenticatorでpasskey assertionを生成してmypageへ到達した後、cookieとUser-Agentを通常のWorker `fetch`へ移管した。過去月JSONによるavailable月列挙、credit detail取得、private R2への20 artifactとmanifest保存が1 runで成功し、failureは0だった。raw credential、WebAuthn assertion、cookie、明細値、file hashはcommit／logしていない。
 
@@ -216,26 +216,35 @@ content-addressedで保存し、最後にterminal `runs/myjcb/<run-id>/terminal.
 
 HTMLは取得時sourceをUTF-8へdecodeし、script/style/metaと埋込み要素、event/data属性、navigation URL、form action、全value/textarea、token/session類似属性、16桁card番号を決定的に除去・置換してから保存する。login/mypage HTMLは保存しない。各objectのR2 metadataは`packages/collection`が書く`sha256`と`byteSize`だけである。manifestにはrun/connection/artifact/failureのmetadataだけを入れ、cookie値や実明細値をlogへ出さない。bucketはpublicにしない。
 
-## Cronと手動実行
+## Schedule
 
-`wrangler.jsonc`のCron `0 21 * * *`（06:00 JST）からWorkerの`scheduled()`を直接呼ぶ。GitHub Actionsをschedulerとして使わない。
+The Worker has no Cron Trigger (`triggers.crons` is empty in `wrangler.jsonc`). The Processor's
+`ScheduleAlarm` calls `ScheduledCollection.runScheduled` (`src/schedule-entrypoint.ts`) for the
+`myjcb` job in [`config/alarm-jobs.json`](../../config/alarm-jobs.json), daily at 06:00 JST
+(`0 21 * * *` UTC). GitHub Actionsをschedulerとして使わない。
 
 通常runは既存の固定action private RPC／schedule経路を使い、公開手動triggerは404になる。`GET /health`はsecret不要でsource/schemaだけを返す。ProcessorがDATAのterminalをin-processで登録する（[processor.md](../../docs/processor.md)）。中央Importerへの転送、`POST /backfill-raw-evidence`、source専用bucketは2026-09-13に廃止した（[legacy-retirement.md](../../docs/legacy-retirement.md)）。
 
 ```sh
-bun install --frozen-lockfile
-bun test
-mise run //services/collector-myjcb:typecheck
+mise run install                            # from the repository root
+mise run //services/collector-myjcb:test
+mise run //services/collector-myjcb:ci
 mise run //services/collector-myjcb:dry-run
 ```
 
 live PoCでは`wrangler deploy`、private R2 bucket作成、secret投入、第一connectionの実credential testまで行った。成功runは1 connection、20 artifact、failure 0で、内訳はcredit detail 11、parsed ledger 6、menu 1、過去月JSON 1、discovery 1だった。このrunでは公式CSV/PDF/OFX linkが見つからず、export artifactは0だった（2026-09-27の調査で、確定月はlinkを相対hrefで持ち、collectorがそれを解決できていなかったと分かった）。従ってこのconnectionではHTML ledgerが実データsourceとして必要であり、別IDでexportが存在する場合だけ確定月をCSV中心へ最適化する。manifestとsource-preserving artifactはprivate R2へ保存し、実値やsecretはPRへ含めない。
 
-作成済みpersistent resourceはWorker `kogane-myjcb-collector-poc`、Cron `0 21 * * *`、admin/connection secret群である。保存先は共有DATA bucket `kogane-raw-evidence`で、旧private R2 bucket同名は2026-09-13に中央DATAへコピー・検証した後に削除した。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄時はWorkerとsecretだけを削除し、他のcollectorとProcessorも使う共有DATA bucketは削除しない。
+作成済みpersistent resourceはWorker `kogane-myjcb-collector-poc`とconnection secret群である（the schedule is the Processor's `myjcb` alarm job, not a Cron Trigger; the admin routes were retired, #1131）。保存先は共有DATA bucket `kogane-raw-evidence`で、旧private R2 bucket同名は2026-09-13に中央DATAへコピー・検証した後に削除した。Browser Run sessionはconnection完了時にcloseし、永続profileを作らない。廃棄時はWorkerとsecretだけを削除し、他のcollectorとProcessorも使う共有DATA bucketは削除しない。
 
-Cronとmanual triggerのoverlap lockは未実装である。同一IDの同時login/readを避けるため、Durable Object lockまたはQueueによる一接続一実行の直列化をdeploy/merge前要件とする。本PRのPoCをそのままscheduled運用しない。
+Overlapping runs are prevented by the shared execution lease: every collection takes the
+`myjcb` row of `collection_execution_leases` through `withCollectionLease`
+(`src/worker.ts`, `packages/collection/src/schedule-lease.ts`, binding `SCHEDULE_DB`), and a
+second alarm or operations request while it is held is refused with `collection_busy_or_uncertain`
+before contacting MyJCB, and its scheduled result carries the failure code `collection_busy`
+(`scheduledFailure`, `packages/collection/src/schedule-result.ts`). The lease is per source, not per connection: one run covers every
+configured connection in turn.
 
-Processorの登録の冪等性はこのoverlap問題を解決しない。同じrun IDとterminal digestの再送は同じrunへ収束するが、collectorが別UUIDで二回収集した場合は別の取得事実として両方を保持する。したがって内容hashでrunを潰さず、重複実行の抑止はcollectorの実行lockで行う。raw-evidence導入では既存Cronを変更せず、追加のscheduled triggerやGitHub Actions cronも作らない。
+Processorの登録の冪等性はこのoverlap問題を解決しない。同じrun IDとterminal digestの再送は同じrunへ収束するが、collectorが別UUIDで二回収集した場合は別の取得事実として両方を保持する。したがって内容hashでrunを潰さず、重複実行の抑止はcollectorの実行lockで行う。追加のscheduled triggerやGitHub Actions cronは作らない。
 
 ## synthetic test
 
