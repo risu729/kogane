@@ -179,7 +179,7 @@ Keep direct clients separate from browser bootstrap modes; test fresh challenges
 
 | Function                                    | Concrete candidate                                                                                    | Confidence/next checks                                                                                                     |
 | ------------------------------------------- | ----------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| Debit read                                  | Okura `debitDetailMenu.html?link_id=...` → `debitDetail.html?seq=N`                                   | Current public code; live Mizuho/Kyoto/password-ID success unconfirmed                                                     |
+| Debit read                                  | Okura `debitDetailMenu.html?link_id=...` → `debitDetail.html?seq=N`                                   | Current public code; live success on Mizuho/Kyoto issuers and IDs without a passkey unconfirmed                            |
 | Credit read                                 | `/iss-pc/member/details_inquiry/detailMenu.html?link_id=...` → `detail.html?detailMonth=N&output=web` | User GET confirmed 2026-08-31; initial HTML `0..8`, past API only account-available `9..17`                                |
 | Past-month availability                     | `POST /iss-pc/general_json/member/details_inquiry/detailPastJson.json`                                | `detailAPI.js`/user operation confirm JSON-RPC; stop on missing hidden discriminator/API failure, no blind scanning        |
 | PDF export                                  | `/iss-pc/member/details_inquiry/detailDbPdf.html?detailMonth=N&output=pdf`                            | Finalized GET/`%PDF-1.4` confirmed 2026-08-31; `detailNewspdf.html` is notice, not statement                               |
@@ -337,12 +337,12 @@ Stop automation immediately for any of these.
 
 ## Unconfirmed items
 
-- Exact issuers/current combined-switch graph among inventory JCB W/Recruit/Mizuho/Kyoto cards.
-- Actual debit passkey offerings and Bitwarden Web/app compatibility.
+- The exact issuer shown for each card in the real inventory, and the combined-login switching graph currently set up among JCB W, Recruit JCB, Mizuho JCB Debit and Kyoto Bank JCB Debit.
+- Whether Mizuho JCB Debit and Kyoto Bank JCB Debit actually offer passkeys, and whether a Bitwarden passkey works on the Web and in the app.
 - Cross-issuer `details_inquiry`/DOM/export schemas, post-login TTL/timeouts/renewal/existing-switch transport.
 - Card-specific export columns, OFX fitid, maxima, zero-month responses; first-ID CSV encoding/12 headers confirmed.
 - Complete official debit-difference statuses and issuer-specific negatives/cancellations/cashback.
-- Real Okura success across production issuers/password IDs; recent code alone is not live proof.
+- Whether the public Okura implementation succeeds in production for each issuer and for IDs without a registered passkey; recent code alone is not proof of live success.
 - Auth-host WAF/bot vendors; public `www` Cloudflare confirmed, `my` products/Akamai unknown.
 - Private 3.9.0 mirror static analysis complete, but official 3.11.1 certificates/manifests/hosts/network config/schemas/pinning-Integrity unconfirmed. Also untested: 3.9.0 runtime headers/cookies/server FIDO extensions/login-OTP-passkey/authenticated schemas.
 
