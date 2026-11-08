@@ -8,8 +8,11 @@ export function runPrefix(startedAt: string, runId: string): string {
 /**
  * The manifest entry of an artifact — validated, hashed and keyed inside its
  * run — without writing it anywhere. `storeArtifact` is this plus the staging
- * put; in shared mode (U09) the entry is all the run needs, because the bytes
- * go to DATA content-addressed and the staging bucket is not written.
+ * put; no Worker path calls it, and the parity tests keep it as the staged
+ * encoding. In shared mode (U09) the bytes go to DATA content-addressed and the
+ * staging bucket is not written, so the Worker keeps this entry's dataset,
+ * digest and size and replaces its run-prefix key with the content-addressed
+ * object key.
  */
 export async function describeArtifact(options: {
   prefix: string;

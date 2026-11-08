@@ -17,6 +17,7 @@
 // capture. Credentials, the relay token and the container handoff envelope
 // never enter a plan at all.
 import {
+  objectKey,
   persistRun,
   type PersistArtifact,
   type PersistRunPlan,
@@ -27,7 +28,7 @@ import {
   type TerminalRunFields,
   type TerminalTransformation,
 } from "../../../packages/collection/src/index";
-import type { CollectionFailure, CollectionManifest, RawArtifact } from "./types";
+import type { CollectionFailure, CollectionManifest, RawArtifact, StoredArtifact } from "./types";
 
 /** `runs/<source>/…` in DATA. The CORE source id (`sbi-shinsei-bank`) is the
  * Processor's business; a terminal names the collector's own source. */
@@ -209,9 +210,17 @@ export interface SharedRunInput {
  * artifact per collected dataset. A `failed` run with nothing collected plans
  * the manifest alone, so the failure is recorded as a failure rather than as a
  * complete observation of nothing (G1-09).
+ *
+ * The collector manifest's `artifacts` entries are written here, one per
+ * planned artifact in collection order, from the bytes DATA will hold: the
+ * digest and size of the token-stripped capture and the content-addressed key
+ * it is written at. The caller's `manifest.artifacts` is not copied, because
+ * the Worker admits each artifact before the token is stripped, so its entries
+ * describe bytes that are never stored.
  */
 export async function buildSharedRunPlan(input: SharedRunInput): Promise<PersistRunPlan> {
   const artifacts: PersistArtifact[] = [];
+  const stored: StoredArtifact[] = [];
   const transformations: TerminalTransformation[] = [];
   const collected = new Set<string>();
   for (const artifact of input.artifacts) {
@@ -222,6 +231,13 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
       role: normalized ? COLLECTOR_DERIVED_ROLE : PROVIDER_CAPTURE_ROLE,
     });
     artifacts.push(entry);
+    stored.push({
+      dataset: artifact.dataset,
+      key: objectKey(entry.sha256),
+      mediaType: artifact.mediaType,
+      sha256: entry.sha256,
+      bytes: entry.byteSize,
+    });
     collected.add(artifact.filename);
     transformations.push(
       normalized
@@ -259,7 +275,7 @@ export async function buildSharedRunPlan(input: SharedRunInput): Promise<Persist
   artifacts.push(
     await artifactOf({
       artifactKey: MANIFEST_ARTIFACT_KEY,
-      bytes: sharedManifestBytes(input.manifest),
+      bytes: sharedManifestBytes({ ...input.manifest, artifacts: stored }),
       role: COLLECTOR_MANIFEST_ROLE,
     }),
   );

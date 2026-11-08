@@ -456,14 +456,23 @@ describe("GLOBAL PASS months are walked page by page", () => {
       expect(r.response.status).toBe("success");
       expect(r.manifest?.status).toBe("success");
       expect(r.manifest?.failures).toEqual([]);
-      expect(r.manifest?.artifacts.map((a) => [a.month, a.page, a.key.split("/").at(-1)])).toEqual([
+      const terminal = [...r.stored.values()]
+        .map((bytes) => new TextDecoder().decode(bytes))
+        .find((body) => body.includes('"units"'));
+      // Each manifest entry names its page's content-addressed object, the
+      // one the terminal stores under the page's file name.
+      const named = new Map(
+        (
+          JSON.parse(terminal!) as {
+            artifacts: { artifactKey: string; storageRef: { key: string } }[];
+          }
+        ).artifacts.map((entry) => [entry.storageRef.key, entry.artifactKey]),
+      );
+      expect(r.manifest?.artifacts.map((a) => [a.month, a.page, named.get(a.key)])).toEqual([
         ["2099-02", 1, "activity-2099-02.html"],
         ["2099-02", 2, "activity-2099-02-p2.html"],
         ["2099-01", 1, "activity-2099-01.html"],
       ]);
-      const terminal = [...r.stored.values()]
-        .map((bytes) => new TextDecoder().decode(bytes))
-        .find((body) => body.includes('"units"'));
       expect(terminal).toContain('"coverageStatus":"complete"');
       expect(terminal).toContain('"artifactKey":"activity-2099-02-p2.html"');
       expect(events(r, "globalpass-activity-pages")).toEqual([

@@ -298,8 +298,11 @@ describe("G1-01/G1-02 persisting a run", () => {
   });
 });
 
-describe("one copy: shared mode names what legacy mode would have staged", () => {
-  test("the manifest entry is the same whether or not the staging put happens", async () => {
+describe("one copy: DATA holds the bytes the staging put wrote", () => {
+  // The Worker keeps `describeArtifact`'s dataset, digest and size but names
+  // the content-addressed object instead of this run-prefix key
+  // (test/worker-manifest.test.ts).
+  test("describeArtifact's record and bytes are the staging put's, and DATA holds the same bytes", async () => {
     const prefix = `raw/sbi-vc-trade/2026/09/01/${RUN_ID}`;
     const artifact = { dataset: "cash-balances", body: BODY };
     const described = await describeArtifact({ prefix, artifact });
