@@ -545,6 +545,21 @@ describe.if(runnable)("operator schedule administration", () => {
       await card.getByRole("button", { name: "設定を保存", exact: true }).waitFor();
       expect(writes).toHaveLength(1);
       expect(await card.getByRole("status").innerText()).toBe("保存しました。");
+      // Reads recover after another tab stored revision 3: the card skips the
+      // revision this save wrote, and the message is not shown over values
+      // the save never wrote.
+      readAfterWrite = null;
+      snapshotStatus = 200;
+      const row = snapshot.schedules.find((schedule) => schedule.id === "sony-bank")!;
+      expect(row.revision).toBe(2);
+      Object.assign(row, { revision: 3, pattern: { ...row.pattern, time: "07:15" } });
+      await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+      await page.waitForFunction(
+        () =>
+          (document.querySelector('input[aria-label="ソニー銀行の実行時刻"]') as HTMLInputElement)
+            ?.value === "07:15",
+      );
+      expect(await card.getByRole("status").innerText()).toBe("");
     } finally {
       await page.close();
     }
