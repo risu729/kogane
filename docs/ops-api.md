@@ -404,12 +404,12 @@ An agent may request collections without a count or rate limit (owner,
 `kogane.ops.collection.request` description tells the caller to read the
 source's history first, and every item is an existing read:
 
-| Read first                                                    | Tool                                                                                                                                                                |
-| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| the source's collection quality: latest runs and stage codes  | `kogane.collection-quality.read` with `source`                                                                                                                      |
-| its schedule, next alarm, recent occurrences and held leases  | `kogane.schedules.read`                                                                                                                                             |
-| its maintenance windows and the maintenance-adjusted due time | `kogane.schedules.maintenance.read` with `source`                                                                                                                   |
-| earlier requests and how they ended                           | `kogane.audit.search` with `filters: { operation: "ops.collection.request" }`, narrowed to the source by hand; then `kogane.ops.operation.get` for the caller's own |
+| Read first                                                    | Tool                                                                                                                                      |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| the source's collection quality: latest runs and stage codes  | `kogane.collection-quality.read` with `source`                                                                                            |
+| its schedule, next alarm, recent occurrences and held leases  | `kogane.schedules.read`                                                                                                                   |
+| its maintenance windows and the maintenance-adjusted due time | `kogane.schedules.maintenance.read` with `source`                                                                                         |
+| earlier requests and how they ended                           | `kogane.ops.operation.list` with `kind: "collection"` (each summary names its source and status), then `kogane.ops.operation.get` for one |
 
 It then does not request while the source's alarm is due, its maintenance
 window is on, a lease is held or an earlier request has not finished, and when
@@ -419,9 +419,9 @@ dispatcher holds a request during maintenance and while a lease is held anyway
 request that can only wait, expire or fail the same way. The rule is in the
 tool description, not in code.
 
-`kogane.ops.operation.get` reads only the caller's own operations
-([MCP](#mcp)), so a request someone else made is seen as an occurrence or a
-held lease in `kogane.schedules.read`, not through its record. Requests are
+Both operations reads are whole-store ([MCP](#mcp), ADR 0086): a request
+the operator or another MCP client made is listed and read like the caller's
+own. Requests are
 accepted without a cap, but the dispatch lane starts at most one collector per
 tick (`COLLECTOR_STARTS_PER_TICK`), so several requests start one after
 another, not in parallel.
