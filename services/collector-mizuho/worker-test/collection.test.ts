@@ -1,5 +1,6 @@
 import { env } from "cloudflare:test";
 import { describe, expect, it, vi } from "vitest";
+import iconv from "iconv-lite";
 import {
   readTerminal,
   listTerminals,
@@ -16,7 +17,13 @@ import {
 } from "../../../packages/parsers/src/parsers/mizuho-html";
 import { createHandler, createCollection } from "../src/worker";
 import { persistMizuhoRun } from "../src/storage";
-import { MizuhoClientError, type MizuhoCollection, type MizuhoSession } from "../src/client";
+import { loginMizuho } from "../src/login";
+import {
+  collectMizuho,
+  MizuhoClientError,
+  type MizuhoCollection,
+  type MizuhoSession,
+} from "../src/client";
 
 const session: MizuhoSession = {
   origin: "https://web1.ib.mizuhobank.co.jp",
@@ -84,6 +91,167 @@ async function manifestFor(response: Awaited<ReturnType<ReturnType<typeof create
 }
 
 describe("Mizuho Worker and shared DATA integration", () => {
+  it.each([
+    "form-count",
+    "field-value",
+    "missing-token",
+    "credential-controls",
+    "entry-base",
+    "post-login-form",
+  ] as const)("records the %s login refusal with closed fields only", async (check) => {
+    const page = (name: string, controls = "") =>
+      `<html><head><base href="https://web1.ib.mizuhobank.co.jp/servlet/"></head><body><p>private-provider-sentinel</p><form name="${name}">${Object.entries(
+        {
+          _FORMID: name,
+          _FRAMEID: "frame",
+          _TARGETID: "frame",
+          _LUID: "private-luid",
+          _TOKEN: "private-token",
+          _SUBINDEX: "",
+          POSTKEY: "private-postkey",
+        },
+      )
+        .map(([key, value]) => `<input type="hidden" name="${key}" value="${value}">`)
+        .join("")}${controls}</form></body></html>`;
+    const customer = page("LOGBNK_00000B", '<input type="text" name="txbCustNo">');
+    const first =
+      check === "form-count"
+        ? "<p>private-provider-sentinel</p>"
+        : check === "field-value"
+          ? customer.replace(
+              "</form>",
+              '<input type="hidden" name="_TOKEN" value="private-duplicate"></form>',
+            )
+          : check === "missing-token"
+            ? customer.replace('value="private-token"', 'value=""')
+            : check === "credential-controls"
+              ? customer.replace('<input type="text" name="txbCustNo">', "")
+              : check === "entry-base"
+                ? customer.replace(/<base[^>]*>/u, "")
+                : customer;
+    const pages = [
+      first,
+      page("LOGBNK_00005B", '<input type="password" name="PASSWD_LoginPwdInput">'),
+      page("BALINQ_03010B"),
+    ];
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const execute = createCollection({
+        login: (options) =>
+          loginMizuho({
+            ...options,
+            fetcher: async () =>
+              new Response(pages.shift(), { headers: { "content-type": "text/html" } }),
+          }),
+      });
+      await execute({
+        ...env,
+        MIZUHO_CUSTOMER_NUMBER: "12345678",
+        MIZUHO_LOGIN_PASSWORD: "SyntheticPassword123",
+      });
+      const record = log.mock.calls
+        .map(([value]) => JSON.parse(String(value)))
+        .find((value) => value.event === "mizuho-collection-result");
+      expect(record).toMatchObject({
+        errorCode: "login-unrecognized-page",
+        loginCheck: check,
+        httpStatusClass: "2xx",
+        expectedForm: check === "post-login-form" ? "MENTOP_02000B" : "LOGBNK_00000B",
+      });
+      for (const forbidden of ["private", "SyntheticPassword", "12345678", "https://", "<html"])
+        expect(JSON.stringify(record)).not.toContain(forbidden);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("accumulates each timed phase across repeated account-list and history reads", async () => {
+    let clock = 0;
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const execute = createCollection({
+        monotonicNow: () => clock,
+        login: async () => {
+          clock += 10;
+          return session;
+        },
+        collect: async ({ onPhase }) => {
+          onPhase?.("account-list");
+          clock += 20;
+          onPhase?.("history");
+          clock += 30;
+          onPhase?.("account-list");
+          clock += 5;
+          onPhase?.("history");
+          clock += 7;
+          return collection();
+        },
+        persist: async (bucket, input) => {
+          clock += 40;
+          return persistMizuhoRun(bucket, input);
+        },
+      });
+      await execute(env);
+      const record = log.mock.calls
+        .map(([value]) => JSON.parse(String(value)))
+        .find((value) => value.event === "mizuho-collection-result");
+      expect(record.phaseDurationsMs).toEqual({
+        login: 10,
+        "account-list": 25,
+        history: 37,
+        persistence: 40,
+      });
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it("persists an unexpected history TypeError as internal-error on the unit and safe log", async () => {
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    try {
+      const accountPage = mizuhoAccountHtml()
+        .replace(
+          '<form name="BALINQ_03010B">',
+          `<form name="BALINQ_03010B">${Object.entries({
+            ...session.form.fields,
+            _FORMID: "BALINQ_03010B",
+          })
+            .map(([key, value]) => `<input type="hidden" name="${key}" value="${value}">`)
+            .join("")}`,
+        )
+        .replace(
+          'type="button"',
+          `type="button" onclick="doTransaction('/BALINQ0301002B','0',false,null,this.form,null,null)"`,
+        );
+      const execute = createCollection({
+        login: async () => session,
+        collect: (options) =>
+          collectMizuho({
+            ...options,
+            fetcher: async () =>
+              new Response(new Uint8Array(iconv.encode(accountPage, "shift_jis")), {
+                headers: { "content-type": "text/html" },
+              }),
+            onPhase: (phase) => {
+              options.onPhase?.(phase);
+              if (phase === "history") throw new TypeError("private-programming-error");
+            },
+          }),
+      });
+      const result = await execute(env);
+      const terminal = await manifestFor(result);
+      expect(terminal.units.some((unit) => unit.safeErrorCode === "internal-error")).toBe(true);
+      const record = log.mock.calls
+        .map(([value]) => JSON.parse(String(value)))
+        .find((value) => value.event === "mizuho-collection-result");
+      expect(record.issueCodes).toContain("internal-error");
+      expect(JSON.stringify(record)).not.toContain("read-parse-error");
+      expect(JSON.stringify(record)).not.toContain("private-programming-error");
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   for (const scenario of ["success", "collection-failure", "persistence-failure"] as const) {
     it.each(["configuration", "login", "collection", "persistence", "result", "all"] as const)(
       `a throwing %s log sink preserves the alarm ${scenario} and attempt counts`,
@@ -262,7 +430,7 @@ describe("Mizuho Worker and shared DATA integration", () => {
       customerNumber: "0000000000",
       password: "syntheticpassword",
     });
-    expect(collect).toHaveBeenCalledExactlyOnceWith({ session });
+    expect(collect).toHaveBeenCalledExactlyOnceWith({ session, onPhase: expect.any(Function) });
     const text = JSON.stringify(response.body);
     const manifest = await manifestFor(response);
     const persisted = [JSON.stringify(manifest)];
@@ -360,6 +528,12 @@ describe("Mizuho Worker and shared DATA integration", () => {
           historyCount: 1,
           failedUnitCount: 0,
           issueCodes: partial ? ["history-pagination-unverified"] : [],
+          phaseDurationsMs: {
+            login: expect.any(Number),
+            "account-list": 0,
+            history: 0,
+            persistence: expect.any(Number),
+          },
         });
         const terminal = await readTerminal(env.DATA, "mizuho-bank", result.runId);
         expect(terminal.outcome).toBe("found");
@@ -404,8 +578,14 @@ describe("Mizuho Worker and shared DATA integration", () => {
         historyCount: 0,
         failedUnitCount: 0,
         issueCodes: [],
-        errorCode: "read-parse-error",
+        errorCode: "internal-error",
         failurePhase: "login",
+        phaseDurationsMs: {
+          login: expect.any(Number),
+          "account-list": 0,
+          history: 0,
+          persistence: expect.any(Number),
+        },
       });
       const terminal = await readTerminal(env.DATA, "mizuho-bank", result.runId);
       expect(terminal.outcome).toBe("found");
