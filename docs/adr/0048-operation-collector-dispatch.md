@@ -1,6 +1,7 @@
 # ADR 0048: Run an accepted collection or session refresh once through the named collector RPC
 
-- Status: accepted (merged 2026-10-08 in #576; production dispatch unverified)
+- Status: accepted (merged 2026-10-08 in #576; production dispatch verified
+  2026-11-08, [below](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production))
 - Date: 2026-10-08
 - Issue: #544
 - Amended: 2026-11-07, the `projected` stage is derived from the READ pointer
@@ -11,6 +12,9 @@
   proposed)
 - Amended: 2026-11-08, a collection with more than 100 runs
   ([below](#amendment-a-collection-with-more-than-100-runs-2026-11-08);
+  proposed)
+- Amended: 2026-11-08, five connections enabled and verified in production
+  ([below](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production);
   proposed)
 
 ## Context
@@ -98,7 +102,8 @@ would mix acceptance (a core-keep fact) with execution (operational state).
    (`operation_expired`).
 4. The connection is not listed in the new Processor variable
    `OPS_COLLECTOR_DISPATCH_CONNECTIONS` (a JSON array; empty, absent or
-   malformed means none, and the committed value is empty) → waits
+   malformed means none; the committed value was empty until the
+   [2026-11-08 amendment](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production)) → waits
    (`collector_dispatch_disabled`, re-checked hourly) and so expires unless the
    owner enables the connection.
 5. An enabled connection without a binding in this deployment →
@@ -201,10 +206,13 @@ retry/backoff library, because the policy after a start is "never retry".
 
 Open limits, written down rather than guessed:
 
-- Production dispatch has not run: no connection is enabled, and no deployed
-  collector has served `runOperation`.
+- ~~Production dispatch has not run: no connection is enabled, and no deployed
+  collector has served `runOperation`.~~ Closed by the
+  [2026-11-08 amendment](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production).
 - The requested window is not applied by any collector.
-- READ projection of a run is not traced; `projected` stays pending.
+- ~~READ projection of a run is not traced; `projected` stays pending.~~
+  Closed by the
+  [2026-11-07 amendment](#amendment-2026-11-07-the-projected-stage-is-derived-from-the-read-pointer).
 - The operator UI reads one operation's trail on its 依頼の経過 page
   (amendment of 2026-11-07 below); no page lists operations, and the UI sends
   no operations request. `kogane.ops.operation.get` returns the same record to
@@ -350,9 +358,10 @@ not keep is the revision at which a given parse was published:
   the stored revision, so its first publication covers it again. Whatever
   else reads `ops_requests.status` directly sees `running`.
 - Only executions recorded `published` after this change carry a revision;
-  an earlier one reads `projection_revision_unrecorded` for good. No
-  production execution was ever published (no connection is enabled), so
-  this affects none today.
+  an earlier one reads `projection_revision_unrecorded` for good. When this
+  amendment was written no production execution had been published; the
+  first one (sony-bank, 2026-11-08) was published before this amendment
+  deployed and so reads `projection_revision_unrecorded`.
 - Coverage is a revision comparison over the whole CORE input, whatever the
   balance projection keeps from the request's parses (a transaction-only
   collection contributes no balance row, and is still covered once the
@@ -385,7 +394,10 @@ not keep is the revision at which a given parse was published:
   stores the requirement when it records `published`; a reader without READ
   reports `read_model_unavailable`.
 
-A production trail to `projected` is unverified: no connection is enabled.
+A production trail to `projected` was unverified when this amendment was
+written; the
+[2026-11-08 amendment](#amendment-2026-11-08-five-connections-enabled-and-verified-in-production)
+followed four to `completed`.
 
 ## Amendment 2026-11-07 — the operator's 依頼の経過 page (proposed)
 
@@ -567,3 +579,54 @@ first 100 runs. `collectorOperationResult` checks the same `MAX_RUN_IDS`.
 - `packages/application/test/collection-quality-query.test.ts`: an occurrence
   naming 100 runs keeps the collection-quality summary within its contract;
   101 do not.
+
+## Amendment 2026-11-08: five connections enabled and verified in production
+
+Status: proposed (accepted when its pull request merges).
+
+### Context
+
+The decision above left every connection disabled until the owner enabled
+one, and its open limits said production dispatch had not run. On 2026-11-08
+03:19 UTC the owner allowed agents to request collections without a limit,
+asked that every healthy connection be enabled, and asked that the request
+tool tell its caller to read the source's history first
+([AGENTS.md](../../AGENTS.md#production-data)).
+
+### Decision
+
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names `sony-bank`, `sbi-securities`,
+`mobile-suica`, `moneyforward-me` and `myjcb` in both Processor
+configurations (sony-bank in #1119, the other four in #1149). The first
+request per connection was sent one at a time through
+`kogane.ops.collection.request`, after reading the source's collection
+quality, schedule, leases, maintenance windows and earlier requests ([ops-api.md](../ops-api.md#requesting-a-collection-as-an-agent)).
+The gates, the one start per tick and the never-retry policy are unchanged.
+The remaining connections wait for their own fixes
+([ops-api.md](../ops-api.md#enabling-collector-execution-adr-0048); St
+George and SBI VC in #1140).
+
+### Consequences
+
+- Each of the five requests went accepted → started → collected →
+  published, with every parse-selected run published and no reason code.
+  Four reached `projected` and `status: completed`; sony-bank's was
+  published before the READ-tracing amendment deployed and reads
+  `projection_revision_unrecorded`, as that amendment says.
+- The tracker records a publication only when it next checks the execution
+  (`TRACK_INTERVAL_MS`), so the trail shows `published` some minutes after
+  the run was published.
+- The open limit "Production dispatch has not run" is closed. The requested
+  window and unattended session refresh remain open as written above.
+
+### Verification
+
+- The committed list and its parsing: `services/processor/wrangler.jsonc`,
+  `services/processor/cloudflare.config.ts`,
+  `services/processor/test/operation-dispatch.test.ts`, and the resource
+  ledger's digest in `scripts/resource-ledger.test.ts`.
+- Production (2026-11-08, read through Kogane MCP, no provider contacted by
+  hand): one operation per connection read through
+  `kogane.ops.operation.get` to its terminal state, recorded in
+  [current-status.md](../current-status.md) and
+  [ops-api.md](../ops-api.md#enabling-collector-execution-adr-0048) by #1170.
