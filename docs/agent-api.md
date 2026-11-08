@@ -1107,6 +1107,10 @@ attenuates it.
    and `sub`, and names the caller **`mcp-client:<sub>`**.
 5. The grant is the whole-store grant (ADR 0084), and the tool runs.
 
+Through the MCP Portal ([route](#which-client-connects-and-how)), the
+Portal is the client of steps 1–3; each person's own client signs in at the
+Portal's Access application and calls `https://mcp.takuk.me/mcp`.
+
 | Assertion reaching the Worker                                            | On `/mcp`                                  | On every other route                           |
 | ------------------------------------------------------------------------ | ------------------------------------------ | ---------------------------------------------- |
 | MCP application (`aud` = `ACCESS_MCP_AUDIENCE`)                          | caller `mcp-client:<sub>`, agent-only      | `401 authentication_required`                  |
@@ -1134,7 +1138,8 @@ are unchanged.
 ### Endpoint and transport
 
 - URL: `https://<app-host>/mcp` (or a dedicated hostname routed to this
-  Worker, if the gaps below require one).
+  Worker, if the gaps below require one). Clients register the Portal URL
+  `https://mcp.takuk.me/mcp` instead ([route](#which-client-connects-and-how)).
 - Served by the official MCP TypeScript SDK, `@modelcontextprotocol/server`
   (pinned): the initialize-based revisions through its stateless Streamable
   HTTP transport and the stateless 2026-07-28 revision through
@@ -1179,12 +1184,20 @@ mapping, the grant shape and the local checks are the same for all of them.
 If an existing connection reports that it needs reauthentication, follow that
 runbook.
 
-| Client                                          | Flow it presents ([Claude][claude-auth], [ChatGPT][openai-auth], [Codex][codex-mcp])                                                                                                                                                                      | Owner creates in Cloudflare                                                                  | Worker mapping           | Grants                                                            | Client-side registration                                                                                       |
-| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| claude.ai (also Claude Desktop and mobile)      | OAuth 2.0 code + PKCE `S256`; discovery from the `401`; CIMD if advertised, else DCR; redirect `https://claude.ai/api/mcp/auth_callback`; calls from `160.79.104.0/21`                                                                                    | the MCP Access application with Managed OAuth, an identity policy, that redirect URI allowed | `mcp-client:<owner-sub>` | none (ADR 0084); nothing in `AGENT_GRANTS` or `OPERATOR_SUBJECTS` | Customize → Connectors → Add custom connector → URL, sign in, OAuth client "Register automatically"            |
-| ChatGPT (developer mode app)                    | OAuth 2.1 code + PKCE `S256`; `resource` on authorize and token; CIMD, DCR or a predefined client; redirect `https://chatgpt.com/connector_platform_oauth_redirect` if the server returns `iss`, else `https://chatgpt.com/connector/oauth/{callback_id}` | the same application; both redirect forms allowed (`https://chatgpt.com/connector/oauth/*`)  | `mcp-client:<owner-sub>` | none                                                              | Settings → Apps → Advanced settings → Developer mode; create an app with the URL and OAuth                     |
-| Codex (CLI, IDE extension, ChatGPT desktop app) | OAuth via `codex mcp login`; CIMD, else DCR; local callback listener                                                                                                                                                                                      | the same application with "allow localhost/loopback clients" on                              | `mcp-client:<owner-sub>` | none                                                              | `[mcp_servers.kogane] url = "https://<app-host>/mcp"` in `~/.codex/config.toml`, then `codex mcp login kogane` |
-| Claude Code (optional)                          | OAuth with its own CIMD, else DCR; loopback redirect on any port                                                                                                                                                                                          | as Codex                                                                                     | `mcp-client:<owner-sub>` | none                                                              | `claude mcp add --transport http kogane https://<app-host>/mcp`, then `/mcp` to sign in                        |
+**Route (owner, 2026-11-07, [ADR 0047 amendment](adr/0047-mcp-client-connection.md#amendment-clients-connect-through-the-mcp-portal-2026-11-07)):**
+claude.ai, ChatGPT and Grok register the Cloudflare MCP Portal
+`https://mcp.takuk.me/mcp`, not the origin URL. Their redirect URIs are
+allowed on the Portal's Access application ("MCP Portal"); the origin
+application allows only the Portal's own callbacks. The table below describes
+each client's OAuth flow; read "the same application" as the Portal's.
+Codex and Claude Code rows need loopback on the Portal application before use.
+
+| Client                                          | Flow it presents ([Claude][claude-auth], [ChatGPT][openai-auth], [Codex][codex-mcp])                                                                                                                                                                      | Owner creates in Cloudflare                                                                 | Worker mapping           | Grants                                                            | Client-side registration                                                                                         |
+| ----------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| claude.ai (also Claude Desktop and mobile)      | OAuth 2.0 code + PKCE `S256`; discovery from the `401`; CIMD if advertised, else DCR; redirect `https://claude.ai/api/mcp/auth_callback`; calls from `160.79.104.0/21`                                                                                    | the Portal's Access application, that redirect URI allowed                                  | `mcp-client:<owner-sub>` | none (ADR 0084); nothing in `AGENT_GRANTS` or `OPERATOR_SUBJECTS` | Customize → Connectors → Add custom connector → URL, sign in, OAuth client "Register automatically"              |
+| ChatGPT (developer mode app)                    | OAuth 2.1 code + PKCE `S256`; `resource` on authorize and token; CIMD, DCR or a predefined client; redirect `https://chatgpt.com/connector_platform_oauth_redirect` if the server returns `iss`, else `https://chatgpt.com/connector/oauth/{callback_id}` | the same application; both redirect forms allowed (`https://chatgpt.com/connector/oauth/*`) | `mcp-client:<owner-sub>` | none                                                              | Settings → Apps → Advanced settings → Developer mode; create an app with the URL and OAuth                       |
+| Codex (CLI, IDE extension, ChatGPT desktop app) | OAuth via `codex mcp login`; CIMD, else DCR; local callback listener                                                                                                                                                                                      | the same application with "allow localhost/loopback clients" on                             | `mcp-client:<owner-sub>` | none                                                              | `[mcp_servers.kogane] url = "https://mcp.takuk.me/mcp"` in `~/.codex/config.toml`, then `codex mcp login kogane` |
+| Claude Code (optional)                          | OAuth with its own CIMD, else DCR; loopback redirect on any port                                                                                                                                                                                          | as Codex                                                                                    | `mcp-client:<owner-sub>` | none                                                              | `claude mcp add --transport http kogane https://mcp.takuk.me/mcp`, then `/mcp` to sign in                        |
 
 ### Owner hand-off, in order
 
@@ -1203,14 +1216,25 @@ values. These steps do not assert that production or any client has passed.
    browser application's audience and policies remain unchanged. Current
    [portal policy documentation][cf-mcp-portal-policy] says Device Posture
    Checks are enforced; verify the actual upstream OAuth and refresh path
-   under those requirements instead of removing them.
+   under those requirements instead of removing them. Readback 2026-11-07:
+   the one policy, "Owner access", includes only the owner email (one-time
+   PIN) with no require or exclude: its Gateway requirement was emptied at
+   07:10 UTC (audit log), and the Gateway posture rule is no longer
+   referenced, so no posture check applies.
 3. _Managed OAuth readback_ — confirm it is enabled on the MCP application
-   (API `oauth_configuration.enabled`) with approved redirect URIs for the
-   intended clients: `https://claude.ai/api/mcp/auth_callback`,
-   `https://chatgpt.com/connector_platform_oauth_redirect` and
-   `https://chatgpt.com/connector/oauth/*`; allow localhost and loopback only
-   for approved Codex/Claude Code clients. Read back the configured access
-   token and grant-session lifetimes; do not infer them from defaults.
+   (API `oauth_configuration.enabled`) with only the Portal's callbacks as
+   redirect URIs, and that the Portal's Access application allows the
+   intended clients' redirect URIs, such as
+   `https://claude.ai/api/mcp/auth_callback`; allow localhost and loopback
+   only for approved Codex/Claude Code clients. Read back the configured
+   access token and grant-session lifetimes; do not infer them from defaults.
+   Readback 2026-11-07: the origin application allows only
+   `https://mcp.takuk.me/servers-callback` and the dashboard's Kogane server
+   callback, with localhost and loopback off (16:40 UTC); the Portal
+   application allows ChatGPT's two, claude.ai's, Grok's two and Cursor's two
+   (16:36 UTC; listed in the
+   [ADR 0047 amendment](adr/0047-mcp-client-connection.md#amendment-clients-connect-through-the-mcp-portal-2026-11-07)).
+   Access token 5 minutes, grant session 24 hours.
 4. _Normal deployment and domain attachment_ — deploy the reviewed commit
    through the ordinary pipeline and verify the live App bindings agree
    with both production configs: the dedicated `ACCESS_MCP_AUDIENCE` is
@@ -1230,7 +1254,8 @@ values. These steps do not assert that production or any client has passed.
    `authorization_response_iss_parameter_supported` in authorization-server
    metadata. Discovery must belong to the dedicated MCP application.
 6. _Client registration_ — add the intended connector/app/server using the
-   table above and `https://kogane-mcp.takuk.me/mcp`, signing in as the owner.
+   table above and the Portal URL `https://mcp.takuk.me/mcp`, signing in as
+   the owner.
    Registration and an OAuth login alone do not prove a tool works.
 7. _Fresh-session calls_ — in each intended client, start a new conversation
    with only this connector enabled and perform these existing tool calls:
@@ -1301,8 +1326,13 @@ later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
 
 - **Protected-resource `resource`.** claude.ai requires the metadata's
   `resource` to equal the URL entered, path included ([Claude][claude-auth]);
-  the Managed OAuth page does not say what Access publishes. _Question:_
-  what does step 5 show?
+  the Managed OAuth page does not say what Access publishes. Observed
+  2026-11-07: the origin's protected-resource `resource` is
+  `https://kogane-mcp.takuk.me` (no `/mcp`); on 2026-11-04 the
+  [recovery runbook](mcp-recovery.md) recorded the exact `/mcp` resource.
+  claude.ai still connected to the origin `/mcp` URL directly on 2026-11-07
+  (about 15:20 UTC, before the route below was decided). Clients now
+  register the Portal, so the Portal's metadata is the one they check.
 - **Dedicated hostname.** The approved configuration selects a dedicated
   hostname. Its attachment to the Worker and its actual discovery/resource
   metadata still require steps 4–5; the declaration alone proves neither.
@@ -1316,7 +1346,8 @@ later); unset `ACCESS_MCP_AUDIENCE` or remove the grant entry and deploy
   requires `sub` and refuses an assertion without it.
 - **Device posture.** Preserve the approved identity and posture policy.
   Current Portal documentation supports posture checks; actual upstream
-  OAuth requests and refresh under that policy remain live checks.
+  OAuth requests and refresh under that policy remain live checks. Since
+  2026-11-07 07:10 UTC the policy has no posture requirement (step 2).
 - **Plans.** ChatGPT developer mode is documented for paid plans on the web,
   with conflicting statements about write actions on personal plans; the
   configured grant here is read-only. Verify registration and actual reads
