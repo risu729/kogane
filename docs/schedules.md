@@ -102,17 +102,18 @@ therefore have no audit record.
 The next Vpass occurrence, 2026-11-07 21:00 UTC, also ended `uncertain`
 (`dispatch_uncertain`, no `finished_at`). Read from Workers Logs on
 2026-11-08: the Vpass alarm object claimed the occurrence at 21:00:00.609 UTC,
-but no invocation record of that attempt exists, on the Processor or on the
-Vpass Worker. The runtime retried the alarm at 21:01:39 UTC (outcome
-`canceled`, 32 ms), which found the next occurrence already reserved and did
-nothing more, as designed. A Vpass lease was nevertheless held and went silent
-right after 21:00: the 21:10 tick freed it at 21:15:01 UTC
-(`alarm.lease.expire`), so the collector had most likely been called and had
-claimed its lease before both executions stopped without a record. No deploy
-ran in that window and nothing logged an exception or a limit. Other alarms of
-the same minute finished normally, and the reservation for the next
-occurrence stayed armed. The alarm and lease log lines below were added so the
-next such stop shows where it happened.
+but neither the Processor nor the Vpass Worker has an invocation record of
+that attempt. One more alarm invocation of the same object, at 21:01:39 UTC,
+ended `canceled` after 32 ms with no log line. The claim had already moved the
+schedule to the next occurrence, so a retried alarm could only re-arm for it.
+A Vpass lease was nevertheless held: the processor tick triggered at 21:10:05
+freed it at 21:15:01 UTC (`alarm.lease.expire`) under the ten-minute heartbeat
+rule, so its last heartbeat was written before about 21:05. The collector had
+therefore most likely been called and had claimed its lease before both
+executions stopped without a record. No deploy ran in that window, the logs
+show no exception or limit, the other alarms of 21:00 finished normally, and
+the reservation for the next occurrence stayed armed. The alarm and lease log
+lines below were added so the next such stop shows where it happened.
 
 An accepted operations-API collection or session refresh runs through the same
 named collector RPC and the same lease

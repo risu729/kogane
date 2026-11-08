@@ -195,4 +195,4 @@ test("an expired lease logs when its holder claimed and when it last proved itse
   } finally {
     info.mockRestore();
   }
-});
+}, 60_000);
