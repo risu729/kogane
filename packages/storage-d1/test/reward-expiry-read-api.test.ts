@@ -285,6 +285,10 @@ describe("READ expiry keeps the two dates and the history reasons apart", () => 
       read: db,
       readInstanceId: instance.read_instance_id,
       snapshot,
+      revision: {
+        coreEpoch: snapshot.core_epoch,
+        visibilityRevision: snapshot.visibility_revision,
+      },
     };
     const body = (await rewardExpiryFromRead(
       context,

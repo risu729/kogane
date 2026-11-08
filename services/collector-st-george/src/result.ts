@@ -55,7 +55,10 @@ export function stGeorgeScheduledResult(value: unknown): ScheduledResult {
   const result = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
   let failureCode = "collection_failed";
   if (result.status === "busy") failureCode = "collection_busy";
-  else if (result.reason === "persistence-incomplete") failureCode = "terminal_persistence_failed";
+  else if (result.reason === "persistence-incomplete")
+    // The run stays pending under its id with no terminal; a later trigger
+    // reports it once it is stored. It is not a persisted run of this alarm.
+    return { ...base, runIds: [], failureCode: "terminal_persistence_failed" };
   else if (result.reason === "persistence-pending") failureCode = "terminal_persistence_pending";
   else if (result.reason === "state-unavailable") failureCode = "collector_state_unavailable";
   else if (FAILURE_CODES.includes(result.reason as FailureCode))

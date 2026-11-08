@@ -110,7 +110,7 @@ into `needs-rule-verification`.
   - `rule`: rule参照・版・family・確認状態・版の適用期間 `validPeriod`・規約の根拠
     （`evidenceRefs`、`docs/sources` の記録）・対象活動policy参照・期限calendar。
   - `activity`: inactivity ruleが消費した履歴窓・完全性・最古観測日・起算活動（参照と日付）。
-  - `membership`: tier条件つきruleが消費した必要tierと、この保有の該当claim。
+  - `membership`: tier条件つきruleが消費した必要tierと、この保有の該当claim。claimはtierのコードポイント順（`MEMBERSHIP_SQL` の `ORDER BY tier` と同じ順）、同じtierの中はclaimの正規JSON順に並べ、渡された順に依存しない。
   - `uncertaintyCodes`: 算定を妨げないが限定する条件（タイムゾーン仮置き、古い側の履歴欠落、
     自己申告のtier）。
 - `agreement` — `agree` / `disagree` / `not-comparable`。比べられるのは暦日どうしだけで、
@@ -463,6 +463,14 @@ fieldそのものがない応答（このfieldより前のApp）は受け付け�
 `reward_read_model_context_changed` / `reward_read_model_restriction_changed`）を返す。cursorは
 U11と同じ `{snapshotId, readInstanceId, filterDigest, position}` で、別queryのcursorは400
 `cursor_mismatch`、別instance・退役snapshotのcursorは410 `context_expired`。異なるcursorをoffsetとして読み替えることはない。
+
+Retained snapshots: a cursor that still names an older, retained snapshot is refused with the same
+503 code as the published one when the CORE epoch or visibility revision that snapshot was captured
+under has moved since (a use restriction invalidates the rows computed before it); it is never
+continued. A rebuild that moves neither keeps such a cursor readable. The check uses the snapshot's
+own capture, so a snapshot that a later build only re-verified at the new revision (status
+`unchanged`) is still refused once a newer snapshot replaces it; a request without the cursor
+reads the published one. `/api/v2/balances/*` cursors behave the same way.
 
 capability `rewardsV2ReadModel`（`none` / `read-d1`）を `/api/meta` が広告する。`core-d1` は無い。
 COREはreward snapshotを公開したことがなく、都度算定の答えはsnapshotではないからである。

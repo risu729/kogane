@@ -1,8 +1,4 @@
 import { schedulesApi, scheduleBootstrapApi } from "./schedules-api";
-import {
-  EVIDENCE_API_VERSION,
-  type EvidenceMeta,
-} from "../../../packages/observation-shared/src/evidence-contract";
 import { authenticate, browserCaller, mcpCaller } from "./auth";
 import {
   auditedAgentApi,
@@ -43,10 +39,10 @@ import { instrumentCandidatesApi } from "./instrument-candidates-api";
 import { instrumentHistoryApi } from "./instrument-history-api";
 import { instrumentCoverageApi } from "./instrument-coverage-api";
 import { reportsApi } from "./reports-api";
-import { cursor, HttpError, identifier, json, secureResponse } from "./http";
-import { catalogue, detailDto, getArtifact, getRun, listArtifacts, listRuns, raw } from "./read";
+import { HttpError, json, secureResponse } from "./http";
+import { catalogue, raw } from "./read";
+import { EVIDENCE_PREFIX, readEvidenceRoute } from "./evidence-browser-api";
 
-const PREFIX = "/api/evidence/v1";
 function classify(path: string): string {
   const agent = classifyAgentPath(path);
   if (agent !== null) return agent;
@@ -67,7 +63,7 @@ function classify(path: string): string {
   if (path === RECONSTRUCTED_STATE_PATH) return "reconstructed_state";
   if (path === "/api/collection-quality" || path.startsWith("/api/collection-quality/"))
     return "collection_quality";
-  if (path === `${PREFIX}/meta`) return "meta";
+  if (path === `${EVIDENCE_PREFIX}/meta`) return "meta";
   if (/^\/api\/evidence\/v1\/sources\/[^/]+\/runs$/.test(path)) return "source_runs";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts$/.test(path)) return "run_artifacts";
   if (/^\/api\/evidence\/v1\/runs\/[^/]+\/artifacts\/[^/]+\/raw$/.test(path)) return "artifact_raw";
@@ -75,8 +71,9 @@ function classify(path: string): string {
   if (path === "/api/v2/activity" || path === "/api/v2/obligations") return "events_v2";
   if (path === "/api/v2/reports") return "report";
   if (/^\/api\/v2\/reports\/[^/]+(?:\/(?:explanation|export))?$/.test(path)) return "report";
-  if (path.startsWith("/api/v2/rewards")) return "rewards";
-  return path.startsWith("/api/") ? "unknown_api" : "assets";
+  if (path === "/api/v2/rewards" || path.startsWith("/api/v2/rewards/")) return "rewards";
+  // The same boundary `route` answers 404 for: `/api` itself is an API path.
+  return path === "/api" || path.startsWith("/api/") ? "unknown_api" : "assets";
 }
 
 async function route(request: Request, env: Env, url: URL): Promise<Response> {
@@ -180,51 +177,14 @@ async function route(request: Request, env: Env, url: URL): Promise<Response> {
   // A10 read side: 404 unless the projection table exists.
   const eventsResponse = await catalogue(() => eventsApi(env, url));
   if (eventsResponse) return eventsResponse;
-  if (env.EVIDENCE_SOURCE_ID !== "sony-bank") throw new HttpError(503, "source_not_configured");
-  const source = env.EVIDENCE_SOURCE_ID;
+  // The evidence browser (`/api/evidence/v1/*`), whose reader also answers
+  // `kogane.evidence.read`; the raw bytes are streamed here only.
+  const evidence = await readEvidenceRoute(env, url);
+  if (evidence)
+    return "raw" in evidence
+      ? raw(env.EVIDENCE, evidence.raw, request.method === "HEAD")
+      : json(evidence.body);
   const path = url.pathname;
-  if (path === `${PREFIX}/meta`) {
-    if (url.search) throw new HttpError(400, "invalid_query");
-    return json({
-      apiVersion: EVIDENCE_API_VERSION,
-      source: { kind: "central-raw-store", classification: "financial" },
-      capabilities: {
-        readOnly: true,
-        rawEvidence: true,
-        parsedObservations: true,
-        liveCollectors: false,
-      },
-      sources: [{ id: source, label: "Sony Bank" }],
-    } satisfies EvidenceMeta);
-  }
-  const sourceMatch = /^\/api\/evidence\/v1\/sources\/([^/]+)\/runs$/.exec(path);
-  if (sourceMatch) {
-    if (sourceMatch[1] !== source) throw new HttpError(404, "not_found");
-    const before = cursor(url);
-    return json({
-      apiVersion: EVIDENCE_API_VERSION,
-      sourceId: source,
-      coverage: "sealed-only",
-      ...(await catalogue(() => listRuns(env.DB, source, before))),
-    });
-  }
-  const match = /^\/api\/evidence\/v1\/runs\/([^/]+)\/artifacts(?:\/([^/]+)(\/raw)?)?$/.exec(path);
-  if (match) {
-    const runId = identifier(match[1], "r");
-    const before = match[2] ? undefined : cursor(url);
-    if (match[2] && url.search) throw new HttpError(400, "invalid_query");
-    const run = await catalogue(() => getRun(env.DB, source, runId));
-    if (!match[2])
-      return json({
-        apiVersion: EVIDENCE_API_VERSION,
-        run,
-        ...(await catalogue(() => listArtifacts(env.DB, source, runId, before!))),
-      });
-    const artifactId = identifier(match[2], "a");
-    const artifact = await catalogue(() => getArtifact(env.DB, source, runId, artifactId));
-    if (match[3]) return raw(env.EVIDENCE, artifact, request.method === "HEAD");
-    return json({ apiVersion: EVIDENCE_API_VERSION, run, artifact: detailDto(artifact) });
-  }
   if (path === "/api" || path.startsWith("/api/")) throw new HttpError(404, "not_found");
   return env.ASSETS.fetch(request);
 }

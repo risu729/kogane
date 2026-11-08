@@ -40,7 +40,7 @@ import {
   storedPositionQuantity,
 } from "./valuation-on-date.ts";
 
-export const HOLDINGS_CHANGE_REFUSALS = [
+const HOLDINGS_CHANGE_REFUSALS = [
   "invalid_request",
   "invalid_range",
   "date_in_future",

@@ -48,6 +48,7 @@ import {
   type OperationCall,
   type OperationName,
 } from "../../../packages/application/src/index";
+import { RUN_ID as TERMINAL_RUN_ID } from "../../../packages/collection/src/keys";
 import { auditContext, auditedRoute } from "./audit";
 import { principalFor } from "./grants";
 import { boundedText, HttpError, json } from "./http";
@@ -70,12 +71,27 @@ export function isOpsPath(path: string): boolean {
   return path === OPS_PREFIX || path.startsWith(`${OPS_PREFIX}/`);
 }
 
-/** Route label for the request log; identifiers never reach it. */
+/** The first path segments this prefix serves: the six routes, health and schedules. */
+const OPS_ROUTE_HEADS: readonly string[] = [
+  "collections",
+  "imports",
+  "replays",
+  "projections",
+  "sessions",
+  "operations",
+  "health",
+  "schedules",
+];
+
+/**
+ * Route label for the request log: a closed code. Neither identifiers nor any
+ * other path text the caller sent reach it; an unserved segment is `unknown`.
+ */
 export function classifyOpsPath(path: string): string | null {
   if (!isOpsPath(path)) return null;
   const rest = path.slice(OPS_PREFIX.length).replace(/^\//u, "");
   const head = rest.split("/")[0] ?? "";
-  return `ops_${/^[a-z]{1,32}$/u.test(head) ? head : "unknown"}`;
+  return `ops_${OPS_ROUTE_HEADS.includes(head) ? head : "unknown"}`;
 }
 
 // ── request schemas ─────────────────────────────────────────────────────
@@ -99,8 +115,14 @@ const IDEMPOTENCY_KEY = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u)
   .optional();
-/** A run as the terminal contract names it: one path segment, never a key. */
-const RUN_ID = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/u);
+/**
+ * A run as the terminal contract names it: one path segment, never a key.
+ * The grammar is the bucket key's own (`RUN_ID` in `packages/collection`), not
+ * a copy of it: an import names the run whose terminal is
+ * `runs/<source>/<runId>/terminal.json`, so a run id that key refuses could
+ * never register and is refused here, at acceptance, rather than answered 202.
+ */
+const RUN_ID = z.string().regex(TERMINAL_RUN_ID);
 /** A registered parser release id (0028), never a version string a caller invents. */
 const PARSER_RELEASE = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:+-]{0,127}$/u);
 

@@ -78,7 +78,14 @@ interface IdentityCommand {
   label and status come from the target's current claims, or the entity when
   it has none; ambiguous claims are refused.
 - `release-override` appends a `release-override` decision at the current
-  revision and sets `superseded_by` on every active override of the subject.
+  revision, citing every active override of the subject in its
+  `evidence_refs_json`, and sets `superseded_by` on exactly the overrides it
+  cites that are at or before that revision, and only from the command's own
+  ledger row. A second delivery (an identical resend whose batch runs after a
+  later `assign`, or a change commit replayed under its receipt guard)
+  therefore never releases an override made after the release: either the
+  citation bound or the revision bound alone stops it, and both are kept as
+  defense in depth.
   It does not delete or replace the manual mapping row: the manual mapping
   stays current until automatic policy appends the next rule revision. It also
   releases a manual row no decision describes (one written by an older build):
@@ -86,8 +93,11 @@ interface IdentityCommand {
 - All writes of one command are one `D1Database.batch` (one transaction). The
   ledger insert carries every precondition (no such operation id, revision
   matches, target or active override exists); every later statement is joined
-  on the ledger row, so a failed guard writes nothing, and a trigger failure
-  aborts everything including the ledger row.
+  on the ledger row of that same command (operation id, payload digest and
+  actor), so a failed guard writes nothing, a conflicting command that took the
+  operation id first carries none of its rows (the command answers
+  `idempotency_conflict`), and a trigger failure aborts everything including
+  the ledger row.
 - Receipts: `{ operationId, action, kind, referenceId, revision, mappingId,
   decisionRevisionId, payloadDigest }`; `revision` is the mapping revision after
   the command. Ids are derived from the operation id, so a resend produces the

@@ -182,6 +182,13 @@ export interface CardPurchasePage {
     unrecognizedCurrentRows: number;
     /** Why those rows are outside the list, per source and closed reason. */
     unrecognizedReasons: CardPurchaseUnrecognizedReasons;
+    /**
+     * No refund is allocated to the purchase it refunds: the review kind
+     * `card-refund.allocate` exists, but nothing plans or writes an
+     * allocation, so a refund is shown and summed apart from purchases and
+     * never subtracted from one. Stated, not implied, as the page says it.
+     */
+    refundsAllocated: false;
     limit: number;
   };
 }

@@ -701,7 +701,11 @@ guarded, and is covered by a test with a synthetic source that does report one.
 a caller-chosen `operationId` makes a resend idempotent, the actor is the
 principal the server verified, and `expectedStatus` is the state the caller saw.
 All writes of one command are one D1 batch guarded on the ledger row, so a
-failed guard writes nothing. An acceptance appends two decision revisions (one
+failed guard writes nothing. Every statement after the ledger insert needs the
+ledger row of that same command (key, payload digest and actor), so a
+conflicting command that took the key first carries none of its decisions,
+relation or resolution, and the command answers `idempotency_conflict`. An
+acceptance appends two decision revisions (one
 for the proposal, one for the relation it creates), inserts the
 `entity_relations` row, and resolves the proposal. The relation's ends are the
 targets' own `SourceFactRef` ids, `transaction:<id>`, which already carry
@@ -1005,7 +1009,7 @@ every earlier revision stays readable.
 
 A withdrawn link is closed for good, a known limit: 0032 resolves a proposal
 once, so the proposal row stays `accepted` (the withdrawal supersedes the
-decision that accepted it), the triple's latest relation is `rejected`, and
+decision that accepted it), the triple's newest decision is `rejected`, and
 the candidate offers no action again. The same two rows can only be linked
 again through a new proposal, which the candidate pass writes when either
 row's event is re-anchored or revised onto a new observation.
@@ -1239,12 +1243,20 @@ event already retired keeps the period it had.
 - `activity({ basis, offset })` — current event revisions with at least one leg
   on the requested basis, their legs, their live allocations, one total per
   (basis, unit), and `explanationRefs` running event → legs → allocations →
-  source facts → raw locators.
+  source facts → raw locators. A (basis, unit) with a leg that is not exact
+  keeps its total, unknown with that leg's status and reason (the first such
+  leg by index), so an accepted card settlement lists its exact
+  `cash-movement` total beside an `obligation-change` total that is `missing`
+  with `statement_principal_and_fees_unknown`; it is never zero and never
+  left out (INV05).
 - `obligations({ offset })` — principal, live settlements, `settled`,
   `outstanding` (`principal − settled`, exact arithmetic), confirmed and
   projected fee totals kept apart, and the unresolved differences the
   settlements declared. When either side is not exact, `outstanding` is `null`
-  with an `outstandingReasonCode`; it is never zero-filled (INV05).
+  with an `outstandingReasonCode`; it is never zero-filled (INV05). A fee
+  total is `null` only when there is no such fee: a fee that is not exact, or
+  in another unit than the principal, leaves it unknown with a reason (the
+  fee's own status and reason, or a `conflict` with `unit_mismatch`).
 - `reconciliationSignals({ subjectRefs })` — the latest published
   provider-reported balance beside the amount the adopted events'
   `cash-movement` legs imply, and their `difference` with reason codes (`snapshot_boundary_unknown`,
@@ -1296,6 +1308,10 @@ the Worker reads. Otherwise the paths 404 like any unknown route and
 `ApiCapabilities`; both stored capability constants default it to `false` and
 the server replaces it with what the store has. `EVENTS_V2_ENABLED` is not read.
 
+An agent reads both routes through `kogane.events.read`
+([agent API](agent-api.md#ui-read-pages)), which calls the routes' own
+`readEventsRoute` and exists exactly where they do.
+
 `services/app/src/card-purchases-api.ts` serves one more read, to an operator
 only:
 
@@ -1339,9 +1355,13 @@ answer for a set too large to return complete ([read model](read-model.md)),
 rather than partly summed; a statement period narrows it. The provider
 statement totals are listed beside the figures and are never subtracted from
 or compared with them, and `settlementAddsPurchaseExpense` is `false`.
-`coverage` says the list is not a complete transaction history, names the
-excluded shapes, and counts the current provider rows no live event holds,
-across every statement month whatever the filter. `unrecognizedReasons` splits
+`coverage` says the list is not a complete transaction history, says no
+refund is allocated to a purchase (`refundsAllocated: false`: nothing plans or
+writes `card-refund.allocate`, [above](#review-commands-for-purchases-migration-0051),
+so a refund is summed apart and never subtracted from a purchase, as the page
+says beside each refund), names the excluded shapes, and counts the current
+provider rows no live event holds, across every statement month whatever the
+filter. `unrecognizedReasons` splits
 that count per source and closed reason: each such row is classified when the
 page is read by `classifyCardUsage`, the writer's own rule, through the same
 row-to-fact mapping (`packages/application/src/card-usage-fact.ts`), so the
@@ -1377,7 +1397,15 @@ on `bun:sqlite`); production had 298 current rows, 6 of them unrecognised
 synthetic store of about 34,000 usage
 observations (180 days of daily captures) and 8,200 live events, the
 unfiltered first page took about 0.4 s in `bun:sqlite`, of which the usage
-pass was about 0.3 s and the selection about 0.04 s. The candidates add two
+pass was about 0.3 s and the selection about 0.04 s. The pass is proven
+equal to the one shipped before #1020 (frozen in
+`packages/application/test/card-purchase-current-legacy-sql.ts`) for the
+page's current keys and the unrecognised count: on the random stores of
+`packages/read-model/test/card-usage-random-store.ts`
+(`card-purchase-current.test.ts`, which also checks the returned unrecognised
+rows are exactly the first ones by observation id up to each bound) and on the
+scaled store without table statistics (`card-purchase-scale.test.ts`, with
+the plan check). The candidates add two
 queries: one pass over the stage-B `pending_to_posted` proposals, re-deriving
 each target's recognition key by primary-key lookups
 (`packages/application/src/query/card-purchase-candidates.ts`), and one lookup
