@@ -21,8 +21,9 @@
 //   fact of the candidate stays. Merging, rejecting or withdrawing a link, like
 //   accepting a settlement, stays with the operator on the purchases page.
 // - The agent API's bounds and codes. The grant's `maxRows` bounds how deep a
-//   caller pages; the page's own bound on the events one answer may total is
-//   `budget_exceeded` (the route's `413 result_limit_exceeded`); an event id
+//   caller pages, and a next page past it is not offered (`nextPage` says
+//   `budget_exceeded` instead); the page's own bound on the events one answer
+//   may total is `budget_exceeded` (the route's `413 result_limit_exceeded`); an event id
 //   that names nothing gets the answer an out-of-scope ref gets.
 //
 // It reads, and nothing else: no path here writes a row, and a refusal reads
@@ -68,9 +69,22 @@ export interface PurchasesExplanation {
    * purchases page. Stated, not implied: nothing in `data` offers one.
    */
   decisions: "operator-only";
+  /**
+   * Why `data.nextOffset` is what it is, in a closed code: `offered` (it
+   * names the next page), `none` (no event follows this page, or the read is
+   * one exact event), or `budget_exceeded` (events follow, and
+   * `data.summary.events` counts them, but the next page would reach past the
+   * grant's `maxRows`, so its request would be refused with that code and
+   * `data.nextOffset` is null rather than a page this caller cannot fetch).
+   */
+  nextPage: PurchasesNextPage;
   /** The page. Provider-derived text (a counterparty) appears nowhere else. */
   data: AgentCardPurchasePage;
 }
+
+/** The closed codes of `PurchasesExplanation.nextPage`. */
+export const PURCHASES_NEXT_PAGE = ["offered", "none", "budget_exceeded"] as const;
+export type PurchasesNextPage = (typeof PURCHASES_NEXT_PAGE)[number];
 
 export type PurchasesExplainOutcome =
   | { ok: true; explanation: PurchasesExplanation }
@@ -194,6 +208,16 @@ export async function explainCardPurchases(input: {
   // An event id that names nothing is refused like a ref outside the grant.
   if (request.eventId !== undefined && page.items.length === 0)
     return fail("evidence_restricted", ["eventId"]);
+  // The next page only while there is one and this grant may read it: an
+  // offset the same caller would be refused is not offered, and the answer
+  // says why there is none, as the candidate reviews of this package do.
+  const nextPage: PurchasesNextPage =
+    page.nextOffset === null
+      ? "none"
+      : page.nextOffset + CARD_PURCHASE_PAGE_SIZE > grant.budget.maxRows
+        ? "budget_exceeded"
+        : "offered";
+  const agentPage = withoutReviewAffordances(page);
   return {
     ok: true,
     explanation: {
@@ -204,7 +228,8 @@ export async function explainCardPurchases(input: {
         offset,
       },
       decisions: "operator-only",
-      data: withoutReviewAffordances(page),
+      nextPage,
+      data: nextPage === "budget_exceeded" ? { ...agentPage, nextOffset: null } : agentPage,
     },
   };
 }

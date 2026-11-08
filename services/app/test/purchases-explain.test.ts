@@ -329,6 +329,7 @@ describe("the agent reads the operator's page", () => {
       schemaVersion: "kogane-card-purchases-v1",
       query: { period: null, eventId: null, offset: 0 },
       decisions: "operator-only",
+      nextPage: "none",
       data: withoutReviewAffordances(page),
     });
     expect(validAgentCardPurchasePage(body["data"])).toBe(true);
