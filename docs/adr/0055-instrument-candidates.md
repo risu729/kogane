@@ -4,6 +4,9 @@
   [2026-10-09 amendment](#amendment-2026-10-09-route-and-page-as-implemented)
   (route, page, agent read tool and cost) is proposed
 - The [server anchor and history amendment](#amendment-2026-10-09-server-anchor-and-history) below is proposed.
+- The [2026-11-08 amendment](#amendment-2026-11-08-adopt-sbis-bare-domestic-code-onto-its-listing-by-rule)
+  (rule `instrument-auto-v1`: SBI's bare domestic code adopted onto its listing
+  by a recorded rule decision) is proposed.
 - Date: 2026-10-08
 - Issue: part of #546
 
@@ -1129,3 +1132,182 @@ boundary. B14's positive temporal provenance and B15/B16/B17/B20 database
 integration proofs remain pending in the companion plan. The local storage
 primitive amendment above supplies partial database proofs without enabling
 a temporal command; #546 remains open.
+
+## Amendment 2026-11-08: adopt SBI's bare domestic code onto its listing by rule
+
+- Status: proposed
+- Date: 2026-11-08
+- Issue: part of #546; Phase 3 unit 3g ([roadmap](../roadmap.md), layers 0–5)
+- Owner direction, 2026-11-08 03:16 UTC: matches that are almost certainly
+  right (SBI's, for example) may be adopted automatically; the rest may be
+  decided by an agent over MCP when judgement is needed
+  (「SBIの照合とか、ほぼ確実に正しくできるものは自動でいいんですけど。LLM必要ならMCPでもいいが」).
+- Carried by: `packages/domain/src/instrument-auto-adoption.ts` (the rule),
+  `queryInstrumentAutoAdoptions` in
+  `packages/application/src/query/instrument-resolution.ts`,
+  `services/processor/src/instrument-auto-adoption.ts` (the lane), the
+  `rule` recording of `executeIdentityCommand` in
+  `packages/storage-d1/src/core/identity-commands.ts`, and the identity
+  writer's guard in `packages/storage-d1/src/core/identity-store.ts`
+
+### Context
+
+The decision above lets nothing but a person's `identity.assign` adopt a
+candidate. In production every candidate is one shape: on 2026-11-08 the
+read answered 16 proposed candidates, all inside SBI Securities, each
+between `mic-symbol/XTKS/<code>` (a held position on 東証) and
+`sbi-security-code/JP/<code>` (the same code on a venue the SBI rule does not
+map: `PTS（X）`, `東証（外）`, or no market), both stated in JPY, with
+evidence `security-code-equal`, agreements kind, country and currency, and
+gaps ISIN, market, share class and product class. A Japanese securities code
+names one issue on every Japanese venue (a PTS trade is a trade in the listed
+share), so a person reviewing these 16 learns nothing the stored facts do
+not already say. Leaving them open keeps the instrument layer unresolved for
+no benefit.
+
+### Options considered
+
+1. **Keep every adoption manual.** Rejected by the owner's direction: certain
+   matches should not wait on a person.
+2. **Adopt every candidate without a conflict.** Rejected: a code is a ticker
+   in some markets and can be reused, a cross-broker pair depends on the
+   other broker's rule, and an ISIN covers several listings. Those still need
+   judgement.
+3. **Write the adoption as a `manual` mapping under a system actor.**
+   Rejected: it would claim a person decided, and a manual mapping is
+   protected from automatic policy, so the record would misstate both who
+   decided and what may override it.
+4. **One closed, versioned rule for the one certain shape, written as a
+   `rule` mapping revision with a `rule` assign decision and a lane audit
+   record; everything else stays a candidate for a person or an agent.**
+   Chosen.
+
+### Decision
+
+1. **Rule `instrument-auto-v1`** (`instrumentAutoAdoptions`) adopts a
+   candidate only when all of these hold:
+   - it is `proposed` with no hold; its only evidence is
+     `security-code-equal`; it agrees on kind, country and currency;
+   - the anchor is `mic-symbol` on XTKS, XNGO, XFKA or XSAP (the MICs the SBI
+     rule maps) and the subject is `sbi-security-code` scoped `JP` with no
+     RIC; both are of kind `security`, country `JP`, with the same code, and
+     the code is a Japanese securities code (four characters, the first and
+     third digits, the second and fourth digits or capital letters, so JPX's
+     alphanumeric codes such as `130A` count and an eight-digit fund code
+     does not); neither states an ISIN, a share class or a product class;
+   - both identifiers are used by `sbi-securities` only, and every use states
+     JPY (no unconfirmed currency);
+   - nobody decided anything about either: both current mappings are the
+     identity rule's own, every identifier on the anchor's instrument is
+     mapped by rule, the subject shares its instrument with nobody, and no
+     `listed_as` relation in any status joins either identifier to the
+     other's instrument;
+   - the subject is unambiguous: this is its only candidate and it is in no
+     separated pair (a code held on 東証 and 名証 gives the bare code two
+     candidates and is left to a person).
+2. **The write.** An `assign` identity command for the subject onto the
+   anchor's current instrument, with actor `rule:instrument-auto-v1`,
+   verification `server`, operation id
+   `instrument-auto-v1:<subject identifier>:r<subject revision>` (a resend
+   replays), the subject's revision as the expected revision, and a guard
+   that the anchor's current mapping is still the rule revision the read saw
+   on the same instrument. It appends a `rule` mapping revision and a `rule`
+   `assign` decision whose evidence is the new mapping and both identifiers,
+   with a reason naming the rule, the code and the listing. CORE 0029 already
+   allows a `rule` decision on a `rule` mapping; no migration. `rule` is
+   accepted only for `assign` by a `rule:` actor; no HTTP, MCP or UI path
+   passes it.
+3. **The lane** `instrument_auto_adoption`, right after `identity_sweep`, no
+   flag. Each tick a gate counts the pairs of the shape on two instruments,
+   both mapped by rule, from `instrument_identifiers` and the current
+   mappings only (key seeks; no observation table). Zero ends the tick. Else
+   the full candidate read decides, at most once an hour (judged by the
+   lane's own `processor_lane_ticks` row with `evaluated: true`), under the
+   page's bound of 500,000 current identity observations (past it the tick
+   fails with `IdentityObservationBoundExceeded`), and at most 50 adoptions a
+   tick are written. Its tick counts are `pairs`, `evaluated`, `eligible`,
+   `adopted`, `conflicts` and `refused`; each tick that wrote is one `lane`
+   audit record naming the decision rows (ADR 0064, principal
+   `lane:instrument-auto-adoption`).
+4. **Not reverted by a policy version.** The identity writer no longer
+   appends a new rule revision over a current `rule` mapping onto another
+   instrument than the identifier's own. Only an adoption produces one; before
+   this amendment the writer only ever mapped an identifier onto its own
+   instrument, so nothing else changes.
+5. **New identifier state `resolved-by-rule`** in
+   `IDENTIFIER_RESOLUTION_STATES`: an identifier shares its instrument, no
+   manual mapping among the sharers explains it, and a `rule` assign decision
+   at a sharer's current revision does. `resolved-by-decision` still wins
+   when a manual mapping is among the sharers, and `shared-without-decision`
+   stays for a share no recorded decision explains. The facts read marks the
+   current mapping with that decision (`ruleAdopted`, a seek on
+   `decision_revisions_subject`). The coverage answer (ADR 0073) gains the key
+   with its schema version unchanged: every reader in the repository checks
+   the keys against the shared list. The page shows it as
+   `自動規則により同じ銘柄`.
+6. **Corrections.** A person or an agent undoes an adoption with
+   `identity.assign` of the subject back onto its own instrument (a manual,
+   protected mapping the rule never touches; the pair is then proposed again
+   and can be closed with `relation.reject`). A later `release-override` of
+   that manual mapping hands the subject back to automatic policy, which may
+   adopt it again. An anchor a person re-maps between the read and the write
+   stops the write (the guard), and an adopted pair is never re-adopted.
+
+Everything outside the shape stays a candidate with its `identity.assign` and
+`relation.reject` commands, decided by a person on the page or by an agent
+over MCP (`kogane.instruments.candidates`, then the change lifecycle).
+
+### Consequences and limits
+
+- This narrows "nothing adopts on the server" above, and INV07's "rule
+  proposals only propose", by one recorded rule decision, as the
+  provider-link acceptance of `rule:reconciliation-v1` does for reconciliation.
+- Expected in production after the first evaluation: the 16 sbi-securities
+  pairs `adopted`, their 32 identifiers `resolved-by-rule`, the other 8 SBI
+  Securities identifiers `no-candidate`.
+- What an adoption moves: the subject's current mapping. Readers keyed by the
+  current instrument now see one instrument for the listing and the bare
+  code: the reported-state rows name the listing's instrument for a bare-code
+  row, and a holdings change between a bare-code row and a listing row no
+  longer reports `instrument_differs`. Valuation and the report job still key
+  prices by the provider-local `instrument:<source>:<market>:<code>`, and the
+  lot adapter (ADR 0059) is served by no route; a lot query over the bare
+  code's old instrument would name it remapped (`needs_review`).
+- A Japanese code reused after a delisting is the risk this rule accepts:
+  the candidate read compares no period (Consequences above), and the rule
+  adopts on the code. Inside one source, with both identifiers in current
+  published observations, that means SBI shows one code for two issues at
+  once, which a person corrects as in Decision 6.
+- Cost: the gate is two key seeks per bare code; the full read is the walk of
+  the Cost section above (about 0.8 to 0.95 s per 100,000 observations on
+  workerd), at most 24 times a day and only while a pair of the shape waits.
+  Remote D1 is still unmeasured.
+- Cross-broker codes, foreign codes, ISIN and RIC pairs, and a code listed on
+  two Japanese exchanges stay for a person or an agent. A later version of the
+  rule widens the shape only with production evidence.
+
+### Verification
+
+- `packages/domain/test/instrument-auto-adoption.test.ts`: the shape adopted
+  on each Japanese MIC and for an alphanumeric code; a fund-length code,
+  another country, MIC, namespace, source or kind, an ISIN, RIC, share class
+  or product class, a non-JPY, several, missing or unconfirmed currency, a
+  manual mapping on either side or on the anchor's instrument, a `listed_as`
+  relation in any status, and two listings of one code are all left proposed;
+  an adopted pair is not adopted again and reads `resolved-by-rule`, and a
+  manual sharer still reads `resolved-by-decision`.
+- `services/processor/test/instrument-auto-adoption.test.ts`, over CORE
+  migrations with identifiers written by the production identity writer from
+  synthetic SBI rows: the lane adopts as revision 2 (`rule`) with a `rule`
+  decision of `rule:instrument-auto-v1` naming both identifiers, protects
+  nothing, shows in the history as automatic, and the next tick's gate finds
+  nothing; a re-identification under a later policy version keeps the
+  adoption; declined shapes stay proposed while the gate still counts them;
+  the full read runs at most once an hour; a person's undo is not re-adopted;
+  a moved anchor stops the write; `rule` is refused for a non-rule actor and
+  for a release; the gate's plan names no observation table.
+- The lane tick, invocation probe, lane audit and lane order tests in
+  `services/processor/test/`, the coverage contract and API tests, and the
+  page's coverage table test, each with the new lane or state.
+- After deploy: `kogane.instruments.coverage` and
+  `kogane.instruments.candidates` (`view: "decided"`) in production.
