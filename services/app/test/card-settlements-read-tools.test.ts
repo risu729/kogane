@@ -10,7 +10,8 @@ import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import worker from "../src/worker";
 import { callTool, toolContext } from "../src/agent-service";
 import { readMcpTools } from "../src/read-tools";
-import type { Grant } from "../../../packages/application/src/index";
+import { fullGrant, GRANT_LIMITS, type Grant } from "../../../packages/application/src/index";
+import { readerGrant } from "../src/agent-api";
 
 const OWNER = "synthetic-settlement-owner";
 const PRINCIPAL = `mcp-client:${OWNER}`;
@@ -370,6 +371,89 @@ describe("card settlement reads for agents", () => {
     ] as const) {
       expect((await http(tool, args)).status).toBe(404);
       expect((await call(tool, args)).isError).toBe(true);
+    }
+  });
+
+  it("refuse and page alike on the page route and both agent transports, each under its own grant", async () => {
+    // The page holds the browser's reader grant and an MCP client the full
+    // grant; both carry the published row budget, so they page equally deep.
+    expect(readerGrant(OWNER).budget.maxRows).toBe(GRANT_LIMITS.maxRows);
+    expect(fullGrant(PRINCIPAL).budget.maxRows).toBe(GRANT_LIMITS.maxRows);
+    const STATEMENT = "statementKey=statement-read-tool";
+    for (const [args, query, status, code] of [
+      [{}, "", 200, null],
+      [{ offset: 0 }, "?offset=0", 200, null],
+      [{ offset: 950 }, "?offset=950", 200, null],
+      [{ offset: 951 }, "?offset=951", 413, "budget_exceeded"],
+      [{ offset: 1_000_000 }, "?offset=1000000", 413, "budget_exceeded"],
+      [{ offset: -1 }, "?offset=-1", 400, "invalid_query"],
+      [{ offset: 1_000_001 }, "?offset=1000001", 400, "invalid_query"],
+      [{ offset: 1e20 }, "?offset=100000000000000000000", 400, "invalid_query"],
+      [{ offset: 1.5 }, "?offset=1.5", 400, "invalid_query"],
+      [{ offset: "abc" }, "?offset=abc", 400, "invalid_query"],
+      [{ offset: "01" }, "?offset=01", 400, "invalid_query"],
+      [{ offset: "" }, "?offset=", 400, "invalid_query"],
+      [{ proposalId: ID }, `?proposalId=${ID}`, 200, null],
+      [{ proposalId: ID, offset: 0 }, `?proposalId=${ID}&offset=0`, 400, "invalid_query"],
+      [{ statementKey: "statement-read-tool", offset: 950 }, `?${STATEMENT}&offset=950`, 200, null],
+      [
+        { statementKey: "statement-read-tool", offset: 951 },
+        `?${STATEMENT}&offset=951`,
+        413,
+        "budget_exceeded",
+      ],
+      [{ relatedTo: ID, offset: 951 }, `?relatedTo=${ID}&offset=951`, 413, "budget_exceeded"],
+      // The budget precedes the anchor's read: a missing anchor deep down is not looked up.
+      [
+        { relatedTo: "missing", offset: 951 },
+        "?relatedTo=missing&offset=951",
+        413,
+        "budget_exceeded",
+      ],
+    ] as const) {
+      const route = await worker.fetch(
+        new Request(`https://fixture.test/api/v2/reconciliation/card-settlements${query}`, {
+          headers: { "cf-access-jwt-assertion": await token(APP_AUD) },
+        }),
+        environment(),
+      );
+      const expected = (await route.json()) as Record<string, unknown>;
+      expect({ query, status: route.status, code: expected["code"] ?? null }).toEqual({
+        query,
+        status,
+        code,
+      });
+      const viaHttp = await http(LIST, args);
+      expect({ query, status: viaHttp.status, body: await viaHttp.json() }).toEqual({
+        query,
+        status,
+        body: expected,
+      });
+      const viaMcp = await call(LIST, args);
+      expect({ query, isError: viaMcp.isError === true, body: viaMcp.structuredContent }).toEqual({
+        query,
+        isError: status >= 400,
+        body: expected,
+      });
+    }
+    // The ownership read takes `proposalId` alone, on every path.
+    for (const [args, query] of [
+      [{ proposalId: ID, offset: -1 }, `?proposalId=${ID}&offset=-1`],
+      [{ proposalId: ID, statementKey: "k" }, `?proposalId=${ID}&statementKey=k`],
+      [{}, ""],
+    ] as const) {
+      const route = await worker.fetch(
+        new Request(
+          `https://fixture.test/api/v2/reconciliation/card-settlements/ownership${query}`,
+          { headers: { "cf-access-jwt-assertion": await token(APP_AUD) } },
+        ),
+        environment(),
+      );
+      expect(route.status).toBe(400);
+      const expected = await route.json();
+      expect(expected).toMatchObject({ code: "invalid_query" });
+      expect(await (await http(OWNERSHIP, args)).json()).toEqual(expected);
+      expect((await call(OWNERSHIP, args)).structuredContent).toEqual(expected);
     }
   });
 

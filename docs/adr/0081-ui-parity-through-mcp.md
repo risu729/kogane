@@ -172,6 +172,11 @@ What the code does today (main `02a915a`):
   on `mcp`, whose catalogue paths are now `ui` and `mcp`
   (`services/app/test/schedule-tools.test.ts`;
   [agent access](../agent-api.md#maintenance-windows)).
+- 2026-11-07: `GET /api/v2/reconciliation/card-settlements` and its
+  `/ownership` read call `readCardSettlementsForGrant` and
+  `readCardOwnershipForGrant`, the functions `kogane.card-settlements.read`
+  and `kogane.card-settlements.ownership` call, under the browser's reader
+  grant ([amendment below](#amendment-one-request-rule-and-one-budget-for-the-card-settlement-reads-2026-11-07)).
 - 2026-11-07: `schedules.survey.decide` is on `ui` and `mcp`
   (`kogane.schedules.survey.decide`, which an MCP client applies as itself under
   ADR 0084; five review reasons, and any disable, re-enable or overlap, kept
@@ -231,3 +236,67 @@ is an R0 read of one object in the audit log, which records the object's
 count, never its bytes. `services/app/test/page-read-raw.test.ts` compares
 the decoded bytes with both downloads and checks the refusals, the size
 bound and tampered bytes.
+
+## Amendment: one request rule and one budget for the card settlement reads (2026-11-07)
+
+- Status: proposed
+- Date: 2026-11-07
+
+### Context
+
+The `カード照合` page route `GET /api/v2/reconciliation/card-settlements` (and
+`/ownership`) parsed its own query string and called the queries directly,
+while `kogane.card-settlements.read` and `.ownership` called
+`readCardSettlementsForGrant` and `readCardOwnershipForGrant`, which wrap the
+same queries. The two answered one request differently, against point 2: an
+`offset` of `-1` was `400 invalid_offset` on the route and
+`400 invalid_query` over MCP, and the route read any offset up to 1,000,000
+while a tool refused `offset + 50` above the grant's `maxRows` (1000) with
+`413 budget_exceeded`.
+
+### Options considered
+
+1. **The route's rules for both.** The service would answer
+   `invalid_offset` (a new code in the closed `financial-error-v1` list that
+   `kogane.capabilities` publishes) and take no row budget from the page's
+   grant, or a grant past `GRANT_LIMITS.maxRows`, which `validGrant` refuses.
+   This widens a published agent contract and makes the operator page an
+   exception to the per-call bound ADR 0084 keeps for every caller.
+2. **Keep two rule sets, deep paging only for the operator.** The divergence
+   this amendment removes.
+3. **The service's rules for both (chosen).** The route is an adapter: it
+   turns its query into the tool's arguments and reads under the reader grant
+   a signed-in browser holds over every GET route (`readerGrant`), as the
+   unmatched statements and account candidate pages already do. The budget is
+   the grant's: the reader grant and every MCP client's full grant hold
+   `maxRows` 1000, so both page to offset 950.
+
+### Decision
+
+Option 3. On the route, a malformed list or ownership request is the
+service's `400 invalid_query` as `financial-error-v1` (was `invalid_offset` or
+`invalid_query` as `{error, requestId}`), and a list read with `offset + 50`
+above 1000 is `413 budget_exceeded` (was a page). The `/statements` grouping,
+which has no MCP read yet, keeps its own rules until it gets one.
+
+### Consequences
+
+- The page, the agent HTTP route and MCP give one status and one body for the
+  same request.
+- The page does not read the flat list; a statement's
+  candidates and a review's competitors are paged 50 at a time, 36 per
+  statement on average on the scaled store. A statement or competitor list of more than
+  1,000 candidates is readable only to offset 950, and the page's next-page
+  link past it is refused. Raising that is a change to `GRANT_LIMITS` or to
+  the read's paging, for both paths at once.
+- Other routes keep `invalid_offset` until their own adapters are reviewed.
+
+### Verification
+
+`services/app/test/card-settlements-read-tools.test.ts` sends offsets -1, 0,
+950, 951, 1,000,000, 1,000,001, 10^20, 1.5, non-numeric and empty to the
+route, the agent HTTP route and MCP and gets one status and body on all three.
+`services/app/test/card-settlements-api-differential.test.ts` runs the frozen
+route handler (`card-settlements-api-frozen.ts`) beside the adapter on a
+store of 1,101 candidates and finds every answer byte-identical except these
+two changes; the existing route tests are unchanged.
