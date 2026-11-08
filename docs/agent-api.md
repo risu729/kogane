@@ -1048,23 +1048,48 @@ the App's capability check (`decisionCapabilityFor`), the delegated envelope's
 `commandFamilies`, the Processor route's plan and decision checks
 (`delegatedPlanAllowed`, `delegatedDecisionAllowed`) and the writer's
 `delegatedCommandFamilyAllowed` all derive from it, so a family is decidable at
-every gate or at none. A `prepare` checks the plan
-(open, not expired, digest unchanged, simulation not stale) and the approval,
-and returns a `cfm_` digest; it writes no approval and no decision. A
-`confirm` with that digest within ten minutes applies it, and a repeated
-confirm replays the result. A refusal from the lifecycle is the same code on
-both paths (`stale_context` with the candidate's ref, `plan_not_found`, …).
-An override release whose subject has nothing left to release is refused
-`target_missing` at approve and at commit on both paths, and one whose
-override another release ends between the commit's reads and its batch
-`stale_context`
-([`services/app/test/identity-release-parity.test.ts`](../services/app/test/identity-release-parity.test.ts)).
-Two limits remain. A refusal from the tool's own check before the Processor
-is called (plan, simulation, approval) carries the code without `refs`. And
-when one input has several refusals, the tool checks the plan's simulation
-before the approval while `commit` checks the approval first, so a release
-with nothing to release and an expired approval is `target_missing` over MCP
-and `approval_expired` on the page's path.
+every gate or at none.
+
+The tools' pre-check is `previewApproval` or `previewCommit`
+(`packages/application/src/command/decision-preview.ts`,
+[ADR 0081 amendment](adr/0081-ui-parity-through-mcp.md#amendment-one-pre-check-for-the-mcp-approve-and-commit-tools-2026-11-08)).
+It runs the functions `approve` and `commit` themselves run on the loaded plan
+before they write (`approvalPrecheck`; `commitPrecheck`, then `reversalCheck`
+for a `revertsAuditId`), then the simulation the preview carries. A `prepare`
+runs it, writes no approval and no decision, and returns a `cfm_` digest and
+the simulation report; for an operation id the caller already completed it
+answers with that receipt as a replay, as `commit` does, issues no
+confirmation and is recorded `replayed` with `operation:<id>`. A `confirm`
+with the digest within ten minutes checks the confirmation first (an invalid,
+used or expired one is refused with its own code before any lifecycle
+refusal, since the Processor runs `approve` or `commit` only for a verified
+confirmation), then runs the pre-check and forwards to the Processor, whose `approve` or `commit` applies it and answers
+every refusal the lifecycle gives itself; a repeated confirm replays the
+result. So a refusal is the same code with the same `refs`, in the same
+order, on both paths, at `prepare` and at `confirm`: an ended override
+release with an expired approval is `approval_expired` with the approval id,
+a moved plan with an expired approval the same, a wrong digest on an expired
+plan `stale_context` with the plan id, another principal's approval
+`approval_required`, an ended release alone `target_missing` with the
+subject, and a release whose override another release ends between the
+commit's reads and its batch `stale_context` with the plan id ([`services/app/test/command-precheck-parity.test.ts`](../services/app/test/command-precheck-parity.test.ts),
+[`services/app/test/identity-release-parity.test.ts`](../services/app/test/identity-release-parity.test.ts)).
+The caller's authority stays each path's own: the operator's grant on the
+page's path, the MCP client's capability and confirmation here.
+
+Two differences belong to the R2 step. The confirmation page offers 承認 and
+確定 only on a simulation report that loaded and is not stale
+(`apps/web/src/pages/Confirm.tsx`), which `approve` and `commit` do not
+re-check; the tools return that report as the preview, so after every
+lifecycle check they refuse, at `prepare` and at `confirm`, a plan whose
+simulation fails (with the code and refs `kogane.command.simulate` gives) and
+one whose re-derived plan differs while none of its pinned revisions moved
+(`stale_context` with the plan id). And a `prepare` writes nothing to the
+change lifecycle: a plan whose pinned revisions moved is refused
+`stale_context` with the plan id and each moved ref, as on the page's path,
+but `approve` (and `commit`, at its batch) also marks the plan `stale`, and a
+`prepare` leaves it as it is, as the page's `simulate` does; a `confirm`
+leaves that refusal to the Processor, which marks it.
 
 This is how the カード照合 decisions work over MCP (Phase 2 unit 2g.2,
 [ADR 0081](adr/0081-ui-parity-through-mcp.md)): `card-settlement.accept`,

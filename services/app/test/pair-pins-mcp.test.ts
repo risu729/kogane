@@ -229,8 +229,10 @@ it("a decision under the pair's other reference makes an MCP approval and commit
   expect(otherCommit.isError).not.toBe(true);
   expect(await rowsOf(OTHER)).toBe(1);
 
-  // Confirming the prepared commit, or preparing it again, is refused as
-  // stale, and nothing is written under the plan's own reference.
+  // Confirming the prepared commit is refused as stale, and the Processor's
+  // `commit` marks the plan stale (ADR 0081, 2026-11-08 amendment), so
+  // preparing it again is `plan_not_open`, as the page's `commit` answers.
+  // Nothing is written under the plan's own reference.
   const confirmed = await invoke("kogane.command.commit", {
     ...commitBody,
     step: "confirm",
@@ -238,9 +240,16 @@ it("a decision under the pair's other reference makes an MCP approval and commit
   });
   expect(confirmed.isError).toBe(true);
   expect(confirmed.structuredContent.error).toBe("stale_context");
+  expect(
+    (
+      await env.DB.prepare("SELECT status FROM change_plans WHERE plan_id=?")
+        .bind(accept.planId)
+        .first<{ status: string }>()
+    )?.status,
+  ).toBe("stale");
   const again = await invoke("kogane.command.commit", { ...commitBody, step: "prepare" });
   expect(again.isError).toBe(true);
-  expect(again.structuredContent.error).toBe("stale_context");
+  expect(again.structuredContent.error).toBe("plan_not_open");
   expect(await rowsOf(OWN)).toBe(0);
 
   // The plan made before that decision is refused at approval too.

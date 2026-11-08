@@ -714,7 +714,12 @@ it("real MCP R2 owner decision prepares, confirms through the existing writer, a
     revertsAuditId: "aud_11111111-2222-4333-8444-555555555555",
     step: "prepare",
   });
-  expect(invalidReverse.result.structuredContent.error).toBe("revert_invalid");
+  // `commit`'s own reversal check, which the tool's pre-check runs after the
+  // plan's and the approval's (ADR 0081).
+  expect(invalidReverse.result.structuredContent).toEqual({
+    error: "stale_context",
+    refs: [reverse.plan.planId, "revert_invalid"],
+  });
   const reverseConfirmation = await invoke("kogane.command.commit", {
     ...reverseCommit,
     step: "prepare",
@@ -748,17 +753,20 @@ it("real MCP R2 owner decision prepares, confirms through the existing writer, a
       .first(),
   ).not.toBeNull();
   // The second release's expected revision still holds, but nothing is left
-  // to release. The tool's own re-simulation refuses the confirmation before
-  // the commit batch, so no receipt is kept, its approval stays unspent and
-  // its plan open. The command layer's commit gives the HTTP route the same
-  // `target_missing` (services/processor/test/change-lifecycle.test.ts).
+  // to release. The Processor's `commit` refuses the confirmation before its
+  // batch, so no receipt is kept, its approval stays unspent and its plan
+  // open: the same `target_missing`, with the subject, that the HTTP route
+  // gives (services/processor/test/change-lifecycle.test.ts).
   const stale = await invoke("kogane.command.commit", {
     ...secondCommit,
     step: "confirm",
     confirmationDigest: secondConfirmation.result.structuredContent.confirmation.digest,
   });
   expect(stale.result.isError).toBe(true);
-  expect(stale.result.structuredContent).toEqual({ error: "target_missing" });
+  expect(stale.result.structuredContent).toEqual({
+    error: "target_missing",
+    refs: ["instrument_mapping:delegated-history-identifier"],
+  });
   expect(
     await env.DB.prepare("SELECT count(*) n FROM operation_receipts WHERE operation_id=?")
       .bind(secondCommit.operationId)

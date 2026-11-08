@@ -1,10 +1,11 @@
 // ADR 0081 point 2: an override release with nothing left to release gets the
-// same refusal code on the page's path (`/api/command/v1/*`) and over MCP
-// (`kogane.command.approve` and `.commit`), at approve and at commit, and a
-// release whose override another release ends between its commit's reads and
-// its batch gets the same `stale_context` on both. Both adapters forward to
-// the Processor's one command route, which runs `approve` and `commit` in
-// packages/application; the MCP decision tools re-simulate the plan first.
+// same refusal, code and refs, on the page's path (`/api/command/v1/*`) and
+// over MCP (`kogane.command.approve` and `.commit`), at approve and at
+// commit, and a release whose override another release ends between its
+// commit's reads and its batch gets the same `stale_context` on both. Both
+// adapters forward to the Processor's one command route, which runs `approve`
+// and `commit` in packages/application; the MCP decision tools run the same
+// checks first (`previewApproval`, `previewCommit`).
 //
 // Real App Worker, real CORE migrations and the Processor's real command
 // route over the same store. Every identity is invented.
@@ -322,9 +323,8 @@ describe("an override release with nothing left to release, on the page's path a
       failed: true,
       body: { error: "target_missing", refs: [subjectRef] },
     });
-    // The tool's own re-simulation answers before the Processor is called,
-    // with the code alone.
-    expect(approvedMcp).toEqual({ failed: true, body: { error: approvedHttp.body.error } });
+    // The tool's pre-check is `approve`'s own, so the code and the refs.
+    expect(approvedMcp).toEqual(approvedHttp);
 
     const committedHttp = await http("commit", {
       planId: commitOverHttp.plan.planId,
@@ -344,8 +344,8 @@ describe("an override release with nothing left to release, on the page's path a
       failed: true,
       body: { error: "target_missing", refs: [subjectRef] },
     });
-    expect(confirmedMcp).toEqual({ failed: true, body: { error: committedHttp.body.error } });
-    expect(preparedMcp).toEqual(confirmedMcp);
+    expect(confirmedMcp).toEqual(committedHttp);
+    expect(preparedMcp).toEqual(committedHttp);
 
     // No approval, receipt or decision; each plan as open as it was, each
     // approval unspent.

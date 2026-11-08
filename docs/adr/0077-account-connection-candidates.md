@@ -481,9 +481,11 @@ Synthetic data only.
   projection input" shows the projection reading the two orientations apart).
 - `services/app/test/pair-pins-mcp.test.ts` on workerd: over real MCP, a plan
   approved and prepared for commit, then a rejection committed under the other
-  producer's reference, is refused with `stale_context` at confirm and at a
-  new prepare, and a plan made before that decision is refused at approval;
-  nothing is written under the plan's own reference.
+  producer's reference, is refused with `stale_context` at confirm, which
+  marks the plan stale, and with `plan_not_open` at a new prepare (since the
+  [ADR 0081 amendment of 2026-11-08](0081-ui-parity-through-mcp.md#amendment-one-pre-check-for-the-mcp-approve-and-commit-tools-2026-11-08)),
+  and a plan made before that decision is refused at approval; nothing is
+  written under the plan's own reference.
 
 ## Amendment 2026-11-08: the correction history of a source account
 
