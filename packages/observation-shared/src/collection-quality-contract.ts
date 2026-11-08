@@ -546,8 +546,11 @@ const cells = z
     ),
   );
 
-/** `GET /api/collection-quality/<sourceId>/accounts` (ADR 0088). */
-export const ACCOUNT_COVERAGE_API_VERSION = 1;
+/**
+ * `GET /api/collection-quality/<sourceId>/accounts` (ADR 0088); version 3
+ * dates every named capture and includes its provider data type catalogue.
+ */
+export const ACCOUNT_COVERAGE_API_VERSION = 3;
 export const ACCOUNT_COVERAGE_SUFFIX = "/accounts";
 /** More cells than this in one source is refused (413), never cut. */
 export const ACCOUNT_COVERAGE_CELL_BOUND = 2_000;
@@ -587,28 +590,69 @@ const accountPeriod = z
     observations: id,
     /** The cell's own reasons, as the cell page states them. */
     reasons: distinct(z.enum(CELL_REASONS)),
+    /**
+     * The age of this named capture. Standing independently states whether
+     * that capture contributes to current data.
+     */
+    freshness,
   })
   .check(
     z.refine((value) =>
       value.standing === "newest-not-current" ? true : value.standing === value.cellState,
     ),
+    z.refine((value) => value.freshness.ageDays !== null),
   );
 
-const accountDataType = z.strictObject({
-  dataset: z.nullable(text),
-  parser: text,
-  kind: z.enum(OBSERVATION_KINDS),
-  periods: z.array(accountPeriod).check(z.minLength(1), z.maxLength(ACCOUNT_COVERAGE_ENTRY_BOUND)),
-});
+/** A group's value must belong to a newest named capture, including its wait state. */
+function newestFreshnessMatches(
+  periods: readonly {
+    capture: { capturedAt: string };
+    freshness: { state: string; ageDays: number | null };
+  }[],
+  value: { state: string; ageDays: number | null },
+): boolean {
+  const newest = Math.max(...periods.map((entry) => Date.parse(entry.capture.capturedAt)));
+  return periods.some(
+    (entry) =>
+      Date.parse(entry.capture.capturedAt) === newest &&
+      entry.freshness.state === value.state &&
+      entry.freshness.ageDays === value.ageDays,
+  );
+}
 
-const coveredAccount = z.strictObject({
-  accountId: text,
-  /** The account's own label (`accounts.label`), as the identities page shows it. */
-  label: z.string().check(z.maxLength(512)),
-  /** The current mapping statuses of the source accounts that name it here. */
-  statuses: distinct(z.enum(MAPPING_STATUSES)).check(z.minLength(1)),
-  dataTypes: z.array(accountDataType).check(z.minLength(1), z.maxLength(1_000)),
-});
+const accountDataType = z
+  .strictObject({
+    dataset: z.nullable(text),
+    parser: text,
+    providerTypes: distinct(z.enum(PROVIDER_DATA_TYPES), PROVIDER_DATA_TYPES.length),
+    kind: z.enum(OBSERVATION_KINDS),
+    periods: z
+      .array(accountPeriod)
+      .check(z.minLength(1), z.maxLength(ACCOUNT_COVERAGE_ENTRY_BOUND)),
+    /** That of its newest named capture, with that period's wait state. */
+    freshness,
+  })
+  .check(z.refine((value) => newestFreshnessMatches(value.periods, value.freshness)));
+
+const coveredAccount = z
+  .strictObject({
+    accountId: text,
+    /** The account's own label (`accounts.label`), as the identities page shows it. */
+    label: z.string().check(z.maxLength(512)),
+    /** The current mapping statuses of the source accounts that name it here. */
+    statuses: distinct(z.enum(MAPPING_STATUSES)).check(z.minLength(1)),
+    dataTypes: z.array(accountDataType).check(z.minLength(1), z.maxLength(1_000)),
+    /** That of its freshest period over every data type. */
+    freshness,
+  })
+  .check(
+    z.refine((value) =>
+      newestFreshnessMatches(
+        value.dataTypes.flatMap((entry) => entry.periods),
+        value.freshness,
+      ),
+    ),
+  );
 
 /** A cell neither of whose captures names an account, with the cell's own reasons. */
 const unattributed = z.strictObject({
@@ -624,6 +668,9 @@ const unattributed = z.strictObject({
 const accountCoverage = z
   .strictObject({
     apiVersion: z.literal(ACCOUNT_COVERAGE_API_VERSION),
+    freshnessAsOf,
+    dataTypesVersion: z.literal(PROVIDER_DATA_TYPES_VERSION),
+    dataTypes,
     sourceId,
     latestFetchRun: fetchRun,
     /** Every cell of the source was read: no page, no cut. */
@@ -648,6 +695,30 @@ const accountCoverage = z
             sum + account.dataTypes.reduce((inner, type) => inner + type.periods.length, 0),
           0,
         ) <= ACCOUNT_COVERAGE_ENTRY_BOUND,
+    ),
+    // A period's age is that of the capture it names, counted to the answer's date.
+    z.refine((value) =>
+      value.accounts.every((account) =>
+        account.dataTypes.every((type) =>
+          type.periods.every((entry) =>
+            ageOf(entry.capture.capturedAt, value.freshnessAsOf.date, entry.freshness.ageDays),
+          ),
+        ),
+      ),
+    ),
+    // Reverse membership is checked against this answer's self-contained catalogue.
+    z.refine((value) =>
+      value.accounts.every((account) =>
+        account.dataTypes.every((type) => {
+          const expected = (value.dataTypes ?? [])
+            .filter((entry) => entry.parsers.includes(type.parser))
+            .map((entry) => entry.type);
+          return (
+            expected.length === type.providerTypes.length &&
+            expected.every((entry, index) => entry === type.providerTypes[index])
+          );
+        }),
+      ),
     ),
   );
 

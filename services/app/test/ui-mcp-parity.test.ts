@@ -213,7 +213,7 @@ function widestConfiguration(): Record<string, unknown> {
   };
 }
 
-async function publishedTools(): Promise<Set<string>> {
+async function publishedDefinitions(): Promise<{ name: string; description: string }[]> {
   const assertion = await new SignJWT({ type: "app" })
     .setProtectedHeader({ alg: "RS256", kid: "fixture" })
     .setIssuer(ISSUER)
@@ -235,8 +235,14 @@ async function publishedTools(): Promise<Set<string>> {
     { ...env, ...widestConfiguration() } as Env,
   );
   expect(response.status).toBe(200);
-  const body = (await response.json()) as { result: { tools: { name: string }[] } };
-  return new Set(body.result.tools.map((tool) => tool.name));
+  const body = (await response.json()) as {
+    result: { tools: { name: string; description: string }[] };
+  };
+  return body.result.tools;
+}
+
+async function publishedTools(): Promise<Set<string>> {
+  return new Set((await publishedDefinitions()).map((tool) => tool.name));
 }
 
 // ── the guards ───────────────────────────────────────────────────────────
@@ -287,6 +293,23 @@ describe("catalogue operations on ui are published on mcp (ADR 0081, point 4)", 
 });
 
 describe("UI read routes have an MCP read (ADR 0081, point 4)", () => {
+  it("publishes the self-contained account catalogue and named-capture freshness contract", async () => {
+    expect(READ_ROUTE_TOOLS["/api/collection-quality/:source/accounts"]).toEqual([
+      "kogane.collection-quality.read",
+    ]);
+    const tool = (await publishedDefinitions()).find(
+      (entry) => entry.name === "kogane.collection-quality.read",
+    )!;
+    for (const term of [
+      "freshnessAsOf",
+      "named capture",
+      "independent of standing",
+      "dataTypesVersion",
+      "providerTypes",
+      "provider-data-types-v1",
+    ])
+      expect(tool.description).toContain(term);
+  });
   const routes = [
     ...Object.keys(READ_ROUTE_TOOLS),
     ...Object.keys(READ_ROUTE_GAPS),

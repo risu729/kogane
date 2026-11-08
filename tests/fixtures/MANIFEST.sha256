@@ -50,6 +50,7 @@ e173fab01f81df0c56d419aca93a8e8da7ee70e1e932191f1954fe3b957fe0aa  tests/fixtures
 f68812d7cce61b817826495f1eca31c6ab5b210a2839ae5c36861efb3b40c37a  tests/fixtures/observation-pipeline/v-point-pay-parser-boundaries/balance-addition.json
 9222ea3cc2e20cd9c6e3cb817cf8f116c079e0b8fd1de85c5de8c6fcb702699d  tests/fixtures/observation-pipeline/v-point-pay-parser-boundaries/charge.json
 475e884fa896e209de77eb8fc8b05512f551bb37e9311a8690670b61ee7d0a7a  tests/fixtures/observation-pipeline/v-point-pay-parser-boundaries/declined.json
+b80a0c7df6f99b9945f4c1b295a313cc58778dd56ae9d985fcdb882bb3d48670  tests/fixtures/observation-pipeline/v-point-pay-parser-boundaries/expected-1.0.1.json
 de0518df097bf07d84c76f810d59206deaef20f8821a3c736b25007c0444ce19  tests/fixtures/observation-pipeline/v-point-pay-parser-boundaries/usage.json
 2bf9b6d0cde4bd7baa4ff0e706ef3af58c57cbb854f3d278919eb44c30086e00  tests/fixtures/observation-pipeline/v-point/balance-info.json
 06c39f15a2d07da1df1b463e3c7a208fa094f3ade558162363e900e01c870305  tests/fixtures/observation-pipeline/v-point/history-page-0001.json
