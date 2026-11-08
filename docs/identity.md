@@ -287,7 +287,9 @@ Shinsei only. `reviewAccountCandidates`
   to `source_account:<id>`, with evidence `connection-review-confirmed` and
   the review's artifact refs. Status comes from the newest stored relation of
   the pair (`accepted`, `rejected`, else `proposed`) under any reference it
-  may have been recorded under, listed as `recordedContainment`: the
+  may have been recorded under, where each reference's relation is its newest
+  decision and a later proposal never replaces one (ADR 0077's amendment of
+  2026-11-08), listed as `recordedContainment`: the
   candidate's own (`this-connection`), another producer's current review of
   the same identity value (`same-identity-value`), or a reference migration
   0029 backfilled under a key the identity-value rewrite (migration 0063)
@@ -308,10 +310,12 @@ Shinsei only. `reviewAccountCandidates`
   (`aggregator-account-connection-scoped`, and `several-direct-accounts` when
   one connection pins several direct accounts) and reports a `same_account`
   relation already stored between its two sides, in either orientation, each
-  with its own status. No status of the pair is derived from them, and the
-  balance projection reads each orientation as a triple of its own, so a
-  `same_account` plan pins only its own triple (nothing else changes what it
-  showed or writes) and a rejection withdraws only its own orientation;
+  with its own status by the same rule: an agent's later `same_account`
+  proposal does not hide a person's acceptance or rejection. No status of the
+  pair is derived from them, and the balance projection reads each orientation
+  as a triple of its own, so a `same_account` plan pins only its own triple
+  (nothing else changes what it showed or writes) and a rejection withdraws
+  only its own orientation;
 - **connections**: every current review with its state (`confirmed`,
   `unresolved`, `evidence-ineligible`) and its aggregator source accounts of
   any producer; **unreviewed**: aggregator source accounts no current review
@@ -330,7 +334,7 @@ and the page `/identities/account-candidates` (`口座の対応候補`), whose
 buttons plan the named payload with the reason a person writes after reading
 the candidate again; approval and commit happen on the confirmation screen.
 Views `open`, `held`, `decided`, `connections`, `unreviewed`; 50 items a page.
-Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 newest
+Bounds: 64 current reviews, 1,000 aggregator source accounts, 10,000 current
 relation rows (and 10,000 backfilled relations under a rewritten key),
 refused whole past each. Every read is keyed (ADR 0077, Cost).
 
