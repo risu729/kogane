@@ -48,7 +48,7 @@ runs/mobile-suica/<run-id>/terminal.json    run completion record written last (
 
 HTML and JSON contain the owner's transport/purchase history, balances and amounts. The R2 bucket must not be public. Stored HTML already has `baseVariable` replaced by a fixed sentinel; the original value is not saved to R2. Cookies, passkeys and WebAuthn assertions are not stored either.
 
-Date search means "on or before the specified day", with at most 100 records per 1 page. v2 captures only 1 page: fewer than 100 records is complete success; exactly 100 saves the 3 artifacts, then returns `partial` / `history_boundary_unproven`. It does not move to a previous-day cursor or claim complete capture.
+Date search uses `指定日以前` ("on or before the specified day"), with at most 100 records per 1 page. v2 captures only 1 page: fewer than 100 records is complete success; exactly 100 saves the 3 artifacts, then returns `partial` / `history_boundary_unproven`. It does not move to a previous-day cursor or claim complete capture.
 The alarm entry point (`alarmCollection`, `src/worker.ts`) reports a persisted `partial`
 run as completed (`packages/collection/src/schedule-result.ts`); the `partial` status and
 its issue code stay on the terminal. A run whose terminal was not written is reported as failed.
