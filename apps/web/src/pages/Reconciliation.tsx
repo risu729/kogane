@@ -191,6 +191,12 @@ function OlderCandidates({
   const [requested, setRequested] = useState(false);
   const [offset, setOffset] = useState(0);
   const query = useStatementCandidates(group.statementKey, offset, requested);
+  // Several statements can show their whole lists at once: each pager, its
+  // spoken count and its loading state name the statement they belong to.
+  const lead = group.candidates[0];
+  const statement = lead
+    ? `${statementSource(lead)} · ${lead.facts.statement.sourceAccount} · ${lead.facts.statement.period ?? "請求月不明"}`
+    : group.statementKey;
   if (!requested)
     return (
       <button className="button" type="button" onClick={() => setRequested(true)}>
@@ -200,7 +206,7 @@ function OlderCandidates({
   return (
     <QueryBoundary
       query={query}
-      label="この請求の候補"
+      label={`${statement} の請求の候補`}
       isEmpty={(data) => data.items.length === 0}
       empty="この請求の候補はほかにありません。"
     >
@@ -211,8 +217,9 @@ function OlderCandidates({
             .map((review) => (
               <SettlementCard key={review.proposalId} review={review} />
             ))}
-          <nav className="pagination" aria-label="この請求の候補のページ">
+          <nav className="pagination" aria-label={`${statement} の請求の候補のページ`}>
             <span role="status" aria-live="polite">
+              <span className="visually-hidden">{statement} の請求の候補：</span>
               {offset + 1}–{offset + data.items.length} 件目 / {group.candidateCount} 件
             </span>
             <button
