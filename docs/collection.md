@@ -1297,7 +1297,7 @@ format change is needed for that step.
   `waitingForHuman`, and a run that lost its session carries
   `human_required_approval` (G3-10, G3-11). `/api/status` reports
   `waitingForHuman` while the person still has to act.
-- **Open limits (owner decision pending; the code is as described).**
+- **Open limits (decided 2026-11-08, not yet implemented; the code is as described).**
   - _A failed logout makes a finished backfill partial and unrecoverable._ In
     the completion branch of `SmbcBackfillSession.alarm()`
     (`src/session.ts`, `progress.completedChunks >= ranges.length`), a
@@ -1314,8 +1314,11 @@ format change is needed for that step.
     sign-off differently: `collectPrestiaBank`
     (`services/collector-prestia-bank/src/client.ts`) catches it and returns
     `signoffFailed: true`, the run stays `success`, and `signoffFailed` is
-    reported only in the body the run returns, not in its terminal. Whether a
-    failed logout should cost the run its coverage is not decided.
+    reported only in the body the run returns, not in its terminal. Owner
+    decision (2026-11-08): a failed logout after a complete collection keeps
+    the run `success` with a flag, as Prestia does, as one rule for every
+    collector; the work is
+    [#1177](https://github.com/risu729/kogane/issues/1177).
     `test/retry-diagnostics.test.ts` ("a completion whose logout fails ends
     partial with logout_failed and cannot be resumed") pins today's behaviour.
   - _A successful backfill claims a day still in progress._ `finishAndStart`
@@ -1331,8 +1334,9 @@ format change is needed for that step.
     for the `to` computed at the new approval, so today a run resumes only if
     the person approves on the JST day it started, and after such a change a
     stopped run stored with the old end day would no longer match and would
-    start a fresh backfill. Both the end day and the resume comparison are
-    undecided.
+    start a fresh backfill. Owner decision (2026-11-08): fix both, so no
+    `success` claims a day in progress and a stopped run still resumes; the
+    work is [#1178](https://github.com/risu729/kogane/issues/1178).
 - Verified with synthetic data only: `test/shared-collection.test.ts` and
   `worker-test/shared-data-bucket.test.ts` and `worker-test/continuation.test.ts`,
   which stage initial and resumed runs into a real

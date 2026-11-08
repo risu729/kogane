@@ -3140,11 +3140,10 @@ Phase 3 is done when:
   verbatim cell in `extra` keeps a trailing line break. Text after a
   closing quote (`"ab"c`) is likewise joined into the field. No stored
   export is known to contain either.
-  Two choices are open: whether such a file fails the artifact or keeps
-  the rows before the quote with a reason, and where the check lives.
   `util.ts` is in the digest closure of all 43 parser releases, so a
-  change there releases every parser; a CSV reader of its own for
-  `paypay-csv` and the Sony history CSV parser would release only those.
+  change there releases every parser. Owner decision (2026-11-08): fix the
+  shared reader, and tolerate such a file rather than fail it; the work is
+  [#1176](https://github.com/risu729/kogane/issues/1176).
 - **Sony history pages and identical rows.** `sony-bank-history-json`
   and `sony-bank-history-csv` give a row the id
   `sony-bank-history:<fingerprint of currency, date, signed amount and
