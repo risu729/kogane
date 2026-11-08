@@ -429,10 +429,12 @@ function SourceAccounts({ sourceId }: { sourceId: string }): ReactNode {
             件を、観測が対応付けられた口座ごとに並べます。保存記録のない期間は列挙できず、欠落とも取得済みとも判定しません。別の取得元にある同じ口座は、その取得元で表示します。
           </p>
           <p>
-            新しさは、この口座を含む取得のうち現在の表示に採用されたものの日付から{" "}
-            {data.freshnessAsOf.date}
-            （日本時間）までの日数です。口座とデータ種別の新しさは、その中で最も新しい期間のものです。最新の取得にだけ口座がある期間は、現在の表示に採用された取得がないため「取得なし」と表示します。
+            新しさは、各期間に表示する取得の日付から {data.freshnessAsOf.date}
+            （日本時間）までの日数です。口座とデータ種別の新しさは、その中で最も新しい取得のものです。現在の表示への採用状況は、各期間に別に表示します。
           </p>
+          <Panel title="口座表示の提供元データ種別">
+            <DataTypes entries={data.dataTypes} />
+          </Panel>
           {data.accounts.length === 0 ? (
             <EmptyState>
               口座に対応付けられた観測がありません。取得や取引がないことの証明ではありません。
@@ -453,7 +455,10 @@ function SourceAccounts({ sourceId }: { sourceId: string }): ReactNode {
                   {account.dataTypes.map((type) => (
                     <section key={`${type.dataset}/${type.parser}/${type.kind}`}>
                       <h3>
-                        {KIND_LABELS[type.kind]} · {type.dataset ?? "データ種別不明"}
+                        {type.providerTypes.length
+                          ? type.providerTypes.map((value) => DATA_TYPE_LABELS[value]).join(" / ")
+                          : "提供元のデータ種別不明"}{" "}
+                        · {KIND_LABELS[type.kind]} · {type.dataset ?? "データ種別不明"}
                       </h3>
                       <p>
                         解析: {type.parser} · 新しさ: <Freshness value={type.freshness} />
@@ -565,9 +570,11 @@ export function CollectionQualityPage(): ReactNode {
                     日本時間基準。成否を問わず最新の取得記録の日付。データ種別ごとの新しさは下の一覧）
                   </p>
                   <Reasons codes={selected.reasons} />
-                  <Panel title="取得元が提供するデータ種別">
-                    <DataTypes entries={selected.dataTypes} />
-                  </Panel>
+                  {!byAccount ? (
+                    <Panel title="取得元が提供するデータ種別">
+                      <DataTypes entries={selected.dataTypes} />
+                    </Panel>
+                  ) : null}
                   <Panel title="最後の試行と取得結果">
                     {selected.schedules.length ? (
                       selected.schedules.map((schedule) => (

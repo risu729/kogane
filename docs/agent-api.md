@@ -801,12 +801,15 @@ Each source of the summary and each cell of `view: "cells"` carries its
 freshness under `collection-freshness-v1`, counted to the answer's
 `freshnessAsOf`
 ([evidence browser](evidence-browser.md#collection-quality-apicollection-quality));
-in `view: "accounts"` each period carries its cell's freshness when the
-cell's current capture names the account (none when only the newest,
-not-current capture does), and each data type and account that of its
-freshest period ([ADR 0088, amendment of 2026-11-08](adr/0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period)). Each summary source with a collector lists its
+in `view: "accounts"` every period ages its own named capture independently
+of standing; each data type and account carries its newest named capture's
+freshness ([ADR 0088, amendment of 2026-11-08](adr/0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period)). Each summary source with a collector lists its
 provider's data types under `provider-data-types-v1`
 ([ADR 0087](adr/0087-provider-data-type-catalogue.md)).
+The account answer (API version 3) independently carries `dataTypesVersion`
+and source-level `dataTypes`. Each parser group's `providerTypes` reverses
+that catalogue's parser membership in catalogue order; unknown parsers map
+to `[]`. Partial and uncollected entries retain their tracking issues.
 Its cells carry provider fetch-unit keys (card tokens, account digests,
 connection ids, a branch and account number; ADR 0045), so it needs
 `evidence.read`, the capability of the evidence routes, not `records.read`.

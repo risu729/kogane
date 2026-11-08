@@ -280,7 +280,11 @@ describe.if(runnable)("collection quality browser", () => {
       ).not.toBeNull();
       await page.getByRole("heading", { name: "Synthetic browser account" }).waitFor();
       expect(await page.getByText("口座の対応が未確定", { exact: false }).count()).toBe(1);
-      expect(await page.getByText("取引 · globalpass-activity", { exact: true }).count()).toBe(1);
+      expect(
+        await page
+          .getByText("カード利用明細 · 取引 · globalpass-activity", { exact: true })
+          .count(),
+      ).toBe(1);
       expect(await page.getByText("最新の取得が現在の表示対象", { exact: false }).count()).toBe(1);
       expect(await page.getByText("この口座の観測 1 件", { exact: false }).count()).toBe(1);
       // collection-freshness-v1: the account, its data type and its one month
@@ -340,6 +344,25 @@ describe.if(runnable)("collection quality browser", () => {
           .getByText("この口座・カードの原本ファイルがありません", { exact: false })
           .count(),
       ).toBeGreaterThan(0);
+      expect(await auditView(page)).toEqual([]);
+      // The account answer owns the catalogue: gaps remain visible even
+      // when no observation names an account, without relying on summary data.
+      await page.goto(`${origin}/collection-quality?source=sony-bank&view=accounts`);
+      const catalogue = page
+        .locator("section.panel")
+        .filter({
+          has: page.getByRole("heading", { name: "口座表示の提供元データ種別", exact: true }),
+        });
+      await catalogue.waitFor();
+      expect(await catalogue.getByText("入出金明細", { exact: false }).count()).toBe(1);
+      expect(await catalogue.getByText("一部のみ", { exact: false }).count()).toBeGreaterThan(0);
+      expect(await catalogue.getByText("未収集", { exact: false }).count()).toBeGreaterThan(0);
+      expect(
+        await catalogue.locator('a[href="https://github.com/risu729/kogane/issues/449"]').count(),
+      ).toBeGreaterThan(0);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      ).toBe(true);
       expect(await auditView(page)).toEqual([]);
       // More cells than the bound is refused whole (413): no account, period
       // or count is shown, only the refusal.

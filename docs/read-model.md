@@ -417,10 +417,9 @@ account answer counts ages to one instant, `freshnessAsOf` (the route's request 
 days. A cell's age is its current capture's; a source's is its newest visible
 fetch run's, whatever that run's outcome. The cells and the account view read
 the source's own jobs (`SOURCE_JOBS_SQL`) to tell what the source waits on;
-`ACCOUNT_COVERAGE_SQL` itself is unchanged. In the account view a period the
-cell's current capture names carries the cell's freshness, a
-`newest-not-current` period none, and a data type and an account their
-freshest period's ([ADR 0088, amendment of 2026-11-08](adr/0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period)).
+`ACCOUNT_COVERAGE_SQL` itself is unchanged. In the account view every period
+ages its own named capture independently of standing; a data type and account
+carry their newest named capture's freshness ([ADR 0088, amendment of 2026-11-08](adr/0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period)).
 
 ### Cost
 

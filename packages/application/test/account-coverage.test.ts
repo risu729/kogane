@@ -11,10 +11,12 @@ import {
   SOURCE_JOBS_SQL,
 } from "../../read-model/src/collection-quality.ts";
 import type { SqlExecutor } from "../../read-model/src/reader.ts";
+import { PROVIDER_DATA_TYPE_CATALOGUE } from "../src/collection/provider-data-types.ts";
 import {
   CollectionQualityLimitError,
   queryAccountCoverage,
   queryCollectionQualityCells,
+  queryCollectionQualitySummary,
 } from "../src/query/collection-quality.ts";
 import {
   ACCOUNT_COVERAGE_CELL_BOUND,
@@ -183,11 +185,13 @@ async function expectSameCells(store: QualityStore, sourceId: string, answer: Ac
           state: period.cellState,
           reasons: period.reasons,
         });
-        // A period the current capture names has the cell page's own freshness.
-        if (period.standing !== "newest-not-current")
-          expect(period.freshness).toEqual(
-            cells.find((value) => key(value) === key({ ...type, ...period }))!.freshness,
-          );
+        // Parity applies wherever both views name the same capture.
+        const cell = cells.find((value) => key(value) === key({ ...type, ...period }))!;
+        if (
+          cell.current?.fetchRunId === period.capture.fetchRunId &&
+          cell.current.capturedAt === period.capture.capturedAt
+        )
+          expect(period.freshness).toEqual(cell.freshness);
       }
   for (const value of answer.unattributed) {
     expect(seen.has(key(value))).toBe(false);
@@ -198,7 +202,117 @@ async function expectSameCells(store: QualityStore, sourceId: string, answer: Ac
     expect(seen.get(key(value))).toEqual({ state: value.state, reasons: value.reasons });
 }
 
+const named = (accounts: number) =>
+  JSON.stringify(
+    Array.from({ length: accounts }, (_, index) => [
+      "current",
+      `synthetic-account-${String(index)}`,
+      `Synthetic ${String(index)}`,
+      "identified",
+      "transaction",
+      1,
+    ]),
+  );
+const syntheticAccountRows = (accounts: number) =>
+  Array.from({ length: ACCOUNT_COVERAGE_CELL_BOUND }, (_, index) => ({
+    dataset: "synthetic-dataset",
+    parser_name: "synthetic-parser",
+    fetch_unit_key: `synthetic-unit-${String(index)}`,
+    period_kind: "latest",
+    period: null,
+    period_state: null,
+    current_rule: "published-eligible",
+    newest_run_id: 1,
+    newest_captured_at: "2099-01-01T00:00:00.000Z",
+    newest_run_succeeded: 1,
+    latest_producer_run_id: 1,
+    artifacts: 1,
+    observations: accounts,
+    unresolved_identities: 0,
+    identity_missing: 0,
+    unit_outcome_unknown: 0,
+    raw_stored: 1,
+    not_queued: 0,
+    not_eligible: 0,
+    published: 1,
+    pending: 0,
+    failed: 0,
+    unpublished: 0,
+    failure_codes_json: "[]",
+    unit_failed: 0,
+    unit_failure_code: null,
+    incomplete_coverage: 0,
+    coverage_causes_json: "[]",
+    unreported_coverage: 0,
+    current_run_id: 1,
+    current_captured_at: "2099-01-01T00:00:00.000Z",
+    accounts_json: named(accounts),
+  }));
+
 describe("account coverage", () => {
+  test("a group's newest capture keeps its own wait, across types and within one Tokyo date", async () => {
+    const older = {
+      ...syntheticAccountRows(1)[0]!,
+      unit_failed: 1,
+      unit_failure_code: "human_required_reauth",
+    };
+    const newer = {
+      ...syntheticAccountRows(1)[0]!,
+      newest_run_id: 2,
+      current_run_id: 2,
+      newest_captured_at: "2099-01-01T01:00:00.000Z",
+      current_captured_at: "2099-01-01T01:00:00.000Z",
+    };
+    for (const otherType of [false, true]) {
+      const rows = [older, { ...newer, dataset: otherType ? "another-dataset" : newer.dataset }];
+      const answer = await queryAccountCoverage(
+        {
+          all: async <T>(sql: string) => (sql === SOURCE_JOBS_SQL ? [] : rows) as T[],
+          first: async <T>() =>
+            ({ source_id: "paypay", fetch_run_id: 2, succeeded: 1, completed_at: null }) as T,
+        },
+        { sourceId: "paypay", asOf: "2099-01-07T00:00:00.000Z" },
+      );
+      expect(validAccountCoverage(answer)).toBe(true);
+      expect(answer!.dataTypes).toBeNull();
+      expect(answer!.accounts[0]!.dataTypes.every((type) => type.providerTypes.length === 0)).toBe(
+        true,
+      );
+      expect(answer!.accounts[0]!.freshness).toEqual({ state: "stale", ageDays: 6 });
+      expect(
+        answer!.accounts[0]!.dataTypes.find((type) => type.dataset === newer.dataset)!.freshness,
+      ).toEqual(
+        otherType ? { state: "human-required", ageDays: 6 } : { state: "stale", ageDays: 6 },
+      );
+    }
+  });
+  test("provider types reverse every source catalogue and leave unknown parsers unclassified", async () => {
+    // Exercise the actual reader's reverse lookup for every catalogue source
+    // and parser, including parsers shared by multiple provider data types.
+    for (const [sourceId, catalogue] of Object.entries(PROVIDER_DATA_TYPE_CATALOGUE)) {
+      for (const parser of new Set([
+        ...catalogue.flatMap((entry) => entry.parsers),
+        "synthetic-unknown-parser",
+      ])) {
+        const one = { ...syntheticAccountRows(1)[0]!, parser_name: parser };
+        const answer = await queryAccountCoverage(
+          {
+            all: async <T>(sql: string) => (sql === SOURCE_JOBS_SQL ? [] : [one]) as T[],
+            first: async <T>() =>
+              ({ source_id: sourceId, fetch_run_id: 1, succeeded: 1, completed_at: null }) as T,
+          },
+          { sourceId, asOf: AS_OF },
+        );
+        expect(validAccountCoverage(answer)).toBe(true);
+        expect(answer!.dataTypesVersion).toBe("provider-data-types-v1");
+        expect(answer!.dataTypes).toEqual([...catalogue]);
+        expect(answer!.accounts[0]!.dataTypes[0]!.providerTypes).toEqual(
+          catalogue.filter((entry) => entry.parsers.includes(parser)).map((entry) => entry.type),
+        );
+      }
+    }
+  });
+
   test("an unknown source is null; an empty source has no account and no cell", async () => {
     const store = new QualityStore();
     try {
@@ -600,12 +714,39 @@ describe("account coverage", () => {
         { state: "human-required", ageDays: 8 },
       ]);
       await expectSameCells(store, "global-pass", waiting);
+      // Summary, cells and accounts apply the same wait to matching captures.
+      const asOf = "2099-02-10T03:00:00.000Z";
+      const parity = async (state: "human-required" | "disabled") => {
+        const account = await read(store, "global-pass", asOf);
+        const summary = await queryCollectionQualitySummary(executor(store), { asOf });
+        const source = summary.sources.find((entry) => entry.sourceId === "global-pass")!;
+        expect(account.accounts[0]!.freshness).toEqual(source.freshness);
+        expect(source.freshness.state).toBe(state);
+        const cells = await queryCollectionQualityCells(executor(store), {
+          sourceId: "global-pass",
+          offset: 0,
+          asOf,
+        });
+        for (const group of account.accounts[0]!.dataTypes)
+          for (const period of group.periods)
+            expect(period.freshness).toEqual(
+              cells!.cells.find((cell) => cell.period.value === period.period.value)!.freshness,
+            );
+      };
+      await parity("human-required");
+      store.db.run("UPDATE collection_schedules SET enabled = 0 WHERE id = 'prestia-globalpass'");
+      await parity("human-required");
+      store.occurrence("prestia-globalpass", {
+        nominalAt: "2099-02-04T18:17:00.000Z",
+        status: "completed",
+      });
+      await parity("disabled");
     } finally {
       store.db.close();
     }
   });
 
-  test("an account only a newest, not-current capture names has no age: nothing current names it", async () => {
+  test("an account only a newest, not-current capture names has its capture's age: nothing current names it", async () => {
     const store = new QualityStore();
     const ids = new Identities(store, "st-george");
     try {
@@ -654,10 +795,10 @@ describe("account coverage", () => {
       // The cell's current capture (two days old) names only the old account.
       expect(of).toEqual({
         "synthetic-account-new": [
-          { state: "no-capture", ageDays: null },
-          { state: "no-capture", ageDays: null },
+          { state: "recent", ageDays: 1 },
+          { state: "recent", ageDays: 1 },
           "newest-not-current",
-          { state: "no-capture", ageDays: null },
+          { state: "recent", ageDays: 1 },
         ],
         "synthetic-account-old": [
           { state: "recent", ageDays: 2 },
@@ -699,9 +840,8 @@ describe("account coverage", () => {
         // An age the capture does not give, or one the policy does not allow.
         edit((copy) => (period(copy).freshness = { state: "stale", ageDays: 5 })),
         edit((copy) => (period(copy).freshness = { state: "recent", ageDays: 4 })),
-        // A current period with no age, a newest-not-current one with one.
+        // Every named capture must have its age, regardless of standing.
         edit((copy) => (period(copy).freshness = { state: "no-capture", ageDays: null })),
-        edit((copy) => (period(copy).standing = "newest-not-current")),
         // A data type or an account whose age is not its freshest period's.
         edit(
           (copy) => (copy.accounts[0]!.dataTypes[0]!.freshness = { state: "stale", ageDays: 9 }),
@@ -785,54 +925,9 @@ describe("account coverage", () => {
   });
 
   test("more account periods than the bound is refused whole, never cut", async () => {
-    const named = (accounts: number) =>
-      JSON.stringify(
-        Array.from({ length: accounts }, (_, index) => [
-          "current",
-          `synthetic-account-${String(index)}`,
-          `Synthetic ${String(index)}`,
-          "identified",
-          "transaction",
-          1,
-        ]),
-      );
-    const rows = (accounts: number) =>
-      Array.from({ length: ACCOUNT_COVERAGE_CELL_BOUND }, (_, index) => ({
-        dataset: "synthetic-dataset",
-        parser_name: "synthetic-parser",
-        fetch_unit_key: `synthetic-unit-${String(index)}`,
-        period_kind: "latest",
-        period: null,
-        period_state: null,
-        current_rule: "published-eligible",
-        newest_run_id: 1,
-        newest_captured_at: "2099-01-01T00:00:00.000Z",
-        newest_run_succeeded: 1,
-        latest_producer_run_id: 1,
-        artifacts: 1,
-        observations: accounts,
-        unresolved_identities: 0,
-        identity_missing: 0,
-        unit_outcome_unknown: 0,
-        raw_stored: 1,
-        not_queued: 0,
-        not_eligible: 0,
-        published: 1,
-        pending: 0,
-        failed: 0,
-        unpublished: 0,
-        failure_codes_json: "[]",
-        unit_failed: 0,
-        unit_failure_code: null,
-        incomplete_coverage: 0,
-        coverage_causes_json: "[]",
-        unreported_coverage: 0,
-        current_run_id: 1,
-        current_captured_at: "2099-01-01T00:00:00.000Z",
-        accounts_json: named(accounts),
-      }));
     const executorOf = (accounts: number): SqlExecutor => ({
-      all: async <T>(sql: string) => (sql === SOURCE_JOBS_SQL ? [] : rows(accounts)) as T[],
+      all: async <T>(sql: string) =>
+        (sql === SOURCE_JOBS_SQL ? [] : syntheticAccountRows(accounts)) as T[],
       first: async <T>() =>
         ({ source_id: "vpass", fetch_run_id: 1, succeeded: 1, completed_at: null }) as T,
     });

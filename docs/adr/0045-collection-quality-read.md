@@ -442,7 +442,8 @@ triggered run completes).
   its own `apiVersion` 1) is unchanged: its periods state their capture
   times and carry no freshness. ADR 0088's
   [amendment of 2026-11-08](0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period)
-  later applies this policy to that view (`apiVersion` 2).
+  later applies this policy to that view (`apiVersion` 3), using each period's
+  named capture independently of standing and carrying the provider catalogue.
 - Synthetic tests: `packages/domain/test/collection-freshness.test.ts`
   (Tokyo dates across midnight and offsets, every threshold, waits, refusals,
   and that the contract's check accepts exactly the policy's answers);

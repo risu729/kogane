@@ -893,11 +893,10 @@ The summary, the cells and the account view name `freshnessAsOf` (`policy`,
 the instant `at` and its Asia/Tokyo `date`), and each source and cell carries
 `freshness: { state, ageDays }`. In the account view
 ([ADR 0088, amendment of 2026-11-08](adr/0088-collection-quality-per-account.md#amendment-2026-11-08-freshness-per-account-data-type-and-period))
-each period carries its cell's freshness when the cell's current capture
-names the account, and no age (`no-capture`, or what the source or the unit
-waits on) when only the newest, not-current capture does; each data type and
-each account carries that of its freshest period, the smallest age, so a
-stale month beside a fresh one leaves the group fresh. The
+each period ages its own named capture independently of standing. Each data
+type and account carries its newest named capture's freshness, selected by
+instant across its periods and data types respectively. A stale month beside
+a fresh one leaves the group fresh. The
 age is in Asia/Tokyo civil days from the capture's date to that date: for a
 cell its current capture, for a source its newest visible fetch run whatever
 its outcome. The state is `same-day` (0),
@@ -916,8 +915,15 @@ account, data type and period (当日の取得, N日前の取得, 古い, 本人
 定期実行の停止中, 取得なし).
 
 **Data types the provider offers** (`provider-data-types-v1`,
-[ADR 0087](adr/0087-provider-data-type-catalogue.md)). The summary names
-`dataTypesVersion`, and each source with a collector carries `dataTypes`: the
+[ADR 0087](adr/0087-provider-data-type-catalogue.md)).
+The account answer is self-contained: API version 3 carries its own
+`dataTypesVersion` and source-level `dataTypes`. Each account parser group
+also carries `providerTypes`, the reverse membership of its parser in that
+source's catalogue, in catalogue order (an unknown parser maps to `[]`).
+The account screen uses these fields for Japanese type labels and the same
+partial/uncollected statuses and tracking links, even with no named accounts.
+
+The summary names `dataTypesVersion`, and each source with a collector carries `dataTypes`: the
 data types its provider offers for the account kinds it collects (`balance`,
 `cash_movement`, `card_usage`, `card_statement`, `position`, `execution`,
 `settlement_cash`, `asset_transfer`, `income`, `valuation_history`,

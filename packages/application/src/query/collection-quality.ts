@@ -587,28 +587,15 @@ interface AccountBucket {
 const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
- * The freshness of a group of an account's periods (a data type, or the whole
- * account): that of its freshest period, the one with the smallest age, which
- * a fresh capture leaves fresh; stale or with no age, it is explained by a
- * period's own "a person must act" unit code, else by what the source waits on
- * (`collection-freshness-v1`, the cell rule of `cellFreshness` over a group).
+ * A group uses its newest named capture's freshness, independently of standing.
+ * Equal capture instants retain the cell read's stable order.
  */
-function freshestFreshness(
-  periods: readonly AccountCoveragePeriod[],
-  asOfDate: string,
-  wait: CollectionWait,
-): CollectionFreshness {
-  const own = periods.some((entry) => entry.reasons.includes("user_action_required"))
-    ? "human-required"
-    : wait;
-  let freshest: AccountCoveragePeriod | null = null;
+function freshestFreshness(periods: readonly AccountCoveragePeriod[]): CollectionFreshness {
+  let freshest = periods[0]!;
   for (const entry of periods)
-    if (
-      entry.freshness.ageDays !== null &&
-      (freshest === null || entry.freshness.ageDays < freshest.freshness.ageDays!)
-    )
+    if (Date.parse(entry.capture.capturedAt) > Date.parse(freshest.capture.capturedAt))
       freshest = entry;
-  return collectionFreshness(freshest?.capture.capturedAt ?? null, asOfDate, own);
+  return { ...freshest.freshness };
 }
 
 export interface AccountCoverageInput {
@@ -635,10 +622,8 @@ export interface AccountCoverageInput {
  * `identified` keeps that status.
  *
  * Freshness (`collection-freshness-v1`, ADR 0088's amendment of 2026-11-08):
- * a period whose account the cell's current capture names carries the cell
- * page's own freshness; a `newest-not-current` period has no age, since no
- * current capture names its account; a data type and an account carry their
- * freshest period's (`freshestFreshness`).
+ * every period uses the capture it names, even when it is not current. A
+ * data type and account use their newest named capture's freshness.
  */
 export async function queryAccountCoverage(
   executor: SqlExecutor,
@@ -648,6 +633,7 @@ export async function queryAccountCoverage(
   if (source === null) return null;
   const asOf = freshnessAsOf(input.asOf);
   const wait = await waitOfSource(executor, source.source_id);
+  const providerTypes = providerDataTypes(source.source_id);
   const rows = await executor.all<AccountCoverageRow>(ACCOUNT_COVERAGE_SQL, [input.sourceId]);
   if (rows.length > ACCOUNT_COVERAGE_CELL_BOUND) throw new CollectionQualityLimitError();
   const accounts = new Map<string, AccountBucket>();
@@ -697,24 +683,23 @@ export async function queryAccountCoverage(
       const type = JSON.stringify([value.dataset, value.parser, kind]);
       const periods = bucket.types.get(type) ?? [];
       bucket.types.set(type, periods);
+      const capture = inCurrent
+        ? value.current!
+        : { fetchRunId: value.newest.fetchRunId, capturedAt: value.newest.capturedAt };
       periods.push({
         unitKey: value.unitKey,
         period: value.period,
         currentRule: value.currentRule,
         cellState: value.state,
         standing,
-        capture: inCurrent
-          ? value.current!
-          : { fetchRunId: value.newest.fetchRunId, capturedAt: value.newest.capturedAt },
+        capture,
         observations: inCurrent ? seen.current : seen.newest,
         reasons: value.reasons,
-        freshness: inCurrent
-          ? cellFreshness(value, asOf.date, wait)
-          : collectionFreshness(
-              null,
-              asOf.date,
-              value.reasons.includes("user_action_required") ? "human-required" : wait,
-            ),
+        freshness: collectionFreshness(
+          capture.capturedAt,
+          asOf.date,
+          value.reasons.includes("user_action_required") ? "human-required" : wait,
+        ),
       });
       entries += 1;
     }
@@ -724,6 +709,8 @@ export async function queryAccountCoverage(
   return {
     apiVersion: ACCOUNT_COVERAGE_API_VERSION,
     freshnessAsOf: asOf,
+    dataTypesVersion: PROVIDER_DATA_TYPES_VERSION,
+    dataTypes: providerTypes,
     sourceId: source.source_id,
     latestFetchRun: fetchRun(source),
     cells: rows.length,
@@ -741,8 +728,11 @@ export async function queryAccountCoverage(
               dataset,
               parser,
               kind,
+              providerTypes: (providerTypes ?? [])
+                .filter((entry) => entry.parsers.includes(parser))
+                .map((entry) => entry.type),
               periods,
-              freshness: freshestFreshness(periods, asOf.date, wait),
+              freshness: freshestFreshness(periods),
             };
           })
           .sort(
@@ -756,11 +746,7 @@ export async function queryAccountCoverage(
           label: bucket.label,
           statuses: MAPPING_STATUSES.filter((status) => bucket.statuses.has(status)),
           dataTypes,
-          freshness: freshestFreshness(
-            dataTypes.flatMap((type) => type.periods),
-            asOf.date,
-            wait,
-          ),
+          freshness: freshestFreshness(dataTypes.flatMap((type) => type.periods)),
         };
       }),
     unattributed,

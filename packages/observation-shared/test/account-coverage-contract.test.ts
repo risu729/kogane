@@ -19,14 +19,14 @@ const period = {
   freshness: { state: "recent", ageDays: 2 },
 };
 const NONE = { state: "no-capture", ageDays: null };
-/** The freshness of the freshest period, as the read gives it with no wait. */
+/** A group's freshness belongs to its newest named capture. */
 function freshest(periods: unknown[]): unknown {
-  const ages = periods
-    .map((entry) => (entry as { freshness?: { ageDays: number | null } }).freshness?.ageDays)
-    .filter((age): age is number => typeof age === "number");
-  if (ages.length === 0) return NONE;
-  const age = Math.min(...ages);
-  return { state: age === 0 ? "same-day" : age <= 3 ? "recent" : "stale", ageDays: age };
+  const entries = periods as (typeof period)[];
+  return (
+    [...entries].sort(
+      (a, b) => Date.parse(b.capture.capturedAt) - Date.parse(a.capture.capturedAt),
+    )[0]?.freshness ?? NONE
+  );
 }
 const account = (accountId: string, periods: unknown[] = [period]) => ({
   accountId,
@@ -36,6 +36,7 @@ const account = (accountId: string, periods: unknown[] = [period]) => ({
     {
       dataset: "statement-page",
       parser: "vpass-statement-page",
+      providerTypes: ["card_usage", "card_statement"],
       kind: "transaction",
       periods,
       freshness: freshest(periods),
@@ -44,7 +45,12 @@ const account = (accountId: string, periods: unknown[] = [period]) => ({
   freshness: freshest(periods),
 });
 const answer = (overrides: Record<string, unknown> = {}) => ({
-  apiVersion: 2,
+  apiVersion: 3,
+  dataTypesVersion: "provider-data-types-v1",
+  dataTypes: [
+    { type: "card_usage", status: "collected", parsers: ["vpass-statement-page"], issue: null },
+    { type: "card_statement", status: "collected", parsers: ["vpass-statement-page"], issue: null },
+  ],
   freshnessAsOf: {
     policy: "collection-freshness-v1",
     at: "2099-01-03T00:00:00.000Z",
@@ -84,6 +90,10 @@ describe("account coverage wire check", () => {
   test("refuses what the read never answers", () => {
     for (const bad of [
       answer({ apiVersion: 1 }),
+      answer({ apiVersion: 2 }),
+      answer({ dataTypesVersion: undefined }),
+      answer({ dataTypesVersion: "unknown" }),
+      answer({ dataTypes: undefined }),
       answer({ extra: true }),
       answer({ cells: 0 }),
       answer({ cells: 2_001 }),
@@ -141,21 +151,72 @@ describe("account coverage wire check", () => {
         validAccountCoverage(
           answer({
             accounts: [
-              account("synthetic-a", [
-                { ...period, cellState, standing: "newest-not-current", freshness: NONE },
-              ]),
+              account("synthetic-a", [{ ...period, cellState, standing: "newest-not-current" }]),
             ],
           }),
         ),
       ).toBe(true);
-    // ... but never with an age: no current capture names its account.
+    // Standing does not erase the named capture's age.
     expect(
       validAccountCoverage(
         answer({
-          accounts: [account("synthetic-a", [{ ...period, standing: "newest-not-current" }])],
+          accounts: [
+            account("synthetic-a", [
+              { ...period, standing: "newest-not-current", freshness: NONE },
+            ]),
+          ],
         }),
       ),
     ).toBe(false);
+  });
+
+  test("reverse parser membership is closed, distinct and self-contained", () => {
+    const editType = (providerTypes: unknown) => {
+      const value = answer();
+      Object.assign(value.accounts[0]!.dataTypes[0]!, { providerTypes });
+      return value;
+    };
+    for (const bad of [
+      undefined,
+      ["unknown"],
+      ["card_usage", "card_usage"],
+      [],
+      ["card_usage"],
+      ["balance"],
+      ["card_statement", "card_usage"],
+    ])
+      expect(validAccountCoverage(editType(bad))).toBe(false);
+    const unknown = answer({ dataTypes: null });
+    Object.assign(unknown.accounts[0]!.dataTypes[0]!, {
+      parser: "unknown-parser",
+      providerTypes: [],
+    });
+    expect(validAccountCoverage(unknown)).toBe(true);
+    expect(validAccountCoverage(answer({ dataTypes: null }))).toBe(false);
+  });
+
+  test("newest means capture instant, including wait state, even within one civil day", () => {
+    const older = {
+      ...period,
+      capture: { fetchRunId: 6, capturedAt: "2099-01-01T00:00:00.000Z" },
+      freshness: { state: "human-required", ageDays: 6 },
+    };
+    const newer = {
+      ...period,
+      capture: { fetchRunId: 7, capturedAt: "2099-01-01T01:00:00.000Z" },
+      freshness: { state: "stale", ageDays: 6 },
+    };
+    const value = answer({
+      freshnessAsOf: {
+        policy: "collection-freshness-v1",
+        at: "2099-01-07T00:00:00.000Z",
+        date: "2099-01-07",
+      },
+      accounts: [account("synthetic-a", [older, newer])],
+    });
+    expect(validAccountCoverage(value)).toBe(true);
+    value.accounts[0]!.freshness = older.freshness;
+    expect(validAccountCoverage(value)).toBe(false);
   });
 
   test("a data type and an account carry their freshest period's age", () => {

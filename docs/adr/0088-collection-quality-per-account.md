@@ -252,101 +252,71 @@ Synthetic data only, no production access:
 
 - Status: proposed
 - Date: 2026-11-08
-- Decided by: the owner on 2026-11-08 at 03:19 UTC, accepting the Phase 3
-  plan's unit 3d as proposed: "Each cell, and #1112's per-account view, gets
-  the age of its current capture and a closed state" under the provisional
-  states of `collection-freshness-v1`
-  ([plan, 3d and section 6](../plans/2026-11-phase3-coverage-identity.md#3d-freshness-per-cell-code--adr-0045-amendment-after-1112)).
-  This amendment decides only how that policy applies to this view.
-- Issue: [#542](https://github.com/risu729/kogane/issues/542) (Phase 3,
-  layers 0–5: "coverage is visible per account and data type")
-- Builds on: [ADR 0045's amendment of 2026-11-08](0045-collection-quality-read.md#amendment-2026-11-08-freshness-per-source-and-cell)
-  (`collection-freshness-v1` per source and cell), which left this view
-  without freshness.
+- Issue: [#1139](https://github.com/risu729/kogane/issues/1139)
+- Builds on: [ADR 0045's freshness amendment](0045-collection-quality-read.md#amendment-2026-11-08-freshness-per-source-and-cell)
+  and [ADR 0087](0087-provider-data-type-catalogue.md).
+- Owner approval: required before merge. The earlier Phase 3 plan approved
+  current-capture ages in principle; this amendment follows the later issue's
+  explicit named-capture rule, including captures that are not current.
 
-### Context
+### Context and options
 
-ADR 0045's freshness amendment gave each source and each cell an age and a
-closed state, and stated that this view "is unchanged: its periods state
-their capture times and carry no freshness". A person reading which periods
-of a card's statements or a bank account's movements are current therefore
-still did the date arithmetic per period, and an agent reading
-`view: "accounts"` had to restate the policy's thresholds itself. A cell's
-freshness is not always the account's: in a cell whose newest capture is
-not current, an account that only the newest capture names is in no current
-capture at all.
+The account view already groups saved cells by account, parser, observation
+kind and period. It names the capture that contains that account's observations
+and states its adoption separately. The provider catalogue already describes
+what each source offers, including gaps. Neither belongs in a new table.
 
-### Options considered
-
-1. **Copy each cell's freshness onto every period of it.** Rejected: a
-   `newest-not-current` period would read `same-day` from a current capture
-   that does not name its account.
-2. **The age of the capture the period lists, current or not.** Rejected: a
-   newest capture that is not current is not what the account's current data
-   stands on; it would read fresh while nothing current names the account.
-3. **The age of the cell's current capture where it names the account, none
-   otherwise; a data type and an account read their freshest period
-   (chosen).** It is the cell page's own value wherever the two views talk
-   about the same capture, and a group's age is when its newest current data
-   was captured.
+Copying the cell's current-capture freshness onto every account period can
+name a capture that does not contain that account. Giving a
+`newest-not-current` period no age conceals the timestamp it actually names.
+The chosen rule ages the named capture and retains `standing` as the separate
+statement about current data. This follows the literal acceptance contract of
+[#1139](https://github.com/risu729/kogane/issues/1139), refining the earlier
+[Phase 3 plan](../plans/2026-11-phase3-coverage-identity.md#3d-freshness-per-cell-code--adr-0045-amendment-after-1112).
 
 ### Decision
 
-- The answer names `freshnessAsOf` (`{ policy, at, date }`), the one instant
-  every age is counted to, as the cell page does; the route and the tool pass
-  the request time, as for the other two routes.
-- Each period carries `freshness: { state, ageDays }`. For `current` and
-  `older-current` it is the cell's own freshness (`cellFreshness`, the cell
-  page's value: the age of the cell's current capture, explained by what the
-  source waits on or by the cell's own "a person must act" unit code). For
-  `newest-not-current` it has no age: `no-capture`, or `human-required` or
-  `disabled` when that is what the cell or the source waits on.
-- Each data type and each account carries the freshness of its freshest
-  period: the smallest age among its periods, a fresh one staying `same-day`
-  or `recent`; stale or without any age it is explained by a period's own
-  "a person must act" unit code, else by what the source waits on.
-- What the source waits on is read with the cells route's own
-  `SOURCE_JOBS_SQL` (keyed by the source's job sources); `ACCOUNT_COVERAGE_SQL`
-  is unchanged.
-- `ACCOUNT_COVERAGE_API_VERSION` is 2. The wire check
-  (`validAccountCoverage`) requires `freshnessAsOf` with its Tokyo date, each
-  pair consistent with the policy, a period's age equal to its capture's and
-  absent exactly for `newest-not-current`, and a data type's and an account's
-  age equal to its freshest period's.
-- The page (`?view=accounts`) shows the freshness beside each account, data
-  type and period, with the as-of date and what a group's freshness means.
-  `kogane.collection-quality.read` with `view: "accounts"` answers the same
-  through the same reader (ADR 0081); its description now says so, so its
-  published MCP definition changes. No new tool, capability, catalogue entry,
-  route, migration or writer is added, and the audit record still counts the
-  cells read.
+- One `freshnessAsOf: { policy, at, date }` applies to the whole answer.
+  Every period uses its own `capture.capturedAt` under
+  `collection-freshness-v1`, even with `standing: newest-not-current`.
+  Source wait is read through the cells route's `SOURCE_JOBS_SQL`; the
+  period's `user_action_required` reason has the same precedence as on cells.
+- Each parser group and account carries the freshness of its newest named
+  capture, selected by instant across its periods (and, for an account,
+  across all groups). Equal instants retain the reader's stable cell order;
+  the strict contract accepts either tied newest period's value. A wait on
+  an older period does not replace the newest period's wait state.
+- `ACCOUNT_COVERAGE_API_VERSION` is 3. The answer owns `dataTypesVersion`
+  and source-level `dataTypes`, using the unchanged provider catalogue.
+  Each parser group has `providerTypes: ProviderDataType[]`: reverse parser
+  membership in that source's catalogue, in catalogue order. An unknown
+  parser maps to `[]`; a source without a catalogue has `dataTypes: null`.
+  A parser can describe multiple provider types; observation kind is never
+  used to guess a provider type.
+- The strict wire check requires the version, catalogue and as-of, closed
+  distinct provider types, exact reverse membership, policy-consistent
+  freshness pairs, each period's age from its capture and Tokyo as-of date,
+  and each group's exact freshness from a newest capture.
+- The account page reuses `Freshness`, `DATA_TYPE_LABELS` and `DataTypes`.
+  It shows account, parser and period ages and the account answer's own
+  catalogue with partial/uncollected tracking links. It explains adoption
+  independently. The catalogue remains visible when no account is named.
+- `kogane.collection-quality.read` with `view: accounts` uses the same
+  reader and response on HTTP and MCP; its description states these fields.
+  No grants, tools, tables, migrations or catalogue contents change.
 
-### Consequences
+### Consequences and verification
 
-- An account's or a data type's freshness is its newest current data's: one
-  stale month beside a fresh one does not make the group stale, and a period
-  list still shows each month's own age. Nothing here says that every period
-  a provider has is present (the open limits above stand).
-- A web client newer than the App Worker refuses a version 1 answer as
-  malformed; the two deploy together, as for version 1.
-- The description and the answer of an MCP tool change, which needs the
-  owner's approval before merge (ADR 0081, AGENTS.md).
+Freshness describes the named evidence's age, not its adoption or history
+completeness. A stale month beside a fresh one remains visible without making
+the account stale. Cell and account-period freshness agree whenever their
+named captures agree; different captures can legitimately have different ages.
+Clients and App deploy together because older account shapes are rejected.
+The MCP description changes and this proposed amendment require owner approval
+before merge under ADR 0081 and AGENTS.md.
 
-### Verification
-
-Synthetic data only:
-`packages/application/test/account-coverage.test.ts` (periods, data types
-and accounts at ages 0 to 8 across the Tokyo midnight; a stale period beside
-a fresh one; a person's wait on the source's job explaining only what is
-stale; a `newest-not-current` account without an age while the older
-current one has its capture's; every period the current capture names
-equal to the cell page's freshness under the same instant; the bounds with
-the source's jobs read; and the wire check refusing a wrong date, a missing
-as-of, an age its capture does not give, a current period without an age, a
-`newest-not-current` one with one, and a group age that is not its freshest
-period's); `packages/observation-shared/test/account-coverage-contract.test.ts`
-(version, as-of, period and group ages);
-`services/app/test/page-read-reports.test.ts` (route and tool answers equal
-under one clock, unchanged);
-`apps/web/test/collection-quality.browser.test.ts` (the account panel's three
-ages and the as-of text).
+Synthetic tests cover all source catalogue/parser reverse memberships, unknown
+parsers, named non-current captures, Tokyo midnight, source/manual/unit wait
+precedence, newest capture selection across types, strict malformed responses,
+matching-capture cell parity, HTTP/MCP equality, and the production browser view
+at 375 px with an accessibility audit. No production collection is exercised.
