@@ -4,7 +4,7 @@
 // is refused outright when its explanation and export are (ADR 0072,
 // amendment of 2026-11-06). Every value is invented.
 import { env } from "cloudflare:test";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, onTestFinished, vi } from "vitest";
 import { canonicalJson, type ReportBody } from "../../../packages/domain/src/index";
 import { validApiResponse } from "../../../packages/observation-shared/src/api-validation";
 import {
@@ -239,6 +239,13 @@ describe("collection quality page reads", () => {
   });
 
   it("answer the summary and a source's cells exactly as the routes do", async () => {
+    // One clock for every call: each answer counts its ages to `now`
+    // (`freshnessAsOf`, collection-freshness-v1).
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
+    onTestFinished(() => {
+      vi.useRealTimers();
+    });
     const before = await tableCounts();
     for (const [query, args] of [
       ["/api/collection-quality", {}],
