@@ -1051,6 +1051,22 @@ describe("the operator's read and the never-recorded list", () => {
     // key were absent: both are refused, each recorded as any unknown key is.
     const repeated = await mcpCall(`[${message(3, '{"__proto__":"x"}')},${message(3, "{}")}]`);
     expect(repeated.records).toEqual([...unknown[0]!.records, ...unknown[0]!.records]);
+    // A call is never run with another call's arguments: a repeated id and
+    // tool whose other arguments differ runs with its own, and a string id
+    // is not the number it spells.
+    const sorted = (records: unknown[]) => records.map((row) => JSON.stringify(row)).sort();
+    const own = await mcpCall(message(5, '{"cursor":null}'));
+    expect(((own.answer as Answer).result as { isError?: boolean }).isError).not.toBe(true);
+    for (const rawBody of [
+      `[${message(5, '{"__proto__":"x"}')},${message(5, '{"cursor":null}')}]`,
+      `[${message(5, '{"cursor":null}')},${message(5, '{"__proto__":"x"}')}]`,
+      `[${message(5, '{"cursor":null}').replace('"id":5', '"id":"5"')},${message(5, '{"__proto__":"x"}')}]`,
+      `[${message(5, '{"__proto__":"x"}').replace('"id":5', '"id":"5"')},${message(5, '{"cursor":null}')}]`,
+    ])
+      expect({ rawBody, records: sorted((await mcpCall(rawBody)).records) }).toEqual({
+        rawBody,
+        records: sorted([...unknown[0]!.records, ...own.records]),
+      });
     // A prototype member's name was never dropped, and stays refused.
     for (const key of ["constructor", "toString"])
       expect({

@@ -1530,8 +1530,13 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   refuses the key with the same code, result and audit record as any other
   unknown key on `/mcp`, as `/api/agent/v1/<tool>` refuses it. The copy is
   read only when a tool call is dispatched, after the SDK accepted the
-  body; every other call keeps the SDK's arguments. A batch that repeats
-  such a call's id and tool name has each of those calls refused.
+  body. A call is matched to a sent message with its id and tool name whose
+  arguments, without that key, are the SDK's, so it never runs with another
+  call's arguments: a batch that repeats an id and a tool name runs each
+  call with its own, and refuses each call that cannot be told from one
+  carrying the key. Every other call keeps the SDK's arguments. It fails
+  closed: a copy that cannot be read or parsed, or a call no sent message
+  matches, is `internal_error`, never a run as if the key were absent.
 - **Identity.** The dispatcher has the `AgentCaller` the boundary proved
   (`caller`, `src/auth.ts`) and its resolved `Grant`. Pass the caller object
   on; never derive a role from `caller.principal`, and never read identity

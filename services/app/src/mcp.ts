@@ -292,11 +292,24 @@ function querySpecSchema(): Record<string, unknown> {
 
 type PublishedTools = readonly { name: string }[] | (() => Promise<readonly { name: string }[]>);
 type Dispatch = (name: string, body: unknown) => Promise<ToolResult | null>;
-/** A call's `params.arguments` as the client sent them, when the SDK's differ. */
-type SentArguments = (id: RequestId, name: string) => Promise<Record<string, unknown> | undefined>;
+/** The arguments a call runs with, from the SDK's id, tool name and arguments. */
+type SentArguments = (
+  id: RequestId,
+  name: string,
+  parsed: Record<string, unknown> | undefined,
+) => Promise<Record<string, unknown> | undefined>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/** An arguments value as JSON text, without a top-level own `__proto__` key. */
+function withoutProto(args: unknown): string | undefined {
+  return JSON.stringify(
+    isRecord(args)
+      ? Object.fromEntries(Object.entries(args).filter(([key]) => key !== "__proto__"))
+      : args,
+  );
 }
 
 /**
@@ -305,42 +318,55 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * the key were absent, where `/api/agent/v1/<tool>` (which hands the tool
  * `JSON.parse`'s object) refuses it as an unknown key. This reads the body
  * the client sent from a copy taken before the SDK read its own, only when a
- * `tools/call` handler asks, and only after the SDK accepted the body (so it
- * is JSON within `MAX_REQUEST_BYTES`; the two fallbacks below are not
- * reached). It answers the sent arguments object of a `tools/call` message
- * with that id and tool name whose arguments have an own `__proto__` key, so
- * the tool refuses the key as it refuses any unknown one. A batch that
- * repeats an id and a name with such a call among them is refused for each
- * of those calls rather than run as if the key were absent. Every other call
- * keeps the SDK's arguments, which are then the same keys and values.
+ * `tools/call` handler asks, which is after the SDK accepted the body as JSON
+ * within `MAX_REQUEST_BYTES`.
+ *
+ * A call's sent arguments are those of a `tools/call` message with the same
+ * id and tool name whose keys and values, without a top-level `__proto__`,
+ * are the SDK's arguments. When such a message's arguments have an own
+ * `__proto__` key, the call runs with them, so the only difference from the
+ * SDK's is that key, and the tool refuses it as any unknown key. A batch that
+ * repeats an id and a name runs each call with its own arguments, and a call
+ * that cannot be told from one with a `__proto__` key is refused with it.
+ * Every other call keeps the SDK's arguments.
+ *
+ * It fails closed: a copy that cannot be read or parsed, an id that is not a
+ * JSON-RPC one, or a call that no sent message matches (the SDK's view and
+ * this copy disagree) throws, and the call is answered `internal_error`
+ * rather than run as if a key were absent.
  */
 function sentArgumentsOf(copy: Request): { sent: SentArguments; release: () => void } {
   let body: Promise<unknown> | undefined;
+  let released = false;
   const read = async (): Promise<unknown> => {
+    if (released) throw new Error("mcp_sent_body_released");
     const outcome = await readRequestBody(copy, MAX_REQUEST_BYTES);
-    if (outcome.tooLarge) return undefined;
-    try {
-      return JSON.parse(outcome.text) as unknown;
-    } catch {
-      return undefined;
-    }
+    if (outcome.tooLarge) throw new Error("mcp_sent_body_too_large");
+    return JSON.parse(outcome.text) as unknown;
   };
   return {
-    sent: async (id, name) => {
-      const parsed = await (body ??= read());
-      for (const message of Array.isArray(parsed) ? parsed : [parsed]) {
+    sent: async (id, name, parsed) => {
+      if (typeof id !== "string" && typeof id !== "number") throw new Error("mcp_sent_id_invalid");
+      const messages = await (body ??= read());
+      const expected = withoutProto(parsed);
+      let matched = false;
+      for (const message of Array.isArray(messages) ? messages : [messages]) {
         if (!isRecord(message) || message["method"] !== "tools/call" || message["id"] !== id)
           continue;
         const params = message["params"];
         if (!isRecord(params) || params["name"] !== name) continue;
         const args = params["arguments"];
+        if (withoutProto(args) !== expected) continue;
         if (isRecord(args) && Object.hasOwn(args, "__proto__")) return args;
+        matched = true;
       }
-      return undefined;
+      if (!matched) throw new Error("mcp_sent_call_unmatched");
+      return parsed;
     },
     // A copy nobody asked for is cancelled, so its buffered half of the body
-    // is not held to the end of the request.
+    // is not held to the end of the request; a later ask then fails closed.
     release: () => {
+      released = true;
       if (body === undefined) void copy.body?.cancel().catch(() => undefined);
     },
   };
@@ -366,7 +392,7 @@ function serverFor(run: Dispatch, tools: PublishedTools, sent: SentArguments): S
     const { name } = request.params;
     const outcome = await run(
       name,
-      (await sent(ctx.mcpReq.id, name)) ?? request.params.arguments ?? {},
+      (await sent(ctx.mcpReq.id, name, request.params.arguments)) ?? {},
     );
     // A name the dispatcher does not know is a protocol error, not a tool's.
     if (outcome === null) throw new ProtocolError(ProtocolErrorCode.InvalidParams, "unknown_tool");
@@ -436,7 +462,7 @@ export async function handleMcp(
     serverFor(
       (name, body) => contained(() => run(name, body)),
       typeof tools === "function" ? () => contained(tools) : tools,
-      (id, name) => contained(() => sent(id, name)),
+      (id, name, parsed) => contained(() => sent(id, name, parsed)),
     );
   let response: Response;
   try {
