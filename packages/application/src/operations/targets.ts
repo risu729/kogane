@@ -27,6 +27,7 @@ import {
 } from "./sql.ts";
 
 import { cardSettlementPlan } from "./card-settlement-target.ts";
+import { withPairPins } from "./pair-references.ts";
 
 import { ownershipReviewRequested } from "../../../domain/src/ownership-review.ts";
 import {
@@ -219,6 +220,9 @@ async function identityPlan(
       return commandError("stale_context", [anchorRef, subjectRef]);
     expectedRevisions[anchorRef] = anchor.revision;
   }
+  // A candidate adoption decides an instrument pair: both orientations of
+  // its `listed_as` are pinned too (pair-references.ts).
+  const pinned = await withPairPins(store, kind, payload, expectedRevisions);
 
   const impact = (await store.first<ImpactRow>(
     account ? ACCOUNT_IMPACT_SQL : INSTRUMENT_IMPACT_SQL,
@@ -250,7 +254,7 @@ async function identityPlan(
     ok: true,
     resolved: {
       targets: [target],
-      expectedRevisions,
+      expectedRevisions: pinned,
       simulation: {
         kind,
         targets: [target],
@@ -298,7 +302,11 @@ async function relationPlan(
     ok: true,
     resolved: {
       targets: [target],
-      expectedRevisions: { [subjectRef]: current.revision },
+      // An account or instrument pair is pinned under every reference its
+      // decisions may be recorded under (pair-references.ts).
+      expectedRevisions: await withPairPins(store, kind, payload, {
+        [subjectRef]: current.revision,
+      }),
       simulation: {
         kind,
         targets: [target],

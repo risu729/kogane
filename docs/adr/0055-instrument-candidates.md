@@ -1129,3 +1129,40 @@ boundary. B14's positive temporal provenance and B15/B16/B17/B20 database
 integration proofs remain pending in the companion plan. The local storage
 primitive amendment above supplies partial database proofs without enabling
 a temporal command; #546 remains open.
+
+## Amendment 2026-11-08: adoption and keeping apart pin the whole pair
+
+- Status: proposed until the PR that carries it merges, then accepted
+- Date: 2026-11-08
+- Carried by: `packages/application/src/operations/pair-references.ts` and its
+  calls in `packages/application/src/operations/targets.ts`,
+  `packages/application/src/command/approve.ts` and
+  `packages/application/src/command/commit.ts`;
+  [change lifecycle](../change-lifecycle.md#pair-pins)
+- Related: [ADR 0077's amendment of the same day](0077-account-connection-candidates.md#amendment-2026-11-08-a-pair-plan-pins-every-reference-of-the-pair),
+  which states the mechanism for both families
+
+A candidate's status reads both identifiers' mappings and `listed_as` in both
+orientations (from each identifier's current instrument to the other
+identifier), but the adoption plan pinned only the two mappings and the
+keep-apart plan only its own `listed_as` triple. A rejection recorded in the
+other orientation between plan and commit left an adoption fresh, and an
+adoption recorded in between left a keep-apart fresh.
+
+Decision: a candidate adoption (`identity.assign` with candidate provenance)
+and a `listed_as` decision whose evidence names exactly the subject and one
+other identifier (the candidate's keep-apart payload) each pin both mappings
+and both orientations: `listed_as` from the target (anchor's) instrument to the
+subject and from the subject's current instrument to the anchor. Every one of
+them is a function of the two pinned mappings, so the set cannot change while
+the plan is fresh. A decision under any of them between plan and commit makes
+the plan stale (`stale_context`); an adoption plan made before this amendment
+is stale at simulation and refused at approval and commit. A `listed_as`
+decision whose evidence does not name the pair still pins only its own triple.
+No migration and no new subject kind.
+
+Verified in `packages/application/test/pair-pins.test.ts` (both plans pin the
+same four references; a reverse-orientation rejection makes the adoption stale;
+an adoption makes the keep-apart stale, and neither commit writes) and
+`packages/application/test/instrument-candidate-anchor.test.ts` (the adoption
+plan's pins).

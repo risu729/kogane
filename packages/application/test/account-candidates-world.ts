@@ -10,6 +10,8 @@ export const MF = "moneyforward-me";
 // The only direct source a confirmed review may name (CORE 0023 CHECK).
 export const BANK = "sbi-shinsei-bank";
 export const MF_PRODUCER = "synthetic-mf-collector";
+/** A second producer that reviews the same identity values (`same-identity-value`). */
+export const MF_PRODUCER_2 = "synthetic-mf-browser";
 export const DIRECT_PRODUCER = "synthetic-direct";
 export const KEY_A = `moneyforward-account-v2-${"a".repeat(64)}`;
 export const KEY_B = `moneyforward-account-v2-${"b".repeat(64)}`;
@@ -22,7 +24,7 @@ export class Store {
 
   constructor() {
     this.db.exec(`INSERT INTO sources VALUES('${MF}','synthetic'),('${BANK}','synthetic');
-      INSERT INTO producers VALUES('${MF_PRODUCER}'),('${DIRECT_PRODUCER}');`);
+      INSERT INTO producers VALUES('${MF_PRODUCER}'),('${MF_PRODUCER_2}'),('${DIRECT_PRODUCER}');`);
     const db = this.db;
     this.sql = {
       all: async <T>(text: string, args: readonly unknown[]) =>
@@ -95,14 +97,19 @@ export class Store {
    * source accounts (evidence from one successful direct run), or unresolved.
    * Returns the direct run, so a test can exclude it.
    */
-  review(key: string, directs: string[], label = "Synthetic bank (aggregator)"): number | null {
-    const mf = this.run(MF, MF_PRODUCER, key);
+  review(
+    key: string,
+    directs: string[],
+    label = "Synthetic bank (aggregator)",
+    producer = MF_PRODUCER,
+  ): number | null {
+    const mf = this.run(MF, producer, key);
     const detail = this.artifact(mf.run, mf.unit, MF, "account-detail");
     if (directs.length === 0) {
       this.db.run(
         `INSERT INTO account_connection_reviews(producer_id,connection_key,revision,label,status,reason,verifier_version,detail_artifact_id,direct_reference_ids_json,created_at)
          VALUES(?,?,1,?,'unresolved','synthetic','synthetic-v1',?,'[]','2099-01-01T00:00:00.000Z')`,
-        [MF_PRODUCER, key, label, detail],
+        [producer, key, label, detail],
       );
       return null;
     }
@@ -118,7 +125,7 @@ export class Store {
       `INSERT INTO account_connection_reviews(producer_id,connection_key,revision,label,status,related_source_id,direct_producer_id,reason,verifier_version,detail_artifact_id,direct_artifact_id,branch_artifact_id,direct_reference_ids_json,created_at)
        VALUES(?,?,1,?,'confirmed',?,?,'synthetic','synthetic-v1',?,?,?,?,'2099-01-01T00:00:00.000Z')`,
       [
-        MF_PRODUCER,
+        producer,
         key,
         label,
         BANK,

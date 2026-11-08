@@ -79,6 +79,8 @@ export async function seedRun(
     body?: string;
     dataset?: string;
     fetchUnitKey?: string;
+    /** The run's producer; `evidence-test` unless a test registers another one. */
+    producer?: string;
     /**
      * Several independent fetch units in one run, each with its own terminal
      * report and its own artifacts (design review D13). `count` artifacts are
@@ -88,7 +90,7 @@ export async function seedRun(
   } = {},
 ) {
   const { runId } = await post("/v1/runs", {
-    producerId: "evidence-test",
+    producerId: options.producer ?? "evidence-test",
     sourceId: options.source ?? "sony-bank",
     externalIdNamespace: "fixture",
     externalSessionId: crypto.randomUUID(),

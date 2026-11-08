@@ -19,6 +19,7 @@ import {
   pendingPostedReviewRequested,
 } from "../../../domain/src/pending-posted-review.ts";
 import { prepareOwnershipReview } from "./ownership-review.ts";
+import { connectionPairGuard } from "./pair-references.ts";
 import { pendingPostedWrites, preparePendingPostedReview } from "./pending-posted-review.ts";
 
 export async function relationMutation(input: MutationInput): Promise<MutationWrites | null> {
@@ -57,11 +58,13 @@ export async function relationMutation(input: MutationInput): Promise<MutationWr
         guard,
       })
     : null;
+  // An account pair's batch writes nothing when the pair has a reference
+  // the plan did not pin (pair-references.ts).
   const precondition = ownership?.ok
     ? ownership.review.precondition
     : link?.ok
       ? link.review.precondition
-      : undefined;
+      : (connectionPairGuard(plan.kind, plan.payload, plan.expectedRevisions) ?? undefined);
   return {
     ...(precondition ? { precondition } : {}),
     decisionRevisionId: decisionId,
