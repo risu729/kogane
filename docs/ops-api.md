@@ -10,8 +10,8 @@ six operation-request kinds are distinct from the newer operator-only
 [schedule settings API](schedules.md#settings-api). A collection or unattended
 session-refresh request reaches a collector only through the named collector RPC
 the alarm uses, and only for a connection the Processor's
-`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names none
-([collector execution](#collector-execution-adr-0048),
+`OPS_COLLECTOR_DISPATCH_CONNECTIONS` names; the committed value names
+`sony-bank` ([collector execution](#collector-execution-adr-0048),
 [ADR 0048](adr/0048-operation-collector-dispatch.md)).
 
 The six things an operator asks this system to _do_ — collect a source,
@@ -326,6 +326,28 @@ route; on `/mcp` it reads only the calling principal's own operations, so an ope
 in the browser is followed on the HTTP read route, `execution` block included. No agent-API grant capability reads
 an operation.
 
+### Requesting a collection as an agent
+
+An agent may request collections without a count or rate limit (owner,
+2026-11-08 03:19 UTC); nothing in the App or the Processor caps them. The
+`kogane.ops.collection.request` description tells the caller to read the
+source's history first, and every item is an existing read:
+
+| Read first                                                    | Tool                                                                                            |
+| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| the source's collection quality: latest runs and stage codes  | `kogane.collection-quality.read` with `source`                                                  |
+| its schedule, next alarm, recent occurrences and held leases  | `kogane.schedules.read`                                                                         |
+| its maintenance windows and the maintenance-adjusted due time | `kogane.schedules.maintenance.read` with `source`                                               |
+| earlier requests and how they ended                           | `kogane.audit.search` with `operation: ops.collection.request`, then `kogane.ops.operation.get` |
+
+It then does not request while the source's alarm is due, its maintenance
+window is on, a lease is held or an earlier request has not finished, and when
+the latest runs failed it finds the cause before requesting again. The
+dispatcher holds a request during maintenance and while a lease is held anyway
+([collector execution](#collector-execution-adr-0048)); reading first avoids a
+request that can only wait, expire or fail the same way. The rule is in the
+tool description, not in code.
+
 ## Session refresh and human-required states
 
 `SESSION_REFRESH_POLICY` is a wrangler var holding `{"<source>": "unattended"}`
@@ -600,9 +622,9 @@ Synthetic data only.
   Processor tick starting one request over a named service binding).
 
 Not verified: no deployed instance, no live Access policy, no real provider or
-session, and no deployed collector has served `runOperation`; no connection is
-enabled in the committed configuration. No operations tool has run for a
-real MCP client; dated client connection evidence is in the
+session, and no deployed collector has served `runOperation`; the committed
+configuration names only `sony-bank`, and no request has run through it yet.
+No operations tool has run for a real MCP client; dated client connection evidence is in the
 [recovery runbook](mcp-recovery.md).
 
 Acceptance ids and the test that carries each:
@@ -665,6 +687,12 @@ a fresh idempotency key at a time the source's alarm is not due, and read
 `GET /api/ops/v1/operations/{id}` until `execution.state` is `published`,
 `unpublished`, `failed` or `uncertain`. Rollback: remove the id; a request
 already `started` is not interrupted, and nothing started is retried.
+The owner allowed every healthy connection (2026-11-08 03:19 UTC); they are
+added one at a time, each after the previous one's first request was followed
+to `published`. The committed value names `sony-bank`. The order after it is
+`sbi-securities`, `sbi-vc-trade`, `mobile-suica`, `moneyforward-me`, `myjcb` and
+`sbi-shinsei` (connection ids); Vpass, St.George and the container collectors
+come after their open fixes.
 `SESSION_REFRESH_POLICY` must also name `sbi-vc-trade` before an unattended
 refresh of it is dispatched, and only once its unattended renewal has been
 demonstrated.
