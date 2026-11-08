@@ -781,7 +781,10 @@ and travel only encoded under `data`. An object over 1 MiB is
 `413 raw_too_large` before it is read ([ADR 0081, amendment of
 2026-11-07](adr/0081-ui-parity-through-mcp.md#amendment-2026-11-07-raw-evidence-bytes-over-mcp)).
 
-`kogane.schedules.read` takes no argument and answers the schedules page:
+`kogane.schedules.read` takes no argument and answers the schedules page
+(each job's `collectionRequest` included: the CORE source a
+`kogane.ops.collection.request` names for it and whether the Processor would
+dispatch it, [schedules](schedules.md#収集を依頼-collection-request)):
 the Processor's snapshot that `GET /api/ops/v1/schedules` relays, read with no
 operator or agent header, less its `survey` part (the maintenance re-survey's
 freshness and proposals, `kogane.schedules.survey.read`'s). The page is the
