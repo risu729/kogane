@@ -1,6 +1,6 @@
 # ADR 0087: A checked-in catalogue of the data types each provider offers makes uncollected data visible
 
-Status: proposed
+Status: accepted (owner OK on the pull request, 2026-11-08 04:44 UTC)
 Date: 2026-11-08
 Issue: [#542](https://github.com/risu729/kogane/issues/542) (Phase 3, layers 0–5:
 "Missing data types remain visible"); per-source issues #441–#454 under #440
