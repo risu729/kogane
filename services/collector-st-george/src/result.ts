@@ -39,7 +39,8 @@ export function safeFailureCode(value: unknown): FailureCode {
  * The closed code of an error the lease-held collection threw. A holder that
  * stopped itself (ADR 0085) keeps its reason instead of `container-failed`:
  * its deadline is `deadline-exceeded`, a lost lease is `collection-interrupted`.
- * Either is a failed run, so the coordinator blocks until the operator resumes.
+ * Either is a failed run; neither blocks the next run (only a refused or
+ * challenged login does).
  */
 export function thrownFailureCode(error: unknown): FailureCode {
   const message = error instanceof Error ? error.message : null;

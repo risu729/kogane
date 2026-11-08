@@ -76,7 +76,7 @@ export interface StateStorage {
 }
 type StoredState =
   | { kind: "running" }
-  | { kind: "blocked"; reason: FailureCode; runId?: string }
+  | { kind: "blocked"; reason: FailureCode; runId?: string; since?: string }
   | { kind: "pending"; run: Omit<SharedRunInput, "snapshot">; snapshotChunks: number };
 export interface PublicRunResult {
   status: "stored" | "blocked" | "busy" | "failed" | "ready";
@@ -99,7 +99,7 @@ type RetryPendingResult =
     }
   | { status: "failed"; reason: "state-unavailable" | "persistence-incomplete" }
   | { status: "stored"; runId: string; terminalKey: string }
-  | { status: "blocked"; reason: FailureCode; runId: string; terminalKey: string };
+  | { status: "blocked" | "failed"; reason: FailureCode; runId: string; terminalKey: string };
 
 const RUN_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -194,7 +194,37 @@ function snapshotRun(pending: PendingState, chunks: Uint8Array[]): SharedRunInpu
   return { ...pending.run, snapshot };
 }
 
-/** A durable attempt marker prevents a restart from replaying an uncertain login. */
+/**
+ * Failures after which another unattended login could make things worse: the
+ * bank refused the credentials, or it asked for a person (challenge, OTP,
+ * locked account). An HTTP 401/403/429 from the bank, its "Request error" page
+ * and an unknown page also block: none has been observed yet, and each may be
+ * how the bank answers a wrong password, so retrying daily could lock the
+ * account. These stop later runs until an operator asks for a collection
+ * again. Every other failure (a container or browser crash, a network error, a
+ * deadline) is recorded as a failed run and the next scheduled run tries again.
+ */
+const LOGIN_BLOCKING_CODES: ReadonlySet<FailureCode> = new Set([
+  "login-rejected",
+  "authentication-challenge",
+  "human-required",
+  "http-denied",
+  "bank-request-error",
+  "unexpected-route",
+]);
+export function blocksLaterLogins(reason: FailureCode): boolean {
+  return LOGIN_BLOCKING_CODES.has(reason);
+}
+
+/** What `withCollectionLease` throws when another execution holds the source. */
+const LEASE_REFUSAL = "collection_busy_or_uncertain";
+
+/**
+ * Serializes attempts in one object. The durable attempt marker is written
+ * before any provider request; one left by a reset object is logged and
+ * cleared, because the collection lease, not the marker, keeps a second login
+ * from overlapping the interrupted one.
+ */
 export class CollectionCoordinator {
   private active = false;
   constructor(
@@ -263,18 +293,33 @@ export class CollectionCoordinator {
         )
           return false;
         const run = selected.pending.run;
-        if (run.reason === undefined) await storage.delete("state");
-        else await storage.put("state", { kind: "blocked", reason: run.reason, runId: run.runId });
+        if (run.reason === undefined || !blocksLaterLogins(run.reason))
+          await storage.delete("state");
+        else
+          await storage.put("state", {
+            kind: "blocked",
+            reason: run.reason,
+            runId: run.runId,
+            since: run.completedAt,
+          });
         for (let index = 0; index < current.snapshotChunks; index++)
           await storage.delete(this.chunkKey(run.runId, index));
         return true;
       });
       if (!finished) return { status: "refused", reason: "state-changed" };
       const run = selected.pending.run;
+      if (run.reason !== undefined && blocksLaterLogins(run.reason))
+        logBlockEvent({
+          event: "st-george-collection-blocked",
+          reason: run.reason,
+          blockedRunId: run.runId,
+          blockedSince: run.completedAt,
+          clearedBy: "operator-resume",
+        });
       return run.reason === undefined
         ? { status: "stored", runId: run.runId, terminalKey: result.terminalKey }
         : {
-            status: "blocked",
+            status: blocksLaterLogins(run.reason) ? "blocked" : "failed",
             reason: run.reason,
             runId: run.runId,
             terminalKey: result.terminalKey,
@@ -314,6 +359,13 @@ export class CollectionCoordinator {
       const state = await this.storage.get<StoredState>("state");
       if (state?.kind === "pending") return { status: "failed", reason: "persistence-pending" };
       await this.storage.delete("state");
+      if (state?.kind === "blocked")
+        logBlockEvent({
+          event: "st-george-block-cleared",
+          reason: state.reason,
+          blockedRunId: state.runId ?? null,
+          cause: "operator-resume",
+        });
       return { status: "ready" };
     } finally {
       this.active = false;
@@ -325,15 +377,37 @@ export class CollectionCoordinator {
     try {
       let state = await this.storage.get<StoredState>("state");
       if (state?.kind === "running") {
-        state = { kind: "blocked", reason: "collection-interrupted" };
-        await this.storage.put("state", state);
+        // The object was reset during an attempt. Its lease outlived it, so no
+        // other attempt can still be running once this one holds the lease.
+        logBlockEvent({ event: "st-george-interrupted-attempt-cleared" });
+        state = undefined;
       }
-      if (state?.kind === "blocked")
-        return {
-          status: "blocked",
+      if (state?.kind === "blocked") {
+        if (blocksLaterLogins(state.reason)) {
+          // Nothing is contacted. Say which run blocked, since when, and what lifts it.
+          logBlockEvent({
+            event: "st-george-collection-skipped-blocked",
+            reason: state.reason,
+            blockedRunId: state.runId ?? null,
+            blockedSince: state.since ?? null,
+            clearedBy: "operator-resume",
+          });
+          return {
+            status: "blocked",
+            reason: state.reason,
+            ...(state.runId ? { runId: state.runId } : {}),
+          };
+        }
+        // A block that needs no person, left by the older any-failure policy,
+        // no longer stops the run.
+        logBlockEvent({
+          event: "st-george-block-cleared",
           reason: state.reason,
-          ...(state.runId ? { runId: state.runId } : {}),
-        };
+          blockedRunId: state.runId ?? null,
+          cause: "not-a-login-refusal",
+        });
+        state = undefined;
+      }
       let run: SharedRunInput;
       let pending: Extract<StoredState, { kind: "pending" }>;
       if (state?.kind === "pending") {
@@ -349,6 +423,11 @@ export class CollectionCoordinator {
         try {
           output = parseCollectionOutput(await this.collect(runId));
         } catch (error) {
+          if (error instanceof Error && error.message === LEASE_REFUSAL) {
+            // Another execution holds the source; nothing was contacted.
+            await this.storage.delete("state");
+            return { status: "busy" };
+          }
           output = {
             status: "failed",
             reason: thrownFailureCode(error),
@@ -375,13 +454,23 @@ export class CollectionCoordinator {
       if (!sharedRunPersisted(result))
         return { status: "failed", reason: "persistence-incomplete", runId: run.runId };
       if (run.reason !== undefined) {
-        await this.finishPending(pending, {
-          kind: "blocked",
-          reason: run.reason,
-          runId: run.runId,
-        });
+        const blocked = blocksLaterLogins(run.reason);
+        await this.finishPending(
+          pending,
+          blocked
+            ? { kind: "blocked", reason: run.reason, runId: run.runId, since: run.completedAt }
+            : undefined,
+        );
+        if (blocked)
+          logBlockEvent({
+            event: "st-george-collection-blocked",
+            reason: run.reason,
+            blockedRunId: run.runId,
+            blockedSince: run.completedAt,
+            clearedBy: "operator-resume",
+          });
         return {
-          status: "blocked",
+          status: blocked ? "blocked" : "failed",
           reason: run.reason,
           runId: run.runId,
           terminalKey: result.terminalKey,
@@ -460,5 +549,16 @@ export class CollectionCoordinator {
       for (let index = 0; index < pending.snapshotChunks; index++)
         await storage.delete(this.chunkKey(pending.run.runId, index));
     });
+  }
+}
+
+/** Fixed event names, closed codes, run UUIDs and timestamps only. */
+function logBlockEvent(
+  fields: { event: string; reason?: FailureCode } & Record<string, string | null>,
+): void {
+  try {
+    console.warn(JSON.stringify(fields));
+  } catch {
+    /* A diagnostic must not change the run. */
   }
 }

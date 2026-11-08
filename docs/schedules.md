@@ -1,8 +1,9 @@
 # Schedule administration
 
 Open `/schedules` from **取得履歴** or **収集スケジュール**. Only the configured
-Access operator can open this page; maintenance windows alone can also be read
-by a granted agent ([below](#agent-maintenance-tools)). The page
+Access operator can open this page; an MCP client can read the same snapshot
+without its re-survey section, and maintenance windows and the re-survey
+section through their own reads ([below](#agent-maintenance-tools)). The page
 shows the original next occurrence, maintenance-adjusted due time, actual alarm
 reservation and the latest scheduling receipt separately. All displayed timestamps use Japan time;
 daily configuration defaults to Japan time and can use Sydney or UTC explicitly.
@@ -59,8 +60,8 @@ write for 10 minutes while the Processor can is the open limit in the ADR.)
 Such a run is recorded `uncertain` (`collection_deadline_exceeded` or
 `collection_lease_lost`), since the provider may have been contacted, and is
 never replayed. St George instead records a failed run with the stop as its
-reason and blocks until the operator resumes it, as after any failed St George
-run.
+reason; its next scheduled run tries again. Only a refused, challenged or unrecognised St
+George login blocks the source until the operator resumes it.
 
 **停止した実行を解除** remains for the operator, for a source that should not
 wait for the tick. Only after confirming the previous execution stopped, use it.
@@ -107,9 +108,9 @@ held the request waits (`collection_lease_held`) instead of starting. The
 Processor's dispatch only reads the lease and never releases or replaces it;
 the collector acquires and releases it exactly as for an alarm run, and a
 stopped execution's lease is still released only by the operator. A collector that finds its lease held reports `collection_busy` (alarm
-receipts included) rather than `collection_failed`; St George, whose session
-coordinator records a refused lease as a failed run, still reports
-`collection_failed` and then refuses later runs until the operator resumes it.
+receipts included) rather than `collection_failed`. St George does the same
+since 2026-11-08 UTC; before that its session coordinator recorded a refused
+lease as a failed run and refused later runs until the operator resumed it.
 
 Deployment applies CORE 0065 and uploads named collector entrypoints before the
 Processor and App. It removes the fourteen configured Cron jobs and reconciles
@@ -367,8 +368,9 @@ The preparation checks the current source/rule/host/bounds and reports the
 smaller remaining budget, without saving a maintenance revision. Confirm runs
 the validations again and consumes the preparation only with the effect.
 
-The checked-in delegation table is empty, and the MCP financial-reader grant
-has no schedule authority. Production migration application and real-client
+There is no delegation table: every MCP client the MCP Access application
+admits is the delegated principal and holds `schedules.read` over every
+schedule source (ADR 0084). Production migration application and real-client
 maintenance writes were not verified by these local synthetic tests.
 
 ## S3 maintenance execution and confirmation (2026-10-10)
