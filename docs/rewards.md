@@ -67,8 +67,10 @@ into `needs-rule-verification`.
 - `{"kind":"unknown"}` keeps its meaning: the period was not established (including
   stored text that does not parse). It is never read as a standing offer, and the
   reader never turns damaged text into `open-ended` or `null`.
-- An `unknown` deadline is not checked, and `availableForOffer` adds no code for an
-  `unknown` validity. Route search rejects an `unknown` validity as
+- `availableForOffer` checks neither an `unknown` deadline nor an `unknown` validity
+  and adds no code for them, nor for a clock inside a `period` deadline (a limit;
+  `/offers/simulate` calls it without a clock, so it checks neither field there).
+  Route search rejects an `unknown` validity or deadline as
   `needs_rule_verification` (see "Search eligibility at each hop"), which is why a
   standing offer stores `open-ended` and `null` instead of `unknown`.
 - No migration: both columns already hold JSON text, and nothing writes offer rows
@@ -585,6 +587,15 @@ unknown time or zone mismatch cannot establish a whole application day and yield
 first day and every later day, so it stays a route instead of becoming
 `needs_rule_verification`; a `null` deadline is never passed.
 
+The application deadline is checked at the same day (`conversion-search-v3`). A
+local-date or instant deadline is its own calendar day, and a later day is
+`application_deadline_passed` (`reuse_before_credit` after an earlier hop). A period
+deadline is passed only after the period ends; a day inside the period establishes
+nothing and yields `needs_rule_verification`. An `unknown` or malformed deadline also
+yields `needs_rule_verification`: only `null` means no deadline (INV05). Before v3 an
+unknown, malformed or period deadline was never checked, so such an offer was a route
+on any day.
+
 The `/offers/simulate` goal search starts from today's UTC date as a `local-date`
 with zone `null` (`services/app/src/rewards-api.ts`). A `null` zone is compatible with
 any offer zone, so an `Asia/Tokyo` offer is checked against the UTC date: between
@@ -601,12 +612,14 @@ route passes no membership claims, so every tier-limited offer is
 `needs_rule_verification` there until membership is supplied.
 
 `CONVERSION_SEARCH_RELEASE` is part of the reward projection's build digest
-(`packages/read-model/src/reward-projection.ts`), so the bump to `conversion-search-v2`
+(`packages/read-model/src/reward-projection.ts`), so each bump (`conversion-search-v2`, then `-v3`)
 builds a new projection snapshot once; stored snapshots are not rewritten and no
 migration is needed.
 
 The exhaustive eligibility test covers all 960 combinations of ten validity shapes
 (including three standing-offer shapes), eight membership scenarios,
 restricted/unrestricted tiers, three application days and direct/two-hop routes. A
-malformed stored validity establishes no day and stays `needs_rule_verification`. The
-existing deadline and completion rules are unchanged.
+malformed stored validity establishes no day and stays `needs_rule_verification`.
+`packages/domain/test/reward-conversion.test.ts` also pins unknown, malformed and
+period deadlines. The completion rule is unchanged; a `requiredCompletionBy` with no
+day is still not checked (a limit; no caller passes one today).
