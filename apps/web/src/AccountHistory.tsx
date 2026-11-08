@@ -31,6 +31,11 @@ const STATE_LABELS: Readonly<Record<string, string>> = {
   accepted: "採用",
   rejected: "含まれないと判断",
   released: "解除",
+  // A mapping revision's own status (`account_mappings.status`).
+  identified: "識別済み",
+  "provider-local": "取得元内で識別",
+  aggregate: "集計表示",
+  unresolved: "要確認",
 };
 
 function HistoryEntry({ entry }: { entry: AccountHistoryEntry }): ReactNode {

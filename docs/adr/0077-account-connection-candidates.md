@@ -1,7 +1,9 @@
 # ADR 0077: Propose aggregator-to-direct account containment from confirmed connection reviews; never propose the same account without leaf evidence
 
-- Status: accepted (merged 2026-11-06 in #949)
-- Date: 2026-11-06
+- Status: accepted (merged 2026-11-06 in #949); the
+  [2026-11-08 amendment](#amendment-2026-11-08-the-correction-history-of-a-source-account)
+  is proposed
+- Date: 2026-11-06; amended 2026-11-08
 - Issue: part of #545
 - Carried by: `packages/domain/src/account-candidates.ts` (policy
   `account-candidates-v1`), `packages/read-model/src/account-candidates.ts`,
@@ -372,7 +374,8 @@ Synthetic data only, no production access.
   capability, either narrowed scope and malformed ids refuse before any read;
   an unknown account is restricted; a history past the budget is refused
   before its rows are read; both statements are keyed on the whole CORE
-  schema without statistics.
+  schema without statistics, with no table scan anywhere in either plan, the
+  decision-origin subqueries included.
 - `services/app/test/account-history-api.test.ts` on workerd: the route's
   answer, Access, GET/HEAD only, strict query, unknown account; the agent
   route and MCP return the route's answer; strict input; one audit read per
@@ -382,4 +385,5 @@ Synthetic data only, no production access.
 - `apps/web/test/account-candidates.browser.test.ts`: the panel reads only
   when opened, for the candidate's direct source account, lists an acceptance
   and its withdrawal in order, plans nothing and passes the accessibility
-  audit.
+  audit; a refused history (`budget_exceeded`) shows the refusal alone, with
+  no list, no "no history" line and no footnote.

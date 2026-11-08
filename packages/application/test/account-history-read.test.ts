@@ -281,9 +281,17 @@ describe("query plans without table statistics", () => {
       const plan = explain(db, text, [DIRECT])
         .map((step) => step.detail)
         .join("\n");
-      expect(plan).not.toMatch(
-        /^SCAN (m|d|r|account_mappings|decision_revisions|entity_relations)\b/mu,
-      );
+      // No table is scanned anywhere, the origin subqueries (`origin_op`,
+      // `origin_d`) included; only the count's one constant row is.
+      expect(plan).not.toMatch(/^SCAN (?!CONSTANT ROW$)/mu);
+      if (text === ACCOUNT_HISTORY_SQL) {
+        expect(plan).toContain(
+          "origin_op USING INDEX sqlite_autoindex_decision_operations_1 (operation_id=?)",
+        );
+        expect(plan).toContain(
+          "origin_d USING INDEX decision_revisions_subject (subject_kind=? AND subject_ref=? AND revision=?)",
+        );
+      }
       expect(plan).toContain("sqlite_autoindex_account_mappings_2 (source_account_id=?)");
       expect(plan).toContain("decision_revisions_subject (subject_kind=? AND subject_ref=?)");
       expect(plan).toMatch(/entity_relations_from \(kind=\? AND from_ref=\?\)/u);

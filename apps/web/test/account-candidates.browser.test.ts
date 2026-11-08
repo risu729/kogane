@@ -12,6 +12,7 @@ import {
   type AccountCandidate,
   type AccountCandidateView,
 } from "../../../packages/application/src/query/account-candidates.ts";
+import { ERROR_STATUS } from "../../../packages/application/src/errors.ts";
 import { readAccountHistoryForGrant } from "../../../packages/application/src/query/account-history-read.ts";
 import { world, type Store } from "../../../packages/application/test/account-candidates-world.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
@@ -37,6 +38,8 @@ describe.if(runnable)("account candidate review", () => {
   let store: Store;
   const posted: { operation: string; body: Record<string, any> }[] = [];
   const read: URL[] = [];
+  /** The history route's row budget; a test lowers it to see a refusal. */
+  let historyRows: number = GRANT.budget.maxRows;
 
   async function page(view: AccountCandidateView, offset: number, sourceAccountId: string | null) {
     const outcome = await reviewAccountCandidates({
@@ -52,6 +55,7 @@ describe.if(runnable)("account candidate review", () => {
     store = world();
     posted.length = 0;
     read.length = 0;
+    historyRows = GRANT.budget.maxRows;
   });
   beforeAll(async () => {
     store = world();
@@ -79,13 +83,13 @@ describe.if(runnable)("account candidate review", () => {
         if (url.pathname === "/api/identity/account-history") {
           read.push(url);
           const outcome = await readAccountHistoryForGrant({
-            grant: GRANT,
+            grant: { ...GRANT, budget: { ...GRANT.budget, maxRows: historyRows } },
             sql: store.sql,
             sourceAccountId: url.searchParams.get("sourceAccountId"),
           });
           return outcome.ok
             ? Response.json(outcome.history)
-            : Response.json(outcome.error, { status: 403 });
+            : Response.json(outcome.error, { status: ERROR_STATUS[outcome.error.code] });
         }
         if (url.pathname.startsWith("/api/command/v1/")) {
           const operation = url.pathname.split("/").at(-1)!;
@@ -293,10 +297,29 @@ describe.if(runnable)("account candidate review", () => {
     const items = await card.locator("ol li").allInnerTexts();
     expect(items).toHaveLength(3);
     expect(items[0]).toContain("対応付け");
+    // A mapping revision's status reads as its label, not as the stored code.
+    expect(items[0]).toContain("規則による判断 · 取得元内で識別");
     expect(items[1]).toContain("synthetic acceptance");
     expect(items[1]).toContain("連携に含まれる");
     expect(items[2]).toContain("synthetic withdrawal");
     expect(items[2]).toContain("含まれないと判断");
+    expect(await auditView(tab)).toEqual([]);
+    expect(posted).toEqual([]);
+    await tab.close();
+  }, 60_000);
+
+  test("a refused history shows the refusal alone, never an empty or partial list", async () => {
+    // The direct account has at least its mapping revision; a budget of zero refuses it whole.
+    historyRows = 0;
+    const tab = await open();
+    const card = tab.locator(".identity-card").first();
+    await card.getByRole("button", { name: "取得元の口座の訂正履歴を見る", exact: true }).click();
+    const alert = card.getByRole("alert");
+    await alert.waitFor();
+    expect(await alert.innerText()).toContain("表示上限を超えています");
+    expect(await card.locator("ol li").count()).toBe(0);
+    expect(await card.getByText("記録順の履歴です。", { exact: false }).count()).toBe(0);
+    expect(await card.getByText("履歴はありません。", { exact: true }).count()).toBe(0);
     expect(await auditView(tab)).toEqual([]);
     expect(posted).toEqual([]);
     await tab.close();
