@@ -442,7 +442,7 @@ describe("reward reads", () => {
       offerCoverage: { limit: 200, truncated: false },
       offerVersions: ["offer:synthetic-versioned@v1", "offer:synthetic-versioned@v2"],
       reasonCodes: ["offer_version_not_selected"],
-      release: "conversion-search-v2",
+      release: "conversion-search-v3",
     });
     const receive = async (version: string) =>
       (
@@ -531,7 +531,7 @@ describe("reward reads", () => {
       offerCoverage: { limit: 200, truncated: false },
       sourceUnits: stored,
       reasonCodes: ["source_unit_not_selected"],
-      release: "conversion-search-v2",
+      release: "conversion-search-v3",
     });
     expect(body).not.toHaveProperty("paths");
     expect(body).not.toHaveProperty("rejected");

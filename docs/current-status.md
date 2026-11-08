@@ -126,9 +126,10 @@ the MCP Access application admits applies as itself, over every schedule
 
 ## Next work
 
-The next product milestone is card usage → statement → bank debit with an
-explainable trail and no double expense. Finish representative coverage and
-identity gaps, then extend dated holdings/liabilities, valuation, lots/P&L and
+Card usage → statement → bank debit with an explainable trail and no double
+expense was done for the representative cases on 2026-11-08 (roadmap Phase 2).
+The next product milestone is representative coverage, collection requests and
+identity (Phase 3); then dated holdings/liabilities, valuation, lots/P&L and
 tax. Rewards can progress in parallel. See the [roadmap](roadmap.md) for delivery
 order and acceptance criteria. Survey decisions over MCP follow the owner's adoption conditions of
 2026-11-07 ([ADR 0050, 2026-11-07 amendment](adr/0050-maintenance-survey-proposals.md#amendment-delegated-decisions-over-mcp-2026-11-07)). The official-site maintenance re-survey is

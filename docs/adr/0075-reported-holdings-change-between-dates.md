@@ -309,3 +309,18 @@ was added afterwards, with the amendment to ADR 0019.)
   or `±0` and every digit of the exact decimal (18 fraction digits, more
   integer digits than a Number holds), and a change that is not exact as
   unknown.
+
+## Amendment 2026-11-07: an agent read of the same page
+
+- Status: accepted (risu's decision of 2026-11-07, recorded as
+  [ADR 0081](0081-ui-parity-through-mcp.md)); implemented by #1069
+
+The limit "No agent read" above no longer holds. ADR 0081 requires an MCP read
+for every UI read, so `kogane.reported-holdings-change.read` answers
+`GET /api/v2/reported-holdings-change` through the route's own reader
+(`readHoldingsChange`), under `records.read` on `"*"` sources and accounts, and
+only where the reported state's views exist, as the route does
+([agent API: UI read pages](../agent-api.md#ui-read-pages)). It takes the
+route's `from`, `to`, `source` and `account` and answers under `data`; each call
+is an R0 read in the audit log. `services/app/test/page-read-rewards.test.ts`
+compares its answer with the route's.

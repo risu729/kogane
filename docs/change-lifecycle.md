@@ -621,7 +621,17 @@ stale, and Approve / Commit buttons. The buttons act only when the API
 advertises `commands: true`; without it the screen is read-only and says so.
 After a commit the receipt panel distinguishes `受理` (accepted) from
 `反映済み` (published) and offers a re-check rather than claiming completion
-(addendum 11 §5).
+(addendum 11 §5); one re-check runs at a time, so an earlier answer never
+replaces a later one. A refusal from any step (simulate, approve, commit or the
+re-check) is shown by a fixed message for its closed code, and every code in
+`COMMAND_ERROR_CODES` has its own (`apps/web/src/command-api.ts`); the
+server's text is never shown. Of the codes outside that list only the App's
+`command_executor_unavailable` has its own message; any other (such as the
+App's `invalid_request` or `internal_error`) falls back to a message chosen by
+HTTP status, which asks to retry later only for a server fault, a timeout or a
+rate limit and otherwise says a retry gets the same answer. A simulate refusal
+the same request would meet again (a 4xx other than 401, 408 or 429, or
+`budget_exceeded`) offers no 再試行 button.
 
 A plan that reviews something shown elsewhere adds a panel that reads the
 reviewed item back from the server. The panel compares the plan's pins with that
