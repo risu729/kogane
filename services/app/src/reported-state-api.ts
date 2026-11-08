@@ -4,23 +4,20 @@
 // Read-only, GET-only, and served under the reader authority every signed-in
 // subject already has over the other GET routes: it shows provider figures the
 // evidence pages already show, adds none of them up and carries no review
-// action. A store without the views it reads does not serve it.
+// action. A store without the views it reads does not serve it. The route is
+// an adapter: the request rules and refusal codes are the application
+// service's (`readReportedStateRequest`), which the agent tool calls too.
 import { storeHasFeature } from "../../../packages/application/src/query/store-schema.ts";
 import {
-  DatedStateLimitError,
-  queryDatedState,
-} from "../../../packages/application/src/query/dated-state.ts";
+  readReportedStateRequest,
+  reportedStateBodyFromQuery,
+} from "../../../packages/application/src/query/reported-state-read.ts";
 import type { ReportedState } from "../../../packages/domain/src/reported-state.ts";
-import { parseLocalDate } from "../../../packages/domain/src/time.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { readerGrant } from "./agent-api";
 import { HttpError, json } from "./http";
 
 export const REPORTED_STATE_PATH = "/api/v2/reported-state";
-const PARAMETERS = ["date", "source", "account"];
-export const REPORTED_STATE_DATE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/u;
-export const REPORTED_STATE_SOURCE = /^[a-z0-9][a-z0-9-]{0,63}$/u;
-export const REPORTED_STATE_ACCOUNT = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,127}$/u;
 
 /**
  * Served only where the store has what the read joins: the snapshot policy
@@ -28,11 +25,6 @@ export const REPORTED_STATE_ACCOUNT = /^[A-Za-z0-9][A-Za-z0-9_:.-]{0,127}$/u;
  */
 export async function reportedStateAvailable(env: Env): Promise<boolean> {
   return storeHasFeature(d1Executor(env.DB), "datedState");
-}
-
-/** Today's civil date in Asia/Tokyo: a later date has no reported state yet. */
-function tokyoToday(now: number): string {
-  return new Date(now + 9 * 3_600_000).toISOString().slice(0, 10);
 }
 
 export async function reportedStateApi(
@@ -48,45 +40,28 @@ export async function reportedStateApi(
   // The reader authority: every source and account, summaries and records.
   if (!readerGrant(subject).capabilities.includes("summary.read"))
     throw new HttpError(403, "forbidden");
-  for (const [key, value] of url.searchParams)
-    if (!PARAMETERS.includes(key) || url.searchParams.getAll(key).length !== 1 || !value)
-      throw new HttpError(400, "invalid_query");
-  const state = await readReportedState(env, {
-    date: url.searchParams.get("date"),
-    source: url.searchParams.get("source"),
-    account: url.searchParams.get("account"),
-  });
+  // The query string as the tool's body: the service's rules decide both.
+  const query = reportedStateBodyFromQuery(url.searchParams);
+  if (!query.ok) throw new HttpError(query.status, query.refusal);
+  const state = await readReportedState(env, query.body);
   return json({ apiVersion: 2, ...state });
 }
 
 /**
- * The route's request rules and its read, shared with the agent tool
- * `kogane.reported-state.read` so both answer the same state and the same
- * closed refusal codes (thrown as `HttpError`): `invalid_date`,
- * `date_in_future`, `invalid_query` for a malformed filter, and
- * `result_limit_exceeded` (413) past the read's row bound.
+ * The read the route and the agent tool `kogane.reported-state.read` both
+ * call. The request rules, the read and the closed refusal codes are the
+ * application service's (`readReportedStateRequest`), so both answer the same
+ * state and the same refusal, thrown as `HttpError`: `invalid_query` for
+ * another, repeated or empty key or a malformed filter, `invalid_date`,
+ * `date_in_future`, and `result_limit_exceeded` (413) past the read's row
+ * bound.
  */
-export async function readReportedState(
-  env: Env,
-  request: { date: string | null; source: string | null; account: string | null },
-): Promise<ReportedState> {
-  const { date, source, account } = request;
-  if (date === null || !REPORTED_STATE_DATE.test(date) || parseLocalDate(date) === null)
-    throw new HttpError(400, "invalid_date");
-  if (date > tokyoToday(Date.now())) throw new HttpError(400, "date_in_future");
-  if (source !== null && !REPORTED_STATE_SOURCE.test(source))
-    throw new HttpError(400, "invalid_query");
-  if (account !== null && !REPORTED_STATE_ACCOUNT.test(account))
-    throw new HttpError(400, "invalid_query");
-  try {
-    return await queryDatedState(d1Executor(env.DB), {
-      date,
-      ...(source === null ? {} : { source }),
-      ...(account === null ? {} : { account }),
-    });
-  } catch (error) {
-    // More rows than the bound are refused, never cut into a partial answer.
-    if (error instanceof DatedStateLimitError) throw new HttpError(413, "result_limit_exceeded");
-    throw error;
-  }
+export async function readReportedState(env: Env, body: unknown): Promise<ReportedState> {
+  const outcome = await readReportedStateRequest({
+    sql: d1Executor(env.DB),
+    body,
+    now: Date.now(),
+  });
+  if (!outcome.ok) throw new HttpError(outcome.status, outcome.refusal);
+  return outcome.state;
 }
