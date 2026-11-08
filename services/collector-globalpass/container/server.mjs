@@ -1040,6 +1040,8 @@ async function collectBrowser(payload, response, diagnostics, lastHttpError, cha
   }
   const { browser, context } = launched;
   let page;
+  // A flag, not `primaryError !== undefined`: `throw undefined` is still a failure.
+  let failed = false;
   let primaryError;
   try {
     await context.route("**/*", async (route) => {
@@ -1131,11 +1133,12 @@ async function collectBrowser(payload, response, diagnostics, lastHttpError, cha
     }
     await diagnostics.step("logout", () => signOut(page));
   } catch (error) {
+    failed = true;
     primaryError = error;
   }
   // A teardown failure is logged, but it never replaces the failure that
   // ended the run, nor takes over its stage.
-  const blame = primaryError === undefined;
+  const blame = !failed;
   let teardownError;
   try {
     await diagnostics.step("browser-close", () => launched.close(), { blame });
@@ -1148,7 +1151,7 @@ async function collectBrowser(payload, response, diagnostics, lastHttpError, cha
   } catch (error) {
     teardownError ??= error;
   }
-  if (primaryError !== undefined) throw primaryError;
+  if (failed) throw primaryError;
   if (teardownError !== undefined) throw teardownError;
 }
 
