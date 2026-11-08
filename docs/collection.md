@@ -888,13 +888,18 @@ window, and `full_snapshot` with no range when it did not.
 | ------------------------------------------------------ | ---------------------------- | ---------------------------------------------- |
 | `account-list.html`                                    | `sanitized_provider_capture` | `account-list`                                 |
 | `ordinary/<branch>-<account>/history/<from>-<to>.html` | `sanitized_provider_capture` | `ordinary:<branch>:<account>:page:<from>:<to>` |
+| `ordinary/<branch>-<account>/history/unparsed.html`    | `sanitized_provider_capture` | `ordinary:<branch>:<account>:page:unparsed`    |
 
 One daily cron (`25 21 * * *` UTC, 06:25 JST) signs in once with the Worker
 secrets and reads the account list, then the first displayed history page of
 each ordinary JPY account, at most ten accounts: a run holds up to 11
 artifacts. Accounts past the limit, and accounts whose read failed, are
-units with no artifact, `coverageStatus: unknown` and
-`safeErrorCode: collection-unit-failed`, which make the run `partial`.
+units with no artifact, `coverageStatus: unknown` and the closed code that
+stopped them as `safeErrorCode` (`account-limit`, a client code such as
+`read-http-error`, or the HTML parser's check as `parse-<code>`; anything else
+stays `collection-unit-failed`), which make the run `partial`. A history page
+the parser refuses is still stored, sanitized and `partial`, under the
+`unparsed` key above; no parser accepts that key, so it is evidence only.
 Additional authentication stops the run, and scheduled retries are disabled.
 
 Sanitizer: `sanitizeMizuhoPage` (`packages/parsers/src/parsers/mizuho-html.ts`)
@@ -908,9 +913,11 @@ Each artifact is recorded as a `redacted` transformation by
 Terminal: `source: mizuho-bank`, `producer: collector-mizuho-bank`,
 `producerVersion: COLLECTOR_SCHEMA_VERSION` (`mizuho-collector-v1`),
 `requestedScope: unspecified` over every unit key and no range; units are
-`container`s. `providerOutcome` is `failed` (with no artifact and
-`safeErrorCode: collection-failed`), `partial` when any unit failed (with
-`safeErrorCode: collection-unit-failed`), else `success`. `coverageStatus` is
+`container`s. `providerOutcome` is `failed` (with no artifact and the
+closed code that failed the run, e.g. `login-unrecognized-page`, as
+`safeErrorCode`, else `collection-failed`), `partial` when any unit failed
+(with `safeErrorCode: collection-unit-failed` on the run and each unit's own
+code), else `success`. `coverageStatus` is
 `partial` when the collector recorded any issue (for example a first history
 page that is not the whole history, which leaves the outcome `success`) and
 otherwise `unknown`: no date-range coverage is claimed. The run is written
