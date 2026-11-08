@@ -985,29 +985,78 @@ describe("the operator's read and the never-recorded list", () => {
     }
   });
 
-  // The open limit docs/agent-api.md states: the SDK reads `params.arguments`
-  // as a record, which drops a top-level `__proto__` key and no other.
-  it("answers a top-level `__proto__` argument on /mcp as if absent, unlike the agent route", async () => {
-    const mcpCall = async (args: string) => {
-      const tool = await call("/mcp", {
-        via: "mcp",
-        headers: MCP_HEADERS,
-        rawBody: `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"kogane.audit.search","arguments":${args}}}`,
-      });
-      return ((await tool.response.json()) as { result: { isError?: boolean } }).result;
+  // The SDK reads `params.arguments` as a record, which drops a top-level
+  // `__proto__` key; `handleMcp` hands the tool the arguments as sent.
+  it("refuses a top-level `__proto__` argument on /mcp as the agent route and any unknown key", async () => {
+    const message = (id: number, args: string) =>
+      `{"jsonrpc":"2.0","id":${id},"method":"tools/call","params":{"name":"kogane.audit.search","arguments":${args}}}`;
+    const modern = (id: number, args: string) =>
+      `{"jsonrpc":"2.0","id":${id},"method":"tools/call","params":{"name":"kogane.audit.search","arguments":${args},"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"synthetic-client","version":"0"},"io.modelcontextprotocol/clientCapabilities":{}}}}`;
+    const MODERN_HEADERS = {
+      ...MCP_CLIENT_HEADERS,
+      "mcp-protocol-version": "2026-07-28",
+      "mcp-method": "tools/call",
+      "mcp-name": "kogane.audit.search",
     };
-    const agent = await call("/api/agent/v1/audit.search", { rawBody: '{"__proto__":"x"}' });
-    expect(agent.response.status).toBe(400);
-    expect((await mcpCall('{"__proto__":"x"}')).isError).not.toBe(true);
-    expect((await mcpCall('{"__proto__":{"cursor":"x"}}')).isError).not.toBe(true);
-    // Any other unknown key, prototype member names included, still reaches
-    // the tool and is refused there.
-    for (const key of ["constructor", "toString", "unknown"]) {
-      expect({ key, isError: (await mcpCall(`{"${key}":"x"}`)).isError }).toEqual({
-        key,
-        isError: true,
-      });
+    type Answer = { id: number; result: { isError?: boolean; structuredContent: unknown } };
+    const mcpCall = async (rawBody: string, headers: Record<string, string> = MCP_HEADERS) => {
+      const tool = await call("/mcp", { via: "mcp", headers, rawBody });
+      expect(tool.response.status).toBe(200);
+      return {
+        answer: (await tool.response.json()) as Answer | Answer[],
+        records: (await recordsOf(tool.requestId)).map(brief),
+      };
+    };
+    // Any other unknown key, in each revision: what the tool answers on /mcp,
+    // and what it records.
+    const eras = [
+      [message, MCP_HEADERS],
+      [modern, MODERN_HEADERS],
+    ] as const;
+    const unknown = [];
+    for (const [frame, headers] of eras)
+      unknown.push(await mcpCall(frame(1, '{"unknown":"x"}'), headers));
+    const refused = (unknown[0]!.answer as Answer).result;
+    expect(refused.isError).toBe(true);
+    expect(unknown[0]!.records.length).toBeGreaterThan(0);
+    for (const era of unknown) {
+      expect((era.answer as Answer).result.isError).toBe(true);
+      expect((era.answer as Answer).result.structuredContent).toEqual(refused.structuredContent);
+      expect(era.records).toEqual(unknown[0]!.records);
     }
+    for (const args of ['{"__proto__":"x"}', '{"__proto__":{"cursor":"x"}}']) {
+      const agent = await call("/api/agent/v1/audit.search", { rawBody: args });
+      expect({ args, status: agent.response.status }).toEqual({ args, status: 400 });
+      expect(refused.structuredContent).toEqual(await agent.response.json());
+      for (const [index, [frame, headers]] of eras.entries()) {
+        const proto = await mcpCall(frame(1, args), headers);
+        expect({ args, headers, answer: proto.answer }).toEqual({
+          args,
+          headers,
+          answer: unknown[index]!.answer,
+        });
+        expect(proto.records).toEqual(unknown[index]!.records);
+      }
+    }
+    // In a batch, the guarded call is refused and its neighbour answered as alone.
+    const alone = ((await mcpCall(message(2, "{}"))).answer as Answer).result;
+    expect(alone.isError).not.toBe(true);
+    const batch = (await mcpCall(`[${message(1, '{"__proto__":"x"}')},${message(2, "{}")}]`))
+      .answer as Answer[];
+    expect(Object.fromEntries(batch.map((answer) => [answer.id, answer.result.isError]))).toEqual({
+      1: true,
+      2: alone.isError,
+    });
+    // A batch repeating the guarded call's id and tool runs neither as if the
+    // key were absent: both are refused, each recorded as any unknown key is.
+    const repeated = await mcpCall(`[${message(3, '{"__proto__":"x"}')},${message(3, "{}")}]`);
+    expect(repeated.records).toEqual([...unknown[0]!.records, ...unknown[0]!.records]);
+    // A prototype member's name was never dropped, and stays refused.
+    for (const key of ["constructor", "toString"])
+      expect({
+        key,
+        result: ((await mcpCall(message(1, `{"${key}":"x"}`))).answer as Answer).result,
+      }).toEqual({ key, result: refused });
   });
 
   it("no record holds provider text, a token-shaped value or an amount", async () => {

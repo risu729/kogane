@@ -1523,10 +1523,15 @@ What another tool set (maintenance, #560; operation tracking, #544) relies on:
   `__proto__` key is then refused with the code the route answers for any
   unknown key: `invalid_query` on `/api/v2/audit` and the カード照合 reads,
   `unsupported_semantics` on `/api/v2/query`, `invalid_command` from the
-  Processor for a plan payload. A limit: the SDK reads `params.arguments`
-  as a record too, so a top-level `__proto__` argument key never reaches a
-  tool on `/mcp`. The call is answered as if the key were absent, where
-  `/api/agent/v1/<tool>` sees the key and a closed argument refuses it.
+  Processor for a plan payload. The SDK reads `params.arguments` as a
+  record too, so `handleMcp` (`src/mcp.ts`) keeps a copy of the body the
+  client sent: a `tools/call` whose sent arguments carry an own top-level
+  `__proto__` key reaches the tool with those arguments, and the tool
+  refuses the key with the same code, result and audit record as any other
+  unknown key on `/mcp`, as `/api/agent/v1/<tool>` refuses it. The copy is
+  read only when a tool call is dispatched, after the SDK accepted the
+  body; every other call keeps the SDK's arguments. A batch that repeats
+  such a call's id and tool name has each of those calls refused.
 - **Identity.** The dispatcher has the `AgentCaller` the boundary proved
   (`caller`, `src/auth.ts`) and its resolved `Grant`. Pass the caller object
   on; never derive a role from `caller.principal`, and never read identity

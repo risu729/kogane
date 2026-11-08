@@ -21,6 +21,8 @@ import {
   isLegacyRequest,
   ProtocolError,
   ProtocolErrorCode,
+  readRequestBody,
+  type RequestId,
   Server,
   WebStandardStreamableHTTPServerTransport,
 } from "@modelcontextprotocol/server";
@@ -290,6 +292,59 @@ function querySpecSchema(): Record<string, unknown> {
 
 type PublishedTools = readonly { name: string }[] | (() => Promise<readonly { name: string }[]>);
 type Dispatch = (name: string, body: unknown) => Promise<ToolResult | null>;
+/** A call's `params.arguments` as the client sent them, when the SDK's differ. */
+type SentArguments = (id: RequestId, name: string) => Promise<Record<string, unknown> | undefined>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+/**
+ * The SDK reads `params.arguments` as a Zod record, and a record drops a
+ * `__proto__` key without an issue, so a tool would answer such a call as if
+ * the key were absent, where `/api/agent/v1/<tool>` (which hands the tool
+ * `JSON.parse`'s object) refuses it as an unknown key. This reads the body
+ * the client sent from a copy taken before the SDK read its own, only when a
+ * `tools/call` handler asks, and only after the SDK accepted the body (so it
+ * is JSON within `MAX_REQUEST_BYTES`; the two fallbacks below are not
+ * reached). It answers the sent arguments object of a `tools/call` message
+ * with that id and tool name whose arguments have an own `__proto__` key, so
+ * the tool refuses the key as it refuses any unknown one. A batch that
+ * repeats an id and a name with such a call among them is refused for each
+ * of those calls rather than run as if the key were absent. Every other call
+ * keeps the SDK's arguments, which are then the same keys and values.
+ */
+function sentArgumentsOf(copy: Request): { sent: SentArguments; release: () => void } {
+  let body: Promise<unknown> | undefined;
+  const read = async (): Promise<unknown> => {
+    const outcome = await readRequestBody(copy, MAX_REQUEST_BYTES);
+    if (outcome.tooLarge) return undefined;
+    try {
+      return JSON.parse(outcome.text) as unknown;
+    } catch {
+      return undefined;
+    }
+  };
+  return {
+    sent: async (id, name) => {
+      const parsed = await (body ??= read());
+      for (const message of Array.isArray(parsed) ? parsed : [parsed]) {
+        if (!isRecord(message) || message["method"] !== "tools/call" || message["id"] !== id)
+          continue;
+        const params = message["params"];
+        if (!isRecord(params) || params["name"] !== name) continue;
+        const args = params["arguments"];
+        if (isRecord(args) && Object.hasOwn(args, "__proto__")) return args;
+      }
+      return undefined;
+    },
+    // A copy nobody asked for is cancelled, so its buffered half of the body
+    // is not held to the end of the request.
+    release: () => {
+      if (body === undefined) void copy.body?.cancel().catch(() => undefined);
+    },
+  };
+}
 
 /**
  * One SDK server for one request. It declares the tools capability and
@@ -297,7 +352,7 @@ type Dispatch = (name: string, body: unknown) => Promise<ToolResult | null>;
  * SDK's (`initialize`, `ping`, `server/discover`, notifications) or its
  * `-32601`.
  */
-function serverFor(run: Dispatch, tools: PublishedTools): Server {
+function serverFor(run: Dispatch, tools: PublishedTools, sent: SentArguments): Server {
   const server = new Server(MCP_SERVER_INFO, {
     capabilities: { tools: { listChanged: false } },
     instructions: MCP_INSTRUCTIONS,
@@ -307,8 +362,12 @@ function serverFor(run: Dispatch, tools: PublishedTools): Server {
     // carries them as they are.
     tools: structuredClone(typeof tools === "function" ? await tools() : tools) as never,
   }));
-  server.setRequestHandler("tools/call", async (request) => {
-    const outcome = await run(request.params.name, request.params.arguments ?? {});
+  server.setRequestHandler("tools/call", async (request, ctx) => {
+    const { name } = request.params;
+    const outcome = await run(
+      name,
+      (await sent(ctx.mcpReq.id, name)) ?? request.params.arguments ?? {},
+    );
     // A name the dispatcher does not know is a protocol error, not a tool's.
     if (outcome === null) throw new ProtocolError(ProtocolErrorCode.InvalidParams, "unknown_tool");
     return {
@@ -352,6 +411,11 @@ function serverFor(run: Dispatch, tools: PublishedTools): Server {
  * name `run` does not know is `unknown_tool`, not a route of its own. `tools`
  * may be a function, which is then asked only by `tools/list`, so a list that
  * needs the store is not computed for a message that does not show it.
+ *
+ * The request is cloned before the SDK reads it, so a tool call whose sent
+ * arguments carry a top-level `__proto__` key reaches `run` with them
+ * (`sentArgumentsOf`); `agentApi` calls this after the Access gate, the
+ * origin check and the grant.
  */
 export async function handleMcp(
   request: Request,
@@ -367,12 +431,19 @@ export async function handleMcp(
       throw new ProtocolError(ProtocolErrorCode.InternalError, "internal_error");
     }
   };
+  const { sent, release } = sentArgumentsOf(request.clone());
   const factory = (): Server =>
     serverFor(
       (name, body) => contained(() => run(name, body)),
       typeof tools === "function" ? () => contained(tools) : tools,
+      (id, name) => contained(() => sent(id, name)),
     );
-  const response = await serve(request, factory);
+  let response: Response;
+  try {
+    response = await serve(request, factory);
+  } finally {
+    release();
+  }
   if (failure !== undefined) throw failure.error;
   return response;
 }
