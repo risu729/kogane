@@ -424,6 +424,15 @@ applied** (`execution.scope: "collector_default"`).
 | `expired`           | not started within 24 h of acceptance                                                         | `blocked`               |
 | `unsupported`       | no connection (or no binding) serves the source and action                                    | `blocked`               |
 
+The closed shape a collector answers is `status` (`completed` or `failed`), a
+`failureCode` exactly when it failed (lower-case letters, digits and `_`, at
+most 64; the pattern is checked, not a fixed list), and at most 100 run ids, each one
+a terminal key can carry (`RUN_ID` in `packages/collection/src/keys.ts`, so
+never a `:`): `collectorOperationResult` in
+`packages/collection/src/operation-rpc.ts`. The collector's own result helpers
+(`scheduledResult`, `scheduledFailure`) report only such ids, and none for a
+run whose terminal was not written, even when the run is listed.
+
 `startedAt`, `collectedAt`, `publishedAt` and `finishedAt` are set when the
 state is reached; `expiresAt` is acceptance + 24 h.
 

@@ -786,8 +786,8 @@ applies to collector starts only; an import expiry would be a new decision.
 expiry") pins this.
 
 An import whose stored payload names no source or run, or a source or run id
-the bucket key grammar refuses (the App's run grammar also admits `:`, which
-no terminal key can carry), fails at once with `operation_payload_invalid`
+the bucket key grammar refuses (the App refuses such a run id at acceptance,
+so this catches a payload stored before it did), fails at once with `operation_payload_invalid`
 and writes no stage row; it is not looked at again.
 
 An import whose registration **throws** — R2 or CORE unavailable, or a

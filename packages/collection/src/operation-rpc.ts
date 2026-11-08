@@ -17,6 +17,7 @@
 // Dependency-free like the rest of this package: collectors bundle it, so the
 // validation below is the same closed-key style as `manifest.ts` rather than a
 // schema library (the App's request schemas stay Zod).
+import { RUN_ID } from "./keys";
 import type { ScheduledResult } from "./schedule-result";
 
 export const COLLECTOR_OPERATION_VERSION = "kogane-collector-operation-v1";
@@ -276,14 +277,14 @@ export async function runCollectorOperation(
   return runScheduled(connection.cron, request.requestedAtMs, request);
 }
 
-const RUN_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/u;
 const SAFE_CODE = /^[a-z0-9_]{1,64}$/u;
 
 /**
  * What the Processor accepts back over the binding: the closed result shape,
- * or null when the value is not one. A malformed answer arrived *after* the
- * collector was called, so the caller treats null as an uncertain outcome —
- * never as "nothing happened".
+ * or null when the value is not one. A run id must be one a terminal key can
+ * carry (keys.ts `RUN_ID`): no other id can name a persisted run. A malformed
+ * answer arrived *after* the collector was called, so the caller treats null
+ * as an uncertain outcome — never as "nothing happened".
  */
 export function collectorOperationResult(value: unknown): ScheduledResult | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
