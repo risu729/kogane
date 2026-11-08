@@ -42,7 +42,7 @@ const FOREIGN = {
   source: "sbi-securities",
   dataset: "foreign-cash-positions",
   parser: "sbi-foreign-cash-positions",
-  version: "0.3.0",
+  version: "0.3.1",
 } as const;
 const REQUEST: HoldingsChangeRequest = {
   from: "2026-09-01",

@@ -1,4 +1,4 @@
--- The shared CSV helper releases every parser, including three whose dataset
+-- The shared CSV helper releases every parser, including four whose dataset
 -- policy requires an exact version. Admit the new equivalent snapshot readers
 -- after the CSV recovery release; leave operator-selected alternatives alone.
 -- Only operational policy rows change. Raw evidence, parse runs, observations,
@@ -17,4 +17,9 @@ WHERE parser_name = 'sbi-shinsei-exchange-rate' AND dataset = 'exchange-rate'
 UPDATE dataset_snapshot_policies
 SET required_parser_version = '1.0.1', updated_at_ms = 1794096000000
 WHERE parser_name = 'prestia-bank-balances' AND dataset = 'prestia-bank-balance-html'
+  AND required_parser_version = '1.0.0';
+
+UPDATE dataset_snapshot_policies
+SET required_parser_version = '1.0.1', updated_at_ms = 1794096000000
+WHERE parser_name = 'st-george-balances' AND dataset = 'account-snapshot'
   AND required_parser_version = '1.0.0';

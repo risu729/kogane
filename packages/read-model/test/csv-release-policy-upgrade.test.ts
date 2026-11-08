@@ -29,6 +29,13 @@ const POLICIES = [
     old: "1.0.0",
     current: "1.0.1",
   },
+  {
+    source: "st-george",
+    dataset: "account-snapshot",
+    parser: "st-george-balances",
+    old: "1.0.0",
+    current: "1.0.1",
+  },
 ] as const;
 const RELATIONS = {
   fetchArtifacts: "observation_fetch_artifacts",

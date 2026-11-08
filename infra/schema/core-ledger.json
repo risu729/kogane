@@ -1177,9 +1177,9 @@
     },
     {
       "file": "0084_csv_reader_release_snapshot_policies.sql",
-      "statementCount": 3,
+      "statementCount": 4,
       "insertStatements": [],
-      "sha256": "6c9aeaf9f910f5958425813772b5e0a15190c9028dfc15df56d9a484ad43874e"
+      "sha256": "14d293a661d1229c973e51d8813b8908f64f35f29defa35f635b3f01de39be8d"
     }
   ],
   "tables": [

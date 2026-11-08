@@ -55,7 +55,7 @@ const FOREIGN = {
   source: "sbi-securities",
   dataset: "foreign-cash-positions",
   parser: "sbi-foreign-cash-positions",
-  version: "0.3.0",
+  version: "0.3.1",
 } as const;
 
 const EQUITY: PriceSelectionPolicy = {

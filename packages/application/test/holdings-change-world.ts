@@ -50,7 +50,7 @@ export function holdingsChangeWorld(): DatedStore {
     source: "sbi-securities",
     dataset: "foreign-cash-positions",
     parser: "sbi-foreign-cash-positions",
-    version: "0.3.0",
+    version: "0.3.1",
     fetchedAt: "2026-09-05T01:00:00Z",
     positions: [{ account: "sbi-a", code: "VTX", quantity: "2.5", currency: "USD" }],
   });
