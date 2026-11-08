@@ -965,7 +965,8 @@ the collector's own record, so it is `collector_manifest` now.
   were never stored. Manifests written before then keep those entries
   (append-only; corrections are new runs). No reader depends on them: the
   Processor's collector-manifest metadata extractors exist only for Sony Bank
-  and MyJCB (both match entries to stored objects by digest and size), and
+  and MyJCB (Sony Bank matches an entry by dataset, digest and size; MyJCB's
+  shared-bucket manifests by digest, size and content-addressed key), and
   neither the App nor the web evidence browser reads a collector manifest's
   entries. `test/shared-collection.test.ts` ("the collector
   manifest describes the bytes DATA holds") checks every entry against the
@@ -1012,7 +1013,7 @@ Processor maps it to the CORE source `global-pass`), producer
 | ------------------------------ | ---------------------------- | ---------------------------------------------------------------------------------- |
 | `activity-<yyyy-mm>.html`      | `sanitized_provider_capture` | page 1 of the month, as `sanitizeGlobalPassActivityHtml` produced it               |
 | `activity-<yyyy-mm>-p<n>.html` | `sanitized_provider_capture` | page `n` (2..5) of a walked month, as `sanitizeGlobalPassActivityHtml` produced it |
-| `manifest.json`                | `collector_manifest`         | the collector manifest, the bytes legacy mode staged                               |
+| `manifest.json`                | `collector_manifest`         | the collector manifest; each `artifacts` entry names its page's stored object      |
 
 - `requestedScope`: `month_range` over the selected months (oldest to newest),
   `unitKeys: ["account"]`. A run whose container never reported its month list
@@ -1115,6 +1116,17 @@ Processor maps it to the CORE source `global-pass`), producer
   `terminalDigest`.
 - Staging: **none**. Every sanitized page is held in memory until the terminal
   is written.
+- **What the manifest's `artifacts` entries describe.** One entry per stored
+  page: `sha256` and `bytes` are the digest and size of the sanitized page,
+  and `key` is the content-addressed object (`objects/<2 hex>/<sha256>`) the
+  terminal's `storageRef` names for those bytes. Until 2026-11-08 `key` was a
+  staging-prefix key (`raw/prestia-globalpass/<date>/<runId>/…`) that shared
+  mode never writes; the digest and size were already those of the stored
+  bytes. Manifests written before then keep that key (append-only). No reader
+  depends on it (the Processor's collector-manifest metadata extractors exist
+  only for Sony Bank and MyJCB). `test/shared-worker.test.ts` ("the collector
+  manifest names the objects DATA holds") checks every entry against the
+  terminal and the object in a fake `DATA` bucket.
 - Sanitization: `test/shared-worker.test.ts` asserts nothing in `DATA` carries
   the session state, the password or the relay token. The importer-side
   sanitizer comparison was removed with the importer
@@ -1134,7 +1146,7 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 | Artifact         | Role                 | Bytes                                                       |
 | ---------------- | -------------------- | ----------------------------------------------------------- |
 | `<dataset>.json` | `collector_derived`  | the gateway envelope with `meta.secureKey` already stripped |
-| `manifest.json`  | `collector_manifest` | the collector manifest, the bytes legacy mode staged        |
+| `manifest.json`  | `collector_manifest` | the collector manifest; each entry names a stored object    |
 
 - `requestedScope`: `full_snapshot`, `unitKeys: ["account"]`; one `account` unit
   of kind `collection`, the same unit the central descriptors use, counting the
@@ -1172,6 +1184,20 @@ keep-alive and the daily collection — both unchanged. Terminal source id
 - Staging: **none**. Every sanitized envelope is held in memory until the
   terminal is written; the create-only terminal put in `DATA` is the duplicate
   guard the staging `onlyIf` put used to be.
+- **What the manifest's `artifacts` entries describe.** One entry per stored
+  dataset: `sha256` and `bytes` are the digest and size of the sanitized
+  envelope, and `key` is the content-addressed object
+  (`objects/<2 hex>/<sha256>`) the terminal's `storageRef` names for those
+  bytes. The Worker takes the entry from `describeArtifact` and replaces its
+  run-prefix key, which only the legacy staging put (`storeArtifact`) writes.
+  Until 2026-11-08 `key` was that run-prefix key
+  (`raw/sbi-vc-trade/<date>/<runId>/<dataset>.json`), which shared mode never
+  writes; the digest and size were already those of the stored bytes.
+  Manifests written before then keep that key (append-only). No reader
+  depends on it (the Processor's collector-manifest metadata extractors exist
+  only for Sony Bank and MyJCB). `test/worker-manifest.test.ts` runs the
+  Durable Object's collection against a synthetic gateway and checks every
+  entry against the terminal and the object in a fake `DATA` bucket.
 - Parity: `test/shared-collection.test.ts` asserts the `DATA` bytes are the
   staged encoding of the same sanitized body (the encoding the retired
   importer forwarded verbatim after checking `meta.secureKey` was absent), and

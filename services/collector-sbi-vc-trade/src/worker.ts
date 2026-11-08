@@ -10,6 +10,7 @@ import {
 } from "../../../packages/collection/src/schedule-result";
 import { DurableObject } from "cloudflare:workers";
 import { createDiagnostics } from "../../../packages/collector-diagnostics/src/index";
+import { objectKey } from "../../../packages/collection/src/index";
 import { collectSbiVcTrade } from "./collector";
 import { decryptSession, encryptSession } from "./crypto";
 import { createPasskeySession, parsePasskeyCredential } from "./passkey";
@@ -256,12 +257,14 @@ export class SbiVcSessionState extends DurableObject<Env> {
             },
             onArtifact: async (artifact) => {
               operation = `r2_${artifact.dataset}`;
-              artifacts.push(
-                // The manifest entry only: the bytes reach DATA
-                // content-addressed when the terminal is written, and
-                // nothing is staged.
-                (await describeArtifact({ prefix, artifact })).record,
-              );
+              const { record } = await describeArtifact({ prefix, artifact });
+              // The manifest entry only: the bytes reach DATA
+              // content-addressed when the terminal is written, and nothing
+              // is staged. So the entry names that object, the key the
+              // terminal's `storageRef` gives the same bytes, rather than the
+              // run-prefix staging key `describeArtifact` returns, which
+              // shared mode never writes.
+              artifacts.push({ ...record, key: objectKey(record.sha256) });
               captures.push({ dataset: artifact.dataset, body: artifact.body });
               operation = "collect";
             },

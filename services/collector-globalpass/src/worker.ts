@@ -4,6 +4,7 @@ import {
   scheduledResult,
   type ScheduledResult,
 } from "../../../packages/collection/src/schedule-result";
+import { objectKey } from "../../../packages/collection/src/index";
 import { Container, getContainer } from "@cloudflare/containers";
 import { createHash, timingSafeEqual } from "node:crypto";
 import {
@@ -20,7 +21,6 @@ import {
   GLOBALPASS_MEDIA_TYPE,
   GLOBALPASS_PAGINATION_STATUS,
   GLOBALPASS_SCHEMA_VERSION,
-  runPrefix,
   safeMonth,
   selectedMonthsForMode,
   strictCollectionStatus,
@@ -191,7 +191,6 @@ async function collectWithContainer(
     operationId?: string;
   },
 ): Promise<CollectionResult> {
-  const prefix = runPrefix(startedAt, runId);
   const attemptId = `attempt-${crypto.randomUUID()}`;
   // U09: decided once per run. `shared` writes the run only into DATA — the
   // staging bucket is not written at all — and skips the central upload
@@ -395,7 +394,7 @@ async function collectWithContainer(
         artifacts.push(
           // The manifest entry only: the bytes reach DATA content-addressed
           // when the terminal is written, and nothing is staged.
-          (await describeHtml(prefix, month, record.page, sanitizedHtml)).record,
+          (await describeHtml(month, record.page, sanitizedHtml)).record,
         );
         captures.push({ month, page: record.page, sanitizedHtml });
       } catch (error) {
@@ -505,13 +504,14 @@ async function collectWithContainer(
   }
 }
 /**
- * The manifest entry of one month's page — hashed and keyed inside its run —
- * without writing it anywhere. `storeHtml` is this plus the staging put; in
- * shared mode (U09) the entry is all the run needs, because the bytes go to
- * DATA content-addressed and the staging bucket is not written.
+ * The manifest entry of one month's page, without writing it anywhere. The
+ * bytes reach DATA content-addressed when the terminal is written (U09) and
+ * nothing is staged, so the entry names that object
+ * (`objects/<2 hex>/<sha256>`), the key the terminal's `storageRef` gives the
+ * same bytes. Until 2026-11-08 it named a run-prefix staging key
+ * (`raw/prestia-globalpass/<date>/<runId>/…`) that shared mode never writes.
  */
 async function describeHtml(
-  prefix: string,
   month: string,
   page: number,
   html: string,
@@ -521,7 +521,7 @@ async function describeHtml(
 }> {
   const body = new TextEncoder().encode(html);
   const sha256 = hex(await crypto.subtle.digest("SHA-256", body));
-  const key = `${prefix}/${artifactFilename(month, page)}`;
+  const key = objectKey(sha256);
   return {
     record: {
       dataset: GLOBALPASS_DATASET,
