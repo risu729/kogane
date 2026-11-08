@@ -119,6 +119,7 @@ const RECONCILE_RESULT = {
 test("the audited lanes are the ones that write decisions or proposals, and every one keeps tick records", () => {
   expect(Object.keys(LANE_AUDIT).sort()).toEqual([
     "card_settlement_sweep",
+    "instrument_auto_adoption",
     "maintenance_survey",
     "purchase_recognition",
     "reconciliation_sweep",

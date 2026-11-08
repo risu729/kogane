@@ -10,6 +10,8 @@ import {
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+/** Every age is counted to this instant: two Tokyo days after the synthetic capture. */
+const AS_OF = "2099-01-03T00:00:00.000Z";
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
@@ -51,12 +53,13 @@ describe.if(runnable)("collection quality browser", () => {
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
         if (url.pathname === "/api/collection-quality")
-          return Response.json(await queryCollectionQualitySummary(executor));
+          return Response.json(await queryCollectionQualitySummary(executor, { asOf: AS_OF }));
         if (url.pathname.startsWith("/api/collection-quality/"))
           return Response.json(
             await queryCollectionQualityCells(executor, {
               sourceId: url.pathname.split("/").at(-1)!,
               offset: Number(url.searchParams.get("offset") ?? 0),
+              asOf: AS_OF,
             }),
           );
         if (url.pathname.startsWith("/api/"))
@@ -91,6 +94,26 @@ describe.if(runnable)("collection quality browser", () => {
       expect(
         await page.getByText("本人による認証・操作が必要です", { exact: false }).count(),
       ).toBeGreaterThan(0);
+      // collection-freshness-v1: the source's newest run is two days old; the
+      // unit with no file waits on a person and has no current capture.
+      expect(await page.locator('.freshness[data-state="recent"]').first().textContent()).toBe(
+        "2日前の取得",
+      );
+      expect(
+        await page.locator('.freshness[data-state="human-required"]').first().textContent(),
+      ).toBe("本人操作待ち（取得なし）");
+      expect(
+        await page.locator('nav .freshness[data-state="human-required"]').count(),
+      ).toBeGreaterThan(0);
+      // PRESTIA bank's only job is disabled and it was never captured.
+      expect(
+        await page.locator('nav .freshness[data-state="disabled"]').first().textContent(),
+      ).toBe("定期実行の停止中（取得なし）");
+      // provider-data-types-v1: what Vpass offers and what of it is collected.
+      expect(await page.getByText("カード利用明細: 収集・解析済み", { exact: false }).count()).toBe(
+        1,
+      );
+      expect(await page.locator('li[data-status="collected"]').count()).toBeGreaterThan(0);
       expect(
         await page.getByText("予約状態を確認できません", { exact: false }).count(),
       ).toBeGreaterThan(0);
@@ -137,6 +160,22 @@ describe.if(runnable)("collection quality browser", () => {
         })
         .waitFor();
       expect(await page.getByText("synthetic-card", { exact: false }).count()).toBe(0);
+      // provider-data-types-v1: Sony Bank's history is partial and its term
+      // deposits are not collected, each linked to the issue that tracks it;
+      // the source list counts the types not wholly collected.
+      expect(await page.locator('li[data-status="partial"]').count()).toBeGreaterThan(0);
+      expect(
+        await page.locator('li[data-status="not_collected"]', { hasText: "term_deposit" }).count(),
+      ).toBe(1);
+      expect(
+        await page
+          .locator('li[data-status="partial"]', { hasText: "cash_movement" })
+          .getByRole("link", { name: "残りの対応 #449" })
+          .getAttribute("href"),
+      ).toBe("https://github.com/risu729/kogane/issues/449");
+      expect(await page.getByText(/未収集・一部のみのデータ種別 \d+ 件/).count()).toBeGreaterThan(
+        0,
+      );
       expect(requests.filter((request) => request.method !== "GET")).toEqual([]);
       expect(
         requests.some(

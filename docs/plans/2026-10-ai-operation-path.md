@@ -14,9 +14,11 @@
   real-client activation remains open. On 2026-11-07
   [ADR 0084](../adr/0084-mcp-operator-authority-without-delegation.md) removed
   the `MCP_DELEGATIONS` declaration, its roles and the delegation status
-  (S3's declaration core and S8's status part): the operator's MCP principal
-  now resolves from `OPERATOR_SUBJECTS` and its read grant, and the sections
-  below that describe declarations record the earlier design. See the
+  (S3's declaration core and S8's status part), and `AGENT_API_GRANTS` with
+  them: every MCP client the MCP Access application admits now resolves as
+  itself over the whole store, without reading `OPERATOR_SUBJECTS` or a
+  grant table, and the sections below that describe declarations and grants
+  record the earlier design. See the
   [current resume plan](2026-10-mcp-maintenance-followups.md).
   The decisions it rests on are [ADR 0063](../adr/0063-delegated-ai-operation-path.md)
   (delegated AI operation path) and
@@ -600,9 +602,17 @@ routes, H8 the agents' proposal route) and 20 reads (D1–D20). Operations with
    record will be its only durable trace. It stays R3.
 5. Agent-facing contracts for the review queues (D8, D9): only the purchases
    page has one (`validAgentCardPurchasePage`).
-6. D2–D4, D6, D7, D11–D13, D17, D18: the routes exist, no MCP tool does, and
-   none is proven computable inside a listed scope. D5's, D14's and D19's
-   (`kogane.events.read`) tools exist, whole-store only.
+6. D2–D7, D11–D15 and D17–D19 have MCP reads over the routes' own readers,
+   whole-store only, under the names in
+   [agent API: UI read pages](../agent-api.md#ui-read-pages) rather than the
+   proposed ones above (`kogane.observations.list`, `kogane.observations.get`,
+   `kogane.store.read`, `kogane.balances.read`, `kogane.identity.read`,
+   `kogane.rewards.read`, `kogane.evidence.read`, `kogane.evidence.raw.read`,
+   `kogane.schedules.read`, `kogane.collection-quality.read`,
+   `kogane.reports.read`, `kogane.events.read`; D5's is
+   `kogane.reported-state.read`). None is proven computable inside a listed
+   scope. D7's `/api/v2/rewards/simulations` has no MCP read; no screen reads
+   it either. D16 is `kogane.command.simulate`, not a route read.
 7. W1, W2, W4, W5: the writers exist, no agent adapter does.
 8. #564's tool exists only on its branch, with a free-text reason.
 

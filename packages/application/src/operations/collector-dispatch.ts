@@ -31,6 +31,7 @@ import {
   storedRunIds,
   trailOutcome,
 } from "./collector-trail.ts";
+import { projectionRequirementWrite } from "./projection-trace.ts";
 import { type OperationStage, recordDispatch, recordOperationStage } from "./requests.ts";
 
 /** The named collector connection a request is bound to. */
@@ -335,7 +336,10 @@ export type TrackingResult = "published" | "unpublished" | "pending";
  * one was adopted, or `unpublished` with the closed reason when none was — or
  * when nothing settled within `PUBLICATION_HORIZON_MS` of collection
  * (`publication_not_observed`). Otherwise the next look is `checkIntervalMs`
- * away. `projected` (READ) is not traced here and stays as it is.
+ * away. Recording `published` also stores the CORE revision the READ
+ * projection has to reach, as the `projected` stage's pending reference; the
+ * operation record derives `projected` from it when it is read
+ * (`projection-trace.ts`). Nothing here reads READ.
  */
 export async function trackCollectorPublication(input: {
   store: CommandStore;
@@ -373,6 +377,9 @@ export async function trackCollectorPublication(input: {
           updated_at=?2 WHERE operation_id=?1 AND state='collected'`,
         binds: [operationId, now],
       },
+      // In the same transaction, after the publication this call read: the
+      // revision stored is at or above the one that publication wrote.
+      projectionRequirementWrite(operationId, now),
     ]);
     return "published";
   }

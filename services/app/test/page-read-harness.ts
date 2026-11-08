@@ -121,9 +121,9 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
     return { status: response.status, body: await response.json() };
   }
 
-  /** One `/mcp` JSON-RPC message as `mcp-client:synthetic-agent`. */
-  async function mcpMessage(message: Record<string, unknown>) {
-    const response = await worker.fetch(
+  /** The Worker's response to one `/mcp` JSON-RPC message as `mcp-client:synthetic-agent`. */
+  async function mcpResponse(message: Record<string, unknown>): Promise<Response> {
+    return worker.fetch(
       new Request("https://fixture.test/mcp", {
         method: "POST",
         headers: {
@@ -134,6 +134,11 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
       }),
       environment(),
     );
+  }
+
+  /** One `/mcp` JSON-RPC message as `mcp-client:synthetic-agent`. */
+  async function mcpMessage(message: Record<string, unknown>) {
+    const response = await mcpResponse(message);
     expect(response.status).toBe(200);
     return (await response.json()) as Record<string, any>;
   }
@@ -183,7 +188,17 @@ export function pageReadHarness(label: string, extraEnv: Record<string, unknown>
     return page;
   }
 
-  return { route, routeResponse, http, mcp, mcpMessage, direct, listed, expectSameAnswer };
+  return {
+    route,
+    routeResponse,
+    http,
+    mcp,
+    mcpMessage,
+    mcpResponse,
+    direct,
+    listed,
+    expectSameAnswer,
+  };
 }
 
 /**
