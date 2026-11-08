@@ -1,6 +1,8 @@
-// Grant boundary for the `カード照合` page's two reads (ADR 0081): the review
-// list or one review, and the ownership review of one candidate. The services
-// are the page's own (`queryCardSettlements`, `queryCardOwnership`); this file
+// Grant boundary for the `カード照合` pages' reads (ADR 0081): the review list,
+// one statement's candidates, one review or the candidates it competes with,
+// and the ownership review of one candidate. The services are the pages' own
+// (`queryCardSettlements`, `queryRelatedCardSettlements`,
+// `queryCardOwnership`); this file
 // adds no SQL and no writer. A review joins a card statement to a bank debit of
 // another source and account, and its ownership side reads both accounts'
 // claims, so only a whole-store grant may read it.
@@ -11,11 +13,17 @@ import type { SqlExecutor } from "../../../read-model/src/reader.ts";
 import { financialError } from "../errors.ts";
 import { grantAllows, type Grant } from "../grants.ts";
 import { queryCardOwnership } from "./card-ownership.ts";
-import { CARD_SETTLEMENT_PAGE_SIZE, queryCardSettlements } from "./card-settlements.ts";
+import {
+  CARD_SETTLEMENT_PAGE_SIZE,
+  queryCardSettlements,
+  queryRelatedCardSettlements,
+} from "./card-settlements.ts";
 
 /** The route's proposal id pattern (`services/app/src/card-settlements-api.ts`). */
 export const CARD_SETTLEMENT_PROPOSAL_ID = /^[A-Za-z0-9_-]{1,128}$/u;
 export const CARD_SETTLEMENTS_MAX_OFFSET = 1_000_000;
+/** The route's statement key bound (`statementKey` above 1024 characters is refused). */
+export const CARD_SETTLEMENT_STATEMENT_KEY_MAX = 1024;
 
 export type CardSettlementsReadOperation = "card-settlements.read" | "card-settlements.ownership";
 export type CardSettlementsReadOutcome<T> =
@@ -40,9 +48,13 @@ function refusal(
 }
 
 /**
- * One page of reviews (`offset`) or one review (`proposalId`), as the page reads
- * them. The grant's `maxRows` bounds how deep a caller pages: `offset + 50`
- * (one for a `proposalId` read) above it is `budget_exceeded`, before any read.
+ * One page of reviews (`offset`), of one statement's candidates
+ * (`statementKey`), of the candidates a review competes with (`relatedTo`), or
+ * one review (`proposalId`), as the pages read them. `proposalId` takes no
+ * other key; `statementKey` and `relatedTo` each take `offset` only. The
+ * grant's `maxRows` bounds how deep a caller pages: `offset + 50` (one for a
+ * `proposalId` read) above it is `budget_exceeded`, before any read. A
+ * `proposalId` or `relatedTo` that names no candidate is `not_found`.
  */
 export async function readCardSettlementsForGrant(input: {
   grant: Grant;
@@ -59,20 +71,34 @@ export async function readCardSettlementsForGrant(input: {
   if (
     typeof request !== "object" ||
     Array.isArray(request) ||
-    Object.keys(request).some((key) => key !== "offset" && key !== "proposalId")
+    Object.keys(request).some(
+      (key) => !["offset", "proposalId", "statementKey", "relatedTo"].includes(key),
+    )
   )
     return invalid;
-  const { offset, proposalId } = request as { offset?: unknown; proposalId?: unknown };
+  const { offset, proposalId, statementKey, relatedTo } = request as {
+    offset?: unknown;
+    proposalId?: unknown;
+    statementKey?: unknown;
+    relatedTo?: unknown;
+  };
   if (
     (offset !== undefined && typeof offset !== "number") ||
-    (proposalId !== undefined && typeof proposalId !== "string")
+    (proposalId !== undefined && typeof proposalId !== "string") ||
+    (statementKey !== undefined && typeof statementKey !== "string") ||
+    (relatedTo !== undefined && typeof relatedTo !== "string")
   )
     return invalid;
+  const filters = [proposalId, statementKey, relatedTo].filter((value) => value !== undefined);
   if (
+    filters.length > 1 ||
     (offset !== undefined &&
       (!Number.isSafeInteger(offset) || offset < 0 || offset > CARD_SETTLEMENTS_MAX_OFFSET)) ||
     (proposalId !== undefined &&
-      (!CARD_SETTLEMENT_PROPOSAL_ID.test(proposalId) || offset !== undefined))
+      (!CARD_SETTLEMENT_PROPOSAL_ID.test(proposalId) || offset !== undefined)) ||
+    (statementKey !== undefined &&
+      (statementKey.length === 0 || statementKey.length > CARD_SETTLEMENT_STATEMENT_KEY_MAX)) ||
+    (relatedTo !== undefined && !CARD_SETTLEMENT_PROPOSAL_ID.test(relatedTo))
   )
     return invalid;
   const reach = proposalId === undefined ? (offset ?? 0) + CARD_SETTLEMENT_PAGE_SIZE : 1;
@@ -83,9 +109,16 @@ export async function readCardSettlementsForGrant(input: {
         `budget:maxRows=${String(input.grant.budget.maxRows)}`,
       ]),
     };
+  if (relatedTo !== undefined) {
+    const related = await queryRelatedCardSettlements(input.sql, relatedTo, {
+      offset: offset ?? 0,
+    });
+    return related ? { status: "ok", answer: related } : { status: "not_found" };
+  }
   const page = await queryCardSettlements(input.sql, {
     offset: offset ?? 0,
     ...(proposalId === undefined ? {} : { proposalId }),
+    ...(statementKey === undefined ? {} : { statementKey }),
   });
   if (proposalId !== undefined && page.items.length === 0) return { status: "not_found" };
   return { status: "ok", answer: page };

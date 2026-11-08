@@ -3,11 +3,33 @@
 // `execution.ts` and the adapters each transport installs (`readiness.ts`).
 import type { ScopeSet } from "../grants.ts";
 
+/**
+ * The change-kind families (a kind's prefix before its first dot) an MCP
+ * client may plan, approve and commit. The one list every gate reads: the
+ * App's `kogane.command.approve`/`.commit` capability, the delegated
+ * execution envelope's `commandFamilies`, and the Processor's command route
+ * all derive from it, so a family is decidable everywhere or nowhere.
+ */
+export const DECISION_FAMILIES = ["card-settlement", "relation", "identity"] as const;
+export type DecisionFamily = (typeof DECISION_FAMILIES)[number];
+export type DecisionCapability = `commands.decide.${DecisionFamily}`;
+export function decisionCapability(family: DecisionFamily): DecisionCapability {
+  return `commands.decide.${family}`;
+}
+/** `commands.decide.<family>` for every decision family, in `DECISION_FAMILIES` order. */
+export const DECISION_CAPABILITIES: readonly DecisionCapability[] =
+  DECISION_FAMILIES.map(decisionCapability);
+/** The decision family of a change kind, or `null` when no MCP client may decide it. */
+export function decisionFamilyOf(kind: string): DecisionFamily | null {
+  const family = kind.split(".", 1)[0] ?? "";
+  return (DECISION_FAMILIES as readonly string[]).includes(family)
+    ? (family as DecisionFamily)
+    : null;
+}
+
 export const DELEGATION_CAPABILITIES = [
   "commands.plan",
-  "commands.decide.card-settlement",
-  "commands.decide.relation",
-  "commands.decide.identity",
+  ...DECISION_CAPABILITIES,
   "schedules.maintenance.update",
   "schedules.survey.decide",
   "schedules.job.update",

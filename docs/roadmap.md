@@ -325,7 +325,12 @@ lifecycle. Statements without a settlement candidate are listed on
 a closed reason, refund and zero totals under their own code, and the ADR 0074
 planner's read-only answer for statements whose window holds no equal debit
 ([card settlements](card-settlements.md#statements-without-a-candidate)); a
-multi-debit allocation is shown but cannot be accepted. Source ownership is
+multi-debit allocation is shown but cannot be accepted. Each statement/debit
+candidate has its own page listing the candidates it competes with, which the
+purchase chain links, so a wrong match is corrected there by a withdrawal and
+another candidate's acceptance
+([correcting a match](card-settlements.md#correcting-a-match)); agents read
+the same list through `kogane.card-settlements.read` (`relatedTo`). Source ownership is
 recorded by the owner default (ADR 0082) for the accounts the candidates name.
 Installments, revolving and bonus payments, partial payments and refund
 allocation are shown as unsupported with closed reasons and still need support
@@ -389,6 +394,18 @@ or have no candidate
 identifiers, not a match rate; money and reward units have no resolution
 state, and a candidate across providers needs a second source whose identity
 rule records comparable identifiers.
+
+Per source, `/collection-quality?source=<id>&view=accounts` (and
+`kogane.collection-quality.read` with `view: "accounts"`) regroups the
+collection quality cells by the accounts their newest or current capture's
+observations map to: per account and data type (dataset, parser, observation
+kind) the periods that are current, held back by a newer capture that is not
+current, or only in a capture that is not current, each with the cell's closed
+reasons, and apart from them the cells no observation attributes to an
+account ([ADR 0088](adr/0088-collection-quality-per-account.md)). A period no
+capture has is not listed and not claimed missing; an account two sources name
+is shown under each; whether an account is the owner's is not decided there.
+It is not verified against production.
 
 Contracts: [collection](collection.md), [observations](observations.md),
 [identity](identity.md), [source identities](identity-sources.md).

@@ -38,6 +38,7 @@ import {
 import type { SqlWrite } from "../../../packages/storage-d1/src/core/operations.ts";
 import { canonicalDigest } from "../../../packages/domain/src/context.ts";
 import { boundedText, INTERNAL_BODY_LIMIT } from "./bounded-body.ts";
+import { collectionRequestTarget } from "./operations/collection-targets.ts";
 export { jobs };
 export interface ScheduleRow {
   id: string;
@@ -181,9 +182,14 @@ const STALE_LEASE = `lease_ref IS NOT NULL AND (
 export async function expireStaleLeases(db: D1Database): Promise<number> {
   const stale = await db
     .prepare(
-      `SELECT source,lease_ref FROM collection_execution_leases WHERE ${STALE_LEASE} ORDER BY source`,
+      `SELECT source,lease_ref,started_at,heartbeat_at FROM collection_execution_leases WHERE ${STALE_LEASE} ORDER BY source`,
     )
-    .all<{ source: string; lease_ref: string }>();
+    .all<{
+      source: string;
+      lease_ref: string;
+      started_at: string | null;
+      heartbeat_at: string | null;
+    }>();
   let freed = 0;
   for (const row of stale.results) {
     const record = leaseExpiryWrite(row.source, new Date().toISOString(), crypto.randomUUID());
@@ -197,7 +203,17 @@ export async function expireStaleLeases(db: D1Database): Promise<number> {
     ]);
     if (released?.meta.changes === 1) {
       freed += 1;
-      console.log(JSON.stringify({ event: "collection_lease_expired", source: row.source }));
+      // The holder's claim and last heartbeat say how long its execution
+      // lived before it went silent; they are cleared by the release above.
+      console.log(
+        JSON.stringify({
+          event: "collection_lease_expired",
+          source: row.source,
+          leaseRef: row.lease_ref,
+          startedAt: row.started_at,
+          lastHeartbeatAt: row.heartbeat_at,
+        }),
+      );
     }
   }
   return freed;
@@ -1477,6 +1493,7 @@ export async function scheduleSnapshot(env: Env): Promise<ScheduleSnapshot> {
         verifiedAt: ref?.verified_at ?? "",
       },
       latest: latest.find((o) => o.scheduleId === row.id) ?? null,
+      collectionRequest: collectionRequestTarget(env, row.id),
     });
   }
   // The re-survey's freshness and proposals (ADR 0050); a read failure hides

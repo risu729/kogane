@@ -3,6 +3,7 @@ import { queryCardOwnership } from "../../../packages/application/src/query/card
 import {
   queryCardSettlementStatements,
   queryCardSettlements,
+  queryRelatedCardSettlements,
 } from "../../../packages/application/src/query/card-settlements.ts";
 import { d1Executor } from "../../../packages/read-model/src/d1.ts";
 import { principalFor } from "./grants";
@@ -36,7 +37,7 @@ export async function cardSettlementsApi(
     throw new HttpError(403, "operator_required");
   for (const [key, value] of url.searchParams) {
     if (
-      !["offset", "proposalId", "statementKey"].includes(key) ||
+      !["offset", "proposalId", "statementKey", "relatedTo"].includes(key) ||
       url.searchParams.getAll(key).length !== 1 ||
       !value
     )
@@ -58,6 +59,18 @@ export async function cardSettlementsApi(
     (statementKey.length > 1024 || proposalId !== null || ownership || grouped)
   )
     throw new HttpError(400, "invalid_query");
+  // The candidates `relatedTo` competes with: the list's own DTO and paging,
+  // so it combines with `offset` only.
+  const relatedTo = url.searchParams.get("relatedTo");
+  if (
+    relatedTo !== null &&
+    (!/^[A-Za-z0-9_-]{1,128}$/u.test(relatedTo) ||
+      proposalId !== null ||
+      statementKey !== null ||
+      ownership ||
+      grouped)
+  )
+    throw new HttpError(400, "invalid_query");
   if (grouped) {
     if (proposalId !== null) throw new HttpError(400, "invalid_query");
     return json({
@@ -71,6 +84,11 @@ export async function cardSettlementsApi(
     const review = await queryCardOwnership(d1Executor(env.DB), proposalId);
     if (!review) throw new HttpError(404, "not_found");
     return json({ apiVersion: 2, ...review });
+  }
+  if (relatedTo !== null) {
+    const related = await queryRelatedCardSettlements(d1Executor(env.DB), relatedTo, { offset });
+    if (!related) throw new HttpError(404, "not_found");
+    return json({ apiVersion: 2, ...related });
   }
   const page = await queryCardSettlements(d1Executor(env.DB), {
     offset,

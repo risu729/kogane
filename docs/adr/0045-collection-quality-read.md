@@ -345,6 +345,10 @@ Every MCP client holds the whole-store grant, `evidence.read` included
 listed to every client the MCP Access application admits. The answer travels under `data`, as untrusted provider
 content, and each call is an R0 read in the audit log.
 
+[ADR 0088](0088-collection-quality-per-account.md) adds the per-account view
+of one source's cells to this tool as `view: "accounts"`, over the same
+reader, capability and store feature.
+
 ## Amendment 2026-11-08: freshness per source and cell
 
 - Status: accepted (merged in #1127). The owner accepted these states, provisionally, on
@@ -434,6 +438,9 @@ triggered run completes).
   change here.
 - No migration, table, writer, grant or tool is added; the policy is code and
   a new version is a new name.
+- The per-account view ([ADR 0088](0088-collection-quality-per-account.md),
+  its own `apiVersion` 1) is unchanged: its periods state their capture
+  times and carry no freshness.
 - Synthetic tests: `packages/domain/test/collection-freshness.test.ts`
   (Tokyo dates across midnight and offsets, every threshold, waits, refusals,
   and that the contract's check accepts exactly the policy's answers);

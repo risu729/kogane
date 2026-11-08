@@ -65,6 +65,16 @@ test("a closed request is required before reading", async () => {
     { proposalId: 1 },
     { proposalId: "a", offset: 0 },
     { source: "myjcb" },
+    { statementKey: "" },
+    { statementKey: "k".repeat(1025) },
+    { statementKey: 1 },
+    { statementKey: "k", proposalId: "a" },
+    { relatedTo: "/etc" },
+    { relatedTo: "a".repeat(129) },
+    { relatedTo: 1 },
+    { relatedTo: "a", proposalId: "a" },
+    { relatedTo: "a", statementKey: "k" },
+    { relatedTo: "a", offset: -1 },
   ])
     expect(await readCardSettlementsForGrant({ grant: GRANT, sql: store.sql, request })).toEqual({
       status: "refused",
@@ -117,4 +127,60 @@ test("the grant's maxRows bounds the page depth before any read", async () => {
       request: { proposalId: "missing" },
     }),
   ).toEqual({ status: "not_found" });
+});
+
+test("one statement's candidates and a review's competitors read the pages' services", async () => {
+  const store = emptyStore();
+  expect(
+    await readCardSettlementsForGrant({
+      grant: GRANT,
+      sql: store.sql,
+      request: { statementKey: "statement-synthetic", offset: 50 },
+    }),
+  ).toMatchObject({ status: "ok", answer: { items: [], nextOffset: null } });
+  expect(store.calls[0]![1]).toEqual(["statement-synthetic", 51, 50]);
+  // A missing anchor is not found, read by its key before any page.
+  const first: unknown[][] = [];
+  const missing = {
+    all: async () => {
+      throw new Error("no page without an anchor");
+    },
+    first: async (sql: string, binds: unknown[] = []) => {
+      first.push([sql, binds]);
+      return null;
+    },
+  } as unknown as SqlExecutor;
+  expect(
+    await readCardSettlementsForGrant({
+      grant: GRANT,
+      sql: missing,
+      request: { relatedTo: "missing" },
+    }),
+  ).toEqual({ status: "not_found" });
+  expect(first).toEqual([[expect.stringContaining("WHERE id=?1"), ["missing"]]]);
+  const present = emptyStore();
+  const anchored = { ...present.sql, first: async () => ({ present: 1 }) } as SqlExecutor;
+  expect(
+    await readCardSettlementsForGrant({
+      grant: GRANT,
+      sql: anchored,
+      request: { relatedTo: "anchor", offset: 50 },
+    }),
+  ).toMatchObject({ status: "ok", answer: { items: [], nextOffset: null } });
+  expect(present.calls[0]![0]).toContain("related_review");
+  expect(present.calls[0]![1]).toEqual(["anchor", 51, 50]);
+});
+
+test("a statement's or a review's competitors page only as deep as maxRows", async () => {
+  const store = forbiddenStore();
+  const grant = { ...GRANT, budget: { ...GRANT.budget, maxRows: 99 } };
+  for (const request of [
+    { statementKey: "k", offset: 50 },
+    { relatedTo: "a", offset: 50 },
+  ])
+    expect(await readCardSettlementsForGrant({ grant, sql: store.sql, request })).toEqual({
+      status: "refused",
+      error: expect.objectContaining({ code: "budget_exceeded", refs: ["budget:maxRows=99"] }),
+    });
+  expect(store.reads()).toBe(0);
 });

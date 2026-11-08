@@ -716,6 +716,7 @@ describe("a token minted for MCP reaches no other route, and /mcp takes no other
       ["GET", "/api/v2/reported-state", undefined],
       ["GET", "/api/v2/reported-holdings-change?from=2026-03-01&to=2026-03-31", undefined],
       ["GET", "/api/collection-quality", undefined],
+      ["GET", "/api/collection-quality/sony-bank/accounts", undefined],
       ["POST", "/api/ops/v1/collections", COLLECTION],
       ["GET", "/api/ops/v1/operations/op_synthetic", undefined],
       ["GET", "/api/ops/v1/health", undefined],

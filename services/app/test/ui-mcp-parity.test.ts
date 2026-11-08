@@ -9,7 +9,10 @@
 //    `command.*` operations: card settlement accept, withdraw and reject, the
 //    ownership review, identity) is one `kogane.command.plan` accepts and one
 //    `kogane.command.approve` and `.commit` decide, so guard 1's `command.*`
-//    entries cover every kind a screen can decide.
+//    entries cover every kind a screen can decide. It runs the gates
+//    themselves (the App's decision capability, the delegated envelope, the
+//    Processor's command route and the writer's family check), never a list
+//    beside them, so a family one gate accepts and another refuses fails.
 //
 // ADR 0081 point 2 (no SQL in MCP adapters) is guarded by
 // `tests/mcp-tools-no-sql.test.ts`.
@@ -33,13 +36,25 @@ import {
 } from "../../../packages/application/src/operation-path/catalogue.ts";
 import {
   CHANGE_KINDS,
+  delegatedCan,
+  delegatedCommandFamilyAllowed,
   ECONOMIC_EVENT_PLANNERS,
+  executionFor,
   isCardReviewKind,
   isEconomicEventKind,
+  processorCall,
+  resolveDelegation,
   REVIEW_PLANNERS,
 } from "../../../packages/application/src/index";
+import {
+  delegatedDecisionAllowed,
+  delegatedPlanAllowed,
+} from "../../processor/src/change-commands";
 import { DELEGATED_COMMAND_TOOLS } from "../src/delegated-command-tools";
-import { EXECUTABLE_DECISION_CAPABILITIES } from "../src/delegated-decision-tools";
+import {
+  decisionCapabilityFor,
+  EXECUTABLE_DECISION_CAPABILITIES,
+} from "../src/delegated-decision-tools";
 import { MCP_CLIENT_HEADERS } from "./mcp-headers";
 import { routeServes, uiApiPatterns } from "./ui-routes";
 
@@ -96,6 +111,7 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reports/:id/explanation": ["kogane.reports.read"],
   "/api/collection-quality": ["kogane.collection-quality.read"],
   "/api/collection-quality/:source": ["kogane.collection-quality.read"],
+  "/api/collection-quality/:source/accounts": ["kogane.collection-quality.read"],
   "/api/evidence/v1/meta": ["kogane.evidence.read"],
   "/api/evidence/v1/sources/:source/runs": ["kogane.evidence.read"],
   "/api/evidence/v1/runs/:run/artifacts": ["kogane.evidence.read"],
@@ -141,6 +157,8 @@ const TOOLS_WITHOUT_UI_ROUTE: Readonly<Record<string, string>> = {
 const NOT_READ_ROUTES: Readonly<Record<string, string>> = {
   "/api/command/v1": "the change lifecycle's path prefix constant",
   "/api/command/v1/:operation": "POST only: the catalogue's command.* operations (guard 1)",
+  "/api/ops/v1/collections":
+    "POST only: ops.collection.request (guard 1), the schedules page's 収集を依頼",
   "/api/evidence/v1": "the evidence browser's path prefix constant",
 };
 
@@ -337,19 +355,65 @@ describe("change kinds the lifecycle plans are decided over MCP (ADR 0081, point
     );
   });
 
-  it("kogane.command.plan publishes every plannable kind", () => {
+  it("kogane.command.plan publishes every plannable kind and the Processor plans it", () => {
     const plan = DELEGATED_COMMAND_TOOLS.find((tool) => tool.name === "kogane.command.plan")!;
     const kind = (plan.inputSchema as { properties: { kind: { enum: string[] } } }).properties.kind;
     expect(kind.enum).toEqual(expect.arrayContaining([...plannable]));
+    // The command route refuses a delegated plan of a kind outside the
+    // decidable families `unsupported_semantics`.
+    expect(plannable.filter((k) => !delegatedPlanAllowed(k))).toEqual([]);
   });
 
-  it("kogane.command.approve and .commit decide every plannable kind's family", () => {
-    const undecided = plannable.filter(
-      (kind) =>
-        !(EXECUTABLE_DECISION_CAPABILITIES as readonly string[]).includes(
-          `commands.decide.${kind.split(".")[0]}`,
-        ),
-    );
-    expect(undecided).toEqual([]);
+  it("kogane.command.approve and .commit decide every plannable kind, at every gate", async () => {
+    const resolution = await resolveDelegation({
+      caller: { kind: "mcp-client", principal: "mcp-client:parity-guard" },
+      now: new Date().toISOString(),
+    });
+    if (!resolution.ok) throw new Error(resolution.code);
+    const principal = resolution.principal;
+    const execution = executionFor(principal);
+    const refused: string[] = [];
+    for (const kind of plannable)
+      for (const tool of ["approve", "commit"] as const) {
+        const at = (gate: string) => refused.push(`${tool} ${kind}: ${gate}`);
+        // App: the tool requires this capability of the plan's kind
+        // (`operation_not_delegable` otherwise), the MCP authority must
+        // hold it, and the tools are listed only to a holder of one of
+        // EXECUTABLE_DECISION_CAPABILITIES.
+        let capability: string | null = null;
+        try {
+          const required = decisionCapabilityFor(kind);
+          delegatedCan(principal, required);
+          capability = required;
+        } catch {
+          at("app capability");
+        }
+        if (
+          capability !== null &&
+          !(EXECUTABLE_DECISION_CAPABILITIES as readonly string[]).includes(capability)
+        )
+          at("app tool listing");
+        // Processor: the command route's family check on the envelope the App sends.
+        if (!delegatedDecisionAllowed(kind, execution.commandFamilies)) at("processor route");
+        // Writer: approve()/commit()'s family attenuation on the confirmed call.
+        const call = processorCall(
+          {
+            path: "mcp",
+            correlationId: crypto.randomUUID(),
+            delegatedExecution: {
+              ...execution,
+              idempotencyKey: "parity-guard",
+              payloadDigest: "0".repeat(64),
+              confirmsAuditId: `aud_${crypto.randomUUID()}`,
+              confirmationDigest: `cfm_${"0".repeat(64)}`,
+            },
+          },
+          `command.${tool}`,
+          principal.id,
+          "delegated",
+        );
+        if (!delegatedCommandFamilyAllowed(call, kind)) at("writer family");
+      }
+    expect(refused).toEqual([]);
   });
 });
