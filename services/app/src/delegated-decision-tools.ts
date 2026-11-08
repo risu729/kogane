@@ -15,6 +15,9 @@ import {
   getReceipt,
   statusForCommandError,
   replayDelegatedConfirmation,
+  DECISION_CAPABILITIES,
+  decisionCapability,
+  decisionFamilyOf,
   type DelegationCapability,
   type DelegationResolution,
   type OperationCall,
@@ -47,11 +50,8 @@ const schemas = {
   }),
 };
 export type DelegatedDecisionTool = keyof typeof schemas;
-export const EXECUTABLE_DECISION_CAPABILITIES = [
-  "commands.decide.card-settlement",
-  "commands.decide.relation",
-  "commands.decide.identity",
-] as const satisfies readonly DelegationCapability[];
+/** Derived from `DECISION_FAMILIES`, the list every decision gate reads. */
+export const EXECUTABLE_DECISION_CAPABILITIES = DECISION_CAPABILITIES;
 export function isDelegatedDecisionTool(name: string): name is DelegatedDecisionTool {
   return Object.hasOwn(schemas, name);
 }
@@ -74,10 +74,10 @@ export function delegatedDecisionTools(env: Env, resolution: DelegationResolutio
     ? descriptors
     : [];
 }
-function capability(kind: string): DelegationCapability {
-  const family = kind.split(".")[0];
-  if (family === "identity" || family === "relation" || family === "card-settlement")
-    return `commands.decide.${family}`;
+/** The capability deciding a plan of `kind` needs; refused for a family outside `DECISION_FAMILIES`. */
+export function decisionCapabilityFor(kind: string): DelegationCapability {
+  const family = decisionFamilyOf(kind);
+  if (family !== null) return decisionCapability(family);
   throw new DelegatedOperationError("operation_not_delegable");
 }
 export async function callDelegatedDecisionTool(
@@ -107,7 +107,7 @@ export async function callDelegatedDecisionTool(
     const store = d1CommandStore(env.DB);
     const plan = await loadPlan(store, parsed.planId);
     if (!plan) throw new HttpError(404, "plan_not_found");
-    const cap = capability(plan.kind);
+    const cap = decisionCapabilityFor(plan.kind);
     delegatedCan(principal, cap);
     const { step, confirmationDigest, ...payload } = parsed;
     const key = "operationId" in payload ? payload.operationId : payload.idempotencyKey;
