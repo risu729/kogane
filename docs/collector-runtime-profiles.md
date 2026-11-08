@@ -1,17 +1,17 @@
 # Collector runtime profiles
 
-この表は、Cloudflareへdeploy可能な金融source collector（`services/collector-<source>/`）だけを対象にする。調査専用のBrowser Run、Camoufox、Kameleo、OCI、runtime probe、TAMIA bridgeと、observation pipelineのUI testはcollectorではないため含めない。HTMLを取得・parseするだけでは「browser使用」と数えず、実行時にChrome／Chromiumを起動するかで分類する。
+This table covers only financial-source collectors deployable to Cloudflare (`services/collector-<source>/`). Research-only Browser Run, Camoufox, Kameleo, OCI, runtime probes, the TAMIA bridge and observation-pipeline UI tests are not collectors and are excluded. Fetching/parsing HTML alone does not count as browser use; classification depends on whether Chrome/Chromium is launched at runtime.
 
-この表はdirectory名ではなく、directory移動で変わらないWorker nameで各collectorを指す。configとbinding、cron、bucketの現在地は[`../infra/resources.md`](../infra/resources.md)にある。
+The table identifies each collector by its Worker name, which survives directory moves, rather than by directory name. Current configurations, bindings, crons and buckets are in [`../infra/resources.md`](../infra/resources.md).
 
-| Collector                                                         | Worker name                       | Browser使用      | Runtime                                        | 使用区間と目的                                                                               | Browser外の処理                                   |
-| ----------------------------------------------------------------- | --------------------------------- | ---------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------- |
-| [SMCC Vpass](../services/collector-vpass/README.md)               | `kogane-vpass-collector-poc`      | **なし**         | Worker `fetch`                                 | Android JSON protocolを直接再現するため不要                                                  | 認証、card列挙、月列挙、明細JSON、R2              |
-| [SBI証券](../services/collector-sbi-securities/README.md)         | `kogane-sbi-collector-poc`        | **なし**         | Worker `fetch` + 暗号処理                      | WebAuthn assertionと公式Web／app通信を直接実装するため不要                                   | passkey認証、session確立、残高・履歴、R2          |
-| [Sony銀行](../services/collector-sony-bank/README.md)             | `kogane-sony-bank-collector-poc`  | **なし**         | Worker `fetch`                                 | Web BFF、WALLET SSO、HTML/CSVを通常HTTPで取得できるため不要                                  | 認証、銀行API、WALLET月切替、R2                   |
-| [Vポイント](../services/collector-vpoint/README.md)               | `kogane-vpoint-collector-poc`     | **なし**         | Worker `fetch` + Email Worker + Durable Object | form chainとメール認証をHTTPで再現し、sessionをDOに保持するため不要                          | 認証、JSON API、session更新、R2                   |
-| [MyJCB](../services/collector-myjcb/README.md)                    | `kogane-myjcb-collector-poc`      | **ログインのみ** | **Browser Run binding** + Worker `fetch`       | 動的login protection scriptとNNL WebAuthn `result`を公式page内で実行し、mypage sessionを作る | login後のmenu、月列挙、明細HTML/export、R2        |
-| [PRESTIA GLOBAL PASS](../services/collector-globalpass/README.md) | `kogane-globalpass-collector-poc` | **全収集区間**   | **Container Playwright Google Chrome**         | Turnstile、JavaScript login、server-rendered明細、月selectorを実ブラウザで処理する           | Worker orchestration、TAMIA relay、NDJSON受信、R2 |
+| Collector                                                                    | Worker name                       | Browser use           | Runtime                                        | Where and why the browser is used                                                                                      | Work outside the browser                                                |
+| ---------------------------------------------------------------------------- | --------------------------------- | --------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| [SMCC Vpass](../services/collector-vpass/README.md)                          | `kogane-vpass-collector-poc`      | **None**              | Worker `fetch`                                 | Not needed: reproduces the Android JSON protocol directly                                                              | Authentication, card enumeration, month enumeration, statement JSON, R2 |
+| [`SBI証券`](../services/collector-sbi-securities/README.md) (SBI Securities) | `kogane-sbi-collector-poc`        | **None**              | Worker `fetch` + cryptography                  | Not needed: implements WebAuthn assertions and official web/app communications directly                                | Passkey authentication, session establishment, balances/history, R2     |
+| [`Sony銀行`](../services/collector-sony-bank/README.md) (Sony Bank)          | `kogane-sony-bank-collector-poc`  | **None**              | Worker `fetch`                                 | Not needed: Web BFF, WALLET SSO and HTML/CSV are available over ordinary HTTP                                          | Authentication, bank API, WALLET month changes, R2                      |
+| [`Vポイント`](../services/collector-vpoint/README.md) (V Point)              | `kogane-vpoint-collector-poc`     | **None**              | Worker `fetch` + Email Worker + Durable Object | Not needed: reproduces the form chain/email verification over HTTP and retains the session in a DO                     | Authentication, JSON API, session refresh, R2                           |
+| [MyJCB](../services/collector-myjcb/README.md)                               | `kogane-myjcb-collector-poc`      | **Login only**        | **Browser Run binding** + Worker `fetch`       | Runs the dynamic login-protection script and NNL WebAuthn `result` within the official page to create a mypage session | Post-login menus, month enumeration, statement HTML/export, R2          |
+| [PRESTIA GLOBAL PASS](../services/collector-globalpass/README.md)            | `kogane-globalpass-collector-poc` | **Entire collection** | **Container Playwright Google Chrome**         | Handles Turnstile, JavaScript login, server-rendered statements and month selectors in a real browser                  | Worker orchestration, TAMIA relay, NDJSON reception, R2                 |
 
 Limit: the table lists only the six collectors whose README carries a
 `Runtime profile` section. The other nine deployable collectors
@@ -23,20 +23,24 @@ Limit: the table lists only the six collectors whose README carries a
 README at all) and are not classified here;
 their bindings are in [`../infra/resources.md`](../infra/resources.md).
 
-GLOBAL PASSのWorkerには別にBrowser Run bindingがあるが、旧`/browser-probe`入口は廃止済みでbindingは未使用である。通常のdaily collectorはContainer Chromeを使う。MyJCBは逆に、Browser Runをsession bootstrap直後に閉じ、それ以降は通常のWorker `fetch`だけを使う。
+The GLOBAL PASS Worker also has a Browser Run binding, but its former `/browser-probe` entrypoint is retired and the binding is unused. Normal daily collection uses Container Chrome. MyJCB instead closes Browser Run immediately after session bootstrap and uses only ordinary Worker `fetch` afterward.
 
-## 新しいcollectorで必ず明記する項目
+<a id="新しいcollectorで必ず明記する項目"></a>
 
-各collectorのREADME冒頭に`Runtime profile`を置き、次を明記する。
+## Required information for a new collector
 
-1. `Browser: なし / ログインのみ / 全収集区間`のいずれか。
-2. 実体がBrowser Run binding、Container Chrome/Chromium、外部browserのどれか。
-3. browserが必要な具体的理由。WAF名だけで済ませず、WebAuthn、Turnstile、動的script、rendered navigation等のどの処理を任せるかを書く。
-4. session取得後に通常`fetch`へ切り替える境界と、browserで取得するデータ範囲。
-5. diagnostic/probeだけがbrowserを使う場合は、production collectionから明確に分離する。
+Place `Runtime profile` at the start of each collector README and state:
 
-調査時にKogane Capture Chromeを使ったこと、HTMLをparseすること、browser由来のUser-Agentを送ることだけをruntime browser依存と記載しない。
+1. One of `Browser: none / login only / entire collection`.
+2. Whether the actual runtime is a Browser Run binding, Container Chrome/Chromium or an external browser.
+3. The specific reason a browser is needed. A WAF name alone is insufficient: identify which work it handles, such as WebAuthn, Turnstile, a dynamic script or rendered navigation.
+4. The boundary where ordinary `fetch` takes over after obtaining a session, and the data captured in the browser.
+5. If only diagnostics/probes use a browser, distinguish them explicitly from production collection.
 
-## 終了した browser 実験
+Using Kogane Capture Chrome during research, parsing HTML, or sending a browser-derived User-Agent alone is not a runtime browser dependency.
 
-この表に載らない調査用のbrowser runtimeは、[`research/`](research/)に成果と停止理由を残してcodeをmainから除いた。継続中のものは`experiments/<name>/EXPERIMENT.md`にowner、期限、停止条件がある。
+<a id="終了した-browser-実験"></a>
+
+## Retired browser experiments
+
+Research browser runtimes absent from this table have their findings and stopping reasons in [`research/`](research/), with their code removed from main. Ongoing experiments have an owner, deadline and stopping conditions in `experiments/<name>/EXPERIMENT.md`.

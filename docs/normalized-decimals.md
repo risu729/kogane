@@ -1,50 +1,62 @@
-# DBでの金額・数量の正規化
+<a id="dbでの金額数量の正規化"></a>
 
-## 責務と保存形式
+# Normalizing amounts and quantities in the database
 
-原本（Layer A）と解析結果（Layer B）の金額表記は変更しない。残高、取引、評価額、保有数量について、`observation_decimal_values` に `decimal-v1` の導出値を保存する。取得元や通貨の違いを消したり、残高と利用実績を合算したりする処理ではない。
+<a id="責務と保存形式"></a>
 
-値は `coefficient × 10^(-scale)`。係数は任意精度の整数文字列、小数桁数は整数とする。例として `-0012.3400` は係数 `-1234`、桁数 `2`。`0.00` と `-0` は係数 `0`、桁数 `0` に統一する。金額を浮動小数点へ変換しない。文字列として残すのは精度保持のためであり、取得元の自由形式文字列とは区別する。
+## Responsibility and storage format
 
-状態は以下を区別する。
+Original amount text in Layer A evidence and Layer B parser results is unchanged. For balances, transactions, valuations and held quantities, `observation_decimal_values` stores derived `decimal-v1` values. This neither erases source/currency differences nor combines balances with usage activity.
 
-- `exact`: 正規化できた値。ゼロ除外はこの状態の係数 `0` のみ。
-- `missing`: 元の両フィールドが欠損。
-- `unparsed`: 値は存在するが、この方針では解釈できない。
-- `conflict`: 整数表現と小数表記に矛盾がある。どちらかを勝手に採用しない。
+A value is `coefficient × 10^(-scale)`. The coefficient is an arbitrary-precision integer string and the scale is an integer. For example, `-0012.3400` has coefficient `-1234` and scale `2`. Both `0.00` and `-0` normalize to coefficient `0`, scale `0`. Amounts are never converted to floating point. The string representation preserves precision and is distinct from free-form provider text.
 
-原表記の表示は維持し、詳細画面に正規化の状態・係数・桁数・方針バージョンを併記する。APIは保存済みの値を渡し、画面側で原表記を再解析しない。古いデモ等で正規化値がない場合もゼロ扱いしない。
+The following states remain distinct.
 
-## 入力契約
+- `exact`: a normalized value. Zero exclusion applies only to coefficient `0` in this state.
+- `missing`: both original fields are absent.
+- `unparsed`: a value exists but this policy cannot interpret it.
+- `conflict`: the integer representation and decimal text disagree. Neither is adopted arbitrarily.
 
-`amount_scale` は小数表記の精度であり、`amount_minor` の単位指数とは限らない。既存解析器の契約で定義済みの JPY=0、USD/AUD=2 のみ整数値から換算する。未知通貨では指数を推測しない。ただしゼロと符号は指数によらないため、矛盾検出に使う。保有数量は `quantity_text` を対象とする。
+Original text stays visible; details also show normalization state, coefficient, scale and policy version. The API supplies stored values, and the screen does not reparse original text. Old demos without normalized values are not treated as zero either.
 
-小数表記はASCII数字、任意の先頭符号、小数点1個、前後のASCII空白に限定する。`.001` は有効、指数・区切り文字・通貨接尾辞・末尾小数点は対象外。有効な整数値が別途あればそれを使用できる。入力長は4096文字まで。欠損と空文字は同一視しない。複数の有効な表現が一致すれば `agreement`、片方なら `decimal_text` / `minor_units`、不明・不一致なら `none` を保存する。
+<a id="入力契約"></a>
 
-## 移行と今後の取り込み
+## Input contract
 
-`0024_observation_decimals.sql` が過去の全解析結果を一度だけ処理する。4種類の原テーブルへの `AFTER INSERT` トリガーが、今後の追加を同じトランザクション内で正規化する。解析器ごとの個別修正は不要。失敗時は原行と導出行が一緒にロールバックされる。導出行の更新・削除は禁止する。
+`amount_scale` is the precision of decimal text, not necessarily the unit exponent of `amount_minor`. Integer values are converted only for JPY=0 and USD/AUD=2, as already defined by the parser contracts. No exponent is guessed for unknown currencies. Zero and sign do not depend on an exponent, however, and are used to detect conflicts. Held quantities use `quantity_text`.
 
-SQLビューが方針の定義元。トリガーは `scripts/generate-decimal-triggers.ts` がそのSQLを新規行 `NEW` のみに展開する。集約ビューをIDで絞る方式は過去全件を走査し得るため使わない。変更時は生成スクリプトと `--check` を実行する。WranglerのSQL分割器が `CASE` / `END` を認識できる空白を維持すること。実際のD1移行テストでも全マイグレーションを通す。
+Decimal text accepts only ASCII digits, an optional leading sign, 1 decimal point and surrounding ASCII whitespace. `.001` is valid; exponents, separators, currency suffixes and a trailing decimal point are unsupported. A separately valid integer value can still be used. Input is limited to 4096 characters. Missing and empty strings are distinct. Matching valid representations store `agreement`; a single valid representation stores `decimal_text` / `minor_units`; unknown or disagreeing values store `none`.
 
-本番はDB移行を先に適用し、その後にAPI/UIを配備する。APIは対象ページのIDだけを最大80件ずつ主キーで読み取る。正規化値の欠落や不正値は隠蔽しない。ローカルSQLiteも同じ移行をトランザクション内で一度適用する。
+<a id="移行と今後の取り込み"></a>
 
-戻す場合は旧Workerへ戻せばよい。追加されたDB表・トリガーは旧APIと互換なので残す。DB全体の復元は移行後の取得を失う可能性があるため通常のロールバック手段にしない。方針の変更は別バージョンの追加移行で行い、適用済み移行を編集しない。
+## Migration and future ingestion
 
-## 方針の選択と追加手順
+`0024_observation_decimals.sql` processes every historical parser result once. `AFTER INSERT` triggers on the 4 original tables normalize later additions within the same transaction. No per-parser fix is needed. On failure, original and derived rows roll back together. Derived rows cannot be updated or deleted.
 
-`InterpretationContext.decimalPolicyRelease` は、投影が存在する名前だけを取り得る。判定は `services/app/src/decimal-policy.ts` の `DECIMAL_POLICY_PROJECTIONS` が持ち、`decimalPolicySelection(url)` が `decimalPolicy` クエリパラメータを解決する。指定が無ければ `decimal-v1`。形式が不正な値は 400 `invalid_query`、形式は正しいが投影が存在しない値は 400 `unsupported_semantics` を返す。既定の `decimal-v1` へ黙って読み替えない。`decimalRows()` は選ばれた `policy_version` で投影を読む。
+SQL views define the policy. `scripts/generate-decimal-triggers.ts` expands that SQL into triggers using only the new row `NEW`. Filtering an aggregate view by ID is avoided because it can scan all history. After a change, run the generator and `--check`. Retain whitespace that lets Wrangler's SQL splitter recognize `CASE` / `END`. Actual D1 migration tests also apply every migration.
 
-現在この契約を公開しているのは `GET /api/v2/reports/{id}` のみで、応答の `interpretationContext.decimalPolicyRelease` に選択結果が入る。既存の一覧API（`/api/transactions` 等）はパラメータ集合を共有スキーマの capability から導いているため、そちらへ広げる場合は `LIST_REQUEST_SCHEMA` と `ApiCapabilities` の変更（D14/A08 の担当範囲）を伴う。サーバだけが黙って追加パラメータを受け付ける状態にはしない。
+In production, apply database migrations before deploying API/UI. The API reads only the requested page's IDs by primary key, in batches of at most 80. Missing or invalid normalized values are not hidden. Local SQLite applies the same migration once within a transaction.
 
-第二の方針を追加する手順は次の通り（根本レビュー 07 §6）。`0024_observation_decimals.sql` は編集しない。
+Rollback restores the old Worker. Added database tables and triggers stay because they are compatible with the old API. Restoring the whole database is not a normal rollback method: it could lose captures made after migration. A policy change uses another version in an additive migration; applied migrations are not edited.
 
-1. 新しい追加マイグレーションで、`policy_version` を鍵に含む投影を作る。新表でも互換ビューでもよいが、`decimal-v1` の行は書き換えない。
-2. 過去分の backfill は DDL と分け、再開可能な処理にする。大きな表を一度のマイグレーションで走査しない。
-3. `DECIMAL_POLICY_PROJECTIONS` に名前を登録する。ここに無い名前は API から選べない。
-4. 二方針を並べて比較するテストを追加し、既存の `decimal-v1` の結果が不変であることを確認する。
-5. 配備順はDB移行→API/UI。旧Workerは新しい名前を知らないので既定のまま動く。
+<a id="方針の選択と追加手順"></a>
 
-## 検証
+## Policy selection and addition
 
-任意精度、小数桁、負のゼロ、未知通貨、矛盾、欠損、原行の不変性、挿入時の原子性を検証する。3,000件の追加について過去全件走査の退行も検査する。API契約、D1実行環境、画面の外貨・暗号資産ゼロ除外を含む自動テストを実施。実データの予行はメモリ内で行い、金額や口座情報をログ・公開資料に保存しない。
+`InterpretationContext.decimalPolicyRelease` admits only names with an existing projection. `DECIMAL_POLICY_PROJECTIONS` in `services/app/src/decimal-policy.ts` owns that decision, and `decimalPolicySelection(url)` resolves the `decimalPolicy` query parameter. With no selection, it uses `decimal-v1`. An invalid format returns 400 `invalid_query`; a well-formed name without a projection returns 400 `unsupported_semantics`. Neither silently falls back to the default `decimal-v1`. `decimalRows()` reads the projection for the selected `policy_version`.
+
+Only `GET /api/v2/reports/{id}` currently exposes this contract, returning the selection in `interpretationContext.decimalPolicyRelease`. Existing list APIs (such as `/api/transactions`) derive their parameter sets from shared-schema capabilities, so extending selection to them also requires changes to `LIST_REQUEST_SCHEMA` and `ApiCapabilities` (owned by D14/A08). The server must not silently accept extra parameters on its own.
+
+To add a second policy (fundamental review 07 §6), follow these steps. Do not edit `0024_observation_decimals.sql`.
+
+1. Add a migration creating a projection keyed by `policy_version`. A new table or compatible view is acceptable, but `decimal-v1` rows are not rewritten.
+2. Separate historical backfill from DDL and make it resumable. Do not scan a large table in one migration.
+3. Register the name in `DECIMAL_POLICY_PROJECTIONS`. The API cannot select a name absent from it.
+4. Add tests comparing both policies and verify that existing `decimal-v1` results remain unchanged.
+5. Deploy in database-migration → API/UI order. The old Worker does not know the new name and continues using its default.
+
+<a id="検証"></a>
+
+## Verification
+
+Checks cover arbitrary precision, scale, negative zero, unknown currencies, conflicts, missingness, original-row immutability and insert atomicity. Adding 3,000 rows also checks for regressions that scan all history. Automated tests include the API contract, the D1 runtime and zero exclusion for foreign currencies/cryptoassets on screen. Rehearsal with real data is in memory, without storing amounts or account information in logs or public materials.
