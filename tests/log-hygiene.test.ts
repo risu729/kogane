@@ -173,6 +173,10 @@ const ERROR_TO_SANITIZING_WRAPPER: Readonly<Record<string, { count: number; reas
     count: 2,
     reason: "the relay's local `log` keeps only `errorType: safeErrorType(error)`",
   },
+  "services/collector-st-george/src/worker-policy.ts": {
+    count: 1,
+    reason: "compared with the lease refusal code only; the message is never logged or returned",
+  },
   "services/collector-st-george/src/tcp-relay.ts": {
     count: 2,
     reason: "the relay's local `log` keeps only `errorType: safeErrorType(error)`",
