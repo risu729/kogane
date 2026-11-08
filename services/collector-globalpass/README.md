@@ -74,7 +74,7 @@ runは`packages/collection`で共有DATA bucketへ直接書き、ProcessorがDAT
 - `GLOBALPASS_PASSWORD`
 - `RELAY_TOKEN`: WebSocket relay専用
 
-session cookie、Turnstile token、Nablarch hidden stateは保存・再利用せず、毎run新しいbrowser contextで取得する。資格情報JSON、secret、実データはGitへ入れない。remote secretは`wrangler.jsonc`にも生成型にも現れないため、`env.d.ts`は上記3 secret名をaugmentationする (it also still declares `RAW_EVIDENCE_IMPORTER: Fetcher`, which no binding in `wrangler.jsonc` provides and `src/` does not read).
+session cookie、Turnstile token、Nablarch hidden stateは保存・再利用せず、毎run新しいbrowser contextで取得する。資格情報JSON、secret、実データはGitへ入れない。remote secretは`wrangler.jsonc`にも生成型にも現れないため、`env.d.ts`は上記3 secret名だけをaugmentationする。
 
 ローカルの必要項目だけを同期する例:
 
