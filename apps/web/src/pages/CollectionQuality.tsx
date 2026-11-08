@@ -339,7 +339,11 @@ function SourceAccounts({ sourceId }: { sourceId: string }): ReactNode {
             </EmptyState>
           ) : (
             data.accounts.map((account) => (
-              <Panel key={account.accountId} title={account.label}>
+              <Panel
+                key={account.accountId}
+                // A stored label may be empty; the heading still names the panel.
+                title={account.label.trim() === "" ? "ラベルのない口座" : account.label}
+              >
                 <div className="panel-body">
                   <p>
                     口座 <code>{account.accountId}</code> ·{" "}

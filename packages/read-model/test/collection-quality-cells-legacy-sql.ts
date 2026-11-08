@@ -1,9 +1,10 @@
 // The collection quality cell page (`CELL_QUALITY_SQL` in
 // src/collection-quality.ts) exactly as it shipped before ADR 0088 split its
 // CTEs out as `CELL_RESULT_CTES` (main at commit 76a01e11, rendered text),
-// frozen so collection-quality.test.ts can prove that the current cell page
-// and the account coverage read (`ACCOUNT_COVERAGE_SQL`) return the shipped
-// cells row for row on scaled and random stores. The digest pins the text:
+// frozen so collection-quality.test.ts (the scaled store) and
+// collection-quality-differential.test.ts (random stores) can prove that the
+// current cell page and the account coverage read (`ACCOUNT_COVERAGE_SQL`)
+// return the shipped cells row for row. The digest pins the text:
 // never edit it by hand, and never import it outside tests.
 
 /** SHA-256 of `LEGACY_CELL_QUALITY_SQL`. */

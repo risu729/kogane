@@ -120,7 +120,8 @@ For the agent read:
    period, sorted unique accounts, and the bounds.
 6. **Page.** `/collection-quality?source=<id>&view=accounts` shows
    `口座 × データ種別 × 期間`: one panel per account (label, id and mapping
-   status in words), its data types with their periods, standing, capture
+   status in words; an empty stored label is headed `ラベルのない口座`), its
+   data types with their periods, standing, capture
    link, observation count and reasons, and a panel
    `口座に対応付けられない保存記録`. A view switch (`取得単位ごと` /
    `口座ごと`) sits beside the cell list; the default view's requests are
@@ -193,7 +194,9 @@ Synthetic data only, no production access:
   policies, corrected mappings; the seeds together draw each state), the
   current cell page equals the frozen one page for page, and the account
   read's cells equal the frozen page's cells row for row, every named
-  account with at least one observation.
+  account with at least one observation, and the newest capture's
+  observations under an `unresolved` mapping sum to the frozen page's
+  `unresolved_identities` for every cell.
 - `packages/read-model/test/collection-quality.test.ts`: the cell page's
   text equals the frozen text; on the scaled store without statistics the
   current and frozen pages are equal for every source and offset, the
@@ -236,7 +239,10 @@ Synthetic data only, no production access:
   the production build: the default view never requests the account read;
   the account view shows the account, its unresolved status, data type,
   standing and count, the pending month apart with its reason, no page-wide
-  horizontal scroll, and passes the accessibility audit.
+  horizontal scroll, and passes the accessibility audit; a source whose
+  observations name no account shows that this proves no absence, with its
+  records apart; a `413` answer shows only the refusal, no account, period or
+  count; both views pass the accessibility audit too.
 - `mise run //packages/read-model:ci`, `//packages/application:ci`,
   `//packages/observation-shared:ci`, `//services/app:ci`, `//apps/web:ci`,
   `//experiments/observation-pipeline-local:ci`, `mise run ci:root`,

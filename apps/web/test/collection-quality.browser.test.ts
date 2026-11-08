@@ -245,4 +245,47 @@ describe.if(runnable)("collection quality browser", () => {
       await page.close();
     }
   }, 30000);
+  test("the account view states an empty answer as unknown and shows a refused one as refused, never in part", async () => {
+    const page = await browser.newPage();
+    try {
+      await page.setViewportSize({ width: 375, height: 812 });
+      // vpass has a unit with no file and no observation: no account is named.
+      await page.goto(`${origin}/collection-quality?source=vpass&view=accounts`);
+      await page.getByRole("heading", { name: "口座 × データ種別 × 期間", exact: true }).waitFor();
+      expect(
+        await page
+          .getByText(
+            "口座に対応付けられた観測がありません。取得や取引がないことの証明ではありません。",
+            {
+              exact: true,
+            },
+          )
+          .count(),
+      ).toBe(1);
+      const apart = page.locator("section.panel").filter({
+        has: page.getByRole("heading", { name: "口座に対応付けられない保存記録" }),
+      });
+      expect(
+        await apart
+          .getByText("この口座・カードの原本ファイルがありません", { exact: false })
+          .count(),
+      ).toBeGreaterThan(0);
+      expect(await auditView(page)).toEqual([]);
+      // More cells than the bound is refused whole (413): no account, period
+      // or count is shown, only the refusal.
+      await page.route("**/api/collection-quality/global-pass/accounts", (route) =>
+        route.fulfill({ status: 413, json: { error: "result_limit_exceeded" } }),
+      );
+      await page.goto(`${origin}/collection-quality?source=global-pass&view=accounts`);
+      await page.getByRole("alert").filter({ hasText: "(HTTP 413)" }).waitFor();
+      expect(
+        await page.getByRole("heading", { name: "口座 × データ種別 × 期間", exact: true }).count(),
+      ).toBe(0);
+      expect(await page.getByText("Synthetic browser account", { exact: false }).count()).toBe(0);
+      expect(await page.getByText("この口座の観測", { exact: false }).count()).toBe(0);
+      expect(await auditView(page)).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  }, 30000);
 });

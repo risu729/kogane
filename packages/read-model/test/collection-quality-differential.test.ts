@@ -325,6 +325,17 @@ describe("the cell page and the account read equal the shipped cell page on rand
               expect(["transaction", "balance"]).toContain(kind);
               expect(observations).toBeGreaterThan(0);
             }
+            // The newest capture's unresolved identities are read as the
+            // shipped cell page counts them (its `unresolved_identities`).
+            expect(
+              named
+                .filter(([capture, , , status]) => capture === "newest" && status === "unresolved")
+                .reduce((sum, [, , , , , observations]) => sum + observations, 0),
+            ).toBe(row.unresolved_identities);
+            if (
+              named.some(([capture, , , status]) => capture === "newest" && status === "unresolved")
+            )
+              drawn.add("newest-names-unresolved");
             if (named.length > 0) drawn.add("cell-names-account");
             else drawn.add("cell-names-no-account");
             if (row.current_run_id !== null && row.current_run_id !== row.newest_run_id)
@@ -348,6 +359,7 @@ describe("the cell page and the account read equal the shipped cell page on rand
         "identity-unsealed",
         "mapping-corrected",
         "newer-policy-sealed",
+        "newest-names-unresolved",
         "no-current",
         "older-current",
         "parse-failed",
