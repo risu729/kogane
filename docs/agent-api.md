@@ -1831,6 +1831,7 @@ owner's agreement.
    | `/api/evidence/v1/meta`, `…/sources/:source/runs`, `…/runs/:run/artifacts`, `…/runs/:run/artifacts/:artifact` | `kogane.evidence.read` ([UI read pages](#ui-read-pages))                                                                                                       |
    | `/api/raw/:sha256`, `/api/evidence/v1/runs/:run/artifacts/:artifact/raw`                                      | `kogane.evidence.raw.read` ([UI read pages](#ui-read-pages))                                                                                                   |
    | `/api/ops/v1/schedules`                                                                                       | `kogane.schedules.read` ([UI read pages](#ui-read-pages)) without the survey proposals, `kogane.schedules.maintenance.read` and `kogane.schedules.survey.read` |
+   | `/api/ops/v1/operations/:id`                                                                                  | `kogane.ops.operation.get` (the 依頼の経過 page; the same `readOperation` receipt, whole-store, [ADR 0086](adr/0086-operator-operations-list.md))              |
 
    The 2 gaps, by group:
 

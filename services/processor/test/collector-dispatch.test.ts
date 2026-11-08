@@ -21,6 +21,7 @@ import {
   type Principal,
 } from "../../../packages/application/src/index.ts";
 import type { OperationConnection } from "../../../packages/collection/src/operation-rpc.ts";
+import { validOperationRecord } from "../../../packages/observation-shared/src/operation-contract.ts";
 import * as scheduleModel from "../../../packages/collection/src/schedule-model.ts";
 import { fullCoreDatabase, sqliteD1 } from "../../../packages/storage-d1/test/sqlite.ts";
 import { registerCollectionRun } from "../src/collection/index.ts";
@@ -144,6 +145,9 @@ async function read(w: World, operationId: string): Promise<OperationReceipt> {
     operationId,
   });
   if (!outcome.ok) throw new Error("receipt missing");
+  // Every record this suite reads, at every point of the trail, is one the
+  // browser's 依頼の経過 page accepts as it travels (operation-contract.ts).
+  expect(validOperationRecord(JSON.parse(JSON.stringify(outcome.receipt)), operationId)).toBe(true);
   return outcome.receipt;
 }
 
