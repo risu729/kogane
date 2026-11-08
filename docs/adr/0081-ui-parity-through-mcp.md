@@ -290,9 +290,11 @@ which has no MCP read yet, keeps its own rules until it gets one.
 - The page does not read the flat list; a statement's
   candidates and a review's competitors are paged 50 at a time, 36 per
   statement on average on the scaled store. A statement or competitor list of more than
-  1,000 candidates is readable only to offset 950, and the page's next-page
-  link past it is refused. Raising that is a change to `GRANT_LIMITS` or to
-  the read's paging, for both paths at once.
+  1,000 candidates is readable only to offset 950. Until the 2026-11-08
+  amendment below, the page's next-page link past it was offered and then
+  refused; it is now withheld and said (`nextPage: "budget_exceeded"`).
+  Raising the depth is a change to `GRANT_LIMITS` or to the read's paging,
+  for both paths at once.
 - Other routes keep `invalid_offset` until their own adapters are reviewed.
 
 ### Verification
@@ -377,3 +379,91 @@ body on all three, and checks the listing, the absence while the route is not
 served, and the R0 audit records. `services/app/test/ui-mcp-parity.test.ts`
 maps the route to the tool. `packages/application/test/card-settlements-read.test.ts`
 covers the service's refusals before any read.
+
+## Amendment: no card settlement page offers a next page its budget refuses (2026-11-08)
+
+- Status: proposed
+- Date: 2026-11-08
+
+### Context
+
+The first 2026-11-07 amendment gave the `カード照合` page route and the card
+settlement tools one row budget: a page read with `offset + 50` (`+ 10` on
+the grouped list) above the grant's `maxRows` is `413 budget_exceeded`. The
+answers' `nextOffset` did not look at that budget. Under the published
+`maxRows` of 1000 the page at offset 950 of a list of more than 1,000 rows
+named offset 1000, and the grouped page at 990 named 1000; the next request,
+from the page's pager or from an agent following `nextOffset`, was refused.
+`kogane.card-settlements.unmatched` (`reviewUnmatchedCardStatements`) did the
+same with its own `offset + 50` check. The "950-offset bound" earlier PRs
+mention is this one bound: offset 950 is the last page the budget serves, and
+the gap was that its answer offered one more. A null `nextOffset` also meant
+only "the last page", so withholding it silently would show a cut list as
+complete (INV05).
+
+### Options considered
+
+1. **Keep offering it and let the request fail.** An answer advertises a
+   request its own service refuses, and the page shows a working next
+   button (`次の請求`, `次の候補`) that leads to an error.
+2. **Null the offset silently**, as `reviewInstrumentCandidates` and
+   `reviewAccountCandidates` do. The page and an agent cannot tell the end of
+   the list from the grant's bound, against INV05.
+3. **Null the offset and say why in a closed code (chosen).** Each answer
+   gains `nextPage`: `offered`, `none` or `budget_exceeded`. These are the
+   codes and the rule proposed for `kogane.purchases.explain`'s `nextPage`
+   in PR [#1173](https://github.com/risu729/kogane/pull/1173), open when this
+   amendment was written, so the two can share one list when both merge.
+
+### Decision
+
+Option 3, for `readCardSettlementsForGrant` (a page, one statement's
+candidates, a review's competitors, and `nextPage: "none"` for one review by
+`proposalId`), `readCardSettlementStatementsForGrant` and
+`reviewUnmatchedCardStatements`. One function decides both the refusal and
+the offer (`pageBeyondBudget` and `withinBudget` in
+`packages/application/src/query/page-budget.ts`): a next page whose
+`nextOffset` plus the page size exceeds `maxRows` is withheld
+(`nextOffset: null`) and said (`nextPage: "budget_exceeded"`). The codes are
+`CARD_SETTLEMENT_NEXT_PAGE` in `packages/domain/src/card-settlement-review.ts`.
+The route and the tools answer the field alike, since they are adapters over
+these functions. The contract validators (`validNextPage` in
+`packages/observation-shared/src/card-settlement-contract.ts`, used by the
+review, grouped and unmatched validators) require a closed `nextPage` and a
+`nextOffset` exactly when it is `offered`. The `カード照合` pages disable the
+next button as before and, for `budget_exceeded`, say under the pager that
+rows follow which the page cannot read, never that the list ends.
+
+### Consequences
+
+- `nextPage` is a field added to three published answers (the route bodies
+  and the tools' results). It is an addition to the wire the owner approves
+  before this merges. An older browser client that does not know it still
+  pages by `nextOffset`; the current client refuses an answer without it.
+- With the published budget the last page offered starts at offset 950 (990
+  grouped). Every answer below that depth is unchanged but for the added
+  field; the pages at 950 (989 and 990 grouped) no longer name a page the
+  route refuses.
+- Reading deeper is still a change to `GRANT_LIMITS` or to the reads'
+  paging, for both paths at once.
+
+### Verification
+
+`packages/application/test/card-settlement-paging.test.ts` walks each of the
+five reads from offset 0 along the next page it offers, under `maxRows` from
+one page to 1000 and on stores of 0 to 1,101 rows: every offered page is
+served, the walk reads exactly as deep as the budget allows, and it ends with
+`none` after the last row or with `budget_exceeded`, whose next page is the
+one refused. Before the fix the same test failed on every read: the page
+offered at the bound was refused. `services/app/test/card-settlements-api-differential.test.ts`
+and `card-settlement-statements-differential.test.ts` compare the route with
+the frozen handler and find exactly three pages (offset 950 alone, of one
+statement and of one review's competitors) and two grouped pages (989, 990)
+whose next page is now withheld, every other answer byte-identical.
+`services/app/test/card-settlements-read-tools.test.ts` checks the tools under
+a narrower grant and the route, the agent HTTP route and MCP answering one
+body. `apps/web/test/card-settlement.browser.test.ts` checks the note under
+the grouped and unmatched pagers, the disabled button and the accessibility
+audit, and `apps/web/test/card-settlement-contract.test.ts` and
+`packages/observation-shared/test/card-statements-unmatched-contract.test.ts`
+the validators.

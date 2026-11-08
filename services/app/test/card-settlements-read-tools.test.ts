@@ -610,4 +610,70 @@ describe("card settlement reads for agents", () => {
       expect(answer.body).toMatchObject({ code: "budget_exceeded" });
     }
   });
+
+  // After the test above: it adds 61 candidates, 51 of one statement and ten
+  // statements of one candidate each.
+  it("offer no next page the caller's grant is refused, on the tool and the page alike", async () => {
+    for (let n = 0; n < 51; n++)
+      await insertCandidate(
+        `card-settlement-paging-${String(n).padStart(2, "0")}`,
+        "statement-paging",
+        `bank-paging-${String(n)}`,
+        n.toString(16).padStart(64, "d"),
+        new Date(Date.UTC(2026, 9, 1) + n * 60_000).toISOString(),
+      );
+    for (let n = 0; n < 10; n++)
+      await insertCandidate(
+        `card-settlement-single-${String(n)}`,
+        `statement-single-${String(n)}`,
+        `bank-single-${String(n)}`,
+        n.toString(16).padStart(64, "e"),
+        new Date(Date.UTC(2025, 0, 1) + n * 60_000).toISOString(),
+      );
+    // Twelve statements now: the three above and the ten singles.
+    const STATEMENT = { statementKey: "statement-paging" };
+    const under = (maxRows: number) => ({ ...GRANT, budget: { ...GRANT.budget, maxRows } });
+    for (const [name, args, size, maxRows] of [
+      [LIST, {}, 50, 60],
+      [LIST, STATEMENT, 50, 60],
+      [LIST, { relatedTo: "card-settlement-paging-00" }, 50, 60],
+      [STATEMENTS, {}, 10, 15],
+    ] as const) {
+      // A grant that may read the next page is offered it.
+      const deep = await direct(name, args, under(2 * size));
+      expect({ name, args, body: deep.body }).toMatchObject({
+        name,
+        args,
+        body: { nextOffset: size, nextPage: "offered" },
+      });
+      // One that may not is told why, and its request is the refusal.
+      const shallow = await direct(name, args, under(maxRows));
+      expect({ name, args, status: shallow.status, body: shallow.body }).toMatchObject({
+        name,
+        args,
+        status: 200,
+        body: { nextOffset: null, nextPage: "budget_exceeded" },
+      });
+      const refused = await direct(name, { ...args, offset: size }, under(maxRows));
+      expect({ name, args, status: refused.status, body: refused.body }).toMatchObject({
+        name,
+        args,
+        status: 413,
+        body: { code: "budget_exceeded", refs: [`budget:maxRows=${String(maxRows)}`] },
+      });
+    }
+    // The page route, the agent HTTP route and MCP answer one body, under the
+    // same published budget: the next page is offered while it is readable.
+    for (const [args, query] of [
+      [STATEMENT, "?statementKey=statement-paging"],
+      [{ ...STATEMENT, offset: 50 }, "?statementKey=statement-paging&offset=50"],
+    ] as const) {
+      const expected = (await page(query)) as { nextOffset: unknown; nextPage: unknown };
+      expect(await (await http(LIST, args)).json()).toEqual(expected);
+      expect((await call(LIST, args)).structuredContent).toEqual(expected);
+      expect([expected.nextOffset, expected.nextPage]).toEqual(
+        "offset" in args ? [null, "none"] : [50, "offered"],
+      );
+    }
+  });
 });
