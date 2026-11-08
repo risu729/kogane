@@ -340,6 +340,34 @@ describe("query validation over HTTP", () => {
     });
   });
 
+  it("answers the next page of a cursor on a later request", async () => {
+    // Each request is evaluated at its own second; the next page comes later.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-09-09T00:00:00.000Z"));
+    const environment = {};
+    const first = await call("/api/agent/v1/financial.query", {
+      body: { intent: "activity", limit: 1 },
+      environment,
+    });
+    const page = (await first.json()) as {
+      contextId: string;
+      result: { nextCursor: string | null; data: { rows: { observationRef: string }[] } };
+    };
+    expect(page.result.nextCursor).not.toBeNull();
+    vi.setSystemTime(new Date("2026-09-09T00:00:02.000Z"));
+    const response = await call("/api/agent/v1/financial.query", {
+      body: { intent: "activity", limit: 1, cursor: page.result.nextCursor },
+      environment,
+    });
+    expect(response.status).toBe(200);
+    const next = (await response.json()) as typeof page;
+    expect(next.contextId).not.toBe(page.contextId);
+    expect(next.result.data.rows).toHaveLength(1);
+    expect(next.result.data.rows[0]!.observationRef).not.toBe(
+      page.result.data.rows[0]!.observationRef,
+    );
+  });
+
   it("refuses a cursor from a different query as stale_context", async () => {
     const environment = {};
     const first = await call("/api/agent/v1/financial.query", {
