@@ -47,7 +47,10 @@ beforeEach(() => {
     return Response.json(jwks);
   });
 });
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 /** The civil date in Tokyo `days` from today. */
 const tokyo = (days: number) =>
@@ -247,6 +250,10 @@ describe("the agent tool", () => {
   const body = { account: ACCOUNT, from: "2026-03-01", to: "2026-03-31" };
 
   it("is listed while the route is served and answers what the route answers", async () => {
+    // One clock for both calls: the answer's default cut is `now`. The instant
+    // is the real one, so the range's Tokyo date checks see today.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date());
     const listed = (await (
       await call("/mcp", {
         subject: "agent-principal",
@@ -277,16 +284,10 @@ describe("the agent tool", () => {
     ).json()) as { result: { isError: boolean; structuredContent: Record<string, unknown> } };
     expect(called.result.isError).toBe(false);
     const route = (await (await call(`${PATH}?${RANGE}`)).json()) as Record<string, unknown>;
-    // The empty log's default cut is the caller's clock, so the cut, the
-    // manifests and the context id differ between two calls; the rest does not.
-    const pick = (answer: Record<string, unknown>) => ({
-      status: answer["status"],
-      reasons: answer["reasons"],
-      reported: answer["reported"],
-      cells: (answer["reconstruction"] as { cells: unknown }).cells,
-      dispositions: (answer["reconstruction"] as { dispositions: unknown }).dispositions,
-    });
-    expect(pick(called.result.structuredContent)).toEqual(pick(route));
+    // The empty log's default cut is the caller's clock, and the manifests and
+    // the context id follow the cut; under the one clock above, the whole
+    // answer is the same.
+    expect(called.result.structuredContent).toEqual(route);
     expect(validApiResponse(PATH, called.result.structuredContent)).toBe(true);
   });
 
