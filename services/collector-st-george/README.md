@@ -66,14 +66,32 @@ Wrangler generates binding types. Secret names are declared in `env.d.ts`:
 Non-secret settings are `COLLECTOR_SCHEMA_VERSION`, `EGRESS_MODE` and
 `RELAY_PUBLIC_URL`. The configured daily schedule is 06:35 JST (`35 21 * * *`
 in UTC), with platform retries disabled. The same durable coordinator serializes
-manual and scheduled collection. An authentication/network failure blocks later
-runs until an operator resolves the cause and explicitly resumes collection.
+manual and scheduled collection. Only a refused, challenged or unrecognised
+login (`login-rejected`, `authentication-challenge`, `human-required`, and
+`http-denied`, `bank-request-error` and `unexpected-route`, none observed yet
+and each possibly the bank's answer to a wrong password) blocks later runs until an operator resolves the cause and explicitly resumes collection,
+because another unattended login could lock the account. Every other failure (a
+browser or container crash, a network error, a deadline) is a
+failed run and the next scheduled run tries again (2026-11-08 UTC; before that,
+any failure blocked, which left the collector stopped from 2026-10-07 on a
+`runtime-failed` run). A block of another reason left by that older policy is
+cleared on the next run. The Worker log records each block:
+`st-george-collection-blocked` when a refused, challenged or unrecognised login stores one,
+`st-george-collection-skipped-blocked` for each run it skips (nothing is
+contacted), and `st-george-block-cleared` when a block of that older policy is
+lifted (`cause: "not-a-login-refusal"`) or an operator resumes
+(`cause: "operator-resume"`). Each carries the reason code and the blocking run's id (`null` when the
+stored block has none); the first two also carry `blockedSince` (`null` for a
+block stored before 2026-11-08) and `clearedBy: "operator-resume"`. A lease
+held by another execution answers `busy` and
+records no run. An in-flight marker from an object reset mid-attempt no longer
+blocks: the lease outlives that attempt, so the next run cannot overlap it.
 Enable this schedule only after authenticated cloud collection and downstream
 publication have been verified.
 
 `GET /health` reports service configuration without contacting the bank.
 Authenticated `POST /trigger` starts or resumes a collection/storage attempt.
-Authenticated `POST /resume` clears a stopped authentication/network attempt;
+Authenticated `POST /resume` clears a refused, challenged or unrecognised login block;
 it does not start collection or discard a snapshot awaiting storage. Call `/trigger`
 after clearing the blocker. Treat resume as an explicit operator
 decision after resolving the blocker. Neither route accepts account details or

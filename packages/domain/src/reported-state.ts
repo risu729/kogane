@@ -10,11 +10,11 @@ import { addDays, daysBetween, formatLocalDate, parseLocalDate, type CivilDate }
 import type { Quantity } from "./values.ts";
 
 export const REPORTED_STATE_SCHEMA = "reported-state-v1";
-/** `same-day` / `recent` (captured at most `RECENT_DAYS` before the date) / `stale`. */
+/** `same-day` / `recent` (captured at most `RECENT_DAYS` before the date) / `stale`; `collection-freshness-v1` uses the same thresholds. */
 export const DATED_STATE_FRESHNESS_POLICY = "dated-state-freshness-v1";
 /** Which containers and rows a reported state lists (ADR 0019, decision 2). */
 export const DATED_STATE_PERIMETER_POLICY = "dated-state-perimeter-v1";
-const RECENT_DAYS = 3;
+export const RECENT_DAYS = 3;
 /** The civil zone of the date the owner asks about; capture times are UTC instants. */
 export const REPORTED_STATE_ZONE = "Asia/Tokyo";
 const ZONE_OFFSET_MS = 9 * 3_600_000;

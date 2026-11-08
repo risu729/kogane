@@ -130,7 +130,9 @@ describe("collection quality", () => {
   });
 
   it("only matching configurations receive observed alarms; failures and invalid replies remain unknown", async () => {
-    const summary = await queryCollectionQualitySummary(d1Executor(env.DB));
+    const summary = await queryCollectionQualitySummary(d1Executor(env.DB), {
+      asOf: new Date().toISOString(),
+    });
     const schedules = [
       ...summary.sources.flatMap((source) => source.schedules),
       ...summary.otherSchedules,

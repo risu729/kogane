@@ -11,6 +11,8 @@ import {
   queryCollectionQualitySummary,
 } from "../../../packages/application/src/query/collection-quality.ts";
 import { CENTRAL_STORE_CAPABILITIES } from "../../../packages/observation-shared/src/api-schema.ts";
+/** Every age is counted to this instant: two Tokyo days after the synthetic capture. */
+const AS_OF = "2099-01-03T00:00:00.000Z";
 const client = join(import.meta.dir, "../dist-production");
 const executablePath = process.env["CHROMIUM_PATH"] ?? chromium.executablePath();
 const runnable = existsSync(join(client, "index.html")) && existsSync(executablePath);
@@ -84,7 +86,7 @@ describe.if(runnable)("collection quality browser", () => {
             capabilities: CENTRAL_STORE_CAPABILITIES,
           });
         if (url.pathname === "/api/collection-quality")
-          return Response.json(await queryCollectionQualitySummary(executor));
+          return Response.json(await queryCollectionQualitySummary(executor, { asOf: AS_OF }));
         if (
           url.pathname.startsWith("/api/collection-quality/") &&
           url.pathname.endsWith("/accounts")
@@ -97,6 +99,7 @@ describe.if(runnable)("collection quality browser", () => {
             await queryCollectionQualityCells(executor, {
               sourceId: url.pathname.split("/").at(-1)!,
               offset: Number(url.searchParams.get("offset") ?? 0),
+              asOf: AS_OF,
             }),
           );
         if (url.pathname.startsWith("/api/"))
@@ -131,6 +134,25 @@ describe.if(runnable)("collection quality browser", () => {
       expect(
         await page.getByText("本人による認証・操作が必要です", { exact: false }).count(),
       ).toBeGreaterThan(0);
+      // collection-freshness-v1: the chosen source's newest run is two days old
+      // (GLOBAL PASS, listed before it, is one day old); the unit with no file
+      // waits on a person and has no current capture.
+      expect(
+        await page
+          .locator("p", { hasText: "最新の取得記録の新しさ" })
+          .locator('.freshness[data-state="recent"]')
+          .textContent(),
+      ).toBe("2日前の取得");
+      expect(
+        await page.locator('.freshness[data-state="human-required"]').first().textContent(),
+      ).toBe("本人操作待ち（取得なし）");
+      expect(
+        await page.locator('nav .freshness[data-state="human-required"]').count(),
+      ).toBeGreaterThan(0);
+      // PRESTIA bank's only job is disabled and it was never captured.
+      expect(
+        await page.locator('nav .freshness[data-state="disabled"]').first().textContent(),
+      ).toBe("定期実行の停止中（取得なし）");
       expect(
         await page.getByText("予約状態を確認できません", { exact: false }).count(),
       ).toBeGreaterThan(0);

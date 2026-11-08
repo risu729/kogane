@@ -188,9 +188,12 @@ sign and no overlap group are summable; capacities, aggregates, statement
 amounts, period totals, reward units and balances restated after a
 transaction are excluded by their registry entries. The sum is exact integer
 arithmetic outside SQL, over the whole filter scope rather than the page, and
-a subject that appears twice makes the subtotal unavailable instead of double
-counting it. Above 5,000 adopted rows the subtotal is `null` with
-`scope_exceeds_subtotal_bound`.
+a subject that appears twice in the same unit makes the subtotal unavailable
+(`subject_reported_twice`) instead of double counting it. A subject that holds
+several units (an exchange account's cash per asset, a broker's foreign cash
+per currency) counts once in each unit's figure: the subtotal is per unit, so
+that is not a second count of anything. Above 5,000 adopted rows the subtotal
+is `null` with `scope_exceeds_subtotal_bound`.
 
 ### Cursor contract
 

@@ -319,9 +319,11 @@ registry entries. Units are never added together, the answer carries
 liabilities mean an asset subtotal is not even a lower bound (addendum 05 §5).
 
 Every row is re-checked against the grant before it is summed, and a subject
-scope reached through two scope pairs is refused with `incomplete_evidence`
-rather than counted twice (INV06). A scope larger than the projection's
-subtotal bound is refused with `budget_exceeded`, never partially summed. An
+scope counted twice in one unit (for example reached through two scope pairs)
+is refused with `incomplete_evidence` rather than counted twice (INV06). A
+subject that holds several units counts once in each unit. A scope larger
+than the projection's subtotal bound is refused with `budget_exceeded`, never
+partially summed. An
 unresolved, conflicting or stale measure inside the scope makes the answer
 `partial` and names the reason code; it never silently disappears from the
 figure.
@@ -705,6 +707,11 @@ so `offset` with it is `400 invalid_request`;
 [ADR 0088](adr/0088-collection-quality-per-account.md)). The account view
 carries each account's stored label, under `data` like every page read, and
 its audit record counts the cells it read, never an account.
+Each source of the summary and each cell of `view: "cells"` carries its
+freshness under `collection-freshness-v1`, counted to the answer's
+`freshnessAsOf`
+([evidence browser](evidence-browser.md#collection-quality-apicollection-quality));
+the account view carries none.
 Its cells carry provider fetch-unit keys (card tokens, account digests,
 connection ids, a branch and account number; ADR 0045), so it needs
 `evidence.read`, the capability of the evidence routes, not `records.read`.

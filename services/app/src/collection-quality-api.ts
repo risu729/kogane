@@ -70,10 +70,12 @@ export async function readCollectionQuality(
   url: { pathname: string; searchParams: URLSearchParams },
 ): Promise<unknown> {
   const path = url.pathname;
+  // Every age of the answer is counted to this one instant (collection-freshness-v1).
+  const asOf = new Date().toISOString();
   try {
     if (path === COLLECTION_QUALITY_PATH) {
       if ([...url.searchParams.keys()].length > 0) throw new HttpError(400, "invalid_query");
-      const summary = await queryCollectionQualitySummary(d1Executor(env.DB));
+      const summary = await queryCollectionQualitySummary(d1Executor(env.DB), { asOf });
       await readAlarms(env, summary);
       return summary;
     }
@@ -96,6 +98,7 @@ export async function readCollectionQuality(
     const cells = await queryCollectionQualityCells(d1Executor(env.DB), {
       sourceId,
       offset: Number(offsetText),
+      asOf,
     });
     if (cells === null) throw new HttpError(404, "not_found");
     return cells;

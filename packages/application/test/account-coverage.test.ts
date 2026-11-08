@@ -143,7 +143,12 @@ async function read(store: QualityStore, sourceId: string): Promise<AccountCover
 
 /** Every cell of the paged cell read, as the account read must cover it. */
 async function pagedCells(store: QualityStore, sourceId: string) {
-  const page = await queryCollectionQualityCells(executor(store), { sourceId, offset: 0 });
+  // Ages are not compared here; any one instant serves (collection-freshness-v1).
+  const page = await queryCollectionQualityCells(executor(store), {
+    sourceId,
+    offset: 0,
+    asOf: "2099-01-01T00:00:00.000Z",
+  });
   expect(page!.coverage.truncated).toBe(false);
   return page!.cells;
 }
