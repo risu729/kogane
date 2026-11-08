@@ -96,6 +96,7 @@ const READ_ROUTE_TOOLS: Readonly<Record<string, readonly string[]>> = {
   "/api/v2/reports/:id/explanation": ["kogane.reports.read"],
   "/api/collection-quality": ["kogane.collection-quality.read"],
   "/api/collection-quality/:source": ["kogane.collection-quality.read"],
+  "/api/collection-quality/:source/accounts": ["kogane.collection-quality.read"],
   "/api/evidence/v1/meta": ["kogane.evidence.read"],
   "/api/evidence/v1/sources/:source/runs": ["kogane.evidence.read"],
   "/api/evidence/v1/runs/:run/artifacts": ["kogane.evidence.read"],

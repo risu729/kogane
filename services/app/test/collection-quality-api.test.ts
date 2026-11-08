@@ -1,8 +1,9 @@
-// `GET /api/collection-quality` and `GET /api/collection-quality/<sourceId>`:
-// behind Access, served to any signed-in reader, GET-only, absent where the
-// store lacks the scheduling tables, bounded, and writing nothing. One
-// synthetic Sony Bank capture is seeded through the ingest Worker; every value
-// is invented.
+// `GET /api/collection-quality`, `GET /api/collection-quality/<sourceId>` and
+// `GET /api/collection-quality/<sourceId>/accounts` (ADR 0088): behind Access,
+// served to any signed-in reader, GET-only, absent where the store lacks the
+// scheduling tables, bounded, and writing nothing. Their MCP reads are in
+// `page-read-reports.test.ts`. One synthetic Sony Bank capture is
+// seeded through the ingest Worker; every value is invented.
 import { env } from "cloudflare:test";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -243,6 +244,46 @@ describe("collection quality", () => {
       expect(refused.status, path).toBe(status);
       expect(((await refused.json()) as { error: string }).error).toBe(code);
     }
+  });
+
+  it("serves one source's cells regrouped by account, unpaged, and writes nothing (ADR 0088)", async () => {
+    const before = await counts();
+    const path = `${PATH}/sony-bank/accounts`;
+    const response = await call(path);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = (await response.json()) as {
+      sourceId: string;
+      cells: number;
+      accounts: unknown[];
+      unattributed: { dataset: string | null; state: string }[];
+    };
+    expect(validApiResponse(path, body)).toBe(true);
+    // The path names the source the answer is about; another source's path refuses it.
+    expect(validApiResponse(`${PATH}/vpass/accounts`, body)).toBe(false);
+    expect(body.sourceId).toBe("sony-bank");
+    expect(body.cells).toBe(1);
+    // The seeded capture's observations have no identity run: no account is named.
+    expect(body.accounts).toEqual([]);
+    expect(body.unattributed).toMatchObject([
+      { dataset: "yen-history-page-0001", state: "current" },
+    ]);
+    for (const [refusedPath, status, code] of [
+      [`${PATH}/no-such-source/accounts`, 404, "not_found"],
+      [`${PATH}/kogane-synthetic/accounts`, 404, "not_found"],
+      [`${PATH}/Sony_Bank/accounts`, 404, "not_found"],
+      [`${PATH}/accounts/accounts`, 404, "not_found"],
+      [`${PATH}/sony-bank/accounts/extra`, 404, "not_found"],
+      [`${path}?offset=0`, 400, "invalid_query"],
+    ] as const) {
+      const refused = await call(refusedPath);
+      expect(refused.status, refusedPath).toBe(status);
+      expect(((await refused.json()) as { error: string }).error).toBe(code);
+    }
+    expect((await call(path, { subject: null })).status).toBe(401);
+    expect((await call(path, { method: "POST" })).status).toBe(405);
+    expect((await call(path, { schema: false })).status).toBe(404);
+    expect(await counts()).toEqual(before);
   });
 
   it("is behind Access, GET-only, and absent from a store without the scheduling tables", async () => {
