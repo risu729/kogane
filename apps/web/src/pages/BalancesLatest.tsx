@@ -224,7 +224,7 @@ function LatestBody({
           </table>
         </div>
         <Pagination
-          label="表示ページ"
+          label={`${copy.title}のページ`}
           status={page.page.hasMore ? "続きがあります" : "最後のページです"}
           previous={{ label: "前へ", disabled: !canGoBack, onClick: onBack }}
           next={{ label: "次へ", disabled: !page.page.hasMore, onClick: onNext }}
