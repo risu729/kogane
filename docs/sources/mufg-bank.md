@@ -206,8 +206,7 @@ phone/location permissions, biometrics, OTP. Location is optional for improved f
 suggest integrity/risk checks, not specific Play Integrity/SafetyNet/custom root detection without artifacts.
 
 Research environment lacked ADB, Android SDK build tools, jadx/apktool, connected owner physical Android;
-no legitimate artifact obtained from Play-authenticated devices. Do not use unofficial mirrors without
-provenance. Reproducible acquisition:
+no legitimate artifact obtained from Play-authenticated devices. Do not use unofficial mirrors, because they do not meet provenance requirements. Reproducible acquisition:
 
 1. On owner non-root Android, follow official bank page to Google Play and install target package.
 2. With owner consent, enable USB debugging; use `adb shell dumpsys package jp.mufg.bk.applisp.app` to record

@@ -200,7 +200,7 @@ unavailable in app. Web login has a QR flow using app-registered passkeys; brows
 may not reach all screens.
 
 No Mercari-distributed standalone APK found; research environment lacked `adb`, `apksigner`, `bundletool`,
-`jadx`, `apktool`, `aapt2`, `apkanalyzer`, MobSF. Do not use APK mirrors without guaranteed provenance/signers.
+`jadx`, `apktool`, `aapt2`, `apkanalyzer`, MobSF. Do not use APK mirrors, because their provenance and signers cannot be guaranteed.
 After connecting a non-root user device legitimately installed from Google Play, extract split APKs temporarily,
 checking matching packages, versionCodes, and signers across all splits.
 

@@ -320,7 +320,7 @@ on public login; first bounded check only whether Bitwarden fills passwords or p
 - Initial registration uses primary account branch/account number/first PIN, personal information, SMS,
   login settings, six-digit app password or biometrics.
 - Startup uses app password/biometrics; Android FAQ specifies fingerprints, not face.
-- ご利用カード（アプリ版） (usage card, app version) shows transaction-varying second PINs after biometrics/app
+- `ご利用カード（アプリ版）` (usage card, app version) shows transaction-varying second PINs after biometrics/app
   password; extra SMS may occur, not requested for read collection.
 - Separate `キャッシュカード認証（残高照会のみ）` ("cash card authentication (balance inquiry only)") mode
   covers ordinary/savings, excludes time balances, requires re-registration after non-use. Unsuitable for complete enumeration.
@@ -354,8 +354,7 @@ than immediately recreating login with bare Workers `fetch`.
 [Android distribution link](https://www.mizuhobank.co.jp/special/directapp/dl_android.html) redirects to Play
 [`jp.co.mizuhobank.banking`](https://play.google.com/store/apps/details?id=jp.co.mizuhobank.banking&hl=ja&gl=JP).
 Public Play on 2026-08-26: developer `MIZUHO BANK, LTD.`, version `5.30.0`, updated 2026-07-22, 1 million+
-downloads. Provenance: bank link, Play developer, package. No direct official APK found; no third-party mirrors
-without guaranteed provenance.
+downloads. Provenance: bank link, Play developer, package. No direct official APK was found; do not use third-party APK mirrors because their provenance cannot be guaranteed.
 
 Play listing/official FAQs establish:
 
