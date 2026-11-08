@@ -49,8 +49,11 @@ drafts. A unit skips a PR while it is a draft. The owner also assigned the older
 
 The units run in five threads: 1a with 1c; 1b with 1d; 1e with 1g; 1f; and 1h with 1i. Unit 1j follows them. Reviews run in parallel, but merges go through one
 queue: 16 of these PRs touch `docs/current-status.md` and 14 touch
-`docs/adr/README.md`, so each merge is followed by a rebase of the next PR on
-the latest `main` and a fresh CI run.
+`docs/adr/README.md`, so after each merge the next PR is checked against the
+new `main` by [merging rule 4](../AGENTS.md#merging): when `main` no longer
+merges into it cleanly or the latest `main`'s `CI Check` is red, `main` is
+merged into the branch and `CI Check` runs again (owner, 2026-11-08 04:21
+UTC; before that every PR was brought up to the latest `main` and re-run).
 
 | Unit                           | PRs                                                                     | Stacks and notes                                                                                                                         |
 | ------------------------------ | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
